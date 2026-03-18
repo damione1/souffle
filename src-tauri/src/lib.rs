@@ -1,8 +1,13 @@
 pub mod audio;
+pub mod clipboard;
 pub mod commands;
 pub mod engine;
 pub mod errors;
+pub mod models;
+pub mod ollama;
+pub mod pipeline;
 pub mod state;
+pub mod transcript;
 pub mod tray;
 
 use audio::AudioCapture;
@@ -44,7 +49,12 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stderr))
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -55,6 +65,22 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::start_recording,
             commands::stop_recording,
+            commands::get_model_status,
+            commands::download_model,
+            commands::load_model,
+            commands::start_transcription,
+            commands::stop_transcription,
+            commands::list_audio_devices,
+            commands::select_audio_device,
+            commands::test_transcribe_wav,
+            commands::paste_text,
+            commands::start_meeting_recording,
+            commands::stop_meeting_recording,
+            commands::list_meetings,
+            commands::get_meeting,
+            commands::delete_meeting,
+            commands::check_ollama,
+            commands::summarize_meeting,
         ])
         .setup(|app| {
             // Register global hotkey: Cmd+Shift+Space for dictation toggle

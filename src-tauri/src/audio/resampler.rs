@@ -1,11 +1,24 @@
 use rubato::{FftFixedInOut, Resampler as RubatoResampler};
 
-const TARGET_SAMPLE_RATE: usize = 16_000;
+/// Kyutai Mimi codec expects 24kHz audio input
+const TARGET_SAMPLE_RATE: usize = 24_000;
 
-/// Wraps rubato for high-quality resampling to 16kHz mono f32
+/// Fixed gain applied to microphone input.
+/// Live mic capture typically produces -30dBFS peaks (max_amp ~0.03).
+/// The Kyutai model was trained with -24dB to +15dB augmentation,
+/// so we need to boost by ~15x to reach the model's expected range.
+const MIC_GAIN: f32 = 15.0;
+
+/// Wraps rubato for high-quality resampling to 24kHz mono f32,
+/// with a fixed gain boost for live mic input.
+///
+/// Buffers input samples internally so the FFT resampler always
+/// receives complete chunks (no zero-padding artifacts).
 pub struct Resampler {
     resampler: Option<FftFixedInOut<f32>>,
     source_channels: usize,
+    /// Accumulation buffer for incomplete chunks
+    input_buffer: Vec<f32>,
 }
 
 impl Resampler {
@@ -14,20 +27,34 @@ impl Resampler {
         let source_channels = source_channels as usize;
 
         let resampler = if source_rate != TARGET_SAMPLE_RATE {
-            // chunk_size must divide evenly — rubato will pick an appropriate size
-            FftFixedInOut::new(source_rate, TARGET_SAMPLE_RATE, 1024, 1)
-                .ok()
+            match FftFixedInOut::new(source_rate, TARGET_SAMPLE_RATE, 1024, 1) {
+                Ok(r) => {
+                    eprintln!(
+                        "[souffle] Resampler created: {}Hz → {}Hz, chunk_in={}, chunk_out={}",
+                        source_rate, TARGET_SAMPLE_RATE,
+                        r.input_frames_next(), r.output_frames_next()
+                    );
+                    Some(r)
+                }
+                Err(e) => {
+                    eprintln!("[souffle] WARNING: Resampler creation failed: {e}");
+                    eprintln!("[souffle] Audio will NOT be resampled — model expects 24kHz!");
+                    None
+                }
+            }
         } else {
+            eprintln!("[souffle] Source rate matches target (24kHz), no resampling needed");
             None
         };
 
         Self {
             resampler,
             source_channels,
+            input_buffer: Vec::new(),
         }
     }
 
-    /// Convert interleaved multi-channel samples to mono 16kHz f32
+    /// Convert interleaved multi-channel samples to mono 24kHz f32 with gain
     pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
         // Step 1: downmix to mono
         let mono = if self.source_channels > 1 {
@@ -39,29 +66,33 @@ impl Resampler {
             input.to_vec()
         };
 
-        // Step 2: resample if needed
-        if let Some(ref mut resampler) = self.resampler {
+        // Step 2: resample if needed (with proper buffering)
+        let mut resampled = if let Some(ref mut resampler) = self.resampler {
+            // Accumulate samples in the input buffer
+            self.input_buffer.extend_from_slice(&mono);
+
             let frames_needed = resampler.input_frames_next();
             let mut output = Vec::new();
 
-            for chunk in mono.chunks(frames_needed) {
-                if chunk.len() < frames_needed {
-                    // pad the last chunk with zeros
-                    let mut padded = chunk.to_vec();
-                    padded.resize(frames_needed, 0.0);
-                    if let Ok(result) = resampler.process(&[padded], None) {
-                        output.extend_from_slice(&result[0]);
-                    }
-                } else {
-                    if let Ok(result) = resampler.process(&[chunk.to_vec()], None) {
-                        output.extend_from_slice(&result[0]);
-                    }
+            // Only process complete chunks — no zero-padding
+            while self.input_buffer.len() >= frames_needed {
+                let chunk: Vec<f32> = self.input_buffer.drain(..frames_needed).collect();
+                if let Ok(result) = resampler.process(&[chunk], None) {
+                    output.extend_from_slice(&result[0]);
                 }
             }
+            // Remaining samples stay in input_buffer for the next call
 
             output
         } else {
             mono
+        };
+
+        // Step 3: apply fixed gain and hard-clip to [-1.0, 1.0]
+        for sample in &mut resampled {
+            *sample = (*sample * MIC_GAIN).clamp(-1.0, 1.0);
         }
+
+        resampled
     }
 }

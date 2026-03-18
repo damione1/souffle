@@ -1,1 +1,3 @@
-// Model download, verification, and management — Phase 2
+pub mod download;
+
+pub use download::{default_model_dir, model_exists, DownloadProgress, DownloadStatus, KYUTAI_HF_REPO};

@@ -1,25 +1,60 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use crossbeam_channel::{Receiver, Sender};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use super::resampler::Resampler;
 use crate::state::AudioCommand;
 
-/// Manages audio capture from the system's default input device.
-/// Sends resampled 16kHz mono f32 chunks over a crossbeam channel.
+/// Info about an available audio input device, sent to frontend
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AudioDeviceInfo {
+    pub name: String,
+    pub is_default: bool,
+}
+
+/// List all available input devices
+pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
+    let host = cpal::default_host();
+    let default_name = host
+        .default_input_device()
+        .and_then(|d| d.name().ok())
+        .unwrap_or_default();
+
+    let devices = match host.input_devices() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[souffle] Failed to list input devices: {e}");
+            return vec![];
+        }
+    };
+
+    devices
+        .filter_map(|d| {
+            let name = d.name().ok()?;
+            Some(AudioDeviceInfo {
+                is_default: name == default_name,
+                name,
+            })
+        })
+        .collect()
+}
+
+/// Manages audio capture from a selected input device.
+/// Sends resampled 24kHz mono f32 chunks over a crossbeam channel.
 ///
 /// This struct lives on a dedicated thread because cpal's Stream is !Send on macOS.
 pub struct AudioCapture {
     stream: Option<Stream>,
     audio_sender: Sender<Vec<f32>>,
+    selected_device: Option<String>,
 }
 
 impl AudioCapture {
     /// Spawn the audio thread. Returns channels for commanding it and receiving audio.
     pub fn spawn() -> (Sender<AudioCommand>, Receiver<Vec<f32>>) {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
-        // Bounded channel: ~30 seconds of audio at 16kHz in 1-second chunks
+        // Bounded channel: ~30 seconds of audio at 24kHz in 1-second chunks
         let (audio_tx, audio_rx) = crossbeam_channel::bounded::<Vec<f32>>(30);
 
         std::thread::Builder::new()
@@ -28,6 +63,7 @@ impl AudioCapture {
                 let mut capture = AudioCapture {
                     stream: None,
                     audio_sender: audio_tx,
+                    selected_device: None,
                 };
 
                 // Block on commands from main thread
@@ -35,11 +71,15 @@ impl AudioCapture {
                     match cmd {
                         AudioCommand::Start => {
                             if let Err(e) = capture.start() {
-                                error!("Failed to start audio capture: {e}");
+                                eprintln!("[souffle] Failed to start audio capture: {e}");
                             }
                         }
                         AudioCommand::Stop => {
                             capture.stop();
+                        }
+                        AudioCommand::SelectDevice(name) => {
+                            eprintln!("[souffle] Selected input device: {name}");
+                            capture.selected_device = Some(name);
                         }
                     }
                 }
@@ -51,31 +91,52 @@ impl AudioCapture {
         (cmd_tx, audio_rx)
     }
 
-    fn start(&mut self) -> Result<(), String> {
+    fn find_device(&self) -> Result<Device, String> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| "No input device available".to_string())?;
+
+        if let Some(ref name) = self.selected_device {
+            // Find the device by name
+            let devices = host
+                .input_devices()
+                .map_err(|e| format!("Failed to list devices: {e}"))?;
+
+            for device in devices {
+                if let Ok(n) = device.name() {
+                    if n == *name {
+                        return Ok(device);
+                    }
+                }
+            }
+            eprintln!("[souffle] Selected device '{name}' not found, falling back to default");
+        }
+
+        host.default_input_device()
+            .ok_or_else(|| "No input device available".to_string())
+    }
+
+    fn start(&mut self) -> Result<(), String> {
+        let device = self.find_device()?;
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".into());
-        info!(device = %device_name, "Using input device");
+        eprintln!("[souffle] Using input device: {device_name}");
 
         let config = Self::preferred_config(&device)?;
         let sample_rate = config.sample_rate.0;
         let channels = config.channels;
 
-        info!(
-            sample_rate = sample_rate,
-            channels = channels,
-            "Audio capture config"
-        );
+        eprintln!("[souffle] Audio config: {sample_rate}Hz, {channels}ch");
 
         let mut resampler = Resampler::new(sample_rate, channels);
         let sender = self.audio_sender.clone();
 
         let err_fn = |err: cpal::StreamError| {
-            error!("Audio stream error: {}", err);
+            eprintln!("[souffle] Audio stream error: {err}");
         };
+
+        // Reset the first-chunk logging flag for each new recording session
+        static LOGGED: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        LOGGED.store(false, std::sync::atomic::Ordering::Relaxed);
 
         let stream = device
             .build_input_stream(
@@ -83,6 +144,14 @@ impl AudioCapture {
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     let resampled = resampler.process(data);
                     if !resampled.is_empty() {
+                        // Log first chunk to confirm audio is flowing
+                        if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                            let max_amp = resampled.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+                            eprintln!(
+                                "[souffle] First audio chunk: {} samples, max_amp={max_amp:.4}",
+                                resampled.len(),
+                            );
+                        }
                         if sender.try_send(resampled).is_err() {
                             warn!("Audio buffer full, dropping samples");
                         }
@@ -98,13 +167,13 @@ impl AudioCapture {
             .map_err(|e| format!("Failed to start stream: {e}"))?;
         self.stream = Some(stream);
 
-        info!("Audio capture started");
+        eprintln!("[souffle] Audio capture started on '{device_name}'");
         Ok(())
     }
 
     fn stop(&mut self) {
         if self.stream.take().is_some() {
-            info!("Audio capture stopped");
+            eprintln!("[souffle] Audio capture stopped");
         }
     }
 

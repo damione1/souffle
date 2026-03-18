@@ -499,29 +499,66 @@ Built with Tauri, Candle, and open-source technologies."
 
 ## 8. Milestones
 
-### Phase 1: Foundation (Target: 2 weeks with Claude Code)
-- [ ] Scaffold Tauri v2 project with Svelte 5 + TypeScript + Tailwind
-- [ ] Implement system tray with icon states and basic menu
-- [ ] Implement global hotkey registration (Cmd+Shift+Space)
-- [ ] Audio capture from microphone via cpal (16kHz mono f32)
-- [ ] Ring buffer + crossbeam-channel audio pipeline
-- [ ] Save captured audio to WAV file (validate audio pipeline works)
+### Phase 1: Foundation ✅ (Completed 2026-03-17)
+- [x] Scaffold Tauri v2 project with Svelte 5 + TypeScript + Tailwind
+- [x] Implement system tray with icon states and basic menu
+- [x] Implement global hotkey registration (Cmd+Shift+Space)
+- [x] Audio capture from microphone via cpal (24kHz mono f32, updated from 16kHz in Phase 2)
+- [x] Ring buffer + crossbeam-channel audio pipeline
+- [x] Save captured audio to WAV file (validate audio pipeline works)
 
-### Phase 2: Kyutai Integration (Target: 2-3 weeks)
-- [ ] Integrate Candle with Metal feature flag
-- [ ] Port/adapt Kyutai stt-rs inference code into the app
-- [ ] Model download manager (HuggingFace, progress bar, checksum)
-- [ ] Implement KyutaiEngine: TranscriptionEngine trait
-- [ ] Streaming transcription pipeline: audio -> engine -> frontend via Channel API
-- [ ] Benchmark: latency, memory, accuracy on M4 Pro
+**Implementation notes:**
+- Stack: Vite 7.3 / @sveltejs/vite-plugin-svelte 6 / Tailwind CSS 4 / Svelte 5 / Tauri 2.10 / Rust 1.94
+- cpal `Stream` is `!Send` on macOS → AudioCapture runs on a dedicated `std::thread`, communicates via `AudioCommand` channel
+- Audio pipeline: cpal callback → Resampler (rubato, mono 24kHz f32) → crossbeam bounded(30) → drain on stop
+- Global hotkey emits `recording-started`/`recording-stopped` Tauri events to sync frontend
+- WAV files saved to `~/Library/Application Support/com.souffle.app/recordings/`
+- `TranscriptionEngine` trait defined in `engine/mod.rs`, ready for Phase 2
+- Using cpal 0.15 (not 0.17) — loopback capture deferred to Phase 3
 
-### Phase 3: Polish & Features (Target: 2 weeks)
-- [ ] Dictation mode: auto-paste via clipboard + Cmd+V simulation
-- [ ] Meeting recording mode: system audio capture (CoreAudio loopback)
-- [ ] Meeting transcript storage (JSON) and history view
-- [ ] Ollama integration for meeting summarization
-- [ ] Settings UI: engine config, hotkeys, audio devices
-- [ ] Dark/light mode theming
+### Phase 2: Kyutai Integration ✅ (Completed 2026-03-17)
+- [x] Integrate Candle with Metal feature flag
+- [x] Port/adapt Kyutai stt-rs inference code into the app
+- [x] Model download manager (HuggingFace, progress bar, checksum)
+- [x] Implement KyutaiEngine: TranscriptionEngine trait
+- [x] Streaming transcription pipeline: audio -> engine -> frontend via Channel API
+- [ ] Benchmark: latency, memory, accuracy on M4 Pro (pending runtime validation)
+
+**Implementation notes:**
+- Audio pipeline changed from 16kHz to 24kHz — Mimi codec confirmed to require 24kHz input
+- Uses `moshi` crate v0.6.1 (provides Mimi codec, LM model, ASR state machine) — no raw porting needed
+- Candle 0.9.x with `metal` feature for Apple GPU; `candle-nn`, `candle-transformers` at same version
+- SentencePiece tokenizer (not HuggingFace `tokenizers` crate) — requires cmake for native build
+- `KyutaiEngine` wraps `moshi::asr::State` — streaming: 1920 PCM samples (80ms) → Mimi encode → LM forward → text tokens
+- Model download via `hf-hub` with symlinks to HF cache to avoid doubling ~2.4GB on disk
+- `TranscriptionPipeline` runs on dedicated `std::thread`, buffers audio into 1920-sample frames
+- New Tauri commands: `get_model_status`, `download_model`, `load_model`, `start_transcription`, `stop_transcription`
+- Frontend: model download UI → load model button → streaming transcription via Channel API
+- VAD extra heads enabled (4 heads at 0.5s/1s/2s/3s horizons) for future end-of-turn detection
+
+**Important** If there is any kind of issue with versions or lib config, compatibility, etc... alway check the documentation via context7 or internet if not available on context7.
+
+### Phase 3: Polish & Features (Target: 2 weeks) ✅ COMPLETE
+- [x] Dictation mode: auto-paste via clipboard + Cmd+V simulation
+- [x] Meeting recording mode: mic recording with live transcription (system audio deferred — BlackHole workaround documented)
+- [x] Meeting transcript storage (JSON) and history view
+- [x] Ollama integration for meeting summarization (streaming)
+- [x] Settings UI: audio device, auto-paste, Ollama config, theme
+- [x] Dark/light/system mode theming
+- [x] Tab-based navigation (Dictation / Recordings / Settings)
+- [x] Enhanced tray menu (Start/Stop Dictation, Meeting Recording, Settings)
+
+**Implementation notes:**
+- Auto-paste uses `arboard` (clipboard) + `enigo` (Cmd+V simulation) — requires macOS Accessibility permission
+- Meeting transcripts stored as JSON in `~/Library/Application Support/com.souffle.app/meetings/{uuid}.json`
+- Ollama integration: `POST /api/generate` with streaming NDJSON, system prompt from SPEC
+- Settings persisted via `tauri-plugin-store` (`settings.json`)
+- Theme: CSS class strategy (`.light`/`.dark` on `<html>`), Tailwind overrides in app.css
+- Frontend restructured: shared types in `src/lib/types/`, reactive store in `src/lib/stores/`
+- ASR Word emission: emit immediately on `Word` event (don't wait for `EndWord` which has 5s+ latency)
+- Inter-word spaces added in frontend (SentencePiece strips leading `▁` when decoding per-word)
+- Paragraph breaks inserted on pause > 1.5s after sentence-ending punctuation
+- Shutdown sequence: stop audio → wait 300ms → stop pipeline (drains channel) → flush engine
 
 ### Phase 4: Distribution (Target: 1 week)
 - [ ] Apple Developer Program enrollment
@@ -545,7 +582,7 @@ Built with Tauri, Candle, and open-source technologies."
 | Candle Metal perf on M4 Pro insufficient for real-time 1B model | Critical | Medium | **Validate in Phase 2 ASAP.** Fallback: Whisper via whisper-rs (proven). Candle Metal is less optimized than whisper.cpp Metal. |
 | Kyutai stt-rs is demo-quality, not production-ready | High | Medium | Budget extra time to harden. Isolate in engine trait so replacement is cheap. |
 | cpal 0.17 CoreAudio loopback unstable | High | Low | Fallback: ScreenCaptureKit via objc2 bindings, or require BlackHole virtual audio device. |
-| Mimi codec sample rate mismatch | Medium | Medium | Check Mimi docs immediately. May need 24kHz instead of 16kHz. rubato handles resampling. |
+| ~~Mimi codec sample rate mismatch~~ | ~~Medium~~ | ~~Medium~~ | ✅ **Resolved in Phase 2**: Confirmed 24kHz. Pipeline updated from 16kHz to 24kHz. |
 | macOS notarization rejects binary with Candle Metal shaders | Medium | Low | Test notarization early in Phase 2, not Phase 4. |
 | Model download size (2GB) deters users | Medium | Medium | Show clear progress, allow background download, offer smaller model if Kyutai releases one. |
 

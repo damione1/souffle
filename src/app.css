@@ -7,13 +7,67 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color: #e4e4e7;
-  background-color: #09090b;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Dark theme (default) */
+  color: #e4e4e7;
+  background-color: #09090b;
+}
+
+.light {
+  color: #27272a;
+  background-color: #fafafa;
+}
+
+.light select,
+.light input[type="text"],
+.light input[type="number"] {
+  background-color: #f4f4f5;
+  border-color: #d4d4d8;
+  color: #27272a;
+}
+
+.light .bg-zinc-900 {
+  background-color: #f4f4f5;
+}
+
+.light .bg-zinc-800 {
+  background-color: #e4e4e7;
+}
+
+.light .border-zinc-800 {
+  border-color: #d4d4d8;
+}
+
+.light .border-zinc-700 {
+  border-color: #a1a1aa;
+}
+
+.light .text-zinc-100 {
+  color: #18181b;
+}
+
+.light .text-zinc-200 {
+  color: #27272a;
+}
+
+.light .text-zinc-300 {
+  color: #3f3f46;
+}
+
+.light .text-zinc-400 {
+  color: #52525b;
+}
+
+.light .text-zinc-500 {
+  color: #71717a;
+}
+
+.light .text-zinc-600 {
+  color: #a1a1aa;
 }
 
 body {

@@ -1,3 +1,5 @@
+pub mod kyutai;
+
 use std::path::{Path, PathBuf};
 
 /// Core trait that ALL transcription engines must implement.
@@ -21,7 +23,7 @@ pub trait TranscriptionEngine: Send + Sync {
     fn unload_model(&mut self) -> Result<(), EngineError>;
 
     /// Process an audio chunk and return transcription segments.
-    /// `audio`: raw PCM f32 samples at 16kHz mono.
+    /// `audio`: raw PCM f32 samples at 24kHz mono.
     /// `language`: optional language hint (None = auto-detect).
     fn transcribe(
         &self,
