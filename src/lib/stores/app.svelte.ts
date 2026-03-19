@@ -6,6 +6,9 @@ let currentView = $state<View>("dictation");
 // Theme
 let theme = $state<Theme>("dark");
 
+// Selected audio device (persisted across tab switches)
+let selectedDevice = $state("");
+
 // Settings with defaults
 let settings = $state<AppSettings>({
   theme: "dark",
@@ -25,5 +28,8 @@ export function getAppState() {
 
     get settings() { return settings; },
     set settings(s: AppSettings) { settings = s; },
+
+    get selectedDevice() { return selectedDevice; },
+    set selectedDevice(d: string) { selectedDevice = d; },
   };
 }

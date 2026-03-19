@@ -20,7 +20,6 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-store = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-log = "2"
 tauri-plugin-single-instance = "2"
@@ -48,6 +47,9 @@ hf-hub = "0.4.3"
 reqwest = { version = "0.12", features = ["stream"] }
 futures-util = "0.3"
 sha2 = "0.10"
+
+# Phase 4: SQLite unified storage
+rusqlite = { version = "0.33", features = ["bundled-full"] }
 
 # Phase 3: Clipboard/paste + Ollama
 arboard = "3"

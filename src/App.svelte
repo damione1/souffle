@@ -1,7 +1,7 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
-  import { load } from "@tauri-apps/plugin-store";
   import TabBar from "./lib/components/TabBar.svelte";
   import Dictation from "./lib/components/Dictation.svelte";
   import Recordings from "./lib/components/Recordings.svelte";
@@ -14,23 +14,26 @@
   let unlistenNav: (() => void) | null = null;
 
   onMount(() => {
-    // Load saved settings
+    // Load saved settings from SQLite
     (async () => {
       try {
-        const store = await load("settings.json", { defaults: {}, autoSave: true });
-        const theme = await store.get<Theme>("theme");
-        if (theme) {
+        const settings = await invoke<Record<string, unknown>>("get_settings");
+        if (settings.theme) {
+          const theme = settings.theme as Theme;
           app.theme = theme;
           app.settings = { ...app.settings, theme };
           applyTheme(theme);
         }
-        const autoPaste = await store.get<boolean>("auto_paste");
-        if (autoPaste !== null && autoPaste !== undefined) {
-          app.settings = { ...app.settings, auto_paste: autoPaste };
+        if (settings.auto_paste !== null && settings.auto_paste !== undefined) {
+          app.settings = { ...app.settings, auto_paste: settings.auto_paste as boolean };
         }
-        const pasteDelay = await store.get<number>("paste_delay_ms");
-        if (pasteDelay !== null && pasteDelay !== undefined) {
-          app.settings = { ...app.settings, paste_delay_ms: pasteDelay };
+        if (settings.paste_delay_ms !== null && settings.paste_delay_ms !== undefined) {
+          app.settings = { ...app.settings, paste_delay_ms: settings.paste_delay_ms as number };
+        }
+        // Restore saved audio device and tell backend
+        if (settings.audio_device) {
+          app.selectedDevice = settings.audio_device as string;
+          await invoke("select_audio_device", { deviceName: app.selectedDevice });
         }
       } catch { /* First run, no settings yet */ }
     })();

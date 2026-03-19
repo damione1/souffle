@@ -9,7 +9,6 @@
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered",
     "notification:default",
-    "store:default",
     "fs:default",
     "log:default"
   ]

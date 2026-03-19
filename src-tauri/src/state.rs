@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{Receiver, Sender};
 
+use crate::db::Database;
 use crate::engine::kyutai::KyutaiEngine;
 use crate::engine::TranscriptionSegment;
 use crate::pipeline::TranscriptionPipeline;
@@ -40,12 +41,14 @@ pub struct AppState {
     pub model_loaded: Mutex<bool>,
     pub recording_mode: Mutex<RecordingMode>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
+    pub db: Arc<Database>,
 }
 
 impl AppState {
     pub fn new(
         audio_cmd_sender: Sender<AudioCommand>,
         audio_receiver: Receiver<Vec<f32>>,
+        db: Arc<Database>,
     ) -> Self {
         Self {
             audio_cmd_sender,
@@ -56,6 +59,7 @@ impl AppState {
             model_loaded: Mutex::new(false),
             recording_mode: Mutex::new(RecordingMode::Idle),
             meeting_accumulator: Arc::new(Mutex::new(None)),
+            db,
         }
     }
 }

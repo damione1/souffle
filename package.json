@@ -24,6 +24,5 @@
     "vite": "^7.0.0"
   },
   "dependencies": {
-    "@tauri-apps/plugin-store": "^2.4.2"
   }
 }

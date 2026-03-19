@@ -1,10 +1,16 @@
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use candle_core::{Device, Tensor};
 use tracing::info;
 
 use super::{EngineError, TranscriptionEngine, TranscriptionSegment};
+
+/// Debug frame counter — reset per session for clean logging
+static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
+/// Debug audio buffer — captures first 3s of each session for offline analysis
+static DEBUG_SAMPLES: Mutex<Option<Vec<f32>>> = Mutex::new(None);
 
 /// Kyutai STT model configuration, deserialized from config.json
 #[derive(Debug, serde::Deserialize)]
@@ -78,7 +84,7 @@ struct LoadedModel {
     text_tokenizer: sentencepiece::SentencePieceProcessor,
     config: KyutaiConfig,
     device: Device,
-    /// Path to model directory, needed to reload mimi for state reset
+    /// Path to model directory, needed to rebuild state between sessions
     model_path: std::path::PathBuf,
 }
 
@@ -106,39 +112,53 @@ impl KyutaiEngine {
     }
 
     /// Reset the ASR state for a new recording session.
-    /// Recreates the moshi::asr::State to clear KV cache and internal buffers.
+    /// Fully rebuilds the moshi State (Mimi + LM) from scratch to avoid
+    /// accumulated streaming state that `State::reset()` doesn't fully clear.
+    /// The old state is dropped BEFORE allocating the new one to avoid
+    /// doubling Metal GPU memory usage.
     pub fn reset_state(&self) -> Result<(), EngineError> {
-        let mut guard = self.model.lock().map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-        let model = guard.as_mut().ok_or(EngineError::NotInitialized)?;
+        // Reset debug counters so logging starts fresh each session
+        FRAME_COUNT.store(0, Ordering::Relaxed);
+        if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
+            *dbg = None;
+        }
 
-        // Reload mimi and recreate state
-        let mimi_path = model.model_path.join(&model.config.mimi_name);
+        let mut guard = self.model.lock().map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
+        let old = guard.take().ok_or(EngineError::NotInitialized)?;
+
+        // Destructure: keep config/tokenizer/device, drop old state to free Metal resources
+        let LoadedModel { state: old_state, text_tokenizer, config, device, model_path } = old;
+        drop(old_state);
+
+        // Rebuild Mimi audio tokenizer (fresh streaming state)
+        let mimi_path = model_path.join(&config.mimi_name);
         let audio_tokenizer = moshi::mimi::load(
             mimi_path.to_str().ok_or_else(|| EngineError::LoadError("Invalid mimi path".into()))?,
             Some(32),
-            &model.device,
+            &device,
         )
         .map_err(|e| EngineError::LoadError(format!("Mimi reload: {e}")))?;
 
-        let asr_delay_in_tokens = (model.config.stt_config.audio_delay_seconds * 12.5) as usize;
-
-        // Recreate the LM model for fresh KV cache
-        let dtype = model.device.bf16_default_to_f32();
-        let model_file = model.model_path.join("model.safetensors");
+        // Rebuild LM model (fresh KV caches, fresh RoPE positions)
+        let dtype = device.bf16_default_to_f32();
+        let model_file = model_path.join("model.safetensors");
         let vb_lm = unsafe {
-            candle_nn::VarBuilder::from_mmaped_safetensors(&[&model_file], dtype, &model.device)
+            candle_nn::VarBuilder::from_mmaped_safetensors(&[&model_file], dtype, &device)
                 .map_err(|e| EngineError::LoadError(format!("Model weights reload: {e}")))?
         };
         let lm = moshi::lm::LmModel::new(
-            &model.config.to_lm_config(),
+            &config.to_lm_config(),
             moshi::nn::MaybeQuantizedVarBuilder::Real(vb_lm),
         )
         .map_err(|e| EngineError::LoadError(format!("LM model reload: {e}")))?;
 
-        model.state = moshi::asr::State::new(1, asr_delay_in_tokens, 0., audio_tokenizer, lm)
-            .map_err(|e| EngineError::LoadError(format!("ASR state reset: {e}")))?;
+        // Create fresh ASR state
+        let asr_delay_in_tokens = (config.stt_config.audio_delay_seconds * 12.5) as usize;
+        let state = moshi::asr::State::new(1, asr_delay_in_tokens, 0., audio_tokenizer, lm)
+            .map_err(|e| EngineError::LoadError(format!("ASR state init: {e}")))?;
 
-        eprintln!("[souffle] ASR state reset for new session");
+        *guard = Some(LoadedModel { state, text_tokenizer, config, device, model_path });
+        eprintln!("[souffle] ASR state rebuilt for new session");
         Ok(())
     }
 }
@@ -236,19 +256,16 @@ impl TranscriptionEngine for KyutaiEngine {
 
         let mut segments = Vec::new();
 
-        static FRAME_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        // Save first 3 seconds of audio to WAV for debugging
-        static DEBUG_SAMPLES: std::sync::Mutex<Option<Vec<f32>>> = std::sync::Mutex::new(None);
+        // Debug: save first 3s of audio per session to WAV for offline analysis
         {
             let mut dbg = DEBUG_SAMPLES.lock().unwrap();
-            if dbg.is_none() && FRAME_COUNT.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+            if dbg.is_none() && FRAME_COUNT.load(Ordering::Relaxed) == 0 {
                 *dbg = Some(Vec::with_capacity(24_000 * 3));
             }
             if let Some(ref mut buf) = *dbg {
                 if buf.len() < 24_000 * 3 {
                     buf.extend_from_slice(audio);
                 } else if !buf.is_empty() {
-                    // Save once and clear
                     let path = dirs_next::data_dir()
                         .unwrap_or_else(|| std::path::PathBuf::from("."))
                         .join("com.souffle.app")
@@ -270,7 +287,7 @@ impl TranscriptionEngine for KyutaiEngine {
         if !audio.is_empty() {
             let max_amp = audio.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
             let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
-            let frame_num = FRAME_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+            let frame_num = FRAME_COUNT.load(Ordering::Relaxed);
             if frame_num < 5 || frame_num % 50 == 0 {
                 eprintln!(
                     "[souffle] Engine input: {} samples, max_amp={max_amp:.4}, rms={rms:.6}",
@@ -299,10 +316,24 @@ impl TranscriptionEngine for KyutaiEngine {
 
             let asr_msgs = model
                 .state
-                .step_pcm(pcm_tensor, None, &().into(), |_, _, _| ())
+                .step_pcm(pcm_tensor, None, &().into(), |items, text_tensor, _audio_tensors| {
+                    // Debug: log what the model is producing
+                    let frame = FRAME_COUNT.load(Ordering::Relaxed);
+                    if frame < 20 || frame % 50 == 0 {
+                        if let Ok(text_vals) = text_tensor.to_vec2::<u32>() {
+                            for (i, item) in items.iter().enumerate() {
+                                let tv = text_vals.get(i).map(|v| format!("{v:?}")).unwrap_or_default();
+                                eprintln!(
+                                    "[souffle] Frame {frame} pre-forward: batch={i} text_token={} step_idx(first={}) input_text={tv}",
+                                    item.text_token(), item.is_first_step()
+                                );
+                            }
+                        }
+                    }
+                })
                 .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))?;
 
-            let frame_num = FRAME_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let frame_num = FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
 
             // Log message types for first 20 frames then every 50th
             if frame_num < 20 || frame_num % 50 == 0 {
@@ -313,15 +344,14 @@ impl TranscriptionEngine for KyutaiEngine {
                     match msg {
                         moshi::asr::AsrMsg::Word { .. } => words += 1,
                         moshi::asr::AsrMsg::EndWord { .. } => end_words += 1,
-                        moshi::asr::AsrMsg::Step { prs, .. } => {
+                        moshi::asr::AsrMsg::Step { step_idx, prs, .. } => {
                             steps += 1;
                             if frame_num < 10 || frame_num % 50 == 0 {
-                                // Show VAD probabilities
                                 let vad_str: Vec<String> = prs.iter()
                                     .map(|p| format!("{:.2}", p[0]))
                                     .collect();
                                 eprintln!(
-                                    "[souffle] Frame {frame_num}: Step VAD=[{}]",
+                                    "[souffle] Frame {frame_num} (model_step={step_idx}): Step VAD=[{}]",
                                     vad_str.join(", ")
                                 );
                             }

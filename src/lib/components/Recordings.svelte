@@ -82,8 +82,10 @@
         summaryStream += progress.text;
         if (progress.done) {
           isSummarizing = false;
-          // Refresh the meeting to get saved summary
-          toggleExpand(id);
+          // Refresh the meeting to get saved summary (don't toggle — it's already expanded)
+          invoke("get_meeting", { id }).then((meeting) => {
+            expandedMeeting = meeting as MeetingTranscript;
+          });
         }
       };
       await invoke("summarize_meeting", { id, model: selectedModel, channel });

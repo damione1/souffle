@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod clipboard;
 pub mod commands;
+pub mod db;
 pub mod engine;
 pub mod errors;
 pub mod models;
@@ -10,44 +11,33 @@ pub mod state;
 pub mod transcript;
 pub mod tray;
 
+use std::sync::Arc;
+
 use audio::AudioCapture;
-use state::{AppState, AudioCommand};
-use tauri::{Emitter, Manager};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use state::AppState;
+use tauri::Manager;
 use tracing::info;
+
+/// Default shortcut strings
+pub const DEFAULT_TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 
 pub fn run() {
     // Spawn the audio thread before Tauri starts (cpal Stream is !Send on macOS)
     let (cmd_tx, audio_rx) = AudioCapture::spawn();
 
-    let dictation_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
+    // Initialize SQLite database
+    let db_path = dirs_next::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("com.souffle.app")
+        .join("souffle.db");
+
+    let database = Arc::new(
+        db::Database::open(&db_path).expect("Failed to open database"),
+    );
 
     tauri::Builder::default()
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, shortcut, event| {
-                    if shortcut == &dictation_shortcut && event.state() == ShortcutState::Pressed {
-                        let state = app.state::<AppState>();
-                        let mut is_recording = state.is_recording.lock().unwrap();
-
-                        if *is_recording {
-                            let _ = state.audio_cmd_sender.send(AudioCommand::Stop);
-                            *is_recording = false;
-                            info!("Dictation stopped via hotkey");
-                            // Emit event to frontend
-                            let _ = app.emit("recording-stopped", ());
-                        } else {
-                            let _ = state.audio_cmd_sender.send(AudioCommand::Start);
-                            *is_recording = true;
-                            info!("Dictation started via hotkey");
-                            let _ = app.emit("recording-started", ());
-                        }
-                    }
-                })
-                .build(),
-        )
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -61,7 +51,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .manage(AppState::new(cmd_tx, audio_rx))
+        .manage(AppState::new(cmd_tx, audio_rx, database))
         .invoke_handler(tauri::generate_handler![
             commands::start_recording,
             commands::stop_recording,
@@ -81,13 +71,36 @@ pub fn run() {
             commands::delete_meeting,
             commands::check_ollama,
             commands::summarize_meeting,
+            commands::list_dictation_entries,
+            commands::add_dictation_entry,
+            commands::delete_dictation_entry,
+            commands::clear_dictation_history,
+            commands::get_settings,
+            commands::save_setting,
+            commands::update_shortcuts,
+            commands::get_shortcuts,
         ])
         .setup(|app| {
-            // Register global hotkey: Cmd+Shift+Space for dictation toggle
-            let shortcut =
-                Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
-            app.global_shortcut().register(shortcut)?;
-            info!("Global shortcut registered: Cmd+Shift+Space");
+            // Load shortcut settings from DB and register
+            let state = app.state::<AppState>();
+            let toggle = state
+                .db
+                .get_setting("shortcut_toggle")
+                .ok()
+                .flatten()
+                .and_then(|v| serde_json::from_str::<String>(&v).ok())
+                .unwrap_or_else(|| DEFAULT_TOGGLE_SHORTCUT.to_string());
+            let ptt = state
+                .db
+                .get_setting("shortcut_push_to_talk")
+                .ok()
+                .flatten()
+                .and_then(|v| serde_json::from_str::<String>(&v).ok())
+                .unwrap_or_default();
+
+            if let Err(e) = commands::register_shortcuts(app.handle(), &toggle, &ptt) {
+                tracing::warn!("Failed to register shortcuts on startup: {e}");
+            }
 
             tray::setup_tray(app.handle())?;
             info!("Souffle started");

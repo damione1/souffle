@@ -73,7 +73,7 @@ A polished, privacy-first desktop application for local speech-to-text transcrip
 | Notifications | tauri-plugin-notification | Transcription complete, errors |
 | Auto-start | tauri-plugin-autostart | Launch at login (optional) |
 | Single instance | tauri-plugin-single-instance | Prevent multiple instances |
-| Local storage | tauri-plugin-store | User preferences, engine config |
+| Local storage | SQLite (rusqlite) | Meetings, dictation, settings, search, embeddings |
 | File system | tauri-plugin-fs | Model storage, recordings |
 | Auto-updater | tauri-plugin-updater | GitHub releases based updates |
 | Logging | tauri-plugin-log | Structured logging for debugging |
@@ -560,14 +560,57 @@ Built with Tauri, Candle, and open-source technologies."
 - Paragraph breaks inserted on pause > 1.5s after sentence-ending punctuation
 - Shutdown sequence: stop audio → wait 300ms → stop pipeline (drains channel) → flush engine
 
-### Phase 4: Distribution (Target: 1 week)
+### Phase 4: Unified Storage & Search ✅ (In Progress)
+- [x] SQLite unified storage (`souffle.db` via rusqlite with bundled-full/FTS5)
+- [x] Meeting CRUD via SQLite (replaces JSON file I/O)
+- [x] JSON → SQLite auto-migration (existing meetings imported on first run)
+- [x] Dictation history backend (replaces frontend-only tauri-plugin-store)
+- [x] Settings migration to SQLite key-value table (tauri-plugin-store removed entirely)
+- [ ] FTS5 full-text search across meetings and dictation
+- [ ] Transcript review/edit before summarization
+- [ ] Vector embeddings + semantic search
+
+**Implementation notes:**
+- DB path: `~/Library/Application Support/com.souffle.app/souffle.db`
+- WAL mode + foreign keys enabled, schema versioned via `schema_version` table
+- `Database` struct with `Mutex<Connection>`, all methods take `&self`
+- JSON migration is idempotent — existing meeting IDs checked before insert, dirs renamed to `.json_backup`
+- Settings stored as JSON-encoded values in `settings(key, value)` table
+- `tauri-plugin-store` fully removed from Cargo.toml, package.json, and capabilities
+- FTS5 `text_search` virtual table populated on meeting save and dictation entry add
+- Schema includes `embeddings` table for future vector search (Step 7)
+
+**Roadmap (future sessions):**
+
+#### Step 5: Full-text search
+- FTS5 search across meetings and dictation entries
+- `search_text(query)` command returning snippets with `<mark>` highlighting
+- Search bar UI above meeting list in Recordings tab
+- Query: `SELECT snippet(text_search, 0, '<mark>', '</mark>', '...', 32), source_type, source_id, rank FROM text_search WHERE text_search MATCH ? ORDER BY rank LIMIT 20`
+
+#### Step 6: Transcript review/edit before summarization
+- `edited_transcript TEXT` column on meetings (ALTER TABLE in schema v2)
+- "Review & Edit" button in expanded meeting card → textarea pre-filled with segment text
+- "Save & Summarize" / "Save" / "Cancel" actions
+- `summarize_meeting` uses `edited_transcript` if present, else joins segments
+
+#### Step 7: Vector embeddings + semantic search
+- `EmbeddingProvider` trait with `embed(texts) -> Vec<Vec<f32>>`, `dimensions()`, `model_name()`
+- Ollama primary: `POST /api/embed` with `nomic-embed-text` model
+- On-device fallback: Candle sentence transformer (all-MiniLM-L6-v2, ~80MB)
+- Chunk meeting transcript into ~200-word chunks with 50-word overlap
+- Store `Vec<f32>` as BLOB via `f32::to_le_bytes()`
+- Cosine similarity search in Rust (load all embeddings, compute, sort, return top-K)
+- Generate embeddings after `stop_meeting_recording` or on-demand via button
+
+### Phase 5: Distribution (Target: 1 week)
 - [ ] Apple Developer Program enrollment
 - [ ] Code signing + notarization pipeline (GitHub Actions)
 - [ ] DMG installer with custom icon
 - [ ] Auto-updater via GitHub releases
 - [ ] README, website/landing page
 
-### Phase 5: Multi-Engine (v1.5, future)
+### Phase 6: Multi-Engine (v1.5, future)
 - [ ] Whisper engine via whisper-rs (Metal acceleration)
 - [ ] Engine switching in settings without restart
 - [ ] Parakeet engine via ort crate (v2)

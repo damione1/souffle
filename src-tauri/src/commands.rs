@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, AppHandle, Emitter, State};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tracing::info;
 
 use crate::audio::capture::{list_input_devices, AudioDeviceInfo};
@@ -422,7 +423,7 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
         summary_generated_at: None,
     };
 
-    crate::transcript::save_meeting(&transcript)?;
+    state.db.save_meeting(&transcript)?;
     info!(id = %id, duration = duration, "Meeting recording saved");
 
     Ok(id)
@@ -430,20 +431,20 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
 
 /// List all saved meetings
 #[tauri::command]
-pub fn list_meetings() -> Result<Vec<crate::transcript::MeetingListItem>, String> {
-    crate::transcript::list_meetings()
+pub fn list_meetings(state: State<'_, AppState>) -> Result<Vec<crate::transcript::MeetingListItem>, String> {
+    state.db.list_meetings()
 }
 
 /// Get a full meeting transcript by ID
 #[tauri::command]
-pub fn get_meeting(id: String) -> Result<crate::transcript::MeetingTranscript, String> {
-    crate::transcript::load_meeting(&id)
+pub fn get_meeting(state: State<'_, AppState>, id: String) -> Result<crate::transcript::MeetingTranscript, String> {
+    state.db.load_meeting(&id)
 }
 
 /// Delete a meeting by ID
 #[tauri::command]
-pub fn delete_meeting(id: String) -> Result<(), String> {
-    crate::transcript::delete_meeting(&id)
+pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.db.delete_meeting(&id)
 }
 
 /// Copy text to clipboard and simulate Cmd+V paste
@@ -461,11 +462,12 @@ pub async fn check_ollama() -> Result<crate::ollama::OllamaStatus, String> {
 /// Summarize a meeting transcript using Ollama, streaming results back
 #[tauri::command]
 pub async fn summarize_meeting(
+    state: State<'_, AppState>,
     id: String,
     model: String,
     channel: Channel<crate::ollama::SummarizeProgress>,
 ) -> Result<(), String> {
-    let transcript = crate::transcript::load_meeting(&id)?;
+    let transcript = state.db.load_meeting(&id)?;
 
     // Build transcript text from segments (space-separated — SentencePiece strips inter-word spaces)
     let text: String = transcript
@@ -480,13 +482,14 @@ pub async fn summarize_meeting(
     }
 
     let channel_clone = channel.clone();
+    let db = state.db.clone();
     let summary = crate::ollama::summarize_stream(&text, &model, None, move |progress| {
         let _ = channel_clone.send(progress);
     })
     .await?;
 
-    // Save summary to transcript
-    crate::transcript::update_meeting_summary(&id, &summary, &model)?;
+    // Save summary to database
+    db.update_meeting_summary(&id, &summary, &model)?;
 
     Ok(())
 }
@@ -539,6 +542,152 @@ pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String>
     } else {
         Ok(text)
     }
+}
+
+// ─── Dictation history commands ──────────────────────────────────────
+
+/// List dictation history entries
+#[tauri::command]
+pub fn list_dictation_entries(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+) -> Result<Vec<crate::db::dictation::DictationEntry>, String> {
+    state.db.list_dictation_entries(limit.unwrap_or(50))
+}
+
+/// Add a dictation history entry
+#[tauri::command]
+pub fn add_dictation_entry(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    state.db.add_dictation_entry(&id, &text, &timestamp)
+}
+
+/// Delete a single dictation entry
+#[tauri::command]
+pub fn delete_dictation_entry(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.db.delete_dictation_entry(&id)
+}
+
+/// Clear all dictation history
+#[tauri::command]
+pub fn clear_dictation_history(state: State<'_, AppState>) -> Result<(), String> {
+    state.db.clear_dictation_entries()
+}
+
+// ─── Settings commands ──────────────────────────────────────────────
+
+/// Get all settings as a JSON object
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let pairs = state.db.get_all_settings()?;
+    let mut map = serde_json::Map::new();
+    for (key, value_str) in pairs {
+        // Each value is stored as JSON, parse it back
+        let value: serde_json::Value =
+            serde_json::from_str(&value_str).unwrap_or(serde_json::Value::String(value_str));
+        map.insert(key, value);
+    }
+    Ok(serde_json::Value::Object(map))
+}
+
+/// Save a single setting (key + JSON-encoded value)
+#[tauri::command]
+pub fn save_setting(
+    state: State<'_, AppState>,
+    key: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let value_str = serde_json::to_string(&value).map_err(|e| format!("Serialize: {e}"))?;
+    state.db.set_setting(&key, &value_str)
+}
+
+// ─── Shortcut commands ──────────────────────────────────────────────
+
+/// Register global shortcuts for toggle and push-to-talk dictation.
+/// Called from setup() on startup and from update_shortcuts command.
+pub fn register_shortcuts(
+    app: &AppHandle,
+    toggle_shortcut: &str,
+    ptt_shortcut: &str,
+) -> Result<(), String> {
+    let gs = app.global_shortcut();
+
+    // Unregister all existing shortcuts first
+    gs.unregister_all().map_err(|e| format!("Unregister: {e}"))?;
+
+    // Toggle shortcut: emit event, frontend handles the pipeline
+    if !toggle_shortcut.is_empty() {
+        gs.on_shortcut(toggle_shortcut, move |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                let _ = app.emit("shortcut-toggle", ());
+            }
+        })
+        .map_err(|e| format!("Register toggle shortcut '{toggle_shortcut}': {e}"))?;
+        info!(shortcut = toggle_shortcut, "Toggle shortcut registered");
+    }
+
+    // Push-to-talk shortcut: emit start on press, stop on release
+    if !ptt_shortcut.is_empty() {
+        gs.on_shortcut(ptt_shortcut, move |app, _shortcut, event| {
+            match event.state {
+                ShortcutState::Pressed => { let _ = app.emit("shortcut-ptt-start", ()); }
+                ShortcutState::Released => { let _ = app.emit("shortcut-ptt-stop", ()); }
+            }
+        })
+        .map_err(|e| format!("Register PTT shortcut '{ptt_shortcut}': {e}"))?;
+        info!(shortcut = ptt_shortcut, "Push-to-talk shortcut registered");
+    }
+
+    Ok(())
+}
+
+/// Update shortcut bindings at runtime. Saves to DB and re-registers.
+#[tauri::command]
+pub fn update_shortcuts(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    toggle_shortcut: String,
+    ptt_shortcut: String,
+) -> Result<(), String> {
+    // Save to database
+    let toggle_json = serde_json::to_string(&toggle_shortcut)
+        .map_err(|e| format!("Serialize: {e}"))?;
+    let ptt_json = serde_json::to_string(&ptt_shortcut)
+        .map_err(|e| format!("Serialize: {e}"))?;
+
+    state.db.set_setting("shortcut_toggle", &toggle_json)?;
+    state.db.set_setting("shortcut_push_to_talk", &ptt_json)?;
+
+    // Re-register shortcuts
+    register_shortcuts(&app, &toggle_shortcut, &ptt_shortcut)
+}
+
+/// Get current shortcut settings
+#[tauri::command]
+pub fn get_shortcuts(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let toggle = state
+        .db
+        .get_setting("shortcut_toggle")?
+        .and_then(|v| serde_json::from_str::<String>(&v).ok())
+        .unwrap_or_else(|| crate::DEFAULT_TOGGLE_SHORTCUT.to_string());
+
+    let ptt = state
+        .db
+        .get_setting("shortcut_push_to_talk")?
+        .and_then(|v| serde_json::from_str::<String>(&v).ok())
+        .unwrap_or_default();
+
+    Ok(serde_json::json!({
+        "toggle": toggle,
+        "push_to_talk": ptt,
+    }))
 }
 
 /// Save f32 PCM samples (24kHz mono) to a WAV file

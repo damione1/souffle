@@ -2,7 +2,7 @@
   import { invoke, Channel } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
-  import type { TranscriptionSegment, ModelStatus, DownloadProgress, AudioDevice } from "../types";
+  import type { TranscriptionSegment, ModelStatus, DownloadProgress, DictationEntry } from "../types";
   import { getAppState } from "../stores/app.svelte";
 
   const app = getAppState();
@@ -19,52 +19,60 @@
   let downloadFile = $state("");
   let isLoadingModel = $state(false);
 
-  // Audio devices
-  let audioDevices = $state<AudioDevice[]>([]);
-  let selectedDevice = $state("");
+  // History
+  let history = $state<DictationEntry[]>([]);
+  let showHistory = $state(false);
+  let expandedEntryId = $state<string | null>(null);
 
   let cleanupFns: (() => void)[] = [];
 
+  async function loadHistory() {
+    try {
+      history = await invoke("list_dictation_entries", { limit: 50 });
+    } catch { /* First run */ }
+  }
+
+  async function addHistoryEntry(text: string) {
+    if (!text.trim()) return;
+    try {
+      await invoke("add_dictation_entry", { text: text.trim() });
+      await loadHistory();
+    } catch (e) {
+      console.warn("Failed to save dictation entry:", e);
+    }
+  }
+
+  async function clearHistory() {
+    try {
+      await invoke("clear_dictation_history");
+      history = [];
+    } catch (e) {
+      console.warn("Failed to clear history:", e);
+    }
+  }
+
   onMount(() => {
     checkModelStatus();
-    refreshDevices();
+    loadHistory();
 
-    listen("recording-started", () => {
-      isRecording = true;
-      statusMessage = "";
+    // Shortcut/tray → toggle transcription (same pipeline as button click)
+    listen("shortcut-toggle", () => {
+      toggleRecording();
     }).then((fn) => cleanupFns.push(fn));
 
-    listen("recording-stopped", () => {
-      isRecording = false;
+    // Push-to-talk: start on press, stop on release
+    listen("shortcut-ptt-start", () => {
+      if (!isRecording) toggleRecording();
+    }).then((fn) => cleanupFns.push(fn));
+
+    listen("shortcut-ptt-stop", () => {
+      if (isRecording) toggleRecording();
     }).then((fn) => cleanupFns.push(fn));
 
     return () => {
       cleanupFns.forEach((fn) => fn());
     };
   });
-
-  async function refreshDevices() {
-    try {
-      audioDevices = await invoke("list_audio_devices");
-      const defaultDev = audioDevices.find((d) => d.is_default);
-      if (!selectedDevice && defaultDev) {
-        selectedDevice = defaultDev.name;
-      }
-    } catch (e) {
-      statusMessage = String(e);
-    }
-  }
-
-  async function onDeviceChange(event: Event) {
-    const target = event.target as HTMLSelectElement;
-    selectedDevice = target.value;
-    try {
-      await invoke("select_audio_device", { deviceName: selectedDevice });
-      statusMessage = "";
-    } catch (e) {
-      statusMessage = String(e);
-    }
-  }
 
   async function checkModelStatus() {
     try {
@@ -125,6 +133,9 @@
         await invoke("stop_transcription");
         isRecording = false;
 
+        // Save to history before clearing
+        await addHistoryEntry(transcript);
+
         // Auto-paste if enabled and we have text
         if (app.settings.auto_paste && transcript.trim()) {
           try {
@@ -176,30 +187,6 @@
   <h1 class="text-2xl font-semibold text-zinc-100">Souffle</h1>
 
   <p class="text-xs text-zinc-500">{engineName}</p>
-
-  <!-- Audio device selector -->
-  <div class="flex items-center gap-2 w-full">
-    <select
-      value={selectedDevice}
-      onchange={onDeviceChange}
-      class="flex-1 px-3 py-1.5 text-xs rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-300
-        focus:border-zinc-500 focus:outline-none"
-    >
-      {#each audioDevices as device}
-        <option value={device.name}>
-          {device.name}{device.is_default ? " (default)" : ""}
-        </option>
-      {/each}
-    </select>
-    <button
-      onclick={refreshDevices}
-      title="Refresh device list"
-      class="px-2 py-1.5 text-xs rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400
-        hover:text-zinc-200 hover:border-zinc-500 cursor-pointer transition-colors"
-    >
-      ↻
-    </button>
-  </div>
 
   <!-- Model setup flow -->
   {#if !modelDownloaded}
@@ -263,7 +250,7 @@
   {/if}
 
   <div class="flex items-center gap-3">
-    <p class="text-xs text-zinc-600">Cmd+Shift+Space to toggle</p>
+    <p class="text-xs text-zinc-600">Configure shortcuts in Settings</p>
     {#if app.settings.auto_paste}
       <span class="text-xs text-blue-400">Auto-paste ON</span>
     {/if}
@@ -283,5 +270,60 @@
     >
       Copy last
     </button>
+  {/if}
+
+  <!-- Dictation History -->
+  {#if history.length > 0}
+    <div class="w-full mt-2">
+      <button
+        onclick={() => showHistory = !showHistory}
+        class="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer mb-2"
+      >
+        <span>{showHistory ? "▲" : "▼"}</span>
+        <span>History ({history.length})</span>
+      </button>
+
+      {#if showHistory}
+        <div class="flex flex-col gap-2">
+          {#each history as entry}
+            <div class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
+              <button
+                onclick={() => expandedEntryId = expandedEntryId === entry.id ? null : entry.id}
+                class="w-full flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-zinc-800/50 transition-colors"
+              >
+                <div class="flex flex-col items-start gap-0.5 min-w-0">
+                  <span class="text-xs text-zinc-500">{new Date(entry.timestamp).toLocaleString()}</span>
+                  <span class="text-sm text-zinc-300 truncate w-full text-left">
+                    {entry.text.slice(0, 80)}{entry.text.length > 80 ? "..." : ""}
+                  </span>
+                </div>
+                <span class="text-zinc-500 text-xs ml-2 shrink-0">{expandedEntryId === entry.id ? "▲" : "▼"}</span>
+              </button>
+
+              {#if expandedEntryId === entry.id}
+                <div class="border-t border-zinc-800 p-3">
+                  <div class="text-sm text-zinc-300 whitespace-pre-wrap max-h-40 overflow-y-auto mb-2">
+                    {entry.text}
+                  </div>
+                  <button
+                    onclick={() => navigator.clipboard.writeText(entry.text)}
+                    class="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                  >
+                    Copy
+                  </button>
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+
+        <button
+          onclick={clearHistory}
+          class="text-xs text-red-500/70 hover:text-red-400 cursor-pointer mt-2"
+        >
+          Clear history
+        </button>
+      {/if}
+    </div>
   {/if}
 </div>

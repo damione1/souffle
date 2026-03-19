@@ -5,8 +5,6 @@ use tauri::{
 };
 use tracing::info;
 
-use crate::state::{AppState, AudioCommand, RecordingMode};
-
 /// Set up the system tray with menu items
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let toggle_dictation =
@@ -30,23 +28,9 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .icon_as_template(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle_dictation" => {
-                let state = app.state::<AppState>();
-                let mut is_recording = state.is_recording.lock().unwrap();
-                let mode = *state.recording_mode.lock().unwrap();
-
-                if mode == RecordingMode::Dictation {
-                    let _ = state.audio_cmd_sender.send(AudioCommand::Stop);
-                    *is_recording = false;
-                    *state.recording_mode.lock().unwrap() = RecordingMode::Idle;
-                    let _ = app.emit("recording-stopped", ());
-                    info!("Dictation stopped via tray");
-                } else if !*is_recording {
-                    let _ = state.audio_cmd_sender.send(AudioCommand::Start);
-                    *is_recording = true;
-                    *state.recording_mode.lock().unwrap() = RecordingMode::Dictation;
-                    let _ = app.emit("recording-started", ());
-                    info!("Dictation started via tray");
-                }
+                // Emit same event as keyboard shortcut — frontend handles full pipeline
+                let _ = app.emit("shortcut-toggle", ());
+                info!("Dictation toggle via tray");
             }
             "toggle_meeting" => {
                 // Meeting start/stop requires the full pipeline setup,

@@ -67,4 +67,10 @@ export type AppSettings = {
   ollama_model: string;
 };
 
+export type DictationEntry = {
+  id: string;
+  text: string;
+  timestamp: string; // ISO date
+};
+
 export type View = "dictation" | "recordings" | "settings";
