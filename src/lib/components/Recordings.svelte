@@ -1,14 +1,23 @@
 <script lang="ts">
   import { invoke, Channel } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import type { MeetingListItem, MeetingTranscript, SummarizeProgress, OllamaStatus } from "../types";
+  import type {
+    MeetingListItem,
+    MeetingTranscript,
+    SummarizeProgress,
+    OllamaStatus,
+    TranscriptionSegment,
+  } from "../types";
+  import { getAppState } from "../stores/app.svelte";
+
+  const app = getAppState();
 
   let meetings = $state<MeetingListItem[]>([]);
   let expandedId = $state<string | null>(null);
   let expandedMeeting = $state<MeetingTranscript | null>(null);
   let statusMessage = $state("");
   let ollamaAvailable = $state(false);
-  let ollamaModels = $state<string[]>([]);
+  let summaryModels = $state<string[]>([]);
   let selectedModel = $state("");
   let isSummarizing = $state(false);
   let summaryStream = $state("");
@@ -16,6 +25,35 @@
   // Meeting recording state
   let isRecordingMeeting = $state(false);
   let meetingTitle = $state("");
+  let liveMeetingTitle = $state("");
+  let liveMeetingTranscript = $state("");
+  let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
+  let liveMeetingLastTime = 0;
+
+  const PAUSE_THRESHOLD = 1.5;
+
+  function syncSelectedModel(preferredModel?: string | null) {
+    if (summaryModels.length === 0) {
+      selectedModel = "";
+      return;
+    }
+
+    if (preferredModel && summaryModels.includes(preferredModel)) {
+      selectedModel = preferredModel;
+      return;
+    }
+
+    if (selectedModel && summaryModels.includes(selectedModel)) {
+      return;
+    }
+
+    if (app.settings.ollama_model && summaryModels.includes(app.settings.ollama_model)) {
+      selectedModel = app.settings.ollama_model;
+      return;
+    }
+
+    selectedModel = summaryModels[0];
+  }
 
   onMount(async () => {
     await refreshMeetings();
@@ -34,10 +72,15 @@
     try {
       const status: OllamaStatus = await invoke("check_ollama");
       ollamaAvailable = status.available;
-      ollamaModels = status.models;
-      if (status.models.length > 0 && !selectedModel) {
-        selectedModel = status.models[0];
+      summaryModels = status.summary_models;
+
+      if (status.available && status.summary_models.length === 0 && status.models.length > 0) {
+        statusMessage =
+          "No text-generation Ollama model available for summaries. Install a chat model such as qwen, llama, mistral, gemma, phi, or deepseek.";
+        return;
       }
+
+      syncSelectedModel(expandedMeeting?.summary_model);
     } catch {
       ollamaAvailable = false;
     }
@@ -50,8 +93,10 @@
       return;
     }
     try {
-      expandedMeeting = await invoke("get_meeting", { id });
+      const meeting = await invoke<MeetingTranscript>("get_meeting", { id });
+      expandedMeeting = meeting;
       expandedId = id;
+      syncSelectedModel(meeting.summary_model);
     } catch (e) {
       statusMessage = String(e);
     }
@@ -85,6 +130,7 @@
           // Refresh the meeting to get saved summary (don't toggle — it's already expanded)
           invoke("get_meeting", { id }).then((meeting) => {
             expandedMeeting = meeting as MeetingTranscript;
+            syncSelectedModel(expandedMeeting.summary_model);
           });
         }
       };
@@ -98,23 +144,58 @@
   async function startMeetingRecording() {
     try {
       const title = meetingTitle.trim() || `Meeting ${new Date().toLocaleDateString()}`;
-      const channel = new Channel<import("../types").TranscriptionSegment>();
-      channel.onmessage = () => {
-        // Segments are accumulated server-side for meetings
+      liveMeetingTitle = title;
+      liveMeetingTranscript = "";
+      liveMeetingSegments = [];
+      liveMeetingLastTime = 0;
+      statusMessage = "";
+
+      const channel = new Channel<TranscriptionSegment>();
+      channel.onmessage = (segment) => {
+        if (!segment.is_final || !segment.text) return;
+
+        liveMeetingSegments = [...liveMeetingSegments, segment];
+
+        if (liveMeetingTranscript) {
+          const gap = segment.start_time - liveMeetingLastTime;
+          const endsWithSentence = /[.!?…]\s*$/.test(liveMeetingTranscript);
+          if (gap >= PAUSE_THRESHOLD && endsWithSentence && !liveMeetingTranscript.endsWith("\n")) {
+            liveMeetingTranscript += "\n\n";
+          } else if (
+            !liveMeetingTranscript.endsWith(" ") &&
+            !liveMeetingTranscript.endsWith("\n") &&
+            !segment.text.startsWith(" ")
+          ) {
+            liveMeetingTranscript += " ";
+          }
+        }
+
+        liveMeetingTranscript += segment.text;
+        liveMeetingLastTime = segment.start_time;
       };
       await invoke("start_meeting_recording", { title, channel });
       isRecordingMeeting = true;
       meetingTitle = "";
     } catch (e) {
       statusMessage = String(e);
+      liveMeetingTitle = "";
+      liveMeetingTranscript = "";
+      liveMeetingSegments = [];
+      liveMeetingLastTime = 0;
     }
   }
 
   async function stopMeetingRecording() {
     try {
-      await invoke("stop_meeting_recording");
+      const id: string = await invoke("stop_meeting_recording");
       isRecordingMeeting = false;
       await refreshMeetings();
+      expandedMeeting = await invoke("get_meeting", { id });
+      expandedId = id;
+      liveMeetingTitle = "";
+      liveMeetingTranscript = "";
+      liveMeetingSegments = [];
+      liveMeetingLastTime = 0;
     } catch (e) {
       statusMessage = String(e);
     }
@@ -140,6 +221,19 @@
       <div class="flex items-center gap-2">
         <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
         <span class="text-sm text-red-400">Recording meeting...</span>
+      </div>
+      <div class="rounded-lg bg-zinc-800/60 border border-zinc-700 p-3">
+        <div class="flex items-center justify-between gap-3 mb-2">
+          <span class="text-xs font-medium text-zinc-300">{liveMeetingTitle}</span>
+          <span class="text-[10px] text-zinc-500">{liveMeetingSegments.length} segments</span>
+        </div>
+        <div class="text-sm text-zinc-300 whitespace-pre-wrap min-h-20 max-h-52 overflow-y-auto">
+          {#if liveMeetingTranscript}
+            {liveMeetingTranscript}
+          {:else}
+            <span class="text-zinc-500 italic">Listening for speech...</span>
+          {/if}
+        </div>
       </div>
       <button
         onclick={stopMeetingRecording}
@@ -222,30 +316,42 @@
                     {expandedMeeting.summary}
                   </div>
                 </div>
-              {:else if isSummarizing && expandedId === meeting.id}
+              {/if}
+
+              {#if isSummarizing && expandedId === meeting.id}
                 <div>
-                  <h4 class="text-xs font-medium text-zinc-400 mb-1">Generating summary...</h4>
+                  <h4 class="text-xs font-medium text-zinc-400 mb-1">
+                    {expandedMeeting.summary ? "Generating replacement summary..." : "Generating summary..."}
+                  </h4>
                   <div class="text-sm text-zinc-300 whitespace-pre-wrap p-2 rounded bg-zinc-800/50">
                     {summaryStream}<span class="animate-pulse">|</span>
                   </div>
                 </div>
-              {:else if ollamaAvailable && expandedMeeting.segments.length > 0}
+              {/if}
+
+              {#if ollamaAvailable && summaryModels.length > 0 && expandedMeeting.segments.length > 0}
                 <div class="flex items-center gap-2">
                   <select
                     bind:value={selectedModel}
+                    disabled={isSummarizing}
                     class="px-2 py-1 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 focus:outline-none"
                   >
-                    {#each ollamaModels as model}
+                    {#each summaryModels as model}
                       <option value={model}>{model}</option>
                     {/each}
                   </select>
                   <button
                     onclick={() => summarizeMeeting(meeting.id)}
+                    disabled={isSummarizing}
                     class="px-3 py-1 text-xs rounded bg-purple-600 hover:bg-purple-500 text-white cursor-pointer transition-colors"
                   >
-                    Summarize
+                    {expandedMeeting.summary ? "Re-summarize" : "Summarize"}
                   </button>
                 </div>
+              {:else if ollamaAvailable && expandedMeeting.segments.length > 0}
+                <p class="text-xs text-amber-400">
+                  No summary-capable Ollama model detected. Install a text-generation model to generate reliable summaries.
+                </p>
               {/if}
 
               <!-- Actions -->

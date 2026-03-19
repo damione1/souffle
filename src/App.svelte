@@ -30,6 +30,9 @@
         if (settings.paste_delay_ms !== null && settings.paste_delay_ms !== undefined) {
           app.settings = { ...app.settings, paste_delay_ms: settings.paste_delay_ms as number };
         }
+        if (settings.debug_transcription !== null && settings.debug_transcription !== undefined) {
+          app.settings = { ...app.settings, debug_transcription: settings.debug_transcription as boolean };
+        }
         // Restore saved audio device and tell backend
         if (settings.audio_device) {
           app.selectedDevice = settings.audio_device as string;

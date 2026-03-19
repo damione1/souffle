@@ -1,16 +1,26 @@
 use tauri::{
+    AppHandle, Emitter, Manager,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
 };
 use tracing::info;
 
 /// Set up the system tray with menu items
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let toggle_dictation =
-        MenuItem::with_id(app, "toggle_dictation", "Start Dictation", true, None::<&str>)?;
-    let toggle_meeting =
-        MenuItem::with_id(app, "toggle_meeting", "Start Meeting Recording", true, None::<&str>)?;
+    let toggle_dictation = MenuItem::with_id(
+        app,
+        "toggle_dictation",
+        "Start Dictation",
+        true,
+        None::<&str>,
+    )?;
+    let toggle_meeting = MenuItem::with_id(
+        app,
+        "toggle_meeting",
+        "Start Meeting Recording",
+        true,
+        None::<&str>,
+    )?;
     let separator = MenuItem::with_id(app, "sep", "─────────", false, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
@@ -18,7 +28,14 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = Menu::with_items(
         app,
-        &[&toggle_dictation, &toggle_meeting, &separator, &settings, &show, &quit],
+        &[
+            &toggle_dictation,
+            &toggle_meeting,
+            &separator,
+            &settings,
+            &show,
+            &quit,
+        ],
     )?;
 
     TrayIconBuilder::new()

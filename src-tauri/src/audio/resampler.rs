@@ -31,8 +31,10 @@ impl Resampler {
                 Ok(r) => {
                     eprintln!(
                         "[souffle] Resampler created: {}Hz → {}Hz, chunk_in={}, chunk_out={}",
-                        source_rate, TARGET_SAMPLE_RATE,
-                        r.input_frames_next(), r.output_frames_next()
+                        source_rate,
+                        TARGET_SAMPLE_RATE,
+                        r.input_frames_next(),
+                        r.output_frames_next()
                     );
                     Some(r)
                 }

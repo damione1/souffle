@@ -97,11 +97,7 @@ pub fn delete_meeting(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn update_meeting_summary(
-    id: &str,
-    summary: &str,
-    model: &str,
-) -> Result<(), String> {
+pub fn update_meeting_summary(id: &str, summary: &str, model: &str) -> Result<(), String> {
     let mut transcript = load_meeting(id)?;
     transcript.summary = Some(summary.to_string());
     transcript.summary_model = Some(model.to_string());

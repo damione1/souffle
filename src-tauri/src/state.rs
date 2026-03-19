@@ -2,14 +2,15 @@ use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{Receiver, Sender};
 
+use crate::audio::AudioChunk;
 use crate::db::Database;
-use crate::engine::kyutai::KyutaiEngine;
 use crate::engine::TranscriptionSegment;
+use crate::engine::kyutai::KyutaiEngine;
 use crate::pipeline::TranscriptionPipeline;
 
 /// Commands sent to the audio thread
 pub enum AudioCommand {
-    Start,
+    Start(u64),
     Stop,
     SelectDevice(String),
 }
@@ -34,11 +35,12 @@ pub struct MeetingAccumulator {
 /// so we communicate with it via a command channel.
 pub struct AppState {
     pub audio_cmd_sender: Sender<AudioCommand>,
-    pub audio_receiver: Receiver<Vec<f32>>,
+    pub audio_receiver: Receiver<AudioChunk>,
     pub is_recording: Mutex<bool>,
     pub engine: Arc<Mutex<KyutaiEngine>>,
     pub pipeline: Mutex<Option<TranscriptionPipeline>>,
     pub model_loaded: Mutex<bool>,
+    pub next_audio_session_id: Mutex<u64>,
     pub recording_mode: Mutex<RecordingMode>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     pub db: Arc<Database>,
@@ -47,7 +49,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         audio_cmd_sender: Sender<AudioCommand>,
-        audio_receiver: Receiver<Vec<f32>>,
+        audio_receiver: Receiver<AudioChunk>,
         db: Arc<Database>,
     ) -> Self {
         Self {
@@ -57,6 +59,7 @@ impl AppState {
             engine: Arc::new(Mutex::new(KyutaiEngine::new())),
             pipeline: Mutex::new(None),
             model_loaded: Mutex::new(false),
+            next_audio_session_id: Mutex::new(0),
             recording_mode: Mutex::new(RecordingMode::Idle),
             meeting_accumulator: Arc::new(Mutex::new(None)),
             db,

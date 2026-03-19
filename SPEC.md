@@ -2,9 +2,9 @@
 
 ## Local Speech-to-Text Desktop Application - Technical Specification
 
-**Version:** 1.0.0-draft
+**Version:** 1.0.1-draft
 **Author:** Damien (Lead Data Engineer / Software Engineer, 10+ years)
-**Date:** 2026-03-17
+**Date:** 2026-03-19
 **Target:** macOS (Apple Silicon M1-M4), cross-platform ready by design
 
 ---
@@ -60,16 +60,17 @@ A polished, privacy-first desktop application for local speech-to-text transcrip
 ### Audio
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
-| Audio capture | cpal | 0.17+ | Microphone + system audio (CoreAudio loopback on macOS 14.6+) |
-| Resampling | rubato | 0.15+ | High-quality resample to 16kHz mono f32 (Whisper/Kyutai requirement) |
-| Audio I/O | hound | 3.5+ | WAV file read/write for meeting recordings |
-| VAD | Silero VAD | ONNX via ort | Voice Activity Detection (avoid transcribing silence) |
+| Audio capture | cpal | 0.15.x | Microphone capture on macOS; system audio via BlackHole virtual device workaround |
+| Resampling | rubato | 0.15+ | High-quality resample to 24kHz mono f32 (Mimi/Kyutai requirement) |
+| Audio I/O | hound | 3.5+ | WAV debug capture / offline inspection |
+| VAD / end-of-turn | Kyutai semantic VAD heads | via moshi | Built-in end-of-turn scoring from the model |
 
 ### System Integration
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
 | Global hotkeys | tauri-plugin-global-shortcut | Toggle recording from anywhere |
 | System tray | Tauri TrayIconBuilder | Menu bar presence, status indicator |
+| Tray positioning | tauri-plugin-positioner | Optional positioning of compact windows/popovers near the tray |
 | Notifications | tauri-plugin-notification | Transcription complete, errors |
 | Auto-start | tauri-plugin-autostart | Launch at login (optional) |
 | Single instance | tauri-plugin-single-instance | Prevent multiple instances |
@@ -83,7 +84,8 @@ A polished, privacy-first desktop application for local speech-to-text transcrip
 |-----------|-----------|---------|
 | LLM runtime | Ollama (external) | Local LLM inference via HTTP API (localhost:11434) |
 | Communication | reqwest | HTTP client for Ollama API |
-| Default model | User's choice | Recommended: llama3.1:8b or mistral |
+| Model management (future) | ollama-rs | Stream `/api/pull`, inspect local tags, surface download progress |
+| Summary model | User-selected chat/instruction model | Recommended: qwen, llama, mistral, gemma, phi, deepseek; speech/embedding models excluded |
 
 ---
 
@@ -213,12 +215,12 @@ Communication:
   Frontend --[tauri::command]--> Main thread (start/stop/config)
 ```
 
-**Ring buffer design for audio:**
-- Capacity: 30 seconds of audio at 16kHz = 480,000 f32 samples (~1.8 MB)
-- Audio thread writes continuously
-- Inference thread reads in chunks (configurable: 1-5 seconds for streaming, 30s for Whisper)
-- If buffer overflows (inference too slow), log warning and drop oldest samples
-- Use `crossbeam-channel::bounded` with backpressure
+**Current audio queue design:**
+- `crossbeam-channel::bounded` carries session-tagged `AudioChunk` values from capture to inference
+- Audio is resampled inline to 24kHz mono f32 before enqueue
+- Each chunk is tagged with a monotonically increasing `session_id`
+- The capture callback only emits when its `active_session_id` matches the current session
+- Start/stop paths drain stale chunks to keep session boundaries clean
 
 ### 3.4 Model Management
 
@@ -230,16 +232,11 @@ $APP_DATA_DIR/
     kyutai/
       stt-1b-en_fr/
         model.safetensors
-        tokenizer.json
+        tokenizer.model
         config.json
-    whisper/                  (v1.5)
-      large-v3-turbo-q5_0.bin
-    parakeet/                 (v2)
-      tdt-0.6b-v3.onnx
-  recordings/
-    2026-03-17_standup.wav
-    2026-03-17_standup.json   (transcription + metadata)
-  config.json                 (user preferences)
+        mimi-pytorch.safetensors
+  souffle.db                  (meetings, segments, dictation history, settings, FTS)
+  debug_engine_input.wav      (optional, only when transcription debug is enabled)
 ```
 
 **Download flow:**
@@ -259,7 +256,7 @@ Reference implementation: https://github.com/kyutai-labs/delayed-streams-modelin
 - Audio encoder: Mimi neural codec, encodes audio at 12.5 Hz into 32 tokens/frame
 - Architecture: Decoder-only Transformer
 - Model: stt-1b-en_fr (1B params, bilingual, ~2GB weights)
-- Input: Raw audio (PCM f32, 24kHz for Mimi - resample from 16kHz if needed, check Mimi's expected sample rate)
+- Input: Raw audio (PCM f32, 24kHz mono)
 - Output: Token stream with word-level timestamps, punctuation, capitalization
 - Latency: ~500ms for the 1B model
 - Built-in Semantic VAD: predicts end-of-utterance from content, not just silence
@@ -275,9 +272,43 @@ Reference implementation: https://github.com/kyutai-labs/delayed-streams-modelin
 - [ ] Candle Metal performance on M4 Pro for 1B param model
 - [ ] Actual latency in practice (claimed 500ms)
 - [ ] Memory footprint (expected ~4-6 GB with model loaded)
-- [ ] Mimi codec expected sample rate (may be 24kHz, not 16kHz)
+- [x] Mimi codec expected sample rate = 24kHz
 - [ ] Streaming behavior: how to feed continuous audio vs file-based
 - [ ] Whether the stt-rs example is production-ready or just a demo
+
+### 3.6 Current Implementation Assessment (2026-03-19)
+
+**Overall status**
+- The core application is operational end-to-end: model download/load, dictation, meeting recording, SQLite persistence, live transcript streaming, and Ollama summarization.
+- The backend architecture has held up well: a dedicated audio thread feeds a dedicated inference thread, while Tauri commands and channels keep UI control and streaming updates simple.
+- The Kyutai integration is viable for interactive use on Apple Silicon, but it still needs longer-run profiling and automated soak testing before calling it production-hardened.
+
+**Most important issue that was fixed**
+- The main stability issue was a session-boundary bug that looked like a memory leak: the first transcription session worked, but the second session could crash, reuse stale audio, or get stuck in an invalid decoding state.
+- Root cause was not a single leak. It was a combination of:
+  - late CoreAudio/cpal callbacks still enqueueing audio after `Stop`
+  - stale audio chunks crossing session boundaries
+  - reset/rebuild of the Kyutai/Candle Metal state happening too aggressively on reused resources
+- The fix was layered:
+  - audio chunks are now tagged with a `session_id`
+  - the capture callback is gated by an `active_session_id` atomic and becomes a no-op immediately after stop
+  - stale chunks are drained/ignored on stop/start boundaries
+  - session start/reset is serialized around the persistent inference pipeline
+  - Kyutai reset now synchronizes the Metal device and rebuilds the ASR state/device cleanly
+- Current result: multiple back-to-back dictation sessions and meeting-recording sessions were validated manually without reproducing the previous second-session crash/leak symptom.
+
+**Other implementation improvements completed during troubleshooting**
+- Meeting recording now shows live transcript feedback in the Recordings tab while recording, instead of only after stop.
+- Verbose transcription diagnostics are runtime-gated behind a `debug_transcription` setting rather than always-on logs.
+- Meeting summarization is now stricter and more extractive:
+  - speech/embedding models such as `whisper` are filtered out for summaries
+  - the prompt explicitly forbids invented decisions, action items, and greeting-style intros
+  - users can re-run summarization on an existing meeting with a different model
+
+**Current technical limitations**
+- System audio capture is still not true native CoreAudio loopback; the practical workaround is selecting BlackHole as the input device.
+- The session-boundary fix is validated manually, not yet by an automated regression or soak test.
+- Summary quality still depends heavily on using a proper text-generation model in Ollama.
 
 ---
 
@@ -305,40 +336,27 @@ Reference implementation: https://github.com/kyutai-labs/delayed-streams-modelin
 **Trigger:** Manual start from app window or tray menu
 **Flow:**
 1. User selects "Start Meeting Recording" from tray menu or app window
-2. Audio capture starts from system audio (CoreAudio loopback via cpal 0.17)
-3. Optionally, also capture microphone (dual-stream for speaker separation in v2)
-4. Audio is saved to WAV file in real-time (hound crate)
+2. Audio capture starts from the currently selected input device (microphone, or BlackHole if the user wants system audio)
+3. Audio is streamed through the same persistent Kyutai inference pipeline used by dictation
+4. Live transcript segments are shown in the Recordings view while the meeting is active
 5. Tray icon shows "recording meeting" state (pulsing indicator)
-6. User can optionally see live transcription in app window
+6. Final segments are accumulated in memory during the meeting
 7. User stops recording via tray menu or hotkey (default: Cmd+Shift+M)
-8. Post-processing: full transcription saved as JSON alongside WAV
-9. If Ollama is available: offer to summarize the meeting transcript
-10. Summary saved alongside transcript
+8. On stop, the meeting transcript is saved to SQLite (`meetings` + `segments` tables)
+9. If Ollama is available with a summary-capable text model, the user can summarize or re-summarize the meeting
+10. Summary, model name, and generation timestamp are persisted on the meeting row
 
-**Meeting transcript JSON format:**
-```json
-{
-  "id": "uuid-v4",
-  "created_at": "2026-03-17T14:30:00Z",
-  "duration_seconds": 3600,
-  "engine": "kyutai-stt-1b-en_fr",
-  "language_detected": "fr",
-  "audio_file": "2026-03-17_standup.wav",
-  "segments": [
-    {
-      "text": "Bonjour tout le monde, on commence le standup.",
-      "start_time": 0.0,
-      "end_time": 3.2,
-      "is_final": true,
-      "language": "fr",
-      "confidence": 0.94
-    }
-  ],
-  "summary": null,
-  "summary_model": null,
-  "summary_generated_at": null
-}
-```
+**Current persisted meeting shape (logical model):**
+- `id`
+- `title`
+- `started_at`
+- `ended_at`
+- `duration_seconds`
+- `engine`
+- `segments[]`
+- `summary`
+- `summary_model`
+- `summary_generated_at`
 
 ### 4.3 Ollama Summarization
 
@@ -346,21 +364,54 @@ Reference implementation: https://github.com/kyutai-labs/delayed-streams-modelin
 **Detection:** On app startup and periodically, check `GET http://localhost:11434/api/tags`
 **Flow:**
 1. After meeting transcription is complete, check if Ollama is available
-2. If available, show "Summarize" button in meeting detail view
-3. On click, send transcript to Ollama with a system prompt:
-   - "You are a meeting summarizer. Given the following meeting transcript, produce:
-     1. A concise summary (2-3 paragraphs)
-     2. Key decisions made
-     3. Action items with responsible persons (if identifiable)
-     4. Topics discussed
-     Respond in the same language as the transcript."
-4. Stream response back to UI
-5. Save summary in the transcript JSON
+2. Filter installed Ollama tags to summary-capable text-generation models only
+3. In meeting detail view, show a model picker plus `Summarize` / `Re-summarize`
+4. On click, send the transcript to Ollama with a strict extractive prompt:
+   - no greeting, no intro, no invented decisions or action items
+   - fixed markdown structure: `Summary`, `Decisions`, `Action Items`, `Topics`
+   - if the transcript does not state something, say so explicitly instead of inferring
+5. Stream response back to UI
+6. Save summary, model name, and timestamp in SQLite
 
 **Ollama API call:**
 - Endpoint: `POST http://localhost:11434/api/generate`
-- Model: user-configurable (default: auto-detect first available model)
+- Model: user-configurable summary-capable text model (not STT / embedding models)
 - Stream: true (show summary generation in real-time)
+- Temperature: `0.0` to minimize drift and hallucination
+
+### 4.4 Meeting Detection (Future)
+
+There is no single reliable cross-app meeting API on macOS. The recommended implementation is a **multi-signal decision pipeline** ordered by privacy impact and reliability:
+
+1. **Process + network activity (`sysinfo` + connection inspection)**  
+   Detect Zoom / Teams / Slack / Meet companion processes, then confirm active meeting-related network connections. This is the highest-value zero-permission signal.
+2. **CoreAudio device state (`coreaudio-rs`)**  
+   Watch `kAudioDevicePropertyDeviceIsRunningSomewhere` to learn that the microphone is in use without reading audio data.
+3. **Calendar prediction (`objc2-event-kit`)**  
+   Parse Zoom / Teams / Meet URLs from current or upcoming calendar events to provide "meeting starting soon" hints.
+4. **Window title detection (`winshift`, optional)**  
+   Use Accessibility permission to inspect meeting window titles for stronger confirmation when needed.
+
+**Recommended decision logic**
+- If meeting app process is running and it has active meeting-network connections: **meeting detected**
+- Else if microphone device is active and a meeting app process is running: **meeting detected**
+- Else if a calendar event with a meeting URL is happening now: **probable meeting**
+
+Platform-specific OAuth integrations (Zoom webhooks, Teams Graph presence, Slack events) should remain optional add-ons, not the primary local-detection path.
+
+### 4.5 Speaker Diarization (Future)
+
+The preferred architecture is **post-processing diarization**, not a replacement of the existing Kyutai STT loop:
+
+1. Run Kyutai STT as-is to generate timestamped segments
+2. In parallel, resample the same 24kHz mono recording to **16kHz mono** with `rubato`
+3. Feed the 16kHz stream/file to **`pyannote-rs`** (preferred), which combines segmentation and speaker embeddings via ONNX Runtime
+4. Align diarization spans with transcript timestamps
+5. Insert speaker labels / paragraph breaks where the active speaker changes
+
+**Recommended library choice**
+- `pyannote-rs` is the default recommendation for v1 diarization because it is already proven in a Tauri desktop app and integrates cleanly as a separate inference pass.
+- `native-pyannote-rs`, `sherpa-rs`, and `parakeet-rs` remain evaluation options, but they are not the primary path today.
 
 ---
 
@@ -380,7 +431,8 @@ The main window is a **compact, single-page app** with three tabs/views:
 **Recordings view:**
 - List of past meeting recordings (date, duration, engine used)
 - Click to expand: full transcript, summary (if generated), audio playback
-- "Summarize" button (if Ollama available and no summary yet)
+- Live transcript panel while a meeting is being recorded
+- Model picker + "Summarize" / "Re-summarize" button for any saved meeting with transcript text
 - "Export" button (copy transcript, export as .txt/.srt)
 - "Delete" button (with confirmation)
 
@@ -390,7 +442,8 @@ The main window is a **compact, single-page app** with three tabs/views:
 - Global hotkey configuration
 - Dictation: auto-paste on/off, paste delay
 - Audio: input device selection, system audio capture on/off
-- Ollama: connection URL, preferred model
+- Ollama: connection URL, preferred summary model
+- Diagnostics: verbose transcription debug toggle
 - General: launch at login, language preference, theme (light/dark/system)
 - About: version, licenses, links
 
@@ -411,6 +464,15 @@ The main window is a **compact, single-page app** with three tabs/views:
 - "Settings"
 - Separator
 - "Quit"
+
+**Implementation notes**
+- Use Tauri v2's built-in `TrayIconBuilder` and runtime `set_icon()`; do not define a duplicate tray icon in both `tauri.conf.json` and code.
+- Bundle icon variants at compile time with `include_bytes!`.
+- Use a template icon for idle/ready state so macOS can adapt it to dark/light menu bar themes.
+- Use a non-template colored icon for active recording state.
+- Important gotcha: `set_icon()` resets the template flag, so call `set_icon_as_template(true)` again after swapping back to a template icon.
+- Use 22×22px tray assets (44×44px at `@2x` for Retina).
+- Hide the main window on close and prevent process exit when all windows are closed so recording can continue from the tray.
 
 ### 5.3 UI Guidelines
 
@@ -473,6 +535,18 @@ The main window is a **compact, single-page app** with three tabs/views:
 - CoreML cold-start penalty is ~15 min on first run per device. Start with Metal only.
 - Binary size target: ~20-30 MB (without models). Models are separate downloads.
 - Cargo release profile must include: `strip = true`, `lto = true`, `codegen-units = 1`, `opt-level = "s"`, `panic = "abort"`
+
+### 6.4 Autostart / Login Items
+
+**Recommended implementation**
+- Use `tauri-plugin-autostart` v2 with the Builder API and pass `--autostarted` to distinguish login launches from user launches.
+- Expose autostart as an explicit user-controlled setting. Do not enable it silently.
+
+**macOS-specific caveats**
+- On Ventura+ the app appears in System Settings → General → Login Items, where users can disable it.
+- Unsigned apps are shown as background items from an unidentified developer, so code signing + notarization are effectively mandatory for a good experience.
+- LaunchAgent plist files can outlive app uninstall and leave orphan entries behind.
+- For a more native macOS-only path later, evaluate `smappservice-rs` / `SMAppService`, which integrates more cleanly with Login Items and uninstall behavior.
 
 ---
 
@@ -541,7 +615,7 @@ Built with Tauri, Candle, and open-source technologies."
 ### Phase 3: Polish & Features (Target: 2 weeks) ✅ COMPLETE
 - [x] Dictation mode: auto-paste via clipboard + Cmd+V simulation
 - [x] Meeting recording mode: mic recording with live transcription (system audio deferred — BlackHole workaround documented)
-- [x] Meeting transcript storage (JSON) and history view
+- [x] Meeting transcript storage and history view (later migrated from JSON to SQLite in Phase 4)
 - [x] Ollama integration for meeting summarization (streaming)
 - [x] Settings UI: audio device, auto-paste, Ollama config, theme
 - [x] Dark/light/system mode theming
@@ -550,17 +624,19 @@ Built with Tauri, Candle, and open-source technologies."
 
 **Implementation notes:**
 - Auto-paste uses `arboard` (clipboard) + `enigo` (Cmd+V simulation) — requires macOS Accessibility permission
-- Meeting transcripts stored as JSON in `~/Library/Application Support/com.souffle.app/meetings/{uuid}.json`
-- Ollama integration: `POST /api/generate` with streaming NDJSON, system prompt from SPEC
-- Settings persisted via `tauri-plugin-store` (`settings.json`)
+- Meeting recording exposes live transcript updates in the Recordings tab during capture
+- Ollama integration: `POST /api/generate` with streaming NDJSON
+- Summary UI supports re-running with a different model on an already summarized meeting
+- Tray behavior should remain code-driven via `TrayIconBuilder`; use template icons for idle state and a colored icon for recording state
 - Theme: CSS class strategy (`.light`/`.dark` on `<html>`), Tailwind overrides in app.css
 - Frontend restructured: shared types in `src/lib/types/`, reactive store in `src/lib/stores/`
 - ASR Word emission: emit immediately on `Word` event (don't wait for `EndWord` which has 5s+ latency)
 - Inter-word spaces added in frontend (SentencePiece strips leading `▁` when decoding per-word)
 - Paragraph breaks inserted on pause > 1.5s after sentence-ending punctuation
-- Shutdown sequence: stop audio → wait 300ms → stop pipeline (drains channel) → flush engine
+- Runtime debug logs are gated behind a persisted `debug_transcription` toggle
+- Session boundaries are isolated with session-tagged audio chunks and callback-level gating
 
-### Phase 4: Unified Storage & Search ✅ (In Progress)
+### Phase 4: Unified Storage & Search ✅ (Core complete, search still in progress)
 - [x] SQLite unified storage (`souffle.db` via rusqlite with bundled-full/FTS5)
 - [x] Meeting CRUD via SQLite (replaces JSON file I/O)
 - [x] JSON → SQLite auto-migration (existing meetings imported on first run)
@@ -579,6 +655,8 @@ Built with Tauri, Candle, and open-source technologies."
 - `tauri-plugin-store` fully removed from Cargo.toml, package.json, and capabilities
 - FTS5 `text_search` virtual table populated on meeting save and dictation entry add
 - Schema includes `embeddings` table for future vector search (Step 7)
+- Current storage of record summaries is `meetings.summary`, `meetings.summary_model`, `meetings.summary_generated_at`
+- Debug and session-isolation work landed on top of the SQLite-backed architecture without changing the external UI flow
 
 **Roadmap (future sessions):**
 
@@ -603,18 +681,37 @@ Built with Tauri, Candle, and open-source technologies."
 - Cosine similarity search in Rust (load all embeddings, compute, sort, return top-K)
 - Generate embeddings after `stop_meeting_recording` or on-demand via button
 
+#### Step 8: Meeting detection pipeline
+- Process detection via `sysinfo`
+- Confirm active calls with process-scoped network activity checks
+- Add CoreAudio device-state monitoring via `coreaudio-rs`
+- Add EventKit meeting-URL prediction via `objc2-event-kit`
+- Optionally add Accessibility-based window-title confirmation via `winshift`
+- Keep app-specific OAuth integrations optional, not required
+
+#### Step 9: Ollama model pull UX
+- Add in-app Ollama model list / pull flow
+- Preferred crate: `ollama-rs` with streaming pull support
+- Stream pull progress to the frontend via Tauri Channels, not unordered events
+- Show manifest, layer-download, digest verification, and completion states
+- Never use a short read timeout for large pulls; only use a connect timeout
+
 ### Phase 5: Distribution (Target: 1 week)
 - [ ] Apple Developer Program enrollment
 - [ ] Code signing + notarization pipeline (GitHub Actions)
 - [ ] DMG installer with custom icon
 - [ ] Auto-updater via GitHub releases
+- [ ] Autostart toggle via `tauri-plugin-autostart` with Ventura+ Login Items validation
+- [ ] Verify login-item behavior for signed/notarized builds and document uninstall cleanup
 - [ ] README, website/landing page
 
-### Phase 6: Multi-Engine (v1.5, future)
+### Phase 6: Multi-Engine & Meeting Intelligence (v1.5+, future)
 - [ ] Whisper engine via whisper-rs (Metal acceleration)
 - [ ] Engine switching in settings without restart
 - [ ] Parakeet engine via ort crate (v2)
-- [ ] Speaker diarization (v2)
+- [ ] Speaker diarization via `pyannote-rs` post-processing (preferred first implementation)
+- [ ] Meeting detection pipeline via `sysinfo` + CoreAudio device state + EventKit (+ optional window-title signal)
+- [ ] Optional tray-positioned mini window / popover via `tauri-plugin-positioner`
 
 ---
 
@@ -624,7 +721,8 @@ Built with Tauri, Candle, and open-source technologies."
 |------|--------|------------|------------|
 | Candle Metal perf on M4 Pro insufficient for real-time 1B model | Critical | Medium | **Validate in Phase 2 ASAP.** Fallback: Whisper via whisper-rs (proven). Candle Metal is less optimized than whisper.cpp Metal. |
 | Kyutai stt-rs is demo-quality, not production-ready | High | Medium | Budget extra time to harden. Isolate in engine trait so replacement is cheap. |
-| cpal 0.17 CoreAudio loopback unstable | High | Low | Fallback: ScreenCaptureKit via objc2 bindings, or require BlackHole virtual audio device. |
+| Native CoreAudio loopback / system-audio capture on macOS remains fragile | High | Low | Current workaround is BlackHole as the selected input device. Longer-term fallback: ScreenCaptureKit or a different capture backend. |
+| ~~Multi-session transcription leaked/contaminated audio between sessions~~ | ~~Critical~~ | ~~High~~ | ✅ **Resolved on 2026-03-19**: session-tagged audio chunks, callback-level `active_session_id` gating, stale-queue draining, serialized reset/start ordering, and clean Kyutai/Metal state rebuild. Add soak tests later. |
 | ~~Mimi codec sample rate mismatch~~ | ~~Medium~~ | ~~Medium~~ | ✅ **Resolved in Phase 2**: Confirmed 24kHz. Pipeline updated from 16kHz to 24kHz. |
 | macOS notarization rejects binary with Candle Metal shaders | Medium | Low | Test notarization early in Phase 2, not Phase 4. |
 | Model download size (2GB) deters users | Medium | Medium | Show clear progress, allow background download, offer smaller model if Kyutai releases one. |
@@ -644,25 +742,28 @@ voxtral/
         mod.rs             # Audio module exports
         capture.rs         # cpal microphone + system audio capture
         resampler.rs       # rubato wrapper
-        ring_buffer.rs     # Lock-free ring buffer
+      db/
+        mod.rs             # SQLite database entry point
+        schema.rs          # DB schema + migrations
+        migrate.rs         # JSON -> SQLite migration
+        meetings.rs        # Meeting persistence
+        dictation.rs       # Dictation history persistence
+        settings.rs        # Settings persistence
       engine/
         mod.rs             # Engine module + TranscriptionEngine trait
         kyutai.rs          # Kyutai STT implementation
-        whisper.rs         # (v1.5) Whisper implementation
-        parakeet.rs        # (v2) Parakeet implementation
       models/
         mod.rs             # Model download, verification, management
         download.rs        # HuggingFace download with progress
       pipeline/
-        mod.rs             # Orchestrates audio -> engine -> output
-        dictation.rs       # Dictation mode logic
-        meeting.rs         # Meeting recording mode logic
+        mod.rs             # Persistent audio -> engine -> output pipeline
       ollama/
         mod.rs             # Ollama HTTP client
-        summarize.rs       # Meeting summarization prompts
       commands.rs          # All #[tauri::command] functions
       state.rs             # AppState, shared state management
-      config.rs            # User configuration, persistence
+      transcript.rs        # Shared meeting transcript structs
+      debug.rs             # Runtime debug toggles
+      clipboard.rs         # Copy/paste integration
       tray.rs              # System tray setup and event handling
       errors.rs            # App-wide error types
     Cargo.toml
@@ -675,8 +776,7 @@ voxtral/
       components/          # Svelte components
       stores/              # Svelte stores (state management)
       types/               # TypeScript types matching Rust structs
-    routes/                # Pages (if using SvelteKit-like routing)
-    app.html
+    App.svelte             # Main single-page shell
     app.css
   package.json
   svelte.config.js

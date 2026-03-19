@@ -22,12 +22,10 @@ impl Database {
     pub fn open(db_path: &Path) -> Result<Self, String> {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Create db dir: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("Create db dir: {e}"))?;
         }
 
-        let conn =
-            Connection::open(db_path).map_err(|e| format!("Open database: {e}"))?;
+        let conn = Connection::open(db_path).map_err(|e| format!("Open database: {e}"))?;
 
         // WAL mode — journal_mode PRAGMA returns a result row, must use query_row
         let _: String = conn
@@ -76,9 +74,11 @@ impl Database {
             .map_err(|e| format!("Check schema_version: {e}"))?;
 
         let current_version = if has_version_table {
-            conn.query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |row| {
-                row.get::<_, i64>(0)
-            })
+            conn.query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
             .unwrap_or(0)
         } else {
             0

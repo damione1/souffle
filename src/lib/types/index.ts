@@ -50,6 +50,7 @@ export type MeetingListItem = {
 export type OllamaStatus = {
   available: boolean;
   models: string[];
+  summary_models: string[];
 };
 
 export type SummarizeProgress = {
@@ -65,6 +66,7 @@ export type AppSettings = {
   paste_delay_ms: number;
   ollama_url: string;
   ollama_model: string;
+  debug_transcription: boolean;
 };
 
 export type DictationEntry = {

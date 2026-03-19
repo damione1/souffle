@@ -42,7 +42,9 @@ impl Database {
             .map_err(|e| format!("Prepare: {e}"))?;
 
         let pairs = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|e| format!("Query: {e}"))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect: {e}"))?;

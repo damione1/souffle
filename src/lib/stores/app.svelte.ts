@@ -16,6 +16,7 @@ let settings = $state<AppSettings>({
   paste_delay_ms: 100,
   ollama_url: "http://localhost:11434",
   ollama_model: "",
+  debug_transcription: false,
 });
 
 export function getAppState() {

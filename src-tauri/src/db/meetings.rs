@@ -11,7 +11,9 @@ impl Database {
     /// Also indexes the full text for FTS5 search.
     pub fn save_meeting(&self, meeting: &MeetingTranscript) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
-        let tx = conn.transaction().map_err(|e| format!("Transaction: {e}"))?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
             "INSERT OR REPLACE INTO meetings (id, title, started_at, ended_at, duration_seconds, engine, summary, summary_model, summary_generated_at, edited_transcript)
@@ -32,8 +34,11 @@ impl Database {
         .map_err(|e| format!("Insert meeting: {e}"))?;
 
         // Delete existing segments for this meeting (for upsert scenarios)
-        tx.execute("DELETE FROM segments WHERE meeting_id = ?1", params![meeting.id])
-            .map_err(|e| format!("Delete segments: {e}"))?;
+        tx.execute(
+            "DELETE FROM segments WHERE meeting_id = ?1",
+            params![meeting.id],
+        )
+        .map_err(|e| format!("Delete segments: {e}"))?;
 
         for (i, seg) in meeting.segments.iter().enumerate() {
             tx.execute(
@@ -134,7 +139,11 @@ impl Database {
             id: meeting.id,
             title: meeting.title,
             started_at: parse_datetime(&meeting.started_at)?,
-            ended_at: meeting.ended_at.as_deref().map(parse_datetime).transpose()?,
+            ended_at: meeting
+                .ended_at
+                .as_deref()
+                .map(parse_datetime)
+                .transpose()?,
             duration_seconds: meeting.duration_seconds,
             engine: meeting.engine,
             segments,
@@ -164,14 +173,17 @@ impl Database {
                 Ok(MeetingListItem {
                     id: row.get(0)?,
                     title: row.get(1)?,
-                    started_at: row.get::<_, String>(2)
-                        .and_then(|s| {
-                            DateTime::parse_from_rfc3339(&s)
-                                .map(|dt| dt.with_timezone(&Utc))
-                                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                                    2, rusqlite::types::Type::Text, Box::new(e),
-                                ))
-                        })?,
+                    started_at: row.get::<_, String>(2).and_then(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .map_err(|e| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    2,
+                                    rusqlite::types::Type::Text,
+                                    Box::new(e),
+                                )
+                            })
+                    })?,
                     duration_seconds: row.get(3)?,
                     has_summary: row.get(4)?,
                 })

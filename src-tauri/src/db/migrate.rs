@@ -112,18 +112,21 @@ impl Database {
             return Ok(());
         }
 
-        let json =
-            std::fs::read_to_string(&path).map_err(|e| format!("Read dictation_history.json: {e}"))?;
+        let json = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Read dictation_history.json: {e}"))?;
 
-        let values: serde_json::Value =
-            serde_json::from_str(&json).map_err(|e| format!("Parse dictation_history.json: {e}"))?;
+        let values: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| format!("Parse dictation_history.json: {e}"))?;
 
         // tauri-plugin-store wraps the data — look for "entries" key
         if let Some(entries) = values.get("entries").and_then(|v| v.as_array()) {
             let mut count = 0;
             for entry in entries {
                 let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                let text = entry.get("text").and_then(|v| v.as_str()).unwrap_or_default();
+                let text = entry
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
                 let timestamp = entry
                     .get("timestamp")
                     .and_then(|v| v.as_str())
@@ -150,7 +153,10 @@ impl Database {
                 }
             }
             if count > 0 {
-                info!(count, "Dictation entries migrated from dictation_history.json");
+                info!(
+                    count,
+                    "Dictation entries migrated from dictation_history.json"
+                );
             }
         }
 

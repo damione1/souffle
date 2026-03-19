@@ -1,10 +1,18 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use crossbeam_channel::{Receiver, Sender};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{info, warn};
 
 use super::resampler::Resampler;
 use crate::state::AudioCommand;
+
+#[derive(Debug, Clone)]
+pub struct AudioChunk {
+    pub session_id: u64,
+    pub samples: Vec<f32>,
+}
 
 /// Info about an available audio input device, sent to frontend
 #[derive(Debug, Clone, serde::Serialize)]
@@ -46,16 +54,17 @@ pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
 /// This struct lives on a dedicated thread because cpal's Stream is !Send on macOS.
 pub struct AudioCapture {
     stream: Option<Stream>,
-    audio_sender: Sender<Vec<f32>>,
+    audio_sender: Sender<AudioChunk>,
     selected_device: Option<String>,
+    active_session_id: Arc<AtomicU64>,
 }
 
 impl AudioCapture {
     /// Spawn the audio thread. Returns channels for commanding it and receiving audio.
-    pub fn spawn() -> (Sender<AudioCommand>, Receiver<Vec<f32>>) {
+    pub fn spawn() -> (Sender<AudioCommand>, Receiver<AudioChunk>) {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
         // Bounded channel: ~30 seconds of audio at 24kHz in 1-second chunks
-        let (audio_tx, audio_rx) = crossbeam_channel::bounded::<Vec<f32>>(30);
+        let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioChunk>(30);
 
         std::thread::Builder::new()
             .name("audio-capture".into())
@@ -64,13 +73,14 @@ impl AudioCapture {
                     stream: None,
                     audio_sender: audio_tx,
                     selected_device: None,
+                    active_session_id: Arc::new(AtomicU64::new(0)),
                 };
 
                 // Block on commands from main thread
                 while let Ok(cmd) = cmd_rx.recv() {
                     match cmd {
-                        AudioCommand::Start => {
-                            if let Err(e) = capture.start() {
+                        AudioCommand::Start(session_id) => {
+                            if let Err(e) = capture.start(session_id) {
                                 eprintln!("[souffle] Failed to start audio capture: {e}");
                             }
                         }
@@ -114,7 +124,11 @@ impl AudioCapture {
             .ok_or_else(|| "No input device available".to_string())
     }
 
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self, session_id: u64) -> Result<(), String> {
+        // Ensure any previous callback stops emitting immediately.
+        self.active_session_id.store(0, Ordering::Release);
+        self.stream.take();
+
         let device = self.find_device()?;
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".into());
@@ -128,31 +142,43 @@ impl AudioCapture {
 
         let mut resampler = Resampler::new(sample_rate, channels);
         let sender = self.audio_sender.clone();
+        let active_session_id = Arc::clone(&self.active_session_id);
 
         let err_fn = |err: cpal::StreamError| {
             eprintln!("[souffle] Audio stream error: {err}");
         };
 
         // Reset the first-chunk logging flag for each new recording session
-        static LOGGED: std::sync::atomic::AtomicBool =
-            std::sync::atomic::AtomicBool::new(false);
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         LOGGED.store(false, std::sync::atomic::Ordering::Relaxed);
 
         let stream = device
             .build_input_stream(
                 &config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    if active_session_id.load(Ordering::Acquire) != session_id {
+                        return;
+                    }
+
                     let resampled = resampler.process(data);
                     if !resampled.is_empty() {
                         // Log first chunk to confirm audio is flowing
-                        if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        if crate::debug::transcription_debug_enabled()
+                            && !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed)
+                        {
                             let max_amp = resampled.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
                             eprintln!(
                                 "[souffle] First audio chunk: {} samples, max_amp={max_amp:.4}",
                                 resampled.len(),
                             );
                         }
-                        if sender.try_send(resampled).is_err() {
+                        if sender
+                            .try_send(AudioChunk {
+                                session_id,
+                                samples: resampled,
+                            })
+                            .is_err()
+                        {
                             warn!("Audio buffer full, dropping samples");
                         }
                     }
@@ -162,6 +188,7 @@ impl AudioCapture {
             )
             .map_err(|e| format!("Failed to build input stream: {e}"))?;
 
+        self.active_session_id.store(session_id, Ordering::Release);
         stream
             .play()
             .map_err(|e| format!("Failed to start stream: {e}"))?;
@@ -172,6 +199,7 @@ impl AudioCapture {
     }
 
     fn stop(&mut self) {
+        self.active_session_id.store(0, Ordering::Release);
         if self.stream.take().is_some() {
             eprintln!("[souffle] Audio capture stopped");
         }

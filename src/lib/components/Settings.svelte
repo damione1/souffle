@@ -8,7 +8,7 @@
 
   let audioDevices = $state<AudioDevice[]>([]);
   let ollamaAvailable = $state(false);
-  let ollamaModels = $state<string[]>([]);
+  let ollamaSummaryModels = $state<string[]>([]);
   let statusMessage = $state("");
 
   // Shortcut state
@@ -38,6 +38,9 @@
       }
       if (settings.paste_delay_ms !== null && settings.paste_delay_ms !== undefined) {
         app.settings = { ...app.settings, paste_delay_ms: settings.paste_delay_ms as number };
+      }
+      if (settings.debug_transcription !== null && settings.debug_transcription !== undefined) {
+        app.settings = { ...app.settings, debug_transcription: settings.debug_transcription as boolean };
       }
       if (settings.ollama_url) {
         app.settings = { ...app.settings, ollama_url: settings.ollama_url as string };
@@ -109,7 +112,24 @@
     try {
       const status: OllamaStatus = await invoke("check_ollama");
       ollamaAvailable = status.available;
-      ollamaModels = status.models;
+      ollamaSummaryModels = status.summary_models;
+
+      if (status.available && status.summary_models.length === 0 && status.models.length > 0) {
+        statusMessage =
+          "No text-generation Ollama model available for summaries. Install a chat model such as qwen, llama, mistral, gemma, phi, or deepseek.";
+        return;
+      }
+
+      if (status.summary_models.length > 0) {
+        const nextModel = status.summary_models.includes(app.settings.ollama_model)
+          ? app.settings.ollama_model
+          : status.summary_models[0];
+
+        if (nextModel && nextModel !== app.settings.ollama_model) {
+          app.settings = { ...app.settings, ollama_model: nextModel };
+          await saveSetting("ollama_model", nextModel);
+        }
+      }
     } catch {
       ollamaAvailable = false;
     }
@@ -142,6 +162,12 @@
     const value = parseInt((event.target as HTMLInputElement).value);
     app.settings = { ...app.settings, paste_delay_ms: value };
     saveSetting("paste_delay_ms", value);
+  }
+
+  function onDebugTranscriptionChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    app.settings = { ...app.settings, debug_transcription: checked };
+    saveSetting("debug_transcription", checked);
   }
 
   function onOllamaUrlChange(event: Event) {
@@ -425,6 +451,24 @@
     </div>
   </section>
 
+  <section class="flex flex-col gap-3">
+    <h3 class="text-sm font-medium text-zinc-300">Diagnostics</h3>
+    <div class="flex flex-col gap-3 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
+      <label class="flex items-center justify-between">
+        <span class="text-xs text-zinc-400">Verbose transcription debug logs</span>
+        <input
+          type="checkbox"
+          checked={app.settings.debug_transcription}
+          onchange={onDebugTranscriptionChange}
+          class="w-4 h-4 rounded bg-zinc-700 border-zinc-600 cursor-pointer"
+        />
+      </label>
+      <p class="text-xs text-zinc-600">
+        Enables per-frame STT logging and debug audio capture for troubleshooting. Leave this off during normal use.
+      </p>
+    </div>
+  </section>
+
   <!-- Ollama -->
   <section class="flex flex-col gap-3">
     <h3 class="text-sm font-medium text-zinc-300">Ollama</h3>
@@ -454,20 +498,27 @@
           </button>
         </div>
       </div>
-      {#if ollamaAvailable && ollamaModels.length > 0}
+      {#if ollamaAvailable && ollamaSummaryModels.length > 0}
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-zinc-400">Default Model</span>
+          <span class="text-xs text-zinc-400">Default Summary Model</span>
           <select
-            value={app.settings.ollama_model || ollamaModels[0]}
+            value={app.settings.ollama_model || ollamaSummaryModels[0]}
             onchange={onOllamaModelChange}
             class="px-3 py-1.5 text-xs rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300
               focus:border-zinc-500 focus:outline-none"
           >
-            {#each ollamaModels as model}
+            {#each ollamaSummaryModels as model}
               <option value={model}>{model}</option>
             {/each}
           </select>
         </label>
+        <p class="text-xs text-zinc-500">
+          Speech and embedding models are hidden here. Meeting summaries work best with chat or instruction models.
+        </p>
+      {:else if ollamaAvailable}
+        <p class="text-xs text-amber-400">
+          No summary-capable Ollama model detected. Install a text-generation model to enable reliable meeting summaries.
+        </p>
       {/if}
     </div>
   </section>

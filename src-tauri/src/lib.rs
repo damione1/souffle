@@ -2,6 +2,7 @@ pub mod audio;
 pub mod clipboard;
 pub mod commands;
 pub mod db;
+pub mod debug;
 pub mod engine;
 pub mod errors;
 pub mod models;
@@ -31,9 +32,8 @@ pub fn run() {
         .join("com.souffle.app")
         .join("souffle.db");
 
-    let database = Arc::new(
-        db::Database::open(&db_path).expect("Failed to open database"),
-    );
+    let database = Arc::new(db::Database::open(&db_path).expect("Failed to open database"));
+    debug::init_from_db(&database);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -41,7 +41,9 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(
             tauri_plugin_log::Builder::new()
-                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stderr))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stderr,
+                ))
                 .level(log::LevelFilter::Info)
                 .build(),
         )

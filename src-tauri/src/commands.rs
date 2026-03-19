@@ -2,14 +2,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::{ipc::Channel, AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, ipc::Channel};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tracing::info;
 
-use crate::audio::capture::{list_input_devices, AudioDeviceInfo};
+use crate::audio::AudioChunk;
+use crate::audio::capture::{AudioDeviceInfo, list_input_devices};
 use crate::engine::TranscriptionEngine;
 use crate::models;
-use crate::pipeline::{InferenceCommand, TranscriptionPipeline};
+use crate::pipeline::{InferenceCommand, SegmentCallback, TranscriptionPipeline};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator, RecordingMode};
 
 /// Status of the STT model
@@ -26,7 +27,10 @@ pub struct ModelStatus {
 pub fn get_model_status(state: State<'_, AppState>) -> Result<ModelStatus, String> {
     let model_dir = models::default_model_dir();
     let downloaded = models::model_exists(&model_dir);
-    let loaded = *state.model_loaded.lock().map_err(|e| format!("Lock: {e}"))?;
+    let loaded = *state
+        .model_loaded
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     let engine_name = state
         .engine
         .lock()
@@ -107,6 +111,7 @@ pub fn download_model(channel: Channel<models::DownloadProgress>) -> Result<(), 
 }
 
 /// Load the model into memory (GPU/CPU). Must be called after download.
+/// Also spawns the persistent inference pipeline thread.
 #[tauri::command]
 pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
     let model_dir = models::default_model_dir();
@@ -117,12 +122,39 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
     let mut engine = state.engine.lock().map_err(|e| format!("Lock: {e}"))?;
     eprintln!("[souffle] Loading model from {}", model_dir.display());
     engine.load_model(&model_dir).map_err(|e| e.to_string())?;
+    drop(engine);
 
-    let mut loaded = state.model_loaded.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut loaded = state
+        .model_loaded
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     *loaded = true;
 
-    eprintln!("[souffle] Model loaded successfully");
+    // Spawn persistent inference pipeline (lives until app exit)
+    let pipeline =
+        TranscriptionPipeline::spawn(state.audio_receiver.clone(), Arc::clone(&state.engine));
+    let mut pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
+    *pipe_guard = Some(pipeline);
+
+    eprintln!("[souffle] Model loaded, inference pipeline ready");
     Ok(())
+}
+
+fn next_audio_session_id(state: &AppState) -> Result<u64, String> {
+    let mut guard = state
+        .next_audio_session_id
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
+    *guard += 1;
+    Ok(*guard)
+}
+
+fn drain_audio_queue(receiver: &crossbeam_channel::Receiver<AudioChunk>) -> usize {
+    let mut drained = 0usize;
+    while receiver.try_recv().is_ok() {
+        drained += 1;
+    }
+    drained
 }
 
 /// Start recording audio from the default microphone
@@ -137,9 +169,10 @@ pub fn start_recording(state: State<'_, AppState>) -> Result<(), String> {
         return Err("Already recording".into());
     }
 
+    let session_id = next_audio_session_id(&state)?;
     state
         .audio_cmd_sender
-        .send(AudioCommand::Start)
+        .send(AudioCommand::Start(session_id))
         .map_err(|e| format!("Failed to send start command: {e}"))?;
 
     *is_recording = true;
@@ -172,7 +205,7 @@ pub fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
     // Drain all audio from the channel
     let mut all_samples = Vec::new();
     while let Ok(chunk) = state.audio_receiver.try_recv() {
-        all_samples.extend_from_slice(&chunk);
+        all_samples.extend_from_slice(&chunk.samples);
     }
 
     if all_samples.is_empty() {
@@ -193,24 +226,40 @@ pub fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
 
 /// Start streaming transcription. Audio is captured and transcribed in real-time.
 /// Segments are streamed back via the Channel API.
+/// The pipeline thread is already running (spawned at model load) — we reset
+/// the ASR state here (main thread) then send Start to the pipeline.
 #[tauri::command]
 pub fn start_transcription(
     state: State<'_, AppState>,
     channel: Channel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
-    let loaded = *state.model_loaded.lock().map_err(|e| format!("Lock: {e}"))?;
+    let loaded = *state
+        .model_loaded
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     if !loaded {
         return Err("Model not loaded".into());
     }
 
-    let mut is_recording = state.is_recording.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut is_recording = state
+        .is_recording
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     if *is_recording {
         return Err("Already recording".into());
     }
 
     eprintln!("[souffle] Starting streaming transcription...");
+    let session_id = next_audio_session_id(&state)?;
 
-    // Reset ASR state for fresh session (clears KV cache from previous recording)
+    // Clear any tail chunks left behind by the previous session before reset.
+    let drained = drain_audio_queue(&state.audio_receiver);
+    if crate::debug::transcription_debug_enabled() && drained > 0 {
+        eprintln!("[souffle] Cleared {drained} stale audio chunks before reset");
+    }
+
+    // Reset while the pipeline is idle so session teardown/rebuild is fully
+    // serialized away from active inference.
     state
         .engine
         .lock()
@@ -218,33 +267,30 @@ pub fn start_transcription(
         .reset_state()
         .map_err(|e| format!("State reset: {e}"))?;
 
-    // Start audio capture
-    state
-        .audio_cmd_sender
-        .send(AudioCommand::Start)
-        .map_err(|e| format!("Audio start: {e}"))?;
-    eprintln!("[souffle] Audio capture started");
-
-    // Create pipeline with segment callback that sends to the Tauri channel
+    // Send Start before audio capture begins so the next chunk processed belongs
+    // to this session, not to the start/reset race.
     let channel_clone = channel.clone();
-    let on_segment = Box::new(move |seg: crate::engine::TranscriptionSegment| {
+    let on_segment: SegmentCallback = Box::new(move |seg: crate::engine::TranscriptionSegment| {
         let _ = channel_clone.send(seg);
     });
 
-    let pipeline = TranscriptionPipeline::spawn(
-        state.audio_receiver.clone(),
-        Arc::clone(&state.engine),
+    let pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
+    let pipeline = pipe_guard.as_ref().ok_or("Pipeline not initialized")?;
+    pipeline.send(InferenceCommand::Start {
+        session_id,
         on_segment,
-    );
+    })?;
 
-    pipeline.send(InferenceCommand::Start)?;
-    eprintln!("[souffle] Inference pipeline started");
-
-    let mut pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
-    *pipe_guard = Some(pipeline);
+    state
+        .audio_cmd_sender
+        .send(AudioCommand::Start(session_id))
+        .map_err(|e| format!("Audio start: {e}"))?;
 
     *is_recording = true;
-    let mut mode = state.recording_mode.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut mode = state
+        .recording_mode
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     *mode = RecordingMode::Dictation;
 
     eprintln!("[souffle] Streaming transcription active");
@@ -252,9 +298,14 @@ pub fn start_transcription(
 }
 
 /// Stop streaming transcription.
+/// Pipeline stays alive — it drains remaining audio and flushes the engine
+/// before the next session can start.
 #[tauri::command]
 pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
-    let mut is_recording = state.is_recording.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut is_recording = state
+        .is_recording
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     if !*is_recording {
         return Err("Not recording".into());
     }
@@ -268,17 +319,31 @@ pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
     // 2. Wait for audio thread to flush its internal buffers to the channel
     std::thread::sleep(Duration::from_millis(300));
 
-    // 3. Now stop the pipeline — it will drain remaining audio from channel and flush engine
-    let mut pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
-    if let Some(pipeline) = pipe_guard.as_ref() {
-        pipeline.send(InferenceCommand::Stop)?;
+    // 3. Stop the pipeline session — it drains remaining audio and flushes engine,
+    //    then signals completion via the done channel
+    let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+    {
+        let pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
+        if let Some(pipeline) = pipe_guard.as_ref() {
+            pipeline.send(InferenceCommand::Stop(done_tx))?;
+        }
     }
-    // Give pipeline time to process remaining audio and flush
-    std::thread::sleep(Duration::from_millis(500));
-    *pipe_guard = None;
+
+    // 4. Wait for drain/flush to complete before allowing another session
+    done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|_| "Pipeline drain timeout".to_string())?;
+
+    let drained = drain_audio_queue(&state.audio_receiver);
+    if crate::debug::transcription_debug_enabled() && drained > 0 {
+        eprintln!("[souffle] Cleared {drained} trailing audio chunks after stop");
+    }
 
     *is_recording = false;
-    let mut mode = state.recording_mode.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut mode = state
+        .recording_mode
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     *mode = RecordingMode::Idle;
 
     info!("Streaming transcription stopped");
@@ -293,17 +358,24 @@ pub fn start_meeting_recording(
     title: String,
     channel: Channel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
-    let loaded = *state.model_loaded.lock().map_err(|e| format!("Lock: {e}"))?;
+    let loaded = *state
+        .model_loaded
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     if !loaded {
         return Err("Model not loaded".into());
     }
 
-    let mut is_recording = state.is_recording.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut is_recording = state
+        .is_recording
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     if *is_recording {
         return Err("Already recording".into());
     }
 
     eprintln!("[souffle] Starting meeting recording: {title}");
+    let session_id = next_audio_session_id(&state)?;
 
     // Initialize meeting accumulator
     {
@@ -318,7 +390,13 @@ pub fn start_meeting_recording(
         });
     }
 
-    // Reset ASR state
+    let drained = drain_audio_queue(&state.audio_receiver);
+    if crate::debug::transcription_debug_enabled() && drained > 0 {
+        eprintln!("[souffle] Cleared {drained} stale audio chunks before reset");
+    }
+
+    // Reset while the pipeline is idle so session teardown/rebuild is fully
+    // serialized away from active inference.
     state
         .engine
         .lock()
@@ -326,19 +404,12 @@ pub fn start_meeting_recording(
         .reset_state()
         .map_err(|e| format!("State reset: {e}"))?;
 
-    // Start audio capture
-    state
-        .audio_cmd_sender
-        .send(AudioCommand::Start)
-        .map_err(|e| format!("Audio start: {e}"))?;
-
-    // Create pipeline — accumulate segments AND send to frontend channel
+    // Send Start before audio capture begins so the next chunk processed belongs
+    // to this session, not to the start/reset race.
     let channel_clone = channel.clone();
     let acc_ref = Arc::clone(&state.meeting_accumulator);
-    let on_segment = Box::new(move |seg: crate::engine::TranscriptionSegment| {
-        // Send to frontend for live display
+    let on_segment: SegmentCallback = Box::new(move |seg: crate::engine::TranscriptionSegment| {
         let _ = channel_clone.send(seg.clone());
-        // Accumulate for storage
         if let Ok(mut acc) = acc_ref.lock() {
             if let Some(ref mut meeting) = *acc {
                 meeting.segments.push(seg);
@@ -346,28 +417,36 @@ pub fn start_meeting_recording(
         }
     });
 
-    let pipeline = TranscriptionPipeline::spawn(
-        state.audio_receiver.clone(),
-        Arc::clone(&state.engine),
+    let pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
+    let pipeline = pipe_guard.as_ref().ok_or("Pipeline not initialized")?;
+    pipeline.send(InferenceCommand::Start {
+        session_id,
         on_segment,
-    );
-    pipeline.send(InferenceCommand::Start)?;
+    })?;
 
-    let mut pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
-    *pipe_guard = Some(pipeline);
+    state
+        .audio_cmd_sender
+        .send(AudioCommand::Start(session_id))
+        .map_err(|e| format!("Audio start: {e}"))?;
 
     *is_recording = true;
-    let mut mode = state.recording_mode.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut mode = state
+        .recording_mode
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     *mode = RecordingMode::Meeting;
 
     info!("Meeting recording started");
     Ok(())
 }
 
-/// Stop meeting recording and save transcript to JSON.
+/// Stop meeting recording and save transcript.
 #[tauri::command]
 pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, String> {
-    let mut is_recording = state.is_recording.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut is_recording = state
+        .is_recording
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     if !*is_recording {
         return Err("Not recording".into());
     }
@@ -381,16 +460,28 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
     // 2. Wait for audio thread to flush to channel
     std::thread::sleep(Duration::from_millis(300));
 
-    // 3. Stop pipeline — drains remaining audio and flushes engine
-    let mut pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
-    if let Some(pipeline) = pipe_guard.as_ref() {
-        pipeline.send(InferenceCommand::Stop)?;
+    // 3. Stop pipeline session — drains remaining audio and flushes engine
+    let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+    {
+        let pipe_guard = state.pipeline.lock().map_err(|e| format!("Lock: {e}"))?;
+        if let Some(pipeline) = pipe_guard.as_ref() {
+            pipeline.send(InferenceCommand::Stop(done_tx))?;
+        }
     }
-    std::thread::sleep(Duration::from_millis(500));
-    *pipe_guard = None;
+    done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|_| "Pipeline drain timeout".to_string())?;
+
+    let drained = drain_audio_queue(&state.audio_receiver);
+    if crate::debug::transcription_debug_enabled() && drained > 0 {
+        eprintln!("[souffle] Cleared {drained} trailing audio chunks after stop");
+    }
 
     *is_recording = false;
-    let mut mode = state.recording_mode.lock().map_err(|e| format!("Lock: {e}"))?;
+    let mut mode = state
+        .recording_mode
+        .lock()
+        .map_err(|e| format!("Lock: {e}"))?;
     *mode = RecordingMode::Idle;
 
     // Save meeting transcript
@@ -431,13 +522,18 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
 
 /// List all saved meetings
 #[tauri::command]
-pub fn list_meetings(state: State<'_, AppState>) -> Result<Vec<crate::transcript::MeetingListItem>, String> {
+pub fn list_meetings(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::transcript::MeetingListItem>, String> {
     state.db.list_meetings()
 }
 
 /// Get a full meeting transcript by ID
 #[tauri::command]
-pub fn get_meeting(state: State<'_, AppState>, id: String) -> Result<crate::transcript::MeetingTranscript, String> {
+pub fn get_meeting(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<crate::transcript::MeetingTranscript, String> {
     state.db.load_meeting(&id)
 }
 
@@ -507,8 +603,7 @@ pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String>
     }
 
     // Read WAV
-    let mut reader =
-        hound::WavReader::open(&wav_path).map_err(|e| format!("WAV read: {e}"))?;
+    let mut reader = hound::WavReader::open(&wav_path).map_err(|e| format!("WAV read: {e}"))?;
     let pcm: Vec<f32> = reader.samples::<f32>().filter_map(|s| s.ok()).collect();
     eprintln!(
         "[souffle] Test WAV: {} samples ({:.1}s)",
@@ -557,10 +652,7 @@ pub fn list_dictation_entries(
 
 /// Add a dictation history entry
 #[tauri::command]
-pub fn add_dictation_entry(
-    state: State<'_, AppState>,
-    text: String,
-) -> Result<(), String> {
+pub fn add_dictation_entry(state: State<'_, AppState>, text: String) -> Result<(), String> {
     let id = uuid::Uuid::new_v4().to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
     state.db.add_dictation_entry(&id, &text, &timestamp)
@@ -568,10 +660,7 @@ pub fn add_dictation_entry(
 
 /// Delete a single dictation entry
 #[tauri::command]
-pub fn delete_dictation_entry(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
+pub fn delete_dictation_entry(state: State<'_, AppState>, id: String) -> Result<(), String> {
     state.db.delete_dictation_entry(&id)
 }
 
@@ -604,6 +693,11 @@ pub fn save_setting(
     key: String,
     value: serde_json::Value,
 ) -> Result<(), String> {
+    if key == "debug_transcription" {
+        if let Some(enabled) = value.as_bool() {
+            crate::debug::set_transcription_debug(enabled);
+        }
+    }
     let value_str = serde_json::to_string(&value).map_err(|e| format!("Serialize: {e}"))?;
     state.db.set_setting(&key, &value_str)
 }
@@ -620,7 +714,8 @@ pub fn register_shortcuts(
     let gs = app.global_shortcut();
 
     // Unregister all existing shortcuts first
-    gs.unregister_all().map_err(|e| format!("Unregister: {e}"))?;
+    gs.unregister_all()
+        .map_err(|e| format!("Unregister: {e}"))?;
 
     // Toggle shortcut: emit event, frontend handles the pipeline
     if !toggle_shortcut.is_empty() {
@@ -637,8 +732,12 @@ pub fn register_shortcuts(
     if !ptt_shortcut.is_empty() {
         gs.on_shortcut(ptt_shortcut, move |app, _shortcut, event| {
             match event.state {
-                ShortcutState::Pressed => { let _ = app.emit("shortcut-ptt-start", ()); }
-                ShortcutState::Released => { let _ = app.emit("shortcut-ptt-stop", ()); }
+                ShortcutState::Pressed => {
+                    let _ = app.emit("shortcut-ptt-start", ());
+                }
+                ShortcutState::Released => {
+                    let _ = app.emit("shortcut-ptt-stop", ());
+                }
             }
         })
         .map_err(|e| format!("Register PTT shortcut '{ptt_shortcut}': {e}"))?;
@@ -657,10 +756,9 @@ pub fn update_shortcuts(
     ptt_shortcut: String,
 ) -> Result<(), String> {
     // Save to database
-    let toggle_json = serde_json::to_string(&toggle_shortcut)
-        .map_err(|e| format!("Serialize: {e}"))?;
-    let ptt_json = serde_json::to_string(&ptt_shortcut)
-        .map_err(|e| format!("Serialize: {e}"))?;
+    let toggle_json =
+        serde_json::to_string(&toggle_shortcut).map_err(|e| format!("Serialize: {e}"))?;
+    let ptt_json = serde_json::to_string(&ptt_shortcut).map_err(|e| format!("Serialize: {e}"))?;
 
     state.db.set_setting("shortcut_toggle", &toggle_json)?;
     state.db.set_setting("shortcut_push_to_talk", &ptt_json)?;

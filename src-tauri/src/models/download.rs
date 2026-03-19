@@ -49,11 +49,10 @@ pub fn download_model(
     model_dir: &Path,
     progress_callback: impl Fn(DownloadProgress),
 ) -> Result<(), String> {
-    std::fs::create_dir_all(model_dir)
-        .map_err(|e| format!("Failed to create model dir: {e}"))?;
+    std::fs::create_dir_all(model_dir).map_err(|e| format!("Failed to create model dir: {e}"))?;
 
-    let api = hf_hub::api::sync::Api::new()
-        .map_err(|e| format!("HuggingFace API init failed: {e}"))?;
+    let api =
+        hf_hub::api::sync::Api::new().map_err(|e| format!("HuggingFace API init failed: {e}"))?;
     let repo = api.model(KYUTAI_HF_REPO.to_string());
 
     // First download config.json to discover other file names
@@ -64,7 +63,8 @@ pub fn download_model(
         status: DownloadStatus::Starting,
     });
 
-    let config_path = repo.get("config.json")
+    let config_path = repo
+        .get("config.json")
         .map_err(|e| format!("Failed to download config.json: {e}"))?;
 
     // Copy to our model dir
@@ -82,8 +82,8 @@ pub fn download_model(
     // Parse config to get mimi and tokenizer file names
     let config_str = std::fs::read_to_string(&dest_config)
         .map_err(|e| format!("Failed to read config.json: {e}"))?;
-    let config: serde_json::Value = serde_json::from_str(&config_str)
-        .map_err(|e| format!("Invalid config.json: {e}"))?;
+    let config: serde_json::Value =
+        serde_json::from_str(&config_str).map_err(|e| format!("Invalid config.json: {e}"))?;
 
     let mimi_name = config["mimi_name"]
         .as_str()
@@ -108,7 +108,8 @@ pub fn download_model(
             status: DownloadStatus::Downloading,
         });
 
-        let cached_path = repo.get(repo_file)
+        let cached_path = repo
+            .get(repo_file)
             .map_err(|e| format!("Failed to download {repo_file}: {e}"))?;
 
         let dest = model_dir.join(local_name);
