@@ -549,6 +549,12 @@ pub fn paste_text(text: String, delay_ms: u64) -> Result<(), String> {
     crate::clipboard::copy_and_paste(&text, delay_ms)
 }
 
+/// Get the current audio input level (RMS, 0.0–1.0) for waveform visualization
+#[tauri::command]
+pub fn get_audio_level(state: State<'_, AppState>) -> f32 {
+    f32::from_bits(state.audio_rms.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// Check if Ollama is available and list models
 #[tauri::command]
 pub async fn check_ollama() -> Result<crate::ollama::OllamaStatus, String> {

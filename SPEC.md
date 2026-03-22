@@ -13,7 +13,7 @@
 
 ### What this is
 A polished, privacy-first desktop application for local speech-to-text transcription. Two primary modes:
-1. **Dictation mode**: Push-to-talk or toggle recording, transcribed text is pasted into the active application (like SuperWhisper/VoxDrop)
+1. **Dictation mode**: Push-to-talk or toggle recording. Via global shortcut: transcribed text is copied to clipboard and auto-pasted (Cmd+V) into the active application. Via UI button: text is copied to clipboard only (no simulated paste).
 2. **Meeting recording mode**: Continuous background recording of system audio (Teams/Zoom/Meet calls), saved for post-meeting transcription and LLM-based summarization via Ollama
 
 ### What this is NOT
@@ -419,33 +419,49 @@ The preferred architecture is **post-processing diarization**, not a replacement
 
 ### 5.1 App Window
 
-The main window is a **compact, single-page app** with three tabs/views:
+The main window is a **sidebar-based single-page app** (~1100x700, min 800x500) with four views navigated via a left sidebar (~200px, icons + text labels).
 
-**Dictation view (default):**
-- Large central microphone button (toggle recording)
-- Current engine indicator (e.g., "Kyutai STT 1B - FR/EN")
-- Live transcription text area (read-only, shows current session)
-- Language indicator (auto-detected)
-- "Copy last" button
+**Design system ("Private Oracle"):** Dark glassmorphism first, Manrope (headings) + Inter (body) self-hosted fonts, ghost borders (`1px solid rgba(170, 171, 176, 0.15)`), glass panels (`backdrop-filter: blur(24px)`), 0.75rem default roundness. Light theme supported via toggle.
 
-**Recordings view:**
-- List of past meeting recordings (date, duration, engine used)
-- Click to expand: full transcript, summary (if generated), audio playback
-- Live transcript panel while a meeting is being recorded
-- Model picker + "Summarize" / "Re-summarize" button for any saved meeting with transcript text
-- "Export" button (copy transcript, export as .txt/.srt)
-- "Delete" button (with confirmation)
+**Sidebar collapses** to icon-only (~72px) below 800px viewport width.
+
+**Waveform footer:** A canvas-based animated waveform bar sits at the bottom of the content area (full-width, ~40px). Idle: subtle ambient sine wave. Active: bars driven by real audio RMS level from the backend (`get_audio_level` command, polled at ~20Hz). The audio capture thread computes RMS per chunk and stores it in a shared `AtomicU32`.
+
+**Transcription view (default):**
+- Model gate: download/load section (shown conditionally when model not ready)
+- Capability badges (engine name, language support, auto-paste status)
+- Large circular record button with animated states (ready/starting/recording)
+- Live transcript scrollable text area
+- Input device + output mode indicators
+- **Auto-paste behavior**: shortcut-triggered stop → copies to clipboard + simulates Cmd+V (if auto-paste enabled). Button-triggered stop → copies to clipboard only, no Cmd+V. Anti-duplicate guard (`isStopping` flag) prevents multiple paste events from key repeat.
+- **Dictation history**: flat list, always visible when entries exist. Each entry shows text clamped to 5 lines (CSS `line-clamp`), click to expand full text. Inline Copy/Delete buttons per entry. "Clear all" requires confirmation dialog.
+
+**Meeting view (two sub-states):**
+- **New meeting form**: title input + "Start Recording" button. Pressing Enter or clicking starts recording and transitions to the meeting item page.
+- **Meeting item page** (active recording or viewing saved meeting):
+  - Header: meeting title, status pill (Recording / Completed), back button (to history), stop/new meeting actions
+  - **Key insights grid**: after summary generation, bullet points from the summary are extracted and displayed as numbered cards above the two-column layout
+  - Two-column layout:
+    - Left: transcript with paragraph grouping (word-level segments joined into flowing paragraphs, timestamp `[MM:SS]` at the start of each paragraph, new paragraph on pause > 1.5s + sentence-ending punctuation)
+    - Right: summary panel — empty state with icon when no summary, "Generate Summary" CTA button with model selector, streaming output during generation, model attribution pill after completion
+  - Footer: delete meeting with confirmation
+- Navigation: `app.currentMeetingId` in store drives which meeting is displayed. `app.openMeeting(id)` navigates from history, `app.newMeeting()` resets to form.
+
+**Meeting History view:**
+- "Meeting History" header with count badge
+- Client-side search bar filtering on meeting titles
+- Flat list of clickable meeting cards (not accordions) — each card shows title, date, duration, summary badge, chevron indicator
+- Clicking a card navigates to the meeting item page via `app.openMeeting(id)`
+- Empty state message
 
 **Settings view:**
-- Engine selection (dropdown: Kyutai, Whisper [if installed], Parakeet [if installed])
-- Model management (download/delete models, show sizes)
-- Global hotkey configuration
-- Dictation: auto-paste on/off, paste delay
-- Audio: input device selection, system audio capture on/off
-- Ollama: connection URL, preferred summary model
-- Diagnostics: verbose transcription debug toggle
-- General: launch at login, language preference, theme (light/dark/system)
-- About: version, licenses, links
+- Audio Configuration: input device selector + refresh button, noise reduction toggle (grayed out, "Coming Soon" badge)
+- Intelligence: Kyutai STT shown as single read-only entry, Ollama URL input + connection status dot + retry button, summarization model dropdown (all text-gen models from Ollama)
+- Interface: theme buttons (Dark/Light/System), auto-paste toggle + delay input (shown conditionally), global shortcuts (toggle recording + push-to-talk with keyboard capture UI, Mac symbol formatting)
+- Diagnostics: debug transcription logs toggle
+- About: version v0.1.0, engine info, privacy statement
+
+**Removed from original design:** Sampling rate selector (fixed at 24kHz), disk usage block, DB encryption status, bottom audio player/playback controls, engine selection dropdown (only Kyutai implemented), accordion-style meeting expansion in history
 
 ### 5.2 System Tray
 
@@ -480,8 +496,8 @@ The main window is a **compact, single-page app** with three tabs/views:
 - **Dark mode first** (matches macOS developer aesthetic), light mode supported.
 - **No onboarding wizard.** First launch: download model, done.
 - **Animations:** subtle transitions only. No gratuitous motion.
-- **Typography:** system font (-apple-system / SF Pro on macOS).
-- **Colors:** monochrome with a single accent color for recording state.
+- **Typography:** Manrope (headings, 600-800), Inter (body, 400-600), self-hosted WOFF2.
+- **Colors:** Canvas `#0c0e12`, surfaces `#111318`→`#23262c`, accents blue `#4e8eff` / violet `#a78bfa` / teal `#2dd4bf`. Ghost border overlays for depth.
 
 ---
 

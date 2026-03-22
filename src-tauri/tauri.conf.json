@@ -14,8 +14,10 @@
     "windows": [
       {
         "title": "Soufflé",
-        "width": 500,
-        "height": 600,
+        "width": 1100,
+        "height": 700,
+        "minWidth": 800,
+        "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
         "center": true

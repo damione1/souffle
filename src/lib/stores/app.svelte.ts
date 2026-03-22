@@ -1,7 +1,10 @@
 import type { View, Theme, AppSettings } from "../types";
 
 // Current view
-let currentView = $state<View>("dictation");
+let currentView = $state<View>("transcription");
+
+// Current meeting ID (when viewing a specific meeting)
+let currentMeetingId = $state<string | null>(null);
 
 // Theme
 let theme = $state<Theme>("dark");
@@ -24,6 +27,9 @@ export function getAppState() {
     get currentView() { return currentView; },
     set currentView(v: View) { currentView = v; },
 
+    get currentMeetingId() { return currentMeetingId; },
+    set currentMeetingId(id: string | null) { currentMeetingId = id; },
+
     get theme() { return theme; },
     set theme(t: Theme) { theme = t; },
 
@@ -32,5 +38,17 @@ export function getAppState() {
 
     get selectedDevice() { return selectedDevice; },
     set selectedDevice(d: string) { selectedDevice = d; },
+
+    /** Navigate to a specific meeting's detail page */
+    openMeeting(id: string) {
+      currentMeetingId = id;
+      currentView = "meeting";
+    },
+
+    /** Navigate to meeting tab in "new meeting" mode */
+    newMeeting() {
+      currentMeetingId = null;
+      currentView = "meeting";
+    },
   };
 }

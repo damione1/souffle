@@ -75,4 +75,4 @@ export type DictationEntry = {
   timestamp: string; // ISO date
 };
 
-export type View = "dictation" | "recordings" | "settings";
+export type View = "transcription" | "meeting" | "meeting-history" | "settings";

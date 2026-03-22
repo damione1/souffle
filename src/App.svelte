@@ -2,14 +2,24 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
-  import TabBar from "./lib/components/TabBar.svelte";
-  import Dictation from "./lib/components/Dictation.svelte";
-  import Recordings from "./lib/components/Recordings.svelte";
-  import Settings from "./lib/components/Settings.svelte";
+  import Sidebar from "./lib/components/Sidebar.svelte";
+  import Waveform from "./lib/components/Waveform.svelte";
+  import TranscriptionView from "./lib/components/TranscriptionView.svelte";
+  import MeetingView from "./lib/components/MeetingView.svelte";
+  import MeetingHistoryView from "./lib/components/MeetingHistoryView.svelte";
+  import SettingsView from "./lib/components/SettingsView.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
   import type { Theme, View } from "./lib/types";
 
   const app = getAppState();
+
+  let transcriptionView: TranscriptionView | undefined = $state();
+  let meetingView: MeetingView | undefined = $state();
+
+  let isAnyRecording = $derived(
+    (transcriptionView?.getRecordingState?.() ?? false) ||
+    (meetingView?.getRecordingState?.() ?? false)
+  );
 
   let unlistenNav: (() => void) | null = null;
 
@@ -44,7 +54,7 @@
 
     listen<string>("navigate", (event) => {
       const view = event.payload as View;
-      if (["dictation", "recordings", "settings"].includes(view)) {
+      if (["transcription", "meeting", "meeting-history", "settings"].includes(view)) {
         app.currentView = view;
       }
     }).then((fn) => {
@@ -71,18 +81,44 @@
   }
 </script>
 
-<main class="app-shell">
-  <div class="app-frame">
-    <TabBar />
+<div class="app-layout">
+  <Sidebar />
 
-    <section class="page-surface">
-      {#if app.currentView === "dictation"}
-        <Dictation />
-      {:else if app.currentView === "recordings"}
-        <Recordings />
+  <div class="content-area">
+    <main class="content-main">
+      {#if app.currentView === "transcription"}
+        <TranscriptionView bind:this={transcriptionView} />
+      {:else if app.currentView === "meeting"}
+        <MeetingView bind:this={meetingView} />
+      {:else if app.currentView === "meeting-history"}
+        <MeetingHistoryView />
       {:else if app.currentView === "settings"}
-        <Settings />
+        <SettingsView />
       {/if}
-    </section>
+    </main>
+
+    <Waveform active={isAnyRecording} />
   </div>
-</main>
+</div>
+
+<style>
+  .app-layout {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .content-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .content-main {
+    flex: 1;
+    padding: 1.5rem;
+    overflow-y: auto;
+  }
+</style>

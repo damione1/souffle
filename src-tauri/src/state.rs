@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -44,6 +45,8 @@ pub struct AppState {
     pub recording_mode: Mutex<RecordingMode>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     pub db: Arc<Database>,
+    /// Latest audio RMS level (0.0-1.0), stored as f32 bits in AtomicU32
+    pub audio_rms: Arc<AtomicU32>,
 }
 
 impl AppState {
@@ -51,6 +54,7 @@ impl AppState {
         audio_cmd_sender: Sender<AudioCommand>,
         audio_receiver: Receiver<AudioChunk>,
         db: Arc<Database>,
+        audio_rms: Arc<AtomicU32>,
     ) -> Self {
         Self {
             audio_cmd_sender,
@@ -63,6 +67,7 @@ impl AppState {
             recording_mode: Mutex::new(RecordingMode::Idle),
             meeting_accumulator: Arc::new(Mutex::new(None)),
             db,
+            audio_rms,
         }
     }
 }

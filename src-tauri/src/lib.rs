@@ -23,8 +23,11 @@ use tracing::info;
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 
 pub fn run() {
+    // Create the shared audio RMS level
+    let audio_rms = Arc::new(std::sync::atomic::AtomicU32::new(0f32.to_bits()));
+
     // Spawn the audio thread before Tauri starts (cpal Stream is !Send on macOS)
-    let (cmd_tx, audio_rx) = AudioCapture::spawn();
+    let (cmd_tx, audio_rx) = AudioCapture::spawn(Arc::clone(&audio_rms));
 
     // Initialize SQLite database
     let db_path = dirs_next::data_dir()
@@ -53,7 +56,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .manage(AppState::new(cmd_tx, audio_rx, database))
+        .manage(AppState::new(cmd_tx, audio_rx, database, audio_rms))
         .invoke_handler(tauri::generate_handler![
             commands::start_recording,
             commands::stop_recording,
@@ -81,6 +84,7 @@ pub fn run() {
             commands::save_setting,
             commands::update_shortcuts,
             commands::get_shortcuts,
+            commands::get_audio_level,
         ])
         .setup(|app| {
             // Load shortcut settings from DB and register
