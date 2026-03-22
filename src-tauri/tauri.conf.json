@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "Souffle",
+        "title": "Soufflé",
         "width": 500,
         "height": 600,
         "resizable": true,

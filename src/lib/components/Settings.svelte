@@ -11,7 +11,6 @@
   let ollamaSummaryModels = $state<string[]>([]);
   let statusMessage = $state("");
 
-  // Shortcut state
   let toggleShortcut = $state("CommandOrControl+Shift+Space");
   let pttShortcut = $state("");
   let recordingField = $state<"toggle" | "ptt" | null>(null);
@@ -77,20 +76,17 @@
   async function refreshDevices() {
     try {
       audioDevices = await invoke("list_audio_devices");
-      // If we have a saved device and it exists in the list, use it
-      // Otherwise fall back to the system default
       if (app.selectedDevice) {
-        const exists = audioDevices.some((d) => d.name === app.selectedDevice);
+        const exists = audioDevices.some((device) => device.name === app.selectedDevice);
         if (exists) {
-          // Re-send to backend in case it wasn't set yet
           await invoke("select_audio_device", { deviceName: app.selectedDevice });
           return;
         }
       }
-      const defaultDev = audioDevices.find((d) => d.is_default);
-      if (defaultDev) {
-        app.selectedDevice = defaultDev.name;
-        await invoke("select_audio_device", { deviceName: defaultDev.name });
+      const defaultDevice = audioDevices.find((device) => device.is_default);
+      if (defaultDevice) {
+        app.selectedDevice = defaultDevice.name;
+        await invoke("select_audio_device", { deviceName: defaultDevice.name });
       }
     } catch (e) {
       statusMessage = String(e);
@@ -182,20 +178,15 @@
     saveSetting("ollama_model", value);
   }
 
-  // ─── Shortcut recording ─────────────────────────────────────────
-
-  /** Convert a KeyboardEvent into the Tauri shortcut string format */
-  function keyEventToShortcut(e: KeyboardEvent): string | null {
-    // Ignore standalone modifier presses
-    if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return null;
+  function keyEventToShortcut(event: KeyboardEvent): string | null {
+    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return null;
 
     const parts: string[] = [];
-    if (e.metaKey || e.ctrlKey) parts.push("CommandOrControl");
-    if (e.shiftKey) parts.push("Shift");
-    if (e.altKey) parts.push("Alt");
+    if (event.metaKey || event.ctrlKey) parts.push("CommandOrControl");
+    if (event.shiftKey) parts.push("Shift");
+    if (event.altKey) parts.push("Alt");
 
-    // Map key to Tauri Code name
-    const key = mapKey(e.code, e.key);
+    const key = mapKey(event.code, event.key);
     if (!key) return null;
     parts.push(key);
 
@@ -203,15 +194,11 @@
   }
 
   function mapKey(code: string, key: string): string | null {
-    // Function keys
     if (/^F\d{1,2}$/.test(key)) return key;
-
-    // Letter/digit keys from code (e.g., "KeyA" → "A", "Digit1" → "1")
     if (code.startsWith("Key")) return code.slice(3);
     if (code.startsWith("Digit")) return code.slice(5);
 
-    // Special keys
-    const map: Record<string, string> = {
+    const keyMap: Record<string, string> = {
       Space: "Space",
       Enter: "Enter",
       Escape: "Escape",
@@ -239,13 +226,12 @@
       Slash: "Slash",
     };
 
-    return map[code] || null;
+    return keyMap[code] || null;
   }
 
-  /** Format a shortcut string for display (replace Tauri syntax with symbols) */
-  function formatShortcut(s: string): string {
-    if (!s) return "Not set";
-    return s
+  function formatShortcut(shortcut: string): string {
+    if (!shortcut) return "Not set";
+    return shortcut
       .replace(/CommandOrControl/g, "⌘")
       .replace(/Shift/g, "⇧")
       .replace(/Alt/g, "⌥")
@@ -257,19 +243,17 @@
     shortcutError = "";
   }
 
-  function handleKeyDown(e: KeyboardEvent) {
+  function handleKeyDown(event: KeyboardEvent) {
     if (!recordingField) return;
-    e.preventDefault();
-    e.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
 
-    // Escape cancels recording
-    if (e.key === "Escape") {
+    if (event.key === "Escape") {
       recordingField = null;
       return;
     }
 
-    // Backspace/Delete clears the shortcut
-    if (e.key === "Backspace" || e.key === "Delete") {
+    if (event.key === "Backspace" || event.key === "Delete") {
       if (recordingField === "toggle") toggleShortcut = "";
       else pttShortcut = "";
       recordingField = null;
@@ -277,11 +261,10 @@
       return;
     }
 
-    const shortcut = keyEventToShortcut(e);
-    if (!shortcut) return; // Still pressing modifiers only
+    const shortcut = keyEventToShortcut(event);
+    if (!shortcut) return;
 
-    // Must have at least one modifier
-    if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && !/^F\d{1,2}$/.test(e.key)) {
+    if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !/^F\d{1,2}$/.test(event.key)) {
       shortcutError = "Shortcut must include a modifier key (Cmd, Ctrl, Shift, Alt) or be a function key";
       return;
     }
@@ -313,245 +296,277 @@
 
 <svelte:window onkeydown={handleKeyDown} />
 
-<div class="flex flex-col gap-6 w-full max-w-lg">
-  <h2 class="text-lg font-semibold text-zinc-100">Settings</h2>
+<div class="view-stack">
+  <section class="surface-card surface-card--compact">
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">Settings</p>
+        <h3 class="section-title">Preferences</h3>
+        <p class="helper-text">Shortcuts, audio, automation, diagnostics, and theme.</p>
+      </div>
+
+      <div class="action-row" style="flex-wrap: wrap;">
+        <span class="pill">{app.settings.theme} theme</span>
+        <span class="pill">{app.selectedDevice || "System default input"}</span>
+        <span class={`pill ${ollamaAvailable ? "pill--success" : "pill--warning"}`}>
+          {ollamaAvailable ? "Ollama ready" : "Ollama offline"}
+        </span>
+      </div>
+    </div>
+  </section>
 
   {#if statusMessage}
-    <p class="text-xs text-yellow-500">{statusMessage}</p>
+    <div class="status-banner status-banner--warning">
+      <strong>Status</strong>
+      <p class="helper-text">{statusMessage}</p>
+    </div>
   {/if}
 
-  <!-- Keyboard Shortcuts -->
-  <section class="flex flex-col gap-3">
-    <h3 class="text-sm font-medium text-zinc-300">Keyboard Shortcuts</h3>
-    <div class="flex flex-col gap-3 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
-      <!-- Toggle recording -->
-      <div class="flex items-center justify-between">
-        <div class="flex flex-col gap-0.5">
-          <span class="text-xs text-zinc-400">Toggle recording</span>
-          <span class="text-[10px] text-zinc-600">Press to start/stop</span>
+  <div class="settings-grid">
+    <section class="settings-card">
+      <div class="settings-card-body stack-md">
+        <div>
+          <p class="eyebrow">Keyboard</p>
+          <h3 class="section-title">Global shortcuts</h3>
+          <p class="section-description">Capture reliable key chords for fast start/stop workflows and push-to-talk.</p>
         </div>
-        <div class="flex items-center gap-2">
-          <button
-            onclick={() => startRecording("toggle")}
-            class="px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer
-              {recordingField === 'toggle'
-                ? 'bg-blue-600 text-white animate-pulse'
-                : 'bg-zinc-800 border border-zinc-700 text-zinc-300 hover:border-zinc-500'}"
-          >
-            {recordingField === "toggle" ? "Press keys..." : formatShortcut(toggleShortcut)}
-          </button>
-          {#if toggleShortcut}
-            <button
-              onclick={() => clearShortcut("toggle")}
-              class="text-xs text-zinc-600 hover:text-zinc-400 cursor-pointer"
-              title="Clear shortcut"
-            >
-              ×
-            </button>
-          {/if}
+
+        <div class="settings-list">
+          <div class="shortcut-row">
+            <div class="shortcut-meta">
+              <span class="shortcut-label">Toggle recording</span>
+              <span class="shortcut-help">Press once to start or stop dictation.</span>
+            </div>
+            <div class="action-row" style="flex-wrap: wrap; justify-content: flex-end;">
+              <button
+                onclick={() => startRecording("toggle")}
+                class="shortcut-button"
+                class:is-recording={recordingField === "toggle"}
+              >
+                {recordingField === "toggle" ? "Press keys..." : formatShortcut(toggleShortcut)}
+              </button>
+              {#if toggleShortcut}
+                <button onclick={() => clearShortcut("toggle")} class="button button-text">Clear</button>
+              {/if}
+            </div>
+          </div>
+
+          <div class="shortcut-row">
+            <div class="shortcut-meta">
+              <span class="shortcut-label">Push-to-talk</span>
+              <span class="shortcut-help">Hold to record, release to stop.</span>
+            </div>
+            <div class="action-row" style="flex-wrap: wrap; justify-content: flex-end;">
+              <button
+                onclick={() => startRecording("ptt")}
+                class="shortcut-button"
+                class:is-recording={recordingField === "ptt"}
+              >
+                {recordingField === "ptt" ? "Press keys..." : formatShortcut(pttShortcut)}
+              </button>
+              {#if pttShortcut}
+                <button onclick={() => clearShortcut("ptt")} class="button button-text">Clear</button>
+              {/if}
+            </div>
+          </div>
         </div>
+
+        {#if shortcutError}
+          <div class="status-banner status-banner--danger">
+            <strong>Shortcut error</strong>
+            <p class="helper-text">{shortcutError}</p>
+          </div>
+        {/if}
+
+        <p class="helper-text">Click a shortcut, then press the desired key combination. Press Escape to cancel or Delete to clear it.</p>
       </div>
+    </section>
 
-      <!-- Push-to-talk -->
-      <div class="flex items-center justify-between">
-        <div class="flex flex-col gap-0.5">
-          <span class="text-xs text-zinc-400">Push-to-talk</span>
-          <span class="text-[10px] text-zinc-600">Hold to record, release to stop</span>
+    <section class="settings-card">
+      <div class="settings-card-body stack-md">
+        <div>
+          <p class="eyebrow">Audio</p>
+          <h3 class="section-title">Input routing</h3>
+          <p class="section-description">Choose the active microphone or virtual device used by dictation and meeting recording.</p>
         </div>
-        <div class="flex items-center gap-2">
-          <button
-            onclick={() => startRecording("ptt")}
-            class="px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer
-              {recordingField === 'ptt'
-                ? 'bg-blue-600 text-white animate-pulse'
-                : 'bg-zinc-800 border border-zinc-700 text-zinc-300 hover:border-zinc-500'}"
-          >
-            {recordingField === "ptt" ? "Press keys..." : formatShortcut(pttShortcut)}
-          </button>
-          {#if pttShortcut}
-            <button
-              onclick={() => clearShortcut("ptt")}
-              class="text-xs text-zinc-600 hover:text-zinc-400 cursor-pointer"
-              title="Clear shortcut"
-            >
-              ×
-            </button>
-          {/if}
-        </div>
-      </div>
 
-      {#if shortcutError}
-        <p class="text-xs text-red-400">{shortcutError}</p>
-      {/if}
-
-      <p class="text-xs text-zinc-600">
-        Click a shortcut, then press the desired key combination. Press Escape to cancel, Delete to clear.
-      </p>
-    </div>
-  </section>
-
-  <!-- Audio -->
-  <section class="flex flex-col gap-3">
-    <h3 class="text-sm font-medium text-zinc-300">Audio</h3>
-    <div class="flex flex-col gap-2 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
-      <span class="text-xs text-zinc-400">Input Device</span>
-      <div class="flex items-center gap-2">
-        <select
-          value={app.selectedDevice}
-          onchange={onDeviceChange}
-          class="flex-1 px-3 py-1.5 text-xs rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300
-            focus:border-zinc-500 focus:outline-none"
-        >
-          {#each audioDevices as device}
-            <option value={device.name}>
-              {device.name}{device.is_default ? " (default)" : ""}
-            </option>
-          {/each}
-        </select>
-        <button
-          onclick={refreshDevices}
-          class="px-2 py-1.5 text-xs rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400
-            hover:text-zinc-200 hover:border-zinc-500 cursor-pointer transition-colors"
-        >
-          ↻
-        </button>
-      </div>
-    </div>
-  </section>
-
-  <!-- Dictation -->
-  <section class="flex flex-col gap-3">
-    <h3 class="text-sm font-medium text-zinc-300">Dictation</h3>
-    <div class="flex flex-col gap-3 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
-      <label class="flex items-center justify-between">
-        <span class="text-xs text-zinc-400">Auto-paste after dictation</span>
-        <input
-          type="checkbox"
-          checked={app.settings.auto_paste}
-          onchange={onAutoPasteChange}
-          class="w-4 h-4 rounded bg-zinc-700 border-zinc-600 cursor-pointer"
-        />
-      </label>
-      <label class="flex items-center justify-between">
-        <span class="text-xs text-zinc-400">Paste delay (ms)</span>
-        <input
-          type="number"
-          value={app.settings.paste_delay_ms}
-          onchange={onPasteDelayChange}
-          min="50"
-          max="1000"
-          step="50"
-          class="w-20 px-2 py-1 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 text-right
-            focus:border-zinc-500 focus:outline-none"
-        />
-      </label>
-      <p class="text-xs text-zinc-600">
-        Auto-paste copies transcribed text and simulates Cmd+V. Requires Accessibility permission.
-      </p>
-    </div>
-  </section>
-
-  <section class="flex flex-col gap-3">
-    <h3 class="text-sm font-medium text-zinc-300">Diagnostics</h3>
-    <div class="flex flex-col gap-3 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
-      <label class="flex items-center justify-between">
-        <span class="text-xs text-zinc-400">Verbose transcription debug logs</span>
-        <input
-          type="checkbox"
-          checked={app.settings.debug_transcription}
-          onchange={onDebugTranscriptionChange}
-          class="w-4 h-4 rounded bg-zinc-700 border-zinc-600 cursor-pointer"
-        />
-      </label>
-      <p class="text-xs text-zinc-600">
-        Enables per-frame STT logging and debug audio capture for troubleshooting. Leave this off during normal use.
-      </p>
-    </div>
-  </section>
-
-  <!-- Ollama -->
-  <section class="flex flex-col gap-3">
-    <h3 class="text-sm font-medium text-zinc-300">Ollama</h3>
-    <div class="flex flex-col gap-3 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
-      <label class="flex flex-col gap-1">
-        <span class="text-xs text-zinc-400">Ollama URL</span>
-        <input
-          type="text"
-          value={app.settings.ollama_url}
-          onchange={onOllamaUrlChange}
-          class="px-3 py-1.5 text-xs rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300
-            focus:border-zinc-500 focus:outline-none"
-        />
-      </label>
-      <div class="flex items-center justify-between">
-        <span class="text-xs text-zinc-400">Status</span>
-        <div class="flex items-center gap-2">
-          <div class="w-2 h-2 rounded-full {ollamaAvailable ? 'bg-green-500' : 'bg-red-500'}"></div>
-          <span class="text-xs {ollamaAvailable ? 'text-green-400' : 'text-red-400'}">
-            {ollamaAvailable ? "Connected" : "Not available"}
-          </span>
-          <button
-            onclick={checkOllama}
-            class="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-      {#if ollamaAvailable && ollamaSummaryModels.length > 0}
-        <label class="flex flex-col gap-1">
-          <span class="text-xs text-zinc-400">Default Summary Model</span>
-          <select
-            value={app.settings.ollama_model || ollamaSummaryModels[0]}
-            onchange={onOllamaModelChange}
-            class="px-3 py-1.5 text-xs rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300
-              focus:border-zinc-500 focus:outline-none"
-          >
-            {#each ollamaSummaryModels as model}
-              <option value={model}>{model}</option>
+        <label class="field-group">
+          <span class="field-label">Input device</span>
+          <select value={app.selectedDevice} onchange={onDeviceChange} class="field-select">
+            {#each audioDevices as device}
+              <option value={device.name}>
+                {device.name}{device.is_default ? " (default)" : ""}
+              </option>
             {/each}
           </select>
         </label>
-        <p class="text-xs text-zinc-500">
-          Speech and embedding models are hidden here. Meeting summaries work best with chat or instruction models.
-        </p>
-      {:else if ollamaAvailable}
-        <p class="text-xs text-amber-400">
-          No summary-capable Ollama model detected. Install a text-generation model to enable reliable meeting summaries.
-        </p>
-      {/if}
-    </div>
-  </section>
 
-  <!-- Theme -->
-  <section class="flex flex-col gap-3">
-    <h3 class="text-sm font-medium text-zinc-300">Appearance</h3>
-    <div class="flex flex-col gap-2 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
-      <span class="text-xs text-zinc-400">Theme</span>
-      <div class="flex gap-2">
-        {#each ["dark", "light", "system"] as t}
-          <button
-            onclick={() => onThemeChange(t as Theme)}
-            class="flex-1 px-3 py-1.5 text-xs rounded-lg cursor-pointer transition-colors
-              {app.settings.theme === t
-                ? 'bg-blue-600 text-white'
-                : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200'}"
-          >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
-        {/each}
+        <div class="action-row">
+          <button onclick={refreshDevices} class="button button-secondary">Refresh devices</button>
+          <span class="helper-text">Use BlackHole or another loopback device for system audio capture.</span>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- About -->
-  <section class="flex flex-col gap-3">
-    <h3 class="text-sm font-medium text-zinc-300">About</h3>
-    <div class="flex flex-col gap-1 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
-      <p class="text-xs text-zinc-400">Souffle v0.1.0</p>
-      <p class="text-xs text-zinc-500">Local speech-to-text desktop application</p>
-      <p class="text-xs text-zinc-500">Engine: Kyutai STT 1B (FR/EN)</p>
-      <p class="text-xs text-zinc-600 mt-1">Privacy-first. Everything runs locally.</p>
-    </div>
-  </section>
+    <section class="settings-card">
+      <div class="settings-card-body stack-md">
+        <div>
+          <p class="eyebrow">Dictation</p>
+          <h3 class="section-title">Post-processing behavior</h3>
+          <p class="section-description">Keep the automation explicit so it is easy to predict how text will be inserted.</p>
+        </div>
+
+        <div class="setting-row">
+          <div class="shortcut-meta">
+            <span class="shortcut-label">Auto-paste after dictation</span>
+            <span class="shortcut-help">Copies the transcript and simulates Cmd+V when capture stops.</span>
+          </div>
+          <input
+            type="checkbox"
+            checked={app.settings.auto_paste}
+            onchange={onAutoPasteChange}
+            class="switch"
+            aria-label="Auto-paste after dictation"
+          />
+        </div>
+
+        <label class="field-group">
+          <span class="field-label">Paste delay</span>
+          <input
+            type="number"
+            value={app.settings.paste_delay_ms}
+            onchange={onPasteDelayChange}
+            min="50"
+            max="1000"
+            step="50"
+            class="field-number"
+          />
+          <p class="helper-text">Short delays work best when the target app is already focused. Accessibility permission is still required.</p>
+        </label>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-body stack-md">
+        <div>
+          <p class="eyebrow">Diagnostics</p>
+          <h3 class="section-title">Troubleshooting controls</h3>
+          <p class="section-description">Expose debug output only when you need to inspect the transcription pipeline.</p>
+        </div>
+
+        <div class="setting-row">
+          <div class="shortcut-meta">
+            <span class="shortcut-label">Verbose transcription logs</span>
+            <span class="shortcut-help">Includes per-frame STT logging and debug audio capture.</span>
+          </div>
+          <input
+            type="checkbox"
+            checked={app.settings.debug_transcription}
+            onchange={onDebugTranscriptionChange}
+            class="switch"
+            aria-label="Verbose transcription debug logs"
+          />
+        </div>
+
+        <p class="helper-text">Leave this off during normal use so the app stays quiet and lightweight.</p>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-body stack-md">
+        <div>
+          <p class="eyebrow">Ollama</p>
+          <h3 class="section-title">Local summary defaults</h3>
+          <p class="section-description">Use a text-generation model for meeting summaries while keeping the connection state visible.</p>
+        </div>
+
+        <label class="field-group">
+          <span class="field-label">Ollama URL</span>
+          <input type="text" value={app.settings.ollama_url} onchange={onOllamaUrlChange} class="field-input" />
+        </label>
+
+        <div class="setting-row">
+          <div class="shortcut-meta">
+            <span class="shortcut-label">Connection status</span>
+            <span class="shortcut-help">Checks the configured Ollama endpoint for compatible summary models.</span>
+          </div>
+          <div class="action-row" style="flex-wrap: wrap; justify-content: flex-end;">
+            <div class="action-row">
+              <span class="status-dot" class:is-online={ollamaAvailable}></span>
+              <span class="helper-text">{ollamaAvailable ? "Connected" : "Not available"}</span>
+            </div>
+            <button onclick={checkOllama} class="button button-secondary">Retry</button>
+          </div>
+        </div>
+
+        {#if ollamaAvailable && ollamaSummaryModels.length > 0}
+          <label class="field-group">
+            <span class="field-label">Default summary model</span>
+            <select
+              value={app.settings.ollama_model || ollamaSummaryModels[0]}
+              onchange={onOllamaModelChange}
+              class="field-select"
+            >
+              {#each ollamaSummaryModels as model}
+                <option value={model}>{model}</option>
+              {/each}
+            </select>
+          </label>
+          <p class="helper-text">Speech and embedding models stay hidden here so the chooser remains focused on summary-capable options.</p>
+        {:else if ollamaAvailable}
+          <div class="status-banner status-banner--warning">
+            <strong>No summary-capable model found.</strong>
+            <p class="helper-text">Install a chat or instruction model to enable reliable summaries.</p>
+          </div>
+        {/if}
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-body stack-md">
+        <div>
+          <p class="eyebrow">Appearance</p>
+          <h3 class="section-title">Theme</h3>
+          <p class="section-description">The refreshed interface supports dark, light, and system-driven presentation without losing contrast.</p>
+        </div>
+
+        <div class="theme-group">
+          {#each ["dark", "light", "system"] as themeOption}
+            <button
+              onclick={() => onThemeChange(themeOption as Theme)}
+              class="theme-button"
+              class:is-active={app.settings.theme === themeOption}
+            >
+              {themeOption.charAt(0).toUpperCase() + themeOption.slice(1)}
+            </button>
+          {/each}
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-body stack-md">
+        <div>
+          <p class="eyebrow">About</p>
+          <h3 class="section-title">Soufflé</h3>
+          <p class="section-description">Local speech-to-text for macOS with a minimal UI shell and local model execution.</p>
+        </div>
+
+        <div class="settings-list">
+          <div class="setting-row">
+            <span class="shortcut-label">Version</span>
+            <span class="helper-text">v0.1.0</span>
+          </div>
+          <div class="setting-row">
+            <span class="shortcut-label">Engine</span>
+            <span class="helper-text">Kyutai STT 1B (FR/EN)</span>
+          </div>
+          <div class="setting-row">
+            <span class="shortcut-label">Privacy</span>
+            <span class="helper-text">Everything runs locally.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
 </div>

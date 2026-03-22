@@ -22,7 +22,6 @@
   let isSummarizing = $state(false);
   let summaryStream = $state("");
 
-  // Meeting recording state
   let isRecordingMeeting = $state(false);
   let meetingTitle = $state("");
   let liveMeetingTitle = $state("");
@@ -30,7 +29,7 @@
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
   let liveMeetingLastTime = 0;
 
-  const PAUSE_THRESHOLD = 1.5;
+  const pauseThreshold = 1.5;
 
   function syncSelectedModel(preferredModel?: string | null) {
     if (summaryModels.length === 0) {
@@ -127,7 +126,6 @@
         summaryStream += progress.text;
         if (progress.done) {
           isSummarizing = false;
-          // Refresh the meeting to get saved summary (don't toggle — it's already expanded)
           invoke("get_meeting", { id }).then((meeting) => {
             expandedMeeting = meeting as MeetingTranscript;
             syncSelectedModel(expandedMeeting.summary_model);
@@ -159,7 +157,7 @@
         if (liveMeetingTranscript) {
           const gap = segment.start_time - liveMeetingLastTime;
           const endsWithSentence = /[.!?…]\s*$/.test(liveMeetingTranscript);
-          if (gap >= PAUSE_THRESHOLD && endsWithSentence && !liveMeetingTranscript.endsWith("\n")) {
+          if (gap >= pauseThreshold && endsWithSentence && !liveMeetingTranscript.endsWith("\n")) {
             liveMeetingTranscript += "\n\n";
           } else if (
             !liveMeetingTranscript.endsWith(" ") &&
@@ -212,178 +210,211 @@
   }
 </script>
 
-<div class="flex flex-col gap-4 w-full max-w-lg">
-  <h2 class="text-lg font-semibold text-zinc-100">Recordings</h2>
-
-  <!-- Meeting recording controls -->
-  <div class="flex flex-col gap-2 p-3 rounded-lg bg-zinc-900 border border-zinc-800">
-    {#if isRecordingMeeting}
-      <div class="flex items-center gap-2">
-        <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-        <span class="text-sm text-red-400">Recording meeting...</span>
+<div class="view-stack">
+  <section class="surface-card surface-card--compact">
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">Recordings</p>
+        <h3 class="section-title">Meetings</h3>
+        <p class="helper-text">Local recordings, transcripts, and optional summaries.</p>
       </div>
-      <div class="rounded-lg bg-zinc-800/60 border border-zinc-700 p-3">
-        <div class="flex items-center justify-between gap-3 mb-2">
-          <span class="text-xs font-medium text-zinc-300">{liveMeetingTitle}</span>
-          <span class="text-[10px] text-zinc-500">{liveMeetingSegments.length} segments</span>
+      <div class="action-row" style="flex-wrap: wrap;">
+        <span class="pill">{meetings.length} meetings</span>
+        <span class={`pill ${isRecordingMeeting ? "pill--danger" : "pill--primary"}`}>
+          {isRecordingMeeting ? "Recording..." : "Idle"}
+        </span>
+        <span class={`pill ${ollamaAvailable ? "pill--success" : "pill--warning"}`}>
+          {ollamaAvailable ? "Ollama connected" : "Ollama unavailable"}
+        </span>
+      </div>
+    </div>
+  </section>
+
+  {#if statusMessage}
+    <div class="status-banner status-banner--warning">
+      <strong>Status</strong>
+      <p class="helper-text">{statusMessage}</p>
+    </div>
+  {/if}
+
+  <section class="surface-card stack-md">
+    <div class="section-header">
+      <div>
+        <p class="eyebrow">Recorder</p>
+        <h3 class="section-title">{isRecordingMeeting ? "Meeting recording in progress." : "Create a new meeting capture."}</h3>
+        <p class="section-description">
+          Use a descriptive title when needed. For system audio routing, select a virtual device such as BlackHole in Settings first.
+        </p>
+      </div>
+      <span class={`pill ${isRecordingMeeting ? "pill--danger" : "pill--primary"}`}>
+        {isRecordingMeeting ? "Recording..." : "Ready to start"}
+      </span>
+    </div>
+
+    {#if isRecordingMeeting}
+      <div class="stack-md">
+        <div class="action-row" style="flex-wrap: wrap;">
+          <span class="pill pill--danger">{liveMeetingTitle}</span>
+          <span class="pill">{liveMeetingSegments.length} segments</span>
         </div>
-        <div class="text-sm text-zinc-300 whitespace-pre-wrap min-h-20 max-h-52 overflow-y-auto">
+
+        <div class="live-output">
           {#if liveMeetingTranscript}
             {liveMeetingTranscript}
           {:else}
-            <span class="text-zinc-500 italic">Listening for speech...</span>
+            <span class="muted-text">Listening for speech...</span>
           {/if}
+        </div>
+
+        <div class="action-row">
+          <button onclick={stopMeetingRecording} class="button button-danger">Stop Recording</button>
         </div>
       </div>
-      <button
-        onclick={stopMeetingRecording}
-        class="px-3 py-1.5 text-sm rounded-lg bg-red-600 hover:bg-red-500 text-white cursor-pointer transition-colors"
-      >
-        Stop Recording
-      </button>
     {:else}
-      <input
-        type="text"
-        bind:value={meetingTitle}
-        placeholder="Meeting title (optional)"
-        class="px-3 py-1.5 text-sm rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300
-          placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
-      />
-      <button
-        onclick={startMeetingRecording}
-        class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors"
-      >
-        Start Meeting Recording
-      </button>
-      <p class="text-xs text-zinc-600">Records from microphone with live transcription. For system audio, use BlackHole as a virtual audio device.</p>
-    {/if}
-  </div>
+      <div class="content-grid">
+        <label class="field-group">
+          <span class="field-label">Meeting title</span>
+          <input
+            type="text"
+            bind:value={meetingTitle}
+            placeholder="Quarterly planning sync"
+            class="field-input"
+          />
+          <p class="helper-text">Leave empty to use the current date as a fallback title.</p>
+        </label>
 
-  {#if statusMessage}
-    <p class="text-xs text-yellow-500">{statusMessage}</p>
-  {/if}
-
-  <!-- Meeting list -->
-  {#if meetings.length === 0}
-    <p class="text-sm text-zinc-500 text-center py-8">No recordings yet</p>
-  {:else}
-    <div class="flex flex-col gap-2">
-      {#each meetings as meeting}
-        <div class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
-          <!-- Meeting header -->
-          <button
-            onclick={() => toggleExpand(meeting.id)}
-            class="w-full flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-zinc-800/50 transition-colors"
-          >
-            <div class="flex flex-col items-start gap-0.5">
-              <span class="text-sm text-zinc-200">{meeting.title}</span>
-              <span class="text-xs text-zinc-500">{formatDate(meeting.started_at)}</span>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="text-xs text-zinc-500">{formatDuration(meeting.duration_seconds)}</span>
-              {#if meeting.has_summary}
-                <span class="text-xs text-green-500">Summarized</span>
-              {/if}
-              <span class="text-zinc-500 text-xs">{expandedId === meeting.id ? "▲" : "▼"}</span>
-            </div>
-          </button>
-
-          <!-- Expanded content -->
-          {#if expandedId === meeting.id && expandedMeeting}
-            <div class="border-t border-zinc-800 p-4 flex flex-col gap-3">
-              <!-- Transcript -->
-              <div>
-                <h4 class="text-xs font-medium text-zinc-400 mb-1">Transcript</h4>
-                <div class="text-sm text-zinc-300 whitespace-pre-wrap max-h-60 overflow-y-auto p-2 rounded bg-zinc-800/50">
-                  {#if expandedMeeting.segments.length > 0}
-                    {expandedMeeting.segments.map(s => s.text).join(" ")}
-                  {:else}
-                    <span class="text-zinc-500 italic">No transcript available</span>
-                  {/if}
-                </div>
-              </div>
-
-              <!-- Summary -->
-              {#if expandedMeeting.summary}
-                <div>
-                  <h4 class="text-xs font-medium text-zinc-400 mb-1">
-                    Summary
-                    {#if expandedMeeting.summary_model}
-                      <span class="text-zinc-600">({expandedMeeting.summary_model})</span>
-                    {/if}
-                  </h4>
-                  <div class="text-sm text-zinc-300 whitespace-pre-wrap p-2 rounded bg-zinc-800/50">
-                    {expandedMeeting.summary}
-                  </div>
-                </div>
-              {/if}
-
-              {#if isSummarizing && expandedId === meeting.id}
-                <div>
-                  <h4 class="text-xs font-medium text-zinc-400 mb-1">
-                    {expandedMeeting.summary ? "Generating replacement summary..." : "Generating summary..."}
-                  </h4>
-                  <div class="text-sm text-zinc-300 whitespace-pre-wrap p-2 rounded bg-zinc-800/50">
-                    {summaryStream}<span class="animate-pulse">|</span>
-                  </div>
-                </div>
-              {/if}
-
-              {#if ollamaAvailable && summaryModels.length > 0 && expandedMeeting.segments.length > 0}
-                <div class="flex items-center gap-2">
-                  <select
-                    bind:value={selectedModel}
-                    disabled={isSummarizing}
-                    class="px-2 py-1 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 focus:outline-none"
-                  >
-                    {#each summaryModels as model}
-                      <option value={model}>{model}</option>
-                    {/each}
-                  </select>
-                  <button
-                    onclick={() => summarizeMeeting(meeting.id)}
-                    disabled={isSummarizing}
-                    class="px-3 py-1 text-xs rounded bg-purple-600 hover:bg-purple-500 text-white cursor-pointer transition-colors"
-                  >
-                    {expandedMeeting.summary ? "Re-summarize" : "Summarize"}
-                  </button>
-                </div>
-              {:else if ollamaAvailable && expandedMeeting.segments.length > 0}
-                <p class="text-xs text-amber-400">
-                  No summary-capable Ollama model detected. Install a text-generation model to generate reliable summaries.
-                </p>
-              {/if}
-
-              <!-- Actions -->
-              <div class="flex items-center gap-2 pt-1">
-                <button
-                  onclick={() => {
-                    const text = expandedMeeting?.segments.map(s => s.text).join(" ") || "";
-                    navigator.clipboard.writeText(text);
-                  }}
-                  class="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                >
-                  Copy transcript
-                </button>
-                {#if expandedMeeting.summary}
-                  <button
-                    onclick={() => navigator.clipboard.writeText(expandedMeeting?.summary || "")}
-                    class="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                  >
-                    Copy summary
-                  </button>
-                {/if}
-                <button
-                  onclick={() => deleteMeeting(meeting.id)}
-                  class="text-xs text-red-500/70 hover:text-red-400 cursor-pointer ml-auto"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          {/if}
+        <div class="surface-card surface-card--muted stack-md" style="padding: 20px;">
+          <span class="field-label">Session behavior</span>
+          <p class="helper-text">Audio starts immediately, transcript segments stream live, and the finished meeting is saved automatically.</p>
+          <button onclick={startMeetingRecording} class="button button-primary">Start Meeting Recording</button>
         </div>
-      {/each}
+      </div>
+    {/if}
+  </section>
+
+  <section class="surface-card stack-md">
+    <div class="section-header">
+      <div>
+        <p class="eyebrow">Library</p>
+        <h3 class="section-title">Browse saved meetings</h3>
+        <p class="section-description">Expand an entry to review the transcript, generate a summary, or remove it from local storage.</p>
+      </div>
+      <button onclick={refreshMeetings} class="button button-secondary">Refresh list</button>
     </div>
-  {/if}
+
+    {#if meetings.length === 0}
+      <div class="empty-state">
+        <strong>No recordings yet</strong>
+        Start a meeting capture to build the transcript library.
+      </div>
+    {:else}
+      <div class="meeting-list">
+        {#each meetings as meeting}
+          <article class="meeting-item">
+            <button onclick={() => toggleExpand(meeting.id)} class="meeting-toggle">
+              <div class="list-item-header">
+                <div class="stack-sm" style="min-width: 0;">
+                  <span class="section-title" style="font-size: 1rem;">{meeting.title}</span>
+                  <span class="meeting-meta">{formatDate(meeting.started_at)}</span>
+                </div>
+                <div class="action-row" style="flex-wrap: wrap; justify-content: flex-end;">
+                  <span class="pill">{formatDuration(meeting.duration_seconds)}</span>
+                  {#if meeting.has_summary}
+                    <span class="pill pill--success">Summarized</span>
+                  {/if}
+                  <span class="pill">{expandedId === meeting.id ? "Open" : "Closed"}</span>
+                </div>
+              </div>
+            </button>
+
+            {#if expandedId === meeting.id && expandedMeeting}
+              <div class="meeting-body stack-lg">
+                <div class="content-grid">
+                  <div class="stack-sm">
+                    <span class="field-label">Transcript</span>
+                    <div class="transcript-output scroll-block">
+                      {#if expandedMeeting.segments.length > 0}
+                        {expandedMeeting.segments.map((segment) => segment.text).join(" ")}
+                      {:else}
+                        <span class="muted-text">No transcript available.</span>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <div class="stack-sm">
+                    <div class="panel-header">
+                      <span class="field-label">Summary</span>
+                      {#if expandedMeeting.summary_model}
+                        <span class="pill">{expandedMeeting.summary_model}</span>
+                      {/if}
+                    </div>
+
+                    {#if expandedMeeting.summary}
+                      <div class="summary-output scroll-block">{expandedMeeting.summary}</div>
+                    {:else}
+                      <div class="empty-state">
+                        <strong>No summary yet</strong>
+                        Generate one when a compatible Ollama model is available.
+                      </div>
+                    {/if}
+
+                    {#if isSummarizing && expandedId === meeting.id}
+                      <div class="summary-output scroll-block">{summaryStream}<span class="muted-text">|</span></div>
+                    {/if}
+                  </div>
+                </div>
+
+                {#if ollamaAvailable && summaryModels.length > 0 && expandedMeeting.segments.length > 0}
+                  <div class="field-row">
+                    <label class="field-group" style="flex: 1;">
+                      <span class="field-label">Summary model</span>
+                      <select bind:value={selectedModel} disabled={isSummarizing} class="field-select">
+                        {#each summaryModels as model}
+                          <option value={model}>{model}</option>
+                        {/each}
+                      </select>
+                    </label>
+
+                    <button
+                      onclick={() => summarizeMeeting(meeting.id)}
+                      disabled={isSummarizing}
+                      class="button button-primary"
+                    >
+                      {expandedMeeting.summary ? "Re-summarize" : "Summarize"}
+                    </button>
+                  </div>
+                {:else if ollamaAvailable && expandedMeeting.segments.length > 0}
+                  <div class="status-banner status-banner--warning">
+                    <strong>No summary-capable Ollama model detected.</strong>
+                    <p class="helper-text">Install a text-generation model to enable reliable meeting summaries.</p>
+                  </div>
+                {/if}
+
+                <div class="action-row" style="flex-wrap: wrap;">
+                  <button
+                    onclick={() => {
+                      const text = expandedMeeting?.segments.map((segment) => segment.text).join(" ") || "";
+                      navigator.clipboard.writeText(text);
+                    }}
+                    class="button button-secondary"
+                  >
+                    Copy transcript
+                  </button>
+                  {#if expandedMeeting.summary}
+                    <button
+                      onclick={() => navigator.clipboard.writeText(expandedMeeting?.summary || "")}
+                      class="button button-secondary"
+                    >
+                      Copy summary
+                    </button>
+                  {/if}
+                  <button onclick={() => deleteMeeting(meeting.id)} class="button button-ghost danger-text">Delete meeting</button>
+                </div>
+              </div>
+            {/if}
+          </article>
+        {/each}
+      </div>
+    {/if}
+  </section>
 </div>

@@ -2,24 +2,24 @@
   import { invoke, Channel } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
+  import appIcon from "../../../app-icon1.png";
   import type { TranscriptionSegment, ModelStatus, DownloadProgress, DictationEntry } from "../types";
   import { getAppState } from "../stores/app.svelte";
 
   const app = getAppState();
 
   let isRecording = $state(false);
+  let isStartingRecording = $state(false);
   let transcript = $state("");
   let engineName = $state("Kyutai STT 1B - FR/EN");
   let statusMessage = $state("");
 
-  // Model state
   let modelDownloaded = $state(false);
   let modelLoaded = $state(false);
   let isDownloading = $state(false);
   let downloadFile = $state("");
   let isLoadingModel = $state(false);
 
-  // History
   let history = $state<DictationEntry[]>([]);
   let showHistory = $state(false);
   let expandedEntryId = $state<string | null>(null);
@@ -29,7 +29,9 @@
   async function loadHistory() {
     try {
       history = await invoke("list_dictation_entries", { limit: 50 });
-    } catch { /* First run */ }
+    } catch {
+      // First run.
+    }
   }
 
   async function addHistoryEntry(text: string) {
@@ -46,6 +48,7 @@
     try {
       await invoke("clear_dictation_history");
       history = [];
+      expandedEntryId = null;
     } catch (e) {
       console.warn("Failed to clear history:", e);
     }
@@ -55,14 +58,12 @@
     checkModelStatus();
     loadHistory();
 
-    // Shortcut/tray → toggle transcription (same pipeline as button click)
     listen("shortcut-toggle", () => {
-      toggleRecording();
+      if (!isStartingRecording) toggleRecording();
     }).then((fn) => cleanupFns.push(fn));
 
-    // Push-to-talk: start on press, stop on release
     listen("shortcut-ptt-start", () => {
-      if (!isRecording) toggleRecording();
+      if (!isRecording && !isStartingRecording) toggleRecording();
     }).then((fn) => cleanupFns.push(fn));
 
     listen("shortcut-ptt-stop", () => {
@@ -107,6 +108,7 @@
       };
 
       await invoke("download_model", { channel });
+      await checkModelStatus();
     } catch (e) {
       statusMessage = String(e);
       isDownloading = false;
@@ -128,15 +130,15 @@
   }
 
   async function toggleRecording() {
-    try {
-      if (isRecording) {
+    if (isStartingRecording) return;
+
+    if (isRecording) {
+      try {
         await invoke("stop_transcription");
         isRecording = false;
 
-        // Save to history before clearing
         await addHistoryEntry(transcript);
 
-        // Auto-paste if enabled and we have text
         if (app.settings.auto_paste && transcript.trim()) {
           try {
             await invoke("paste_text", {
@@ -147,183 +149,307 @@
             statusMessage = `Paste failed: ${String(e)}`;
           }
         }
-      } else {
-        transcript = "";
-        statusMessage = "";
-
-        if (modelLoaded) {
-          let lastTime = 0;
-          const PAUSE_THRESHOLD = 1.5; // seconds
-
-          const channel = new Channel<TranscriptionSegment>();
-          channel.onmessage = (segment) => {
-            if (segment.is_final) {
-              if (transcript) {
-                const gap = segment.start_time - lastTime;
-                const endsWithSentence = /[.!?…]\s*$/.test(transcript);
-                if (gap >= PAUSE_THRESHOLD && endsWithSentence && !transcript.endsWith("\n")) {
-                  transcript += "\n\n";
-                } else if (!transcript.endsWith(" ") && !transcript.endsWith("\n") && !segment.text.startsWith(" ")) {
-                  transcript += " ";
-                }
-              }
-              transcript += segment.text;
-              lastTime = segment.start_time;
-            }
-          };
-          await invoke("start_transcription", { channel });
-        } else {
-          await invoke("start_recording");
-        }
-        isRecording = true;
+      } catch (e) {
+        statusMessage = String(e);
       }
+      return;
+    }
+
+    if (!modelLoaded) {
+      statusMessage = modelDownloaded
+        ? "Load the model before starting dictation."
+        : "Download and load the model before starting dictation.";
+      return;
+    }
+
+    transcript = "";
+    statusMessage = "";
+    isStartingRecording = true;
+
+    try {
+      let lastTime = 0;
+      const pauseThreshold = 1.5;
+
+      const channel = new Channel<TranscriptionSegment>();
+      channel.onmessage = (segment) => {
+        if (segment.is_final) {
+          if (transcript) {
+            const gap = segment.start_time - lastTime;
+            const endsWithSentence = /[.!?…]\s*$/.test(transcript);
+            if (gap >= pauseThreshold && endsWithSentence && !transcript.endsWith("\n")) {
+              transcript += "\n\n";
+            } else if (!transcript.endsWith(" ") && !transcript.endsWith("\n") && !segment.text.startsWith(" ")) {
+              transcript += " ";
+            }
+          }
+          transcript += segment.text;
+          lastTime = segment.start_time;
+        }
+      };
+
+      await invoke("start_transcription", { channel });
+      isRecording = true;
     } catch (e) {
       statusMessage = String(e);
+    } finally {
+      isStartingRecording = false;
     }
   }
 </script>
 
-<div class="flex flex-col items-center gap-6 w-full max-w-lg">
-  <h1 class="text-2xl font-semibold text-zinc-100">Souffle</h1>
-
-  <p class="text-xs text-zinc-500">{engineName}</p>
-
-  <!-- Model setup flow -->
-  {#if !modelDownloaded}
-    <div class="flex flex-col items-center gap-3 p-4 rounded-lg bg-zinc-900 border border-zinc-800 w-full">
-      <p class="text-sm text-zinc-400">Model not downloaded yet (~2.4 GB)</p>
-      {#if isDownloading}
-        <div class="flex items-center gap-2">
-          <div class="w-4 h-4 border-2 border-zinc-500 border-t-zinc-200 rounded-full animate-spin"></div>
-          <p class="text-xs text-zinc-500">{downloadFile || "Starting download..."}</p>
+<div class="view-stack">
+  <section class="surface-card surface-card--compact dictation-toolbar">
+    <div class="dictation-lockup">
+      <img class="dictation-app-icon" src={appIcon} alt="Soufflé app icon" />
+      <div class="stack-sm">
+        <div class="dictation-heading-row">
+          <h2 class="section-title">Soufflé Dictation</h2>
+          <span class="pill">{engineName}</span>
         </div>
-      {:else}
-        <button
-          onclick={handleDownloadModel}
-          class="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors"
-        >
-          Download Kyutai STT
-        </button>
-      {/if}
+        <p class="helper-text">Rise gently. Dictate boldly.</p>
+      </div>
     </div>
-  {:else if !modelLoaded}
-    <div class="flex flex-col items-center gap-3 p-4 rounded-lg bg-zinc-900 border border-zinc-800 w-full">
-      <p class="text-sm text-zinc-400">Model downloaded. Load into memory to start.</p>
-      {#if isLoadingModel}
-        <div class="flex items-center gap-2">
-          <div class="w-4 h-4 border-2 border-zinc-500 border-t-zinc-200 rounded-full animate-spin"></div>
-          <p class="text-xs text-zinc-500">Loading model (Metal GPU)...</p>
+
+    <div class="action-row" style="flex-wrap: wrap;">
+      <span class={`pill ${modelLoaded ? "pill--success" : modelDownloaded ? "pill--warning" : ""}`}>
+        {modelLoaded ? "Model ready" : modelDownloaded ? "Load required" : "Download required"}
+      </span>
+      <span class={`pill ${app.settings.auto_paste ? "pill--primary" : ""}`}>
+        {app.settings.auto_paste ? `Auto-paste ${app.settings.paste_delay_ms}ms` : "Manual copy"}
+      </span>
+      <span class="pill">Shortcuts in Settings</span>
+    </div>
+  </section>
+
+  {#if !modelDownloaded || !modelLoaded}
+    <section class="surface-card surface-card--compact stack-md">
+      <div class="section-header">
+        <div>
+          <p class="eyebrow">Model</p>
+          <h3 class="section-title">{!modelDownloaded ? "Download Kyutai STT" : "Load the dictation model"}</h3>
+          <p class="section-description">
+            {!modelDownloaded
+              ? "The speech model takes about 2.4 GB on disk."
+              : "The first load takes a few seconds while Metal, the tokenizer, and weights warm up."}
+          </p>
         </div>
-      {:else}
-        <button
-          onclick={handleLoadModel}
-          class="px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-500 text-white cursor-pointer transition-colors"
-        >
-          Load Model
-        </button>
+
+        {#if !modelDownloaded}
+          <button onclick={handleDownloadModel} class="button button-primary" disabled={isDownloading}>
+            {#if isDownloading}
+              <span class="button-spinner" aria-hidden="true"></span>
+              Downloading...
+            {:else}
+              Download model
+            {/if}
+          </button>
+        {:else}
+          <button onclick={handleLoadModel} class="button button-primary" disabled={isLoadingModel}>
+            {#if isLoadingModel}
+              <span class="button-spinner" aria-hidden="true"></span>
+              Loading model...
+            {:else}
+              Load model
+            {/if}
+          </button>
+        {/if}
+      </div>
+
+      {#if isDownloading || isLoadingModel}
+        <div class="status-banner status-banner--warning">
+          <strong>{isDownloading ? (downloadFile || "Downloading model files...") : "Preparing the transcription engine..."}</strong>
+          <p class="helper-text">
+            {isDownloading
+              ? "Keep the app open while the files arrive and unpack."
+              : "This usually takes around three seconds on first load."}
+          </p>
+        </div>
       {/if}
-    </div>
+    </section>
   {/if}
-
-  <!-- Recording button -->
-  <button
-    onclick={toggleRecording}
-    disabled={!modelLoaded && modelDownloaded}
-    aria-label={isRecording ? "Stop recording" : "Start recording"}
-    class="w-24 h-24 rounded-full flex items-center justify-center transition-all duration-200
-      {isRecording
-        ? 'bg-red-500/20 border-2 border-red-500 text-red-400 shadow-lg shadow-red-500/20 cursor-pointer'
-        : modelLoaded
-          ? 'bg-zinc-800 border-2 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 cursor-pointer'
-          : 'bg-zinc-900 border-2 border-zinc-800 text-zinc-600 cursor-not-allowed'}"
-  >
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-10 h-10">
-      <path d="M12 1a4 4 0 0 0-4 4v7a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4Z" />
-      <path d="M6 10a1 1 0 0 0-2 0 8 8 0 0 0 7 7.93V21H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-3.07A8 8 0 0 0 20 10a1 1 0 1 0-2 0 6 6 0 0 1-12 0Z" />
-    </svg>
-  </button>
-
-  {#if isRecording}
-    <p class="text-sm text-red-400 animate-pulse">
-      {modelLoaded ? "Transcribing..." : "Recording..."}
-    </p>
-  {/if}
-
-  <div class="flex items-center gap-3">
-    <p class="text-xs text-zinc-600">Configure shortcuts in Settings</p>
-    {#if app.settings.auto_paste}
-      <span class="text-xs text-blue-400">Auto-paste ON</span>
-    {/if}
-  </div>
 
   {#if statusMessage}
-    <p class="text-xs text-yellow-500">{statusMessage}</p>
-  {/if}
-
-  {#if transcript}
-    <div class="w-full p-4 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300 whitespace-pre-wrap">
-      {transcript}
+    <div class="status-banner status-banner--warning">
+      <strong>Status</strong>
+      <p class="helper-text">{statusMessage}</p>
     </div>
-    <button
-      onclick={() => navigator.clipboard.writeText(transcript)}
-      class="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
-    >
-      Copy last
-    </button>
   {/if}
 
-  <!-- Dictation History -->
-  {#if history.length > 0}
-    <div class="w-full mt-2">
-      <button
-        onclick={() => showHistory = !showHistory}
-        class="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer mb-2"
-      >
-        <span>{showHistory ? "▲" : "▼"}</span>
-        <span>History ({history.length})</span>
-      </button>
+  <div class="split-grid">
+    <section class="surface-card dictation-control-card">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Capture</p>
+          <h3 class="section-title">
+            {#if isStartingRecording}
+              Starting the microphone...
+            {:else if isRecording}
+              Listening now
+            {:else}
+              Ready when you are
+            {/if}
+          </h3>
+          <p class="section-description">
+            {#if isStartingRecording}
+              The engine needs a short warm-up before text starts appearing.
+            {:else if isRecording}
+              Speak normally. Finalized text will stream into the transcript panel.
+            {:else}
+              One control, one transcript, zero ceremony.
+            {/if}
+          </p>
+        </div>
+        <span class={`pill ${isRecording ? "pill--danger" : isStartingRecording ? "pill--warning" : modelLoaded ? "pill--success" : ""}`}>
+          {isRecording ? "Live" : isStartingRecording ? "Starting" : modelLoaded ? "Ready" : "Locked"}
+        </span>
+      </div>
 
-      {#if showHistory}
-        <div class="flex flex-col gap-2">
-          {#each history as entry}
-            <div class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
-              <button
-                onclick={() => expandedEntryId = expandedEntryId === entry.id ? null : entry.id}
-                class="w-full flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-zinc-800/50 transition-colors"
-              >
-                <div class="flex flex-col items-start gap-0.5 min-w-0">
-                  <span class="text-xs text-zinc-500">{new Date(entry.timestamp).toLocaleString()}</span>
-                  <span class="text-sm text-zinc-300 truncate w-full text-left">
-                    {entry.text.slice(0, 80)}{entry.text.length > 80 ? "..." : ""}
-                  </span>
-                </div>
-                <span class="text-zinc-500 text-xs ml-2 shrink-0">{expandedEntryId === entry.id ? "▲" : "▼"}</span>
-              </button>
+      <div class="record-stage record-stage--spotlight">
+        <button
+          onclick={toggleRecording}
+          disabled={!modelLoaded || isLoadingModel || isStartingRecording}
+          aria-label={isRecording ? "Stop recording" : "Start recording"}
+          class="record-button"
+          class:is-ready={modelLoaded && !isRecording}
+          class:is-starting={isStartingRecording}
+          class:is-recording={isRecording}
+        >
+          <span class="record-orbit" aria-hidden="true"></span>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="54" height="54" aria-hidden="true">
+            <path d="M12 1a4 4 0 0 0-4 4v7a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4Z" />
+            <path d="M6 10a1 1 0 0 0-2 0 8 8 0 0 0 7 7.93V21H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-3.07A8 8 0 0 0 20 10a1 1 0 1 0-2 0 6 6 0 0 1-12 0Z" />
+          </svg>
+        </button>
 
-              {#if expandedEntryId === entry.id}
-                <div class="border-t border-zinc-800 p-3">
-                  <div class="text-sm text-zinc-300 whitespace-pre-wrap max-h-40 overflow-y-auto mb-2">
-                    {entry.text}
-                  </div>
-                  <button
-                    onclick={() => navigator.clipboard.writeText(entry.text)}
-                    class="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                  >
-                    Copy
-                  </button>
-                </div>
-              {/if}
-            </div>
-          {/each}
+        <div class="record-state">
+          {#if isStartingRecording}
+            Warming up...
+          {:else if isRecording}
+            Tap to stop
+          {:else if modelLoaded}
+            Tap to start
+          {:else}
+            Load model first
+          {/if}
         </div>
 
-        <button
-          onclick={clearHistory}
-          class="text-xs text-red-500/70 hover:text-red-400 cursor-pointer mt-2"
-        >
-          Clear history
-        </button>
+        <p class="record-caption">
+          {#if isStartingRecording}
+            Starting takes about 1.5 seconds, which is still faster than baking the actual soufflé.
+          {:else if isRecording}
+            The button glows while capture is active so it stays obvious at a glance.
+          {:else if modelLoaded}
+            Streaming text will appear in the transcript panel as soon as final segments arrive.
+          {:else}
+            Use the model control above, then this button becomes available.
+          {/if}
+        </p>
+      </div>
+
+      <div class="metric-grid">
+        <article class="metric-card">
+          <span class="metric-label">Input flow</span>
+          <span class="metric-value">{app.selectedDevice || "System default device"}</span>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">Output</span>
+          <span class="metric-value">{app.settings.auto_paste ? "Auto-paste enabled" : "Copy manually"}</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="surface-card stack-md">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Transcript</p>
+          <h3 class="section-title">Latest output</h3>
+        </div>
+        {#if transcript}
+          <button onclick={() => navigator.clipboard.writeText(transcript)} class="button button-secondary">Copy last</button>
+        {/if}
+      </div>
+
+      {#if transcript}
+        <div class="transcript-output">{transcript}</div>
+      {:else}
+        <div class="empty-state">
+          <strong>
+            {#if isStartingRecording}
+              Warming up the engine
+            {:else if isRecording}
+              Listening for speech
+            {:else}
+              No transcript yet
+            {/if}
+          </strong>
+          {#if isStartingRecording}
+            The session is starting. Text will appear here as soon as finalized segments come back.
+          {:else if isRecording}
+            Start speaking and the transcript will populate here with spacing and paragraph breaks applied.
+          {:else}
+            Press the mic button to start a new dictation.
+          {/if}
+        </div>
       {/if}
+    </section>
+  </div>
+
+  <section class="surface-card surface-card--compact stack-md">
+    <div class="section-header">
+      <div>
+        <p class="eyebrow">History</p>
+        <h3 class="section-title">Recent entries</h3>
+      </div>
+
+      <div class="action-row" style="flex-wrap: wrap;">
+        <span class="pill">{history.length} saved</span>
+        {#if history.length > 0}
+          <button onclick={() => showHistory = !showHistory} class="button button-secondary">
+            {showHistory ? "Hide" : "Show"}
+          </button>
+          <button onclick={clearHistory} class="button button-ghost danger-text">Clear</button>
+        {/if}
+      </div>
     </div>
-  {/if}
+
+    {#if history.length === 0}
+      <div class="empty-state">
+        <strong>No history yet</strong>
+        Finished dictations are saved here automatically so you can revisit them later.
+      </div>
+    {:else if showHistory}
+      <div class="history-list">
+        {#each history as entry}
+          <article class="history-item">
+            <button
+              onclick={() => expandedEntryId = expandedEntryId === entry.id ? null : entry.id}
+              class="history-toggle"
+            >
+              <div class="list-item-header">
+                <div class="stack-sm" style="min-width: 0;">
+                  <span class="history-meta">{new Date(entry.timestamp).toLocaleString()}</span>
+                  <span class="history-preview text-truncate">{entry.text}</span>
+                </div>
+                <span class="pill">{expandedEntryId === entry.id ? "Open" : "Preview"}</span>
+              </div>
+            </button>
+
+            {#if expandedEntryId === entry.id}
+              <div class="history-body stack-md">
+                <div class="transcript-output scroll-block">{entry.text}</div>
+                <div class="action-row">
+                  <button onclick={() => navigator.clipboard.writeText(entry.text)} class="button button-secondary">Copy entry</button>
+                </div>
+              </div>
+            {/if}
+          </article>
+        {/each}
+      </div>
+    {:else}
+      <div class="status-banner">
+        <strong>History is collapsed.</strong>
+        <p class="helper-text">Open it when you want to review or copy previous dictations.</p>
+      </div>
+    {/if}
+  </section>
 </div>

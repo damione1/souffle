@@ -33,21 +33,23 @@
         if (settings.debug_transcription !== null && settings.debug_transcription !== undefined) {
           app.settings = { ...app.settings, debug_transcription: settings.debug_transcription as boolean };
         }
-        // Restore saved audio device and tell backend
         if (settings.audio_device) {
           app.selectedDevice = settings.audio_device as string;
           await invoke("select_audio_device", { deviceName: app.selectedDevice });
         }
-      } catch { /* First run, no settings yet */ }
+      } catch {
+        // First run, no settings yet.
+      }
     })();
 
-    // Listen for tray navigation events
     listen<string>("navigate", (event) => {
       const view = event.payload as View;
       if (["dictation", "recordings", "settings"].includes(view)) {
         app.currentView = view;
       }
-    }).then((fn) => { unlistenNav = fn; });
+    }).then((fn) => {
+      unlistenNav = fn;
+    });
 
     return () => {
       unlistenNav?.();
@@ -62,7 +64,6 @@
       document.documentElement.classList.remove("dark");
       document.documentElement.classList.add("light");
     } else {
-      // system
       const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       document.documentElement.classList.toggle("dark", isDark);
       document.documentElement.classList.toggle("light", !isDark);
@@ -70,15 +71,18 @@
   }
 </script>
 
-<main class="flex flex-col items-center min-h-screen">
-  <TabBar />
-  <div class="flex flex-col items-center justify-center flex-1 p-6 w-full">
-    {#if app.currentView === "dictation"}
-      <Dictation />
-    {:else if app.currentView === "recordings"}
-      <Recordings />
-    {:else if app.currentView === "settings"}
-      <Settings />
-    {/if}
+<main class="app-shell">
+  <div class="app-frame">
+    <TabBar />
+
+    <section class="page-surface">
+      {#if app.currentView === "dictation"}
+        <Dictation />
+      {:else if app.currentView === "recordings"}
+        <Recordings />
+      {:else if app.currentView === "settings"}
+        <Settings />
+      {/if}
+    </section>
   </div>
 </main>

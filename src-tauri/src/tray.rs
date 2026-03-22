@@ -40,7 +40,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     TrayIconBuilder::new()
         .menu(&menu)
-        .tooltip("Souffle")
+        .tooltip("Soufflé")
         .icon(app.default_window_icon().unwrap().clone())
         .icon_as_template(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
