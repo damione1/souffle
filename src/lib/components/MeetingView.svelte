@@ -8,6 +8,11 @@
     TranscriptionSegment,
   } from "../types";
   import { getAppState } from "../stores/app.svelte";
+  import StatusBanner from "./ui/StatusBanner.svelte";
+  import CopyButton from "./ui/CopyButton.svelte";
+  import EmptyState from "./ui/EmptyState.svelte";
+  import ConfirmAction from "./ui/ConfirmAction.svelte";
+  import Spinner from "./ui/Spinner.svelte";
 
   const app = getAppState();
 
@@ -226,59 +231,48 @@
 
   let displayParagraphs = $derived(groupIntoParagraphs(displaySegments));
 
-  let confirmDelete = $state(false);
-
   export function getRecordingState() {
     return isRecordingMeeting;
   }
 </script>
 
-<div class="view">
+<div class="flex flex-col gap-4">
   {#if statusMessage}
-    <div class="status-banner warning">
-      <p class="text-sm">{statusMessage}</p>
-    </div>
+    <StatusBanner message={statusMessage} variant="warning" />
   {/if}
 
   {#if isNewMode}
-    <!-- ═══ New Meeting Form ═══ -->
-    <section class="new-meeting-card surface-card">
-      <h2>New Meeting</h2>
-      <p class="text-secondary text-sm">Audio starts immediately. Transcript segments stream live. The finished meeting is saved automatically.</p>
-
-      <label class="field-group">
-        <span class="field-label">Meeting title</span>
-        <input
-          type="text"
-          bind:value={meetingTitle}
-          placeholder="Quarterly planning sync"
-          class="field-input"
-          onkeydown={(e) => { if (e.key === "Enter") startMeetingRecording(); }}
-        />
-        <p class="text-sm text-muted">Leave empty to use the current date.</p>
-      </label>
-
+    <!-- New Meeting Form (simplified, centered, no card) -->
+    <div class="flex flex-col items-center justify-center h-full gap-6">
+      <input
+        type="text"
+        bind:value={meetingTitle}
+        placeholder="Meeting title (optional)"
+        class="field-input w-full max-w-sm text-center"
+        onkeydown={(e) => { if (e.key === "Enter") startMeetingRecording(); }}
+      />
       <button onclick={startMeetingRecording} class="btn btn-primary btn-lg">
         Start Recording
       </button>
-    </section>
+      <p class="text-sm text-text-muted">Leave empty to use the current date</p>
+    </div>
 
   {:else if isLoadingMeeting}
-    <div class="empty-state">
-      <span class="spinner" aria-hidden="true"></span>
-      <p class="text-sm text-muted">Loading meeting...</p>
+    <div class="flex flex-col items-center gap-2 p-8 text-text-muted">
+      <Spinner />
+      <p class="text-sm">Loading meeting...</p>
     </div>
 
   {:else if meeting}
-    <!-- ═══ Meeting Item Page ═══ -->
-    <div class="meeting-header">
-      <div class="meeting-header-left">
+    <!-- Meeting Item Page -->
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div class="flex flex-col gap-1">
         {#if isRecordingMeeting}
-          <span class="pill pill-danger recording-pill">
+          <span class="pill pill-danger inline-flex items-center gap-1.5">
             <span class="recording-dot"></span> Recording
           </span>
         {:else}
-          <button onclick={() => { app.currentMeetingId = null; app.currentView = "meeting-history"; }} class="btn btn-ghost btn-back">
+          <button onclick={() => { app.currentMeetingId = null; app.currentView = "meeting-history"; }} class="btn btn-ghost py-1 px-0 text-sm gap-1 mb-1">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
               <path fill-rule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clip-rule="evenodd" />
             </svg>
@@ -286,16 +280,16 @@
           </button>
         {/if}
         <h2>{meeting.title}</h2>
-        <div class="meeting-meta">
+        <div class="flex items-center gap-2 flex-wrap">
           {#if !isRecordingMeeting}
-            <span class="text-sm text-muted">{formatDate(meeting.started_at)}</span>
+            <span class="text-sm text-text-muted">{formatDate(meeting.started_at)}</span>
             <span class="pill">{formatDuration(meeting.duration_seconds)}</span>
           {/if}
-          <span class="text-sm text-muted">{displaySegments.length} segments</span>
+          <span class="text-sm text-text-muted">{displaySegments.length} segments</span>
         </div>
       </div>
 
-      <div class="meeting-header-actions">
+      <div class="flex gap-2 shrink-0">
         {#if isRecordingMeeting}
           <button onclick={stopMeetingRecording} class="btn btn-danger">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
@@ -309,54 +303,46 @@
       </div>
     </div>
 
-    <!-- ═══ Key Insights (shown after recording, if summary exists) ═══ -->
+    <!-- Key Insights (shown after recording, if summary exists) -->
     {#if !isRecordingMeeting && meeting.summary}
       {@const lines = meeting.summary.split("\n").filter((l) => l.trim())}
       {@const keyPoints = lines.filter((l) => /^[-•*]\s/.test(l.trim()) || /^\d+[.)]\s/.test(l.trim())).slice(0, 4)}
       {#if keyPoints.length > 0}
-        <div class="insights-grid">
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
           {#each keyPoints as point, i}
-            <div class="insight-card">
-              <span class="insight-number">{i + 1}</span>
-              <p class="insight-text">{point.replace(/^[-•*\d.)]+\s*/, "").trim()}</p>
+            <div class="flex gap-3 p-3.5 bg-surface-2 rounded-default outline-1 outline-ghost-border items-start">
+              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-accent-blue/15 text-accent-blue text-xs font-bold shrink-0">{i + 1}</span>
+              <p class="m-0 text-sm text-text-secondary leading-normal">{point.replace(/^[-•*\d.)]+\s*/, "").trim()}</p>
             </div>
           {/each}
         </div>
       {/if}
     {/if}
 
-    <!-- ═══ Two-column: Transcript + Summary ═══ -->
-    <div class="two-col">
+    <!-- Two-column: Transcript + Summary -->
+    <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
       <!-- Left: Transcript -->
-      <section class="surface-card col-card">
-        <div class="section-row">
+      <section class="surface-card flex flex-col gap-3">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
           <h3>Transcript</h3>
           {#if !isRecordingMeeting && displayParagraphs.length > 0}
-            <button
-              onclick={() => {
-                const text = displayParagraphs.map((p) => `[${p.timestamp}] ${p.text}`).join("\n\n");
-                navigator.clipboard.writeText(text);
-              }}
-              class="btn"
-            >
-              Copy
-            </button>
+            <CopyButton text={displayParagraphs.map((p) => `[${p.timestamp}] ${p.text}`).join("\n\n")} />
           {/if}
         </div>
-        <div class="transcript-output">
+        <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary min-h-60 max-h-[480px] overflow-y-auto text-sm leading-relaxed">
           {#if displayParagraphs.length > 0}
             {#each displayParagraphs as para}
-              <p class="paragraph">
-                <span class="timestamp">[{para.timestamp}]</span>
+              <p class="mb-3 last:mb-0 leading-[1.65]">
+                <span class="text-text-muted text-xs mr-1 tabular-nums">[{para.timestamp}]</span>
                 {para.text}
               </p>
             {/each}
           {:else}
-            <div class="transcript-empty">
+            <div class="flex items-center justify-center min-h-[200px]">
               {#if isRecordingMeeting}
-                <span class="text-muted">Listening for speech...</span>
+                <span class="text-text-muted">Listening for speech...</span>
               {:else}
-                <span class="text-muted">No transcript available.</span>
+                <span class="text-text-muted">No transcript available.</span>
               {/if}
             </div>
           {/if}
@@ -364,48 +350,45 @@
       </section>
 
       <!-- Right: Summary -->
-      <section class="surface-card col-card">
-        <div class="section-row">
+      <section class="surface-card flex flex-col gap-3">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
           <h3>Summary</h3>
           {#if meeting.summary && !isRecordingMeeting}
-            <button
-              onclick={() => navigator.clipboard.writeText(meeting?.summary || "")}
-              class="btn"
-            >
-              Copy
-            </button>
+            <CopyButton text={meeting.summary} />
           {/if}
         </div>
 
         {#if isRecordingMeeting}
-          <div class="empty-state">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32" class="empty-icon">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-            </svg>
-            <p class="text-sm text-muted">Stop the recording to generate a summary.</p>
-          </div>
+          <EmptyState message="Stop the recording to generate a summary.">
+            {#snippet icon()}
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+            {/snippet}
+          </EmptyState>
         {:else if meeting.summary}
-          <div class="summary-output">{meeting.summary}</div>
+          <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-[100px] max-h-[360px] overflow-y-auto text-sm leading-relaxed">{meeting.summary}</div>
           {#if meeting.summary_model}
-            <span class="pill pill-muted" style="align-self: flex-start;">Generated with {meeting.summary_model}</span>
+            <span class="pill pill-muted self-start">Generated with {meeting.summary_model}</span>
           {/if}
         {:else}
-          <div class="empty-state">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32" class="empty-icon">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
-            </svg>
-            <p class="text-sm text-muted">No summary yet. Generate one below.</p>
-          </div>
+          <EmptyState message="No summary yet. Generate one below.">
+            {#snippet icon()}
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
+              </svg>
+            {/snippet}
+          </EmptyState>
         {/if}
 
         {#if isSummarizing}
-          <div class="summary-output streaming">{summaryStream}<span class="cursor">|</span></div>
+          <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-[80px] overflow-y-auto text-sm leading-relaxed">{summaryStream}<span class="text-text-muted animate-pulse">|</span></div>
         {/if}
 
         <!-- Generate Summary CTA -->
         {#if !isRecordingMeeting && displaySegments.length > 0}
           {#if ollamaAvailable && summaryModels.length > 0}
-            <div class="summary-cta">
+            <div class="flex gap-2 items-center">
               <select bind:value={selectedModel} disabled={isSummarizing} class="field-select">
                 {#each summaryModels as model}
                   <option value={model}>{model}</option>
@@ -417,7 +400,7 @@
                 class="btn btn-primary"
               >
                 {#if isSummarizing}
-                  <span class="spinner" aria-hidden="true"></span>
+                  <Spinner />
                   Generating...
                 {:else}
                   {meeting.summary ? "Re-generate Summary" : "Generate Summary"}
@@ -425,290 +408,26 @@
               </button>
             </div>
           {:else if !ollamaAvailable}
-            <div class="ollama-notice">
+            <div class="flex items-center gap-2 py-2">
               <span class="status-dot"></span>
-              <span class="text-sm text-muted">Connect Ollama in Settings to enable summaries.</span>
+              <span class="text-sm text-text-muted">Connect Ollama in Settings to enable summaries.</span>
             </div>
           {/if}
         {/if}
       </section>
     </div>
 
-    <!-- ═══ Footer actions for completed meetings ═══ -->
+    <!-- Footer actions for completed meetings -->
     {#if !isRecordingMeeting && meeting.id}
-      <div class="meeting-footer">
-        {#if confirmDelete}
-          <span class="text-sm text-muted">Delete this meeting permanently?</span>
-          <button onclick={deleteMeeting} class="btn btn-danger">Yes, delete</button>
-          <button onclick={() => (confirmDelete = false)} class="btn btn-ghost">Cancel</button>
-        {:else}
-          <button onclick={() => (confirmDelete = true)} class="btn btn-ghost" style="color: var(--color-danger);">
-            Delete meeting
-          </button>
-        {/if}
+      <div class="flex items-center gap-2 pt-2 border-t border-ghost-border">
+        <ConfirmAction
+          label="Delete meeting"
+          confirmLabel="Yes, delete"
+          confirmMessage="Delete this meeting permanently?"
+          variant="danger"
+          onConfirm={deleteMeeting}
+        />
       </div>
     {/if}
   {/if}
 </div>
-
-<style>
-  .view {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  /* ── New Meeting Form ── */
-  .new-meeting-card {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    max-width: 480px;
-  }
-
-  .field-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .btn-lg {
-    padding: 0.75rem 1.5rem;
-    font-size: 1rem;
-  }
-
-  /* ── Meeting Header ── */
-  .meeting-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-
-  .meeting-header-left {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .meeting-header-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-shrink: 0;
-  }
-
-  .meeting-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .btn-back {
-    padding: 0.25rem 0;
-    font-size: 0.8125rem;
-    gap: 0.25rem;
-    margin-bottom: 0.25rem;
-  }
-
-  .recording-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-  }
-
-  .recording-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--color-danger);
-    animation: blink 1.2s ease-in-out infinite;
-  }
-
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
-
-  /* ── Key Insights Grid ── */
-  .insights-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 0.75rem;
-  }
-
-  .insight-card {
-    display: flex;
-    gap: 0.75rem;
-    padding: 0.875rem;
-    background: var(--color-surface-2);
-    border-radius: var(--radius-default);
-    outline: 1px solid var(--color-ghost-border);
-    align-items: flex-start;
-  }
-
-  .insight-number {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: color-mix(in srgb, var(--color-accent-blue) 15%, transparent);
-    color: var(--color-accent-blue);
-    font-size: 0.75rem;
-    font-weight: 700;
-    flex-shrink: 0;
-  }
-
-  .insight-text {
-    margin: 0;
-    font-size: 0.8125rem;
-    color: var(--color-text-secondary);
-    line-height: 1.5;
-  }
-
-  /* ── Two-column layout ── */
-  .two-col {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-  }
-
-  .col-card {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .section-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-
-  /* ── Transcript ── */
-  .transcript-output {
-    padding: 0.75rem;
-    background: var(--color-surface-1);
-    border-radius: var(--radius-default);
-    outline: 1px solid var(--color-ghost-border);
-    color: var(--color-text-secondary);
-    min-height: 240px;
-    max-height: 480px;
-    overflow-y: auto;
-    font-size: 0.8125rem;
-    line-height: 1.6;
-  }
-
-  .transcript-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 200px;
-  }
-
-  .paragraph {
-    margin: 0 0 0.75rem 0;
-    line-height: 1.65;
-  }
-
-  .paragraph:last-child {
-    margin-bottom: 0;
-  }
-
-  .timestamp {
-    color: var(--color-text-muted);
-    font-size: 0.7rem;
-    margin-right: 0.25rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* ── Summary ── */
-  .summary-output {
-    padding: 0.75rem;
-    background: var(--color-surface-1);
-    border-radius: var(--radius-default);
-    outline: 1px solid var(--color-ghost-border);
-    color: var(--color-text-secondary);
-    white-space: pre-wrap;
-    min-height: 100px;
-    max-height: 360px;
-    overflow-y: auto;
-    font-size: 0.8125rem;
-    line-height: 1.6;
-  }
-
-  .summary-output.streaming {
-    min-height: 80px;
-  }
-
-  .cursor {
-    color: var(--color-text-muted);
-    animation: blink 0.8s step-end infinite;
-  }
-
-  .summary-cta {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .ollama-notice {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0;
-  }
-
-  .empty-state {
-    padding: 2rem;
-    text-align: center;
-    color: var(--color-text-muted);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .empty-icon {
-    opacity: 0.4;
-  }
-
-  /* ── Footer ── */
-  .meeting-footer {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--color-ghost-border);
-  }
-
-  /* ── Status / Helpers ── */
-  .status-banner {
-    padding: 0.75rem 1rem;
-    border-radius: var(--radius-default);
-    background: var(--color-surface-3);
-    outline: 1px solid var(--color-ghost-border);
-  }
-
-  .status-banner.warning {
-    outline-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
-  }
-
-  .text-secondary { color: var(--color-text-secondary); }
-  .text-muted { color: var(--color-text-muted); }
-  .text-sm { font-size: 0.8125rem; }
-
-  @media (max-width: 700px) {
-    .two-col {
-      grid-template-columns: 1fr;
-    }
-    .insights-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>

@@ -81,11 +81,11 @@
   }
 </script>
 
-<div class="app-layout">
+<div class="flex h-screen overflow-hidden">
   <Sidebar />
 
-  <div class="content-area">
-    <main class="content-main">
+  <div class="flex flex-1 flex-col min-w-0 overflow-hidden">
+    <main class="flex-1 p-6 overflow-y-auto">
       {#if app.currentView === "transcription"}
         <TranscriptionView bind:this={transcriptionView} />
       {:else if app.currentView === "meeting"}
@@ -100,25 +100,3 @@
     <Waveform active={isAnyRecording} />
   </div>
 </div>
-
-<style>
-  .app-layout {
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-  }
-
-  .content-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    overflow: hidden;
-  }
-
-  .content-main {
-    flex: 1;
-    padding: 1.5rem;
-    overflow-y: auto;
-  }
-</style>

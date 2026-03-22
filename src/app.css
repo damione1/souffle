@@ -60,7 +60,6 @@
   --font-family-body: "Inter", system-ui, sans-serif;
 
   --radius-default: 0.75rem;
-  --radius-lg: 1rem;
   --radius-pill: 9999px;
 }
 
@@ -139,19 +138,14 @@ img {
   background: var(--color-glass-bg);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  border-radius: var(--radius-lg);
-  outline: 1px solid var(--color-ghost-border);
-}
-
-/* ─── Ghost border ─── */
-.ghost-border {
+  border-radius: 1rem;
   outline: 1px solid var(--color-ghost-border);
 }
 
 /* ─── Surface card ─── */
 .surface-card {
   background: var(--color-surface-2);
-  border-radius: var(--radius-lg);
+  border-radius: 1rem;
   outline: 1px solid var(--color-ghost-border);
   padding: 1.25rem;
 }
@@ -218,6 +212,23 @@ img {
   padding: 0.5rem;
   min-width: 2.25rem;
   min-height: 2.25rem;
+}
+
+.btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  min-height: auto;
+}
+
+.btn-lg {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+}
+
+.btn-active {
+  background: var(--color-accent-blue) !important;
+  color: #fff !important;
+  outline: none !important;
 }
 
 /* ─── Pills / Badges ─── */
@@ -438,9 +449,23 @@ img {
   animation: spin 0.7s linear infinite;
 }
 
+/* ─── Recording dot ─── */
+.recording-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
 /* ─── Animations ─── */
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 @keyframes recordPulse {

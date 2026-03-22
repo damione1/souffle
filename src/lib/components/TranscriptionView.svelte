@@ -4,6 +4,11 @@
   import { onMount } from "svelte";
   import type { TranscriptionSegment, ModelStatus, DownloadProgress, DictationEntry } from "../types";
   import { getAppState } from "../stores/app.svelte";
+  import StatusBanner from "./ui/StatusBanner.svelte";
+  import CopyButton from "./ui/CopyButton.svelte";
+  import ConfirmAction from "./ui/ConfirmAction.svelte";
+  import EmptyState from "./ui/EmptyState.svelte";
+  import Spinner from "./ui/Spinner.svelte";
 
   const app = getAppState();
 
@@ -22,7 +27,6 @@
 
   let history = $state<DictationEntry[]>([]);
   let expandedEntryId = $state<string | null>(null);
-  let confirmClearAll = $state(false);
 
   let cleanupFns: (() => void)[] = [];
 
@@ -228,14 +232,14 @@
   }
 </script>
 
-<div class="view">
+<div class="flex flex-col gap-4">
   <!-- Model gate -->
   {#if !modelDownloaded || !modelLoaded}
     <section class="surface-card">
-      <div class="section-row">
-        <div class="section-text">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <div class="flex-1 min-w-0">
           <h3>{!modelDownloaded ? "Download Kyutai STT" : "Load the dictation model"}</h3>
-          <p class="text-secondary text-sm">
+          <p class="text-text-secondary text-sm">
             {!modelDownloaded
               ? "The speech model takes about 2.4 GB on disk."
               : "The first load takes a few seconds while Metal, the tokenizer, and weights warm up."}
@@ -245,7 +249,7 @@
         {#if !modelDownloaded}
           <button onclick={handleDownloadModel} class="btn btn-primary" disabled={isDownloading}>
             {#if isDownloading}
-              <span class="spinner" aria-hidden="true"></span>
+              <Spinner />
               Downloading...
             {:else}
               Download model
@@ -254,7 +258,7 @@
         {:else}
           <button onclick={handleLoadModel} class="btn btn-primary" disabled={isLoadingModel}>
             {#if isLoadingModel}
-              <span class="spinner" aria-hidden="true"></span>
+              <Spinner />
               Loading...
             {:else}
               Load model
@@ -264,9 +268,9 @@
       </div>
 
       {#if isDownloading || isLoadingModel}
-        <div class="status-banner">
+        <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border mt-3">
           <strong>{isDownloading ? (downloadFile || "Downloading model files...") : "Preparing engine..."}</strong>
-          <p class="text-muted text-sm">
+          <p class="text-text-muted text-sm">
             {isDownloading ? "Keep the app open while files download." : "Usually takes a few seconds on first load."}
           </p>
         </div>
@@ -275,15 +279,13 @@
   {/if}
 
   {#if statusMessage}
-    <div class="status-banner warning">
-      <p class="text-sm">{statusMessage}</p>
-    </div>
+    <StatusBanner message={statusMessage} variant="warning" />
   {/if}
 
   <!-- Hero area -->
   <section class="surface-card">
-    <div class="hero-row">
-      <div class="hero-badges">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex flex-wrap gap-2">
         <span class="pill pill-blue">{engineName}</span>
         <span class={`pill ${modelLoaded ? "pill-success" : modelDownloaded ? "pill-warning" : ""}`}>
           {modelLoaded ? "Model ready" : modelDownloaded ? "Load required" : "Download required"}
@@ -296,9 +298,9 @@
   </section>
 
   <!-- Record + Transcript -->
-  <div class="two-col">
-    <section class="surface-card center-col">
-      <h3 class="text-center">
+  <div class="grid grid-cols-[minmax(280px,1fr)_minmax(280px,1.2fr)] gap-4 max-[700px]:grid-cols-1">
+    <section class="surface-card flex flex-col items-center gap-4 text-center">
+      <h3>
         {#if isStartingRecording}
           Starting the microphone...
         {:else if isRecording}
@@ -307,7 +309,7 @@
           Ready when you are
         {/if}
       </h3>
-      <p class="text-secondary text-sm text-center">
+      <p class="text-text-secondary text-sm">
         {#if isStartingRecording}
           Warming up the engine.
         {:else if isRecording}
@@ -331,7 +333,7 @@
         </svg>
       </button>
 
-      <span class="text-sm text-secondary">
+      <span class="text-sm text-text-secondary">
         {#if isStartingRecording}
           Warming up...
         {:else if isRecording}
@@ -343,47 +345,33 @@
         {/if}
       </span>
 
-      <div class="metrics-row">
-        <div class="metric">
+      <div class="flex gap-6 mt-2">
+        <div class="flex flex-col gap-0.5 text-center">
           <span class="field-label">Input</span>
           <span class="text-sm">{app.selectedDevice || "Default device"}</span>
         </div>
-        <div class="metric">
+        <div class="flex flex-col gap-0.5 text-center">
           <span class="field-label">Output</span>
           <span class="text-sm">{app.settings.auto_paste ? "Auto-paste" : "Manual copy"}</span>
         </div>
       </div>
     </section>
 
-    <section class="surface-card transcript-col">
-      <div class="section-row">
+    <section class="surface-card flex flex-col gap-3">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
         <h3>Transcript</h3>
         {#if transcript}
-          <button onclick={() => navigator.clipboard.writeText(transcript)} class="btn">Copy</button>
+          <CopyButton text={transcript} />
         {/if}
       </div>
 
       {#if transcript}
-        <div class="transcript-output">{transcript}</div>
+        <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-40 max-h-[360px] overflow-y-auto text-sm leading-relaxed">{transcript}</div>
       {:else}
-        <div class="empty-state">
-          <strong>
-            {#if isStartingRecording}
-              Warming up...
-            {:else if isRecording}
-              Listening for speech
-            {:else}
-              No transcript yet
-            {/if}
-          </strong>
-          <p class="text-sm text-muted">
-            {#if isRecording || isStartingRecording}
-              Text will appear as segments arrive.
-            {:else}
-              Press the mic button to start.
-            {/if}
-          </p>
-        </div>
+        <EmptyState
+          title={isStartingRecording ? "Warming up..." : isRecording ? "Listening for speech" : "No transcript yet"}
+          message={isRecording || isStartingRecording ? "Text will appear as segments arrive." : "Press the mic button to start."}
+        />
       {/if}
     </section>
   </div>
@@ -391,34 +379,31 @@
   <!-- History -->
   {#if history.length > 0}
     <section class="surface-card">
-      <div class="section-row">
-        <h3>History <span class="text-sm text-muted" style="font-weight: 400;">({history.length})</span></h3>
-        {#if confirmClearAll}
-          <div class="btn-group">
-            <span class="text-sm text-muted">Clear all entries?</span>
-            <button onclick={() => { clearHistory(); confirmClearAll = false; }} class="btn btn-danger">Yes, clear</button>
-            <button onclick={() => (confirmClearAll = false)} class="btn btn-ghost">Cancel</button>
-          </div>
-        {:else}
-          <button onclick={() => (confirmClearAll = true)} class="btn btn-ghost" style="color: var(--color-danger);">Clear all</button>
-        {/if}
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <h3>History <span class="text-sm text-text-muted font-normal">({history.length})</span></h3>
+        <ConfirmAction
+          label="Clear all"
+          confirmLabel="Yes, clear"
+          confirmMessage="Clear all entries?"
+          variant="danger"
+          onConfirm={clearHistory}
+        />
       </div>
 
-      <div class="history-list">
+      <div class="flex flex-col gap-2 mt-2">
         {#each history as entry}
           {@const isExpanded = expandedEntryId === entry.id}
-          <div class="history-item">
+          <div class="rounded-default outline-1 outline-ghost-border bg-surface-1 overflow-hidden">
             <button
               onclick={() => (expandedEntryId = isExpanded ? null : entry.id)}
-              class="history-content"
-              class:is-expanded={isExpanded}
+              class="w-full px-3 py-2.5 text-left cursor-pointer transition-colors duration-150 hover:bg-surface-3"
             >
-              <span class="history-date">{new Date(entry.timestamp).toLocaleString()}</span>
-              <p class="history-text" class:is-clamped={!isExpanded}>{entry.text}</p>
+              <span class="text-xs text-text-muted">{new Date(entry.timestamp).toLocaleString()}</span>
+              <p class={`mt-1 mb-0 text-text-secondary text-sm leading-normal whitespace-pre-wrap break-words ${!isExpanded ? "line-clamp-5" : ""}`}>{entry.text}</p>
             </button>
-            <div class="history-actions">
+            <div class="flex gap-1 px-3 pb-2">
               <button onclick={() => navigator.clipboard.writeText(entry.text)} class="btn btn-ghost btn-sm">Copy</button>
-              <button onclick={() => deleteHistoryEntry(entry.id)} class="btn btn-ghost btn-sm" style="color: var(--color-danger);">Delete</button>
+              <button onclick={() => deleteHistoryEntry(entry.id)} class="btn btn-ghost btn-sm text-danger">Delete</button>
             </div>
           </div>
         {/each}
@@ -426,195 +411,3 @@
     </section>
   {/if}
 </div>
-
-<style>
-  .view {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .section-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-
-  .section-text {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .hero-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
-
-  .hero-badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
-  .two-col {
-    display: grid;
-    grid-template-columns: minmax(280px, 1fr) minmax(280px, 1.2fr);
-    gap: 1rem;
-  }
-
-  .center-col {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1rem;
-    text-align: center;
-  }
-
-  .text-center {
-    text-align: center;
-  }
-
-  .text-secondary {
-    color: var(--color-text-secondary);
-  }
-
-  .text-muted {
-    color: var(--color-text-muted);
-  }
-
-  .text-sm {
-    font-size: 0.8125rem;
-  }
-
-  .transcript-col {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .transcript-output {
-    padding: 0.75rem;
-    background: var(--color-surface-1);
-    border-radius: var(--radius-default);
-    outline: 1px solid var(--color-ghost-border);
-    color: var(--color-text-secondary);
-    white-space: pre-wrap;
-    min-height: 160px;
-    max-height: 360px;
-    overflow-y: auto;
-    font-size: 0.875rem;
-    line-height: 1.6;
-  }
-
-  .empty-state {
-    padding: 1.5rem;
-    text-align: center;
-    color: var(--color-text-muted);
-  }
-
-  .empty-state strong {
-    display: block;
-    margin-bottom: 0.25rem;
-    color: var(--color-text-secondary);
-  }
-
-  .status-banner {
-    padding: 0.75rem 1rem;
-    border-radius: var(--radius-default);
-    background: var(--color-surface-3);
-    outline: 1px solid var(--color-ghost-border);
-  }
-
-  .status-banner.warning {
-    outline-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
-  }
-
-  .metrics-row {
-    display: flex;
-    gap: 1.5rem;
-    margin-top: 0.5rem;
-  }
-
-  .metric {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-    text-align: center;
-  }
-
-  .btn-group {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .history-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-  }
-
-  .history-item {
-    border-radius: var(--radius-default);
-    outline: 1px solid var(--color-ghost-border);
-    background: var(--color-surface-1);
-    overflow: hidden;
-  }
-
-  .history-content {
-    width: 100%;
-    padding: 0.625rem 0.75rem;
-    text-align: left;
-    cursor: pointer;
-    transition: background 150ms ease;
-  }
-
-  .history-content:hover {
-    background: var(--color-surface-3);
-  }
-
-  .history-date {
-    font-size: 0.7rem;
-    color: var(--color-text-muted);
-  }
-
-  .history-text {
-    margin: 0.25rem 0 0;
-    color: var(--color-text-secondary);
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .history-text.is-clamped {
-    display: -webkit-box;
-    -webkit-line-clamp: 5;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .history-actions {
-    display: flex;
-    gap: 0.25rem;
-    padding: 0.25rem 0.75rem 0.5rem;
-  }
-
-  .btn-sm {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-    min-height: auto;
-  }
-
-  @media (max-width: 700px) {
-    .two-col {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>

@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import type { AudioDevice, OllamaStatus, Theme } from "../types";
   import { getAppState } from "../stores/app.svelte";
+  import StatusBanner from "./ui/StatusBanner.svelte";
 
   const app = getAppState();
 
@@ -268,23 +269,21 @@
 
 <svelte:window onkeydown={handleKeyDown} />
 
-<div class="view">
+<div class="flex flex-col gap-4">
   <h2>Settings</h2>
 
   {#if statusMessage}
-    <div class="status-banner">
-      <p class="text-sm">{statusMessage}</p>
-    </div>
+    <StatusBanner message={statusMessage} />
   {/if}
 
   <!-- Audio Configuration -->
-  <section class="surface-card section">
+  <section class="surface-card flex flex-col gap-3.5">
     <h3>Audio Configuration</h3>
-    <p class="text-secondary text-sm">Choose the active microphone or virtual device.</p>
+    <p class="text-text-secondary text-sm">Choose the active microphone or virtual device.</p>
 
-    <div class="field-group">
+    <div class="flex flex-col gap-1.5">
       <span class="field-label">Input device</span>
-      <div class="input-row">
+      <div class="flex gap-1.5 items-center">
         <select value={app.selectedDevice} onchange={onDeviceChange} class="field-select">
           {#each audioDevices as device}
             <option value={device.name}>
@@ -300,12 +299,12 @@
       </div>
     </div>
 
-    <div class="setting-row disabled">
+    <div class="flex items-center justify-between gap-4 opacity-50">
       <div>
-        <span class="setting-label">Noise Reduction</span>
-        <span class="text-sm text-muted">Reduce background noise during capture.</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Noise Reduction</span>
+        <span class="text-sm text-text-muted">Reduce background noise during capture.</span>
       </div>
-      <div class="coming-soon-row">
+      <div class="flex gap-2 items-center">
         <span class="pill pill-muted">Coming Soon</span>
         <input type="checkbox" disabled class="switch" />
       </div>
@@ -313,38 +312,38 @@
   </section>
 
   <!-- Intelligence -->
-  <section class="surface-card section">
+  <section class="surface-card flex flex-col gap-3.5">
     <h3>Intelligence</h3>
-    <p class="text-secondary text-sm">Transcription engine and summarization model.</p>
+    <p class="text-text-secondary text-sm">Transcription engine and summarization model.</p>
 
-    <div class="setting-row">
+    <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="setting-label">Transcription engine</span>
-        <span class="text-sm text-muted">Local on-device inference.</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Transcription engine</span>
+        <span class="text-sm text-text-muted">Local on-device inference.</span>
       </div>
       <span class="pill pill-blue">Kyutai STT 1B (FR/EN)</span>
     </div>
 
-    <div class="setting-row">
+    <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="setting-label">Ollama URL</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Ollama URL</span>
       </div>
-      <input type="text" value={app.settings.ollama_url} onchange={onOllamaUrlChange} class="field-input" style="max-width: 16rem;" />
+      <input type="text" value={app.settings.ollama_url} onchange={onOllamaUrlChange} class="field-input max-w-64" />
     </div>
 
-    <div class="setting-row">
+    <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="setting-label">Connection status</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Connection status</span>
       </div>
-      <div class="inline-row">
+      <div class="flex gap-2 items-center">
         <span class="status-dot" class:is-online={ollamaAvailable}></span>
-        <span class="text-sm text-muted">{ollamaAvailable ? "Connected" : "Not available"}</span>
+        <span class="text-sm text-text-muted">{ollamaAvailable ? "Connected" : "Not available"}</span>
         <button onclick={checkOllama} class="btn">Retry</button>
       </div>
     </div>
 
     {#if ollamaAvailable && ollamaSummaryModels.length > 0}
-      <div class="field-group">
+      <div class="flex flex-col gap-1.5">
         <span class="field-label">Summarization model</span>
         <select
           value={app.settings.ollama_model || ollamaSummaryModels[0]}
@@ -357,26 +356,23 @@
         </select>
       </div>
     {:else if ollamaAvailable}
-      <div class="status-banner">
-        <p class="text-sm">No summary-capable model found. Install a chat model to enable summaries.</p>
-      </div>
+      <StatusBanner message="No summary-capable model found. Install a chat model to enable summaries." />
     {/if}
   </section>
 
   <!-- Interface -->
-  <section class="surface-card section">
+  <section class="surface-card flex flex-col gap-3.5">
     <h3>Interface</h3>
 
-    <div class="setting-row">
+    <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="setting-label">Theme</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Theme</span>
       </div>
-      <div class="theme-group">
+      <div class="flex gap-1">
         {#each ["dark", "light", "system"] as themeOption}
           <button
             onclick={() => onThemeChange(themeOption as Theme)}
-            class="btn"
-            class:btn-active={app.settings.theme === themeOption}
+            class={`btn ${app.settings.theme === themeOption ? "btn-active" : ""}`}
           >
             {themeOption.charAt(0).toUpperCase() + themeOption.slice(1)}
           </button>
@@ -384,10 +380,10 @@
       </div>
     </div>
 
-    <div class="setting-row">
+    <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="setting-label">Auto-paste after dictation</span>
-        <span class="text-sm text-muted">Copies transcript and simulates Cmd+V when capture stops.</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Auto-paste after dictation</span>
+        <span class="text-sm text-text-muted">Copies transcript and simulates Cmd+V when capture stops.</span>
       </div>
       <input
         type="checkbox"
@@ -399,10 +395,10 @@
     </div>
 
     {#if app.settings.auto_paste}
-      <div class="setting-row">
+      <div class="flex items-center justify-between gap-4">
         <div>
-          <span class="setting-label">Paste delay</span>
-          <span class="text-sm text-muted">Milliseconds to wait before pasting. Requires Accessibility permission.</span>
+          <span class="block text-[0.9375rem] font-medium text-text-primary">Paste delay</span>
+          <span class="text-sm text-text-muted">Milliseconds to wait before pasting. Requires Accessibility permission.</span>
         </div>
         <input
           type="number"
@@ -416,12 +412,12 @@
       </div>
     {/if}
 
-    <div class="setting-row">
+    <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="setting-label">Toggle recording</span>
-        <span class="text-sm text-muted">Press once to start or stop dictation.</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Toggle recording</span>
+        <span class="text-sm text-text-muted">Press once to start or stop dictation.</span>
       </div>
-      <div class="inline-row">
+      <div class="flex gap-2 items-center">
         <button
           onclick={() => startRecording("toggle")}
           class="shortcut-button"
@@ -435,12 +431,12 @@
       </div>
     </div>
 
-    <div class="setting-row">
+    <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="setting-label">Push-to-talk</span>
-        <span class="text-sm text-muted">Hold to record, release to stop.</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Push-to-talk</span>
+        <span class="text-sm text-text-muted">Hold to record, release to stop.</span>
       </div>
-      <div class="inline-row">
+      <div class="flex gap-2 items-center">
         <button
           onclick={() => startRecording("ptt")}
           class="shortcut-button"
@@ -455,20 +451,18 @@
     </div>
 
     {#if shortcutError}
-      <div class="status-banner danger">
-        <p class="text-sm">{shortcutError}</p>
-      </div>
+      <StatusBanner message={shortcutError} variant="danger" />
     {/if}
   </section>
 
   <!-- Diagnostics -->
-  <section class="surface-card section">
+  <section class="surface-card flex flex-col gap-3.5">
     <h3>Diagnostics</h3>
 
-    <div class="setting-row">
+    <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="setting-label">Verbose transcription logs</span>
-        <span class="text-sm text-muted">Per-frame STT logging and debug audio capture.</span>
+        <span class="block text-[0.9375rem] font-medium text-text-primary">Verbose transcription logs</span>
+        <span class="text-sm text-text-muted">Per-frame STT logging and debug audio capture.</span>
       </div>
       <input
         type="checkbox"
@@ -481,124 +475,22 @@
   </section>
 
   <!-- About -->
-  <section class="surface-card section">
+  <section class="surface-card flex flex-col gap-3.5">
     <h3>About</h3>
 
-    <div class="about-grid">
-      <div class="about-row">
-        <span class="text-muted text-sm">Version</span>
+    <div class="flex flex-col gap-2">
+      <div class="flex justify-between gap-4">
+        <span class="text-text-muted text-sm">Version</span>
         <span class="text-sm">v0.1.0</span>
       </div>
-      <div class="about-row">
-        <span class="text-muted text-sm">Engine</span>
+      <div class="flex justify-between gap-4">
+        <span class="text-text-muted text-sm">Engine</span>
         <span class="text-sm">Kyutai STT 1B (FR/EN)</span>
       </div>
-      <div class="about-row">
-        <span class="text-muted text-sm">Privacy</span>
+      <div class="flex justify-between gap-4">
+        <span class="text-text-muted text-sm">Privacy</span>
         <span class="text-sm">Everything runs locally.</span>
       </div>
     </div>
   </section>
 </div>
-
-<style>
-  .view {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.875rem;
-  }
-
-  .text-secondary {
-    color: var(--color-text-secondary);
-  }
-
-  .text-muted {
-    color: var(--color-text-muted);
-  }
-
-  .text-sm {
-    font-size: 0.8125rem;
-  }
-
-  .setting-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  .setting-row.disabled {
-    opacity: 0.5;
-  }
-
-  .setting-label {
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    display: block;
-  }
-
-  .field-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.375rem;
-  }
-
-  .input-row {
-    display: flex;
-    gap: 0.375rem;
-    align-items: center;
-  }
-
-  .inline-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .coming-soon-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .theme-group {
-    display: flex;
-    gap: 0.25rem;
-  }
-
-  .btn-active {
-    background: var(--color-accent-blue) !important;
-    color: #fff !important;
-    outline: none !important;
-  }
-
-  .status-banner {
-    padding: 0.75rem 1rem;
-    border-radius: var(--radius-default);
-    background: var(--color-surface-3);
-    outline: 1px solid var(--color-ghost-border);
-  }
-
-  .status-banner.danger {
-    outline-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
-  }
-
-  .about-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .about-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-</style>

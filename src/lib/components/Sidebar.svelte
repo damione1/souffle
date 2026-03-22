@@ -28,21 +28,28 @@
   ];
 </script>
 
-<aside class="sidebar">
-  <div class="sidebar-brand">
-    <span class="sidebar-logo">S</span>
-    <span class="sidebar-title">Soufflé</span>
+<aside class="w-[200px] min-w-[200px] h-screen flex flex-col gap-6 py-5 px-3 bg-surface-1 border-r border-ghost-border overflow-y-auto max-[800px]:w-[72px] max-[800px]:min-w-[72px] max-[800px]:items-center">
+  <div class="flex items-center gap-2.5 px-2 max-[800px]:justify-center max-[800px]:px-0">
+    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-accent-blue text-white font-heading font-extrabold text-base shrink-0">S</span>
+    <span class="font-heading font-bold text-lg text-text-primary tracking-tight max-[800px]:hidden">Soufflé</span>
   </div>
 
-  <nav class="sidebar-nav" aria-label="Primary navigation">
+  <nav class="flex flex-col gap-1" aria-label="Primary navigation">
     {#each tabs as tab}
+      {@const isActive = app.currentView === tab.id}
       <button
         onclick={() => (app.currentView = tab.id)}
-        class="sidebar-item"
-        class:is-active={app.currentView === tab.id}
-        aria-current={app.currentView === tab.id ? "page" : undefined}
+        class={`relative flex items-center gap-2.5 py-2.5 px-3 rounded-default cursor-pointer transition-[background,color] duration-150 max-[800px]:justify-center max-[800px]:p-3 ${
+          isActive
+            ? "bg-accent-blue/10 text-accent-blue"
+            : "text-text-muted hover:bg-surface-2 hover:text-text-secondary"
+        }`}
+        aria-current={isActive ? "page" : undefined}
       >
-        <span class="sidebar-indicator" aria-hidden="true"></span>
+        <span
+          class={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-sm bg-accent-blue transition-[height] duration-150 ${isActive ? "h-5" : "h-0"}`}
+          aria-hidden="true"
+        ></span>
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
@@ -57,125 +64,8 @@
         >
           <path d={tab.icon} />
         </svg>
-        <span class="sidebar-label">{tab.label}</span>
+        <span class="text-sm font-medium max-[800px]:hidden">{tab.label}</span>
       </button>
     {/each}
   </nav>
 </aside>
-
-<style>
-  .sidebar {
-    width: 200px;
-    min-width: 200px;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    padding: 1.25rem 0.75rem;
-    background: var(--color-surface-1);
-    border-right: 1px solid var(--color-ghost-border);
-    overflow-y: auto;
-  }
-
-  .sidebar-brand {
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
-    padding: 0 0.5rem;
-  }
-
-  .sidebar-logo {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    background: var(--color-accent-blue);
-    color: #fff;
-    font-family: var(--font-family-heading);
-    font-weight: 800;
-    font-size: 1rem;
-    flex-shrink: 0;
-  }
-
-  .sidebar-title {
-    font-family: var(--font-family-heading);
-    font-weight: 700;
-    font-size: 1.125rem;
-    color: var(--color-text-primary);
-    letter-spacing: -0.02em;
-  }
-
-  .sidebar-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .sidebar-item {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
-    padding: 0.625rem 0.75rem;
-    border-radius: var(--radius-default);
-    color: var(--color-text-muted);
-    cursor: pointer;
-    transition: background 150ms ease, color 150ms ease;
-  }
-
-  .sidebar-item:hover {
-    background: var(--color-surface-2);
-    color: var(--color-text-secondary);
-  }
-
-  .sidebar-item.is-active {
-    background: color-mix(in srgb, var(--color-accent-blue) 10%, transparent);
-    color: var(--color-accent-blue);
-  }
-
-  .sidebar-indicator {
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 0;
-    border-radius: 0 2px 2px 0;
-    background: var(--color-accent-blue);
-    transition: height 150ms ease;
-  }
-
-  .sidebar-item.is-active .sidebar-indicator {
-    height: 1.25rem;
-  }
-
-  .sidebar-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
-
-  @media (max-width: 800px) {
-    .sidebar {
-      width: 72px;
-      min-width: 72px;
-      align-items: center;
-    }
-
-    .sidebar-title,
-    .sidebar-label {
-      display: none;
-    }
-
-    .sidebar-brand {
-      justify-content: center;
-      padding: 0;
-    }
-
-    .sidebar-item {
-      justify-content: center;
-      padding: 0.75rem;
-    }
-  }
-</style>

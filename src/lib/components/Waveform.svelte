@@ -99,22 +99,6 @@
   });
 </script>
 
-<div class="waveform-bar" class:is-active={active}>
-  <canvas bind:this={canvas} class="waveform-canvas"></canvas>
+<div class="w-full h-10 shrink-0 border-t border-ghost-border bg-surface-1">
+  <canvas bind:this={canvas} class="block w-full h-full"></canvas>
 </div>
-
-<style>
-  .waveform-bar {
-    width: 100%;
-    height: 40px;
-    flex-shrink: 0;
-    border-top: 1px solid var(--color-ghost-border);
-    background: var(--color-surface-1);
-  }
-
-  .waveform-canvas {
-    width: 100%;
-    height: 100%;
-    display: block;
-  }
-</style>
