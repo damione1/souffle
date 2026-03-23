@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use tauri::State;
 use tauri::ipc::Channel;
 use tracing::info;
@@ -26,11 +24,7 @@ pub fn get_model_status(state: State<'_, AppState>) -> Result<ModelStatus, Strin
     let model_dir = models::default_model_dir();
     let downloaded = models::model_exists(&model_dir);
     let loaded = *state.model_loaded.acquire()?;
-    let engine_name = state
-        .engine
-        .lock()
-        .map(|e| e.name().to_string())
-        .unwrap_or_else(|_| "Unknown".into());
+    let engine_name = state.engine.acquire()?.name().to_string();
 
     Ok(ModelStatus {
         downloaded,
@@ -109,7 +103,7 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
 
     // Spawn persistent inference pipeline (lives until app exit)
     let pipeline =
-        TranscriptionPipeline::spawn(state.audio_receiver.clone(), Arc::clone(&state.engine));
+        TranscriptionPipeline::spawn(state.audio_receiver.clone(), Arc::clone(&state.engine))?;
     *state.pipeline.acquire()? = Some(pipeline);
 
     info!("Model loaded, inference pipeline ready");
@@ -122,10 +116,7 @@ pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String>
     use crate::constants::{SAMPLE_RATE_F64, SILENCE_SUFFIX_SAMPLES};
     use crate::engine::TranscriptionEngine;
 
-    let wav_path = dirs_next::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("com.souffle.app")
-        .join("debug_engine_input.wav");
+    let wav_path = crate::constants::app_data_dir().join("debug_engine_input.wav");
 
     if !wav_path.exists() {
         return Err("No debug WAV found. Record something first.".into());

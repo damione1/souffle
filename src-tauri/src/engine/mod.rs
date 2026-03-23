@@ -35,6 +35,10 @@ pub trait TranscriptionEngine: Send + Sync {
     /// Returns any remaining buffered segments.
     fn flush(&self) -> Result<Vec<TranscriptionSegment>, EngineError>;
 
+    /// Reset internal state between transcription sessions.
+    /// Clears KV caches, positional encodings, and any accumulated buffers.
+    fn reset_state(&self) -> Result<(), EngineError>;
+
     /// Estimated VRAM/RAM usage in bytes for the loaded model.
     fn memory_usage(&self) -> Option<u64>;
 }

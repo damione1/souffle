@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* https://huggingface.co https://*.hf.co; img-src 'self' data:; font-src 'self'"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",

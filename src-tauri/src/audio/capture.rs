@@ -62,7 +62,7 @@ pub struct AudioCapture {
 
 impl AudioCapture {
     /// Spawn the audio thread. Returns channels for commanding it and receiving audio.
-    pub fn spawn(audio_rms: Arc<AtomicU32>) -> (Sender<AudioCommand>, Receiver<AudioChunk>) {
+    pub fn spawn(audio_rms: Arc<AtomicU32>) -> Result<(Sender<AudioCommand>, Receiver<AudioChunk>), String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
         // Bounded channel: ~30 seconds of audio at 24kHz in 1-second chunks
         let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioChunk>(30);
@@ -98,9 +98,9 @@ impl AudioCapture {
 
                 info!("Audio thread exiting");
             })
-            .expect("Failed to spawn audio thread");
+            .map_err(|e| format!("Failed to spawn audio thread: {e}"))?;
 
-        (cmd_tx, audio_rx)
+        Ok((cmd_tx, audio_rx))
     }
 
     fn find_device(&self) -> Result<Device, String> {
@@ -113,11 +113,10 @@ impl AudioCapture {
                 .map_err(|e| format!("Failed to list devices: {e}"))?;
 
             for device in devices {
-                if let Ok(n) = device.name() {
-                    if n == *name {
+                if let Ok(n) = device.name()
+                    && n == *name {
                         return Ok(device);
                     }
-                }
             }
             warn!("Selected device '{name}' not found, falling back to default");
         }
@@ -217,13 +216,12 @@ impl AudioCapture {
     }
 
     fn preferred_config(device: &Device) -> Result<StreamConfig, String> {
-        let supported = device
+        let mut supported = device
             .supported_input_configs()
             .map_err(|e| format!("Failed to get supported configs: {e}"))?;
 
         let config = supported
-            .filter(|c| c.sample_format() == SampleFormat::F32)
-            .next()
+            .find(|c| c.sample_format() == SampleFormat::F32)
             .or_else(|| {
                 device
                     .supported_input_configs()

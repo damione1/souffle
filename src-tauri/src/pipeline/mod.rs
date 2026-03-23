@@ -36,7 +36,7 @@ pub struct TranscriptionPipeline {
 impl TranscriptionPipeline {
     /// Spawn the persistent inference thread. The thread stays alive across
     /// recording sessions, waiting for Start/Stop commands.
-    pub fn spawn(audio_rx: Receiver<AudioChunk>, engine: Arc<Mutex<KyutaiEngine>>) -> Self {
+    pub fn spawn(audio_rx: Receiver<AudioChunk>, engine: Arc<Mutex<KyutaiEngine>>) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<InferenceCommand>();
 
         std::thread::Builder::new()
@@ -44,9 +44,9 @@ impl TranscriptionPipeline {
             .spawn(move || {
                 Self::inference_loop(cmd_rx, audio_rx, engine);
             })
-            .expect("Failed to spawn inference thread");
+            .map_err(|e| format!("Failed to spawn inference thread: {e}"))?;
 
-        Self { cmd_sender: cmd_tx }
+        Ok(Self { cmd_sender: cmd_tx })
     }
 
     pub fn send(&self, cmd: InferenceCommand) -> Result<(), String> {
@@ -137,29 +137,22 @@ impl TranscriptionPipeline {
                     // Audio capture was stopped before this command was sent,
                     // so no new chunks will arrive — we just collect what's left.
                     let mut drained = 0usize;
-                    loop {
-                        match audio_rx.try_recv() {
-                            Ok(chunk) => {
-                                if chunk.session_id == session_id {
-                                    audio_buffer.extend_from_slice(&chunk.samples);
-                                    drained += 1;
-                                } else {
-                                    skipped_chunks += 1;
-                                }
-                            }
-                            Err(_) => break,
+                    while let Ok(chunk) = audio_rx.try_recv() {
+                        if chunk.session_id == session_id {
+                            audio_buffer.extend_from_slice(&chunk.samples);
+                            drained += 1;
+                        } else {
+                            skipped_chunks += 1;
                         }
                     }
-                    if drained > 0 {
-                        if crate::debug::transcription_debug_enabled() {
+                    if drained > 0
+                        && crate::debug::transcription_debug_enabled() {
                             debug!("Drained {drained} remaining audio chunks on stop");
                         }
-                    }
-                    if skipped_chunks > 0 {
-                        if crate::debug::transcription_debug_enabled() {
+                    if skipped_chunks > 0
+                        && crate::debug::transcription_debug_enabled() {
                             debug!("Ignored {skipped_chunks} stale audio chunks during stop");
                         }
-                    }
 
                     // Process all buffered audio through the engine (frame by frame)
                     while audio_buffer.len() >= MIMI_FRAME_SIZE {
@@ -212,7 +205,7 @@ impl TranscriptionPipeline {
                     if chunk.session_id != session_id {
                         skipped_chunks += 1;
                         if crate::debug::transcription_debug_enabled()
-                            && (skipped_chunks <= 5 || skipped_chunks % 25 == 0)
+                            && (skipped_chunks <= 5 || skipped_chunks.is_multiple_of(25))
                         {
                             debug!(
                                 "Ignoring stale audio chunk from session {} while expecting {}",
@@ -242,7 +235,7 @@ impl TranscriptionPipeline {
                             }
                         }
                         frames_processed += 1;
-                        if crate::debug::transcription_debug_enabled() && frames_processed % 50 == 0
+                        if crate::debug::transcription_debug_enabled() && frames_processed.is_multiple_of(50)
                         {
                             debug!(
                                 "Processed {frames_processed} frames ({:.1}s)",

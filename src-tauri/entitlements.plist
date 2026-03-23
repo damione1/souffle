@@ -2,18 +2,25 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Required for Candle/Metal GPU acceleration (JIT compilation of Metal shaders) -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
+    <!-- Required for Mimi codec and Candle inference engine -->
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
+    <!-- Required for Metal framework loading -->
     <key>com.apple.security.cs.allow-dyld-environment-variables</key>
     <true/>
+    <!-- Core functionality: microphone capture for speech-to-text -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Core functionality: microphone capture for speech-to-text -->
     <key>com.apple.security.device.audio-recording</key>
     <true/>
+    <!-- Required for HuggingFace model downloads and Ollama API communication -->
     <key>com.apple.security.network.client</key>
     <true/>
+    <!-- Required for saving recordings and accessing user files -->
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
 </dict>

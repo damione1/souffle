@@ -30,15 +30,24 @@ pub fn run() {
     let audio_rms = Arc::new(std::sync::atomic::AtomicU32::new(0f32.to_bits()));
 
     // Spawn the audio thread before Tauri starts (cpal Stream is !Send on macOS)
-    let (cmd_tx, audio_rx) = AudioCapture::spawn(Arc::clone(&audio_rms));
+    let (cmd_tx, audio_rx) = match AudioCapture::spawn(Arc::clone(&audio_rms)) {
+        Ok(channels) => channels,
+        Err(e) => {
+            tracing::error!("Fatal: {e}");
+            std::process::exit(1);
+        }
+    };
 
     // Initialize SQLite database
-    let db_path = dirs_next::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("com.souffle.app")
-        .join("souffle.db");
+    let db_path = constants::app_data_dir().join("souffle.db");
 
-    let database = Arc::new(db::Database::open(&db_path).expect("Failed to open database"));
+    let database = match db::Database::open(&db_path) {
+        Ok(db) => Arc::new(db),
+        Err(e) => {
+            tracing::error!("Fatal: Failed to open database: {e}");
+            std::process::exit(1);
+        }
+    };
     debug::init_from_db(&database);
 
     tauri::Builder::default()
@@ -116,5 +125,8 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Souffle");
+        .unwrap_or_else(|e| {
+            tracing::error!("Tauri runtime error: {e}");
+            std::process::exit(1);
+        });
 }

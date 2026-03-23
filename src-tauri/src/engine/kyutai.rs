@@ -98,6 +98,12 @@ pub struct KyutaiEngine {
     model: Mutex<Option<LoadedModel>>,
 }
 
+impl Default for KyutaiEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KyutaiEngine {
     pub fn new() -> Self {
         Self {
@@ -305,9 +311,7 @@ impl TranscriptionEngine for KyutaiEngine {
                 if buf.len() < SAMPLE_RATE as usize * 3 {
                     buf.extend_from_slice(audio);
                 } else if !buf.is_empty() {
-                    let path = dirs_next::data_dir()
-                        .unwrap_or_else(|| std::path::PathBuf::from("."))
-                        .join("com.souffle.app")
+                    let path = crate::constants::app_data_dir()
                         .join("debug_engine_input.wav");
                     if let Ok(mut w) = hound::WavWriter::create(
                         &path,
@@ -334,7 +338,7 @@ impl TranscriptionEngine for KyutaiEngine {
             let max_amp = audio.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
             let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
             let frame_num = FRAME_COUNT.load(Ordering::Relaxed);
-            if frame_num < 5 || frame_num % 50 == 0 {
+            if frame_num < 5 || frame_num.is_multiple_of(50) {
                 debug!(samples = audio.len(), max_amp = format!("{max_amp:.4}"), rms = format!("{rms:.6}"), "Engine input");
             }
         }
@@ -371,8 +375,8 @@ impl TranscriptionEngine for KyutaiEngine {
                     .step_pcm(pcm_tensor, None, &().into(), |items, text_tensor, _audio_tensors| {
                         // Debug: log what the model is producing
                         let frame = FRAME_COUNT.load(Ordering::Relaxed);
-                        if debug_enabled && (frame < 20 || frame % 50 == 0) {
-                            if let Ok(text_vals) = text_tensor.to_vec2::<u32>() {
+                        if debug_enabled && (frame < 20 || frame.is_multiple_of(50))
+                            && let Ok(text_vals) = text_tensor.to_vec2::<u32>() {
                                 for (i, item) in items.iter().enumerate() {
                                     let tv = text_vals.get(i).map(|v| format!("{v:?}")).unwrap_or_default();
                                     trace!(
@@ -385,7 +389,6 @@ impl TranscriptionEngine for KyutaiEngine {
                                     );
                                 }
                             }
-                        }
                     })
                     .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
             })?;
@@ -393,7 +396,7 @@ impl TranscriptionEngine for KyutaiEngine {
             let frame_num = FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
 
             // Log message types for first 20 frames then every 50th
-            if debug_enabled && (frame_num < 20 || frame_num % 50 == 0) {
+            if debug_enabled && (frame_num < 20 || frame_num.is_multiple_of(50)) {
                 let mut words = 0;
                 let mut end_words = 0;
                 let mut steps = 0;
@@ -403,7 +406,7 @@ impl TranscriptionEngine for KyutaiEngine {
                         moshi::asr::AsrMsg::EndWord { .. } => end_words += 1,
                         moshi::asr::AsrMsg::Step { step_idx, prs, .. } => {
                             steps += 1;
-                            if frame_num < 10 || frame_num % 50 == 0 {
+                            if frame_num < 10 || frame_num.is_multiple_of(50) {
                                 let vad_str: Vec<String> =
                                     prs.iter().map(|p| format!("{:.2}", p[0])).collect();
                                 trace!(frame = frame_num, model_step = step_idx, vad = vad_str.join(", "), "Step VAD");
@@ -475,5 +478,9 @@ impl TranscriptionEngine for KyutaiEngine {
     fn memory_usage(&self) -> Option<u64> {
         // Approximate: 1B params at f16 ≈ 2GB + Mimi ≈ 200MB + KV cache
         Some(4_000_000_000)
+    }
+
+    fn reset_state(&self) -> Result<(), EngineError> {
+        KyutaiEngine::reset_state(self)
     }
 }

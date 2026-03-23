@@ -81,7 +81,7 @@ impl Database {
                 [],
                 |row| row.get::<_, i64>(0),
             )
-            .unwrap_or(0)
+            .map_err(|e| format!("Query schema version: {e}"))?
         } else {
             0
         };
