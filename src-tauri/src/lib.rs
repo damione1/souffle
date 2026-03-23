@@ -1,13 +1,16 @@
 pub mod audio;
 pub mod clipboard;
 pub mod commands;
+pub mod constants;
 pub mod db;
 pub mod debug;
 pub mod engine;
 pub mod errors;
+pub mod lock_ext;
 pub mod models;
 pub mod ollama;
 pub mod pipeline;
+pub mod platform;
 pub mod state;
 pub mod transcript;
 pub mod tray;

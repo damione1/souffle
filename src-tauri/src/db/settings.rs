@@ -1,11 +1,13 @@
 use rusqlite::params;
 
+use crate::lock_ext::MutexExt;
+
 use super::Database;
 
 impl Database {
     /// Get a setting value by key. Returns None if not found.
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         let result = conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
@@ -22,7 +24,7 @@ impl Database {
 
     /// Set a setting value (upsert).
     pub fn set_setting(&self, key: &str, value: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
@@ -35,7 +37,7 @@ impl Database {
 
     /// Get all settings as key-value pairs.
     pub fn get_all_settings(&self) -> Result<Vec<(String, String)>, String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         let mut stmt = conn
             .prepare("SELECT key, value FROM settings")

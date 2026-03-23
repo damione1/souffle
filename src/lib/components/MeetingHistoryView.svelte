@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import type { MeetingListItem } from "../types";
   import { getAppState } from "../stores/app.svelte";
+  import { formatDuration, formatDate, errorMessage } from "../utils";
   import StatusBanner from "./ui/StatusBanner.svelte";
   import EmptyState from "./ui/EmptyState.svelte";
 
@@ -26,18 +27,8 @@
     try {
       meetings = await invoke("list_meetings");
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     }
-  }
-
-  function formatDuration(seconds: number): string {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  }
-
-  function formatDate(iso: string): string {
-    return new Date(iso).toLocaleString();
   }
 </script>
 

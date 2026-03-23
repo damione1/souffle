@@ -3,7 +3,7 @@ use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use tracing::{info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::resampler::Resampler;
 use crate::state::AudioCommand;
@@ -32,7 +32,7 @@ pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
     let devices = match host.input_devices() {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("[souffle] Failed to list input devices: {e}");
+            warn!("Failed to list input devices: {e}");
             return vec![];
         }
     };
@@ -83,14 +83,14 @@ impl AudioCapture {
                     match cmd {
                         AudioCommand::Start(session_id) => {
                             if let Err(e) = capture.start(session_id) {
-                                eprintln!("[souffle] Failed to start audio capture: {e}");
+                                warn!("Failed to start audio capture: {e}");
                             }
                         }
                         AudioCommand::Stop => {
                             capture.stop();
                         }
                         AudioCommand::SelectDevice(name) => {
-                            eprintln!("[souffle] Selected input device: {name}");
+                            info!("Selected input device: {name}");
                             capture.selected_device = Some(name);
                         }
                     }
@@ -119,7 +119,7 @@ impl AudioCapture {
                     }
                 }
             }
-            eprintln!("[souffle] Selected device '{name}' not found, falling back to default");
+            warn!("Selected device '{name}' not found, falling back to default");
         }
 
         host.default_input_device()
@@ -134,13 +134,13 @@ impl AudioCapture {
         let device = self.find_device()?;
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".into());
-        eprintln!("[souffle] Using input device: {device_name}");
+        info!("Using input device: {device_name}");
 
         let config = Self::preferred_config(&device)?;
         let sample_rate = config.sample_rate.0;
         let channels = config.channels;
 
-        eprintln!("[souffle] Audio config: {sample_rate}Hz, {channels}ch");
+        info!("Audio config: {sample_rate}Hz, {channels}ch");
 
         let mut resampler = Resampler::new(sample_rate, channels);
         let sender = self.audio_sender.clone();
@@ -148,7 +148,7 @@ impl AudioCapture {
         let rms_ref = Arc::clone(&self.audio_rms);
 
         let err_fn = |err: cpal::StreamError| {
-            eprintln!("[souffle] Audio stream error: {err}");
+            error!("Audio stream error: {err}");
         };
 
         // Reset the first-chunk logging flag for each new recording session
@@ -177,8 +177,8 @@ impl AudioCapture {
                             && !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed)
                         {
                             let max_amp = resampled.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-                            eprintln!(
-                                "[souffle] First audio chunk: {} samples, max_amp={max_amp:.4}",
+                            debug!(
+                                "First audio chunk: {} samples, max_amp={max_amp:.4}",
                                 resampled.len(),
                             );
                         }
@@ -204,7 +204,7 @@ impl AudioCapture {
             .map_err(|e| format!("Failed to start stream: {e}"))?;
         self.stream = Some(stream);
 
-        eprintln!("[souffle] Audio capture started on '{device_name}'");
+        info!("Audio capture started on '{device_name}'");
         Ok(())
     }
 
@@ -212,7 +212,7 @@ impl AudioCapture {
         self.active_session_id.store(0, Ordering::Release);
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
         if self.stream.take().is_some() {
-            eprintln!("[souffle] Audio capture stopped");
+            info!("Audio capture stopped");
         }
     }
 

@@ -1,13 +1,10 @@
-import type { View, Theme, AppSettings } from "../types";
+import type { View, AppSettings } from "../types";
 
 // Current view
 let currentView = $state<View>("transcription");
 
 // Current meeting ID (when viewing a specific meeting)
 let currentMeetingId = $state<string | null>(null);
-
-// Theme
-let theme = $state<Theme>("dark");
 
 // Selected audio device (persisted across tab switches)
 let selectedDevice = $state("");
@@ -29,9 +26,6 @@ export function getAppState() {
 
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },
-
-    get theme() { return theme; },
-    set theme(t: Theme) { theme = t; },
 
     get settings() { return settings; },
     set settings(s: AppSettings) { settings = s; },

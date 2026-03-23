@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import type { TranscriptionSegment, ModelStatus, DownloadProgress, DictationEntry } from "../types";
   import { getAppState } from "../stores/app.svelte";
+  import { errorMessage } from "../utils";
   import StatusBanner from "./ui/StatusBanner.svelte";
   import CopyButton from "./ui/CopyButton.svelte";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
@@ -96,7 +97,7 @@
       modelLoaded = status.loaded;
       engineName = status.engine_name;
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     }
   }
 
@@ -124,7 +125,7 @@
       await invoke("download_model", { channel });
       await checkModelStatus();
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
       isDownloading = false;
     }
   }
@@ -137,7 +138,7 @@
       modelLoaded = true;
       await checkModelStatus();
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     } finally {
       isLoadingModel = false;
     }
@@ -167,7 +168,7 @@
                 delayMs: app.settings.paste_delay_ms,
               });
             } catch (e) {
-              statusMessage = `Paste failed: ${String(e)}`;
+              statusMessage = `Paste failed: ${errorMessage(e)}`;
             }
           } else {
             // Button: copy to clipboard only
@@ -179,7 +180,7 @@
           }
         }
       } catch (e) {
-        statusMessage = String(e);
+        statusMessage = errorMessage(e);
       } finally {
         isStopping = false;
       }
@@ -221,7 +222,7 @@
       await invoke("start_transcription", { channel });
       isRecording = true;
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     } finally {
       isStartingRecording = false;
     }

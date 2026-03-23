@@ -10,6 +10,8 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tracing::info;
 
+use crate::lock_ext::MutexExt;
+
 /// SQLite database wrapper with interior mutability via Mutex.
 pub struct Database {
     conn: Mutex<Connection>,
@@ -62,7 +64,7 @@ impl Database {
 
     /// Ensure the database schema is at the current version.
     fn ensure_schema(&self) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         // Check if schema_version table exists
         let has_version_table: bool = conn

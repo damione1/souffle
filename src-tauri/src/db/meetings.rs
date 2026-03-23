@@ -4,13 +4,15 @@ use rusqlite::params;
 use crate::engine::TranscriptionSegment;
 use crate::transcript::{MeetingListItem, MeetingTranscript};
 
+use crate::lock_ext::MutexExt;
+
 use super::Database;
 
 impl Database {
     /// Save a meeting with all its segments in a single transaction.
     /// Also indexes the full text for FTS5 search.
     pub fn save_meeting(&self, meeting: &MeetingTranscript) -> Result<(), String> {
-        let mut conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let mut conn = self.conn.acquire()?;
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
@@ -87,7 +89,7 @@ impl Database {
 
     /// Load a full meeting with segments by ID.
     pub fn load_meeting(&self, id: &str) -> Result<MeetingTranscript, String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         let meeting = conn
             .query_row(
@@ -159,7 +161,7 @@ impl Database {
 
     /// List all meetings (lightweight, no segments).
     pub fn list_meetings(&self) -> Result<Vec<MeetingListItem>, String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         let mut stmt = conn
             .prepare(
@@ -197,7 +199,7 @@ impl Database {
 
     /// Delete a meeting and its segments (CASCADE handles segments).
     pub fn delete_meeting(&self, id: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         // Delete FTS entry
         conn.execute(
@@ -224,7 +226,7 @@ impl Database {
         summary: &str,
         model: &str,
     ) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
@@ -238,7 +240,7 @@ impl Database {
 
     /// Check if a meeting with the given ID exists.
     pub fn meeting_exists(&self, id: &str) -> Result<bool, String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM meetings WHERE id = ?1",

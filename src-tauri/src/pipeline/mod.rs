@@ -2,30 +2,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
+use tracing::{debug, error, info, warn};
 
 use crate::audio::AudioChunk;
+use crate::constants::MIMI_FRAME_SIZE;
 use crate::engine::kyutai::KyutaiEngine;
 use crate::engine::{TranscriptionEngine, TranscriptionSegment};
-
-/// Drain Metal autorelease pool — see kyutai.rs for full explanation.
-#[cfg(target_os = "macos")]
-fn with_autorelease_pool<T, F: FnOnce() -> T>(f: F) -> T {
-    unsafe extern "C" {
-        fn objc_autoreleasePoolPush() -> *mut std::ffi::c_void;
-        fn objc_autoreleasePoolPop(pool: *mut std::ffi::c_void);
-    }
-    unsafe {
-        let pool = objc_autoreleasePoolPush();
-        let result = f();
-        objc_autoreleasePoolPop(pool);
-        result
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn with_autorelease_pool<T, F: FnOnce() -> T>(f: F) -> T {
-    f()
-}
+use crate::platform::with_autorelease_pool;
 
 /// Callback type for streaming segments to the frontend
 pub type SegmentCallback = Box<dyn Fn(TranscriptionSegment) + Send + 'static>;
@@ -77,7 +60,7 @@ impl TranscriptionPipeline {
         audio_rx: Receiver<AudioChunk>,
         engine: Arc<Mutex<KyutaiEngine>>,
     ) {
-        eprintln!("[souffle] Inference thread started (persistent)");
+        info!("Inference thread started (persistent)");
         let mut session_count: u32 = 0;
 
         loop {
@@ -88,9 +71,7 @@ impl TranscriptionPipeline {
                     on_segment,
                 }) => {
                     session_count += 1;
-                    eprintln!(
-                        "[souffle] Inference session {session_count} starting (audio session {session_id})"
-                    );
+                    info!("Inference session {session_count} starting (audio session {session_id})");
 
                     // Hold engine lock for the entire active session.
                     // State reset is done by the caller before sending Start,
@@ -98,7 +79,7 @@ impl TranscriptionPipeline {
                     let guard = match engine.lock() {
                         Ok(g) => g,
                         Err(e) => {
-                            eprintln!("[souffle] Engine lock failed: {e}");
+                            error!("Engine lock failed: {e}");
                             continue;
                         }
                     };
@@ -113,18 +94,18 @@ impl TranscriptionPipeline {
                     drop(guard);
 
                     if !normal_stop {
-                        eprintln!("[souffle] Inference thread shutting down");
+                        info!("Inference thread shutting down");
                         return;
                     }
-                    eprintln!("[souffle] Inference session {session_count} ended");
+                    info!("Inference session {session_count} ended");
                 }
                 Ok(InferenceCommand::Stop(_)) => {} // already idle, ignore
                 Ok(InferenceCommand::Shutdown) => {
-                    eprintln!("[souffle] Inference thread shutting down");
+                    info!("Inference thread shutting down");
                     return;
                 }
                 Err(_) => {
-                    eprintln!("[souffle] Command channel disconnected, exiting");
+                    warn!("Command channel disconnected, exiting");
                     return;
                 }
             }
@@ -149,7 +130,7 @@ impl TranscriptionPipeline {
             match cmd_rx.try_recv() {
                 Ok(InferenceCommand::Stop(done_tx)) => {
                     if crate::debug::transcription_debug_enabled() {
-                        eprintln!("[souffle] Stopping ({frames_processed} frames processed)");
+                        debug!("Stopping ({frames_processed} frames processed)");
                     }
 
                     // Drain ALL remaining audio from the channel.
@@ -171,34 +152,29 @@ impl TranscriptionPipeline {
                     }
                     if drained > 0 {
                         if crate::debug::transcription_debug_enabled() {
-                            eprintln!("[souffle] Drained {drained} remaining audio chunks on stop");
+                            debug!("Drained {drained} remaining audio chunks on stop");
                         }
                     }
                     if skipped_chunks > 0 {
                         if crate::debug::transcription_debug_enabled() {
-                            eprintln!(
-                                "[souffle] Ignored {skipped_chunks} stale audio chunks during stop"
-                            );
+                            debug!("Ignored {skipped_chunks} stale audio chunks during stop");
                         }
                     }
 
                     // Process all buffered audio through the engine (frame by frame)
-                    while audio_buffer.len() >= 1920 {
-                        let frame: Vec<f32> = audio_buffer.drain(..1920).collect();
+                    while audio_buffer.len() >= MIMI_FRAME_SIZE {
+                        let frame: Vec<f32> = audio_buffer.drain(..MIMI_FRAME_SIZE).collect();
                         match engine.transcribe(&frame, None) {
                             Ok(segments) => {
                                 for seg in &segments {
                                     if crate::debug::transcription_debug_enabled() {
-                                        eprintln!(
-                                            "[souffle] Drain segment: {:?} final={}",
-                                            seg.text, seg.is_final
-                                        );
+                                        debug!("Drain segment: {:?} final={}", seg.text, seg.is_final);
                                     }
                                     on_segment(seg.clone());
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[souffle] Transcribe error during drain: {e}");
+                                error!("Transcribe error during drain: {e}");
                                 break;
                             }
                         }
@@ -213,13 +189,13 @@ impl TranscriptionPipeline {
                     match engine.flush() {
                         Ok(segments) => {
                             if crate::debug::transcription_debug_enabled() {
-                                eprintln!("[souffle] Flush: {} segments", segments.len());
+                                debug!("Flush: {} segments", segments.len());
                             }
                             for seg in segments {
                                 on_segment(seg);
                             }
                         }
-                        Err(e) => eprintln!("[souffle] Flush error: {e}"),
+                        Err(e) => error!("Flush error: {e}"),
                     }
 
                     // Signal caller that drain/flush is complete
@@ -238,8 +214,8 @@ impl TranscriptionPipeline {
                         if crate::debug::transcription_debug_enabled()
                             && (skipped_chunks <= 5 || skipped_chunks % 25 == 0)
                         {
-                            eprintln!(
-                                "[souffle] Ignoring stale audio chunk from session {} while expecting {}",
+                            debug!(
+                                "Ignoring stale audio chunk from session {} while expecting {}",
                                 chunk.session_id, session_id
                             );
                         }
@@ -249,30 +225,27 @@ impl TranscriptionPipeline {
                     audio_buffer.extend_from_slice(&chunk.samples);
 
                     // Process complete 1920-sample frames
-                    while audio_buffer.len() >= 1920 {
-                        let frame: Vec<f32> = audio_buffer.drain(..1920).collect();
+                    while audio_buffer.len() >= MIMI_FRAME_SIZE {
+                        let frame: Vec<f32> = audio_buffer.drain(..MIMI_FRAME_SIZE).collect();
                         match engine.transcribe(&frame, None) {
                             Ok(segments) => {
                                 for seg in &segments {
                                     if crate::debug::transcription_debug_enabled() {
-                                        eprintln!(
-                                            "[souffle] Segment: {:?} final={}",
-                                            seg.text, seg.is_final
-                                        );
+                                        debug!("Segment: {:?} final={}", seg.text, seg.is_final);
                                     }
                                     on_segment(seg.clone());
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[souffle] Transcribe error: {e}");
+                                error!("Transcribe error: {e}");
                                 return false;
                             }
                         }
                         frames_processed += 1;
                         if crate::debug::transcription_debug_enabled() && frames_processed % 50 == 0
                         {
-                            eprintln!(
-                                "[souffle] Processed {frames_processed} frames ({:.1}s)",
+                            debug!(
+                                "Processed {frames_processed} frames ({:.1}s)",
                                 frames_processed as f64 * 0.08,
                             );
                         }
@@ -280,7 +253,7 @@ impl TranscriptionPipeline {
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    eprintln!("[souffle] Audio channel disconnected");
+                    warn!("Audio channel disconnected");
                     return false;
                 }
             }
@@ -294,7 +267,7 @@ impl TranscriptionPipeline {
                     on_segment(seg);
                 }
             }
-            Err(e) => eprintln!("[souffle] Transcribe error: {e}"),
+            Err(e) => error!("Transcribe error: {e}"),
         }
     }
 }

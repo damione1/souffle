@@ -1,4 +1,5 @@
 use rubato::{FftFixedInOut, Resampler as RubatoResampler};
+use tracing::{info, warn};
 
 /// Kyutai Mimi codec expects 24kHz audio input
 const TARGET_SAMPLE_RATE: usize = 24_000;
@@ -29,8 +30,8 @@ impl Resampler {
         let resampler = if source_rate != TARGET_SAMPLE_RATE {
             match FftFixedInOut::new(source_rate, TARGET_SAMPLE_RATE, 1024, 1) {
                 Ok(r) => {
-                    eprintln!(
-                        "[souffle] Resampler created: {}Hz → {}Hz, chunk_in={}, chunk_out={}",
+                    info!(
+                        "Resampler created: {}Hz → {}Hz, chunk_in={}, chunk_out={}",
                         source_rate,
                         TARGET_SAMPLE_RATE,
                         r.input_frames_next(),
@@ -39,13 +40,13 @@ impl Resampler {
                     Some(r)
                 }
                 Err(e) => {
-                    eprintln!("[souffle] WARNING: Resampler creation failed: {e}");
-                    eprintln!("[souffle] Audio will NOT be resampled — model expects 24kHz!");
+                    warn!("Resampler creation failed: {e}");
+                    warn!("Audio will NOT be resampled — model expects 24kHz!");
                     None
                 }
             }
         } else {
-            eprintln!("[souffle] Source rate matches target (24kHz), no resampling needed");
+            info!("Source rate matches target (24kHz), no resampling needed");
             None
         };
 

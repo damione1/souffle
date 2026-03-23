@@ -18,7 +18,7 @@ export type DownloadProgress = {
   file: string;
   downloaded_bytes: number;
   total_bytes: number | null;
-  status: string | { error: string };
+  status: "downloading" | "complete" | { error: string };
 };
 
 export type AudioDevice = {

@@ -1,6 +1,8 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::lock_ext::MutexExt;
+
 use super::Database;
 
 /// A dictation history entry
@@ -14,7 +16,7 @@ pub struct DictationEntry {
 impl Database {
     /// List dictation entries, newest first, with optional limit.
     pub fn list_dictation_entries(&self, limit: i64) -> Result<Vec<DictationEntry>, String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         let mut stmt = conn
             .prepare("SELECT id, text, timestamp FROM dictation_entries ORDER BY timestamp DESC LIMIT ?1")
@@ -37,7 +39,7 @@ impl Database {
 
     /// Add a new dictation entry.
     pub fn add_dictation_entry(&self, id: &str, text: &str, timestamp: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         conn.execute(
             "INSERT INTO dictation_entries (id, text, timestamp) VALUES (?1, ?2, ?3)",
@@ -57,7 +59,7 @@ impl Database {
 
     /// Delete a single dictation entry.
     pub fn delete_dictation_entry(&self, id: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         conn.execute(
             "DELETE FROM text_search WHERE source_type = 'dictation' AND source_id = ?1",
@@ -73,7 +75,7 @@ impl Database {
 
     /// Clear all dictation history.
     pub fn clear_dictation_entries(&self) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
+        let conn = self.conn.acquire()?;
 
         conn.execute(
             "DELETE FROM text_search WHERE source_type = 'dictation'",

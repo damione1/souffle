@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import type { AudioDevice, OllamaStatus, Theme } from "../types";
   import { getAppState } from "../stores/app.svelte";
+  import { applyTheme, loadSettingsFromDb } from "../utils";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
   const app = getAppState();
@@ -26,30 +27,11 @@
 
   async function loadSettings() {
     try {
-      const settings = await invoke<Record<string, unknown>>("get_settings");
-      if (settings.theme) {
-        const theme = settings.theme as Theme;
-        app.settings = { ...app.settings, theme };
-        app.theme = theme;
-        applyTheme(theme);
-      }
-      if (settings.auto_paste !== null && settings.auto_paste !== undefined) {
-        app.settings = { ...app.settings, auto_paste: settings.auto_paste as boolean };
-      }
-      if (settings.paste_delay_ms !== null && settings.paste_delay_ms !== undefined) {
-        app.settings = { ...app.settings, paste_delay_ms: settings.paste_delay_ms as number };
-      }
-      if (settings.debug_transcription !== null && settings.debug_transcription !== undefined) {
-        app.settings = { ...app.settings, debug_transcription: settings.debug_transcription as boolean };
-      }
-      if (settings.ollama_url) {
-        app.settings = { ...app.settings, ollama_url: settings.ollama_url as string };
-      }
-      if (settings.ollama_model) {
-        app.settings = { ...app.settings, ollama_model: settings.ollama_model as string };
-      }
-      if (settings.audio_device) {
-        app.selectedDevice = settings.audio_device as string;
+      const loaded = await loadSettingsFromDb();
+      app.settings = { ...app.settings, ...loaded };
+      applyTheme(app.settings.theme);
+      if (loaded.audio_device) {
+        app.selectedDevice = loaded.audio_device;
       }
     } catch (e) {
       console.warn("Failed to load settings:", e);
@@ -130,19 +112,8 @@
     }
   }
 
-  function applyTheme(theme: Theme) {
-    if (theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
-      document.documentElement.classList.add("dark");
-      document.documentElement.classList.remove("light");
-    } else {
-      document.documentElement.classList.remove("dark");
-      document.documentElement.classList.add("light");
-    }
-  }
-
   function onThemeChange(theme: Theme) {
     app.settings = { ...app.settings, theme };
-    app.theme = theme;
     applyTheme(theme);
     saveSetting("theme", theme);
   }

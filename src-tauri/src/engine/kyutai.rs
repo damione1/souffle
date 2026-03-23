@@ -3,37 +3,16 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use candle_core::{Device, Tensor};
-use tracing::info;
+use tracing::{debug, info, trace};
 
 use super::{EngineError, TranscriptionEngine, TranscriptionSegment};
+use crate::constants::{MIMI_FRAME_SIZE, SAMPLE_RATE};
+use crate::platform::with_autorelease_pool;
 
 /// Debug frame counter — reset per session for clean logging
 static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Debug audio buffer — captures first 3s of each session for offline analysis
 static DEBUG_SAMPLES: Mutex<Option<Vec<f32>>> = Mutex::new(None);
-
-/// Drain Metal autorelease pool to prevent GPU memory leak.
-/// Candle's Metal backend creates autoreleased ObjC objects per tensor operation.
-/// Without periodic draining, these accumulate and corrupt GPU state after ~3 sessions.
-/// See: https://github.com/huggingface/candle/issues/2271
-#[cfg(target_os = "macos")]
-fn with_autorelease_pool<T, F: FnOnce() -> T>(f: F) -> T {
-    unsafe extern "C" {
-        fn objc_autoreleasePoolPush() -> *mut std::ffi::c_void;
-        fn objc_autoreleasePoolPop(pool: *mut std::ffi::c_void);
-    }
-    unsafe {
-        let pool = objc_autoreleasePoolPush();
-        let result = f();
-        objc_autoreleasePoolPop(pool);
-        result
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn with_autorelease_pool<T, F: FnOnce() -> T>(f: F) -> T {
-    f()
-}
 
 /// Kyutai STT model configuration, deserialized from config.json
 #[derive(Debug, serde::Deserialize)]
@@ -230,7 +209,7 @@ impl KyutaiEngine {
         })?;
 
         *guard = Some(rebuilt);
-        eprintln!("[souffle] ASR state rebuilt for new session");
+        info!("ASR state rebuilt for new session");
         Ok(())
     }
 }
@@ -318,12 +297,12 @@ impl TranscriptionEngine for KyutaiEngine {
 
         // Debug: save first 3s of audio per session to WAV for offline analysis
         if debug_enabled {
-            let mut dbg = DEBUG_SAMPLES.lock().unwrap();
+            let Ok(mut dbg) = DEBUG_SAMPLES.lock() else { return Ok(segments); };
             if dbg.is_none() && FRAME_COUNT.load(Ordering::Relaxed) == 0 {
-                *dbg = Some(Vec::with_capacity(24_000 * 3));
+                *dbg = Some(Vec::with_capacity(SAMPLE_RATE as usize * 3));
             }
             if let Some(ref mut buf) = *dbg {
-                if buf.len() < 24_000 * 3 {
+                if buf.len() < SAMPLE_RATE as usize * 3 {
                     buf.extend_from_slice(audio);
                 } else if !buf.is_empty() {
                     let path = dirs_next::data_dir()
@@ -334,7 +313,7 @@ impl TranscriptionEngine for KyutaiEngine {
                         &path,
                         hound::WavSpec {
                             channels: 1,
-                            sample_rate: 24_000,
+                            sample_rate: SAMPLE_RATE,
                             bits_per_sample: 32,
                             sample_format: hound::SampleFormat::Float,
                         },
@@ -343,10 +322,7 @@ impl TranscriptionEngine for KyutaiEngine {
                             let _ = w.write_sample(s);
                         }
                         let _ = w.finalize();
-                        eprintln!(
-                            "[souffle] DEBUG: Saved engine input audio to {}",
-                            path.display()
-                        );
+                        debug!(path = %path.display(), "Saved engine input audio");
                     }
                     buf.clear();
                 }
@@ -359,10 +335,7 @@ impl TranscriptionEngine for KyutaiEngine {
             let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
             let frame_num = FRAME_COUNT.load(Ordering::Relaxed);
             if frame_num < 5 || frame_num % 50 == 0 {
-                eprintln!(
-                    "[souffle] Engine input: {} samples, max_amp={max_amp:.4}, rms={rms:.6}",
-                    audio.len()
-                );
+                debug!(samples = audio.len(), max_amp = format!("{max_amp:.4}"), rms = format!("{rms:.6}"), "Engine input");
             }
         }
 
@@ -370,13 +343,13 @@ impl TranscriptionEngine for KyutaiEngine {
         // without conflicting with mutable borrow of model.state
         let device = model.device.clone();
 
-        // Process audio in 1920-sample frames (80ms at 24kHz)
-        for chunk in audio.chunks(1920) {
+        // Process audio in MIMI_FRAME_SIZE-sample frames (80ms at 24kHz)
+        for chunk in audio.chunks(MIMI_FRAME_SIZE) {
             let padded;
-            let chunk_data = if chunk.len() < 1920 {
+            let chunk_data = if chunk.len() < MIMI_FRAME_SIZE {
                 padded = {
                     let mut v = chunk.to_vec();
-                    v.resize(1920, 0.0);
+                    v.resize(MIMI_FRAME_SIZE, 0.0);
                     v
                 };
                 &padded[..]
@@ -390,7 +363,7 @@ impl TranscriptionEngine for KyutaiEngine {
             // memory after ~3 recording sessions.
             let asr_msgs = with_autorelease_pool(|| {
                 let pcm_tensor = Tensor::new(chunk_data, &device)
-                    .and_then(|t| t.reshape((1, 1, 1920)))
+                    .and_then(|t| t.reshape((1, 1, MIMI_FRAME_SIZE)))
                     .map_err(|e| EngineError::InferenceError(format!("Tensor creation: {e}")))?;
 
                 model
@@ -402,9 +375,13 @@ impl TranscriptionEngine for KyutaiEngine {
                             if let Ok(text_vals) = text_tensor.to_vec2::<u32>() {
                                 for (i, item) in items.iter().enumerate() {
                                     let tv = text_vals.get(i).map(|v| format!("{v:?}")).unwrap_or_default();
-                                    eprintln!(
-                                        "[souffle] Frame {frame} pre-forward: batch={i} text_token={} step_idx(first={}) input_text={tv}",
-                                        item.text_token(), item.is_first_step()
+                                    trace!(
+                                        frame,
+                                        batch = i,
+                                        text_token = item.text_token(),
+                                        first_step = item.is_first_step(),
+                                        input_text = tv,
+                                        "pre-forward"
                                     );
                                 }
                             }
@@ -429,18 +406,13 @@ impl TranscriptionEngine for KyutaiEngine {
                             if frame_num < 10 || frame_num % 50 == 0 {
                                 let vad_str: Vec<String> =
                                     prs.iter().map(|p| format!("{:.2}", p[0])).collect();
-                                eprintln!(
-                                    "[souffle] Frame {frame_num} (model_step={step_idx}): Step VAD=[{}]",
-                                    vad_str.join(", ")
-                                );
+                                trace!(frame = frame_num, model_step = step_idx, vad = vad_str.join(", "), "Step VAD");
                             }
                         }
                     }
                 }
                 if words > 0 || end_words > 0 {
-                    eprintln!(
-                        "[souffle] Frame {frame_num}: {words} words, {end_words} end_words, {steps} steps"
-                    );
+                    debug!(frame = frame_num, words, end_words, steps, "ASR messages");
                 }
             }
 
@@ -454,9 +426,7 @@ impl TranscriptionEngine for KyutaiEngine {
                             .decode_piece_ids(tokens)
                             .unwrap_or_default();
                         if debug_enabled {
-                            eprintln!(
-                                "[souffle] WORD: tokens={tokens:?} text={text:?} t={start_time:.2}"
-                            );
+                            debug!(tokens = ?tokens, text = ?text, t = format!("{start_time:.2}"), "WORD emitted");
                         }
                         if !text.is_empty() {
                             // Emit immediately — the Word message contains the fully
@@ -495,7 +465,7 @@ impl TranscriptionEngine for KyutaiEngine {
             .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
         let model = guard.as_ref().ok_or(EngineError::NotInitialized)?;
         let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
-        let silence_samples = (suffix_seconds * 24_000.0) as usize;
+        let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
         let silence = vec![0.0f32; silence_samples];
         drop(guard);
 

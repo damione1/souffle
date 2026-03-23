@@ -8,6 +8,8 @@
     TranscriptionSegment,
   } from "../types";
   import { getAppState } from "../stores/app.svelte";
+  import { formatTimestamp, formatDate, formatDuration, groupIntoParagraphs, errorMessage } from "../utils";
+  import type { Paragraph } from "../utils";
   import StatusBanner from "./ui/StatusBanner.svelte";
   import CopyButton from "./ui/CopyButton.svelte";
   import EmptyState from "./ui/EmptyState.svelte";
@@ -70,7 +72,7 @@
       meeting = await invoke<MeetingTranscript>("get_meeting", { id });
       syncSelectedModel(meeting.summary_model);
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     } finally {
       isLoadingMeeting = false;
     }
@@ -118,7 +120,7 @@
       };
       meetingTitle = "";
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
       liveMeetingSegments = [];
       liveMeetingLastTime = 0;
     }
@@ -134,7 +136,7 @@
       liveMeetingSegments = [];
       liveMeetingLastTime = 0;
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     }
   }
 
@@ -158,7 +160,7 @@
       };
       await invoke("summarize_meeting", { id: meeting.id, model: selectedModel, channel });
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
       isSummarizing = false;
     }
   }
@@ -172,64 +174,14 @@
       // Go back to history
       app.currentView = "meeting-history";
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     }
-  }
-
-  function formatTimestamp(seconds: number): string {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  }
-
-  function formatDate(iso: string): string {
-    return new Date(iso).toLocaleString();
-  }
-
-  function formatDuration(seconds: number): string {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}m ${secs}s`;
   }
 
   // Get the segments to display (live during recording, or from loaded meeting)
   let displaySegments = $derived(isRecordingMeeting ? liveMeetingSegments : (meeting?.segments ?? []));
 
-  type Paragraph = { timestamp: string; text: string };
-
-  /** Group word-level segments into flowing paragraphs with a leading timestamp */
-  function groupIntoParagraphs(segments: TranscriptionSegment[]): Paragraph[] {
-    if (segments.length === 0) return [];
-
-    const paragraphs: Paragraph[] = [];
-    let currentTimestamp = formatTimestamp(segments[0].start_time);
-    let currentWords: string[] = [];
-    let lastTime = segments[0].start_time;
-    let lastText = "";
-
-    for (const seg of segments) {
-      const gap = seg.start_time - lastTime;
-      const endsWithSentence = /[.!?…]\s*$/.test(lastText);
-
-      if (currentWords.length > 0 && gap >= pauseThreshold && endsWithSentence) {
-        paragraphs.push({ timestamp: currentTimestamp, text: currentWords.join(" ") });
-        currentTimestamp = formatTimestamp(seg.start_time);
-        currentWords = [];
-      }
-
-      currentWords.push(seg.text.trim());
-      lastTime = seg.start_time;
-      lastText = seg.text;
-    }
-
-    if (currentWords.length > 0) {
-      paragraphs.push({ timestamp: currentTimestamp, text: currentWords.join(" ") });
-    }
-
-    return paragraphs;
-  }
-
-  let displayParagraphs = $derived(groupIntoParagraphs(displaySegments));
+  let displayParagraphs = $derived(groupIntoParagraphs(displaySegments, pauseThreshold));
 
   export function getRecordingState() {
     return isRecordingMeeting;
