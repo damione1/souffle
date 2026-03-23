@@ -270,3 +270,103 @@ fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
         .map(|dt| dt.with_timezone(&Utc))
         .map_err(|e| format!("Parse datetime '{s}': {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::engine::TranscriptionSegment;
+    use crate::transcript::MeetingTranscript;
+    use tempfile::TempDir;
+
+    fn test_db() -> (Database, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+        (db, dir)
+    }
+
+    fn sample_meeting(id: &str) -> MeetingTranscript {
+        MeetingTranscript {
+            id: id.to_string(),
+            title: "Test Meeting".to_string(),
+            started_at: Utc::now(),
+            ended_at: Some(Utc::now()),
+            duration_seconds: 60.0,
+            engine: "test-engine".to_string(),
+            segments: vec![
+                TranscriptionSegment {
+                    text: "Hello world".to_string(),
+                    start_time: 0.0,
+                    end_time: 1.0,
+                    is_final: true,
+                    language: Some("en".to_string()),
+                    confidence: Some(0.95),
+                },
+                TranscriptionSegment {
+                    text: "second segment".to_string(),
+                    start_time: 1.5,
+                    end_time: 2.5,
+                    is_final: true,
+                    language: None,
+                    confidence: None,
+                },
+            ],
+            summary: None,
+            summary_model: None,
+            summary_generated_at: None,
+        }
+    }
+
+    #[test]
+    fn save_and_load_meeting() {
+        let (db, _dir) = test_db();
+        let meeting = sample_meeting("m1");
+        db.save_meeting(&meeting).unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.id, "m1");
+        assert_eq!(loaded.title, "Test Meeting");
+        assert_eq!(loaded.segments.len(), 2);
+        assert_eq!(loaded.segments[0].text, "Hello world");
+        assert_eq!(loaded.segments[1].text, "second segment");
+    }
+
+    #[test]
+    fn list_meetings() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        db.save_meeting(&sample_meeting("m2")).unwrap();
+
+        let list = db.list_meetings().unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn delete_meeting_cascades() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        assert!(db.meeting_exists("m1").unwrap());
+
+        db.delete_meeting("m1").unwrap();
+        assert!(!db.meeting_exists("m1").unwrap());
+    }
+
+    #[test]
+    fn update_summary() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        db.update_meeting_summary("m1", "Summary text", "qwen2.5").unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.summary.as_deref(), Some("Summary text"));
+        assert_eq!(loaded.summary_model.as_deref(), Some("qwen2.5"));
+        assert!(loaded.summary_generated_at.is_some());
+    }
+
+    #[test]
+    fn load_nonexistent_meeting_returns_error() {
+        let (db, _dir) = test_db();
+        assert!(db.load_meeting("nonexistent").is_err());
+    }
+}

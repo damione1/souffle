@@ -55,6 +55,9 @@ rusqlite = { version = "0.33", features = ["bundled-full"] }
 arboard = "3"
 enigo = { version = "0.3", features = ["serde"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.release]
 strip = true
 lto = true

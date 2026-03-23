@@ -54,3 +54,48 @@ impl Database {
         Ok(pairs)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::db::Database;
+    use tempfile::TempDir;
+
+    fn test_db() -> (Database, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+        (db, dir)
+    }
+
+    #[test]
+    fn get_set_round_trip() {
+        let (db, _dir) = test_db();
+        db.set_setting("key1", "value1").unwrap();
+        assert_eq!(db.get_setting("key1").unwrap(), Some("value1".to_string()));
+    }
+
+    #[test]
+    fn upsert_overwrites() {
+        let (db, _dir) = test_db();
+        db.set_setting("key1", "old").unwrap();
+        db.set_setting("key1", "new").unwrap();
+        assert_eq!(db.get_setting("key1").unwrap(), Some("new".to_string()));
+    }
+
+    #[test]
+    fn missing_key_returns_none() {
+        let (db, _dir) = test_db();
+        assert_eq!(db.get_setting("nonexistent").unwrap(), None);
+    }
+
+    #[test]
+    fn get_all_settings() {
+        let (db, _dir) = test_db();
+        db.set_setting("a", "1").unwrap();
+        db.set_setting("b", "2").unwrap();
+        let all = db.get_all_settings().unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(all.contains(&("a".to_string(), "1".to_string())));
+        assert!(all.contains(&("b".to_string(), "2".to_string())));
+    }
+}

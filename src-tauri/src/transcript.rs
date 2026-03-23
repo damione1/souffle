@@ -39,3 +39,59 @@ impl From<&MeetingTranscript> for MeetingListItem {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::TranscriptionSegment;
+
+    #[test]
+    fn meeting_transcript_serialization_round_trip() {
+        let meeting = MeetingTranscript {
+            id: "test-id".to_string(),
+            title: "Test".to_string(),
+            started_at: Utc::now(),
+            ended_at: None,
+            duration_seconds: 30.0,
+            engine: "test".to_string(),
+            segments: vec![TranscriptionSegment {
+                text: "hello".to_string(),
+                start_time: 0.0,
+                end_time: 1.0,
+                is_final: true,
+                language: None,
+                confidence: None,
+            }],
+            summary: Some("A summary".to_string()),
+            summary_model: Some("test-model".to_string()),
+            summary_generated_at: None,
+        };
+
+        let json = serde_json::to_string(&meeting).unwrap();
+        let deserialized: MeetingTranscript = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, "test-id");
+        assert_eq!(deserialized.segments.len(), 1);
+        assert_eq!(deserialized.summary.as_deref(), Some("A summary"));
+    }
+
+    #[test]
+    fn meeting_list_item_from_transcript() {
+        let transcript = MeetingTranscript {
+            id: "m1".to_string(),
+            title: "My Meeting".to_string(),
+            started_at: Utc::now(),
+            ended_at: None,
+            duration_seconds: 120.0,
+            engine: "test".to_string(),
+            segments: vec![],
+            summary: Some("summary".to_string()),
+            summary_model: None,
+            summary_generated_at: None,
+        };
+
+        let item = MeetingListItem::from(&transcript);
+        assert_eq!(item.id, "m1");
+        assert_eq!(item.title, "My Meeting");
+        assert!(item.has_summary);
+    }
+}

@@ -89,3 +89,66 @@ impl Database {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::db::Database;
+    use tempfile::TempDir;
+
+    fn test_db() -> (Database, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+        (db, dir)
+    }
+
+    #[test]
+    fn add_and_list_entries() {
+        let (db, _dir) = test_db();
+        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z").unwrap();
+        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z").unwrap();
+
+        let entries = db.list_dictation_entries(50).unwrap();
+        assert_eq!(entries.len(), 2);
+        // Newest first
+        assert_eq!(entries[0].text, "World");
+    }
+
+    #[test]
+    fn delete_single_entry() {
+        let (db, _dir) = test_db();
+        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z").unwrap();
+        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z").unwrap();
+
+        db.delete_dictation_entry("d1").unwrap();
+        let entries = db.list_dictation_entries(50).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "d2");
+    }
+
+    #[test]
+    fn clear_all_entries() {
+        let (db, _dir) = test_db();
+        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z").unwrap();
+        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z").unwrap();
+
+        db.clear_dictation_entries().unwrap();
+        let entries = db.list_dictation_entries(50).unwrap();
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn list_with_limit() {
+        let (db, _dir) = test_db();
+        for i in 0..10 {
+            db.add_dictation_entry(
+                &format!("d{i}"),
+                &format!("Entry {i}"),
+                &format!("2024-01-01T00:{i:02}:00Z"),
+            ).unwrap();
+        }
+
+        let entries = db.list_dictation_entries(3).unwrap();
+        assert_eq!(entries.len(), 3);
+    }
+}

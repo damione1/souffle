@@ -89,3 +89,30 @@ pub const SCHEMA_V1: &[&str] = &[
     CREATE_EMBEDDINGS,
     CREATE_EMBEDDINGS_INDEX,
 ];
+
+#[cfg(test)]
+mod tests {
+    use crate::db::Database;
+    use tempfile::TempDir;
+
+    #[test]
+    fn fresh_db_creation() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+        // Verify tables exist by doing basic operations
+        db.get_all_settings().unwrap();
+        db.list_meetings().unwrap();
+        db.list_dictation_entries(10).unwrap();
+    }
+
+    #[test]
+    fn idempotent_schema_rerun() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        // Open twice — second open should not fail
+        let _db1 = Database::open(&db_path).unwrap();
+        let db2 = Database::open(&db_path).unwrap();
+        db2.get_all_settings().unwrap();
+    }
+}
