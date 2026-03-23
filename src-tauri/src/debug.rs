@@ -15,18 +15,16 @@ fn parse_bool(value: &str) -> Option<bool> {
 }
 
 pub fn init_from_db(db: &Database) {
-    if let Ok(env_value) = std::env::var("SOUFFLE_DEBUG_TRANSCRIPTION") {
-        if let Some(enabled) = parse_bool(&env_value) {
+    if let Ok(env_value) = std::env::var("SOUFFLE_DEBUG_TRANSCRIPTION")
+        && let Some(enabled) = parse_bool(&env_value) {
             set_transcription_debug(enabled);
             return;
         }
-    }
 
-    if let Ok(Some(value)) = db.get_setting("debug_transcription") {
-        if let Some(enabled) = parse_bool(&value) {
+    if let Ok(Some(value)) = db.get_setting("debug_transcription")
+        && let Some(enabled) = parse_bool(&value) {
             set_transcription_debug(enabled);
         }
-    }
 }
 
 pub fn set_transcription_debug(enabled: bool) {

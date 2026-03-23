@@ -1,10 +1,9 @@
 <script lang="ts">
   import { invoke, Channel } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import type { TranscriptionSegment, ModelStatus, DownloadProgress, DictationEntry } from "../types";
   import { getAppState } from "../stores/app.svelte";
-  import { errorMessage } from "../utils";
+  import { errorMessage, useEventListeners } from "../utils";
   import StatusBanner from "./ui/StatusBanner.svelte";
   import CopyButton from "./ui/CopyButton.svelte";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
@@ -13,7 +12,6 @@
 
   const app = getAppState();
 
-  let isRecording = $state(false);
   let isStartingRecording = $state(false);
   let isStopping = $state(false);
   let transcript = $state("");
@@ -29,7 +27,7 @@
   let history = $state<DictationEntry[]>([]);
   let expandedEntryId = $state<string | null>(null);
 
-  let cleanupFns: (() => void)[] = [];
+  const events = useEventListeners();
 
   async function loadHistory() {
     try {
@@ -73,21 +71,19 @@
     checkModelStatus();
     loadHistory();
 
-    listen("shortcut-toggle", () => {
+    events.add("shortcut-toggle", () => {
       if (!isStartingRecording && !isStopping) toggleRecording(true);
-    }).then((fn) => cleanupFns.push(fn));
+    });
 
-    listen("shortcut-ptt-start", () => {
-      if (!isRecording && !isStartingRecording && !isStopping) toggleRecording(true);
-    }).then((fn) => cleanupFns.push(fn));
+    events.add("shortcut-ptt-start", () => {
+      if (!app.isRecording && !isStartingRecording && !isStopping) toggleRecording(true);
+    });
 
-    listen("shortcut-ptt-stop", () => {
-      if (isRecording && !isStopping) toggleRecording(true);
-    }).then((fn) => cleanupFns.push(fn));
+    events.add("shortcut-ptt-stop", () => {
+      if (app.isRecording && !isStopping) toggleRecording(true);
+    });
 
-    return () => {
-      cleanupFns.forEach((fn) => fn());
-    };
+    return () => events.cleanup();
   });
 
   async function checkModelStatus() {
@@ -151,11 +147,12 @@
   async function toggleRecording(fromShortcut = false) {
     if (isStartingRecording || isStopping) return;
 
-    if (isRecording) {
+    if (app.isRecording) {
       isStopping = true;
       try {
         await invoke("stop_transcription");
-        isRecording = false;
+        app.isRecording = false;
+        app.recordingMode = "idle";
 
         await addHistoryEntry(transcript);
 
@@ -220,7 +217,8 @@
       };
 
       await invoke("start_transcription", { channel });
-      isRecording = true;
+      app.isRecording = true;
+      app.recordingMode = "dictation";
     } catch (e) {
       statusMessage = errorMessage(e);
     } finally {
@@ -228,9 +226,6 @@
     }
   }
 
-  export function getRecordingState() {
-    return isRecording;
-  }
 </script>
 
 <div class="flex flex-col gap-4">
@@ -304,7 +299,7 @@
       <h3>
         {#if isStartingRecording}
           Starting the microphone...
-        {:else if isRecording}
+        {:else if app.isRecording}
           Listening now
         {:else}
           Ready when you are
@@ -313,7 +308,7 @@
       <p class="text-text-secondary text-sm">
         {#if isStartingRecording}
           Warming up the engine.
-        {:else if isRecording}
+        {:else if app.isRecording}
           Speak naturally. Text streams into the panel.
         {:else}
           Tap the button to begin.
@@ -321,12 +316,12 @@
       </p>
 
       <button
-        onclick={toggleRecording}
+        onclick={() => toggleRecording()}
         disabled={!modelLoaded || isLoadingModel || isStartingRecording}
-        aria-label={isRecording ? "Stop recording" : "Start recording"}
+        aria-label={app.isRecording ? "Stop recording" : "Start recording"}
         class="record-button"
         class:is-starting={isStartingRecording}
-        class:is-recording={isRecording}
+        class:is-recording={app.isRecording}
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="40" height="40" aria-hidden="true">
           <path d="M12 1a4 4 0 0 0-4 4v7a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4Z" />
@@ -337,7 +332,7 @@
       <span class="text-sm text-text-secondary">
         {#if isStartingRecording}
           Warming up...
-        {:else if isRecording}
+        {:else if app.isRecording}
           Tap to stop
         {:else if modelLoaded}
           Tap to start
@@ -370,8 +365,8 @@
         <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-40 max-h-[360px] overflow-y-auto text-sm leading-relaxed">{transcript}</div>
       {:else}
         <EmptyState
-          title={isStartingRecording ? "Warming up..." : isRecording ? "Listening for speech" : "No transcript yet"}
-          message={isRecording || isStartingRecording ? "Text will appear as segments arrive." : "Press the mic button to start."}
+          title={isStartingRecording ? "Warming up..." : app.isRecording ? "Listening for speech" : "No transcript yet"}
+          message={app.isRecording || isStartingRecording ? "Text will appear as segments arrive." : "Press the mic button to start."}
         />
       {/if}
     </section>

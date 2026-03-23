@@ -24,11 +24,10 @@ pub fn save_setting(
     key: String,
     value: serde_json::Value,
 ) -> Result<(), String> {
-    if key == "debug_transcription" {
-        if let Some(enabled) = value.as_bool() {
+    if key == "debug_transcription"
+        && let Some(enabled) = value.as_bool() {
             crate::debug::set_transcription_debug(enabled);
         }
-    }
     let value_str = serde_json::to_string(&value).map_err(|e| format!("Serialize: {e}"))?;
     state.db.set_setting(&key, &value_str)
 }

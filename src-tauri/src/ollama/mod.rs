@@ -1,35 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_URL: &str = "http://localhost:11434";
-
-const SUMMARIZE_SYSTEM_PROMPT: &str = "\
-You summarize meeting transcripts into a factual, extractive outline.
-
-Rules:
-- Use only information explicitly stated in the transcript.
-- Never infer project names, decisions, action items, deadlines, owners, next steps, or meeting outcomes.
-- Do not turn greetings or a short introduction into a broader meeting narrative.
-- Do not greet, thank, apologize, or address the reader.
-- Do not add an introduction, conclusion, or commentary about the meeting quality.
-- If the transcript is very short, output only the facts that are directly present.
-- If the transcript only contains greetings, attendance, or setup, say only that.
-- Keep the markdown section headings exactly as written below in English.
-- Write the content of each bullet in the same language as the transcript.
-- If a section has no content in the transcript, write a short \"none stated in transcript\" equivalent in the same language.
-- Use short, concrete bullets. No paragraphs.
-- Return exactly this structure and nothing before or after it:
-
-## Summary
-- ...
-
-## Decisions
-- ...
-
-## Action Items
-- ...
-
-## Topics
-- ...";
+use crate::constants::{OLLAMA_DEFAULT_URL, OLLAMA_SUMMARIZE_PROMPT};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaStatus {
@@ -171,7 +142,7 @@ fn summary_models(models: &[String]) -> Vec<String> {
 
 /// Check if Ollama is running and list available models.
 pub async fn check_available(base_url: Option<&str>) -> OllamaStatus {
-    let url = base_url.unwrap_or(DEFAULT_URL);
+    let url = base_url.unwrap_or(OLLAMA_DEFAULT_URL);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
@@ -220,13 +191,13 @@ pub async fn summarize_stream(
         ));
     }
 
-    let url = base_url.unwrap_or(DEFAULT_URL);
+    let url = base_url.unwrap_or(OLLAMA_DEFAULT_URL);
     let client = reqwest::Client::new();
 
     let body = GenerateRequest {
         model: model.to_string(),
         prompt: format!("Transcript:\n---\n{transcript_text}\n---"),
-        system: SUMMARIZE_SYSTEM_PROMPT.to_string(),
+        system: OLLAMA_SUMMARIZE_PROMPT.to_string(),
         stream: true,
         options: GenerateOptions { temperature: 0.0 },
     };

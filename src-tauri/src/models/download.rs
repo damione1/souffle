@@ -34,9 +34,7 @@ pub fn model_exists(model_dir: &Path) -> bool {
 
 /// Get the default model storage directory
 pub fn default_model_dir() -> PathBuf {
-    dirs_next::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("com.souffle.app")
+    crate::constants::app_data_dir()
         .join("models")
         .join("kyutai")
         .join("stt-1b-en_fr")

@@ -105,6 +105,8 @@
       };
       await invoke("start_meeting_recording", { title, channel });
       isRecordingMeeting = true;
+      app.isRecording = true;
+      app.recordingMode = "meeting";
       // Create a temporary meeting object for display during recording
       meeting = {
         id: "",
@@ -130,6 +132,8 @@
     try {
       const id: string = await invoke("stop_meeting_recording");
       isRecordingMeeting = false;
+      app.isRecording = false;
+      app.recordingMode = "idle";
       app.currentMeetingId = id;
       meeting = await invoke("get_meeting", { id });
       syncSelectedModel(meeting?.summary_model);
@@ -183,9 +187,6 @@
 
   let displayParagraphs = $derived(groupIntoParagraphs(displaySegments, pauseThreshold));
 
-  export function getRecordingState() {
-    return isRecordingMeeting;
-  }
 </script>
 
 <div class="flex flex-col gap-4">

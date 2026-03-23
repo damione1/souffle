@@ -1,5 +1,7 @@
 import type { View, AppSettings } from "../types";
 
+export type RecordingMode = "idle" | "dictation" | "meeting";
+
 // Current view
 let currentView = $state<View>("transcription");
 
@@ -8,6 +10,10 @@ let currentMeetingId = $state<string | null>(null);
 
 // Selected audio device (persisted across tab switches)
 let selectedDevice = $state("");
+
+// Recording state — shared across views
+let isRecording = $state(false);
+let recordingMode = $state<RecordingMode>("idle");
 
 // Settings with defaults
 let settings = $state<AppSettings>({
@@ -32,6 +38,12 @@ export function getAppState() {
 
     get selectedDevice() { return selectedDevice; },
     set selectedDevice(d: string) { selectedDevice = d; },
+
+    get isRecording() { return isRecording; },
+    set isRecording(v: boolean) { isRecording = v; },
+
+    get recordingMode() { return recordingMode; },
+    set recordingMode(m: RecordingMode) { recordingMode = m; },
 
     /** Navigate to a specific meeting's detail page */
     openMeeting(id: string) {

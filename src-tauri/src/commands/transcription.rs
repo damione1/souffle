@@ -229,11 +229,10 @@ pub fn start_meeting_recording(
     let acc_ref = Arc::clone(&state.meeting_accumulator);
     let on_segment: SegmentCallback = Box::new(move |seg| {
         let _ = channel_clone.send(seg.clone());
-        if let Ok(mut acc) = acc_ref.lock() {
-            if let Some(ref mut meeting) = *acc {
+        if let Ok(mut acc) = acc_ref.lock()
+            && let Some(ref mut meeting) = *acc {
                 meeting.segments.push(seg);
             }
-        }
     });
 
     start_pipeline(&state, on_segment)?;
@@ -296,10 +295,7 @@ pub fn paste_text(text: String, delay_ms: u64) -> Result<(), String> {
 fn save_wav(samples: &[f32]) -> Result<PathBuf, String> {
     use crate::constants::SAMPLE_RATE;
 
-    let recordings_dir = dirs_next::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("com.souffle.app")
-        .join("recordings");
+    let recordings_dir = crate::constants::app_data_dir().join("recordings");
 
     std::fs::create_dir_all(&recordings_dir)
         .map_err(|e| format!("Failed to create recordings dir: {e}"))?;

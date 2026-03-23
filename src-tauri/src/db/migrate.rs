@@ -26,7 +26,7 @@ impl Database {
             let entry = entry.map_err(|e| format!("Dir entry: {e}"))?;
             let path = entry.path();
 
-            if !path.extension().is_some_and(|ext| ext == "json") {
+            if path.extension().is_none_or(|ext| ext != "json") {
                 continue;
             }
 

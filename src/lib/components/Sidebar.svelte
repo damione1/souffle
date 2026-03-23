@@ -45,6 +45,7 @@
             : "text-text-muted hover:bg-surface-2 hover:text-text-secondary"
         }`}
         aria-current={isActive ? "page" : undefined}
+        aria-label={tab.label}
       >
         <span
           class={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-sm bg-accent-blue transition-[height] duration-150 ${isActive ? "h-5" : "h-0"}`}

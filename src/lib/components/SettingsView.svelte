@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import type { AudioDevice, OllamaStatus, Theme } from "../types";
   import { getAppState } from "../stores/app.svelte";
-  import { applyTheme, loadSettingsFromDb } from "../utils";
+  import { applyTheme, loadSettingsFromDb, errorMessage } from "../utils";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
   const app = getAppState();
@@ -52,7 +52,7 @@
     try {
       await invoke("save_setting", { key, value });
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     }
   }
 
@@ -72,7 +72,7 @@
         await invoke("select_audio_device", { deviceName: defaultDevice.name });
       }
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     }
   }
 
@@ -83,7 +83,7 @@
       await invoke("select_audio_device", { deviceName: app.selectedDevice });
       saveSetting("audio_device", app.selectedDevice);
     } catch (e) {
-      statusMessage = String(e);
+      statusMessage = errorMessage(e);
     }
   }
 
@@ -227,7 +227,7 @@
     try {
       await invoke("update_shortcuts", { toggleShortcut, pttShortcut });
     } catch (e) {
-      shortcutError = String(e);
+      shortcutError = errorMessage(e);
     }
   }
 
@@ -253,9 +253,9 @@
     <p class="text-text-secondary text-sm">Choose the active microphone or virtual device.</p>
 
     <div class="flex flex-col gap-1.5">
-      <span class="field-label">Input device</span>
+      <label for="input-device" class="field-label">Input device</label>
       <div class="flex gap-1.5 items-center">
-        <select value={app.selectedDevice} onchange={onDeviceChange} class="field-select">
+        <select id="input-device" value={app.selectedDevice} onchange={onDeviceChange} class="field-select">
           {#each audioDevices as device}
             <option value={device.name}>
               {device.name}{device.is_default ? " (default)" : ""}
@@ -297,9 +297,9 @@
 
     <div class="flex items-center justify-between gap-4">
       <div>
-        <span class="block text-[0.9375rem] font-medium text-text-primary">Ollama URL</span>
+        <label for="ollama-url" class="block text-[0.9375rem] font-medium text-text-primary">Ollama URL</label>
       </div>
-      <input type="text" value={app.settings.ollama_url} onchange={onOllamaUrlChange} class="field-input max-w-64" />
+      <input id="ollama-url" type="text" value={app.settings.ollama_url} onchange={onOllamaUrlChange} class="field-input max-w-64" />
     </div>
 
     <div class="flex items-center justify-between gap-4">
@@ -315,8 +315,9 @@
 
     {#if ollamaAvailable && ollamaSummaryModels.length > 0}
       <div class="flex flex-col gap-1.5">
-        <span class="field-label">Summarization model</span>
+        <label for="summary-model" class="field-label">Summarization model</label>
         <select
+          id="summary-model"
           value={app.settings.ollama_model || ollamaSummaryModels[0]}
           onchange={onOllamaModelChange}
           class="field-select"
@@ -368,10 +369,11 @@
     {#if app.settings.auto_paste}
       <div class="flex items-center justify-between gap-4">
         <div>
-          <span class="block text-[0.9375rem] font-medium text-text-primary">Paste delay</span>
+          <label for="paste-delay" class="block text-[0.9375rem] font-medium text-text-primary">Paste delay</label>
           <span class="text-sm text-text-muted">Milliseconds to wait before pasting. Requires Accessibility permission.</span>
         </div>
         <input
+          id="paste-delay"
           type="number"
           value={app.settings.paste_delay_ms}
           onchange={onPasteDelayChange}

@@ -14,14 +14,6 @@
 
   const app = getAppState();
 
-  let transcriptionView: TranscriptionView | undefined = $state();
-  let meetingView: MeetingView | undefined = $state();
-
-  let isAnyRecording = $derived(
-    (transcriptionView?.getRecordingState?.() ?? false) ||
-    (meetingView?.getRecordingState?.() ?? false)
-  );
-
   let unlistenNav: (() => void) | null = null;
 
   onMount(() => {
@@ -60,9 +52,9 @@
   <div class="flex flex-1 flex-col min-w-0 overflow-hidden">
     <main class="flex-1 p-6 overflow-y-auto">
       {#if app.currentView === "transcription"}
-        <TranscriptionView bind:this={transcriptionView} />
+        <TranscriptionView />
       {:else if app.currentView === "meeting"}
-        <MeetingView bind:this={meetingView} />
+        <MeetingView />
       {:else if app.currentView === "meeting-history"}
         <MeetingHistoryView />
       {:else if app.currentView === "settings"}
@@ -70,6 +62,6 @@
       {/if}
     </main>
 
-    <Waveform active={isAnyRecording} />
+    <Waveform active={app.isRecording} />
   </div>
 </div>
