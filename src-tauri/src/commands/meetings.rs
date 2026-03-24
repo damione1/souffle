@@ -1,6 +1,7 @@
 use tauri::State;
 use tauri::ipc::Channel;
 
+use crate::settings::AppSettings;
 use crate::state::AppState;
 
 /// List all saved meetings
@@ -28,8 +29,9 @@ pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), Stri
 
 /// Check if Ollama is available and list models
 #[tauri::command]
-pub async fn check_ollama() -> Result<crate::ollama::OllamaStatus, String> {
-    Ok(crate::ollama::check_available(None).await)
+pub async fn check_ollama(state: State<'_, AppState>) -> Result<crate::ollama::OllamaStatus, String> {
+    let settings = AppSettings::load(&state.db)?;
+    Ok(crate::ollama::check_available(Some(&settings.ollama_url)).await)
 }
 
 /// Summarize a meeting transcript using Ollama, streaming results back
@@ -41,6 +43,7 @@ pub async fn summarize_meeting(
     channel: Channel<crate::ollama::SummarizeProgress>,
 ) -> Result<(), String> {
     let transcript = state.db.load_meeting(&id)?;
+    let settings = AppSettings::load(&state.db)?;
 
     let text: String = transcript
         .segments
@@ -55,7 +58,7 @@ pub async fn summarize_meeting(
 
     let channel_clone = channel.clone();
     let db = state.db.clone();
-    let summary = crate::ollama::summarize_stream(&text, &model, None, move |progress| {
+    let summary = crate::ollama::summarize_stream(&text, &model, Some(&settings.ollama_url), move |progress| {
         let _ = channel_clone.send(progress);
     })
     .await?;

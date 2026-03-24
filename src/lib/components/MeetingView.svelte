@@ -1,10 +1,10 @@
 <script lang="ts">
   import { invoke, Channel } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
+  import { getOllamaStatus } from "../api/ollama";
   import type {
     MeetingTranscript,
     SummarizeProgress,
-    OllamaStatus,
     TranscriptionSegment,
   } from "../types";
   import { getAppState } from "../stores/app.svelte";
@@ -80,7 +80,7 @@
 
   async function checkOllama() {
     try {
-      const status: OllamaStatus = await invoke("check_ollama");
+      const status = await getOllamaStatus();
       ollamaAvailable = status.available;
       summaryModels = status.summary_models;
       syncSelectedModel(meeting?.summary_model);

@@ -92,6 +92,27 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
         return Err("Model not downloaded yet".into());
     }
 
+    if *state.is_recording.acquire()? {
+        return Err("Cannot load the model while recording".into());
+    }
+
+    {
+        let model_loaded = *state.model_loaded.acquire()?;
+        let pipeline_ready = state.pipeline.acquire()?.is_some();
+        if model_loaded && pipeline_ready {
+            info!("Model already loaded, reusing existing inference pipeline");
+            return Ok(());
+        }
+    }
+
+    {
+        let mut pipeline_guard = state.pipeline.acquire()?;
+        if let Some(mut pipeline) = pipeline_guard.take() {
+            pipeline.shutdown()?;
+        }
+    }
+    *state.model_loaded.acquire()? = false;
+
     let mut engine = state.engine.acquire()?;
     info!(path = %model_dir.display(), "Loading model");
     engine
@@ -99,12 +120,23 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|e: crate::engine::EngineError| e.to_string())?;
     drop(engine);
 
-    *state.model_loaded.acquire()? = true;
-
     // Spawn persistent inference pipeline (lives until app exit)
-    let pipeline =
-        TranscriptionPipeline::spawn(state.audio_receiver.clone(), Arc::clone(&state.engine))?;
+    let pipeline = match TranscriptionPipeline::spawn(
+        state.audio_receiver.clone(),
+        Arc::clone(&state.engine),
+    ) {
+        Ok(pipeline) => pipeline,
+        Err(e) => {
+            let mut engine = state.engine.acquire()?;
+            if let Err(unload_err) = engine.unload_model() {
+                tracing::warn!("Failed to unload model after pipeline startup error: {unload_err}");
+            }
+            return Err(e);
+        }
+    };
+
     *state.pipeline.acquire()? = Some(pipeline);
+    *state.model_loaded.acquire()? = true;
 
     info!("Model loaded, inference pipeline ready");
     Ok(())

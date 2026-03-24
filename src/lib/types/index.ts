@@ -69,6 +69,15 @@ export type AppSettings = {
   debug_transcription: boolean;
 };
 
+export type PersistedAppSettings = AppSettings & {
+  audio_device: string | null;
+};
+
+export type ShortcutSettings = {
+  toggle: string;
+  push_to_talk: string;
+};
+
 export type DictationEntry = {
   id: string;
   text: string;

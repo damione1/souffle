@@ -1,0 +1,309 @@
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+
+use crate::constants::OLLAMA_DEFAULT_URL;
+use crate::db::Database;
+
+const THEME_KEY: &str = "theme";
+const AUTO_PASTE_KEY: &str = "auto_paste";
+const PASTE_DELAY_MS_KEY: &str = "paste_delay_ms";
+const OLLAMA_URL_KEY: &str = "ollama_url";
+const OLLAMA_MODEL_KEY: &str = "ollama_model";
+const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
+const AUDIO_DEVICE_KEY: &str = "audio_device";
+const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
+const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AppSettings {
+    pub theme: Theme,
+    pub auto_paste: bool,
+    pub paste_delay_ms: u64,
+    pub ollama_url: String,
+    pub ollama_model: String,
+    pub debug_transcription: bool,
+    pub audio_device: Option<String>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            theme: Theme::Dark,
+            auto_paste: false,
+            paste_delay_ms: 100,
+            ollama_url: OLLAMA_DEFAULT_URL.to_string(),
+            ollama_model: String::new(),
+            debug_transcription: false,
+            audio_device: None,
+        }
+    }
+}
+
+impl AppSettings {
+    pub fn load(db: &Database) -> Result<Self, String> {
+        let mut settings = Self::default();
+
+        if let Some(theme) = read_json_setting::<Theme>(db, THEME_KEY)? {
+            settings.theme = theme;
+        }
+        if let Some(auto_paste) = read_json_setting::<bool>(db, AUTO_PASTE_KEY)? {
+            settings.auto_paste = auto_paste;
+        }
+        if let Some(paste_delay_ms) = read_json_setting::<u64>(db, PASTE_DELAY_MS_KEY)? {
+            settings.paste_delay_ms = paste_delay_ms;
+        }
+        if let Some(ollama_url) = read_json_setting::<String>(db, OLLAMA_URL_KEY)?
+            && !ollama_url.trim().is_empty()
+        {
+            settings.ollama_url = ollama_url;
+        }
+        if let Some(ollama_model) = read_json_setting::<String>(db, OLLAMA_MODEL_KEY)? {
+            settings.ollama_model = ollama_model;
+        }
+        if let Some(debug_transcription) =
+            read_json_setting::<bool>(db, DEBUG_TRANSCRIPTION_KEY)?
+        {
+            settings.debug_transcription = debug_transcription;
+        }
+        if let Some(audio_device) = read_json_setting::<String>(db, AUDIO_DEVICE_KEY)? {
+            settings.audio_device = Some(audio_device);
+        }
+
+        Ok(settings.sanitized())
+    }
+
+    pub fn sanitize_for_save(&self) -> Result<Self, String> {
+        let normalized = self.sanitized();
+
+        if self.ollama_url.trim().is_empty() {
+            return Err("Ollama URL cannot be empty".into());
+        }
+
+        if !(50..=1000).contains(&self.paste_delay_ms) {
+            return Err("Paste delay must be between 50 and 1000 ms".into());
+        }
+
+        Ok(normalized)
+    }
+
+    fn sanitized(&self) -> Self {
+        let mut normalized = self.clone();
+        normalized.ollama_url = normalized.ollama_url.trim().to_string();
+        normalized.ollama_model = normalized.ollama_model.trim().to_string();
+        normalized.audio_device = normalized
+            .audio_device
+            .as_ref()
+            .map(|device| device.trim().to_string())
+            .filter(|device| !device.is_empty());
+
+        if normalized.ollama_url.is_empty() {
+            normalized.ollama_url = OLLAMA_DEFAULT_URL.to_string();
+        }
+
+        if !(50..=1000).contains(&normalized.paste_delay_ms) {
+            normalized.paste_delay_ms = Self::default().paste_delay_ms;
+        }
+
+        normalized
+    }
+
+    pub fn save(&self, db: &Database) -> Result<(), String> {
+        let normalized = self.sanitize_for_save()?;
+
+        write_json_setting(db, THEME_KEY, &normalized.theme)?;
+        write_json_setting(db, AUTO_PASTE_KEY, &normalized.auto_paste)?;
+        write_json_setting(db, PASTE_DELAY_MS_KEY, &normalized.paste_delay_ms)?;
+        write_json_setting(db, OLLAMA_URL_KEY, &normalized.ollama_url)?;
+        write_json_setting(db, OLLAMA_MODEL_KEY, &normalized.ollama_model)?;
+        write_json_setting(
+            db,
+            DEBUG_TRANSCRIPTION_KEY,
+            &normalized.debug_transcription,
+        )?;
+
+        if let Some(audio_device) = normalized.audio_device.as_ref() {
+            write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
+        } else {
+            db.delete_setting(AUDIO_DEVICE_KEY)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ShortcutSettings {
+    pub toggle: String,
+    pub push_to_talk: String,
+}
+
+impl Default for ShortcutSettings {
+    fn default() -> Self {
+        Self {
+            toggle: crate::DEFAULT_TOGGLE_SHORTCUT.to_string(),
+            push_to_talk: String::new(),
+        }
+    }
+}
+
+impl ShortcutSettings {
+    pub fn load(db: &Database) -> Result<Self, String> {
+        let mut shortcuts = Self::default();
+
+        if let Some(toggle) = read_json_setting::<String>(db, SHORTCUT_TOGGLE_KEY)? {
+            shortcuts.toggle = toggle;
+        }
+        if let Some(push_to_talk) = read_json_setting::<String>(db, SHORTCUT_PUSH_TO_TALK_KEY)? {
+            shortcuts.push_to_talk = push_to_talk;
+        }
+
+        Ok(shortcuts.sanitized())
+    }
+
+    pub fn normalize(&self) -> Result<Self, String> {
+        let normalized = Self {
+            toggle: self.toggle.trim().to_string(),
+            push_to_talk: self.push_to_talk.trim().to_string(),
+        };
+
+        if !normalized.toggle.is_empty() && normalized.toggle == normalized.push_to_talk {
+            return Err("Toggle and push-to-talk shortcuts must be different".into());
+        }
+
+        Ok(normalized)
+    }
+
+    fn sanitized(&self) -> Self {
+        let mut normalized = Self {
+            toggle: self.toggle.trim().to_string(),
+            push_to_talk: self.push_to_talk.trim().to_string(),
+        };
+
+        if !normalized.toggle.is_empty() && normalized.toggle == normalized.push_to_talk {
+            normalized.push_to_talk.clear();
+        }
+
+        normalized
+    }
+
+    pub fn save(&self, db: &Database) -> Result<(), String> {
+        let normalized = self.normalize()?;
+        write_json_setting(db, SHORTCUT_TOGGLE_KEY, &normalized.toggle)?;
+        write_json_setting(db, SHORTCUT_PUSH_TO_TALK_KEY, &normalized.push_to_talk)?;
+        Ok(())
+    }
+}
+
+fn read_json_setting<T>(db: &Database, key: &str) -> Result<Option<T>, String>
+where
+    T: DeserializeOwned,
+{
+    match db.get_setting(key)? {
+        Some(raw_value) => serde_json::from_str(&raw_value)
+            .map(Some)
+            .map_err(|e| format!("Parse setting '{key}': {e}")),
+        None => Ok(None),
+    }
+}
+
+fn write_json_setting<T>(db: &Database, key: &str, value: &T) -> Result<(), String>
+where
+    T: Serialize,
+{
+    let encoded = serde_json::to_string(value).map_err(|e| format!("Serialize setting '{key}': {e}"))?;
+    db.set_setting(key, &encoded)
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use crate::db::Database;
+
+    use super::{AppSettings, ShortcutSettings, Theme};
+    use crate::constants::OLLAMA_DEFAULT_URL;
+
+    fn test_db() -> (Database, TempDir) {
+        let dir = TempDir::new().expect("temp dir");
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).expect("db open");
+        (db, dir)
+    }
+
+    #[test]
+    fn app_settings_round_trip() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            theme: Theme::Light,
+            auto_paste: true,
+            paste_delay_ms: 250,
+            ollama_url: "http://example.test:11434".into(),
+            ollama_model: "qwen2.5".into(),
+            debug_transcription: true,
+            audio_device: Some("BlackHole".into()),
+        };
+
+        settings.save(&db).expect("save settings");
+
+        assert_eq!(AppSettings::load(&db).expect("load settings"), settings);
+    }
+
+    #[test]
+    fn blank_audio_device_is_removed_on_save() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            audio_device: Some("   ".into()),
+            ..AppSettings::default()
+        };
+
+        settings.save(&db).expect("save settings");
+
+        assert_eq!(db.get_setting("audio_device").expect("get setting"), None);
+    }
+
+    #[test]
+    fn shortcut_settings_reject_duplicate_bindings() {
+        let shortcuts = ShortcutSettings {
+            toggle: "CommandOrControl+Shift+Space".into(),
+            push_to_talk: "CommandOrControl+Shift+Space".into(),
+        };
+
+        assert!(shortcuts.normalize().is_err());
+    }
+
+    #[test]
+    fn missing_settings_use_defaults() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings::load(&db).expect("load defaults");
+        let shortcuts = ShortcutSettings::load(&db).expect("load shortcuts");
+
+        assert_eq!(settings, AppSettings::default());
+        assert_eq!(shortcuts, ShortcutSettings::default());
+    }
+
+    #[test]
+    fn invalid_persisted_values_fall_back_to_defaults() {
+        let (db, _dir) = test_db();
+        db.set_setting("paste_delay_ms", "0").expect("save delay");
+        db.set_setting("ollama_url", "\"   \"").expect("save url");
+        db.set_setting("shortcut_toggle", "\"F6\"").expect("save toggle");
+        db.set_setting("shortcut_push_to_talk", "\"F6\"").expect("save ptt");
+
+        let settings = AppSettings::load(&db).expect("load settings");
+        let shortcuts = ShortcutSettings::load(&db).expect("load shortcuts");
+
+        assert_eq!(settings.paste_delay_ms, AppSettings::default().paste_delay_ms);
+        assert_eq!(settings.ollama_url, OLLAMA_DEFAULT_URL);
+        assert_eq!(shortcuts.toggle, "F6");
+        assert_eq!(shortcuts.push_to_talk, "");
+    }
+}

@@ -11,6 +11,7 @@ pub mod models;
 pub mod ollama;
 pub mod pipeline;
 pub mod platform;
+pub mod settings;
 pub mod state;
 pub mod transcript;
 pub mod tray;
@@ -93,30 +94,23 @@ pub fn run() {
             commands::delete_dictation_entry,
             commands::clear_dictation_history,
             commands::get_settings,
-            commands::save_setting,
-            commands::update_shortcuts,
+            commands::save_settings,
+            commands::save_shortcuts,
             commands::get_shortcuts,
             commands::get_audio_level,
         ])
         .setup(|app| {
             // Load shortcut settings from DB and register
             let state = app.state::<AppState>();
-            let toggle = state
-                .db
-                .get_setting("shortcut_toggle")
-                .ok()
-                .flatten()
-                .and_then(|v| serde_json::from_str::<String>(&v).ok())
-                .unwrap_or_else(|| DEFAULT_TOGGLE_SHORTCUT.to_string());
-            let ptt = state
-                .db
-                .get_setting("shortcut_push_to_talk")
-                .ok()
-                .flatten()
-                .and_then(|v| serde_json::from_str::<String>(&v).ok())
-                .unwrap_or_default();
+            let shortcuts = match settings::ShortcutSettings::load(&state.db) {
+                Ok(shortcuts) => shortcuts,
+                Err(e) => {
+                    tracing::warn!("Failed to load shortcuts on startup, using defaults: {e}");
+                    settings::ShortcutSettings::default()
+                }
+            };
 
-            if let Err(e) = commands::register_shortcuts(app.handle(), &toggle, &ptt) {
+            if let Err(e) = commands::register_shortcuts(app.handle(), &shortcuts) {
                 tracing::warn!("Failed to register shortcuts on startup: {e}");
             }
 

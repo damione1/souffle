@@ -1,9 +1,24 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import type { AudioDevice, OllamaStatus, Theme } from "../types";
+  import {
+    getSettings,
+    getShortcuts,
+    listAudioDevices,
+    saveSettings,
+    saveShortcuts as persistShortcutSettings,
+    selectAudioDevice,
+    toAppSettings,
+    withAudioDevice,
+  } from "../api/settings";
+  import { getOllamaStatus } from "../api/ollama";
+  import type {
+    AudioDevice,
+    PersistedAppSettings,
+    ShortcutSettings,
+    Theme,
+  } from "../types";
   import { getAppState } from "../stores/app.svelte";
-  import { applyTheme, loadSettingsFromDb, errorMessage } from "../utils";
+  import { applyTheme, errorMessage } from "../utils";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
   const app = getAppState();
@@ -19,19 +34,19 @@
   let shortcutError = $state("");
 
   onMount(async () => {
-    await loadSettings();
+    await syncSettings();
     await loadShortcuts();
     await refreshDevices();
     await checkOllama();
   });
 
-  async function loadSettings() {
+  async function syncSettings() {
     try {
-      const loaded = await loadSettingsFromDb();
-      app.settings = { ...app.settings, ...loaded };
+      const settings = await getSettings();
+      app.settings = toAppSettings(settings);
       applyTheme(app.settings.theme);
-      if (loaded.audio_device) {
-        app.selectedDevice = loaded.audio_device;
+      if (settings.audio_device) {
+        app.selectedDevice = settings.audio_device;
       }
     } catch (e) {
       console.warn("Failed to load settings:", e);
@@ -40,7 +55,7 @@
 
   async function loadShortcuts() {
     try {
-      const shortcuts = await invoke<{ toggle: string; push_to_talk: string }>("get_shortcuts");
+      const shortcuts = await getShortcuts();
       toggleShortcut = shortcuts.toggle;
       pttShortcut = shortcuts.push_to_talk;
     } catch (e) {
@@ -48,9 +63,16 @@
     }
   }
 
-  async function saveSetting(key: string, value: unknown) {
+  async function persistSettings(
+    updater: (settings: PersistedAppSettings) => void,
+  ) {
+    const nextSettings = withAudioDevice(app.settings, app.selectedDevice || null);
+    updater(nextSettings);
+
     try {
-      await invoke("save_setting", { key, value });
+      await saveSettings(nextSettings);
+      app.settings = toAppSettings(nextSettings);
+      app.selectedDevice = nextSettings.audio_device ?? "";
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -58,18 +80,18 @@
 
   async function refreshDevices() {
     try {
-      audioDevices = await invoke("list_audio_devices");
+      audioDevices = await listAudioDevices();
       if (app.selectedDevice) {
         const exists = audioDevices.some((d) => d.name === app.selectedDevice);
         if (exists) {
-          await invoke("select_audio_device", { deviceName: app.selectedDevice });
+          await selectAudioDevice(app.selectedDevice);
           return;
         }
       }
       const defaultDevice = audioDevices.find((d) => d.is_default);
       if (defaultDevice) {
         app.selectedDevice = defaultDevice.name;
-        await invoke("select_audio_device", { deviceName: defaultDevice.name });
+        await selectAudioDevice(defaultDevice.name);
       }
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -78,10 +100,11 @@
 
   async function onDeviceChange(event: Event) {
     const target = event.target as HTMLSelectElement;
-    app.selectedDevice = target.value;
     try {
-      await invoke("select_audio_device", { deviceName: app.selectedDevice });
-      saveSetting("audio_device", app.selectedDevice);
+      await selectAudioDevice(target.value);
+      await persistSettings((settings) => {
+        settings.audio_device = target.value;
+      });
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -89,7 +112,7 @@
 
   async function checkOllama() {
     try {
-      const status: OllamaStatus = await invoke("check_ollama");
+      const status = await getOllamaStatus();
       ollamaAvailable = status.available;
       ollamaSummaryModels = status.summary_models;
 
@@ -103,8 +126,9 @@
           ? app.settings.ollama_model
           : status.summary_models[0];
         if (nextModel && nextModel !== app.settings.ollama_model) {
-          app.settings = { ...app.settings, ollama_model: nextModel };
-          await saveSetting("ollama_model", nextModel);
+          await persistSettings((settings) => {
+            settings.ollama_model = nextModel;
+          });
         }
       }
     } catch {
@@ -113,39 +137,45 @@
   }
 
   function onThemeChange(theme: Theme) {
-    app.settings = { ...app.settings, theme };
     applyTheme(theme);
-    saveSetting("theme", theme);
+    void persistSettings((settings) => {
+      settings.theme = theme;
+    });
   }
 
   function onAutoPasteChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
-    app.settings = { ...app.settings, auto_paste: checked };
-    saveSetting("auto_paste", checked);
+    void persistSettings((settings) => {
+      settings.auto_paste = checked;
+    });
   }
 
   function onPasteDelayChange(event: Event) {
     const value = parseInt((event.target as HTMLInputElement).value);
-    app.settings = { ...app.settings, paste_delay_ms: value };
-    saveSetting("paste_delay_ms", value);
+    void persistSettings((settings) => {
+      settings.paste_delay_ms = value;
+    });
   }
 
   function onDebugTranscriptionChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
-    app.settings = { ...app.settings, debug_transcription: checked };
-    saveSetting("debug_transcription", checked);
+    void persistSettings((settings) => {
+      settings.debug_transcription = checked;
+    });
   }
 
   function onOllamaUrlChange(event: Event) {
     const value = (event.target as HTMLInputElement).value;
-    app.settings = { ...app.settings, ollama_url: value };
-    saveSetting("ollama_url", value);
+    void persistSettings((settings) => {
+      settings.ollama_url = value;
+    });
   }
 
   function onOllamaModelChange(event: Event) {
     const value = (event.target as HTMLSelectElement).value;
-    app.settings = { ...app.settings, ollama_model: value };
-    saveSetting("ollama_model", value);
+    void persistSettings((settings) => {
+      settings.ollama_model = value;
+    });
   }
 
   function keyEventToShortcut(event: KeyboardEvent): string | null {
@@ -225,7 +255,10 @@
   async function saveShortcuts() {
     shortcutError = "";
     try {
-      await invoke("update_shortcuts", { toggleShortcut, pttShortcut });
+      await persistShortcutSettings({
+        toggle: toggleShortcut,
+        push_to_talk: pttShortcut,
+      } satisfies ShortcutSettings);
     } catch (e) {
       shortcutError = errorMessage(e);
     }

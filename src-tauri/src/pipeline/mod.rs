@@ -31,6 +31,7 @@ pub enum InferenceCommand {
 /// recording session — no thread creation overhead per recording.
 pub struct TranscriptionPipeline {
     cmd_sender: crossbeam_channel::Sender<InferenceCommand>,
+    handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl TranscriptionPipeline {
@@ -39,20 +40,33 @@ impl TranscriptionPipeline {
     pub fn spawn(audio_rx: Receiver<AudioChunk>, engine: Arc<Mutex<KyutaiEngine>>) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<InferenceCommand>();
 
-        std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .name("inference".into())
             .spawn(move || {
                 Self::inference_loop(cmd_rx, audio_rx, engine);
             })
             .map_err(|e| format!("Failed to spawn inference thread: {e}"))?;
 
-        Ok(Self { cmd_sender: cmd_tx })
+        Ok(Self {
+            cmd_sender: cmd_tx,
+            handle: Some(handle),
+        })
     }
 
     pub fn send(&self, cmd: InferenceCommand) -> Result<(), String> {
         self.cmd_sender
             .send(cmd)
             .map_err(|e| format!("Inference thread disconnected: {e}"))
+    }
+
+    pub fn shutdown(&mut self) -> Result<(), String> {
+        if let Some(handle) = self.handle.take() {
+            let _ = self.cmd_sender.send(InferenceCommand::Shutdown);
+            handle
+                .join()
+                .map_err(|_| "Inference thread panicked during shutdown".to_string())?;
+        }
+        Ok(())
     }
 
     fn inference_loop(
@@ -262,5 +276,34 @@ impl TranscriptionPipeline {
             }
             Err(e) => error!("Transcribe error: {e}"),
         }
+    }
+}
+
+impl Drop for TranscriptionPipeline {
+    fn drop(&mut self) {
+        if let Err(e) = self.shutdown() {
+            warn!("Inference pipeline drop failed: {e}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use crossbeam_channel::unbounded;
+
+    use crate::engine::kyutai::KyutaiEngine;
+
+    use super::TranscriptionPipeline;
+
+    #[test]
+    fn pipeline_shutdown_is_idempotent() {
+        let (_audio_tx, audio_rx) = unbounded();
+        let engine = Arc::new(Mutex::new(KyutaiEngine::new()));
+        let mut pipeline = TranscriptionPipeline::spawn(audio_rx, engine).expect("spawn pipeline");
+
+        pipeline.shutdown().expect("first shutdown");
+        pipeline.shutdown().expect("second shutdown");
     }
 }

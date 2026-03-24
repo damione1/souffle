@@ -35,6 +35,16 @@ impl Database {
         Ok(())
     }
 
+    /// Delete a setting value by key.
+    pub fn delete_setting(&self, key: &str) -> Result<(), String> {
+        let conn = self.conn.acquire()?;
+
+        conn.execute("DELETE FROM settings WHERE key = ?1", params![key])
+            .map_err(|e| format!("Delete setting: {e}"))?;
+
+        Ok(())
+    }
+
     /// Get all settings as key-value pairs.
     pub fn get_all_settings(&self) -> Result<Vec<(String, String)>, String> {
         let conn = self.conn.acquire()?;
@@ -97,5 +107,13 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert!(all.contains(&("a".to_string(), "1".to_string())));
         assert!(all.contains(&("b".to_string(), "2".to_string())));
+    }
+
+    #[test]
+    fn delete_setting_removes_value() {
+        let (db, _dir) = test_db();
+        db.set_setting("a", "1").unwrap();
+        db.delete_setting("a").unwrap();
+        assert_eq!(db.get_setting("a").unwrap(), None);
     }
 }
