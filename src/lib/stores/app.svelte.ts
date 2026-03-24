@@ -23,6 +23,8 @@ let settings = $state<AppSettings>({
   ollama_url: "http://localhost:11434",
   ollama_model: "",
   debug_transcription: false,
+  transcription_engine_id: "kyutai",
+  transcription_model_id: "stt-1b-en_fr",
 });
 
 export function getAppState() {

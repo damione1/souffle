@@ -73,6 +73,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::start_recording,
             commands::stop_recording,
+            commands::get_transcription_catalog,
             commands::get_model_status,
             commands::download_model,
             commands::load_model,

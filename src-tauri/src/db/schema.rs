@@ -1,5 +1,5 @@
-/// Schema version 1: meetings, segments, dictation, settings, FTS5, embeddings
-pub const SCHEMA_VERSION: i64 = 1;
+/// Schema version 2: typed transcription profile metadata for meetings
+pub const SCHEMA_VERSION: i64 = 2;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -88,6 +88,15 @@ pub const SCHEMA_V1: &[&str] = &[
     CREATE_TEXT_SEARCH,
     CREATE_EMBEDDINGS,
     CREATE_EMBEDDINGS_INDEX,
+];
+
+pub const SCHEMA_V2: &[&str] = &[
+    "ALTER TABLE meetings ADD COLUMN transcription_profile TEXT;",
+];
+
+pub const MIGRATIONS: &[(i64, &[&str])] = &[
+    (1, SCHEMA_V1),
+    (2, SCHEMA_V2),
 ];
 
 #[cfg(test)]

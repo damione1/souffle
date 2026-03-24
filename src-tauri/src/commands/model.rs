@@ -2,45 +2,62 @@ use tauri::State;
 use tauri::ipc::Channel;
 use tracing::info;
 
-use crate::engine::TranscriptionEngine;
+use crate::engine::{
+    TranscriptionCatalog, TranscriptionRuntimeStatus, create_engine,
+    resolve_transcription_profile, transcription_engine_catalog,
+};
 use crate::lock_ext::MutexExt;
 use crate::models;
+use crate::settings::AppSettings;
 use crate::pipeline::TranscriptionPipeline;
 use crate::state::AppState;
 use std::sync::Arc;
 
-/// Status of the STT model
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ModelStatus {
-    pub downloaded: bool,
-    pub loaded: bool,
-    pub model_dir: String,
-    pub engine_name: String,
+fn selected_profile(state: &AppState) -> Result<crate::engine::TranscriptionProfile, String> {
+    let settings = AppSettings::load(&state.db)?;
+    resolve_transcription_profile(
+        Some(&settings.transcription_engine_id),
+        Some(&settings.transcription_model_id),
+    )
 }
 
-/// Check whether the model is downloaded and loaded
+/// Catalog of supported transcription engines and models.
 #[tauri::command]
-pub fn get_model_status(state: State<'_, AppState>) -> Result<ModelStatus, String> {
-    let model_dir = models::default_model_dir();
-    let downloaded = models::model_exists(&model_dir);
-    let loaded = *state.model_loaded.acquire()?;
-    let engine_name = state.engine.acquire()?.name().to_string();
-
-    Ok(ModelStatus {
-        downloaded,
-        loaded,
-        model_dir: model_dir.display().to_string(),
-        engine_name,
+pub fn get_transcription_catalog(state: State<'_, AppState>) -> Result<TranscriptionCatalog, String> {
+    let profile = selected_profile(&state)?;
+    Ok(TranscriptionCatalog {
+        engines: transcription_engine_catalog(),
+        selected_engine_id: profile.engine_id,
+        selected_model_id: profile.model_id,
     })
 }
 
-/// Download the Kyutai STT model from HuggingFace.
+/// Check whether the selected transcription model is downloaded and loaded.
+#[tauri::command]
+pub fn get_model_status(state: State<'_, AppState>) -> Result<TranscriptionRuntimeStatus, String> {
+    let profile = selected_profile(&state)?;
+    let model_dir = models::model_dir(&profile);
+    let downloaded = models::model_exists(&profile);
+    let loaded = *state.model_loaded.acquire()?;
+    let active_profile = state.active_profile.acquire()?.clone();
+
+    Ok(TranscriptionRuntimeStatus {
+        profile: profile.clone(),
+        downloaded,
+        loaded: loaded && active_profile.as_ref() == Some(&profile),
+        model_dir: model_dir.display().to_string(),
+    })
+}
+
+/// Download the selected transcription model.
 /// Progress is streamed back via the Channel API.
 #[tauri::command]
-pub fn download_model(channel: Channel<models::DownloadProgress>) -> Result<(), String> {
-    let model_dir = models::default_model_dir();
-
-    if models::model_exists(&model_dir) {
+pub fn download_model(
+    state: State<'_, AppState>,
+    channel: Channel<models::DownloadProgress>,
+) -> Result<(), String> {
+    let profile = selected_profile(&state)?;
+    if models::model_exists(&profile) {
         channel
             .send(models::DownloadProgress {
                 file: "all".into(),
@@ -56,7 +73,7 @@ pub fn download_model(channel: Channel<models::DownloadProgress>) -> Result<(), 
     std::thread::Builder::new()
         .name("model-download".into())
         .spawn(move || {
-            let result = models::download::download_model(&model_dir, |progress| {
+            let result = models::download_model(&profile, |progress| {
                 let _ = channel_clone.send(progress);
             });
             match result {
@@ -87,8 +104,9 @@ pub fn download_model(channel: Channel<models::DownloadProgress>) -> Result<(), 
 /// Also spawns the persistent inference pipeline thread.
 #[tauri::command]
 pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
-    let model_dir = models::default_model_dir();
-    if !models::model_exists(&model_dir) {
+    let profile = selected_profile(&state)?;
+    let model_dir = models::model_dir(&profile);
+    if !models::model_exists(&profile) {
         return Err("Model not downloaded yet".into());
     }
 
@@ -98,8 +116,9 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
 
     {
         let model_loaded = *state.model_loaded.acquire()?;
+        let active_profile = state.active_profile.acquire()?.clone();
         let pipeline_ready = state.pipeline.acquire()?.is_some();
-        if model_loaded && pipeline_ready {
+        if model_loaded && pipeline_ready && active_profile.as_ref() == Some(&profile) {
             info!("Model already loaded, reusing existing inference pipeline");
             return Ok(());
         }
@@ -113,7 +132,14 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
     }
     *state.model_loaded.acquire()? = false;
 
+    let current_profile = state.active_profile.acquire()?.clone();
     let mut engine = state.engine.acquire()?;
+    if current_profile
+        .as_ref()
+        .is_none_or(|current| current.engine_id != profile.engine_id)
+    {
+        *engine = create_engine(&profile.engine_id)?;
+    }
     info!(path = %model_dir.display(), "Loading model");
     engine
         .load_model(&model_dir)
@@ -136,6 +162,7 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
     };
 
     *state.pipeline.acquire()? = Some(pipeline);
+    *state.active_profile.acquire()? = Some(profile);
     *state.model_loaded.acquire()? = true;
 
     info!("Model loaded, inference pipeline ready");
@@ -146,7 +173,6 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String> {
     use crate::constants::{SAMPLE_RATE_F64, SILENCE_SUFFIX_SAMPLES};
-    use crate::engine::TranscriptionEngine;
 
     let wav_path = crate::constants::app_data_dir().join("debug_engine_input.wav");
 

@@ -14,6 +14,7 @@ This document is the repo-level implementation standard for Souffle. It compleme
 
 - Enums and DTOs that cross the frontend/backend boundary belong in focused shared modules, not inline inside command files.
 - Engine-facing types live under `src-tauri/src/engine/`.
+- Engine catalogs, active transcription profiles, and runtime status DTOs belong in `src-tauri/src/engine/mod.rs` or adjacent engine modules.
 - Persisted meeting and transcript DTOs live in `src-tauri/src/transcript.rs`.
 - App settings and shortcut DTOs live in `src-tauri/src/settings.rs`.
 - Raw SQLite access stays in `src-tauri/src/db/`.
@@ -28,12 +29,17 @@ This document is the repo-level implementation standard for Souffle. It compleme
 - New settings, DTOs, or command payloads must be typed and serializable with Serde.
 - Avoid free-form JSON maps for internal app contracts when a typed struct is practical.
 - If a resource has a lifecycle, make shutdown/idempotency explicit.
+- New STT engines or model families must register through descriptor/profile DTOs before any UI or command-layer wiring.
+- Provider model lists must be exposed as typed descriptors, not raw `Vec<String>` payloads.
 
 ## Frontend Placement Rules
 
 - Shared TypeScript types that mirror Rust DTOs belong in `src/lib/types/`.
 - IPC wrappers belong in `src/lib/api/`.
 - Bootstrapping and cross-view initialization logic belong in dedicated modules such as `src/lib/bootstrap.ts`, not duplicated in view components.
+- Feature-specific orchestration belongs in `src/lib/features/<feature>/controller.svelte.ts`.
+- Large views should be composition shells that render feature section components from `src/lib/features/<feature>/components/`.
+- Shared feature selection helpers belong in `src/lib/features/<feature>/` when multiple views/controllers need the same DTO lookup logic.
 - Shared UI primitives belong in `src/lib/components/ui/`.
 - Large view components may own presentation, but not ad hoc persistence and parsing logic. Move backend I/O helpers and normalization into API/bootstrap modules first.
 
@@ -44,6 +50,7 @@ This document is the repo-level implementation standard for Souffle. It compleme
 - Use `errorMessage()` for surfaced errors.
 - Keep app store state as the single frontend source of truth for view/recording state.
 - Preserve the existing UI language and layout unless a task explicitly requests UX changes.
+- Drive engine/model selection UIs from descriptor DTOs, not hard-coded labels or engine-specific assumptions.
 
 ## Tests
 

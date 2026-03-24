@@ -10,6 +10,8 @@ describe("settings helpers", () => {
     ollama_url: "http://localhost:11434",
     ollama_model: "qwen2.5",
     debug_transcription: false,
+    transcription_engine_id: "kyutai",
+    transcription_model_id: "stt-1b-en_fr",
     audio_device: "BlackHole",
   };
 
@@ -21,6 +23,8 @@ describe("settings helpers", () => {
       ollama_url: "http://localhost:11434",
       ollama_model: "qwen2.5",
       debug_transcription: false,
+      transcription_engine_id: "kyutai",
+      transcription_model_id: "stt-1b-en_fr",
     });
   });
 

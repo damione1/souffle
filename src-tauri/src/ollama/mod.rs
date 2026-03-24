@@ -3,10 +3,17 @@ use serde::{Deserialize, Serialize};
 use crate::constants::{OLLAMA_DEFAULT_URL, OLLAMA_SUMMARIZE_PROMPT};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaModelDescriptor {
+    pub id: String,
+    pub label: String,
+    pub can_summarize: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaStatus {
     pub available: bool,
-    pub models: Vec<String>,
-    pub summary_models: Vec<String>,
+    pub base_url: String,
+    pub models: Vec<OllamaModelDescriptor>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -124,20 +131,23 @@ fn summary_model_priority(model: &str) -> usize {
     }
 }
 
-fn summary_models(models: &[String]) -> Vec<String> {
-    let mut filtered = models
+fn model_descriptors(models: &[String]) -> Vec<OllamaModelDescriptor> {
+    let mut descriptors = models
         .iter()
-        .filter(|model| is_summary_capable_model(model))
-        .cloned()
+        .map(|model| OllamaModelDescriptor {
+            id: model.clone(),
+            label: model.clone(),
+            can_summarize: is_summary_capable_model(model),
+        })
         .collect::<Vec<_>>();
 
-    filtered.sort_by(|left, right| {
-        summary_model_priority(left)
-            .cmp(&summary_model_priority(right))
-            .then_with(|| left.cmp(right))
+    descriptors.sort_by(|left, right| {
+        summary_model_priority(&left.id)
+            .cmp(&summary_model_priority(&right.id))
+            .then_with(|| left.id.cmp(&right.id))
     });
 
-    filtered
+    descriptors
 }
 
 /// Check if Ollama is running and list available models.
@@ -154,21 +164,21 @@ pub async fn check_available(base_url: Option<&str>) -> OllamaStatus {
                 let models = tags.models.into_iter().map(|m| m.name).collect::<Vec<_>>();
                 OllamaStatus {
                     available: true,
-                    summary_models: summary_models(&models),
-                    models,
+                    base_url: url.to_string(),
+                    models: model_descriptors(&models),
                 }
             } else {
                 OllamaStatus {
                     available: true,
+                    base_url: url.to_string(),
                     models: Vec::new(),
-                    summary_models: Vec::new(),
                 }
             }
         }
         _ => OllamaStatus {
             available: false,
+            base_url: url.to_string(),
             models: Vec::new(),
-            summary_models: Vec::new(),
         },
     }
 }
@@ -241,7 +251,7 @@ pub async fn summarize_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_summary_capable_model, sanitize_summary, summary_models};
+    use super::{is_summary_capable_model, model_descriptors, sanitize_summary};
 
     #[test]
     fn rejects_speech_and_embedding_models_for_summary() {
@@ -257,14 +267,14 @@ mod tests {
 
     #[test]
     fn prioritizes_common_instruction_models() {
-        let ordered = summary_models(&[
+        let ordered = model_descriptors(&[
             "custom-model:latest".to_string(),
             "mistral:7b".to_string(),
             "qwen2.5:7b".to_string(),
         ]);
 
         assert_eq!(
-            ordered,
+            ordered.into_iter().map(|model| model.id).collect::<Vec<_>>(),
             vec![
                 "qwen2.5:7b".to_string(),
                 "mistral:7b".to_string(),

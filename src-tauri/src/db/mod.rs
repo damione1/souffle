@@ -93,24 +93,29 @@ impl Database {
                 "Applying schema migration"
             );
 
-            for sql in schema::SCHEMA_V1 {
-                conn.execute_batch(sql)
-                    .map_err(|e| format!("Schema migration: {e}"))?;
-            }
+            for (version, statements) in schema::MIGRATIONS {
+                if *version <= current_version {
+                    continue;
+                }
 
-            // Record version
-            if current_version == 0 {
-                conn.execute(
-                    "INSERT INTO schema_version (version) VALUES (?1)",
-                    rusqlite::params![schema::SCHEMA_VERSION],
-                )
-                .map_err(|e| format!("Insert version: {e}"))?;
-            } else {
-                conn.execute(
-                    "UPDATE schema_version SET version = ?1",
-                    rusqlite::params![schema::SCHEMA_VERSION],
-                )
-                .map_err(|e| format!("Update version: {e}"))?;
+                for sql in *statements {
+                    conn.execute_batch(sql)
+                        .map_err(|e| format!("Schema migration v{version}: {e}"))?;
+                }
+
+                if current_version == 0 && *version == 1 {
+                    conn.execute(
+                        "INSERT INTO schema_version (version) VALUES (?1)",
+                        rusqlite::params![version],
+                    )
+                    .map_err(|e| format!("Insert version: {e}"))?;
+                } else {
+                    conn.execute(
+                        "UPDATE schema_version SET version = ?1",
+                        rusqlite::params![version],
+                    )
+                    .map_err(|e| format!("Update version: {e}"))?;
+                }
             }
 
             info!("Schema migration complete");

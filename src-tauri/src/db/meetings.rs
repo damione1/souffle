@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 
-use crate::engine::TranscriptionSegment;
+use crate::engine::{TranscriptionProfile, TranscriptionSegment};
 use crate::transcript::{MeetingListItem, MeetingTranscript};
 
 use crate::lock_ext::MutexExt;
@@ -18,8 +18,8 @@ impl Database {
             .map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
-            "INSERT OR REPLACE INTO meetings (id, title, started_at, ended_at, duration_seconds, engine, summary, summary_model, summary_generated_at, edited_transcript)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT OR REPLACE INTO meetings (id, title, started_at, ended_at, duration_seconds, engine, transcription_profile, summary, summary_model, summary_generated_at, edited_transcript)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 meeting.id,
                 meeting.title,
@@ -27,6 +27,8 @@ impl Database {
                 meeting.ended_at.map(|dt| dt.to_rfc3339()),
                 meeting.duration_seconds,
                 meeting.engine,
+                serde_json::to_string(&meeting.transcription_profile)
+                    .map_err(|e| format!("Serialize profile: {e}"))?,
                 meeting.summary,
                 meeting.summary_model,
                 meeting.summary_generated_at.map(|dt| dt.to_rfc3339()),
@@ -93,7 +95,7 @@ impl Database {
 
         let meeting = conn
             .query_row(
-                "SELECT id, title, started_at, ended_at, duration_seconds, engine, summary, summary_model, summary_generated_at
+                "SELECT id, title, started_at, ended_at, duration_seconds, engine, transcription_profile, summary, summary_model, summary_generated_at
                  FROM meetings WHERE id = ?1",
                 params![id],
                 |row| {
@@ -104,9 +106,10 @@ impl Database {
                         ended_at: row.get::<_, Option<String>>(3)?,
                         duration_seconds: row.get(4)?,
                         engine: row.get(5)?,
-                        summary: row.get(6)?,
-                        summary_model: row.get(7)?,
-                        summary_generated_at: row.get::<_, Option<String>>(8)?,
+                        transcription_profile: row.get(6)?,
+                        summary: row.get(7)?,
+                        summary_model: row.get(8)?,
+                        summary_generated_at: row.get::<_, Option<String>>(9)?,
                     })
                 },
             )
@@ -137,6 +140,8 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect segments: {e}"))?;
 
+        let transcription_profile = meeting.transcription_profile();
+
         Ok(MeetingTranscript {
             id: meeting.id,
             title: meeting.title,
@@ -147,6 +152,7 @@ impl Database {
                 .map(parse_datetime)
                 .transpose()?,
             duration_seconds: meeting.duration_seconds,
+            transcription_profile,
             engine: meeting.engine,
             segments,
             summary: meeting.summary,
@@ -260,9 +266,19 @@ struct MeetingRow {
     ended_at: Option<String>,
     duration_seconds: f64,
     engine: String,
+    transcription_profile: Option<String>,
     summary: Option<String>,
     summary_model: Option<String>,
     summary_generated_at: Option<String>,
+}
+
+impl MeetingRow {
+    fn transcription_profile(&self) -> TranscriptionProfile {
+        self.transcription_profile
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<TranscriptionProfile>(raw).ok())
+            .unwrap_or_else(|| TranscriptionProfile::from_legacy_engine(&self.engine))
+    }
 }
 
 fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
@@ -293,6 +309,7 @@ mod tests {
             started_at: Utc::now(),
             ended_at: Some(Utc::now()),
             duration_seconds: 60.0,
+            transcription_profile: TranscriptionProfile::default(),
             engine: "test-engine".to_string(),
             segments: vec![
                 TranscriptionSegment {

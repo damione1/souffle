@@ -8,10 +8,39 @@ export type TranscriptionSegment = {
 };
 
 export type ModelStatus = {
+  profile: TranscriptionProfile;
   downloaded: boolean;
   loaded: boolean;
   model_dir: string;
-  engine_name: string;
+};
+
+export type TranscriptionProfile = {
+  engine_id: string;
+  engine_label: string;
+  model_id: string;
+  model_label: string;
+};
+
+export type TranscriptionModelDescriptor = {
+  id: string;
+  label: string;
+  description: string;
+  download_size_bytes: number | null;
+  supported_languages: string[];
+};
+
+export type TranscriptionEngineDescriptor = {
+  id: string;
+  label: string;
+  description: string;
+  supports_streaming: boolean;
+  models: TranscriptionModelDescriptor[];
+};
+
+export type TranscriptionCatalog = {
+  engines: TranscriptionEngineDescriptor[];
+  selected_engine_id: string;
+  selected_model_id: string;
 };
 
 export type DownloadProgress = {
@@ -32,6 +61,7 @@ export type MeetingTranscript = {
   started_at: string;
   ended_at: string | null;
   duration_seconds: number;
+  transcription_profile: TranscriptionProfile;
   engine: string;
   segments: TranscriptionSegment[];
   summary: string | null;
@@ -47,10 +77,16 @@ export type MeetingListItem = {
   has_summary: boolean;
 };
 
+export type OllamaModelDescriptor = {
+  id: string;
+  label: string;
+  can_summarize: boolean;
+};
+
 export type OllamaStatus = {
   available: boolean;
-  models: string[];
-  summary_models: string[];
+  base_url: string;
+  models: OllamaModelDescriptor[];
 };
 
 export type SummarizeProgress = {
@@ -67,6 +103,8 @@ export type AppSettings = {
   ollama_url: string;
   ollama_model: string;
   debug_transcription: boolean;
+  transcription_engine_id: string;
+  transcription_model_id: string;
 };
 
 export type PersistedAppSettings = AppSettings & {

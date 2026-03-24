@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
+  import { listMeetings } from "../api/meetings";
   import type { MeetingListItem } from "../types";
   import { getAppState } from "../stores/app.svelte";
   import { formatDuration, formatDate, errorMessage } from "../utils";
@@ -25,7 +25,7 @@
 
   async function refreshMeetings() {
     try {
-      meetings = await invoke("list_meetings");
+      meetings = await listMeetings();
     } catch (e) {
       statusMessage = errorMessage(e);
     }

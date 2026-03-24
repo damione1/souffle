@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::engine::TranscriptionSegment;
+use crate::engine::{TranscriptionProfile, TranscriptionSegment, default_transcription_profile};
 
 /// Full meeting transcript stored as JSON
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,6 +11,8 @@ pub struct MeetingTranscript {
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub duration_seconds: f64,
+    #[serde(default = "default_transcription_profile")]
+    pub transcription_profile: TranscriptionProfile,
     pub engine: String,
     pub segments: Vec<TranscriptionSegment>,
     pub summary: Option<String>,
@@ -53,6 +55,7 @@ mod tests {
             started_at: Utc::now(),
             ended_at: None,
             duration_seconds: 30.0,
+            transcription_profile: default_transcription_profile(),
             engine: "test".to_string(),
             segments: vec![TranscriptionSegment {
                 text: "hello".to_string(),
@@ -72,6 +75,10 @@ mod tests {
         assert_eq!(deserialized.id, "test-id");
         assert_eq!(deserialized.segments.len(), 1);
         assert_eq!(deserialized.summary.as_deref(), Some("A summary"));
+        assert_eq!(
+            deserialized.transcription_profile,
+            default_transcription_profile()
+        );
     }
 
     #[test]
@@ -82,6 +89,7 @@ mod tests {
             started_at: Utc::now(),
             ended_at: None,
             duration_seconds: 120.0,
+            transcription_profile: default_transcription_profile(),
             engine: "test".to_string(),
             segments: vec![],
             summary: Some("summary".to_string()),

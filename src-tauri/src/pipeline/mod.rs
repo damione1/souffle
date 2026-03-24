@@ -1,4 +1,3 @@
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
@@ -6,8 +5,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::audio::AudioChunk;
 use crate::constants::MIMI_FRAME_SIZE;
-use crate::engine::kyutai::KyutaiEngine;
-use crate::engine::{TranscriptionEngine, TranscriptionSegment};
+use crate::engine::{SharedTranscriptionEngine, TranscriptionEngine, TranscriptionSegment};
 use crate::platform::with_autorelease_pool;
 
 /// Callback type for streaming segments to the frontend
@@ -37,7 +35,7 @@ pub struct TranscriptionPipeline {
 impl TranscriptionPipeline {
     /// Spawn the persistent inference thread. The thread stays alive across
     /// recording sessions, waiting for Start/Stop commands.
-    pub fn spawn(audio_rx: Receiver<AudioChunk>, engine: Arc<Mutex<KyutaiEngine>>) -> Result<Self, String> {
+    pub fn spawn(audio_rx: Receiver<AudioChunk>, engine: SharedTranscriptionEngine) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<InferenceCommand>();
 
         let handle = std::thread::Builder::new()
@@ -72,7 +70,7 @@ impl TranscriptionPipeline {
     fn inference_loop(
         cmd_rx: crossbeam_channel::Receiver<InferenceCommand>,
         audio_rx: Receiver<AudioChunk>,
-        engine: Arc<Mutex<KyutaiEngine>>,
+        engine: SharedTranscriptionEngine,
     ) {
         info!("Inference thread started (persistent)");
         let mut session_count: u32 = 0;
@@ -103,7 +101,13 @@ impl TranscriptionPipeline {
                     // pool catches anything that escapes (the inference thread
                     // has no top-level ObjC autorelease pool).
                     let normal_stop = with_autorelease_pool(|| {
-                        Self::active_loop(&cmd_rx, &audio_rx, &guard, &on_segment, session_id)
+                        Self::active_loop(
+                            &cmd_rx,
+                            &audio_rx,
+                            guard.as_ref(),
+                            &on_segment,
+                            session_id,
+                        )
                     });
                     drop(guard);
 
@@ -131,7 +135,7 @@ impl TranscriptionPipeline {
     fn active_loop(
         cmd_rx: &crossbeam_channel::Receiver<InferenceCommand>,
         audio_rx: &Receiver<AudioChunk>,
-        engine: &KyutaiEngine,
+        engine: &dyn TranscriptionEngine,
         on_segment: &SegmentCallback,
         session_id: u64,
     ) -> bool {
@@ -267,7 +271,7 @@ impl TranscriptionPipeline {
         }
     }
 
-    fn process_frames(engine: &KyutaiEngine, audio: &[f32], on_segment: &SegmentCallback) {
+    fn process_frames(engine: &dyn TranscriptionEngine, audio: &[f32], on_segment: &SegmentCallback) {
         match engine.transcribe(audio, None) {
             Ok(segments) => {
                 for seg in segments {
@@ -293,14 +297,14 @@ mod tests {
 
     use crossbeam_channel::unbounded;
 
-    use crate::engine::kyutai::KyutaiEngine;
+    use crate::engine::default_transcription_engine;
 
     use super::TranscriptionPipeline;
 
     #[test]
     fn pipeline_shutdown_is_idempotent() {
         let (_audio_tx, audio_rx) = unbounded();
-        let engine = Arc::new(Mutex::new(KyutaiEngine::new()));
+        let engine = Arc::new(Mutex::new(default_transcription_engine()));
         let mut pipeline = TranscriptionPipeline::spawn(audio_rx, engine).expect("spawn pipeline");
 
         pipeline.shutdown().expect("first shutdown");

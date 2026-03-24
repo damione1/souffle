@@ -5,8 +5,10 @@ use crossbeam_channel::{Receiver, Sender};
 
 use crate::audio::AudioChunk;
 use crate::db::Database;
-use crate::engine::TranscriptionSegment;
-use crate::engine::kyutai::KyutaiEngine;
+use crate::engine::{
+    SharedTranscriptionEngine, TranscriptionProfile, TranscriptionSegment,
+    default_transcription_engine,
+};
 use crate::pipeline::TranscriptionPipeline;
 
 /// Commands sent to the audio thread
@@ -29,6 +31,7 @@ pub struct MeetingAccumulator {
     pub title: String,
     pub segments: Vec<TranscriptionSegment>,
     pub started_at: chrono::DateTime<chrono::Utc>,
+    pub transcription_profile: TranscriptionProfile,
 }
 
 /// Shared application state, managed by Tauri.
@@ -38,9 +41,10 @@ pub struct AppState {
     pub audio_cmd_sender: Sender<AudioCommand>,
     pub audio_receiver: Receiver<AudioChunk>,
     pub is_recording: Mutex<bool>,
-    pub engine: Arc<Mutex<KyutaiEngine>>,
+    pub engine: SharedTranscriptionEngine,
     pub pipeline: Mutex<Option<TranscriptionPipeline>>,
     pub model_loaded: Mutex<bool>,
+    pub active_profile: Mutex<Option<TranscriptionProfile>>,
     pub next_audio_session_id: Mutex<u64>,
     pub recording_mode: Mutex<RecordingMode>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
@@ -60,9 +64,10 @@ impl AppState {
             audio_cmd_sender,
             audio_receiver,
             is_recording: Mutex::new(false),
-            engine: Arc::new(Mutex::new(KyutaiEngine::new())),
+            engine: Arc::new(Mutex::new(default_transcription_engine())),
             pipeline: Mutex::new(None),
             model_loaded: Mutex::new(false),
+            active_profile: Mutex::new(None),
             next_audio_session_id: Mutex::new(0),
             recording_mode: Mutex::new(RecordingMode::Idle),
             meeting_accumulator: Arc::new(Mutex::new(None)),

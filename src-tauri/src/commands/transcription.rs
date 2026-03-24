@@ -8,7 +8,6 @@ use tracing::info;
 
 use crate::audio::AudioChunk;
 use crate::constants::{AUDIO_FLUSH_MS, PIPELINE_DRAIN_TIMEOUT_SECS, SAMPLE_RATE_F64};
-use crate::engine::TranscriptionEngine;
 use crate::lock_ext::MutexExt;
 use crate::pipeline::{InferenceCommand, SegmentCallback};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator, RecordingMode};
@@ -36,6 +35,9 @@ fn start_pipeline(
     let loaded = *state.model_loaded.acquire()?;
     if !loaded {
         return Err("Model not loaded".into());
+    }
+    if state.active_profile.acquire()?.is_none() {
+        return Err("No active transcription profile".into());
     }
 
     let mut is_recording = state.is_recording.acquire()?;
@@ -217,11 +219,17 @@ pub fn start_meeting_recording(
 
     // Initialize meeting accumulator
     {
+        let transcription_profile = state
+            .active_profile
+            .acquire()?
+            .clone()
+            .ok_or("No active transcription profile")?;
         let mut acc = state.meeting_accumulator.acquire()?;
         *acc = Some(MeetingAccumulator {
             title,
             segments: Vec::new(),
             started_at: chrono::Utc::now(),
+            transcription_profile,
         });
     }
 
@@ -260,19 +268,14 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
     let duration = (now - meeting.started_at).num_seconds() as f64;
     let id = uuid::Uuid::new_v4().to_string();
 
-    let engine_name = state
-        .engine
-        .lock()
-        .map(|e| e.name().to_string())
-        .unwrap_or_else(|_| "Unknown".into());
-
     let transcript = crate::transcript::MeetingTranscript {
         id: id.clone(),
         title: meeting.title,
         started_at: meeting.started_at,
         ended_at: Some(now),
         duration_seconds: duration,
-        engine: engine_name,
+        engine: meeting.transcription_profile.engine_label.clone(),
+        transcription_profile: meeting.transcription_profile,
         segments: meeting.segments,
         summary: None,
         summary_model: None,

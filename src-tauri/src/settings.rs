@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::db::Database;
+use crate::engine::{KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, resolve_transcription_profile};
 
 const THEME_KEY: &str = "theme";
 const AUTO_PASTE_KEY: &str = "auto_paste";
@@ -11,6 +12,8 @@ const OLLAMA_URL_KEY: &str = "ollama_url";
 const OLLAMA_MODEL_KEY: &str = "ollama_model";
 const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
 const AUDIO_DEVICE_KEY: &str = "audio_device";
+const TRANSCRIPTION_ENGINE_ID_KEY: &str = "transcription_engine_id";
+const TRANSCRIPTION_MODEL_ID_KEY: &str = "transcription_model_id";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
 
@@ -32,6 +35,8 @@ pub struct AppSettings {
     pub ollama_model: String,
     pub debug_transcription: bool,
     pub audio_device: Option<String>,
+    pub transcription_engine_id: String,
+    pub transcription_model_id: String,
 }
 
 impl Default for AppSettings {
@@ -44,6 +49,8 @@ impl Default for AppSettings {
             ollama_model: String::new(),
             debug_transcription: false,
             audio_device: None,
+            transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
+            transcription_model_id: KYUTAI_MODEL_ID.to_string(),
         }
     }
 }
@@ -77,12 +84,22 @@ impl AppSettings {
         if let Some(audio_device) = read_json_setting::<String>(db, AUDIO_DEVICE_KEY)? {
             settings.audio_device = Some(audio_device);
         }
+        if let Some(transcription_engine_id) =
+            read_json_setting::<String>(db, TRANSCRIPTION_ENGINE_ID_KEY)?
+        {
+            settings.transcription_engine_id = transcription_engine_id;
+        }
+        if let Some(transcription_model_id) =
+            read_json_setting::<String>(db, TRANSCRIPTION_MODEL_ID_KEY)?
+        {
+            settings.transcription_model_id = transcription_model_id;
+        }
 
         Ok(settings.sanitized())
     }
 
     pub fn sanitize_for_save(&self) -> Result<Self, String> {
-        let normalized = self.sanitized();
+        let mut normalized = self.sanitized();
 
         if self.ollama_url.trim().is_empty() {
             return Err("Ollama URL cannot be empty".into());
@@ -92,6 +109,13 @@ impl AppSettings {
             return Err("Paste delay must be between 50 and 1000 ms".into());
         }
 
+        let profile = resolve_transcription_profile(
+            Some(&normalized.transcription_engine_id),
+            Some(&normalized.transcription_model_id),
+        )?;
+        normalized.transcription_engine_id = profile.engine_id;
+        normalized.transcription_model_id = profile.model_id;
+
         Ok(normalized)
     }
 
@@ -99,6 +123,8 @@ impl AppSettings {
         let mut normalized = self.clone();
         normalized.ollama_url = normalized.ollama_url.trim().to_string();
         normalized.ollama_model = normalized.ollama_model.trim().to_string();
+        normalized.transcription_engine_id = normalized.transcription_engine_id.trim().to_string();
+        normalized.transcription_model_id = normalized.transcription_model_id.trim().to_string();
         normalized.audio_device = normalized
             .audio_device
             .as_ref()
@@ -107,6 +133,25 @@ impl AppSettings {
 
         if normalized.ollama_url.is_empty() {
             normalized.ollama_url = OLLAMA_DEFAULT_URL.to_string();
+        }
+
+        if normalized.transcription_engine_id.is_empty() {
+            normalized.transcription_engine_id = KYUTAI_ENGINE_ID.to_string();
+        }
+
+        if normalized.transcription_model_id.is_empty() {
+            normalized.transcription_model_id = KYUTAI_MODEL_ID.to_string();
+        }
+
+        if let Ok(profile) = resolve_transcription_profile(
+            Some(&normalized.transcription_engine_id),
+            Some(&normalized.transcription_model_id),
+        ) {
+            normalized.transcription_engine_id = profile.engine_id;
+            normalized.transcription_model_id = profile.model_id;
+        } else {
+            normalized.transcription_engine_id = KYUTAI_ENGINE_ID.to_string();
+            normalized.transcription_model_id = KYUTAI_MODEL_ID.to_string();
         }
 
         if !(50..=1000).contains(&normalized.paste_delay_ms) {
@@ -124,6 +169,16 @@ impl AppSettings {
         write_json_setting(db, PASTE_DELAY_MS_KEY, &normalized.paste_delay_ms)?;
         write_json_setting(db, OLLAMA_URL_KEY, &normalized.ollama_url)?;
         write_json_setting(db, OLLAMA_MODEL_KEY, &normalized.ollama_model)?;
+        write_json_setting(
+            db,
+            TRANSCRIPTION_ENGINE_ID_KEY,
+            &normalized.transcription_engine_id,
+        )?;
+        write_json_setting(
+            db,
+            TRANSCRIPTION_MODEL_ID_KEY,
+            &normalized.transcription_model_id,
+        )?;
         write_json_setting(
             db,
             DEBUG_TRANSCRIPTION_KEY,
@@ -250,6 +305,8 @@ mod tests {
             ollama_model: "qwen2.5".into(),
             debug_transcription: true,
             audio_device: Some("BlackHole".into()),
+            transcription_engine_id: "kyutai".into(),
+            transcription_model_id: "stt-1b-en_fr".into(),
         };
 
         settings.save(&db).expect("save settings");
