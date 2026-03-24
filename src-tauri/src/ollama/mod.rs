@@ -2,14 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::{OLLAMA_DEFAULT_URL, OLLAMA_SUMMARIZE_PROMPT};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct OllamaModelDescriptor {
     pub id: String,
     pub label: String,
     pub can_summarize: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct OllamaStatus {
     pub available: bool,
     pub base_url: String,
@@ -46,7 +46,7 @@ struct GenerateChunk {
     done: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SummarizeProgress {
     pub text: String,
     pub done: bool,
@@ -274,7 +274,10 @@ mod tests {
         ]);
 
         assert_eq!(
-            ordered.into_iter().map(|model| model.id).collect::<Vec<_>>(),
+            ordered
+                .into_iter()
+                .map(|model| model.id)
+                .collect::<Vec<_>>(),
             vec![
                 "qwen2.5:7b".to_string(),
                 "mistral:7b".to_string(),

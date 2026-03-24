@@ -35,7 +35,10 @@ pub struct TranscriptionPipeline {
 impl TranscriptionPipeline {
     /// Spawn the persistent inference thread. The thread stays alive across
     /// recording sessions, waiting for Start/Stop commands.
-    pub fn spawn(audio_rx: Receiver<AudioChunk>, engine: SharedTranscriptionEngine) -> Result<Self, String> {
+    pub fn spawn(
+        audio_rx: Receiver<AudioChunk>,
+        engine: SharedTranscriptionEngine,
+    ) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<InferenceCommand>();
 
         let handle = std::thread::Builder::new()
@@ -83,7 +86,9 @@ impl TranscriptionPipeline {
                     on_segment,
                 }) => {
                     session_count += 1;
-                    info!("Inference session {session_count} starting (audio session {session_id})");
+                    info!(
+                        "Inference session {session_count} starting (audio session {session_id})"
+                    );
 
                     // Hold engine lock for the entire active session.
                     // State reset is done by the caller before sending Start,
@@ -163,14 +168,12 @@ impl TranscriptionPipeline {
                             skipped_chunks += 1;
                         }
                     }
-                    if drained > 0
-                        && crate::debug::transcription_debug_enabled() {
-                            debug!("Drained {drained} remaining audio chunks on stop");
-                        }
-                    if skipped_chunks > 0
-                        && crate::debug::transcription_debug_enabled() {
-                            debug!("Ignored {skipped_chunks} stale audio chunks during stop");
-                        }
+                    if drained > 0 && crate::debug::transcription_debug_enabled() {
+                        debug!("Drained {drained} remaining audio chunks on stop");
+                    }
+                    if skipped_chunks > 0 && crate::debug::transcription_debug_enabled() {
+                        debug!("Ignored {skipped_chunks} stale audio chunks during stop");
+                    }
 
                     // Process all buffered audio through the engine (frame by frame)
                     while audio_buffer.len() >= MIMI_FRAME_SIZE {
@@ -179,7 +182,10 @@ impl TranscriptionPipeline {
                             Ok(segments) => {
                                 for seg in &segments {
                                     if crate::debug::transcription_debug_enabled() {
-                                        debug!("Drain segment: {:?} final={}", seg.text, seg.is_final);
+                                        debug!(
+                                            "Drain segment: {:?} final={}",
+                                            seg.text, seg.is_final
+                                        );
                                     }
                                     on_segment(seg.clone());
                                 }
@@ -253,7 +259,8 @@ impl TranscriptionPipeline {
                             }
                         }
                         frames_processed += 1;
-                        if crate::debug::transcription_debug_enabled() && frames_processed.is_multiple_of(50)
+                        if crate::debug::transcription_debug_enabled()
+                            && frames_processed.is_multiple_of(50)
                         {
                             debug!(
                                 "Processed {frames_processed} frames ({:.1}s)",
@@ -271,7 +278,11 @@ impl TranscriptionPipeline {
         }
     }
 
-    fn process_frames(engine: &dyn TranscriptionEngine, audio: &[f32], on_segment: &SegmentCallback) {
+    fn process_frames(
+        engine: &dyn TranscriptionEngine,
+        audio: &[f32],
+        on_segment: &SegmentCallback,
+    ) {
         match engine.transcribe(audio, None) {
             Ok(segments) => {
                 for seg in segments {

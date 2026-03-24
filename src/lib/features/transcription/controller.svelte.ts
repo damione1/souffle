@@ -12,19 +12,20 @@ import {
   startStreamingTranscription,
   stopStreamingTranscription,
 } from "../../api/transcription";
-import { saveSettings, toAppSettings, withAudioDevice } from "../../api/settings";
+import { events } from "../../api/generated";
+import { saveSettings } from "../../api/settings";
 import type {
+  AppSettings,
   DictationEntry,
   DownloadProgress,
   TranscriptionCatalog,
   TranscriptionSegment,
 } from "../../types";
-import { errorMessage, useEventListeners } from "../../utils";
+import { errorMessage } from "../../utils";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 
 export function createTranscriptionController() {
   const app = getAppState();
-  const events = useEventListeners();
 
   let isStartingRecording = $state(false);
   let isStopping = $state(false);
@@ -53,19 +54,21 @@ export function createTranscriptionController() {
   async function mount() {
     await Promise.all([refreshCatalog(), refreshRuntimeStatus(), loadHistory()]);
 
-    events.add("shortcut-toggle", () => {
-      if (!isStartingRecording && !isStopping) void toggleRecording(true);
-    });
+    const unlisten = await Promise.all([
+      events.shortcutToggle.listen(() => {
+        if (!isStartingRecording && !isStopping) void toggleRecording(true);
+      }),
+      events.shortcutPttStart.listen(() => {
+        if (!app.isRecording && !isStartingRecording && !isStopping) void toggleRecording(true);
+      }),
+      events.shortcutPttStop.listen(() => {
+        if (app.isRecording && !isStopping) void toggleRecording(true);
+      }),
+    ]);
 
-    events.add("shortcut-ptt-start", () => {
-      if (!app.isRecording && !isStartingRecording && !isStopping) void toggleRecording(true);
-    });
-
-    events.add("shortcut-ptt-stop", () => {
-      if (app.isRecording && !isStopping) void toggleRecording(true);
-    });
-
-    return () => events.cleanup();
+    return () => {
+      unlisten.forEach((fn) => fn());
+    };
   }
 
   async function refreshCatalog() {
@@ -97,12 +100,15 @@ export function createTranscriptionController() {
   }
 
   async function persistSelection(engineId: string, modelId: string) {
-    const nextSettings = withAudioDevice(app.settings, app.selectedDevice || null);
-    nextSettings.transcription_engine_id = engineId;
-    nextSettings.transcription_model_id = modelId;
+    const nextSettings: AppSettings = {
+      ...app.settings,
+      audio_device: app.selectedDevice || null,
+      transcription_engine_id: engineId,
+      transcription_model_id: modelId,
+    };
 
     await saveSettings(nextSettings);
-    app.settings = toAppSettings(nextSettings);
+    app.settings = nextSettings;
     await Promise.all([refreshCatalog(), refreshRuntimeStatus()]);
   }
 

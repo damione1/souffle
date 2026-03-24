@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import Waveform from "./lib/components/Waveform.svelte";
@@ -7,9 +6,9 @@
   import MeetingView from "./lib/components/MeetingView.svelte";
   import MeetingHistoryView from "./lib/components/MeetingHistoryView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
+  import { events } from "./lib/api/generated";
   import { bootstrapAppState } from "./lib/bootstrap";
   import { getAppState } from "./lib/stores/app.svelte";
-  import type { View } from "./lib/types";
 
   const app = getAppState();
 
@@ -24,11 +23,8 @@
       }
     })();
 
-    listen<string>("navigate", (event) => {
-      const view = event.payload as View;
-      if (["transcription", "meeting", "meeting-history", "settings"].includes(view)) {
-        app.currentView = view;
-      }
+    events.navigate.listen((event) => {
+      app.currentView = event.payload;
     }).then((fn) => {
       unlistenNav = fn;
     });

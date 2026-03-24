@@ -1,9 +1,12 @@
 use tauri::{
-    AppHandle, Emitter, Manager,
+    AppHandle, Manager,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
+use tauri_specta::Event;
 use tracing::info;
+
+use crate::app_events::{AppView, Navigate, ShortcutToggle};
 
 /// Set up the system tray with menu items
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -46,7 +49,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle_dictation" => {
                 // Emit same event as keyboard shortcut — frontend handles full pipeline
-                let _ = app.emit("shortcut-toggle", ());
+                let _ = ShortcutToggle.emit(app);
                 info!("Dictation toggle via tray");
             }
             "toggle_meeting" => {
@@ -55,14 +58,14 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
-                    let _ = app.emit("navigate", "meeting");
+                    let _ = Navigate(AppView::Meeting).emit(app);
                 }
             }
             "settings" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
-                    let _ = app.emit("navigate", "settings");
+                    let _ = Navigate(AppView::Settings).emit(app);
                 }
             }
             "show" => {

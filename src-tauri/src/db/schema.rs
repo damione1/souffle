@@ -90,14 +90,9 @@ pub const SCHEMA_V1: &[&str] = &[
     CREATE_EMBEDDINGS_INDEX,
 ];
 
-pub const SCHEMA_V2: &[&str] = &[
-    "ALTER TABLE meetings ADD COLUMN transcription_profile TEXT;",
-];
+pub const SCHEMA_V2: &[&str] = &["ALTER TABLE meetings ADD COLUMN transcription_profile TEXT;"];
 
-pub const MIGRATIONS: &[(i64, &[&str])] = &[
-    (1, SCHEMA_V1),
-    (2, SCHEMA_V2),
-];
+pub const MIGRATIONS: &[(i64, &[&str])] = &[(1, SCHEMA_V1), (2, SCHEMA_V2)];
 
 #[cfg(test)]
 mod tests {

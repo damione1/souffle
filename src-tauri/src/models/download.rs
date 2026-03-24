@@ -6,7 +6,7 @@ use tracing::info;
 pub const KYUTAI_HF_REPO: &str = "kyutai/stt-1b-en_fr-candle";
 
 /// Download status reported to the frontend
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct DownloadProgress {
     pub file: String,
     pub downloaded_bytes: u64,
@@ -14,7 +14,7 @@ pub struct DownloadProgress {
     pub status: DownloadStatus,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DownloadStatus {
     Starting,

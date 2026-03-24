@@ -28,10 +28,7 @@ fn drain_audio_queue(receiver: &crossbeam_channel::Receiver<AudioChunk>) -> usiz
 
 /// Shared logic for starting a recording pipeline.
 /// Validates preconditions, drains stale audio, resets engine, sends Start command, begins audio capture.
-fn start_pipeline(
-    state: &AppState,
-    on_segment: SegmentCallback,
-) -> Result<u64, String> {
+fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, String> {
     let loaded = *state.model_loaded.acquire()?;
     if !loaded {
         return Err("Model not loaded".into());
@@ -117,6 +114,7 @@ fn stop_pipeline(state: &AppState) -> Result<(), String> {
 
 /// Start recording audio from the default microphone
 #[tauri::command]
+#[specta::specta]
 pub fn start_recording(state: State<'_, AppState>) -> Result<(), String> {
     let mut is_recording = state.is_recording.acquire()?;
 
@@ -137,6 +135,7 @@ pub fn start_recording(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Stop recording and return the path to the saved WAV file
 #[tauri::command]
+#[specta::specta]
 pub fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
     let mut is_recording = state.is_recording.acquire()?;
 
@@ -177,6 +176,7 @@ pub fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
 
 /// Start streaming transcription.
 #[tauri::command]
+#[specta::specta]
 pub fn start_transcription(
     state: State<'_, AppState>,
     channel: Channel<crate::engine::TranscriptionSegment>,
@@ -197,6 +197,7 @@ pub fn start_transcription(
 
 /// Stop streaming transcription.
 #[tauri::command]
+#[specta::specta]
 pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
     let is_recording = *state.is_recording.acquire()?;
     if !is_recording {
@@ -210,6 +211,7 @@ pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Start meeting recording with live transcription.
 #[tauri::command]
+#[specta::specta]
 pub fn start_meeting_recording(
     state: State<'_, AppState>,
     title: String,
@@ -238,9 +240,10 @@ pub fn start_meeting_recording(
     let on_segment: SegmentCallback = Box::new(move |seg| {
         let _ = channel_clone.send(seg.clone());
         if let Ok(mut acc) = acc_ref.lock()
-            && let Some(ref mut meeting) = *acc {
-                meeting.segments.push(seg);
-            }
+            && let Some(ref mut meeting) = *acc
+        {
+            meeting.segments.push(seg);
+        }
     });
 
     start_pipeline(&state, on_segment)?;
@@ -252,6 +255,7 @@ pub fn start_meeting_recording(
 
 /// Stop meeting recording and save transcript.
 #[tauri::command]
+#[specta::specta]
 pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, String> {
     let is_recording = *state.is_recording.acquire()?;
     if !is_recording {
@@ -274,7 +278,6 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
         started_at: meeting.started_at,
         ended_at: Some(now),
         duration_seconds: duration,
-        engine: meeting.transcription_profile.engine_label.clone(),
         transcription_profile: meeting.transcription_profile,
         segments: meeting.segments,
         summary: None,
@@ -290,6 +293,7 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
 
 /// Copy text to clipboard and simulate Cmd+V paste
 #[tauri::command]
+#[specta::specta]
 pub fn paste_text(text: String, delay_ms: u64) -> Result<(), String> {
     crate::clipboard::copy_and_paste(&text, delay_ms)
 }

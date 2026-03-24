@@ -1,4 +1,5 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { commands, unwrap } from "./generated";
 import type {
   MeetingListItem,
   MeetingTranscript,
@@ -7,11 +8,11 @@ import type {
 } from "../types";
 
 export async function listMeetings(): Promise<MeetingListItem[]> {
-  return invoke<MeetingListItem[]>("list_meetings");
+  return unwrap(commands.listMeetings());
 }
 
 export async function getMeeting(id: string): Promise<MeetingTranscript> {
-  return invoke<MeetingTranscript>("get_meeting", { id });
+  return unwrap(commands.getMeeting(id));
 }
 
 export async function startMeetingRecording(
@@ -20,11 +21,11 @@ export async function startMeetingRecording(
 ): Promise<void> {
   const channel = new Channel<TranscriptionSegment>();
   channel.onmessage = onSegment;
-  await invoke("start_meeting_recording", { title, channel });
+  await unwrap(commands.startMeetingRecording(title, channel));
 }
 
 export async function stopMeetingRecording(): Promise<string> {
-  return invoke<string>("stop_meeting_recording");
+  return unwrap(commands.stopMeetingRecording());
 }
 
 export async function summarizeMeeting(
@@ -34,9 +35,9 @@ export async function summarizeMeeting(
 ): Promise<void> {
   const channel = new Channel<SummarizeProgress>();
   channel.onmessage = onProgress;
-  await invoke("summarize_meeting", { id, model, channel });
+  await unwrap(commands.summarizeMeeting(id, model, channel));
 }
 
 export async function deleteMeeting(id: string): Promise<void> {
-  await invoke("delete_meeting", { id });
+  await unwrap(commands.deleteMeeting(id));
 }

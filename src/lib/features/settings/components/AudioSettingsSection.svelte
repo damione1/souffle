@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AudioDevice } from "../../../types";
+  import type { AudioDeviceInfo } from "../../../types";
 
   let {
     audioDevices,
@@ -7,7 +7,7 @@
     onDeviceChange,
     onRefreshDevices,
   }: {
-    audioDevices: AudioDevice[];
+    audioDevices: AudioDeviceInfo[];
     selectedDevice: string;
     onDeviceChange: (event: Event) => void | Promise<void>;
     onRefreshDevices: () => void | Promise<void>;

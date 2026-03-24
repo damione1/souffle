@@ -47,6 +47,7 @@ A polished, privacy-first desktop application for local speech-to-text transcrip
 | Frontend framework | Svelte | v5 (runes) | Minimal UI in WebView (compiles to vanilla JS) |
 | Frontend styling | Tailwind CSS | v4 | Utility-first, minimal CSS output |
 | Frontend language | TypeScript | v5 | Type safety for frontend |
+| IPC contract generation | specta + tauri-specta | latest compatible | Rust-first DTO, command, and event bindings exported to TypeScript |
 
 ### STT Inference
 | Component | Technology | Purpose |
@@ -119,6 +120,28 @@ A polished, privacy-first desktop application for local speech-to-text transcrip
 |  +-------------------+                                    |
 +----------------------------------------------------------+
 ```
+
+### 3.1.1 IPC Contract Strategy
+
+**Rust is the source of truth for all frontend/backend contracts.**
+
+- All IPC-facing DTOs and enums derive `serde::{Serialize, Deserialize}` and `specta::Type`
+- Tauri commands are registered through `tauri-specta` so command names, arguments, and return types are exported from Rust
+- App-level events (`navigate`, shortcut events) are exported as typed event contracts, not stringly typed frontend listeners
+- Streaming payloads continue to use Tauri `Channel<T>`, but the payload DTOs are still Rust-defined and exported to TypeScript
+- Generated bindings are committed in the frontend:
+  - `src/lib/types/generated.ts` for DTOs, command signatures, and events
+  - `src/lib/api/generated.ts` as the thin typed frontend entrypoint
+- `src/lib/types/index.ts` remains a re-export layer only; manual duplication of IPC DTOs is not allowed
+
+**Contract rules:**
+
+- Settings persistence uses one typed DTO (`AppSettings`), including `audio_device`
+- Engine/model/runtime metadata must be exposed via typed descriptors, never ad hoc JSON maps
+- New scalable surfaces must be introduced behind DTOs or interfaces first, especially for:
+  - multiple STT engines/models
+  - summarization providers and model catalogs
+  - streamed progress/status payloads
 
 ### 3.2 Engine Abstraction (Critical Design Decision)
 

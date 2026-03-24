@@ -3,4 +3,3 @@ export { applyTheme } from "./theme";
 export { groupIntoParagraphs } from "./paragraphs";
 export type { Paragraph } from "./paragraphs";
 export { errorMessage } from "./errors";
-export { useEventListeners } from "./events";

@@ -3,13 +3,13 @@ use tauri::ipc::Channel;
 use tracing::info;
 
 use crate::engine::{
-    TranscriptionCatalog, TranscriptionRuntimeStatus, create_engine,
-    resolve_transcription_profile, transcription_engine_catalog,
+    TranscriptionCatalog, TranscriptionRuntimeStatus, create_engine, resolve_transcription_profile,
+    transcription_engine_catalog,
 };
 use crate::lock_ext::MutexExt;
 use crate::models;
-use crate::settings::AppSettings;
 use crate::pipeline::TranscriptionPipeline;
+use crate::settings::AppSettings;
 use crate::state::AppState;
 use std::sync::Arc;
 
@@ -23,7 +23,10 @@ fn selected_profile(state: &AppState) -> Result<crate::engine::TranscriptionProf
 
 /// Catalog of supported transcription engines and models.
 #[tauri::command]
-pub fn get_transcription_catalog(state: State<'_, AppState>) -> Result<TranscriptionCatalog, String> {
+#[specta::specta]
+pub fn get_transcription_catalog(
+    state: State<'_, AppState>,
+) -> Result<TranscriptionCatalog, String> {
     let profile = selected_profile(&state)?;
     Ok(TranscriptionCatalog {
         engines: transcription_engine_catalog(),
@@ -34,6 +37,7 @@ pub fn get_transcription_catalog(state: State<'_, AppState>) -> Result<Transcrip
 
 /// Check whether the selected transcription model is downloaded and loaded.
 #[tauri::command]
+#[specta::specta]
 pub fn get_model_status(state: State<'_, AppState>) -> Result<TranscriptionRuntimeStatus, String> {
     let profile = selected_profile(&state)?;
     let model_dir = models::model_dir(&profile);
@@ -52,6 +56,7 @@ pub fn get_model_status(state: State<'_, AppState>) -> Result<TranscriptionRunti
 /// Download the selected transcription model.
 /// Progress is streamed back via the Channel API.
 #[tauri::command]
+#[specta::specta]
 pub fn download_model(
     state: State<'_, AppState>,
     channel: Channel<models::DownloadProgress>,
@@ -103,6 +108,7 @@ pub fn download_model(
 /// Load the model into memory (GPU/CPU). Must be called after download.
 /// Also spawns the persistent inference pipeline thread.
 #[tauri::command]
+#[specta::specta]
 pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
     let profile = selected_profile(&state)?;
     let model_dir = models::model_dir(&profile);
@@ -147,19 +153,20 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
     drop(engine);
 
     // Spawn persistent inference pipeline (lives until app exit)
-    let pipeline = match TranscriptionPipeline::spawn(
-        state.audio_receiver.clone(),
-        Arc::clone(&state.engine),
-    ) {
-        Ok(pipeline) => pipeline,
-        Err(e) => {
-            let mut engine = state.engine.acquire()?;
-            if let Err(unload_err) = engine.unload_model() {
-                tracing::warn!("Failed to unload model after pipeline startup error: {unload_err}");
+    let pipeline =
+        match TranscriptionPipeline::spawn(state.audio_receiver.clone(), Arc::clone(&state.engine))
+        {
+            Ok(pipeline) => pipeline,
+            Err(e) => {
+                let mut engine = state.engine.acquire()?;
+                if let Err(unload_err) = engine.unload_model() {
+                    tracing::warn!(
+                        "Failed to unload model after pipeline startup error: {unload_err}"
+                    );
+                }
+                return Err(e);
             }
-            return Err(e);
-        }
-    };
+        };
 
     *state.pipeline.acquire()? = Some(pipeline);
     *state.active_profile.acquire()? = Some(profile);
@@ -171,6 +178,7 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Debug: feed the debug WAV through the engine to test model in isolation.
 #[tauri::command]
+#[specta::specta]
 pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String> {
     use crate::constants::{SAMPLE_RATE_F64, SILENCE_SUFFIX_SAMPLES};
 

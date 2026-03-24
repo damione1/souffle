@@ -15,7 +15,7 @@ pub struct AudioChunk {
 }
 
 /// Info about an available audio input device, sent to frontend
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct AudioDeviceInfo {
     pub name: String,
     pub is_default: bool,
@@ -62,7 +62,9 @@ pub struct AudioCapture {
 
 impl AudioCapture {
     /// Spawn the audio thread. Returns channels for commanding it and receiving audio.
-    pub fn spawn(audio_rms: Arc<AtomicU32>) -> Result<(Sender<AudioCommand>, Receiver<AudioChunk>), String> {
+    pub fn spawn(
+        audio_rms: Arc<AtomicU32>,
+    ) -> Result<(Sender<AudioCommand>, Receiver<AudioChunk>), String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
         // Bounded channel: ~30 seconds of audio at 24kHz in 1-second chunks
         let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioChunk>(30);
@@ -114,9 +116,10 @@ impl AudioCapture {
 
             for device in devices {
                 if let Ok(n) = device.name()
-                    && n == *name {
-                        return Ok(device);
-                    }
+                    && n == *name
+                {
+                    return Ok(device);
+                }
             }
             warn!("Selected device '{name}' not found, falling back to default");
         }

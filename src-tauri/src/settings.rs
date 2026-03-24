@@ -17,7 +17,7 @@ const TRANSCRIPTION_MODEL_ID_KEY: &str = "transcription_model_id";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     #[default]
@@ -26,7 +26,7 @@ pub enum Theme {
     System,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 pub struct AppSettings {
     pub theme: Theme,
     pub auto_paste: bool,
@@ -76,9 +76,7 @@ impl AppSettings {
         if let Some(ollama_model) = read_json_setting::<String>(db, OLLAMA_MODEL_KEY)? {
             settings.ollama_model = ollama_model;
         }
-        if let Some(debug_transcription) =
-            read_json_setting::<bool>(db, DEBUG_TRANSCRIPTION_KEY)?
-        {
+        if let Some(debug_transcription) = read_json_setting::<bool>(db, DEBUG_TRANSCRIPTION_KEY)? {
             settings.debug_transcription = debug_transcription;
         }
         if let Some(audio_device) = read_json_setting::<String>(db, AUDIO_DEVICE_KEY)? {
@@ -179,11 +177,7 @@ impl AppSettings {
             TRANSCRIPTION_MODEL_ID_KEY,
             &normalized.transcription_model_id,
         )?;
-        write_json_setting(
-            db,
-            DEBUG_TRANSCRIPTION_KEY,
-            &normalized.debug_transcription,
-        )?;
+        write_json_setting(db, DEBUG_TRANSCRIPTION_KEY, &normalized.debug_transcription)?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
             write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
@@ -195,7 +189,7 @@ impl AppSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 pub struct ShortcutSettings {
     pub toggle: String,
     pub push_to_talk: String,
@@ -274,7 +268,8 @@ fn write_json_setting<T>(db: &Database, key: &str, value: &T) -> Result<(), Stri
 where
     T: Serialize,
 {
-    let encoded = serde_json::to_string(value).map_err(|e| format!("Serialize setting '{key}': {e}"))?;
+    let encoded =
+        serde_json::to_string(value).map_err(|e| format!("Serialize setting '{key}': {e}"))?;
     db.set_setting(key, &encoded)
 }
 
@@ -352,13 +347,18 @@ mod tests {
         let (db, _dir) = test_db();
         db.set_setting("paste_delay_ms", "0").expect("save delay");
         db.set_setting("ollama_url", "\"   \"").expect("save url");
-        db.set_setting("shortcut_toggle", "\"F6\"").expect("save toggle");
-        db.set_setting("shortcut_push_to_talk", "\"F6\"").expect("save ptt");
+        db.set_setting("shortcut_toggle", "\"F6\"")
+            .expect("save toggle");
+        db.set_setting("shortcut_push_to_talk", "\"F6\"")
+            .expect("save ptt");
 
         let settings = AppSettings::load(&db).expect("load settings");
         let shortcuts = ShortcutSettings::load(&db).expect("load shortcuts");
 
-        assert_eq!(settings.paste_delay_ms, AppSettings::default().paste_delay_ms);
+        assert_eq!(
+            settings.paste_delay_ms,
+            AppSettings::default().paste_delay_ms
+        );
         assert_eq!(settings.ollama_url, OLLAMA_DEFAULT_URL);
         assert_eq!(shortcuts.toggle, "F6");
         assert_eq!(shortcuts.push_to_talk, "");

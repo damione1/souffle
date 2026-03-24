@@ -1,18 +1,19 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { commands, unwrap } from "./generated";
 import type {
   DictationEntry,
   DownloadProgress,
-  ModelStatus,
   TranscriptionCatalog,
+  TranscriptionRuntimeStatus,
   TranscriptionSegment,
 } from "../types";
 
 export async function getTranscriptionCatalog(): Promise<TranscriptionCatalog> {
-  return invoke<TranscriptionCatalog>("get_transcription_catalog");
+  return unwrap(commands.getTranscriptionCatalog());
 }
 
-export async function getModelStatus(): Promise<ModelStatus> {
-  return invoke<ModelStatus>("get_model_status");
+export async function getModelStatus(): Promise<TranscriptionRuntimeStatus> {
+  return unwrap(commands.getModelStatus());
 }
 
 export async function downloadModel(
@@ -20,11 +21,11 @@ export async function downloadModel(
 ): Promise<void> {
   const channel = new Channel<DownloadProgress>();
   channel.onmessage = onProgress;
-  await invoke("download_model", { channel });
+  await unwrap(commands.downloadModel(channel));
 }
 
 export async function loadModel(): Promise<void> {
-  await invoke("load_model");
+  await unwrap(commands.loadModel());
 }
 
 export async function startStreamingTranscription(
@@ -32,29 +33,29 @@ export async function startStreamingTranscription(
 ): Promise<void> {
   const channel = new Channel<TranscriptionSegment>();
   channel.onmessage = onSegment;
-  await invoke("start_transcription", { channel });
+  await unwrap(commands.startTranscription(channel));
 }
 
 export async function stopStreamingTranscription(): Promise<void> {
-  await invoke("stop_transcription");
+  await unwrap(commands.stopTranscription());
 }
 
 export async function listDictationEntries(limit = 50): Promise<DictationEntry[]> {
-  return invoke<DictationEntry[]>("list_dictation_entries", { limit });
+  return unwrap(commands.listDictationEntries(limit));
 }
 
 export async function addDictationEntry(text: string): Promise<void> {
-  await invoke("add_dictation_entry", { text });
+  await unwrap(commands.addDictationEntry(text));
 }
 
 export async function deleteDictationEntry(id: string): Promise<void> {
-  await invoke("delete_dictation_entry", { id });
+  await unwrap(commands.deleteDictationEntry(id));
 }
 
 export async function clearDictationHistory(): Promise<void> {
-  await invoke("clear_dictation_history");
+  await unwrap(commands.clearDictationHistory());
 }
 
 export async function pasteText(text: string, delayMs: number): Promise<void> {
-  await invoke("paste_text", { text, delayMs });
+  await unwrap(commands.pasteText(text, delayMs));
 }

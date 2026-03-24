@@ -30,7 +30,8 @@ mod tests {
         let _ = std::thread::spawn(move || {
             let _guard = m2.lock().unwrap();
             panic!("intentional panic to poison mutex");
-        }).join();
+        })
+        .join();
         assert!(m.acquire().is_err());
     }
 }

@@ -114,7 +114,6 @@ export function createMeetingController() {
         ended_at: null,
         duration_seconds: 0,
         transcription_profile: transcriptionProfile,
-        engine: transcriptionProfile.engine_label,
         segments: [],
         summary: null,
         summary_model: null,

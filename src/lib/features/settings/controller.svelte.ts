@@ -7,14 +7,12 @@ import {
   saveSettings,
   saveShortcuts as persistShortcutSettings,
   selectAudioDevice,
-  toAppSettings,
-  withAudioDevice,
 } from "../../api/settings";
 import { getAppState } from "../../stores/app.svelte";
 import type {
-  AudioDevice,
+  AppSettings,
+  AudioDeviceInfo,
   OllamaModelDescriptor,
-  PersistedAppSettings,
   ShortcutSettings,
   Theme,
   TranscriptionCatalog,
@@ -24,7 +22,7 @@ import { applyTheme, errorMessage } from "../../utils";
 export function createSettingsController() {
   const app = getAppState();
 
-  let audioDevices = $state<AudioDevice[]>([]);
+  let audioDevices = $state<AudioDeviceInfo[]>([]);
   let ollamaAvailable = $state(false);
   let ollamaModels = $state<OllamaModelDescriptor[]>([]);
   let statusMessage = $state("");
@@ -50,11 +48,9 @@ export function createSettingsController() {
   async function syncSettings() {
     try {
       const settings = await getSettings();
-      app.settings = toAppSettings(settings);
+      app.settings = settings;
       applyTheme(app.settings.theme);
-      if (settings.audio_device) {
-        app.selectedDevice = settings.audio_device;
-      }
+      app.selectedDevice = settings.audio_device ?? "";
     } catch (e) {
       console.warn("Failed to load settings:", e);
     }
@@ -83,13 +79,16 @@ export function createSettingsController() {
     }
   }
 
-  async function persistSettings(updater: (settings: PersistedAppSettings) => void) {
-    const nextSettings = withAudioDevice(app.settings, app.selectedDevice || null);
+  async function persistSettings(updater: (settings: AppSettings) => void) {
+    const nextSettings: AppSettings = {
+      ...app.settings,
+      audio_device: app.selectedDevice || null,
+    };
     updater(nextSettings);
 
     try {
       await saveSettings(nextSettings);
-      app.settings = toAppSettings(nextSettings);
+      app.settings = nextSettings;
       app.selectedDevice = nextSettings.audio_device ?? "";
       await loadCatalog();
     } catch (e) {

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import type { View } from "../types";
+  import type { AppView } from "../types";
   import { getAppState } from "../stores/app.svelte";
 
   const app = getAppState();
 
-  const tabs: { id: View; label: string; icon: string }[] = [
+  const tabs: { id: AppView; label: string; icon: string }[] = [
     {
       id: "transcription",
       label: "Transcription",

@@ -1,9 +1,9 @@
-import type { View, AppSettings } from "../types";
+import type { AppSettings, AppView } from "../types";
 
 export type RecordingMode = "idle" | "dictation" | "meeting";
 
 // Current view
-let currentView = $state<View>("transcription");
+let currentView = $state<AppView>("transcription");
 
 // Current meeting ID (when viewing a specific meeting)
 let currentMeetingId = $state<string | null>(null);
@@ -23,6 +23,7 @@ let settings = $state<AppSettings>({
   ollama_url: "http://localhost:11434",
   ollama_model: "",
   debug_transcription: false,
+  audio_device: null,
   transcription_engine_id: "kyutai",
   transcription_model_id: "stt-1b-en_fr",
 });
@@ -30,7 +31,7 @@ let settings = $state<AppSettings>({
 export function getAppState() {
   return {
     get currentView() { return currentView; },
-    set currentView(v: View) { currentView = v; },
+    set currentView(v: AppView) { currentView = v; },
 
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },

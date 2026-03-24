@@ -8,6 +8,8 @@ function seg(text: string, start: number, end?: number): TranscriptionSegment {
     start_time: start,
     end_time: end ?? start + 0.5,
     is_final: true,
+    language: null,
+    confidence: null,
   };
 }
 

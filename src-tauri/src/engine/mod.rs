@@ -8,7 +8,7 @@ pub const KYUTAI_MODEL_ID: &str = "stt-1b-en_fr";
 
 pub type SharedTranscriptionEngine = Arc<Mutex<Box<dyn TranscriptionEngine>>>;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionProfile {
     pub engine_id: String,
     pub engine_label: String,
@@ -25,7 +25,10 @@ impl Default for TranscriptionProfile {
 impl TranscriptionProfile {
     pub fn from_legacy_engine(engine_label: &str) -> Self {
         let trimmed = engine_label.trim();
-        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("kyutai") || trimmed.contains("Kyutai") {
+        if trimmed.is_empty()
+            || trimmed.eq_ignore_ascii_case("kyutai")
+            || trimmed.contains("Kyutai")
+        {
             return default_transcription_profile();
         }
 
@@ -38,7 +41,7 @@ impl TranscriptionProfile {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionModelDescriptor {
     pub id: String,
     pub label: String,
@@ -47,7 +50,7 @@ pub struct TranscriptionModelDescriptor {
     pub supported_languages: Vec<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionEngineDescriptor {
     pub id: String,
     pub label: String,
@@ -56,14 +59,14 @@ pub struct TranscriptionEngineDescriptor {
     pub models: Vec<TranscriptionModelDescriptor>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionCatalog {
     pub engines: Vec<TranscriptionEngineDescriptor>,
     pub selected_engine_id: String,
     pub selected_model_id: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionRuntimeStatus {
     pub profile: TranscriptionProfile,
     pub downloaded: bool,
@@ -113,7 +116,7 @@ pub trait TranscriptionEngine: Send + Sync {
 }
 
 /// A piece of transcribed text with metadata
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct TranscriptionSegment {
     pub text: String,
     pub start_time: f64,
@@ -181,12 +184,20 @@ pub fn resolve_transcription_profile(
     let model_id = model_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| engine.models.first().map(|model| model.id.as_str()).unwrap_or(KYUTAI_MODEL_ID));
+        .unwrap_or_else(|| {
+            engine
+                .models
+                .first()
+                .map(|model| model.id.as_str())
+                .unwrap_or(KYUTAI_MODEL_ID)
+        });
     let model = engine
         .models
         .iter()
         .find(|candidate| candidate.id == model_id)
-        .ok_or_else(|| format!("Unknown transcription model '{model_id}' for engine '{engine_id}'"))?;
+        .ok_or_else(|| {
+            format!("Unknown transcription model '{model_id}' for engine '{engine_id}'")
+        })?;
 
     Ok(TranscriptionProfile {
         engine_id: engine.id.clone(),
@@ -199,7 +210,9 @@ pub fn resolve_transcription_profile(
 pub fn create_engine(engine_id: &str) -> Result<Box<dyn TranscriptionEngine>, String> {
     match engine_id {
         KYUTAI_ENGINE_ID => Ok(Box::new(kyutai::KyutaiEngine::new())),
-        _ => Err(format!("No engine implementation registered for '{engine_id}'")),
+        _ => Err(format!(
+            "No engine implementation registered for '{engine_id}'"
+        )),
     }
 }
 

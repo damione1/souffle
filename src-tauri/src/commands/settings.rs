@@ -1,22 +1,23 @@
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_specta::Event;
 use tracing::info;
 
+use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutToggle};
 use crate::settings::{AppSettings, ShortcutSettings};
 use crate::state::AppState;
 
 /// Get the typed application settings.
 #[tauri::command]
+#[specta::specta]
 pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
     AppSettings::load(&state.db)
 }
 
 /// Save the typed application settings.
 #[tauri::command]
-pub fn save_settings(
-    state: State<'_, AppState>,
-    settings: AppSettings,
-) -> Result<(), String> {
+#[specta::specta]
+pub fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
     let settings = settings.sanitize_for_save()?;
     settings.save(&state.db)?;
     crate::debug::set_transcription_debug(settings.debug_transcription);
@@ -33,7 +34,7 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
     if !shortcuts.toggle.is_empty() {
         gs.on_shortcut(shortcuts.toggle.as_str(), move |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
-                let _ = app.emit("shortcut-toggle", ());
+                let _ = ShortcutToggle.emit(app);
             }
         })
         .map_err(|e| format!("Register toggle shortcut '{}': {e}", shortcuts.toggle))?;
@@ -41,18 +42,22 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
     }
 
     if !shortcuts.push_to_talk.is_empty() {
-        gs.on_shortcut(shortcuts.push_to_talk.as_str(), move |app, _shortcut, event| {
-            match event.state {
+        gs.on_shortcut(
+            shortcuts.push_to_talk.as_str(),
+            move |app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => {
-                    let _ = app.emit("shortcut-ptt-start", ());
+                    let _ = ShortcutPttStart.emit(app);
                 }
                 ShortcutState::Released => {
-                    let _ = app.emit("shortcut-ptt-stop", ());
+                    let _ = ShortcutPttStop.emit(app);
                 }
-            }
-        })
+            },
+        )
         .map_err(|e| format!("Register PTT shortcut '{}': {e}", shortcuts.push_to_talk))?;
-        info!(shortcut = shortcuts.push_to_talk, "Push-to-talk shortcut registered");
+        info!(
+            shortcut = shortcuts.push_to_talk,
+            "Push-to-talk shortcut registered"
+        );
     }
 
     Ok(())
@@ -60,6 +65,7 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
 
 /// Update shortcut bindings at runtime.
 #[tauri::command]
+#[specta::specta]
 pub fn save_shortcuts(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -79,6 +85,7 @@ pub fn save_shortcuts(
 
 /// Get current shortcut settings
 #[tauri::command]
+#[specta::specta]
 pub fn get_shortcuts(state: State<'_, AppState>) -> Result<ShortcutSettings, String> {
     ShortcutSettings::load(&state.db)
 }

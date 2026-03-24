@@ -6,7 +6,7 @@ use crate::lock_ext::MutexExt;
 use super::Database;
 
 /// A dictation history entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DictationEntry {
     pub id: String,
     pub text: String,
@@ -105,8 +105,10 @@ mod tests {
     #[test]
     fn add_and_list_entries() {
         let (db, _dir) = test_db();
-        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z").unwrap();
-        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z").unwrap();
+        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z")
+            .unwrap();
+        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z")
+            .unwrap();
 
         let entries = db.list_dictation_entries(50).unwrap();
         assert_eq!(entries.len(), 2);
@@ -117,8 +119,10 @@ mod tests {
     #[test]
     fn delete_single_entry() {
         let (db, _dir) = test_db();
-        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z").unwrap();
-        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z").unwrap();
+        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z")
+            .unwrap();
+        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z")
+            .unwrap();
 
         db.delete_dictation_entry("d1").unwrap();
         let entries = db.list_dictation_entries(50).unwrap();
@@ -129,8 +133,10 @@ mod tests {
     #[test]
     fn clear_all_entries() {
         let (db, _dir) = test_db();
-        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z").unwrap();
-        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z").unwrap();
+        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z")
+            .unwrap();
+        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z")
+            .unwrap();
 
         db.clear_dictation_entries().unwrap();
         let entries = db.list_dictation_entries(50).unwrap();
@@ -145,7 +151,8 @@ mod tests {
                 &format!("d{i}"),
                 &format!("Entry {i}"),
                 &format!("2024-01-01T00:{i:02}:00Z"),
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         let entries = db.list_dictation_entries(3).unwrap();

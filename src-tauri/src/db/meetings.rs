@@ -2,7 +2,9 @@ use chrono::{DateTime, Utc};
 use rusqlite::params;
 
 use crate::engine::{TranscriptionProfile, TranscriptionSegment};
-use crate::transcript::{MeetingListItem, MeetingTranscript};
+use crate::transcript::{
+    MeetingListItem, MeetingTranscript, resolve_legacy_transcription_profile,
+};
 
 use crate::lock_ext::MutexExt;
 
@@ -26,7 +28,7 @@ impl Database {
                 meeting.started_at.to_rfc3339(),
                 meeting.ended_at.map(|dt| dt.to_rfc3339()),
                 meeting.duration_seconds,
-                meeting.engine,
+                meeting.transcription_profile.engine_label,
                 serde_json::to_string(&meeting.transcription_profile)
                     .map_err(|e| format!("Serialize profile: {e}"))?,
                 meeting.summary,
@@ -140,7 +142,7 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect segments: {e}"))?;
 
-        let transcription_profile = meeting.transcription_profile();
+        let transcription_profile = meeting.transcription_profile()?;
 
         Ok(MeetingTranscript {
             id: meeting.id,
@@ -153,7 +155,6 @@ impl Database {
                 .transpose()?,
             duration_seconds: meeting.duration_seconds,
             transcription_profile,
-            engine: meeting.engine,
             segments,
             summary: meeting.summary,
             summary_model: meeting.summary_model,
@@ -273,11 +274,15 @@ struct MeetingRow {
 }
 
 impl MeetingRow {
-    fn transcription_profile(&self) -> TranscriptionProfile {
-        self.transcription_profile
+    fn transcription_profile(&self) -> Result<TranscriptionProfile, String> {
+        let profile = self
+            .transcription_profile
             .as_deref()
-            .and_then(|raw| serde_json::from_str::<TranscriptionProfile>(raw).ok())
-            .unwrap_or_else(|| TranscriptionProfile::from_legacy_engine(&self.engine))
+            .map(serde_json::from_str::<TranscriptionProfile>)
+            .transpose()
+            .map_err(|e| format!("Deserialize transcription profile: {e}"))?;
+
+        resolve_legacy_transcription_profile(profile, Some(&self.engine))
     }
 }
 
@@ -310,7 +315,6 @@ mod tests {
             ended_at: Some(Utc::now()),
             duration_seconds: 60.0,
             transcription_profile: TranscriptionProfile::default(),
-            engine: "test-engine".to_string(),
             segments: vec![
                 TranscriptionSegment {
                     text: "Hello world".to_string(),
@@ -347,6 +351,10 @@ mod tests {
         assert_eq!(loaded.segments.len(), 2);
         assert_eq!(loaded.segments[0].text, "Hello world");
         assert_eq!(loaded.segments[1].text, "second segment");
+        assert_eq!(
+            loaded.transcription_profile,
+            TranscriptionProfile::default()
+        );
     }
 
     #[test]
@@ -373,7 +381,8 @@ mod tests {
     fn update_summary() {
         let (db, _dir) = test_db();
         db.save_meeting(&sample_meeting("m1")).unwrap();
-        db.update_meeting_summary("m1", "Summary text", "qwen2.5").unwrap();
+        db.update_meeting_summary("m1", "Summary text", "qwen2.5")
+            .unwrap();
 
         let loaded = db.load_meeting("m1").unwrap();
         assert_eq!(loaded.summary.as_deref(), Some("Summary text"));
@@ -385,5 +394,33 @@ mod tests {
     fn load_nonexistent_meeting_returns_error() {
         let (db, _dir) = test_db();
         assert!(db.load_meeting("nonexistent").is_err());
+    }
+
+    #[test]
+    fn load_meeting_uses_legacy_engine_when_profile_missing() {
+        let (db, _dir) = test_db();
+        let conn = db.conn.acquire().unwrap();
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, ended_at, duration_seconds, engine, summary, summary_model, summary_generated_at, edited_transcript)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                "legacy-id",
+                "Legacy Meeting",
+                Utc::now().to_rfc3339(),
+                None::<String>,
+                12.0,
+                "Legacy Engine",
+                None::<String>,
+                None::<String>,
+                None::<String>,
+                None::<String>,
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let loaded = db.load_meeting("legacy-id").unwrap();
+        assert_eq!(loaded.transcription_profile.engine_label, "Legacy Engine");
+        assert_eq!(loaded.transcription_profile.model_id, "legacy");
     }
 }

@@ -303,7 +303,9 @@ impl TranscriptionEngine for KyutaiEngine {
 
         // Debug: save first 3s of audio per session to WAV for offline analysis
         if debug_enabled {
-            let Ok(mut dbg) = DEBUG_SAMPLES.lock() else { return Ok(segments); };
+            let Ok(mut dbg) = DEBUG_SAMPLES.lock() else {
+                return Ok(segments);
+            };
             if dbg.is_none() && FRAME_COUNT.load(Ordering::Relaxed) == 0 {
                 *dbg = Some(Vec::with_capacity(SAMPLE_RATE as usize * 3));
             }
@@ -311,8 +313,7 @@ impl TranscriptionEngine for KyutaiEngine {
                 if buf.len() < SAMPLE_RATE as usize * 3 {
                     buf.extend_from_slice(audio);
                 } else if !buf.is_empty() {
-                    let path = crate::constants::app_data_dir()
-                        .join("debug_engine_input.wav");
+                    let path = crate::constants::app_data_dir().join("debug_engine_input.wav");
                     if let Ok(mut w) = hound::WavWriter::create(
                         &path,
                         hound::WavSpec {
@@ -339,7 +340,12 @@ impl TranscriptionEngine for KyutaiEngine {
             let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
             let frame_num = FRAME_COUNT.load(Ordering::Relaxed);
             if frame_num < 5 || frame_num.is_multiple_of(50) {
-                debug!(samples = audio.len(), max_amp = format!("{max_amp:.4}"), rms = format!("{rms:.6}"), "Engine input");
+                debug!(
+                    samples = audio.len(),
+                    max_amp = format!("{max_amp:.4}"),
+                    rms = format!("{rms:.6}"),
+                    "Engine input"
+                );
             }
         }
 
@@ -372,13 +378,22 @@ impl TranscriptionEngine for KyutaiEngine {
 
                 model
                     .state
-                    .step_pcm(pcm_tensor, None, &().into(), |items, text_tensor, _audio_tensors| {
-                        // Debug: log what the model is producing
-                        let frame = FRAME_COUNT.load(Ordering::Relaxed);
-                        if debug_enabled && (frame < 20 || frame.is_multiple_of(50))
-                            && let Ok(text_vals) = text_tensor.to_vec2::<u32>() {
+                    .step_pcm(
+                        pcm_tensor,
+                        None,
+                        &().into(),
+                        |items, text_tensor, _audio_tensors| {
+                            // Debug: log what the model is producing
+                            let frame = FRAME_COUNT.load(Ordering::Relaxed);
+                            if debug_enabled
+                                && (frame < 20 || frame.is_multiple_of(50))
+                                && let Ok(text_vals) = text_tensor.to_vec2::<u32>()
+                            {
                                 for (i, item) in items.iter().enumerate() {
-                                    let tv = text_vals.get(i).map(|v| format!("{v:?}")).unwrap_or_default();
+                                    let tv = text_vals
+                                        .get(i)
+                                        .map(|v| format!("{v:?}"))
+                                        .unwrap_or_default();
                                     trace!(
                                         frame,
                                         batch = i,
@@ -389,7 +404,8 @@ impl TranscriptionEngine for KyutaiEngine {
                                     );
                                 }
                             }
-                    })
+                        },
+                    )
                     .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
             })?;
 
@@ -409,7 +425,12 @@ impl TranscriptionEngine for KyutaiEngine {
                             if frame_num < 10 || frame_num.is_multiple_of(50) {
                                 let vad_str: Vec<String> =
                                     prs.iter().map(|p| format!("{:.2}", p[0])).collect();
-                                trace!(frame = frame_num, model_step = step_idx, vad = vad_str.join(", "), "Step VAD");
+                                trace!(
+                                    frame = frame_num,
+                                    model_step = step_idx,
+                                    vad = vad_str.join(", "),
+                                    "Step VAD"
+                                );
                             }
                         }
                     }

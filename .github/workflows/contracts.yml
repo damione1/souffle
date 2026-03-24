@@ -1,0 +1,29 @@
+name: Contracts
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  generated-contracts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2.8.1
+        with:
+          workspaces: src-tauri -> target
+
+      - uses: actions/setup-node@v6.1.0
+        with:
+          node-version: 24
+          check-latest: true
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check:generated-types

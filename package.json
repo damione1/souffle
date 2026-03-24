@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "generate:types": "cargo test export_typescript_bindings --manifest-path src-tauri/Cargo.toml -- --nocapture",
+    "check:generated-types": "npm run generate:types && git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts",
     "tauri": "tauri",
     "test": "vitest run"
   },
