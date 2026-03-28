@@ -2,6 +2,10 @@
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { OllamaModelDescriptor, TranscriptionCatalog } from "../../../types";
   import {
+    hasAvailableTranscriptionModel,
+    isTranscriptionBackendAvailable,
+    isTranscriptionModelAvailable,
+    getSelectedTranscriptionBackend,
     getSelectedTranscriptionEngine,
     getSelectedTranscriptionModel,
   } from "../../transcription/catalog";
@@ -10,6 +14,7 @@
     catalog,
     selectedEngineId,
     selectedModelId,
+    selectedBackendId,
     ollamaUrl,
     ollamaAvailable,
     ollamaModels,
@@ -17,6 +22,7 @@
     selectedOllamaModel,
     onSelectTranscriptionEngine,
     onSelectTranscriptionModel,
+    onSelectTranscriptionBackend,
     onOllamaUrlChange,
     onOllamaModelChange,
     onRetryOllama,
@@ -24,6 +30,7 @@
     catalog: TranscriptionCatalog | null;
     selectedEngineId: string;
     selectedModelId: string;
+    selectedBackendId: string;
     ollamaUrl: string;
     ollamaAvailable: boolean;
     ollamaModels: OllamaModelDescriptor[];
@@ -31,6 +38,7 @@
     selectedOllamaModel: string;
     onSelectTranscriptionEngine: (engineId: string) => void | Promise<void>;
     onSelectTranscriptionModel: (modelId: string) => void | Promise<void>;
+    onSelectTranscriptionBackend: (backendId: string) => void | Promise<void>;
     onOllamaUrlChange: (event: Event) => void;
     onOllamaModelChange: (event: Event) => void;
     onRetryOllama: () => void | Promise<void>;
@@ -38,7 +46,14 @@
 
   let selectedEngine = $derived(getSelectedTranscriptionEngine(catalog, selectedEngineId));
   let selectedModel = $derived(getSelectedTranscriptionModel(catalog, selectedEngineId, selectedModelId));
+  let selectedBackend = $derived(
+    getSelectedTranscriptionBackend(catalog, selectedEngineId, selectedModelId, selectedBackendId),
+  );
   let availableModels = $derived(selectedEngine?.models ?? []);
+  let availableBackends = $derived(selectedModel?.backends ?? []);
+  let selectedAvailabilityNote = $derived(
+    selectedModel?.availability_note ?? selectedBackend?.availability_note ?? null,
+  );
 </script>
 
 <section class="surface-card flex flex-col gap-3.5">
@@ -55,7 +70,9 @@
       disabled={!catalog}
     >
       {#each catalog?.engines ?? [] as engine}
-        <option value={engine.id}>{engine.label}</option>
+        <option value={engine.id} disabled={!hasAvailableTranscriptionModel(engine)}>
+          {engine.label}{hasAvailableTranscriptionModel(engine) ? "" : " (Coming soon)"}
+        </option>
       {/each}
     </select>
     {#if selectedEngine}
@@ -73,7 +90,9 @@
       disabled={availableModels.length === 0}
     >
       {#each availableModels as model}
-        <option value={model.id}>{model.label}</option>
+        <option value={model.id} disabled={!isTranscriptionModelAvailable(model)}>
+          {model.label}{isTranscriptionModelAvailable(model) ? "" : " (Coming soon)"}
+        </option>
       {/each}
     </select>
     {#if selectedModel}
@@ -82,9 +101,39 @@
         {#if selectedModel.supported_languages.length > 0}
           <span class="pill pill-muted">Languages: {selectedModel.supported_languages.join(", ")}</span>
         {/if}
+        <span class="pill pill-muted">
+          {selectedModel.capabilities.supports_streaming ? "Streaming" : "Batch"}
+        </span>
       </div>
     {/if}
   </div>
+
+  {#if availableBackends.length > 1}
+    <div class="flex flex-col gap-1.5">
+      <label for="settings-transcription-backend" class="field-label">Runtime backend</label>
+      <select
+        id="settings-transcription-backend"
+        value={selectedBackendId}
+        onchange={(event) => onSelectTranscriptionBackend((event.currentTarget as HTMLSelectElement).value)}
+        class="field-select"
+      >
+        {#each availableBackends as backend}
+          <option value={backend.id} disabled={!isTranscriptionBackendAvailable(backend)}>
+            {backend.label}{isTranscriptionBackendAvailable(backend) ? "" : " (Coming soon)"}
+          </option>
+        {/each}
+      </select>
+      {#if selectedBackend}
+        <p class="text-sm text-text-muted">{selectedBackend.description}</p>
+      {/if}
+    </div>
+  {:else if selectedBackend}
+    <p class="text-sm text-text-muted">Runtime backend: {selectedBackend.label}</p>
+  {/if}
+
+  {#if selectedAvailabilityNote}
+    <StatusBanner message={selectedAvailabilityNote} />
+  {/if}
 
   <div class="flex items-center justify-between gap-4">
     <div>

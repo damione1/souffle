@@ -1,0 +1,21 @@
+# This file allows you to locally override settings in project.yml for development purposes.
+#
+# Use the same keys as in project.yml here. Any setting you specify will override the corresponding
+# setting in project.yml, allowing you to customise the configuration for your local development environment
+# without affecting the project configuration in project.yml (which is intended to be versioned).
+initial_prompt: |
+  Souffle project standards:
+  - Read and follow AGENTS.md and CLAUDE.md before making architectural changes.
+  - Keep Tauri commands thin and keep app-facing contracts typed.
+  - Put shared Rust DTOs/enums in focused modules like settings.rs or transcript.rs, not inline in command files.
+  - Put engine catalogs, transcription profiles, and runtime DTOs under src-tauri/src/engine/.
+  - Keep transcription architecture layered: family/engine, model, runtime backend, and artifact source are distinct concepts.
+  - Build runtime instances from resolved profiles, not from a bare engine id.
+  - Keep artifact download logic in src-tauri/src/models/ and drive it from typed descriptors rather than hard-coded repo ids.
+  - Put frontend IPC wrappers in src/lib/api, feature controllers in src/lib/features/<feature>/controller.svelte.ts, and feature sections in src/lib/features/<feature>/components/.
+  - Keep top-level Svelte views as composition shells; do not let them own persistence logic or DTO parsing.
+  - Use @lucide/svelte for application icons in Svelte 5 code; avoid inline SVG except for custom artwork.
+  - Drive engine/model/backend selectors from typed descriptor DTOs, not hard-coded labels or raw string arrays.
+  - Preserve the thread model: inference must stay off Tokio.
+  - Add tests for lifecycle, contracts, and persistence changes.
+  - Check recent git history before undoing existing patterns.

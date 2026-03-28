@@ -41,9 +41,9 @@ async getTranscriptionCatalog() : Promise<Result<TranscriptionCatalog, string>> 
 /**
  * Check whether the selected transcription model is downloaded and loaded.
  */
-async getModelStatus() : Promise<Result<TranscriptionRuntimeStatus, string>> {
+async getModelStatus(selection: TranscriptionProfileSelection) : Promise<Result<TranscriptionRuntimeStatus, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_model_status") };
+    return { status: "ok", data: await TAURI_INVOKE("get_model_status", { selection }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -53,9 +53,9 @@ async getModelStatus() : Promise<Result<TranscriptionRuntimeStatus, string>> {
  * Download the selected transcription model.
  * Progress is streamed back via the Channel API.
  */
-async downloadModel(channel: TAURI_CHANNEL<DownloadProgress>) : Promise<Result<null, string>> {
+async downloadModel(selection: TranscriptionProfileSelection, channel: TAURI_CHANNEL<DownloadProgress>) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("download_model", { channel }) };
+    return { status: "ok", data: await TAURI_INVOKE("download_model", { selection, channel }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -65,9 +65,9 @@ async downloadModel(channel: TAURI_CHANNEL<DownloadProgress>) : Promise<Result<n
  * Load the model into memory (GPU/CPU). Must be called after download.
  * Also spawns the persistent inference pipeline thread.
  */
-async loadModel() : Promise<Result<null, string>> {
+async loadModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("load_model") };
+    return { status: "ok", data: await TAURI_INVOKE("load_model", { selection }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -349,12 +349,13 @@ shortcutToggle: "shortcut-toggle"
 
 /** user-defined types **/
 
-export type AppSettings = { theme: Theme; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string }
+export type AppSettings = { theme: Theme; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string }
 export type AppView = "transcription" | "meeting" | "meeting-history" | "settings"
 /**
  * Info about an available audio input device, sent to frontend
  */
 export type AudioDeviceInfo = { name: string; is_default: boolean }
+export type AudioInputRequirements = { sample_rate_hz: number; channels: number; chunk_size_samples: number }
 /**
  * A dictation history entry
  */
@@ -373,6 +374,7 @@ export type MeetingRecordingSession = { id: string; started_at: string; ended_at
  * Full meeting transcript stored as JSON
  */
 export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null }
+export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
 export type OllamaStatus = { available: boolean; base_url: string; models: OllamaModelDescriptor[] }
@@ -382,10 +384,13 @@ export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
 export type SummarizeProgress = { text: string; done: boolean }
 export type Theme = "dark" | "light" | "system"
-export type TranscriptionCatalog = { engines: TranscriptionEngineDescriptor[]; selected_engine_id: string; selected_model_id: string }
-export type TranscriptionEngineDescriptor = { id: string; label: string; description: string; supports_streaming: boolean; models: TranscriptionModelDescriptor[] }
-export type TranscriptionModelDescriptor = { id: string; label: string; description: string; download_size_bytes: number | null; supported_languages: string[] }
-export type TranscriptionProfile = { engine_id: string; engine_label: string; model_id: string; model_label: string }
+export type TranscriptionCapabilities = { supports_streaming: boolean; supports_batch_transcription: boolean; supports_language_auto_detect: boolean; supports_word_timestamps: boolean; supports_partial_results: boolean }
+export type TranscriptionCatalog = { engines: TranscriptionEngineDescriptor[]; selected_engine_id: string; selected_model_id: string; selected_backend_id: string }
+export type TranscriptionEngineDescriptor = { id: string; label: string; description: string; models: TranscriptionModelDescriptor[] }
+export type TranscriptionModelDescriptor = { id: string; label: string; description: string; download_size_bytes: number | null; recommended_memory_bytes: number | null; supported_languages: string[]; capabilities: TranscriptionCapabilities; audio_input: AudioInputRequirements; available_in_app: boolean; availability_note: string | null; backends: TranscriptionRuntimeBackendDescriptor[]; recommended_backend_id: string }
+export type TranscriptionProfile = { engine_id: string; engine_label: string; model_id: string; model_label: string; backend_id?: string; backend_label?: string }
+export type TranscriptionProfileSelection = { engine_id: string; model_id: string; backend_id: string }
+export type TranscriptionRuntimeBackendDescriptor = { id: string; label: string; description: string; recommended: boolean; available_in_app: boolean; availability_note: string | null; artifacts: ModelArtifactDescriptor[] }
 export type TranscriptionRuntimeStatus = { profile: TranscriptionProfile; downloaded: boolean; loaded: boolean; model_dir: string }
 /**
  * A piece of transcribed text with metadata

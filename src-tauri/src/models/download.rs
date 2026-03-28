@@ -1,9 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tracing::info;
-
-/// HuggingFace repo for the Candle-compatible Kyutai STT model
-pub const KYUTAI_HF_REPO: &str = "kyutai/stt-1b-en_fr-candle";
+use crate::engine::ModelArtifactDescriptor;
 
 /// Download status reported to the frontend
 #[derive(Debug, Clone, serde::Serialize, specta::Type)]
@@ -24,26 +22,34 @@ pub enum DownloadStatus {
 }
 
 /// Check if all required model files exist locally
-pub fn model_exists(model_dir: &Path) -> bool {
+pub fn model_exists(model_dir: &Path, required_files: &[String]) -> bool {
     if !model_dir.exists() {
         return false;
     }
-    // Check config.json exists — other files are referenced from it
-    model_dir.join("config.json").exists() && model_dir.join("model.safetensors").exists()
-}
+    if !required_files.iter().all(|file| model_dir.join(file).exists()) {
+        return false;
+    }
 
-/// Get the default model storage directory
-pub fn default_model_dir() -> PathBuf {
-    crate::constants::app_data_dir()
-        .join("models")
-        .join("kyutai")
-        .join("stt-1b-en_fr")
+    let config_path = model_dir.join("config.json");
+    let Ok(config_str) = std::fs::read_to_string(&config_path) else {
+        return true;
+    };
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(&config_str) else {
+        return false;
+    };
+
+    ["mimi_name", "tokenizer_name"].iter().all(|field| {
+        config[*field]
+            .as_str()
+            .is_none_or(|file_name| model_dir.join(file_name).exists())
+    })
 }
 
 /// Download model files from HuggingFace using hf-hub.
 /// hf-hub handles caching, resumption, and stores files in its own cache.
 /// We then symlink/copy the resolved paths to our model dir for easy access.
 pub fn download_model(
+    artifact: &ModelArtifactDescriptor,
     model_dir: &Path,
     progress_callback: impl Fn(DownloadProgress),
 ) -> Result<(), String> {
@@ -51,7 +57,7 @@ pub fn download_model(
 
     let api =
         hf_hub::api::sync::Api::new().map_err(|e| format!("HuggingFace API init failed: {e}"))?;
-    let repo = api.model(KYUTAI_HF_REPO.to_string());
+    let repo = api.model(artifact.repository.clone());
 
     // First download config.json to discover other file names
     progress_callback(DownloadProgress {

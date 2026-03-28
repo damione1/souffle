@@ -22,7 +22,13 @@ import type {
   TranscriptionSegment,
 } from "../../types";
 import { errorMessage } from "../../utils";
-import { formatSelectedTranscriptionLabel } from "./catalog";
+import {
+  formatSelectedTranscriptionLabel,
+  getFirstAvailableTranscriptionBackend,
+  getFirstAvailableTranscriptionModel,
+  getSelectedTranscriptionBackend,
+  toSelectedTranscriptionProfileSelection,
+} from "./catalog";
 
 export function createTranscriptionController() {
   const app = getAppState();
@@ -48,8 +54,18 @@ export function createTranscriptionController() {
       catalog,
       app.settings.transcription_engine_id,
       app.settings.transcription_model_id,
+      app.settings.transcription_backend_id,
     ) || "Transcription model";
   });
+
+  function currentSelection() {
+    return toSelectedTranscriptionProfileSelection(
+      catalog,
+      app.settings.transcription_engine_id,
+      app.settings.transcription_model_id,
+      app.settings.transcription_backend_id,
+    );
+  }
 
   async function mount() {
     await Promise.all([refreshCatalog(), refreshRuntimeStatus(), loadHistory()]);
@@ -78,6 +94,7 @@ export function createTranscriptionController() {
         ...app.settings,
         transcription_engine_id: catalog.selected_engine_id,
         transcription_model_id: catalog.selected_model_id,
+        transcription_backend_id: catalog.selected_backend_id,
       };
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -86,25 +103,27 @@ export function createTranscriptionController() {
 
   async function refreshRuntimeStatus() {
     try {
-      const status = await getModelStatus();
+      const status = await getModelStatus(currentSelection());
       modelDownloaded = status.downloaded;
       modelLoaded = status.loaded;
       app.settings = {
         ...app.settings,
         transcription_engine_id: status.profile.engine_id,
         transcription_model_id: status.profile.model_id,
+        transcription_backend_id: status.profile.backend_id ?? app.settings.transcription_backend_id,
       };
     } catch (e) {
       statusMessage = errorMessage(e);
     }
   }
 
-  async function persistSelection(engineId: string, modelId: string) {
+  async function persistSelection(engineId: string, modelId: string, backendId: string) {
     const nextSettings: AppSettings = {
       ...app.settings,
       audio_device: app.selectedDevice || null,
       transcription_engine_id: engineId,
       transcription_model_id: modelId,
+      transcription_backend_id: backendId,
     };
 
     await saveSettings(nextSettings);
@@ -115,13 +134,32 @@ export function createTranscriptionController() {
   async function selectEngine(engineId: string) {
     if (!catalog) return;
     const engine = catalog.engines.find((candidate) => candidate.id === engineId);
-    const fallbackModelId = engine?.models[0]?.id;
-    if (!fallbackModelId) return;
-    await persistSelection(engineId, fallbackModelId);
+    const fallbackModel = getFirstAvailableTranscriptionModel(engine ?? null);
+    const fallbackBackendId = getFirstAvailableTranscriptionBackend(fallbackModel)?.id;
+    if (!fallbackModel || !fallbackBackendId) return;
+    await persistSelection(engineId, fallbackModel.id, fallbackBackendId);
   }
 
   async function selectModel(modelId: string) {
-    await persistSelection(app.settings.transcription_engine_id, modelId);
+    const backend = getSelectedTranscriptionBackend(
+      catalog,
+      app.settings.transcription_engine_id,
+      modelId,
+      app.settings.transcription_backend_id,
+    );
+    await persistSelection(
+      app.settings.transcription_engine_id,
+      modelId,
+      backend?.id ?? app.settings.transcription_backend_id,
+    );
+  }
+
+  async function selectBackend(backendId: string) {
+    await persistSelection(
+      app.settings.transcription_engine_id,
+      app.settings.transcription_model_id,
+      backendId,
+    );
   }
 
   async function loadHistory() {
@@ -168,7 +206,7 @@ export function createTranscriptionController() {
     downloadFile = "";
 
     try {
-      await downloadModel((progress: DownloadProgress) => {
+      await downloadModel(currentSelection(), (progress: DownloadProgress) => {
         downloadFile = progress.file;
         if (typeof progress.status === "object" && "error" in progress.status) {
           statusMessage = `Download error: ${progress.status.error}`;
@@ -192,7 +230,7 @@ export function createTranscriptionController() {
     isLoadingModel = true;
     statusMessage = "";
     try {
-      await loadModel();
+      await loadModel(currentSelection());
       modelLoaded = true;
       await refreshRuntimeStatus();
     } catch (e) {
@@ -297,6 +335,7 @@ export function createTranscriptionController() {
     refreshRuntimeStatus,
     selectEngine,
     selectModel,
+    selectBackend,
     handleDownloadModel,
     handleLoadModel,
     toggleRecording,

@@ -3,8 +3,9 @@ use tauri::ipc::Channel;
 use tracing::info;
 
 use crate::engine::{
-    TranscriptionCatalog, TranscriptionRuntimeStatus, create_engine, resolve_transcription_profile,
-    transcription_engine_catalog,
+    TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
+    TranscriptionRuntimeStatus, create_engine, resolve_transcription_profile,
+    resolve_transcription_selection, transcription_engine_catalog,
 };
 use crate::lock_ext::MutexExt;
 use crate::models;
@@ -13,11 +14,12 @@ use crate::settings::AppSettings;
 use crate::state::AppState;
 use std::sync::Arc;
 
-fn selected_profile(state: &AppState) -> Result<crate::engine::TranscriptionProfile, String> {
+fn selected_profile(state: &AppState) -> Result<TranscriptionProfile, String> {
     let settings = AppSettings::load(&state.db)?;
     resolve_transcription_profile(
         Some(&settings.transcription_engine_id),
         Some(&settings.transcription_model_id),
+        Some(&settings.transcription_backend_id),
     )
 }
 
@@ -32,14 +34,18 @@ pub fn get_transcription_catalog(
         engines: transcription_engine_catalog(),
         selected_engine_id: profile.engine_id,
         selected_model_id: profile.model_id,
+        selected_backend_id: profile.backend_id,
     })
 }
 
 /// Check whether the selected transcription model is downloaded and loaded.
 #[tauri::command]
 #[specta::specta]
-pub fn get_model_status(state: State<'_, AppState>) -> Result<TranscriptionRuntimeStatus, String> {
-    let profile = selected_profile(&state)?;
+pub fn get_model_status(
+    state: State<'_, AppState>,
+    selection: TranscriptionProfileSelection,
+) -> Result<TranscriptionRuntimeStatus, String> {
+    let profile = resolve_transcription_selection(&selection)?;
     let model_dir = models::model_dir(&profile);
     let downloaded = models::model_exists(&profile);
     let loaded = *state.model_loaded.acquire()?;
@@ -58,10 +64,11 @@ pub fn get_model_status(state: State<'_, AppState>) -> Result<TranscriptionRunti
 #[tauri::command]
 #[specta::specta]
 pub fn download_model(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
+    selection: TranscriptionProfileSelection,
     channel: Channel<models::DownloadProgress>,
 ) -> Result<(), String> {
-    let profile = selected_profile(&state)?;
+    let profile = resolve_transcription_selection(&selection)?;
     if models::model_exists(&profile) {
         channel
             .send(models::DownloadProgress {
@@ -109,8 +116,11 @@ pub fn download_model(
 /// Also spawns the persistent inference pipeline thread.
 #[tauri::command]
 #[specta::specta]
-pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
-    let profile = selected_profile(&state)?;
+pub fn load_model(
+    state: State<'_, AppState>,
+    selection: TranscriptionProfileSelection,
+) -> Result<(), String> {
+    let profile = resolve_transcription_selection(&selection)?;
     let model_dir = models::model_dir(&profile);
     if !models::model_exists(&profile) {
         return Err("Model not downloaded yet".into());
@@ -142,9 +152,11 @@ pub fn load_model(state: State<'_, AppState>) -> Result<(), String> {
     let mut engine = state.engine.acquire()?;
     if current_profile
         .as_ref()
-        .is_none_or(|current| current.engine_id != profile.engine_id)
+        .is_none_or(|current| {
+            current.engine_id != profile.engine_id || current.backend_id != profile.backend_id
+        })
     {
-        *engine = create_engine(&profile.engine_id)?;
+        *engine = create_engine(&profile)?;
     }
     info!(path = %model_dir.display(), "Loading model");
     engine

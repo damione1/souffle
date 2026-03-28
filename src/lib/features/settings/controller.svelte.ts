@@ -18,6 +18,11 @@ import type {
   TranscriptionCatalog,
 } from "../../types";
 import { applyTheme, errorMessage } from "../../utils";
+import {
+  getFirstAvailableTranscriptionBackend,
+  getFirstAvailableTranscriptionModel,
+  getSelectedTranscriptionBackend,
+} from "../transcription/catalog";
 
 export function createSettingsController() {
   const app = getAppState();
@@ -63,6 +68,7 @@ export function createSettingsController() {
         ...app.settings,
         transcription_engine_id: catalog.selected_engine_id,
         transcription_model_id: catalog.selected_model_id,
+        transcription_backend_id: catalog.selected_backend_id,
       };
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -158,18 +164,33 @@ export function createSettingsController() {
 
   async function selectTranscriptionEngine(engineId: string) {
     const engine = catalog?.engines.find((candidate) => candidate.id === engineId);
-    const modelId = engine?.models[0]?.id;
-    if (!modelId) return;
+    const model = getFirstAvailableTranscriptionModel(engine ?? null);
+    const backendId = getFirstAvailableTranscriptionBackend(model)?.id;
+    if (!model || !backendId) return;
 
     await persistSettings((settings) => {
       settings.transcription_engine_id = engineId;
-      settings.transcription_model_id = modelId;
+      settings.transcription_model_id = model.id;
+      settings.transcription_backend_id = backendId;
     });
   }
 
   async function selectTranscriptionModel(modelId: string) {
+    const backend = getSelectedTranscriptionBackend(
+      catalog,
+      app.settings.transcription_engine_id,
+      modelId,
+      app.settings.transcription_backend_id,
+    );
     await persistSettings((settings) => {
       settings.transcription_model_id = modelId;
+      settings.transcription_backend_id = backend?.id ?? settings.transcription_backend_id;
+    });
+  }
+
+  async function selectTranscriptionBackend(backendId: string) {
+    await persistSettings((settings) => {
+      settings.transcription_backend_id = backendId;
     });
   }
 
@@ -325,6 +346,7 @@ export function createSettingsController() {
     checkOllama,
     selectTranscriptionEngine,
     selectTranscriptionModel,
+    selectTranscriptionBackend,
     onThemeChange,
     onAutoPasteChange,
     onPasteDelayChange,

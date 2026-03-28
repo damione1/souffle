@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::db::Database;
-use crate::engine::{KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, resolve_transcription_profile};
+use crate::engine::{
+    CANDLE_BACKEND_ID, KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, resolve_transcription_profile,
+};
 
 const THEME_KEY: &str = "theme";
 const AUTO_PASTE_KEY: &str = "auto_paste";
@@ -14,6 +16,7 @@ const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
 const AUDIO_DEVICE_KEY: &str = "audio_device";
 const TRANSCRIPTION_ENGINE_ID_KEY: &str = "transcription_engine_id";
 const TRANSCRIPTION_MODEL_ID_KEY: &str = "transcription_model_id";
+const TRANSCRIPTION_BACKEND_ID_KEY: &str = "transcription_backend_id";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
 
@@ -37,6 +40,7 @@ pub struct AppSettings {
     pub audio_device: Option<String>,
     pub transcription_engine_id: String,
     pub transcription_model_id: String,
+    pub transcription_backend_id: String,
 }
 
 impl Default for AppSettings {
@@ -51,6 +55,7 @@ impl Default for AppSettings {
             audio_device: None,
             transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
             transcription_model_id: KYUTAI_MODEL_ID.to_string(),
+            transcription_backend_id: CANDLE_BACKEND_ID.to_string(),
         }
     }
 }
@@ -92,6 +97,11 @@ impl AppSettings {
         {
             settings.transcription_model_id = transcription_model_id;
         }
+        if let Some(transcription_backend_id) =
+            read_json_setting::<String>(db, TRANSCRIPTION_BACKEND_ID_KEY)?
+        {
+            settings.transcription_backend_id = transcription_backend_id;
+        }
 
         Ok(settings.sanitized())
     }
@@ -110,9 +120,11 @@ impl AppSettings {
         let profile = resolve_transcription_profile(
             Some(&normalized.transcription_engine_id),
             Some(&normalized.transcription_model_id),
+            Some(&normalized.transcription_backend_id),
         )?;
         normalized.transcription_engine_id = profile.engine_id;
         normalized.transcription_model_id = profile.model_id;
+        normalized.transcription_backend_id = profile.backend_id;
 
         Ok(normalized)
     }
@@ -123,6 +135,7 @@ impl AppSettings {
         normalized.ollama_model = normalized.ollama_model.trim().to_string();
         normalized.transcription_engine_id = normalized.transcription_engine_id.trim().to_string();
         normalized.transcription_model_id = normalized.transcription_model_id.trim().to_string();
+        normalized.transcription_backend_id = normalized.transcription_backend_id.trim().to_string();
         normalized.audio_device = normalized
             .audio_device
             .as_ref()
@@ -140,16 +153,22 @@ impl AppSettings {
         if normalized.transcription_model_id.is_empty() {
             normalized.transcription_model_id = KYUTAI_MODEL_ID.to_string();
         }
+        if normalized.transcription_backend_id.is_empty() {
+            normalized.transcription_backend_id = CANDLE_BACKEND_ID.to_string();
+        }
 
         if let Ok(profile) = resolve_transcription_profile(
             Some(&normalized.transcription_engine_id),
             Some(&normalized.transcription_model_id),
+            Some(&normalized.transcription_backend_id),
         ) {
             normalized.transcription_engine_id = profile.engine_id;
             normalized.transcription_model_id = profile.model_id;
+            normalized.transcription_backend_id = profile.backend_id;
         } else {
             normalized.transcription_engine_id = KYUTAI_ENGINE_ID.to_string();
             normalized.transcription_model_id = KYUTAI_MODEL_ID.to_string();
+            normalized.transcription_backend_id = CANDLE_BACKEND_ID.to_string();
         }
 
         if !(50..=1000).contains(&normalized.paste_delay_ms) {
@@ -176,6 +195,11 @@ impl AppSettings {
             db,
             TRANSCRIPTION_MODEL_ID_KEY,
             &normalized.transcription_model_id,
+        )?;
+        write_json_setting(
+            db,
+            TRANSCRIPTION_BACKEND_ID_KEY,
+            &normalized.transcription_backend_id,
         )?;
         write_json_setting(db, DEBUG_TRANSCRIPTION_KEY, &normalized.debug_transcription)?;
 
@@ -292,6 +316,7 @@ mod tests {
             audio_device: Some("BlackHole".into()),
             transcription_engine_id: "kyutai".into(),
             transcription_model_id: "stt-1b-en_fr".into(),
+            transcription_backend_id: "candle".into(),
         };
 
         settings.save(&db).expect("save settings");
@@ -334,15 +359,19 @@ mod tests {
 
     #[test]
     fn sanitize_rejects_empty_ollama_url() {
-        let mut s = AppSettings::default();
-        s.ollama_url = "".to_string();
+        let s = AppSettings {
+            ollama_url: "".to_string(),
+            ..AppSettings::default()
+        };
         assert!(s.sanitize_for_save().is_err());
     }
 
     #[test]
     fn sanitize_rejects_out_of_range_paste_delay() {
-        let mut s = AppSettings::default();
-        s.paste_delay_ms = 49;
+        let mut s = AppSettings {
+            paste_delay_ms: 49,
+            ..AppSettings::default()
+        };
         assert!(s.sanitize_for_save().is_err());
         s.paste_delay_ms = 1001;
         assert!(s.sanitize_for_save().is_err());
@@ -351,17 +380,36 @@ mod tests {
     #[test]
     fn sanitize_falls_back_to_default_for_unknown_engine() {
         // sanitized() silently corrects unknown engines to the Kyutai default
-        let mut s = AppSettings::default();
-        s.transcription_engine_id = "nonexistent".to_string();
+        let s = AppSettings {
+            transcription_engine_id: "nonexistent".to_string(),
+            ..AppSettings::default()
+        };
         let clean = s.sanitize_for_save().unwrap();
         assert_eq!(clean.transcription_engine_id, "kyutai");
         assert_eq!(clean.transcription_model_id, "stt-1b-en_fr");
+        assert_eq!(clean.transcription_backend_id, "candle");
+    }
+
+    #[test]
+    fn sanitize_falls_back_to_default_for_unavailable_stub_engine() {
+        let s = AppSettings {
+            transcription_engine_id: "whisper".to_string(),
+            transcription_model_id: "turbo".to_string(),
+            transcription_backend_id: "ctranslate2".to_string(),
+            ..AppSettings::default()
+        };
+        let clean = s.sanitize_for_save().unwrap();
+        assert_eq!(clean.transcription_engine_id, "kyutai");
+        assert_eq!(clean.transcription_model_id, "stt-1b-en_fr");
+        assert_eq!(clean.transcription_backend_id, "candle");
     }
 
     #[test]
     fn sanitize_normalizes_whitespace() {
-        let mut s = AppSettings::default();
-        s.ollama_url = "  http://localhost:11434  ".to_string();
+        let s = AppSettings {
+            ollama_url: "  http://localhost:11434  ".to_string(),
+            ..AppSettings::default()
+        };
         let clean = s.sanitize_for_save().unwrap();
         assert_eq!(clean.ollama_url, "http://localhost:11434");
     }

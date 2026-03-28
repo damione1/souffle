@@ -221,18 +221,6 @@ impl KyutaiEngine {
 }
 
 impl TranscriptionEngine for KyutaiEngine {
-    fn name(&self) -> &str {
-        "Kyutai STT 1B (FR/EN)"
-    }
-
-    fn supported_languages(&self) -> Vec<String> {
-        vec!["fr".into(), "en".into()]
-    }
-
-    fn supports_streaming(&self) -> bool {
-        true
-    }
-
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError> {
         let device = Self::select_device()?;
         info!(device = ?device, "Loading Kyutai STT model");
@@ -494,11 +482,6 @@ impl TranscriptionEngine for KyutaiEngine {
         drop(guard);
 
         self.transcribe(&silence, None)
-    }
-
-    fn memory_usage(&self) -> Option<u64> {
-        // Approximate: 1B params at f16 ≈ 2GB + Mimi ≈ 200MB + KV cache
-        Some(4_000_000_000)
     }
 
     fn reset_state(&self) -> Result<(), EngineError> {

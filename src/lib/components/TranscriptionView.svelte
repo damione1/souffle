@@ -26,6 +26,7 @@
     catalog={controller.catalog}
     selectedEngineId={controller.app.settings.transcription_engine_id}
     selectedModelId={controller.app.settings.transcription_model_id}
+    selectedBackendId={controller.app.settings.transcription_backend_id}
     modelDownloaded={controller.modelDownloaded}
     modelLoaded={controller.modelLoaded}
     isDownloading={controller.isDownloading}
@@ -33,6 +34,7 @@
     isLoadingModel={controller.isLoadingModel}
     onSelectEngine={controller.selectEngine}
     onSelectModel={controller.selectModel}
+    onSelectBackend={controller.selectBackend}
     onDownloadModel={controller.handleDownloadModel}
     onLoadModel={controller.handleLoadModel}
   />

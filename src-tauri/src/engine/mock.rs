@@ -16,6 +16,12 @@ pub struct MockEngine {
     pub flush_responses: Mutex<VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>>,
 }
 
+impl Default for MockEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockEngine {
     pub fn new() -> Self {
         Self {
@@ -62,18 +68,6 @@ impl MockEngine {
 }
 
 impl TranscriptionEngine for MockEngine {
-    fn name(&self) -> &str {
-        "mock"
-    }
-
-    fn supported_languages(&self) -> Vec<String> {
-        vec!["en".into(), "fr".into()]
-    }
-
-    fn supports_streaming(&self) -> bool {
-        true
-    }
-
     fn load_model(&mut self, _path: &Path) -> Result<(), EngineError> {
         self.loaded.store(true, Ordering::SeqCst);
         Ok(())
@@ -106,9 +100,5 @@ impl TranscriptionEngine for MockEngine {
 
     fn reset_state(&self) -> Result<(), EngineError> {
         Ok(())
-    }
-
-    fn memory_usage(&self) -> Option<u64> {
-        Some(0)
     }
 }

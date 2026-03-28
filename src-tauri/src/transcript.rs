@@ -2,7 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-use crate::engine::{TranscriptionProfile, TranscriptionSegment, default_transcription_profile};
+use crate::engine::{
+    TranscriptionProfile, TranscriptionSegment, default_transcription_profile,
+    resolve_transcription_profile,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct MeetingRecordingSession {
@@ -113,7 +116,12 @@ pub fn resolve_legacy_transcription_profile(
     legacy_engine: Option<&str>,
 ) -> Result<TranscriptionProfile, String> {
     if let Some(profile) = transcription_profile {
-        return Ok(profile);
+        return resolve_transcription_profile(
+            Some(&profile.engine_id),
+            Some(&profile.model_id),
+            Some(&profile.backend_id),
+        )
+        .or(Ok(profile));
     }
 
     if let Some(engine_label) = legacy_engine {

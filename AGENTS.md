@@ -9,12 +9,15 @@ This document is the repo-level implementation standard for Souffle. It compleme
 - Do not move inference onto Tokio. Keep the existing threading model: UI/runtime on Tokio, audio on `std::thread`, inference on `std::thread`.
 - Runtime lifecycle belongs in backend runtime/pipeline modules, not in UI components.
 - Persisted settings stay behind a typed settings contract. SQLite key/value storage is an implementation detail, not the app-facing API.
+- Keep transcription concepts separated:
+  engine/family, model, backend runtime, and downloadable artifact are different layers and should not be collapsed into one enum or one string id.
 
 ## Rust Placement Rules
 
 - Enums and DTOs that cross the frontend/backend boundary belong in focused shared modules, not inline inside command files.
 - Engine-facing types live under `src-tauri/src/engine/`.
 - Engine catalogs, active transcription profiles, and runtime status DTOs belong in `src-tauri/src/engine/mod.rs` or adjacent engine modules.
+- Artifact download/storage logic belongs under `src-tauri/src/models/`, driven by typed artifact descriptors from the engine registry.
 - Persisted meeting and transcript DTOs live in `src-tauri/src/transcript.rs`.
 - App settings and shortcut DTOs live in `src-tauri/src/settings.rs`.
 - Raw SQLite access stays in `src-tauri/src/db/`.
@@ -30,6 +33,9 @@ This document is the repo-level implementation standard for Souffle. It compleme
 - Avoid free-form JSON maps for internal app contracts when a typed struct is practical.
 - If a resource has a lifecycle, make shutdown/idempotency explicit.
 - New STT engines or model families must register through descriptor/profile DTOs before any UI or command-layer wiring.
+- Runtime implementations must be created from a resolved profile (`engine + model + backend`), not from a single engine id.
+- Metadata such as supported languages, streaming support, and memory guidance belongs in descriptors, not on the runtime trait itself.
+- Download sources must be expressed as typed artifact descriptors, not hard-coded repo matches scattered across commands.
 - Provider model lists must be exposed as typed descriptors, not raw `Vec<String>` payloads.
 
 ## Frontend Placement Rules
@@ -51,7 +57,7 @@ This document is the repo-level implementation standard for Souffle. It compleme
 - Use `errorMessage()` for surfaced errors.
 - Keep app store state as the single frontend source of truth for view/recording state.
 - Preserve the existing UI language and layout unless a task explicitly requests UX changes.
-- Drive engine/model selection UIs from descriptor DTOs, not hard-coded labels or engine-specific assumptions.
+- Drive engine/model/backend selection UIs from descriptor DTOs, not hard-coded labels or engine-specific assumptions.
 
 ## Tests
 

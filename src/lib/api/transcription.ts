@@ -4,6 +4,7 @@ import type {
   DictationEntry,
   DownloadProgress,
   TranscriptionCatalog,
+  TranscriptionProfileSelection,
   TranscriptionRuntimeStatus,
   TranscriptionSegment,
 } from "../types";
@@ -12,20 +13,23 @@ export async function getTranscriptionCatalog(): Promise<TranscriptionCatalog> {
   return unwrap(commands.getTranscriptionCatalog());
 }
 
-export async function getModelStatus(): Promise<TranscriptionRuntimeStatus> {
-  return unwrap(commands.getModelStatus());
+export async function getModelStatus(
+  selection: TranscriptionProfileSelection,
+): Promise<TranscriptionRuntimeStatus> {
+  return unwrap(commands.getModelStatus(selection));
 }
 
 export async function downloadModel(
+  selection: TranscriptionProfileSelection,
   onProgress: (progress: DownloadProgress) => void,
 ): Promise<void> {
   const channel = new Channel<DownloadProgress>();
   channel.onmessage = onProgress;
-  await unwrap(commands.downloadModel(channel));
+  await unwrap(commands.downloadModel(selection, channel));
 }
 
-export async function loadModel(): Promise<void> {
-  await unwrap(commands.loadModel());
+export async function loadModel(selection: TranscriptionProfileSelection): Promise<void> {
+  await unwrap(commands.loadModel(selection));
 }
 
 export async function startStreamingTranscription(

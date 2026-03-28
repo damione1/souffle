@@ -27,12 +27,18 @@ import {
 } from './transcription';
 
 describe('transcription API', () => {
+  const selection = {
+    engine_id: 'kyutai',
+    model_id: 'stt-1b-en_fr',
+    backend_id: 'candle',
+  };
+
   beforeEach(() => {
     mockInvoke.mockReset();
   });
 
   it('getTranscriptionCatalog calls correct command', async () => {
-    const catalog = { engines: [], selected_engine_id: 'kyutai', selected_model_id: 'stt-1b' };
+    const catalog = { engines: [], selected_engine_id: 'kyutai', selected_model_id: 'stt-1b', selected_backend_id: 'candle' };
     mockInvoke.mockResolvedValue(catalog);
 
     const result = await getTranscriptionCatalog();
@@ -45,9 +51,9 @@ describe('transcription API', () => {
     const status = { profile: {}, downloaded: true, loaded: false, model_dir: '/tmp' };
     mockInvoke.mockResolvedValue(status);
 
-    const result = await getModelStatus();
+    const result = await getModelStatus(selection);
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_model_status', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith('get_model_status', expect.objectContaining({ selection }), undefined);
     expect(result).toEqual(status);
   });
 
@@ -55,17 +61,21 @@ describe('transcription API', () => {
     mockInvoke.mockResolvedValue(null);
     const onProgress = vi.fn();
 
-    await downloadModel(onProgress);
+    await downloadModel(selection, onProgress);
 
-    expect(mockInvoke).toHaveBeenCalledWith('download_model', expect.objectContaining({ channel: expect.any(Object) }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'download_model',
+      expect.objectContaining({ selection, channel: expect.any(Object) }),
+      undefined,
+    );
   });
 
   it('loadModel calls correct command', async () => {
     mockInvoke.mockResolvedValue(null);
 
-    await loadModel();
+    await loadModel(selection);
 
-    expect(mockInvoke).toHaveBeenCalledWith('load_model', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith('load_model', expect.objectContaining({ selection }), undefined);
   });
 
   it('startStreamingTranscription creates channel and invokes', async () => {

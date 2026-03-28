@@ -8,8 +8,36 @@ use std::sync::{Arc, Mutex};
 
 pub const KYUTAI_ENGINE_ID: &str = "kyutai";
 pub const KYUTAI_MODEL_ID: &str = "stt-1b-en_fr";
+pub const KYUTAI_MODEL_2_6B_ID: &str = "stt-2.6b-en";
+pub const WHISPER_ENGINE_ID: &str = "whisper";
+pub const WHISPER_MODEL_TURBO_ID: &str = "turbo";
+pub const PARAKEET_ENGINE_ID: &str = "parakeet";
+pub const PARAKEET_MODEL_TDT_1_1B_ID: &str = "parakeet-tdt_ctc-1.1b";
+pub const CANDLE_BACKEND_ID: &str = "candle";
+pub const CTRANSLATE2_BACKEND_ID: &str = "ctranslate2";
+pub const NEMO_BACKEND_ID: &str = "nemo";
+
+const KYUTAI_1B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-1b-en-fr";
+const KYUTAI_2_6B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-2-6b-en";
 
 pub type SharedTranscriptionEngine = Arc<Mutex<Box<dyn TranscriptionEngine>>>;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+pub struct TranscriptionProfileSelection {
+    pub engine_id: String,
+    pub model_id: String,
+    pub backend_id: String,
+}
+
+impl Default for TranscriptionProfileSelection {
+    fn default() -> Self {
+        Self {
+            engine_id: KYUTAI_ENGINE_ID.to_string(),
+            model_id: KYUTAI_MODEL_ID.to_string(),
+            backend_id: CANDLE_BACKEND_ID.to_string(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionProfile {
@@ -17,6 +45,10 @@ pub struct TranscriptionProfile {
     pub engine_label: String,
     pub model_id: String,
     pub model_label: String,
+    #[serde(default = "default_backend_id_string")]
+    pub backend_id: String,
+    #[serde(default = "default_backend_label_string")]
+    pub backend_label: String,
 }
 
 impl Default for TranscriptionProfile {
@@ -40,8 +72,58 @@ impl TranscriptionProfile {
             engine_label: trimmed.to_string(),
             model_id: "legacy".to_string(),
             model_label: "Legacy profile".to_string(),
+            backend_id: default_backend_id_string(),
+            backend_label: default_backend_label_string(),
         }
     }
+
+    pub fn selection(&self) -> TranscriptionProfileSelection {
+        TranscriptionProfileSelection {
+            engine_id: self.engine_id.clone(),
+            model_id: self.model_id.clone(),
+            backend_id: self.backend_id.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+pub struct TranscriptionCapabilities {
+    pub supports_streaming: bool,
+    pub supports_batch_transcription: bool,
+    pub supports_language_auto_detect: bool,
+    pub supports_word_timestamps: bool,
+    pub supports_partial_results: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+pub struct AudioInputRequirements {
+    pub sample_rate_hz: u32,
+    pub channels: u8,
+    pub chunk_size_samples: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+pub struct ModelArtifactDescriptor {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub provider: String,
+    pub repository: String,
+    pub revision: Option<String>,
+    pub file_format: String,
+    pub download_size_bytes: Option<u64>,
+    pub required_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+pub struct TranscriptionRuntimeBackendDescriptor {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub recommended: bool,
+    pub available_in_app: bool,
+    pub availability_note: Option<String>,
+    pub artifacts: Vec<ModelArtifactDescriptor>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
@@ -50,7 +132,14 @@ pub struct TranscriptionModelDescriptor {
     pub label: String,
     pub description: String,
     pub download_size_bytes: Option<u64>,
+    pub recommended_memory_bytes: Option<u64>,
     pub supported_languages: Vec<String>,
+    pub capabilities: TranscriptionCapabilities,
+    pub audio_input: AudioInputRequirements,
+    pub available_in_app: bool,
+    pub availability_note: Option<String>,
+    pub backends: Vec<TranscriptionRuntimeBackendDescriptor>,
+    pub recommended_backend_id: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
@@ -58,7 +147,6 @@ pub struct TranscriptionEngineDescriptor {
     pub id: String,
     pub label: String,
     pub description: String,
-    pub supports_streaming: bool,
     pub models: Vec<TranscriptionModelDescriptor>,
 }
 
@@ -67,6 +155,7 @@ pub struct TranscriptionCatalog {
     pub engines: Vec<TranscriptionEngineDescriptor>,
     pub selected_engine_id: String,
     pub selected_model_id: String,
+    pub selected_backend_id: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
@@ -77,45 +166,18 @@ pub struct TranscriptionRuntimeStatus {
     pub model_dir: String,
 }
 
-/// Core trait that ALL transcription engines must implement.
-/// Adding a new engine (Whisper, Parakeet, Kyutai, future models)
-/// means implementing this trait — nothing else changes.
+/// Runtime interface implemented by each engine family/backend pair.
+/// Product metadata belongs in descriptors, not on the runtime itself.
 pub trait TranscriptionEngine: Send + Sync {
-    /// Human-readable engine name for UI display
-    fn name(&self) -> &str;
-
-    /// Supported languages as ISO 639-1 codes
-    fn supported_languages(&self) -> Vec<String>;
-
-    /// Whether this engine supports true streaming (token-by-token)
-    /// vs chunk-based processing (e.g., Whisper's 30s windows)
-    fn supports_streaming(&self) -> bool;
-
-    /// Initialize the engine, load model weights into memory.
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError>;
-
-    /// Unload model from memory. Must free all GPU/CPU memory.
     fn unload_model(&mut self) -> Result<(), EngineError>;
-
-    /// Process an audio chunk and return transcription segments.
-    /// `audio`: raw PCM f32 samples at 24kHz mono.
-    /// `language`: optional language hint (None = auto-detect).
     fn transcribe(
         &self,
         audio: &[f32],
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
-
-    /// For streaming engines: signal that audio input has ended.
-    /// Returns any remaining buffered segments.
     fn flush(&self) -> Result<Vec<TranscriptionSegment>, EngineError>;
-
-    /// Reset internal state between transcription sessions.
-    /// Clears KV caches, positional encodings, and any accumulated buffers.
     fn reset_state(&self) -> Result<(), EngineError>;
-
-    /// Estimated VRAM/RAM usage in bytes for the loaded model.
-    fn memory_usage(&self) -> Option<u64>;
 }
 
 /// A piece of transcribed text with metadata
@@ -147,33 +209,41 @@ pub enum EngineError {
 }
 
 pub fn transcription_engine_catalog() -> Vec<TranscriptionEngineDescriptor> {
-    vec![TranscriptionEngineDescriptor {
-        id: KYUTAI_ENGINE_ID.to_string(),
-        label: "Kyutai".to_string(),
-        description: "Streaming local STT with Candle + Mimi at 24kHz.".to_string(),
-        supports_streaming: true,
-        models: vec![TranscriptionModelDescriptor {
-            id: KYUTAI_MODEL_ID.to_string(),
-            label: "STT 1B FR/EN".to_string(),
-            description: "stt-1b-en_fr local model from Kyutai.".to_string(),
-            download_size_bytes: Some(2_400_000_000),
-            supported_languages: vec!["fr".to_string(), "en".to_string()],
-        }],
-    }]
+    vec![
+        TranscriptionEngineDescriptor {
+            id: KYUTAI_ENGINE_ID.to_string(),
+            label: "Kyutai".to_string(),
+            description: "Local speech-to-text family optimized for live transcription with Mimi audio tokenization.".to_string(),
+            models: vec![kyutai_1b_model_descriptor(), kyutai_2_6b_model_descriptor()],
+        },
+        TranscriptionEngineDescriptor {
+            id: WHISPER_ENGINE_ID.to_string(),
+            label: "Whisper".to_string(),
+            description: "Multilingual speech recognition family with strong batch transcription support.".to_string(),
+            models: vec![whisper_turbo_model_descriptor()],
+        },
+        TranscriptionEngineDescriptor {
+            id: PARAKEET_ENGINE_ID.to_string(),
+            label: "Parakeet".to_string(),
+            description: "NVIDIA speech recognition family optimized for high-throughput English ASR.".to_string(),
+            models: vec![parakeet_tdt_1_1b_model_descriptor()],
+        },
+    ]
 }
 
 pub fn default_transcription_profile() -> TranscriptionProfile {
-    TranscriptionProfile {
-        engine_id: KYUTAI_ENGINE_ID.to_string(),
-        engine_label: "Kyutai".to_string(),
-        model_id: KYUTAI_MODEL_ID.to_string(),
-        model_label: "STT 1B FR/EN".to_string(),
-    }
+    resolve_transcription_profile(
+        Some(KYUTAI_ENGINE_ID),
+        Some(KYUTAI_MODEL_ID),
+        Some(CANDLE_BACKEND_ID),
+    )
+    .expect("default transcription profile must resolve")
 }
 
 pub fn resolve_transcription_profile(
     engine_id: Option<&str>,
     model_id: Option<&str>,
+    backend_id: Option<&str>,
 ) -> Result<TranscriptionProfile, String> {
     let catalog = transcription_engine_catalog();
     let engine_id = engine_id
@@ -184,6 +254,7 @@ pub fn resolve_transcription_profile(
         .iter()
         .find(|candidate| candidate.id == engine_id)
         .ok_or_else(|| format!("Unknown transcription engine '{engine_id}'"))?;
+
     let model_id = model_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -202,25 +273,290 @@ pub fn resolve_transcription_profile(
             format!("Unknown transcription model '{model_id}' for engine '{engine_id}'")
         })?;
 
+    let backend_id = backend_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(model.recommended_backend_id.as_str());
+    let backend = model
+        .backends
+        .iter()
+        .find(|candidate| candidate.id == backend_id)
+        .ok_or_else(|| {
+            format!(
+                "Unknown transcription backend '{backend_id}' for model '{engine_id}:{model_id}'"
+            )
+        })?;
+    if !model.available_in_app {
+        return Err(unavailable_profile_error(engine, model, backend));
+    }
+    if !backend.available_in_app {
+        return Err(unavailable_profile_error(engine, model, backend));
+    }
+
     Ok(TranscriptionProfile {
         engine_id: engine.id.clone(),
         engine_label: engine.label.clone(),
         model_id: model.id.clone(),
         model_label: model.label.clone(),
+        backend_id: backend.id.clone(),
+        backend_label: backend.label.clone(),
     })
 }
 
-pub fn create_engine(engine_id: &str) -> Result<Box<dyn TranscriptionEngine>, String> {
-    match engine_id {
-        KYUTAI_ENGINE_ID => Ok(Box::new(kyutai::KyutaiEngine::new())),
+pub fn resolve_transcription_selection(
+    selection: &TranscriptionProfileSelection,
+) -> Result<TranscriptionProfile, String> {
+    resolve_transcription_profile(
+        Some(&selection.engine_id),
+        Some(&selection.model_id),
+        Some(&selection.backend_id),
+    )
+}
+
+pub fn resolve_transcription_artifact(
+    profile: &TranscriptionProfile,
+) -> Result<ModelArtifactDescriptor, String> {
+    let catalog = transcription_engine_catalog();
+    let engine = catalog
+        .iter()
+        .find(|candidate| candidate.id == profile.engine_id)
+        .ok_or_else(|| format!("Unknown transcription engine '{}'", profile.engine_id))?;
+    let model = engine
+        .models
+        .iter()
+        .find(|candidate| candidate.id == profile.model_id)
+        .ok_or_else(|| {
+            format!(
+                "Unknown transcription model '{}' for engine '{}'",
+                profile.model_id, profile.engine_id
+            )
+        })?;
+    let backend = model
+        .backends
+        .iter()
+        .find(|candidate| candidate.id == profile.backend_id)
+        .ok_or_else(|| {
+            format!(
+                "Unknown transcription backend '{}' for model '{}:{}'",
+                profile.backend_id, profile.engine_id, profile.model_id
+            )
+        })?;
+    backend
+        .artifacts
+        .first()
+        .cloned()
+        .ok_or_else(|| format!("No artifacts registered for '{}'", backend.id))
+}
+
+pub fn create_engine(profile: &TranscriptionProfile) -> Result<Box<dyn TranscriptionEngine>, String> {
+    match (profile.engine_id.as_str(), profile.backend_id.as_str()) {
+        (KYUTAI_ENGINE_ID, CANDLE_BACKEND_ID) => Ok(Box::new(kyutai::KyutaiEngine::new())),
         _ => Err(format!(
-            "No engine implementation registered for '{engine_id}'"
+            "No runtime implementation registered for '{}:{}'",
+            profile.engine_id, profile.backend_id
         )),
     }
 }
 
 pub fn default_transcription_engine() -> Box<dyn TranscriptionEngine> {
     Box::new(kyutai::KyutaiEngine::new())
+}
+
+fn kyutai_1b_model_descriptor() -> TranscriptionModelDescriptor {
+    TranscriptionModelDescriptor {
+        id: KYUTAI_MODEL_ID.to_string(),
+        label: "STT 1B FR/EN".to_string(),
+        description: "Fast Kyutai streaming model tuned for French and English dictation.".to_string(),
+        download_size_bytes: Some(2_400_000_000),
+        recommended_memory_bytes: Some(4_000_000_000),
+        supported_languages: vec!["fr".to_string(), "en".to_string()],
+        capabilities: kyutai_streaming_capabilities(),
+        audio_input: kyutai_audio_requirements(),
+        available_in_app: true,
+        availability_note: None,
+        backends: vec![kyutai_candle_backend(
+            KYUTAI_1B_CANDLE_ARTIFACT_ID,
+            "Hugging Face Candle export for the Kyutai 1B FR/EN model.",
+            "kyutai/stt-1b-en_fr-candle",
+            Some(2_400_000_000),
+        )],
+        recommended_backend_id: CANDLE_BACKEND_ID.to_string(),
+    }
+}
+
+fn kyutai_2_6b_model_descriptor() -> TranscriptionModelDescriptor {
+    TranscriptionModelDescriptor {
+        id: KYUTAI_MODEL_2_6B_ID.to_string(),
+        label: "STT 2.6B EN".to_string(),
+        description: "Larger Kyutai streaming model optimized for English transcription quality.".to_string(),
+        download_size_bytes: Some(5_620_000_000),
+        recommended_memory_bytes: Some(10_000_000_000),
+        supported_languages: vec!["en".to_string()],
+        capabilities: kyutai_streaming_capabilities(),
+        audio_input: kyutai_audio_requirements(),
+        available_in_app: true,
+        availability_note: None,
+        backends: vec![kyutai_candle_backend(
+            KYUTAI_2_6B_CANDLE_ARTIFACT_ID,
+            "Hugging Face Candle export for the Kyutai 2.6B EN model.",
+            "kyutai/stt-2.6b-en-candle",
+            Some(5_620_000_000),
+        )],
+        recommended_backend_id: CANDLE_BACKEND_ID.to_string(),
+    }
+}
+
+fn kyutai_streaming_capabilities() -> TranscriptionCapabilities {
+    TranscriptionCapabilities {
+        supports_streaming: true,
+        supports_batch_transcription: false,
+        supports_language_auto_detect: true,
+        supports_word_timestamps: true,
+        supports_partial_results: true,
+    }
+}
+
+fn kyutai_audio_requirements() -> AudioInputRequirements {
+    AudioInputRequirements {
+        sample_rate_hz: 24_000,
+        channels: 1,
+        chunk_size_samples: crate::constants::MIMI_FRAME_SIZE as u32,
+    }
+}
+
+fn kyutai_candle_backend(
+    artifact_id: &str,
+    artifact_description: &str,
+    repository: &str,
+    download_size_bytes: Option<u64>,
+) -> TranscriptionRuntimeBackendDescriptor {
+    TranscriptionRuntimeBackendDescriptor {
+        id: CANDLE_BACKEND_ID.to_string(),
+        label: "Candle".to_string(),
+        description: "Pure Rust runtime used by Souffle for local transcription.".to_string(),
+        recommended: true,
+        available_in_app: true,
+        availability_note: None,
+        artifacts: vec![ModelArtifactDescriptor {
+            id: artifact_id.to_string(),
+            label: "Hugging Face".to_string(),
+            description: artifact_description.to_string(),
+            provider: "huggingface".to_string(),
+            repository: repository.to_string(),
+            revision: None,
+            file_format: "safetensors".to_string(),
+            download_size_bytes,
+            required_files: vec!["config.json".to_string(), "model.safetensors".to_string()],
+        }],
+    }
+}
+
+fn whisper_turbo_model_descriptor() -> TranscriptionModelDescriptor {
+    let note = "Catalog stub only. Whisper runtimes are not implemented in this app build yet.";
+    TranscriptionModelDescriptor {
+        id: WHISPER_MODEL_TURBO_ID.to_string(),
+        label: "Turbo".to_string(),
+        description: "Fast multilingual Whisper profile recommended for transcription workloads.".to_string(),
+        download_size_bytes: None,
+        recommended_memory_bytes: Some(6_000_000_000),
+        supported_languages: vec!["multilingual".to_string()],
+        capabilities: TranscriptionCapabilities {
+            supports_streaming: false,
+            supports_batch_transcription: true,
+            supports_language_auto_detect: true,
+            supports_word_timestamps: true,
+            supports_partial_results: false,
+        },
+        audio_input: AudioInputRequirements {
+            sample_rate_hz: 16_000,
+            channels: 1,
+            chunk_size_samples: 30 * 16_000,
+        },
+        available_in_app: false,
+        availability_note: Some(note.to_string()),
+        backends: vec![planned_backend(
+            CTRANSLATE2_BACKEND_ID,
+            "CTranslate2",
+            "Planned runtime backend for efficient local Whisper inference.",
+            note,
+        )],
+        recommended_backend_id: CTRANSLATE2_BACKEND_ID.to_string(),
+    }
+}
+
+fn parakeet_tdt_1_1b_model_descriptor() -> TranscriptionModelDescriptor {
+    let note = "Catalog stub only. Parakeet runtimes are not implemented in this app build yet.";
+    TranscriptionModelDescriptor {
+        id: PARAKEET_MODEL_TDT_1_1B_ID.to_string(),
+        label: "TDT-CTC 1.1B".to_string(),
+        description: "High-throughput English Parakeet profile with punctuation and capitalization.".to_string(),
+        download_size_bytes: None,
+        recommended_memory_bytes: Some(8_000_000_000),
+        supported_languages: vec!["en".to_string()],
+        capabilities: TranscriptionCapabilities {
+            supports_streaming: false,
+            supports_batch_transcription: true,
+            supports_language_auto_detect: false,
+            supports_word_timestamps: false,
+            supports_partial_results: false,
+        },
+        audio_input: AudioInputRequirements {
+            sample_rate_hz: 16_000,
+            channels: 1,
+            chunk_size_samples: 30 * 16_000,
+        },
+        available_in_app: false,
+        availability_note: Some(note.to_string()),
+        backends: vec![planned_backend(
+            NEMO_BACKEND_ID,
+            "NeMo",
+            "Planned runtime backend for NVIDIA Parakeet integration.",
+            note,
+        )],
+        recommended_backend_id: NEMO_BACKEND_ID.to_string(),
+    }
+}
+
+fn planned_backend(
+    id: &str,
+    label: &str,
+    description: &str,
+    note: &str,
+) -> TranscriptionRuntimeBackendDescriptor {
+    TranscriptionRuntimeBackendDescriptor {
+        id: id.to_string(),
+        label: label.to_string(),
+        description: description.to_string(),
+        recommended: true,
+        available_in_app: false,
+        availability_note: Some(note.to_string()),
+        artifacts: vec![],
+    }
+}
+
+fn unavailable_profile_error(
+    engine: &TranscriptionEngineDescriptor,
+    model: &TranscriptionModelDescriptor,
+    backend: &TranscriptionRuntimeBackendDescriptor,
+) -> String {
+    model
+        .availability_note
+        .clone()
+        .or_else(|| backend.availability_note.clone())
+        .unwrap_or_else(|| {
+            format!(
+                "'{} • {} • {}' is declared in the catalog but not available in this app build",
+                engine.label, model.label, backend.label
+            )
+        })
+}
+
+fn default_backend_id_string() -> String {
+    CANDLE_BACKEND_ID.to_string()
+}
+
+fn default_backend_label_string() -> String {
+    "Candle".to_string()
 }
 
 fn slug_id(value: &str) -> String {
@@ -245,93 +581,158 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_profile_uses_kyutai() {
+    fn default_profile_uses_kyutai_1b_candle() {
         let p = default_transcription_profile();
         assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
         assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+        assert_eq!(p.backend_id, CANDLE_BACKEND_ID);
     }
 
     #[test]
-    fn catalog_contains_kyutai() {
+    fn catalog_contains_both_kyutai_models() {
         let cat = transcription_engine_catalog();
-        assert!(cat.iter().any(|e| e.id == KYUTAI_ENGINE_ID));
         let kyutai = cat.iter().find(|e| e.id == KYUTAI_ENGINE_ID).unwrap();
         assert!(kyutai.models.iter().any(|m| m.id == KYUTAI_MODEL_ID));
+        assert!(kyutai.models.iter().any(|m| m.id == KYUTAI_MODEL_2_6B_ID));
+        assert!(cat.iter().any(|e| e.id == WHISPER_ENGINE_ID));
+        assert!(cat.iter().any(|e| e.id == PARAKEET_ENGINE_ID));
     }
 
     #[test]
     fn resolve_profile_defaults() {
-        let p = resolve_transcription_profile(None, None).unwrap();
+        let p = resolve_transcription_profile(None, None, None).unwrap();
         assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
         assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+        assert_eq!(p.backend_id, CANDLE_BACKEND_ID);
     }
 
     #[test]
     fn resolve_profile_valid() {
-        let p =
-            resolve_transcription_profile(Some(KYUTAI_ENGINE_ID), Some(KYUTAI_MODEL_ID)).unwrap();
+        let p = resolve_transcription_profile(
+            Some(KYUTAI_ENGINE_ID),
+            Some(KYUTAI_MODEL_2_6B_ID),
+            Some(CANDLE_BACKEND_ID),
+        )
+        .unwrap();
         assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+        assert_eq!(p.model_id, KYUTAI_MODEL_2_6B_ID);
+        assert_eq!(p.backend_id, CANDLE_BACKEND_ID);
     }
 
     #[test]
     fn resolve_profile_unknown_engine() {
-        let r = resolve_transcription_profile(Some("nonexistent"), Some(KYUTAI_MODEL_ID));
+        let r = resolve_transcription_profile(
+            Some("nonexistent"),
+            Some(KYUTAI_MODEL_ID),
+            Some(CANDLE_BACKEND_ID),
+        );
         assert!(r.is_err());
     }
 
     #[test]
     fn resolve_profile_unknown_model() {
-        let r = resolve_transcription_profile(Some(KYUTAI_ENGINE_ID), Some("nonexistent"));
+        let r = resolve_transcription_profile(
+            Some(KYUTAI_ENGINE_ID),
+            Some("nonexistent"),
+            Some(CANDLE_BACKEND_ID),
+        );
         assert!(r.is_err());
     }
 
     #[test]
+    fn resolve_profile_unknown_backend() {
+        let r =
+            resolve_transcription_profile(Some(KYUTAI_ENGINE_ID), Some(KYUTAI_MODEL_ID), Some("mlx"));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn resolve_profile_rejects_unavailable_whisper_stub() {
+        let r = resolve_transcription_profile(
+            Some(WHISPER_ENGINE_ID),
+            Some(WHISPER_MODEL_TURBO_ID),
+            Some(CTRANSLATE2_BACKEND_ID),
+        );
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("not implemented in this app build"));
+    }
+
+    #[test]
+    fn resolve_profile_rejects_unavailable_parakeet_stub() {
+        let r = resolve_transcription_profile(
+            Some(PARAKEET_ENGINE_ID),
+            Some(PARAKEET_MODEL_TDT_1_1B_ID),
+            Some(NEMO_BACKEND_ID),
+        );
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("not implemented in this app build"));
+    }
+
+    #[test]
     fn resolve_profile_trims_whitespace() {
-        // resolve_transcription_profile trims via str::trim and filters empty,
-        // so "  kyutai  " becomes "kyutai" which matches the catalog.
-        let p =
-            resolve_transcription_profile(Some("  kyutai  "), Some("  stt-1b-en_fr  ")).unwrap();
+        let p = resolve_transcription_profile(
+            Some("  kyutai  "),
+            Some("  stt-1b-en_fr  "),
+            Some("  candle  "),
+        )
+        .unwrap();
         assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
         assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+        assert_eq!(p.backend_id, CANDLE_BACKEND_ID);
     }
 
     #[test]
     fn resolve_profile_empty_uses_defaults() {
-        // Some("") is filtered by .filter(|v| !v.is_empty()), falling back to defaults.
-        let p = resolve_transcription_profile(Some(""), Some("")).unwrap();
+        let p = resolve_transcription_profile(Some(""), Some(""), Some("")).unwrap();
         assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
         assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+        assert_eq!(p.backend_id, CANDLE_BACKEND_ID);
+    }
+
+    #[test]
+    fn resolve_artifact_for_kyutai_2_6b() {
+        let profile = resolve_transcription_profile(
+            Some(KYUTAI_ENGINE_ID),
+            Some(KYUTAI_MODEL_2_6B_ID),
+            Some(CANDLE_BACKEND_ID),
+        )
+        .unwrap();
+        let artifact = resolve_transcription_artifact(&profile).unwrap();
+        assert_eq!(artifact.repository, "kyutai/stt-2.6b-en-candle");
     }
 
     #[test]
     fn create_engine_kyutai() {
-        let e = create_engine(KYUTAI_ENGINE_ID);
+        let profile = default_transcription_profile();
+        let e = create_engine(&profile);
         assert!(e.is_ok());
     }
 
     #[test]
-    fn create_engine_unknown() {
-        let e = create_engine("unknown_engine");
+    fn create_engine_unknown_backend() {
+        let profile = TranscriptionProfile {
+            backend_id: "unknown".into(),
+            backend_label: "Unknown".into(),
+            ..default_transcription_profile()
+        };
+        let e = create_engine(&profile);
         assert!(e.is_err());
     }
 
     #[test]
     fn slug_id_basic() {
-        // slug_id is private, test indirectly via from_legacy_engine
         let p = TranscriptionProfile::from_legacy_engine("My Custom Engine");
         assert_eq!(p.engine_id, "my-custom-engine");
     }
 
     #[test]
     fn slug_id_consecutive_specials() {
-        // Multiple consecutive non-alphanumeric chars collapse into a single dash
         let p = TranscriptionProfile::from_legacy_engine("Engine!!!Version");
         assert_eq!(p.engine_id, "engine-version");
     }
 
     #[test]
     fn slug_id_empty() {
-        // Empty string triggers the default profile path in from_legacy_engine
         let p = TranscriptionProfile::from_legacy_engine("");
         assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
     }
@@ -341,6 +742,7 @@ mod tests {
         let p = TranscriptionProfile::from_legacy_engine("");
         assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
         assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+        assert_eq!(p.backend_id, CANDLE_BACKEND_ID);
     }
 
     #[test]
@@ -355,5 +757,6 @@ mod tests {
         assert!(!p.engine_id.is_empty());
         assert_eq!(p.engine_id, "some-custom-engine");
         assert_eq!(p.model_id, "legacy");
+        assert_eq!(p.backend_id, CANDLE_BACKEND_ID);
     }
 }

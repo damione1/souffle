@@ -43,6 +43,7 @@ describe('app store', () => {
       audio_device: 'mic-1',
       transcription_engine_id: 'whisper',
       transcription_model_id: 'whisper-base',
+      transcription_backend_id: 'candle',
     };
     state.settings = newSettings;
     expect(state.settings.theme).toBe('light');

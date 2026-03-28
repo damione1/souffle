@@ -16,6 +16,7 @@
       controller.catalog,
       controller.app.settings.transcription_engine_id,
       controller.app.settings.transcription_model_id,
+      controller.app.settings.transcription_backend_id,
     ) || "No transcription model selected",
   );
 
@@ -49,6 +50,7 @@
     catalog={controller.catalog}
     selectedEngineId={controller.app.settings.transcription_engine_id}
     selectedModelId={controller.app.settings.transcription_model_id}
+    selectedBackendId={controller.app.settings.transcription_backend_id}
     ollamaUrl={controller.app.settings.ollama_url}
     ollamaAvailable={controller.ollamaAvailable}
     ollamaModels={controller.ollamaModels}
@@ -56,6 +58,7 @@
     selectedOllamaModel={controller.app.settings.ollama_model}
     onSelectTranscriptionEngine={controller.selectTranscriptionEngine}
     onSelectTranscriptionModel={controller.selectTranscriptionModel}
+    onSelectTranscriptionBackend={controller.selectTranscriptionBackend}
     onOllamaUrlChange={controller.onOllamaUrlChange}
     onOllamaModelChange={controller.onOllamaModelChange}
     onRetryOllama={controller.checkOllama}

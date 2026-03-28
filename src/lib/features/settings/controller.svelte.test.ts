@@ -53,6 +53,7 @@ const defaultSettings: AppSettings = {
   audio_device: null,
   transcription_engine_id: "kyutai",
   transcription_model_id: "stt-1b-en_fr",
+  transcription_backend_id: "candle",
 };
 
 const fakeDevices: AudioDeviceInfo[] = [
@@ -71,20 +72,47 @@ const fakeCatalog: TranscriptionCatalog = {
       id: "kyutai",
       label: "Kyutai",
       description: "Kyutai STT",
-      supports_streaming: true,
       models: [
         {
           id: "stt-1b-en_fr",
           label: "STT 1B",
           description: "1B param model",
           download_size_bytes: 2400000000,
+          recommended_memory_bytes: 4000000000,
           supported_languages: ["en", "fr"],
+          capabilities: {
+            supports_streaming: true,
+            supports_batch_transcription: false,
+            supports_language_auto_detect: true,
+            supports_word_timestamps: true,
+            supports_partial_results: true,
+          },
+          audio_input: {
+            sample_rate_hz: 24000,
+            channels: 1,
+            chunk_size_samples: 1920,
+          },
+          available_in_app: true,
+          availability_note: null,
+          backends: [
+            {
+              id: "candle",
+              label: "Candle",
+              description: "Pure Rust runtime",
+              recommended: true,
+              available_in_app: true,
+              availability_note: null,
+              artifacts: [],
+            },
+          ],
+          recommended_backend_id: "candle",
         },
       ],
     },
   ],
   selected_engine_id: "kyutai",
   selected_model_id: "stt-1b-en_fr",
+  selected_backend_id: "candle",
 };
 
 // --- Tests ---

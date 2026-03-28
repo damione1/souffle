@@ -40,20 +40,47 @@ const fakeCatalog: TranscriptionCatalog = {
       id: "kyutai",
       label: "Kyutai",
       description: "Kyutai STT",
-      supports_streaming: true,
       models: [
         {
           id: "stt-1b-en_fr",
           label: "STT 1B",
           description: "1B param model",
           download_size_bytes: 2400000000,
+          recommended_memory_bytes: 4000000000,
           supported_languages: ["en", "fr"],
+          capabilities: {
+            supports_streaming: true,
+            supports_batch_transcription: false,
+            supports_language_auto_detect: true,
+            supports_word_timestamps: true,
+            supports_partial_results: true,
+          },
+          audio_input: {
+            sample_rate_hz: 24000,
+            channels: 1,
+            chunk_size_samples: 1920,
+          },
+          available_in_app: true,
+          availability_note: null,
+          backends: [
+            {
+              id: "candle",
+              label: "Candle",
+              description: "Pure Rust runtime",
+              recommended: true,
+              available_in_app: true,
+              availability_note: null,
+              artifacts: [],
+            },
+          ],
+          recommended_backend_id: "candle",
         },
       ],
     },
   ],
   selected_engine_id: "kyutai",
   selected_model_id: "stt-1b-en_fr",
+  selected_backend_id: "candle",
 };
 
 const fakeStatus: TranscriptionRuntimeStatus = {
@@ -62,6 +89,8 @@ const fakeStatus: TranscriptionRuntimeStatus = {
     engine_label: "Kyutai",
     model_id: "stt-1b-en_fr",
     model_label: "STT 1B",
+    backend_id: "candle",
+    backend_label: "Candle",
   },
   downloaded: true,
   loaded: true,
@@ -77,6 +106,11 @@ const fakeHistory: DictationEntry[] = [
 
 describe("transcription controller", () => {
   const mockUnlisten = vi.fn();
+  const selection = {
+    engine_id: "kyutai",
+    model_id: "stt-1b-en_fr",
+    backend_id: "candle",
+  };
 
   function defaultInvoke(cmd: string, _args?: Record<string, unknown>) {
     switch (cmd) {
@@ -129,7 +163,7 @@ describe("transcription controller", () => {
     const cleanup = await ctrl.mount();
 
     expect(mockInvoke).toHaveBeenCalledWith("get_transcription_catalog");
-    expect(mockInvoke).toHaveBeenCalledWith("get_model_status");
+    expect(mockInvoke).toHaveBeenCalledWith("get_model_status", { selection });
     expect(mockInvoke).toHaveBeenCalledWith("list_dictation_entries", { limit: 50 });
     expect(ctrl.catalog).toEqual(fakeCatalog);
     expect(ctrl.modelDownloaded).toBe(true);
@@ -232,7 +266,7 @@ describe("transcription controller", () => {
     await first;
     await second;
 
-    const startCalls = mockInvoke.mock.calls.filter(([cmd]: [string]) => cmd === "start_transcription");
+    const startCalls = mockInvoke.mock.calls.filter((call) => call[0] === "start_transcription");
     expect(startCalls).toHaveLength(1);
   });
 
@@ -256,7 +290,10 @@ describe("transcription controller", () => {
 
     await ctrl.handleDownloadModel();
 
-    expect(mockInvoke).toHaveBeenCalledWith("download_model", expect.objectContaining({ channel: expect.any(Object) }));
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "download_model",
+      expect.objectContaining({ selection, channel: expect.any(Object) }),
+    );
     expect(ctrl.isDownloading).toBe(false);
     expect(ctrl.modelDownloaded).toBe(true);
   });
@@ -280,7 +317,7 @@ describe("transcription controller", () => {
 
     await ctrl.handleLoadModel();
 
-    expect(mockInvoke).toHaveBeenCalledWith("load_model");
+    expect(mockInvoke).toHaveBeenCalledWith("load_model", { selection });
     expect(ctrl.modelLoaded).toBe(true);
     expect(ctrl.isLoadingModel).toBe(false);
   });

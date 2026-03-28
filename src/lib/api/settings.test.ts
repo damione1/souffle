@@ -27,7 +27,7 @@ describe('settings API', () => {
   });
 
   it('getSettings returns settings object', async () => {
-    const settings = { theme: 'dark', auto_paste: false, paste_delay_ms: 100, ollama_url: '', ollama_model: '', debug_transcription: false, audio_device: null, transcription_engine_id: 'kyutai', transcription_model_id: 'stt-1b' };
+    const settings = { theme: 'dark', auto_paste: false, paste_delay_ms: 100, ollama_url: '', ollama_model: '', debug_transcription: false, audio_device: null, transcription_engine_id: 'kyutai', transcription_model_id: 'stt-1b', transcription_backend_id: 'candle' };
     mockInvoke.mockResolvedValue(settings);
 
     const result = await getSettings();
@@ -38,7 +38,7 @@ describe('settings API', () => {
 
   it('saveSettings passes settings object', async () => {
     mockInvoke.mockResolvedValue(null);
-    const settings = { theme: 'light' as const, auto_paste: true, paste_delay_ms: 200, ollama_url: 'http://localhost:11434', ollama_model: 'llama3', debug_transcription: false, audio_device: null, transcription_engine_id: 'kyutai', transcription_model_id: 'stt-1b' };
+    const settings = { theme: 'light' as const, auto_paste: true, paste_delay_ms: 200, ollama_url: 'http://localhost:11434', ollama_model: 'llama3', debug_transcription: false, audio_device: null, transcription_engine_id: 'kyutai', transcription_model_id: 'stt-1b', transcription_backend_id: 'candle' };
 
     await saveSettings(settings);
 

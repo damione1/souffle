@@ -2,6 +2,10 @@
   import Spinner from "../../../components/ui/Spinner.svelte";
   import type { TranscriptionCatalog } from "../../../types";
   import {
+    hasAvailableTranscriptionModel,
+    isTranscriptionBackendAvailable,
+    isTranscriptionModelAvailable,
+    getSelectedTranscriptionBackend,
     getSelectedTranscriptionEngine,
     getSelectedTranscriptionModel,
   } from "../catalog";
@@ -10,6 +14,7 @@
     catalog,
     selectedEngineId,
     selectedModelId,
+    selectedBackendId,
     modelDownloaded,
     modelLoaded,
     isDownloading,
@@ -17,12 +22,14 @@
     isLoadingModel,
     onSelectEngine,
     onSelectModel,
+    onSelectBackend,
     onDownloadModel,
     onLoadModel,
   }: {
     catalog: TranscriptionCatalog | null;
     selectedEngineId: string;
     selectedModelId: string;
+    selectedBackendId: string;
     modelDownloaded: boolean;
     modelLoaded: boolean;
     isDownloading: boolean;
@@ -30,17 +37,30 @@
     isLoadingModel: boolean;
     onSelectEngine: (engineId: string) => void | Promise<void>;
     onSelectModel: (modelId: string) => void | Promise<void>;
+    onSelectBackend: (backendId: string) => void | Promise<void>;
     onDownloadModel: () => void | Promise<void>;
     onLoadModel: () => void | Promise<void>;
   } = $props();
 
   let selectedEngine = $derived(getSelectedTranscriptionEngine(catalog, selectedEngineId));
   let selectedModel = $derived(getSelectedTranscriptionModel(catalog, selectedEngineId, selectedModelId));
+  let selectedBackend = $derived(
+    getSelectedTranscriptionBackend(catalog, selectedEngineId, selectedModelId, selectedBackendId),
+  );
   let availableModels = $derived(selectedEngine?.models ?? []);
+  let availableBackends = $derived(selectedModel?.backends ?? []);
+  let selectedAvailabilityNote = $derived(
+    selectedModel?.availability_note ?? selectedBackend?.availability_note ?? null,
+  );
 
   function formatDownloadSize(bytes: number | null): string {
     if (!bytes || bytes <= 0) return "Download size varies by provider.";
     return `${(bytes / 1_000_000_000).toFixed(1)} GB download`;
+  }
+
+  function formatMemory(bytes: number | null): string | null {
+    if (!bytes || bytes <= 0) return null;
+    return `${(bytes / 1_000_000_000).toFixed(1)} GB RAM/VRAM`;
   }
 </script>
 
@@ -69,7 +89,9 @@
           class="field-select"
         >
           {#each catalog.engines as engine}
-            <option value={engine.id}>{engine.label}</option>
+            <option value={engine.id} disabled={!hasAvailableTranscriptionModel(engine)}>
+              {engine.label}{hasAvailableTranscriptionModel(engine) ? "" : " (Coming soon)"}
+            </option>
           {/each}
         </select>
         {#if selectedEngine}
@@ -87,19 +109,60 @@
           disabled={availableModels.length === 0}
         >
           {#each availableModels as model}
-            <option value={model.id}>{model.label}</option>
+            <option value={model.id} disabled={!isTranscriptionModelAvailable(model)}>
+              {model.label}{isTranscriptionModelAvailable(model) ? "" : " (Coming soon)"}
+            </option>
           {/each}
         </select>
         {#if selectedModel}
           <div class="flex items-center gap-2 flex-wrap text-sm text-text-muted">
             <span>{selectedModel.description}</span>
             <span class="pill pill-muted">{formatDownloadSize(selectedModel.download_size_bytes)}</span>
+            {#if formatMemory(selectedModel.recommended_memory_bytes)}
+              <span class="pill pill-muted">{formatMemory(selectedModel.recommended_memory_bytes)}</span>
+            {/if}
             {#if selectedModel.supported_languages.length > 0}
               <span class="pill pill-muted">Languages: {selectedModel.supported_languages.join(", ")}</span>
             {/if}
+            <span class="pill pill-muted">
+              {selectedModel.capabilities.supports_streaming ? "Streaming" : "Batch"}
+            </span>
           </div>
         {/if}
       </div>
+    </div>
+
+    {#if availableBackends.length > 1}
+      <div class="flex flex-col gap-1.5">
+        <label for="transcription-backend" class="field-label">Runtime backend</label>
+        <select
+          id="transcription-backend"
+          value={selectedBackendId}
+          onchange={(event) => onSelectBackend((event.currentTarget as HTMLSelectElement).value)}
+          class="field-select"
+        >
+          {#each availableBackends as backend}
+            <option value={backend.id} disabled={!isTranscriptionBackendAvailable(backend)}>
+              {backend.label}{isTranscriptionBackendAvailable(backend) ? "" : " (Coming soon)"}
+            </option>
+          {/each}
+        </select>
+        {#if selectedBackend}
+          <p class="text-sm text-text-muted">{selectedBackend.description}</p>
+        {/if}
+      </div>
+    {:else if selectedBackend}
+      <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border">
+        <strong class="block text-text-primary">{selectedBackend.label} runtime</strong>
+        <p class="text-text-muted text-sm">{selectedBackend.description}</p>
+      </div>
+    {/if}
+  {/if}
+
+  {#if selectedAvailabilityNote}
+    <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border">
+      <strong class="block text-text-primary">Provider roadmap</strong>
+      <p class="text-text-muted text-sm">{selectedAvailabilityNote}</p>
     </div>
   {/if}
 

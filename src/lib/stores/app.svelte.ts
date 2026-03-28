@@ -26,6 +26,7 @@ let settings = $state<AppSettings>({
   audio_device: null,
   transcription_engine_id: "kyutai",
   transcription_model_id: "stt-1b-en_fr",
+  transcription_backend_id: "candle",
 });
 
 export function getAppState() {

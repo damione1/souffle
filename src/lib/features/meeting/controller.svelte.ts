@@ -108,6 +108,7 @@ export function createMeetingController() {
         transcriptionCatalog,
         app.settings.transcription_engine_id,
         app.settings.transcription_model_id,
+        app.settings.transcription_backend_id,
       );
 
       await startMeetingRecording(title, (segment) => {
