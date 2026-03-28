@@ -29,7 +29,6 @@
     profileLabel={controller.activeProfileLabel}
     runtimePhase={controller.runtimePhase}
     autoPaste={controller.app.settings.auto_paste}
-    pasteDelayMs={controller.app.settings.paste_delay_ms}
   />
 
   <div class="grid grid-cols-[minmax(280px,1fr)_minmax(280px,1.2fr)] gap-4 max-[700px]:grid-cols-1">

@@ -35,8 +35,6 @@ pub const DEFAULT_TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
-            commands::start_recording,
-            commands::stop_recording,
             commands::get_transcription_catalog,
             commands::get_model_status,
             commands::download_model,

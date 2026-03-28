@@ -16,8 +16,8 @@
 </script>
 
 <section class="surface-card flex flex-col gap-3.5">
-  <h3>Audio Configuration</h3>
-  <p class="text-text-secondary text-sm">Choose the active microphone or virtual device.</p>
+  <h3>Audio</h3>
+  <p class="text-text-secondary text-sm">Choose which microphone Souffle listens to.</p>
 
   <div class="flex flex-col gap-1.5">
     <label for="input-device" class="field-label">Input device</label>

@@ -46,7 +46,23 @@
     ?? meeting.summary_model
     ?? "",
   );
-  let showStaleSummary = $derived(Boolean(meeting.summary) && meeting.summary_is_stale);
+
+  type SummaryPhase =
+    | "summary_recording"   // has summary + currently recording
+    | "summary_stale"       // has summary but outdated
+    | "summary_current"     // has fresh summary
+    | "recording"           // recording, no summary yet
+    | "empty";              // stopped, no summary
+
+  let summaryPhase = $derived.by((): SummaryPhase => {
+    if (meeting.summary) {
+      if (isRecordingMeeting) return "summary_recording";
+      if (meeting.summary_is_stale) return "summary_stale";
+      return "summary_current";
+    }
+    if (isRecordingMeeting) return "recording";
+    return "empty";
+  });
 </script>
 
 <section class="surface-card flex flex-col gap-3">
@@ -68,23 +84,24 @@
     </div>
   {/if}
 
-  {#if meeting.summary}
-    {#if isRecordingMeeting}
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class="pill pill-warning">Recording in progress</span>
-        <span class="text-sm text-text-muted">This summary will need regeneration after the current session is saved.</span>
-      </div>
-    {:else if showStaleSummary}
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class="pill pill-warning">Summary stale</span>
-        <span class="text-sm text-text-muted">This summary predates the latest recording session.</span>
-      </div>
-    {/if}
+  {#if summaryPhase === "summary_recording"}
+    <div class="flex items-center gap-2 flex-wrap">
+      <span class="pill pill-warning">Recording in progress</span>
+      <span class="text-sm text-text-muted">You can regenerate the summary once the recording is stopped.</span>
+    </div>
+  {:else if summaryPhase === "summary_stale"}
+    <div class="flex items-center gap-2 flex-wrap">
+      <span class="pill pill-warning">Summary outdated</span>
+      <span class="text-sm text-text-muted">New audio was added since this summary was generated.</span>
+    </div>
+  {/if}
+
+  {#if summaryPhase === "summary_recording" || summaryPhase === "summary_stale" || summaryPhase === "summary_current"}
     <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-[100px] max-h-[360px] overflow-y-auto text-sm leading-relaxed">{meeting.summary}</div>
     {#if generatedWithLabel}
       <span class="pill pill-muted self-start">Generated with {generatedWithLabel}</span>
     {/if}
-  {:else if isRecordingMeeting}
+  {:else if summaryPhase === "recording"}
     <EmptyState message="Stop the recording to generate a summary.">
       {#snippet icon()}
         <Clock3 size={32} strokeWidth={1.5} />
@@ -130,7 +147,7 @@
         <span class="text-sm text-text-muted">Connect Ollama in Settings to enable summaries.</span>
       </div>
     {:else}
-      <StatusBanner message="No summary-capable Ollama model is available. Install a text-generation model to enable summaries." />
+      <StatusBanner message="No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries." />
     {/if}
   {/if}
 </section>

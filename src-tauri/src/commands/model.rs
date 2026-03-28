@@ -199,16 +199,8 @@ pub fn load_model(
 
     // Check if already loaded with this profile
     {
-        let model_loaded = *state.model_loaded.acquire()?;
-        let active_profile = state.active_profile.acquire()?.clone();
         let pipeline_ready = state.pipeline.acquire()?.is_some();
-        if model_loaded && pipeline_ready && active_profile.as_ref() == Some(&profile) {
-            // Ensure machine state is consistent
-            if !machine.is_model_ready() {
-                // Fix up machine state to reflect reality
-                let _ = state.apply_transition(StateAction::StartLoad);
-                let _ = state.apply_transition(StateAction::LoadComplete);
-            }
+        if machine.is_model_ready() && pipeline_ready && machine.active_profile() == Some(&profile) {
             info!("Model already loaded, reusing existing inference pipeline");
             return Ok(());
         }
@@ -226,7 +218,6 @@ pub fn load_model(
                 pipeline.shutdown()?;
             }
         }
-        *state.model_loaded.acquire()? = false;
         state.apply_transition(StateAction::UnloadComplete)?;
         // Machine is now in Loading { next_profile }
     } else {
@@ -247,12 +238,11 @@ pub fn load_model(
                 pipeline.shutdown()?;
             }
         }
-        *state.model_loaded.acquire()? = false;
 
         state.apply_transition(StateAction::StartLoad)?;
     }
 
-    let current_profile = state.active_profile.acquire()?.clone();
+    let current_profile = state.current_machine_state()?.active_profile().cloned();
     let mut engine = state.engine.acquire()?;
     if current_profile
         .as_ref()
@@ -292,8 +282,6 @@ pub fn load_model(
         };
 
     *state.pipeline.acquire()? = Some(pipeline);
-    *state.active_profile.acquire()? = Some(profile);
-    *state.model_loaded.acquire()? = true;
 
     state.apply_transition(StateAction::LoadComplete)?;
 

@@ -28,14 +28,22 @@ function createMeetingControllerInstance() {
   let summaryStream = $state("");
   let transcriptionCatalog = $state<TranscriptionCatalog | null>(null);
 
-  let isRecordingMeeting = $state(false);
+  let isRecordingMeeting = $derived(
+    app.machineState.state === "recording_meeting"
+    || (app.machineState.state === "stopping"
+        && typeof app.machineState.data?.was_recording === "object"),
+  );
   let meetingTitle = $state("");
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
 
   let meeting = $state<MeetingTranscript | null>(null);
   let isLoadingMeeting = $state(false);
   let canResumeRecording = $derived(
-    Boolean(meeting?.id) && !isRecordingMeeting && !isLoadingMeeting && !isSummarizing,
+    Boolean(meeting?.id)
+    && !isRecordingMeeting
+    && !isLoadingMeeting
+    && !isSummarizing
+    && app.transcriptionRuntimePhase === "ready",
   );
 
   async function mount() {
@@ -116,9 +124,6 @@ function createMeetingControllerInstance() {
         liveMeetingSegments = [...liveMeetingSegments, segment];
       });
 
-      isRecordingMeeting = true;
-      app.isRecording = true;
-      app.recordingMode = "meeting";
       meeting = {
         id: "",
         title,
@@ -152,10 +157,6 @@ function createMeetingControllerInstance() {
         if (!segment.is_final || !segment.text) return;
         liveMeetingSegments = [...liveMeetingSegments, segment];
       });
-
-      isRecordingMeeting = true;
-      app.isRecording = true;
-      app.recordingMode = "meeting";
     } catch (e) {
       statusMessage = errorMessage(e);
       liveMeetingSegments = [];
@@ -173,10 +174,6 @@ function createMeetingControllerInstance() {
       meeting = await getMeeting(id);
       syncSelectedModel(meeting.summary_model);
       liveMeetingSegments = [];
-
-      isRecordingMeeting = false;
-      app.isRecording = false;
-      app.recordingMode = "idle";
     } catch (e) {
       statusMessage = errorMessage(e);
     }

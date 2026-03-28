@@ -58,13 +58,13 @@ describe('app store', () => {
     expect(state.settings.transcription_engine_id).toBe('whisper');
   });
 
-  it('recordingMode tracks state changes', () => {
+  it('recordingMode is derived from machineState', () => {
     const state = getAppState();
-    state.recordingMode = 'meeting';
+    state.machineState = { state: "recording_meeting", data: { profile: { engine_id: "", engine_label: "", model_id: "", model_label: "", backend_id: "", backend_label: "" }, session_id: 1, meeting_id: "m1" } };
     expect(state.recordingMode).toBe('meeting');
-    state.recordingMode = 'dictation';
+    state.machineState = { state: "recording_dictation", data: { profile: { engine_id: "", engine_label: "", model_id: "", model_label: "", backend_id: "", backend_label: "" }, session_id: 1 } };
     expect(state.recordingMode).toBe('dictation');
-    state.recordingMode = 'idle';
+    state.machineState = { state: "idle" };
     expect(state.recordingMode).toBe('idle');
   });
 });

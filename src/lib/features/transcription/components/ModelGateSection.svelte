@@ -11,13 +11,12 @@
     getSelectedTranscriptionModel,
   } from "../catalog";
   import {
-    operationStateIsBusy,
     runtimePhaseAvailabilityLabel,
     runtimePhasePillClass,
-    runtimePhaseRequiresDownload,
-    runtimePhaseRequiresLoad,
     type TranscriptionModelOperationState,
   } from "../state";
+
+  type ModelGatePhase = "downloading" | "needs_download" | "loading" | "needs_load" | "ready";
 
   let {
     catalog,
@@ -61,11 +60,16 @@
   let selectedAvailabilityNote = $derived(
     selectedModel?.availability_note ?? selectedBackend?.availability_note ?? null,
   );
-  let isDownloading = $derived(modelOperationState === "downloading");
-  let isLoadingModel = $derived(modelOperationState === "loading");
-  let requiresDownload = $derived(runtimePhaseRequiresDownload(runtimePhase));
-  let requiresLoad = $derived(runtimePhaseRequiresLoad(runtimePhase));
-  let isBusy = $derived(operationStateIsBusy(modelOperationState));
+
+  let phase = $derived.by((): ModelGatePhase => {
+    if (modelOperationState === "downloading") return "downloading";
+    if (runtimePhase === "download_required") return "needs_download";
+    if (modelOperationState === "loading") return "loading";
+    if (runtimePhase !== "ready") return "needs_load";
+    return "ready";
+  });
+
+  let isBusy = $derived(phase === "downloading" || phase === "loading");
 
   function formatDownloadSize(bytes: number | null): string {
     if (!bytes || bytes <= 0) return "Download size varies by provider.";
@@ -78,7 +82,7 @@
   }
 
   let downloadLabel = $derived.by(() => {
-    if (!isDownloading) return "";
+    if (phase !== "downloading") return "";
     if (downloadTotalFiles > 0) {
       return `${downloadCompletedFiles}/${downloadTotalFiles} files`;
     }
@@ -91,7 +95,7 @@
     <div class="flex-1 min-w-0">
       <h3>Transcription Model</h3>
       <p class="text-text-secondary text-sm">
-        Select the active engine profile. Downloads, runtime status, and future model families use the same contract.
+        Choose the speech-to-text model Souffle uses for dictation and meetings.
       </p>
     </div>
 
@@ -157,7 +161,7 @@
 
     {#if availableBackends.length > 1}
       <div class="flex flex-col gap-1.5">
-        <label for="transcription-backend" class="field-label">Runtime backend</label>
+        <label for="transcription-backend" class="field-label">Runtime</label>
         <select
           id="transcription-backend"
           value={selectedBackendId}
@@ -185,67 +189,45 @@
 
   {#if selectedAvailabilityNote}
     <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border">
-      <strong class="block text-text-primary">Provider roadmap</strong>
+      <strong class="block text-text-primary">Availability</strong>
       <p class="text-text-muted text-sm">{selectedAvailabilityNote}</p>
     </div>
   {/if}
 
-  <div class="flex items-center justify-between gap-4 flex-wrap">
-    <div class="min-w-0">
-      <strong class="block text-text-primary">
-        {requiresDownload
-          ? `Download ${selectedModel?.label ?? "the selected model"}`
-          : requiresLoad
-            ? `Load ${selectedModel?.label ?? "the selected model"}`
-            : `${selectedModel?.label ?? "Selected model"} is ready`}
-      </strong>
-      <p class="text-text-muted text-sm">
-        {requiresDownload
-          ? "The model is stored locally and reused across sessions."
-          : requiresLoad
-            ? "The first load warms up the tokenizer, weights, and Metal kernels."
-            : "You can switch profiles at any time. The runtime status follows the selected DTO."}
-      </p>
+  {#if phase === "needs_download" || phase === "downloading"}
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <div class="min-w-0">
+        <p class="text-sm font-medium text-text-primary">Download {selectedModel?.label ?? "the selected model"}</p>
+        <p class="text-text-muted text-sm">The model is stored on your Mac and reused across sessions.</p>
+      </div>
+      <button onclick={onDownloadModel} class="btn btn-primary" disabled={phase === "downloading"}>
+        {#if phase === "downloading"}<Spinner /> Downloading...{:else}Download model{/if}
+      </button>
     </div>
-
-    {#if requiresDownload}
-      <button onclick={onDownloadModel} class="btn btn-primary" disabled={isDownloading}>
-        {#if isDownloading}
-          <Spinner />
-          Downloading...
-        {:else}
-          Download model
-        {/if}
+  {:else if phase === "needs_load" || phase === "loading"}
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <div class="min-w-0">
+        <p class="text-sm font-medium text-text-primary">Load {selectedModel?.label ?? "the selected model"}</p>
+        <p class="text-text-muted text-sm">First load may take a few seconds while the model is prepared.</p>
+      </div>
+      <button onclick={onLoadModel} class="btn btn-primary" disabled={phase === "loading"}>
+        {#if phase === "loading"}<Spinner /> Loading...{:else}Load model{/if}
       </button>
-    {:else if requiresLoad}
-      <button onclick={onLoadModel} class="btn btn-primary" disabled={isLoadingModel}>
-        {#if isLoadingModel}
-          <Spinner />
-          Loading...
-        {:else}
-          Load model
-        {/if}
-      </button>
-    {:else}
-      <button class="btn" disabled>Model ready</button>
-    {/if}
-  </div>
+    </div>
+  {/if}
 
-  {#if isBusy}
+  {#if phase === "downloading"}
     <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border">
-      <strong>{isDownloading ? (downloadFile || "Downloading model files...") : "Preparing engine..."}</strong>
-      <p class="text-text-muted text-sm">
-        {isDownloading ? "Keep the app open while files download." : "Usually takes a few seconds on first load."}
-      </p>
-      {#if isDownloading}
-        <div class="mt-3">
-          <ProgressBar
-            value={downloadCompletedFiles}
-            max={downloadTotalFiles || 1}
-            label={downloadLabel}
-          />
-        </div>
-      {/if}
+      <strong>{downloadFile || "Downloading model files..."}</strong>
+      <p class="text-text-muted text-sm">Keep the app open while files download.</p>
+      <div class="mt-3">
+        <ProgressBar value={downloadCompletedFiles} max={downloadTotalFiles || 1} label={downloadLabel} />
+      </div>
+    </div>
+  {:else if phase === "loading"}
+    <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border">
+      <strong>Loading model...</strong>
+      <p class="text-text-muted text-sm">Usually takes a few seconds.</p>
     </div>
   {/if}
 </section>

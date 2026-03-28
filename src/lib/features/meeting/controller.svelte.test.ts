@@ -53,8 +53,10 @@ function createMockAppState() {
   return {
     currentView: "meeting" as string,
     currentMeetingId: null as string | null,
+    machineState: { state: "idle" } as import("../../types").AppStateMachine,
     isRecording: false,
     recordingMode: "idle" as string,
+    transcriptionRuntimePhase: "ready" as string,
     settings: {
       theme: "dark" as const,
       auto_paste: false,
@@ -206,7 +208,7 @@ describe("MeetingController", () => {
     expect(ctrl.summaryModels[0].id).toBe("llama3");
   });
 
-  it("startRecording sets recording state", async () => {
+  it("startRecording calls API and clears title", async () => {
     mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockStartMeetingRecording.mockResolvedValue(undefined);
@@ -218,9 +220,6 @@ describe("MeetingController", () => {
 
     expect(mockStartMeetingRecording).toHaveBeenCalledOnce();
     expect(mockStartMeetingRecording.mock.calls[0][0]).toBe("Sprint Review");
-    expect(ctrl.isRecordingMeeting).toBe(true);
-    expect(mockApp.isRecording).toBe(true);
-    expect(mockApp.recordingMode).toBe("meeting");
     // Title is cleared after start
     expect(ctrl.meetingTitle).toBe("");
   });
@@ -239,9 +238,6 @@ describe("MeetingController", () => {
 
     expect(mockStopMeetingRecording).toHaveBeenCalledOnce();
     expect(mockGetMeeting).toHaveBeenCalledWith("meet-1");
-    expect(ctrl.isRecordingMeeting).toBe(false);
-    expect(mockApp.isRecording).toBe(false);
-    expect(mockApp.recordingMode).toBe("idle");
     expect(mockApp.currentMeetingId).toBe("meet-1");
     expect(ctrl.meeting?.id).toBe("meet-1");
   });
@@ -336,9 +332,6 @@ describe("MeetingController", () => {
 
     expect(mockResumeMeetingRecording).toHaveBeenCalledOnce();
     expect(mockResumeMeetingRecording.mock.calls[0][0]).toBe("meet-1");
-    expect(ctrl.isRecordingMeeting).toBe(true);
-    expect(mockApp.isRecording).toBe(true);
-    expect(mockApp.recordingMode).toBe("meeting");
   });
 
   it("syncSelectedModel picks preferred, then settings, then first available", async () => {

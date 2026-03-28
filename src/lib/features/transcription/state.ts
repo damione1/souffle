@@ -2,18 +2,6 @@ import type { TranscriptionRuntimePhase } from "../../types";
 
 export type TranscriptionModelOperationState = "idle" | "downloading" | "loading";
 
-export function runtimePhaseRequiresDownload(phase: TranscriptionRuntimePhase): boolean {
-  return phase === "download_required";
-}
-
-export function runtimePhaseRequiresLoad(phase: TranscriptionRuntimePhase): boolean {
-  return phase === "load_required";
-}
-
-export function runtimePhaseIsReady(phase: TranscriptionRuntimePhase): boolean {
-  return phase === "ready";
-}
-
 export function runtimePhaseHeroLabel(phase: TranscriptionRuntimePhase): string {
   switch (phase) {
     case "download_required":
@@ -48,8 +36,4 @@ export function runtimePhasePillClass(phase: TranscriptionRuntimePhase): string 
       return "pill-success";
   }
   return phase satisfies never;
-}
-
-export function operationStateIsBusy(state: TranscriptionModelOperationState): boolean {
-  return state !== "idle";
 }

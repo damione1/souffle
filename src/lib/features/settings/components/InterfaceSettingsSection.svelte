@@ -57,7 +57,7 @@
   <div class="flex items-center justify-between gap-4">
     <div>
       <span class="block text-[0.9375rem] font-medium text-text-primary">Auto-paste after dictation</span>
-      <span class="text-sm text-text-muted">Copies transcript and simulates Cmd+V when capture stops.</span>
+      <span class="text-sm text-text-muted">Automatically pastes the transcript when you stop recording.</span>
     </div>
     <input
       type="checkbox"
@@ -71,8 +71,8 @@
   {#if autoPaste}
     <div class="flex items-center justify-between gap-4">
       <div>
-        <label for="paste-delay" class="block text-[0.9375rem] font-medium text-text-primary">Paste delay</label>
-        <span class="text-sm text-text-muted">Milliseconds to wait before pasting. Requires Accessibility permission.</span>
+        <label for="paste-delay" class="block text-[0.9375rem] font-medium text-text-primary">Paste delay (ms)</label>
+        <span class="text-sm text-text-muted">Wait time before pasting. Increase if the text lands in the wrong app.</span>
       </div>
       <input
         id="paste-delay"

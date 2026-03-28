@@ -152,10 +152,8 @@ describe("transcription controller", () => {
     const app = getAppState();
     app.currentView = "transcription";
     app.currentMeetingId = null;
-    app.isRecording = false;
-    app.recordingMode = "idle";
+    app.machineState = { state: "idle" };
     app.transcriptionRuntimePhase = "download_required";
-    app.transcriptionModelOperationState = "idle";
     app.downloadFile = "";
     app.downloadCompletedFiles = 0;
     app.downloadTotalFiles = 0;
@@ -194,6 +192,14 @@ describe("transcription controller", () => {
     expect(mockUnlisten).toHaveBeenCalled();
   });
 
+  /** Simulate the backend emitting a StateChanged event by setting machineState */
+  function simulateRecordingStarted(app: ReturnType<typeof getAppState>) {
+    app.machineState = { state: "recording_dictation", data: { profile: { engine_id: "kyutai", engine_label: "Kyutai", model_id: "stt-1b-en_fr", model_label: "STT 1B", backend_id: "candle", backend_label: "Candle" }, session_id: 1 } };
+  }
+  function simulateRecordingStopped(app: ReturnType<typeof getAppState>) {
+    app.machineState = { state: "ready", data: { profile: { engine_id: "kyutai", engine_label: "Kyutai", model_id: "stt-1b-en_fr", model_label: "STT 1B", backend_id: "candle", backend_label: "Candle" } } };
+  }
+
   it("toggleRecording starts when loaded", async () => {
     const ctrl = createTranscriptionController();
     await ctrl.mount();
@@ -201,8 +207,6 @@ describe("transcription controller", () => {
     await ctrl.toggleRecording();
 
     expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.objectContaining({ channel: expect.any(Object) }));
-    expect(ctrl.app.isRecording).toBe(true);
-    expect(ctrl.app.recordingMode).toBe("dictation");
   });
 
   it("toggleRecording stop saves to history", async () => {
@@ -210,13 +214,13 @@ describe("transcription controller", () => {
     await ctrl.mount();
 
     await ctrl.toggleRecording();
+    // Simulate backend state change
+    simulateRecordingStarted(ctrl.app);
     expect(ctrl.app.isRecording).toBe(true);
 
     await ctrl.toggleRecording();
 
     expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
-    expect(ctrl.app.isRecording).toBe(false);
-    expect(ctrl.app.recordingMode).toBe("idle");
   });
 
   it("toggleRecording stop auto-pastes when fromShortcut and auto_paste enabled", async () => {
@@ -226,13 +230,13 @@ describe("transcription controller", () => {
     ctrl.app.settings = { ...ctrl.app.settings, auto_paste: true, paste_delay_ms: 50 };
 
     await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
     expect(ctrl.app.isRecording).toBe(true);
 
     // Stop with fromShortcut=true — transcript is "" so paste won't trigger for empty text
     await ctrl.toggleRecording(true);
 
     expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
-    expect(ctrl.app.isRecording).toBe(false);
     // pasteText is NOT called because transcript is empty (Channel is mocked)
     expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
   });
@@ -242,6 +246,7 @@ describe("transcription controller", () => {
     await ctrl.mount();
 
     await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
     await ctrl.toggleRecording();
 
     // No paste or clipboard since transcript is empty

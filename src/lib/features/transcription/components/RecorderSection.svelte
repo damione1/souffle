@@ -2,11 +2,17 @@
   import { ArrowDownToLine, Cpu, Mic } from "@lucide/svelte";
   import ProgressBar from "../../../components/ui/ProgressBar.svelte";
   import type { TranscriptionRuntimePhase } from "../../../types";
-  import {
-    runtimePhaseIsReady,
-    runtimePhaseRequiresDownload,
-    type TranscriptionModelOperationState,
-  } from "../state";
+  import type { TranscriptionModelOperationState } from "../state";
+
+  type RecorderPhase =
+    | "locked_by_meeting"
+    | "starting"
+    | "recording"
+    | "downloading"
+    | "needs_download"
+    | "loading"
+    | "needs_load"
+    | "ready";
 
   let {
     isStartingRecording,
@@ -38,98 +44,89 @@
     onToggleRecording: () => void | Promise<void>;
   } = $props();
 
-  let isDownloadingModel = $derived(modelOperationState === "downloading");
-  let isLoadingModel = $derived(modelOperationState === "loading");
-  let requiresDownload = $derived(runtimePhaseRequiresDownload(runtimePhase));
-  let isReady = $derived(runtimePhaseIsReady(runtimePhase));
-
-  let actionLabel = $derived.by(() => {
-    if (lockedByMeeting) return "Meeting recording in progress";
-    if (isStartingRecording) return "Warming up...";
-    if (isRecording) return "Tap to stop";
-    if (isDownloadingModel) return "Downloading model";
-    if (requiresDownload) return "Download model";
-    if (isLoadingModel) return "Preparing engine...";
-    if (!isReady) return "Load model";
-    return "Tap to start";
+  let phase = $derived.by((): RecorderPhase => {
+    if (lockedByMeeting) return "locked_by_meeting";
+    if (isStartingRecording) return "starting";
+    if (isRecording) return "recording";
+    if (modelOperationState === "downloading") return "downloading";
+    if (runtimePhase === "download_required") return "needs_download";
+    if (modelOperationState === "loading") return "loading";
+    if (runtimePhase !== "ready") return "needs_load";
+    return "ready";
   });
+
+  const headings: Record<RecorderPhase, string> = {
+    locked_by_meeting: "Meeting in progress",
+    starting: "Starting the microphone...",
+    recording: "Listening now",
+    downloading: "Ready when you are",
+    needs_download: "Ready when you are",
+    loading: "Ready when you are",
+    needs_load: "Ready when you are",
+    ready: "Ready when you are",
+  };
+
+  const descriptions: Record<RecorderPhase, string> = {
+    locked_by_meeting: "Stop the meeting recording before starting dictation.",
+    starting: "Starting up...",
+    recording: "Speak naturally. Text appears as you talk.",
+    downloading: "Downloading in the background. You can keep using the app.",
+    needs_download: "Download the model to start using dictation.",
+    loading: "Loading model...",
+    needs_load: "Load the model to start recording.",
+    ready: "Tap the button to begin.",
+  };
+
+  const actionLabels: Record<RecorderPhase, string> = {
+    locked_by_meeting: "Meeting recording in progress",
+    starting: "Warming up...",
+    recording: "Tap to stop",
+    downloading: "Downloading model",
+    needs_download: "Download model",
+    loading: "Loading model...",
+    needs_load: "Load model",
+    ready: "Tap to start",
+  };
 </script>
 
 <section class="surface-card flex flex-col items-center gap-4 text-center">
-  <h3>
-    {#if lockedByMeeting}
-      Meeting in progress
-    {:else if isStartingRecording}
-      Starting the microphone...
-    {:else if isRecording}
-      Listening now
-    {:else}
-      Ready when you are
-    {/if}
-  </h3>
-  <p class="text-text-secondary text-sm">
-    {#if lockedByMeeting}
-      Stop the meeting recording before starting dictation.
-    {:else if isStartingRecording}
-      Warming up the engine.
-    {:else if isRecording}
-      Speak naturally. Text streams into the panel.
-    {:else if isDownloadingModel}
-      The model keeps downloading in the background while you navigate the app.
-    {:else if requiresDownload}
-      Download the selected model to enable dictation.
-    {:else if !isReady}
-      Load the selected model into memory before recording.
-    {:else}
-      Tap the button to begin.
-    {/if}
-  </p>
+  <h3>{headings[phase]}</h3>
+  <p class="text-text-secondary text-sm">{descriptions[phase]}</p>
 
-  {#if isDownloadingModel}
-    <button
-      disabled
-      aria-label="Downloading model"
-      class="record-button"
-      class:is-starting={true}
-    >
+  {#if phase === "downloading"}
+    <button disabled aria-label="Downloading model" class="record-button is-starting">
       <ArrowDownToLine size={40} aria-hidden="true" />
     </button>
-  {:else if requiresDownload}
-    <button
-      onclick={onDownloadModel}
-      aria-label="Download model"
-      class="record-button"
-    >
+  {:else if phase === "needs_download"}
+    <button onclick={onDownloadModel} aria-label="Download model" class="record-button">
       <ArrowDownToLine size={40} aria-hidden="true" />
     </button>
-  {:else if !isReady}
+  {:else if phase === "loading" || phase === "needs_load"}
     <button
       onclick={onLoadModel}
-      disabled={isLoadingModel}
+      disabled={phase === "loading"}
       aria-label="Load model"
       class="record-button"
-      class:is-starting={isLoadingModel}
+      class:is-starting={phase === "loading"}
     >
       <Cpu size={40} aria-hidden="true" />
     </button>
   {:else}
     <button
       onclick={onToggleRecording}
-      disabled={isLoadingModel || isStartingRecording || lockedByMeeting}
-      aria-label={isRecording ? "Stop recording" : "Start recording"}
+      disabled={phase === "starting" || phase === "locked_by_meeting"}
+      aria-label={phase === "recording" ? "Stop recording" : "Start recording"}
       class="record-button"
-      class:is-starting={isStartingRecording}
-      class:is-recording={isRecording}
+      class:is-starting={phase === "starting"}
+      class:is-recording={phase === "recording"}
     >
       <Mic size={40} aria-hidden="true" />
     </button>
   {/if}
 
-  <span class="text-sm text-text-secondary">
-    {actionLabel}
-  </span>
+  <span class="text-sm text-text-secondary">{actionLabels[phase]}</span>
 
-  {#if isDownloadingModel}
+  {#if phase === "downloading"}
     <div class="w-full max-w-xs">
       <ProgressBar
         value={downloadCompletedFiles}

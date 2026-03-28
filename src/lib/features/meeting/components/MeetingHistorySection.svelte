@@ -58,7 +58,7 @@
               <span class="pill">{formatDuration(meeting.duration_seconds)}</span>
               {#if meeting.has_summary}
                 <span class={`pill ${meeting.summary_is_stale ? "pill-warning" : "pill-success"}`}>
-                  {meeting.summary_is_stale ? "Summary stale" : "Summary"}
+                  {meeting.summary_is_stale ? "Summary outdated" : "Summary"}
                 </span>
               {/if}
             </div>

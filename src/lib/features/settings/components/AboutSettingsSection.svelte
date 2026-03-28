@@ -22,7 +22,7 @@
     </div>
     <div class="flex justify-between gap-4">
       <span class="text-text-muted text-sm">Summaries</span>
-      <span class="text-sm text-right">{selectedOllamaModelLabel || "Ollama not selected"}</span>
+      <span class="text-sm text-right">{selectedOllamaModelLabel || "Not configured"}</span>
     </div>
     <div class="flex justify-between gap-4">
       <span class="text-text-muted text-sm">Privacy</span>

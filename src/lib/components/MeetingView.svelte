@@ -12,6 +12,7 @@
   const controller = createMeetingController();
 
   let lockedByDictation = $derived(controller.app.recordingMode === "dictation");
+  let modelNotReady = $derived(controller.app.transcriptionRuntimePhase !== "ready");
 
   let sessionCount = $derived(
     controller.meeting
@@ -104,6 +105,7 @@
     <NewMeetingSection
       meetingTitle={controller.meetingTitle}
       {lockedByDictation}
+      {modelNotReady}
       onMeetingTitleChange={(value) => {
         controller.meetingTitle = value;
       }}

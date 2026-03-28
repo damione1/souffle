@@ -6,12 +6,10 @@
     profileLabel,
     runtimePhase,
     autoPaste,
-    pasteDelayMs,
   }: {
     profileLabel: string;
     runtimePhase: TranscriptionRuntimePhase;
     autoPaste: boolean;
-    pasteDelayMs: number;
   } = $props();
 </script>
 
@@ -23,7 +21,7 @@
         {runtimePhaseHeroLabel(runtimePhase)}
       </span>
       <span class={`pill ${autoPaste ? "pill-blue" : "pill-muted"}`}>
-        {autoPaste ? `Auto-paste ${pasteDelayMs}ms` : "Manual copy"}
+        {autoPaste ? "Auto-paste" : "Manual copy"}
       </span>
     </div>
   </div>

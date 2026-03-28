@@ -13,8 +13,8 @@
 
   <div class="flex items-center justify-between gap-4">
     <div>
-      <span class="block text-[0.9375rem] font-medium text-text-primary">Verbose transcription logs</span>
-      <span class="text-sm text-text-muted">Per-frame STT logging and debug audio capture.</span>
+      <span class="block text-[0.9375rem] font-medium text-text-primary">Detailed transcription logs</span>
+      <span class="text-sm text-text-muted">Log extra details about speech recognition for troubleshooting.</span>
     </div>
     <input
       type="checkbox"

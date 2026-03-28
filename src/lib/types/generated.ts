@@ -6,28 +6,6 @@
 
 export const commands = {
 /**
- * Start recording audio from the default microphone
- */
-async startRecording() : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("start_recording") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Stop recording and return the path to the saved WAV file
- */
-async stopRecording() : Promise<Result<string, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("stop_recording") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Catalog of supported transcription engines and models.
  */
 async getTranscriptionCatalog() : Promise<Result<TranscriptionCatalog, string>> {

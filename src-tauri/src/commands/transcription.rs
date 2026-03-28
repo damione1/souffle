@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,10 +7,10 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::audio::AudioChunk;
-use crate::constants::{AUDIO_FLUSH_MS, PIPELINE_DRAIN_TIMEOUT_SECS, SAMPLE_RATE_F64};
+use crate::constants::{AUDIO_FLUSH_MS, PIPELINE_DRAIN_TIMEOUT_SECS};
 use crate::lock_ext::MutexExt;
 use crate::pipeline::{InferenceCommand, SegmentCallback};
-use crate::state::{AppState, AudioCommand, MeetingAccumulator, RecordingMode};
+use crate::state::{AppState, AudioCommand, MeetingAccumulator};
 use crate::state_machine::StateAction;
 use crate::transcript::{MeetingRecordingSession, MeetingTranscript};
 
@@ -31,10 +30,10 @@ fn drain_audio_queue(receiver: &crossbeam_channel::Receiver<AudioChunk>) -> usiz
 
 fn current_active_profile(state: &AppState) -> Result<crate::engine::TranscriptionProfile, String> {
     state
-        .active_profile
-        .acquire()?
-        .clone()
-        .ok_or("No active transcription profile".to_string())
+        .current_machine_state()?
+        .active_profile()
+        .cloned()
+        .ok_or_else(|| "No active transcription profile".to_string())
 }
 
 fn start_meeting_session(
@@ -64,7 +63,6 @@ fn start_meeting_session(
         return Err(error);
     }
 
-    *state.recording_mode.acquire()? = RecordingMode::Meeting;
     Ok(())
 }
 
@@ -117,16 +115,14 @@ fn build_meeting_transcript(
 /// Shared logic for starting a recording pipeline.
 /// Validates preconditions, drains stale audio, resets engine, sends Start command, begins audio capture.
 fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, String> {
-    let loaded = *state.model_loaded.acquire()?;
-    if !loaded {
+    let machine = state.current_machine_state()?;
+    if !machine.is_model_ready() {
         return Err("Model not loaded".into());
     }
-    if state.active_profile.acquire()?.is_none() {
+    if machine.active_profile().is_none() {
         return Err("No active transcription profile".into());
     }
-
-    let mut is_recording = state.is_recording.acquire()?;
-    if *is_recording {
+    if machine.is_recording() {
         return Err("Already recording".into());
     }
 
@@ -158,7 +154,6 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
         .send(AudioCommand::Start(session_id))
         .map_err(|e| format!("Audio start: {e}"))?;
 
-    *is_recording = true;
     Ok(session_id)
 }
 
@@ -193,73 +188,7 @@ fn stop_pipeline(state: &AppState) -> Result<(), String> {
         tracing::debug!(drained, "Cleared trailing audio chunks after stop");
     }
 
-    let mut is_recording = state.is_recording.acquire()?;
-    *is_recording = false;
-    *state.recording_mode.acquire()? = RecordingMode::Idle;
-
     Ok(())
-}
-
-/// Start recording audio from the default microphone
-#[tauri::command]
-#[specta::specta]
-pub fn start_recording(state: State<'_, AppState>) -> Result<(), String> {
-    let mut is_recording = state.is_recording.acquire()?;
-
-    if *is_recording {
-        return Err("Already recording".into());
-    }
-
-    let session_id = next_audio_session_id(&state)?;
-    state
-        .audio_cmd_sender
-        .send(AudioCommand::Start(session_id))
-        .map_err(|e| format!("Failed to send start command: {e}"))?;
-
-    *is_recording = true;
-    info!("Recording started");
-    Ok(())
-}
-
-/// Stop recording and return the path to the saved WAV file
-#[tauri::command]
-#[specta::specta]
-pub fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
-    let mut is_recording = state.is_recording.acquire()?;
-
-    if !*is_recording {
-        return Err("Not recording".into());
-    }
-
-    state
-        .audio_cmd_sender
-        .send(AudioCommand::Stop)
-        .map_err(|e| format!("Failed to send stop command: {e}"))?;
-
-    *is_recording = false;
-
-    // Give cpal a moment to flush its buffers
-    std::thread::sleep(Duration::from_millis(200));
-
-    let mut all_samples = Vec::new();
-    while let Ok(chunk) = state.audio_receiver.try_recv() {
-        all_samples.extend_from_slice(&chunk.samples);
-    }
-
-    if all_samples.is_empty() {
-        info!("Recording stopped - no audio captured");
-        return Ok("No audio captured".into());
-    }
-
-    let wav_path = save_wav(&all_samples)?;
-    let path_str = wav_path.display().to_string();
-    info!(path = %path_str, samples = all_samples.len(), "Recording saved");
-
-    Ok(format!(
-        "Recorded {:.1}s of audio → {}",
-        all_samples.len() as f64 / SAMPLE_RATE_F64,
-        path_str
-    ))
 }
 
 /// Start streaming transcription.
@@ -277,7 +206,6 @@ pub fn start_transcription(
     });
 
     let session_id = start_pipeline(&state, on_segment)?;
-    *state.recording_mode.acquire()? = RecordingMode::Dictation;
 
     // Transition state machine
     state.apply_transition(StateAction::StartDictation { session_id })?;
@@ -290,8 +218,7 @@ pub fn start_transcription(
 #[tauri::command]
 #[specta::specta]
 pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
-    let is_recording = *state.is_recording.acquire()?;
-    if !is_recording {
+    if !state.current_machine_state()?.is_recording() {
         return Err("Not recording".into());
     }
 
@@ -398,11 +325,11 @@ pub fn resume_meeting_recording(
 #[tauri::command]
 #[specta::specta]
 pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, String> {
-    let is_recording = *state.is_recording.acquire()?;
-    if !is_recording {
+    let machine = state.current_machine_state()?;
+    if !machine.is_recording() {
         return Err("Not recording".into());
     }
-    if *state.recording_mode.acquire()? != RecordingMode::Meeting {
+    if !matches!(machine, crate::state_machine::AppStateMachine::RecordingMeeting { .. }) {
         return Err("Meeting recording is not active".into());
     }
 
@@ -435,42 +362,6 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
 #[specta::specta]
 pub fn paste_text(text: String, delay_ms: u64) -> Result<(), String> {
     crate::clipboard::copy_and_paste(&text, delay_ms)
-}
-
-/// Save f32 PCM samples (24kHz mono) to a WAV file
-fn save_wav(samples: &[f32]) -> Result<PathBuf, String> {
-    use crate::constants::SAMPLE_RATE;
-
-    let recordings_dir = crate::constants::app_data_dir().join("recordings");
-
-    std::fs::create_dir_all(&recordings_dir)
-        .map_err(|e| format!("Failed to create recordings dir: {e}"))?;
-
-    let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
-    let filename = format!("{timestamp}.wav");
-    let path = recordings_dir.join(&filename);
-
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: SAMPLE_RATE,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
-    };
-
-    let mut writer =
-        hound::WavWriter::create(&path, spec).map_err(|e| format!("Failed to create WAV: {e}"))?;
-
-    for &sample in samples {
-        writer
-            .write_sample(sample)
-            .map_err(|e| format!("Failed to write sample: {e}"))?;
-    }
-
-    writer
-        .finalize()
-        .map_err(|e| format!("Failed to finalize WAV: {e}"))?;
-
-    Ok(path)
 }
 
 #[cfg(test)]

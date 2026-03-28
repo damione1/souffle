@@ -30,7 +30,6 @@ import {
   startTranscriptionModelDownload,
   startTranscriptionModelLoad,
 } from "./runtime";
-import { runtimePhaseIsReady, runtimePhaseRequiresDownload } from "./state";
 
 function createTranscriptionControllerInstance() {
   const app = getAppState();
@@ -201,8 +200,6 @@ function createTranscriptionControllerInstance() {
       isStopping = true;
       try {
         await stopStreamingTranscription();
-        app.isRecording = false;
-        app.recordingMode = "idle";
 
         await addHistoryEntry(transcript);
 
@@ -229,10 +226,10 @@ function createTranscriptionControllerInstance() {
       return;
     }
 
-    if (!runtimePhaseIsReady(app.transcriptionRuntimePhase)) {
-      statusMessage = runtimePhaseRequiresDownload(app.transcriptionRuntimePhase)
-        ? "Download and load the selected transcription model before starting dictation."
-        : "Load the selected transcription model before starting dictation.";
+    if (app.transcriptionRuntimePhase !== "ready") {
+      statusMessage = app.transcriptionRuntimePhase === "download_required"
+        ? "Download and load the model before starting dictation."
+        : "Load the model before starting dictation.";
       return;
     }
 
@@ -251,8 +248,6 @@ function createTranscriptionControllerInstance() {
           transcript += segment.text;
         }
       });
-      app.isRecording = true;
-      app.recordingMode = "dictation";
     } catch (e) {
       statusMessage = errorMessage(e);
     } finally {

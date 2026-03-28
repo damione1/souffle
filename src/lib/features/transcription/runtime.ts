@@ -7,13 +7,11 @@ import {
 import type { DownloadProgress, TranscriptionCatalog } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfileSelection } from "./catalog";
-import { runtimePhaseRequiresDownload } from "./state";
 
 type AppState = ReturnType<typeof getAppState>;
 
 export function resetTranscriptionRuntimeState(app: AppState) {
   app.transcriptionRuntimePhase = "download_required";
-  app.transcriptionModelOperationState = "idle";
   app.downloadFile = "";
   app.downloadCompletedFiles = 0;
   app.downloadTotalFiles = 0;
@@ -52,7 +50,6 @@ export async function startTranscriptionModelDownload(
 ) {
   if (app.transcriptionModelOperationState !== "idle") return;
 
-  app.transcriptionModelOperationState = "downloading";
   app.downloadFile = "";
   app.downloadCompletedFiles = 0;
   app.downloadTotalFiles = 0;
@@ -68,14 +65,10 @@ export async function startTranscriptionModelDownload(
 
         if (typeof progress.status === "object" && "error" in progress.status) {
           setStatusMessage(`Download error: ${progress.status.error}`);
-          app.transcriptionRuntimePhase = "download_required";
-          app.transcriptionModelOperationState = "idle";
           return;
         }
 
         if (progress.status === "complete" && progress.file === "all") {
-          app.transcriptionRuntimePhase = "load_required";
-          app.transcriptionModelOperationState = "idle";
           app.downloadFile = "";
           void refreshTranscriptionRuntimeStatus(app, catalog).catch((error) => {
             setStatusMessage(errorMessage(error));
@@ -90,10 +83,6 @@ export async function startTranscriptionModelDownload(
     );
   } catch (error) {
     setStatusMessage(errorMessage(error));
-    if (runtimePhaseRequiresDownload(app.transcriptionRuntimePhase)) {
-      app.transcriptionRuntimePhase = "download_required";
-    }
-    app.transcriptionModelOperationState = "idle";
   }
 }
 
@@ -103,17 +92,12 @@ export async function startTranscriptionModelLoad(
   setStatusMessage: (message: string) => void,
 ) {
   if (app.transcriptionModelOperationState !== "idle") return;
-
-  app.transcriptionModelOperationState = "loading";
   setStatusMessage("");
 
   try {
     await loadModel(currentTranscriptionSelection(app, catalog));
-    app.transcriptionRuntimePhase = "ready";
     await refreshTranscriptionRuntimeStatus(app, catalog);
   } catch (error) {
     setStatusMessage(errorMessage(error));
-  } finally {
-    app.transcriptionModelOperationState = "idle";
   }
 }

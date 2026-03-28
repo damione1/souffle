@@ -1,7 +1,5 @@
 import type { AppSettings, AppStateMachine, AppView, TranscriptionRuntimePhase } from "../types";
-
-export type RecordingMode = "idle" | "dictation" | "meeting";
-export type TranscriptionModelOperationState = "idle" | "downloading" | "loading";
+import type { TranscriptionModelOperationState } from "../features/transcription/state";
 
 // Current view
 let currentView = $state<AppView>("transcription");
@@ -12,16 +10,16 @@ let currentMeetingId = $state<string | null>(null);
 // Selected audio device (persisted across tab switches)
 let selectedDevice = $state("");
 
-// Unified state machine from backend
+// Unified state machine from backend — single source of truth
 let machineState = $state<AppStateMachine>({ state: "idle" });
 
-// Recording state — shared across views (kept for backward compat, now derived from machineState)
-let isRecording = $state(false);
-let recordingMode = $state<RecordingMode>("idle");
-
-// Transcription runtime state — shared across views
+// Transcription runtime phase for the *selected* profile.
+// This can differ from machineState when the user selects a different
+// model in settings (machine stays Ready with old profile while the UI
+// shows "download required" for the new one).
 let transcriptionRuntimePhase = $state<TranscriptionRuntimePhase>("download_required");
-let transcriptionModelOperationState = $state<TranscriptionModelOperationState>("idle");
+
+// Download progress — pure UI state, not derivable from machine
 let downloadFile = $state("");
 let downloadCompletedFiles = $state(0);
 let downloadTotalFiles = $state(0);
@@ -40,24 +38,17 @@ let settings = $state<AppSettings>({
   transcription_backend_id: "",
 });
 
-function deriveRecordingMode(state: AppStateMachine): RecordingMode {
+function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {
   switch (state.state) {
     case "recording_dictation":
       return "dictation";
     case "recording_meeting":
+      return "meeting";
     case "stopping":
-      return state.state === "stopping"
-        ? (typeof state.data.was_recording === "object" ? "meeting" : "dictation")
-        : "meeting";
+      return typeof state.data.was_recording === "object" ? "meeting" : "dictation";
     default:
       return "idle";
   }
-}
-
-function deriveIsRecording(state: AppStateMachine): boolean {
-  return state.state === "recording_dictation"
-    || state.state === "recording_meeting"
-    || state.state === "stopping";
 }
 
 function deriveRuntimePhase(state: AppStateMachine): TranscriptionRuntimePhase {
@@ -84,6 +75,14 @@ function deriveRuntimePhase(state: AppStateMachine): TranscriptionRuntimePhase {
   }
 }
 
+function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOperationState {
+  switch (state.state) {
+    case "downloading": return "downloading";
+    case "loading": return "loading";
+    default: return "idle";
+  }
+}
+
 export function getAppState() {
   return {
     get currentView() { return currentView; },
@@ -101,26 +100,25 @@ export function getAppState() {
     get machineState() { return machineState; },
     set machineState(s: AppStateMachine) {
       machineState = s;
-      // Sync derived fields from machine state
-      isRecording = deriveIsRecording(s);
-      recordingMode = deriveRecordingMode(s);
-      // Only update runtime phase from machine if not in a transient operation state
-      if (transcriptionModelOperationState === "idle") {
+      // Sync runtime phase from machine when no model operation is in progress.
+      // During download/load the phase is managed by runtime.ts callbacks.
+      if (deriveModelOperationState(s) === "idle") {
         transcriptionRuntimePhase = deriveRuntimePhase(s);
       }
     },
 
-    get isRecording() { return isRecording; },
-    set isRecording(v: boolean) { isRecording = v; },
-
-    get recordingMode() { return recordingMode; },
-    set recordingMode(m: RecordingMode) { recordingMode = m; },
+    // Derived from machineState — no separate $state
+    get isRecording() {
+      const s = machineState.state;
+      return s === "recording_dictation" || s === "recording_meeting" || s === "stopping";
+    },
+    get recordingMode() { return deriveRecordingMode(machineState); },
+    get transcriptionModelOperationState(): TranscriptionModelOperationState {
+      return deriveModelOperationState(machineState);
+    },
 
     get transcriptionRuntimePhase() { return transcriptionRuntimePhase; },
     set transcriptionRuntimePhase(v: TranscriptionRuntimePhase) { transcriptionRuntimePhase = v; },
-
-    get transcriptionModelOperationState() { return transcriptionModelOperationState; },
-    set transcriptionModelOperationState(v: TranscriptionModelOperationState) { transcriptionModelOperationState = v; },
 
     get downloadFile() { return downloadFile; },
     set downloadFile(v: string) { downloadFile = v; },
