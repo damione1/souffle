@@ -1,5 +1,8 @@
 pub mod kyutai;
 
+#[cfg(test)]
+pub mod mock;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -235,4 +238,122 @@ fn slug_id(value: &str) -> String {
     }
 
     slug.trim_matches('-').to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_profile_uses_kyutai() {
+        let p = default_transcription_profile();
+        assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+        assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+    }
+
+    #[test]
+    fn catalog_contains_kyutai() {
+        let cat = transcription_engine_catalog();
+        assert!(cat.iter().any(|e| e.id == KYUTAI_ENGINE_ID));
+        let kyutai = cat.iter().find(|e| e.id == KYUTAI_ENGINE_ID).unwrap();
+        assert!(kyutai.models.iter().any(|m| m.id == KYUTAI_MODEL_ID));
+    }
+
+    #[test]
+    fn resolve_profile_defaults() {
+        let p = resolve_transcription_profile(None, None).unwrap();
+        assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+        assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+    }
+
+    #[test]
+    fn resolve_profile_valid() {
+        let p =
+            resolve_transcription_profile(Some(KYUTAI_ENGINE_ID), Some(KYUTAI_MODEL_ID)).unwrap();
+        assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+    }
+
+    #[test]
+    fn resolve_profile_unknown_engine() {
+        let r = resolve_transcription_profile(Some("nonexistent"), Some(KYUTAI_MODEL_ID));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn resolve_profile_unknown_model() {
+        let r = resolve_transcription_profile(Some(KYUTAI_ENGINE_ID), Some("nonexistent"));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn resolve_profile_trims_whitespace() {
+        // resolve_transcription_profile trims via str::trim and filters empty,
+        // so "  kyutai  " becomes "kyutai" which matches the catalog.
+        let p =
+            resolve_transcription_profile(Some("  kyutai  "), Some("  stt-1b-en_fr  ")).unwrap();
+        assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+        assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+    }
+
+    #[test]
+    fn resolve_profile_empty_uses_defaults() {
+        // Some("") is filtered by .filter(|v| !v.is_empty()), falling back to defaults.
+        let p = resolve_transcription_profile(Some(""), Some("")).unwrap();
+        assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+        assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+    }
+
+    #[test]
+    fn create_engine_kyutai() {
+        let e = create_engine(KYUTAI_ENGINE_ID);
+        assert!(e.is_ok());
+    }
+
+    #[test]
+    fn create_engine_unknown() {
+        let e = create_engine("unknown_engine");
+        assert!(e.is_err());
+    }
+
+    #[test]
+    fn slug_id_basic() {
+        // slug_id is private, test indirectly via from_legacy_engine
+        let p = TranscriptionProfile::from_legacy_engine("My Custom Engine");
+        assert_eq!(p.engine_id, "my-custom-engine");
+    }
+
+    #[test]
+    fn slug_id_consecutive_specials() {
+        // Multiple consecutive non-alphanumeric chars collapse into a single dash
+        let p = TranscriptionProfile::from_legacy_engine("Engine!!!Version");
+        assert_eq!(p.engine_id, "engine-version");
+    }
+
+    #[test]
+    fn slug_id_empty() {
+        // Empty string triggers the default profile path in from_legacy_engine
+        let p = TranscriptionProfile::from_legacy_engine("");
+        assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+    }
+
+    #[test]
+    fn from_legacy_engine_empty() {
+        let p = TranscriptionProfile::from_legacy_engine("");
+        assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+        assert_eq!(p.model_id, KYUTAI_MODEL_ID);
+    }
+
+    #[test]
+    fn from_legacy_engine_kyutai_case() {
+        let p = TranscriptionProfile::from_legacy_engine("Kyutai STT");
+        assert_eq!(p.engine_id, KYUTAI_ENGINE_ID);
+    }
+
+    #[test]
+    fn from_legacy_engine_custom() {
+        let p = TranscriptionProfile::from_legacy_engine("Some Custom Engine");
+        assert!(!p.engine_id.is_empty());
+        assert_eq!(p.engine_id, "some-custom-engine");
+        assert_eq!(p.model_id, "legacy");
+    }
 }

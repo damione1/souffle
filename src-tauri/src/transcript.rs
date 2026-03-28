@@ -263,6 +263,38 @@ mod tests {
     }
 
     #[test]
+    fn resolve_legacy_profile_both_none() {
+        let p = resolve_legacy_transcription_profile(None, None).unwrap();
+        assert_eq!(p, default_transcription_profile());
+    }
+
+    #[test]
+    fn resolve_legacy_profile_wins_over_engine() {
+        let profile = default_transcription_profile();
+        let p =
+            resolve_legacy_transcription_profile(Some(profile.clone()), Some("ignored")).unwrap();
+        assert_eq!(p, profile);
+    }
+
+    #[test]
+    fn resolve_legacy_sessions_empty_creates_fallback() {
+        let now = Utc::now();
+        let sessions =
+            resolve_legacy_recording_sessions(None, "test-id", now, Some(now), 10.0, 0);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "test-id-session-1");
+    }
+
+    #[test]
+    fn recording_session_completed_duration() {
+        let start = Utc::now();
+        let end = start + chrono::Duration::seconds(120);
+        let session =
+            MeetingRecordingSession::completed("s1".to_string(), start, end, 0, 10);
+        assert!((session.duration_seconds - 120.0).abs() < 0.1);
+    }
+
+    #[test]
     fn legacy_meeting_json_uses_engine_as_profile_fallback() {
         let json = serde_json::json!({
             "id": "legacy-id",

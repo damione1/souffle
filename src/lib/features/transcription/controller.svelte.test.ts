@@ -1,0 +1,318 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// --- Mocks for Tauri runtime ---
+
+const { mockInvoke, mockListen } = vi.hoisted(() => ({
+  mockInvoke: vi.fn(),
+  mockListen: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => {
+  class MockChannel {
+    id = 1;
+    onmessage: ((msg: unknown) => void) | null = null;
+  }
+  return {
+    invoke: mockInvoke,
+    Channel: MockChannel,
+  };
+});
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: mockListen,
+  once: vi.fn(),
+  emit: vi.fn(),
+}));
+
+import { createTranscriptionController } from "./controller.svelte";
+import { getAppState } from "../../stores/app.svelte";
+import type {
+  TranscriptionCatalog,
+  TranscriptionRuntimeStatus,
+  DictationEntry,
+} from "../../types";
+
+// --- Test fixtures ---
+
+const fakeCatalog: TranscriptionCatalog = {
+  engines: [
+    {
+      id: "kyutai",
+      label: "Kyutai",
+      description: "Kyutai STT",
+      supports_streaming: true,
+      models: [
+        {
+          id: "stt-1b-en_fr",
+          label: "STT 1B",
+          description: "1B param model",
+          download_size_bytes: 2400000000,
+          supported_languages: ["en", "fr"],
+        },
+      ],
+    },
+  ],
+  selected_engine_id: "kyutai",
+  selected_model_id: "stt-1b-en_fr",
+};
+
+const fakeStatus: TranscriptionRuntimeStatus = {
+  profile: {
+    engine_id: "kyutai",
+    engine_label: "Kyutai",
+    model_id: "stt-1b-en_fr",
+    model_label: "STT 1B",
+  },
+  downloaded: true,
+  loaded: true,
+  model_dir: "/tmp/models",
+};
+
+const fakeHistory: DictationEntry[] = [
+  { id: "1", text: "Hello world", timestamp: "2025-01-01T00:00:00Z" },
+  { id: "2", text: "Second entry", timestamp: "2025-01-01T01:00:00Z" },
+];
+
+// --- Tests ---
+
+describe("transcription controller", () => {
+  const mockUnlisten = vi.fn();
+
+  function defaultInvoke(cmd: string, _args?: Record<string, unknown>) {
+    switch (cmd) {
+      case "get_transcription_catalog":
+        return Promise.resolve(fakeCatalog);
+      case "get_model_status":
+        return Promise.resolve(fakeStatus);
+      case "list_dictation_entries":
+        return Promise.resolve(fakeHistory);
+      case "start_transcription":
+        return Promise.resolve(null);
+      case "stop_transcription":
+        return Promise.resolve(null);
+      case "add_dictation_entry":
+        return Promise.resolve(null);
+      case "delete_dictation_entry":
+        return Promise.resolve(null);
+      case "clear_dictation_history":
+        return Promise.resolve(null);
+      case "paste_text":
+        return Promise.resolve(null);
+      case "load_model":
+        return Promise.resolve(null);
+      case "download_model":
+        return Promise.resolve(null);
+      case "save_settings":
+        return Promise.resolve(null);
+      default:
+        return Promise.resolve(null);
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInvoke.mockImplementation(defaultInvoke);
+    mockListen.mockResolvedValue(mockUnlisten);
+
+    // Reset shared singleton app state between tests
+    const app = getAppState();
+    app.isRecording = false;
+    app.recordingMode = "idle";
+
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  it("mount loads catalog, status, and history", async () => {
+    const ctrl = createTranscriptionController();
+    const cleanup = await ctrl.mount();
+
+    expect(mockInvoke).toHaveBeenCalledWith("get_transcription_catalog");
+    expect(mockInvoke).toHaveBeenCalledWith("get_model_status");
+    expect(mockInvoke).toHaveBeenCalledWith("list_dictation_entries", { limit: 50 });
+    expect(ctrl.catalog).toEqual(fakeCatalog);
+    expect(ctrl.modelDownloaded).toBe(true);
+    expect(ctrl.modelLoaded).toBe(true);
+    expect(ctrl.history).toEqual(fakeHistory);
+
+    expect(typeof cleanup).toBe("function");
+    cleanup!();
+    expect(mockUnlisten).toHaveBeenCalled();
+  });
+
+  it("toggleRecording starts when loaded", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.objectContaining({ channel: expect.any(Object) }));
+    expect(ctrl.app.isRecording).toBe(true);
+    expect(ctrl.app.recordingMode).toBe("dictation");
+  });
+
+  it("toggleRecording stop saves to history", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+    expect(ctrl.app.isRecording).toBe(true);
+
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    expect(ctrl.app.isRecording).toBe(false);
+    expect(ctrl.app.recordingMode).toBe("idle");
+  });
+
+  it("toggleRecording stop auto-pastes when fromShortcut and auto_paste enabled", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    ctrl.app.settings = { ...ctrl.app.settings, auto_paste: true, paste_delay_ms: 50 };
+
+    await ctrl.toggleRecording(true);
+    expect(ctrl.app.isRecording).toBe(true);
+
+    // Stop with fromShortcut=true — transcript is "" so paste won't trigger for empty text
+    await ctrl.toggleRecording(true);
+
+    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    expect(ctrl.app.isRecording).toBe(false);
+    // pasteText is NOT called because transcript is empty (Channel is mocked)
+    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+  });
+
+  it("toggleRecording stop clipboard only when not fromShortcut", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+    await ctrl.toggleRecording();
+
+    // No paste or clipboard since transcript is empty
+    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it("toggleRecording not loaded shows message", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_model_status") {
+        return Promise.resolve({ ...fakeStatus, downloaded: false, loaded: false });
+      }
+      return defaultInvoke(cmd);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    expect(ctrl.statusMessage).toContain("Download and load");
+  });
+
+  it("toggleRecording guards double start", async () => {
+    let resolveStart: (() => void) | undefined;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "start_transcription") {
+        return new Promise<void>((r) => { resolveStart = r; });
+      }
+      return defaultInvoke(cmd);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    const first = ctrl.toggleRecording();
+    const second = ctrl.toggleRecording();
+
+    resolveStart!();
+    await first;
+    await second;
+
+    const startCalls = mockInvoke.mock.calls.filter(([cmd]: [string]) => cmd === "start_transcription");
+    expect(startCalls).toHaveLength(1);
+  });
+
+  it("handleDownloadModel tracks progress", async () => {
+    // Override download_model to simulate progress callbacks via the Channel
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "download_model") {
+        const channel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        if (channel?.onmessage) {
+          channel.onmessage({ file: "model.safetensors", downloaded_bytes: 500, total_bytes: 1000, status: "downloading" });
+          channel.onmessage({ file: "model.safetensors", downloaded_bytes: 1000, total_bytes: 1000, status: "complete" });
+          channel.onmessage({ file: "all", downloaded_bytes: 0, total_bytes: null, status: "complete" });
+        }
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.handleDownloadModel();
+
+    expect(mockInvoke).toHaveBeenCalledWith("download_model", expect.objectContaining({ channel: expect.any(Object) }));
+    expect(ctrl.isDownloading).toBe(false);
+    expect(ctrl.modelDownloaded).toBe(true);
+  });
+
+  it("handleLoadModel success sets modelLoaded", async () => {
+    let statusCallCount = 0;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_model_status") {
+        statusCallCount++;
+        return Promise.resolve(statusCallCount <= 1
+          ? { ...fakeStatus, loaded: false }
+          : fakeStatus,
+        );
+      }
+      return defaultInvoke(cmd);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    expect(ctrl.modelLoaded).toBe(false);
+
+    await ctrl.handleLoadModel();
+
+    expect(mockInvoke).toHaveBeenCalledWith("load_model");
+    expect(ctrl.modelLoaded).toBe(true);
+    expect(ctrl.isLoadingModel).toBe(false);
+  });
+
+  it("removeHistoryEntry updates list", async () => {
+    let listCallCount = 0;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_dictation_entries") {
+        listCallCount++;
+        return Promise.resolve(listCallCount <= 1 ? fakeHistory : [fakeHistory[1]]);
+      }
+      return defaultInvoke(cmd);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    expect(ctrl.history).toHaveLength(2);
+
+    await ctrl.removeHistoryEntry("1");
+
+    expect(mockInvoke).toHaveBeenCalledWith("delete_dictation_entry", { id: "1" });
+    expect(ctrl.history).toHaveLength(1);
+  });
+
+  it("resetHistory clears all", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    expect(ctrl.history).toHaveLength(2);
+
+    await ctrl.resetHistory();
+
+    expect(mockInvoke).toHaveBeenCalledWith("clear_dictation_history");
+    expect(ctrl.history).toHaveLength(0);
+  });
+});

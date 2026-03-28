@@ -305,12 +305,37 @@ impl Drop for TranscriptionPipeline {
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use crossbeam_channel::unbounded;
 
+    use crate::audio::AudioChunk;
+    use crate::constants::MIMI_FRAME_SIZE;
     use crate::engine::default_transcription_engine;
+    use crate::engine::mock::MockEngine;
+    use crate::engine::TranscriptionSegment;
 
-    use super::TranscriptionPipeline;
+    use super::{InferenceCommand, TranscriptionPipeline};
+
+    /// Helper: create a TranscriptionSegment with the given text.
+    fn seg(text: &str) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: text.to_string(),
+            start_time: 0.0,
+            end_time: 0.0,
+            is_final: false,
+            language: None,
+            confidence: None,
+        }
+    }
+
+    /// Helper: create an AudioChunk with MIMI_FRAME_SIZE samples for the given session.
+    fn audio_chunk(session_id: u64) -> AudioChunk {
+        AudioChunk {
+            session_id,
+            samples: vec![0.0f32; MIMI_FRAME_SIZE],
+        }
+    }
 
     #[test]
     fn pipeline_shutdown_is_idempotent() {
@@ -320,5 +345,311 @@ mod tests {
 
         pipeline.shutdown().expect("first shutdown");
         pipeline.shutdown().expect("second shutdown");
+    }
+
+    #[test]
+    fn pipeline_processes_audio_frames() {
+        let (audio_tx, audio_rx) = unbounded();
+
+        let mock = MockEngine::new().with_transcribe_response(Ok(vec![seg("hello")]), 3);
+        let engine: Arc<Mutex<Box<dyn crate::engine::TranscriptionEngine>>> =
+            Arc::new(Mutex::new(Box::new(mock)));
+
+        let mut pipeline = TranscriptionPipeline::spawn(audio_rx, engine).expect("spawn");
+
+        let collected: Arc<Mutex<Vec<TranscriptionSegment>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_cb = Arc::clone(&collected);
+
+        pipeline
+            .send(InferenceCommand::Start {
+                session_id: 1,
+                on_segment: Box::new(move |s| {
+                    collected_cb.lock().unwrap().push(s);
+                }),
+            })
+            .expect("start");
+
+        // Send 3 frame-sized chunks so engine produces segments
+        for _ in 0..3 {
+            audio_tx.send(audio_chunk(1)).unwrap();
+        }
+
+        // Allow processing time
+        std::thread::sleep(Duration::from_millis(300));
+
+        let (done_tx, done_rx) = unbounded();
+        pipeline
+            .send(InferenceCommand::Stop(done_tx))
+            .expect("stop");
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("done signal");
+
+        let segments = collected.lock().unwrap();
+        assert!(
+            segments.iter().any(|s| s.text == "hello"),
+            "Expected at least one 'hello' segment, got: {:?}",
+            segments.iter().map(|s| &s.text).collect::<Vec<_>>()
+        );
+
+        pipeline.shutdown().expect("shutdown");
+    }
+
+    #[test]
+    fn pipeline_start_stop_cycle() {
+        let (audio_tx, audio_rx) = unbounded();
+
+        let mock = MockEngine::new();
+        let engine: Arc<Mutex<Box<dyn crate::engine::TranscriptionEngine>>> =
+            Arc::new(Mutex::new(Box::new(mock)));
+
+        let mut pipeline = TranscriptionPipeline::spawn(audio_rx, engine).expect("spawn");
+
+        pipeline
+            .send(InferenceCommand::Start {
+                session_id: 1,
+                on_segment: Box::new(|_| {}),
+            })
+            .expect("start");
+
+        audio_tx.send(audio_chunk(1)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+
+        let (done_tx, done_rx) = unbounded();
+        pipeline
+            .send(InferenceCommand::Stop(done_tx))
+            .expect("stop");
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("should receive done signal after stop");
+
+        pipeline.shutdown().expect("shutdown");
+    }
+
+    #[test]
+    fn pipeline_flush_on_stop() {
+        let (_audio_tx, audio_rx) = unbounded();
+
+        let mock = MockEngine::new().with_flush_response(Ok(vec![seg("flushed")]));
+        let engine: Arc<Mutex<Box<dyn crate::engine::TranscriptionEngine>>> =
+            Arc::new(Mutex::new(Box::new(mock)));
+
+        let mut pipeline = TranscriptionPipeline::spawn(audio_rx, engine).expect("spawn");
+
+        let collected: Arc<Mutex<Vec<TranscriptionSegment>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_cb = Arc::clone(&collected);
+
+        pipeline
+            .send(InferenceCommand::Start {
+                session_id: 1,
+                on_segment: Box::new(move |s| {
+                    collected_cb.lock().unwrap().push(s);
+                }),
+            })
+            .expect("start");
+
+        // Small delay so the active_loop is running
+        std::thread::sleep(Duration::from_millis(100));
+
+        let (done_tx, done_rx) = unbounded();
+        pipeline
+            .send(InferenceCommand::Stop(done_tx))
+            .expect("stop");
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("done signal");
+
+        let segments = collected.lock().unwrap();
+        assert!(
+            segments.iter().any(|s| s.text == "flushed"),
+            "Expected flush segment 'flushed', got: {:?}",
+            segments.iter().map(|s| &s.text).collect::<Vec<_>>()
+        );
+
+        pipeline.shutdown().expect("shutdown");
+    }
+
+    #[test]
+    fn pipeline_drain_remaining_on_stop() {
+        let (audio_tx, audio_rx) = unbounded();
+
+        // Provide enough transcribe responses for all chunks that will be drained
+        let mock = MockEngine::new().with_transcribe_response(Ok(vec![seg("drained")]), 5);
+        let engine: Arc<Mutex<Box<dyn crate::engine::TranscriptionEngine>>> =
+            Arc::new(Mutex::new(Box::new(mock)));
+
+        let mut pipeline = TranscriptionPipeline::spawn(audio_rx, engine).expect("spawn");
+
+        let collected: Arc<Mutex<Vec<TranscriptionSegment>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_cb = Arc::clone(&collected);
+
+        pipeline
+            .send(InferenceCommand::Start {
+                session_id: 1,
+                on_segment: Box::new(move |s| {
+                    collected_cb.lock().unwrap().push(s);
+                }),
+            })
+            .expect("start");
+
+        // Send multiple chunks quickly, then immediately stop.
+        // Some will be processed in the active loop, the rest should be
+        // drained during the Stop handling.
+        for _ in 0..5 {
+            audio_tx.send(audio_chunk(1)).unwrap();
+        }
+
+        let (done_tx, done_rx) = unbounded();
+        pipeline
+            .send(InferenceCommand::Stop(done_tx))
+            .expect("stop");
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("done signal");
+
+        let segments = collected.lock().unwrap();
+        let drained_count = segments.iter().filter(|s| s.text == "drained").count();
+        assert!(
+            drained_count >= 1,
+            "Expected at least 1 'drained' segment from queued audio, got {drained_count}"
+        );
+
+        pipeline.shutdown().expect("shutdown");
+    }
+
+    #[test]
+    fn pipeline_multiple_sessions() {
+        let (audio_tx, audio_rx) = unbounded();
+
+        // Provide responses for 2 sessions (transcribe + flush each)
+        let mock = MockEngine::new()
+            .with_transcribe_response(Ok(vec![seg("s1")]), 2)
+            .with_transcribe_response(Ok(vec![seg("s2")]), 2)
+            .with_flush_response(Ok(vec![]))
+            .with_flush_response(Ok(vec![]));
+        let engine: Arc<Mutex<Box<dyn crate::engine::TranscriptionEngine>>> =
+            Arc::new(Mutex::new(Box::new(mock)));
+
+        let mut pipeline = TranscriptionPipeline::spawn(audio_rx, engine).expect("spawn");
+
+        // --- Session 1 ---
+        let collected1: Arc<Mutex<Vec<TranscriptionSegment>>> = Arc::new(Mutex::new(Vec::new()));
+        let cb1 = Arc::clone(&collected1);
+        pipeline
+            .send(InferenceCommand::Start {
+                session_id: 1,
+                on_segment: Box::new(move |s| {
+                    cb1.lock().unwrap().push(s);
+                }),
+            })
+            .expect("start session 1");
+
+        audio_tx.send(audio_chunk(1)).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+
+        let (done_tx1, done_rx1) = unbounded();
+        pipeline
+            .send(InferenceCommand::Stop(done_tx1))
+            .expect("stop session 1");
+        done_rx1
+            .recv_timeout(Duration::from_secs(2))
+            .expect("done signal session 1");
+
+        // --- Session 2 ---
+        let collected2: Arc<Mutex<Vec<TranscriptionSegment>>> = Arc::new(Mutex::new(Vec::new()));
+        let cb2 = Arc::clone(&collected2);
+        pipeline
+            .send(InferenceCommand::Start {
+                session_id: 2,
+                on_segment: Box::new(move |s| {
+                    cb2.lock().unwrap().push(s);
+                }),
+            })
+            .expect("start session 2");
+
+        audio_tx.send(audio_chunk(2)).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+
+        let (done_tx2, done_rx2) = unbounded();
+        pipeline
+            .send(InferenceCommand::Stop(done_tx2))
+            .expect("stop session 2");
+        done_rx2
+            .recv_timeout(Duration::from_secs(2))
+            .expect("done signal session 2");
+
+        let segs1 = collected1.lock().unwrap();
+        let segs2 = collected2.lock().unwrap();
+        assert!(
+            !segs1.is_empty(),
+            "Session 1 should have produced segments"
+        );
+        assert!(
+            !segs2.is_empty(),
+            "Session 2 should have produced segments"
+        );
+
+        pipeline.shutdown().expect("shutdown");
+    }
+
+    #[test]
+    fn pipeline_ignores_stale_session() {
+        let (audio_tx, audio_rx) = unbounded();
+
+        // Only provide transcribe responses for session 2 audio
+        let mock = MockEngine::new()
+            .with_transcribe_response(Ok(vec![seg("fresh")]), 3)
+            .with_flush_response(Ok(vec![]));
+        let engine: Arc<Mutex<Box<dyn crate::engine::TranscriptionEngine>>> =
+            Arc::new(Mutex::new(Box::new(mock)));
+
+        let mut pipeline = TranscriptionPipeline::spawn(audio_rx, engine).expect("spawn");
+
+        // Start session 2, but send audio with session_id=1 (stale)
+        let collected: Arc<Mutex<Vec<TranscriptionSegment>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_cb = Arc::clone(&collected);
+
+        pipeline
+            .send(InferenceCommand::Start {
+                session_id: 2,
+                on_segment: Box::new(move |s| {
+                    collected_cb.lock().unwrap().push(s);
+                }),
+            })
+            .expect("start");
+
+        // Send stale chunks (session_id=1, but active session is 2)
+        for _ in 0..3 {
+            audio_tx
+                .send(AudioChunk {
+                    session_id: 1,
+                    samples: vec![0.0f32; MIMI_FRAME_SIZE],
+                })
+                .unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(200));
+
+        // Now send one valid chunk (session_id=2)
+        audio_tx.send(audio_chunk(2)).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+
+        let (done_tx, done_rx) = unbounded();
+        pipeline
+            .send(InferenceCommand::Stop(done_tx))
+            .expect("stop");
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("done signal");
+
+        let segments = collected.lock().unwrap();
+        // Stale chunks should have been ignored; only the session-2 chunk should
+        // have triggered transcription, so we expect exactly 1 "fresh" segment.
+        let fresh_count = segments.iter().filter(|s| s.text == "fresh").count();
+        assert_eq!(
+            fresh_count, 1,
+            "Expected exactly 1 segment from session-2 audio, got {fresh_count} (stale audio should be ignored)"
+        );
+
+        pipeline.shutdown().expect("shutdown");
     }
 }

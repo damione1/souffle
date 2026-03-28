@@ -275,19 +275,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use tempfile::TempDir;
-
-    use crate::db::Database;
-
     use super::{AppSettings, ShortcutSettings, Theme};
     use crate::constants::OLLAMA_DEFAULT_URL;
-
-    fn test_db() -> (Database, TempDir) {
-        let dir = TempDir::new().expect("temp dir");
-        let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).expect("db open");
-        (db, dir)
-    }
+    use crate::test_helpers::fixtures::test_db;
 
     #[test]
     fn app_settings_round_trip() {
@@ -340,6 +330,61 @@ mod tests {
 
         assert_eq!(settings, AppSettings::default());
         assert_eq!(shortcuts, ShortcutSettings::default());
+    }
+
+    #[test]
+    fn sanitize_rejects_empty_ollama_url() {
+        let mut s = AppSettings::default();
+        s.ollama_url = "".to_string();
+        assert!(s.sanitize_for_save().is_err());
+    }
+
+    #[test]
+    fn sanitize_rejects_out_of_range_paste_delay() {
+        let mut s = AppSettings::default();
+        s.paste_delay_ms = 49;
+        assert!(s.sanitize_for_save().is_err());
+        s.paste_delay_ms = 1001;
+        assert!(s.sanitize_for_save().is_err());
+    }
+
+    #[test]
+    fn sanitize_falls_back_to_default_for_unknown_engine() {
+        // sanitized() silently corrects unknown engines to the Kyutai default
+        let mut s = AppSettings::default();
+        s.transcription_engine_id = "nonexistent".to_string();
+        let clean = s.sanitize_for_save().unwrap();
+        assert_eq!(clean.transcription_engine_id, "kyutai");
+        assert_eq!(clean.transcription_model_id, "stt-1b-en_fr");
+    }
+
+    #[test]
+    fn sanitize_normalizes_whitespace() {
+        let mut s = AppSettings::default();
+        s.ollama_url = "  http://localhost:11434  ".to_string();
+        let clean = s.sanitize_for_save().unwrap();
+        assert_eq!(clean.ollama_url, "http://localhost:11434");
+    }
+
+    #[test]
+    fn shortcut_empty_both_valid() {
+        let s = ShortcutSettings {
+            toggle: String::new(),
+            push_to_talk: String::new(),
+        };
+        assert!(s.normalize().is_ok());
+    }
+
+    #[test]
+    fn shortcut_save_round_trip() {
+        let (db, _dir) = test_db();
+        let s = ShortcutSettings {
+            toggle: "CommandOrControl+Shift+Space".to_string(),
+            push_to_talk: "CommandOrControl+Shift+S".to_string(),
+        };
+        s.save(&db).unwrap();
+        let loaded = ShortcutSettings::load(&db).unwrap();
+        assert_eq!(s, loaded);
     }
 
     #[test]

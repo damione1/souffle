@@ -319,61 +319,8 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::db::Database;
-    use crate::engine::{TranscriptionProfile, TranscriptionSegment};
-    use crate::transcript::MeetingTranscript;
-    use tempfile::TempDir;
-
-    fn test_db() -> (Database, TempDir) {
-        let dir = TempDir::new().unwrap();
-        let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
-        (db, dir)
-    }
-
-    fn sample_meeting(id: &str) -> MeetingTranscript {
-        let started_at = Utc::now();
-        let ended_at = started_at + chrono::Duration::seconds(60);
-
-        MeetingTranscript {
-            id: id.to_string(),
-            title: "Test Meeting".to_string(),
-            started_at,
-            ended_at: Some(ended_at),
-            duration_seconds: 60.0,
-            transcription_profile: TranscriptionProfile::default(),
-            recording_sessions: vec![MeetingRecordingSession::completed(
-                format!("{id}-session-1"),
-                started_at,
-                ended_at,
-                0,
-                2,
-            )],
-            segments: vec![
-                TranscriptionSegment {
-                    text: "Hello world".to_string(),
-                    start_time: 0.0,
-                    end_time: 1.0,
-                    is_final: true,
-                    language: Some("en".to_string()),
-                    confidence: Some(0.95),
-                },
-                TranscriptionSegment {
-                    text: "second segment".to_string(),
-                    start_time: 1.5,
-                    end_time: 2.5,
-                    is_final: true,
-                    language: None,
-                    confidence: None,
-                },
-            ],
-            summary: None,
-            summary_is_stale: false,
-            summary_model: None,
-            summary_generated_at: None,
-        }
-    }
+    use crate::engine::TranscriptionProfile;
+    use crate::test_helpers::fixtures::{sample_meeting, test_db};
 
     #[test]
     fn save_and_load_meeting() {

@@ -170,3 +170,32 @@ impl Database {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::test_helpers::fixtures::test_db;
+
+    #[test]
+    fn migrate_no_meetings_dir_ok() {
+        let (db, dir) = test_db();
+        // No meetings/ subdirectory exists — migration should succeed silently
+        let result = db.migrate_json_meetings(dir.path());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn migrate_no_settings_json_ok() {
+        let (db, dir) = test_db();
+        // No settings.json in temp dir — migration should succeed silently
+        let result = db.migrate_settings_json(dir.path());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn migrate_no_dictation_json_ok() {
+        let (db, dir) = test_db();
+        // No dictation_history.json in temp dir — migration should succeed silently
+        let result = db.migrate_dictation_json(dir.path());
+        assert!(result.is_ok());
+    }
+}

@@ -291,4 +291,41 @@ mod tests {
         let text = "Thanks for the transcript.\n\n## Summary\n- Bonjour\n";
         assert_eq!(sanitize_summary(text), "## Summary\n- Bonjour");
     }
+
+    #[test]
+    fn empty_model_rejected() {
+        assert!(!is_summary_capable_model(""));
+    }
+
+    #[test]
+    fn whitespace_model_rejected() {
+        assert!(!is_summary_capable_model("   "));
+    }
+
+    #[test]
+    fn sanitize_summary_empty() {
+        assert_eq!(sanitize_summary(""), "");
+    }
+
+    #[test]
+    fn sanitize_summary_no_heading() {
+        assert_eq!(
+            sanitize_summary("Just a normal summary."),
+            "Just a normal summary."
+        );
+    }
+
+    #[test]
+    fn sanitize_summary_multi_intro() {
+        // The first line is not a heading prefix, but the second is — strip everything before it
+        let input = "Here is a summary of the meeting.\n## Summary\nKey points are listed below.";
+        let result = sanitize_summary(input);
+        assert_eq!(result, "## Summary\nKey points are listed below.");
+    }
+
+    #[test]
+    fn model_descriptors_empty() {
+        let result = model_descriptors(&[]);
+        assert!(result.is_empty());
+    }
 }

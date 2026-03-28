@@ -17,6 +17,9 @@ pub mod state;
 pub mod transcript;
 pub mod tray;
 
+#[cfg(test)]
+pub mod test_helpers;
+
 use std::sync::Arc;
 
 use audio::AudioCapture;

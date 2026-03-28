@@ -92,15 +92,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use crate::db::Database;
-    use tempfile::TempDir;
-
-    fn test_db() -> (Database, TempDir) {
-        let dir = TempDir::new().unwrap();
-        let db_path = dir.path().join("test.db");
-        let db = Database::open(&db_path).unwrap();
-        (db, dir)
-    }
+    use crate::test_helpers::fixtures::test_db;
 
     #[test]
     fn add_and_list_entries() {
