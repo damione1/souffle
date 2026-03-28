@@ -12,8 +12,20 @@
   const controller = createMeetingController();
 
   let isNewMode = $derived(!controller.app.currentMeetingId && !controller.isRecordingMeeting);
+  let sessionCount = $derived(
+    controller.meeting
+      ? controller.meeting.recording_sessions.length + (controller.isRecordingMeeting ? 1 : 0)
+      : (controller.isRecordingMeeting ? 1 : 0),
+  );
   let displaySegments = $derived(
-    controller.isRecordingMeeting ? controller.liveMeetingSegments : (controller.meeting?.segments ?? []),
+    controller.isRecordingMeeting
+      ? [...(controller.meeting?.segments ?? []), ...controller.liveMeetingSegments]
+      : (controller.meeting?.segments ?? []),
+  );
+  let liveSessionStartIndex = $derived(
+    controller.isRecordingMeeting && Boolean(controller.meeting?.id)
+      ? (controller.meeting?.segments.length ?? null)
+      : null,
   );
 
   onMount(() => {
@@ -48,17 +60,22 @@
       meeting={controller.meeting}
       isRecordingMeeting={controller.isRecordingMeeting}
       segmentCount={displaySegments.length}
+      sessionCount={sessionCount}
+      canResumeRecording={controller.canResumeRecording}
       onBack={() => {
         controller.app.currentMeetingId = null;
         controller.app.currentView = "meeting-history";
       }}
       onNewMeeting={() => controller.app.newMeeting()}
+      onResumeRecording={controller.resumeRecording}
       onStopRecording={controller.stopRecording}
     />
 
     <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
       <MeetingTranscriptSection
         segments={displaySegments}
+        recordingSessions={controller.meeting.recording_sessions}
+        liveSessionStartIndex={liveSessionStartIndex}
         isRecordingMeeting={controller.isRecordingMeeting}
       />
 

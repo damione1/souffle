@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Clock3, WandSparkles } from "@lucide/svelte";
   import CopyButton from "../../../components/ui/CopyButton.svelte";
   import EmptyState from "../../../components/ui/EmptyState.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
@@ -45,12 +46,13 @@
     ?? meeting.summary_model
     ?? "",
   );
+  let showStaleSummary = $derived(Boolean(meeting.summary) && meeting.summary_is_stale);
 </script>
 
 <section class="surface-card flex flex-col gap-3">
   <div class="flex items-center justify-between gap-4 flex-wrap">
     <h3>Summary</h3>
-    {#if meeting.summary && !isRecordingMeeting}
+    {#if meeting.summary}
       <CopyButton text={meeting.summary} />
     {/if}
   </div>
@@ -66,25 +68,32 @@
     </div>
   {/if}
 
-  {#if isRecordingMeeting}
-    <EmptyState message="Stop the recording to generate a summary.">
-      {#snippet icon()}
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-        </svg>
-      {/snippet}
-    </EmptyState>
-  {:else if meeting.summary}
+  {#if meeting.summary}
+    {#if isRecordingMeeting}
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="pill pill-warning">Recording in progress</span>
+        <span class="text-sm text-text-muted">This summary will need regeneration after the current session is saved.</span>
+      </div>
+    {:else if showStaleSummary}
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="pill pill-warning">Summary stale</span>
+        <span class="text-sm text-text-muted">This summary predates the latest recording session.</span>
+      </div>
+    {/if}
     <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-[100px] max-h-[360px] overflow-y-auto text-sm leading-relaxed">{meeting.summary}</div>
     {#if generatedWithLabel}
       <span class="pill pill-muted self-start">Generated with {generatedWithLabel}</span>
     {/if}
+  {:else if isRecordingMeeting}
+    <EmptyState message="Stop the recording to generate a summary.">
+      {#snippet icon()}
+        <Clock3 size={32} strokeWidth={1.5} />
+      {/snippet}
+    </EmptyState>
   {:else}
     <EmptyState message="No summary yet. Generate one below.">
       {#snippet icon()}
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
-        </svg>
+        <WandSparkles size={32} strokeWidth={1.5} />
       {/snippet}
     </EmptyState>
   {/if}

@@ -64,7 +64,7 @@ impl Database {
 
     /// Ensure the database schema is at the current version.
     fn ensure_schema(&self) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
+        let mut conn = self.conn.acquire()?;
 
         // Check if schema_version table exists
         let has_version_table: bool = conn
@@ -93,29 +93,32 @@ impl Database {
                 "Applying schema migration"
             );
 
-            for (version, statements) in schema::MIGRATIONS {
-                if *version <= current_version {
-                    continue;
-                }
-
-                for sql in *statements {
+            if current_version < 1 {
+                for sql in schema::SCHEMA_V1 {
                     conn.execute_batch(sql)
-                        .map_err(|e| format!("Schema migration v{version}: {e}"))?;
+                        .map_err(|e| format!("Schema migration v1: {e}"))?;
                 }
 
-                if current_version == 0 && *version == 1 {
-                    conn.execute(
-                        "INSERT INTO schema_version (version) VALUES (?1)",
-                        rusqlite::params![version],
-                    )
-                    .map_err(|e| format!("Insert version: {e}"))?;
-                } else {
-                    conn.execute(
-                        "UPDATE schema_version SET version = ?1",
-                        rusqlite::params![version],
-                    )
-                    .map_err(|e| format!("Update version: {e}"))?;
+                conn.execute("DELETE FROM schema_version", [])
+                    .map_err(|e| format!("Reset schema version for v1: {e}"))?;
+                conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
+                    .map_err(|e| format!("Insert schema version v1: {e}"))?;
+            }
+
+            if current_version < 2 {
+                for sql in schema::SCHEMA_V2 {
+                    conn.execute_batch(sql)
+                        .map_err(|e| format!("Schema migration v2: {e}"))?;
                 }
+
+                conn.execute("UPDATE schema_version SET version = 2", [])
+                    .map_err(|e| format!("Update schema version v2: {e}"))?;
+            }
+
+            if current_version < 3 {
+                schema::migrate_meetings_to_v3(&mut conn)?;
+                conn.execute("UPDATE schema_version SET version = 3", [])
+                    .map_err(|e| format!("Update schema version v3: {e}"))?;
             }
 
             info!("Schema migration complete");

@@ -6,6 +6,7 @@ export type {
   DownloadProgress,
   DownloadStatus,
   MeetingListItem,
+  MeetingRecordingSession,
   MeetingTranscript,
   OllamaModelDescriptor,
   OllamaStatus,

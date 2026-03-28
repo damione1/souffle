@@ -10,6 +10,7 @@ use crate::engine::{
     default_transcription_engine,
 };
 use crate::pipeline::TranscriptionPipeline;
+use crate::transcript::MeetingRecordingSession;
 
 /// Commands sent to the audio thread
 pub enum AudioCommand {
@@ -28,10 +29,17 @@ pub enum RecordingMode {
 
 /// Accumulated meeting segments while recording
 pub struct MeetingAccumulator {
+    pub id: String,
     pub title: String,
-    pub segments: Vec<TranscriptionSegment>,
-    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub existing_segments: Vec<TranscriptionSegment>,
+    pub new_segments: Vec<TranscriptionSegment>,
+    pub recording_sessions: Vec<MeetingRecordingSession>,
+    pub session_started_at: chrono::DateTime<chrono::Utc>,
     pub transcription_profile: TranscriptionProfile,
+    pub summary: Option<String>,
+    pub summary_is_stale: bool,
+    pub summary_model: Option<String>,
+    pub summary_generated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Shared application state, managed by Tauri.

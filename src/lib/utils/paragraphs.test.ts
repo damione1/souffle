@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { groupIntoParagraphs } from './paragraphs';
-import type { TranscriptionSegment } from '../types';
+import { buildMeetingTranscriptBlocks, groupIntoParagraphs } from './paragraphs';
+import type { MeetingRecordingSession, TranscriptionSegment } from '../types';
 
 function seg(text: string, start: number, end?: number): TranscriptionSegment {
   return {
@@ -10,6 +10,17 @@ function seg(text: string, start: number, end?: number): TranscriptionSegment {
     is_final: true,
     language: null,
     confidence: null,
+  };
+}
+
+function session(id: string, start: number, end: number): MeetingRecordingSession {
+  return {
+    id,
+    started_at: new Date(`2026-03-27T10:0${start}:00Z`).toISOString(),
+    ended_at: new Date(`2026-03-27T10:0${end}:00Z`).toISOString(),
+    duration_seconds: (end - start) * 60,
+    start_segment_index: start,
+    end_segment_index: end,
   };
 }
 
@@ -59,5 +70,53 @@ describe('groupIntoParagraphs', () => {
     ];
     const result = groupIntoParagraphs(segments, 1.5);
     expect(result).toHaveLength(2);
+  });
+});
+
+describe('buildMeetingTranscriptBlocks', () => {
+  it('inserts a session break between saved recording sessions', () => {
+    const segments = [
+      seg('First session.', 0),
+      seg('Second session starts.', 0),
+    ];
+
+    const result = buildMeetingTranscriptBlocks(
+      segments,
+      [
+        session('session-1', 0, 1),
+        session('session-2', 1, 2),
+      ],
+      1.5,
+    );
+
+    expect(result).toHaveLength(3);
+    expect(result[0].type).toBe('paragraph');
+    expect(result[1]).toEqual({
+      type: 'session-break',
+      endLabel: 'End of previous recording',
+      startLabel: 'New recording session started',
+    });
+    expect(result[2].type).toBe('paragraph');
+  });
+
+  it('inserts a live resume marker before appended live segments', () => {
+    const segments = [
+      seg('Saved session.', 0),
+      seg('Live resumed session.', 0),
+    ];
+
+    const result = buildMeetingTranscriptBlocks(
+      segments,
+      [session('session-1', 0, 1)],
+      1.5,
+      1,
+    );
+
+    expect(result).toHaveLength(3);
+    expect(result[1]).toEqual({
+      type: 'session-break',
+      endLabel: 'End of previous recording',
+      startLabel: 'Resumed recording in progress',
+    });
   });
 });

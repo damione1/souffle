@@ -2,11 +2,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::params;
 
 use crate::engine::{TranscriptionProfile, TranscriptionSegment};
-use crate::transcript::{
-    MeetingListItem, MeetingTranscript, resolve_legacy_transcription_profile,
-};
-
 use crate::lock_ext::MutexExt;
+use crate::transcript::{MeetingListItem, MeetingRecordingSession, MeetingTranscript};
 
 use super::Database;
 
@@ -20,26 +17,39 @@ impl Database {
             .map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
-            "INSERT OR REPLACE INTO meetings (id, title, started_at, ended_at, duration_seconds, engine, transcription_profile, summary, summary_model, summary_generated_at, edited_transcript)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT OR REPLACE INTO meetings (
+                id,
+                title,
+                started_at,
+                ended_at,
+                duration_seconds,
+                transcription_profile,
+                recording_sessions,
+                summary,
+                summary_is_stale,
+                summary_model,
+                summary_generated_at,
+                edited_transcript
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 meeting.id,
                 meeting.title,
                 meeting.started_at.to_rfc3339(),
                 meeting.ended_at.map(|dt| dt.to_rfc3339()),
                 meeting.duration_seconds,
-                meeting.transcription_profile.engine_label,
                 serde_json::to_string(&meeting.transcription_profile)
                     .map_err(|e| format!("Serialize profile: {e}"))?,
+                serde_json::to_string(&meeting.recording_sessions)
+                    .map_err(|e| format!("Serialize recording sessions: {e}"))?,
                 meeting.summary,
+                i32::from(meeting.summary_is_stale),
                 meeting.summary_model,
                 meeting.summary_generated_at.map(|dt| dt.to_rfc3339()),
-                None::<String>, // edited_transcript
+                None::<String>,
             ],
         )
         .map_err(|e| format!("Insert meeting: {e}"))?;
 
-        // Delete existing segments for this meeting (for upsert scenarios)
         tx.execute(
             "DELETE FROM segments WHERE meeting_id = ?1",
             params![meeting.id],
@@ -64,22 +74,20 @@ impl Database {
             .map_err(|e| format!("Insert segment: {e}"))?;
         }
 
-        // Index full text for FTS5 search
-        let full_text: String = meeting
+        tx.execute(
+            "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
+            params![meeting.id],
+        )
+        .map_err(|e| format!("Delete FTS: {e}"))?;
+
+        let full_text = meeting
             .segments
             .iter()
-            .map(|s| s.text.as_str())
+            .map(|segment| segment.text.as_str())
             .collect::<Vec<_>>()
             .join(" ");
 
         if !full_text.is_empty() {
-            // Remove old FTS entry
-            tx.execute(
-                "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
-                params![meeting.id],
-            )
-            .map_err(|e| format!("Delete FTS: {e}"))?;
-
             tx.execute(
                 "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
                 params![full_text, "meeting", meeting.id],
@@ -97,21 +105,34 @@ impl Database {
 
         let meeting = conn
             .query_row(
-                "SELECT id, title, started_at, ended_at, duration_seconds, engine, transcription_profile, summary, summary_model, summary_generated_at
-                 FROM meetings WHERE id = ?1",
+                "SELECT
+                    id,
+                    title,
+                    started_at,
+                    ended_at,
+                    duration_seconds,
+                    transcription_profile,
+                    recording_sessions,
+                    summary,
+                    summary_is_stale,
+                    summary_model,
+                    summary_generated_at
+                 FROM meetings
+                 WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(MeetingRow {
                         id: row.get(0)?,
                         title: row.get(1)?,
-                        started_at: row.get::<_, String>(2)?,
-                        ended_at: row.get::<_, Option<String>>(3)?,
+                        started_at: row.get(2)?,
+                        ended_at: row.get(3)?,
                         duration_seconds: row.get(4)?,
-                        engine: row.get(5)?,
-                        transcription_profile: row.get(6)?,
+                        transcription_profile: row.get(5)?,
+                        recording_sessions: row.get(6)?,
                         summary: row.get(7)?,
-                        summary_model: row.get(8)?,
-                        summary_generated_at: row.get::<_, Option<String>>(9)?,
+                        summary_is_stale: row.get::<_, i32>(8)? != 0,
+                        summary_model: row.get(9)?,
+                        summary_generated_at: row.get(10)?,
                     })
                 },
             )
@@ -141,28 +162,33 @@ impl Database {
             .map_err(|e| format!("Query segments: {e}"))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect segments: {e}"))?;
-
         let transcription_profile = meeting.transcription_profile()?;
+        let recording_sessions = meeting.recording_sessions()?;
+        let started_at = parse_datetime(&meeting.started_at)?;
+        let ended_at = meeting
+            .ended_at
+            .as_deref()
+            .map(parse_datetime)
+            .transpose()?;
+        let summary_generated_at = meeting
+            .summary_generated_at
+            .as_deref()
+            .map(parse_datetime)
+            .transpose()?;
 
         Ok(MeetingTranscript {
             id: meeting.id,
             title: meeting.title,
-            started_at: parse_datetime(&meeting.started_at)?,
-            ended_at: meeting
-                .ended_at
-                .as_deref()
-                .map(parse_datetime)
-                .transpose()?,
+            started_at,
+            ended_at,
             duration_seconds: meeting.duration_seconds,
             transcription_profile,
+            recording_sessions,
             segments,
             summary: meeting.summary,
+            summary_is_stale: meeting.summary_is_stale,
             summary_model: meeting.summary_model,
-            summary_generated_at: meeting
-                .summary_generated_at
-                .as_deref()
-                .map(parse_datetime)
-                .transpose()?,
+            summary_generated_at,
         })
     }
 
@@ -172,7 +198,7 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, started_at, duration_seconds, summary IS NOT NULL
+                "SELECT id, title, started_at, duration_seconds, summary IS NOT NULL, summary_is_stale
                  FROM meetings ORDER BY started_at DESC",
             )
             .map_err(|e| format!("Prepare: {e}"))?;
@@ -182,8 +208,8 @@ impl Database {
                 Ok(MeetingListItem {
                     id: row.get(0)?,
                     title: row.get(1)?,
-                    started_at: row.get::<_, String>(2).and_then(|s| {
-                        DateTime::parse_from_rfc3339(&s)
+                    started_at: row.get::<_, String>(2).and_then(|value| {
+                        DateTime::parse_from_rfc3339(&value)
                             .map(|dt| dt.with_timezone(&Utc))
                             .map_err(|e| {
                                 rusqlite::Error::FromSqlConversionFailure(
@@ -195,6 +221,7 @@ impl Database {
                     })?,
                     duration_seconds: row.get(3)?,
                     has_summary: row.get(4)?,
+                    summary_is_stale: row.get::<_, i32>(5)? != 0,
                 })
             })
             .map_err(|e| format!("Query: {e}"))?
@@ -208,25 +235,22 @@ impl Database {
     pub fn delete_meeting(&self, id: &str) -> Result<(), String> {
         let conn = self.conn.acquire()?;
 
-        // Delete FTS entry
         conn.execute(
             "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
             params![id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
-        // Delete embeddings
         conn.execute("DELETE FROM embeddings WHERE meeting_id = ?1", params![id])
             .map_err(|e| format!("Delete embeddings: {e}"))?;
 
-        // Delete meeting (CASCADE deletes segments)
         conn.execute("DELETE FROM meetings WHERE id = ?1", params![id])
             .map_err(|e| format!("Delete meeting: {e}"))?;
 
         Ok(())
     }
 
-    /// Update meeting summary fields.
+    /// Update meeting summary fields and clear the stale flag.
     pub fn update_meeting_summary(
         &self,
         id: &str,
@@ -237,7 +261,9 @@ impl Database {
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
-            "UPDATE meetings SET summary = ?1, summary_model = ?2, summary_generated_at = ?3 WHERE id = ?4",
+            "UPDATE meetings
+             SET summary = ?1, summary_is_stale = 0, summary_model = ?2, summary_generated_at = ?3
+             WHERE id = ?4",
             params![summary, model, now, id],
         )
         .map_err(|e| format!("Update summary: {e}"))?;
@@ -259,44 +285,43 @@ impl Database {
     }
 }
 
-/// Intermediate struct for reading meeting rows
 struct MeetingRow {
     id: String,
     title: String,
     started_at: String,
     ended_at: Option<String>,
     duration_seconds: f64,
-    engine: String,
-    transcription_profile: Option<String>,
+    transcription_profile: String,
+    recording_sessions: String,
     summary: Option<String>,
+    summary_is_stale: bool,
     summary_model: Option<String>,
     summary_generated_at: Option<String>,
 }
 
 impl MeetingRow {
     fn transcription_profile(&self) -> Result<TranscriptionProfile, String> {
-        let profile = self
-            .transcription_profile
-            .as_deref()
-            .map(serde_json::from_str::<TranscriptionProfile>)
-            .transpose()
-            .map_err(|e| format!("Deserialize transcription profile: {e}"))?;
+        serde_json::from_str(&self.transcription_profile)
+            .map_err(|e| format!("Deserialize transcription profile: {e}"))
+    }
 
-        resolve_legacy_transcription_profile(profile, Some(&self.engine))
+    fn recording_sessions(&self) -> Result<Vec<MeetingRecordingSession>, String> {
+        serde_json::from_str(&self.recording_sessions)
+            .map_err(|e| format!("Deserialize recording sessions: {e}"))
     }
 }
 
-fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
-    DateTime::parse_from_rfc3339(s)
+fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
+    DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| format!("Parse datetime '{s}': {e}"))
+        .map_err(|e| format!("Parse datetime '{value}': {e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::engine::TranscriptionSegment;
+    use crate::engine::{TranscriptionProfile, TranscriptionSegment};
     use crate::transcript::MeetingTranscript;
     use tempfile::TempDir;
 
@@ -308,13 +333,23 @@ mod tests {
     }
 
     fn sample_meeting(id: &str) -> MeetingTranscript {
+        let started_at = Utc::now();
+        let ended_at = started_at + chrono::Duration::seconds(60);
+
         MeetingTranscript {
             id: id.to_string(),
             title: "Test Meeting".to_string(),
-            started_at: Utc::now(),
-            ended_at: Some(Utc::now()),
+            started_at,
+            ended_at: Some(ended_at),
             duration_seconds: 60.0,
             transcription_profile: TranscriptionProfile::default(),
+            recording_sessions: vec![MeetingRecordingSession::completed(
+                format!("{id}-session-1"),
+                started_at,
+                ended_at,
+                0,
+                2,
+            )],
             segments: vec![
                 TranscriptionSegment {
                     text: "Hello world".to_string(),
@@ -334,6 +369,7 @@ mod tests {
                 },
             ],
             summary: None,
+            summary_is_stale: false,
             summary_model: None,
             summary_generated_at: None,
         }
@@ -349,6 +385,9 @@ mod tests {
         assert_eq!(loaded.id, "m1");
         assert_eq!(loaded.title, "Test Meeting");
         assert_eq!(loaded.segments.len(), 2);
+        assert_eq!(loaded.recording_sessions.len(), 1);
+        assert_eq!(loaded.recording_sessions[0].start_segment_index, 0);
+        assert_eq!(loaded.recording_sessions[0].end_segment_index, 2);
         assert_eq!(loaded.segments[0].text, "Hello world");
         assert_eq!(loaded.segments[1].text, "second segment");
         assert_eq!(
@@ -360,11 +399,20 @@ mod tests {
     #[test]
     fn list_meetings() {
         let (db, _dir) = test_db();
-        db.save_meeting(&sample_meeting("m1")).unwrap();
-        db.save_meeting(&sample_meeting("m2")).unwrap();
+        let first = sample_meeting("m1");
+        let mut second = sample_meeting("m2");
+        second.summary = Some("Fresh summary".to_string());
+        second.summary_is_stale = true;
+
+        db.save_meeting(&first).unwrap();
+        db.save_meeting(&second).unwrap();
 
         let list = db.list_meetings().unwrap();
         assert_eq!(list.len(), 2);
+        assert!(
+            list.iter()
+                .any(|item| item.id == "m2" && item.summary_is_stale)
+        );
     }
 
     #[test]
@@ -380,12 +428,15 @@ mod tests {
     #[test]
     fn update_summary() {
         let (db, _dir) = test_db();
-        db.save_meeting(&sample_meeting("m1")).unwrap();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary_is_stale = true;
+        db.save_meeting(&meeting).unwrap();
         db.update_meeting_summary("m1", "Summary text", "qwen2.5")
             .unwrap();
 
         let loaded = db.load_meeting("m1").unwrap();
         assert_eq!(loaded.summary.as_deref(), Some("Summary text"));
+        assert!(!loaded.summary_is_stale);
         assert_eq!(loaded.summary_model.as_deref(), Some("qwen2.5"));
         assert!(loaded.summary_generated_at.is_some());
     }
@@ -394,33 +445,5 @@ mod tests {
     fn load_nonexistent_meeting_returns_error() {
         let (db, _dir) = test_db();
         assert!(db.load_meeting("nonexistent").is_err());
-    }
-
-    #[test]
-    fn load_meeting_uses_legacy_engine_when_profile_missing() {
-        let (db, _dir) = test_db();
-        let conn = db.conn.acquire().unwrap();
-        conn.execute(
-            "INSERT INTO meetings (id, title, started_at, ended_at, duration_seconds, engine, summary, summary_model, summary_generated_at, edited_transcript)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                "legacy-id",
-                "Legacy Meeting",
-                Utc::now().to_rfc3339(),
-                None::<String>,
-                12.0,
-                "Legacy Engine",
-                None::<String>,
-                None::<String>,
-                None::<String>,
-                None::<String>,
-            ],
-        )
-        .unwrap();
-        drop(conn);
-
-        let loaded = db.load_meeting("legacy-id").unwrap();
-        assert_eq!(loaded.transcription_profile.engine_label, "Legacy Engine");
-        assert_eq!(loaded.transcription_profile.model_id, "legacy");
     }
 }

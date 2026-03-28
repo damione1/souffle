@@ -47,6 +47,7 @@ This document is the repo-level implementation standard for Souffle. It compleme
 
 - Keep Svelte view files focused on rendering and local interaction state.
 - Do not hand-parse arbitrary backend JSON in components.
+- Use `@lucide/svelte` for app icons in Svelte 5 components. Do not add inline SVG markup unless the icon is custom artwork that does not exist in the shared library.
 - Use `errorMessage()` for surfaced errors.
 - Keep app store state as the single frontend source of truth for view/recording state.
 - Preserve the existing UI language and layout unless a task explicitly requests UX changes.

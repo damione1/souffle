@@ -151,6 +151,17 @@ async startMeetingRecording(title: string, channel: TAURI_CHANNEL<TranscriptionS
 }
 },
 /**
+ * Resume recording on an existing meeting and append new transcript segments.
+ */
+async resumeMeetingRecording(meetingId: string, channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resume_meeting_recording", { meetingId, channel }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Stop meeting recording and save transcript.
  */
 async stopMeetingRecording() : Promise<Result<string, string>> {
@@ -356,11 +367,12 @@ export type DownloadStatus = "starting" | "downloading" | "complete" | { error: 
 /**
  * Lightweight item for listing meetings
  */
-export type MeetingListItem = { id: string; title: string; started_at: string; duration_seconds: number; has_summary: boolean }
+export type MeetingListItem = { id: string; title: string; started_at: string; duration_seconds: number; has_summary: boolean; summary_is_stale: boolean }
+export type MeetingRecordingSession = { id: string; started_at: string; ended_at: string; duration_seconds: number; start_segment_index: number; end_segment_index: number }
 /**
  * Full meeting transcript stored as JSON
  */
-export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; segments: TranscriptionSegment[]; summary: string | null; summary_model: string | null; summary_generated_at: string | null }
+export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null }
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
 export type OllamaStatus = { available: boolean; base_url: string; models: OllamaModelDescriptor[] }

@@ -1,4 +1,11 @@
-import { getMeeting, startMeetingRecording, stopMeetingRecording, summarizeMeeting as runMeetingSummary, deleteMeeting as removeMeeting } from "../../api/meetings";
+import {
+  deleteMeeting as removeMeeting,
+  getMeeting,
+  resumeMeetingRecording,
+  startMeetingRecording,
+  stopMeetingRecording,
+  summarizeMeeting as runMeetingSummary,
+} from "../../api/meetings";
 import { getOllamaStatus } from "../../api/ollama";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
@@ -27,6 +34,9 @@ export function createMeetingController() {
 
   let meeting = $state<MeetingTranscript | null>(null);
   let isLoadingMeeting = $state(false);
+  let canResumeRecording = $derived(
+    Boolean(meeting?.id) && !isRecordingMeeting && !isLoadingMeeting && !isSummarizing,
+  );
 
   async function mount() {
     await Promise.all([checkOllama(), loadTranscriptionCatalog()]);
@@ -92,6 +102,7 @@ export function createMeetingController() {
       const title = meetingTitle.trim() || defaultMeetingTitle();
       liveMeetingSegments = [];
       statusMessage = "";
+      summaryStream = "";
       meeting = null;
       const transcriptionProfile = toSelectedTranscriptionProfile(
         transcriptionCatalog,
@@ -114,12 +125,36 @@ export function createMeetingController() {
         ended_at: null,
         duration_seconds: 0,
         transcription_profile: transcriptionProfile,
+        recording_sessions: [],
         segments: [],
         summary: null,
+        summary_is_stale: false,
         summary_model: null,
         summary_generated_at: null,
       };
       meetingTitle = "";
+    } catch (e) {
+      statusMessage = errorMessage(e);
+      liveMeetingSegments = [];
+    }
+  }
+
+  async function resumeRecording() {
+    if (!meeting || !meeting.id) return;
+
+    try {
+      liveMeetingSegments = [];
+      statusMessage = "";
+      summaryStream = "";
+
+      await resumeMeetingRecording(meeting.id, (segment) => {
+        if (!segment.is_final || !segment.text) return;
+        liveMeetingSegments = [...liveMeetingSegments, segment];
+      });
+
+      isRecordingMeeting = true;
+      app.isRecording = true;
+      app.recordingMode = "meeting";
     } catch (e) {
       statusMessage = errorMessage(e);
       liveMeetingSegments = [];
@@ -191,10 +226,12 @@ export function createMeetingController() {
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
     get isLoadingMeeting() { return isLoadingMeeting; },
+    get canResumeRecording() { return canResumeRecording; },
     mount,
     onMeetingSelectionChange,
     checkOllama,
     startRecording,
+    resumeRecording,
     stopRecording,
     summarizeMeeting,
     deleteMeeting,

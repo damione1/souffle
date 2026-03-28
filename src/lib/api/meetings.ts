@@ -24,6 +24,15 @@ export async function startMeetingRecording(
   await unwrap(commands.startMeetingRecording(title, channel));
 }
 
+export async function resumeMeetingRecording(
+  id: string,
+  onSegment: (segment: TranscriptionSegment) => void,
+): Promise<void> {
+  const channel = new Channel<TranscriptionSegment>();
+  channel.onmessage = onSegment;
+  await unwrap(commands.resumeMeetingRecording(id, channel));
+}
+
 export async function stopMeetingRecording(): Promise<string> {
   return unwrap(commands.stopMeetingRecording());
 }

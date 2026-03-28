@@ -44,6 +44,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::test_transcribe_wav,
             commands::paste_text,
             commands::start_meeting_recording,
+            commands::resume_meeting_recording,
             commands::stop_meeting_recording,
             commands::list_meetings,
             commands::get_meeting,

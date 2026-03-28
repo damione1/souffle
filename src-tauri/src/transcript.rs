@@ -4,6 +4,35 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::{TranscriptionProfile, TranscriptionSegment, default_transcription_profile};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
+pub struct MeetingRecordingSession {
+    pub id: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: DateTime<Utc>,
+    pub duration_seconds: f64,
+    pub start_segment_index: u64,
+    pub end_segment_index: u64,
+}
+
+impl MeetingRecordingSession {
+    pub fn completed(
+        id: String,
+        started_at: DateTime<Utc>,
+        ended_at: DateTime<Utc>,
+        start_segment_index: u64,
+        end_segment_index: u64,
+    ) -> Self {
+        Self {
+            id,
+            started_at,
+            ended_at,
+            duration_seconds: (ended_at - started_at).num_seconds().max(0) as f64,
+            start_segment_index,
+            end_segment_index,
+        }
+    }
+}
+
 /// Full meeting transcript stored as JSON
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct MeetingTranscript {
@@ -13,8 +42,10 @@ pub struct MeetingTranscript {
     pub ended_at: Option<DateTime<Utc>>,
     pub duration_seconds: f64,
     pub transcription_profile: TranscriptionProfile,
+    pub recording_sessions: Vec<MeetingRecordingSession>,
     pub segments: Vec<TranscriptionSegment>,
     pub summary: Option<String>,
+    pub summary_is_stale: bool,
     pub summary_model: Option<String>,
     pub summary_generated_at: Option<DateTime<Utc>>,
 }
@@ -29,9 +60,13 @@ struct MeetingTranscriptWire {
     #[serde(default)]
     transcription_profile: Option<TranscriptionProfile>,
     #[serde(default)]
+    recording_sessions: Option<Vec<MeetingRecordingSession>>,
+    #[serde(default)]
     engine: Option<String>,
     segments: Vec<TranscriptionSegment>,
     summary: Option<String>,
+    #[serde(default)]
+    summary_is_stale: Option<bool>,
     summary_model: Option<String>,
     summary_generated_at: Option<DateTime<Utc>>,
 }
@@ -47,6 +82,14 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             wire.engine.as_deref(),
         )
         .map_err(de::Error::custom)?;
+        let recording_sessions = resolve_legacy_recording_sessions(
+            wire.recording_sessions,
+            &wire.id,
+            wire.started_at,
+            wire.ended_at,
+            wire.duration_seconds,
+            wire.segments.len(),
+        );
 
         Ok(Self {
             id: wire.id,
@@ -55,8 +98,10 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             ended_at: wire.ended_at,
             duration_seconds: wire.duration_seconds,
             transcription_profile,
+            recording_sessions,
             segments: wire.segments,
             summary: wire.summary,
+            summary_is_stale: wire.summary_is_stale.unwrap_or(false),
             summary_model: wire.summary_model,
             summary_generated_at: wire.summary_generated_at,
         })
@@ -78,6 +123,43 @@ pub fn resolve_legacy_transcription_profile(
     Ok(default_transcription_profile())
 }
 
+pub fn legacy_recording_session(
+    meeting_id: &str,
+    started_at: DateTime<Utc>,
+    ended_at: Option<DateTime<Utc>>,
+    duration_seconds: f64,
+    segment_count: usize,
+) -> MeetingRecordingSession {
+    MeetingRecordingSession {
+        id: format!("{meeting_id}-session-1"),
+        started_at,
+        ended_at: ended_at.unwrap_or(started_at),
+        duration_seconds,
+        start_segment_index: 0,
+        end_segment_index: segment_count as u64,
+    }
+}
+
+pub fn resolve_legacy_recording_sessions(
+    recording_sessions: Option<Vec<MeetingRecordingSession>>,
+    meeting_id: &str,
+    started_at: DateTime<Utc>,
+    ended_at: Option<DateTime<Utc>>,
+    duration_seconds: f64,
+    segment_count: usize,
+) -> Vec<MeetingRecordingSession> {
+    match recording_sessions {
+        Some(sessions) if !sessions.is_empty() => sessions,
+        _ => vec![legacy_recording_session(
+            meeting_id,
+            started_at,
+            ended_at,
+            duration_seconds,
+            segment_count,
+        )],
+    }
+}
+
 /// Lightweight item for listing meetings
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct MeetingListItem {
@@ -86,6 +168,7 @@ pub struct MeetingListItem {
     pub started_at: DateTime<Utc>,
     pub duration_seconds: f64,
     pub has_summary: bool,
+    pub summary_is_stale: bool,
 }
 
 impl From<&MeetingTranscript> for MeetingListItem {
@@ -96,6 +179,7 @@ impl From<&MeetingTranscript> for MeetingListItem {
             started_at: t.started_at,
             duration_seconds: t.duration_seconds,
             has_summary: t.summary.is_some(),
+            summary_is_stale: t.summary_is_stale,
         }
     }
 }
@@ -114,6 +198,13 @@ mod tests {
             ended_at: None,
             duration_seconds: 30.0,
             transcription_profile: default_transcription_profile(),
+            recording_sessions: vec![MeetingRecordingSession::completed(
+                "session-1".to_string(),
+                Utc::now(),
+                Utc::now(),
+                0,
+                1,
+            )],
             segments: vec![TranscriptionSegment {
                 text: "hello".to_string(),
                 start_time: 0.0,
@@ -123,6 +214,7 @@ mod tests {
                 confidence: None,
             }],
             summary: Some("A summary".to_string()),
+            summary_is_stale: false,
             summary_model: Some("test-model".to_string()),
             summary_generated_at: None,
         };
@@ -136,6 +228,8 @@ mod tests {
             deserialized.transcription_profile,
             default_transcription_profile()
         );
+        assert_eq!(deserialized.recording_sessions.len(), 1);
+        assert!(!deserialized.summary_is_stale);
     }
 
     #[test]
@@ -147,8 +241,16 @@ mod tests {
             ended_at: None,
             duration_seconds: 120.0,
             transcription_profile: default_transcription_profile(),
+            recording_sessions: vec![MeetingRecordingSession::completed(
+                "session-1".to_string(),
+                Utc::now(),
+                Utc::now(),
+                0,
+                0,
+            )],
             segments: vec![],
             summary: Some("summary".to_string()),
+            summary_is_stale: true,
             summary_model: None,
             summary_generated_at: None,
         };
@@ -157,6 +259,7 @@ mod tests {
         assert_eq!(item.id, "m1");
         assert_eq!(item.title, "My Meeting");
         assert!(item.has_summary);
+        assert!(item.summary_is_stale);
     }
 
     #[test]
@@ -175,7 +278,12 @@ mod tests {
         });
 
         let deserialized: MeetingTranscript = serde_json::from_value(json).unwrap();
-        assert_eq!(deserialized.transcription_profile.engine_label, "Custom Engine");
+        assert_eq!(
+            deserialized.transcription_profile.engine_label,
+            "Custom Engine"
+        );
         assert_eq!(deserialized.transcription_profile.model_id, "legacy");
+        assert_eq!(deserialized.recording_sessions.len(), 1);
+        assert!(!deserialized.summary_is_stale);
     }
 }
