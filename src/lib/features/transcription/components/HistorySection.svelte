@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ChevronDown, Copy, Trash2 } from "@lucide/svelte";
+  import { t } from "svelte-i18n";
   import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
   import type { DictationEntry } from "../../../types";
 
@@ -24,11 +25,11 @@
 
 <section class="surface-card">
   <div class="flex items-center justify-between gap-4 flex-wrap">
-    <h3>History <span class="text-sm text-text-muted font-normal">({history.length})</span></h3>
+    <h3>{$t("dictation_history.title")} <span class="text-sm text-text-muted font-normal">({history.length})</span></h3>
     <ConfirmAction
-      label="Clear all"
-      confirmLabel="Yes, clear"
-      confirmMessage="Clear all entries?"
+      label={$t("dictation_history.clear_all")}
+      confirmLabel={$t("dictation_history.clear_confirm_label")}
+      confirmMessage={$t("dictation_history.clear_confirm_msg")}
       variant="danger"
       onConfirm={onClearHistory}
     />
@@ -46,7 +47,7 @@
           <span class="flex items-center justify-between gap-3">
             <span class="text-xs text-text-muted">{new Date(entry.timestamp).toLocaleString()}</span>
             <span class="inline-flex items-center gap-1 text-xs text-text-muted">
-              {isExpanded ? "Collapse" : "Expand"}
+              {isExpanded ? $t("dictation_history.collapse") : $t("dictation_history.expand")}
               <ChevronDown size={14} class={`transition-transform duration-150 ${isExpanded ? "rotate-180" : ""}`} />
             </span>
           </span>
@@ -60,11 +61,11 @@
           <div class="flex gap-1 px-3 pb-2">
             <button onclick={() => navigator.clipboard.writeText(entry.text)} class="btn btn-ghost btn-sm gap-1.5">
               <Copy size={14} />
-              Copy
+              {$t("dictation_history.copy")}
             </button>
             <button onclick={() => onDeleteEntry(entry.id)} class="btn btn-ghost btn-sm gap-1.5 text-danger">
               <Trash2 size={14} />
-              Delete
+              {$t("dictation_history.delete")}
             </button>
           </div>
         {/if}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ChevronRight } from "@lucide/svelte";
+  import { t } from "svelte-i18n";
   import type { MeetingListItem } from "../../../types";
   import { formatDate, formatDuration } from "../../../utils";
   import EmptyState from "../../../components/ui/EmptyState.svelte";
@@ -22,8 +23,8 @@
 
 <div class="flex flex-col gap-4">
   <div class="flex items-center gap-3">
-    <h2>Meeting History</h2>
-    <span class="pill">{meetings.length} meetings</span>
+    <h2>{$t("meeting_history.title")}</h2>
+    <span class="pill">{$t("meeting_history.meetings_count", { values: { count: meetings.length } })}</span>
   </div>
 
   {#if statusMessage}
@@ -33,14 +34,14 @@
   <input
     type="text"
     bind:value={searchQuery}
-    placeholder="Search meetings..."
+    placeholder={$t("meeting_history.search_placeholder")}
     class="field-input"
   />
 
   {#if filteredMeetings.length === 0}
     <EmptyState
-      title={searchQuery ? "No matches" : "No meetings yet"}
-      message={searchQuery ? "Try a different search term." : "Start a meeting recording to build your transcript library."}
+      title={searchQuery ? $t("meeting_history.no_matches_title") : $t("meeting_history.no_meetings_title")}
+      message={searchQuery ? $t("meeting_history.no_matches_msg") : $t("meeting_history.no_meetings_msg")}
     />
   {:else}
     <div class="flex flex-col gap-2">
@@ -58,7 +59,7 @@
               <span class="pill">{formatDuration(meeting.duration_seconds)}</span>
               {#if meeting.has_summary}
                 <span class={`pill ${meeting.summary_is_stale ? "pill-warning" : "pill-success"}`}>
-                  {meeting.summary_is_stale ? "Summary outdated" : "Summary"}
+                  {meeting.summary_is_stale ? $t("meeting_history.summary_outdated") : $t("meeting_history.summary")}
                 </span>
               {/if}
             </div>

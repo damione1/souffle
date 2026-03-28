@@ -8,6 +8,7 @@ import {
   saveShortcuts as persistShortcutSettings,
   selectAudioDevice,
 } from "../../api/settings";
+import { setLocale } from "../../i18n";
 import { getAppState } from "../../stores/app.svelte";
 import type {
   AppSettings,
@@ -237,6 +238,13 @@ export function createSettingsController() {
     });
   }
 
+  function onLocaleChange(locale: string) {
+    setLocale(locale);
+    void persistSettings((settings) => {
+      settings.locale = locale;
+    });
+  }
+
   function onAutoPasteChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -392,6 +400,7 @@ export function createSettingsController() {
     handleDownloadModel,
     handleLoadModel,
     onThemeChange,
+    onLocaleChange,
     onAutoPasteChange,
     onPasteDelayChange,
     onDebugTranscriptionChange,

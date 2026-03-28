@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { t } from "svelte-i18n";
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
@@ -18,7 +19,7 @@
       controller.app.settings.transcription_engine_id,
       controller.app.settings.transcription_model_id,
       controller.app.settings.transcription_backend_id,
-    ) || "No transcription model selected",
+    ) || $t("settings.no_model_selected"),
   );
 
   let selectedOllamaModelLabel = $derived(
@@ -34,7 +35,7 @@
 <svelte:window onkeydown={controller.handleKeyDown} />
 
 <div class="flex flex-col gap-4">
-  <h2>Settings</h2>
+  <h2>{$t("settings.title")}</h2>
 
   {#if controller.statusMessage}
     <StatusBanner message={controller.statusMessage} />
@@ -77,6 +78,7 @@
 
   <InterfaceSettingsSection
     theme={controller.app.settings.theme}
+    locale={controller.app.settings.locale}
     autoPaste={controller.app.settings.auto_paste}
     pasteDelayMs={controller.app.settings.paste_delay_ms}
     toggleShortcut={controller.toggleShortcut}
@@ -84,6 +86,7 @@
     recordingField={controller.recordingField}
     shortcutError={controller.shortcutError}
     onThemeChange={controller.onThemeChange}
+    onLocaleChange={controller.onLocaleChange}
     onAutoPasteChange={controller.onAutoPasteChange}
     onPasteDelayChange={controller.onPasteDelayChange}
     onStartRecording={controller.startRecording}

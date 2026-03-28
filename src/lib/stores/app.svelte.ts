@@ -27,6 +27,7 @@ let downloadTotalFiles = $state(0);
 // Settings with defaults
 let settings = $state<AppSettings>({
   theme: "dark",
+  locale: "",
   auto_paste: false,
   paste_delay_ms: 100,
   ollama_url: "http://localhost:11434",

@@ -17,6 +17,7 @@ const AUDIO_DEVICE_KEY: &str = "audio_device";
 const TRANSCRIPTION_ENGINE_ID_KEY: &str = "transcription_engine_id";
 const TRANSCRIPTION_MODEL_ID_KEY: &str = "transcription_model_id";
 const TRANSCRIPTION_BACKEND_ID_KEY: &str = "transcription_backend_id";
+const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
 
@@ -32,6 +33,7 @@ pub enum Theme {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 pub struct AppSettings {
     pub theme: Theme,
+    pub locale: String,
     pub auto_paste: bool,
     pub paste_delay_ms: u64,
     pub ollama_url: String,
@@ -47,6 +49,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: Theme::Dark,
+            locale: String::new(),
             auto_paste: false,
             paste_delay_ms: 100,
             ollama_url: OLLAMA_DEFAULT_URL.to_string(),
@@ -66,6 +69,9 @@ impl AppSettings {
 
         if let Some(theme) = read_json_setting::<Theme>(db, THEME_KEY)? {
             settings.theme = theme;
+        }
+        if let Some(locale) = read_json_setting::<String>(db, LOCALE_KEY)? {
+            settings.locale = locale;
         }
         if let Some(auto_paste) = read_json_setting::<bool>(db, AUTO_PASTE_KEY)? {
             settings.auto_paste = auto_paste;
@@ -131,6 +137,7 @@ impl AppSettings {
 
     fn sanitized(&self) -> Self {
         let mut normalized = self.clone();
+        normalized.locale = normalized.locale.trim().to_string();
         normalized.ollama_url = normalized.ollama_url.trim().to_string();
         normalized.ollama_model = normalized.ollama_model.trim().to_string();
         normalized.transcription_engine_id = normalized.transcription_engine_id.trim().to_string();
@@ -182,6 +189,7 @@ impl AppSettings {
         let normalized = self.sanitize_for_save()?;
 
         write_json_setting(db, THEME_KEY, &normalized.theme)?;
+        write_json_setting(db, LOCALE_KEY, &normalized.locale)?;
         write_json_setting(db, AUTO_PASTE_KEY, &normalized.auto_paste)?;
         write_json_setting(db, PASTE_DELAY_MS_KEY, &normalized.paste_delay_ms)?;
         write_json_setting(db, OLLAMA_URL_KEY, &normalized.ollama_url)?;
@@ -308,6 +316,7 @@ mod tests {
         let (db, _dir) = test_db();
         let settings = AppSettings {
             theme: Theme::Light,
+            locale: "fr".into(),
             auto_paste: true,
             paste_delay_ms: 250,
             ollama_url: "http://example.test:11434".into(),

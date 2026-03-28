@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { OllamaModelDescriptor } from "../../../types";
 
@@ -24,32 +25,32 @@
 </script>
 
 <section class="surface-card flex flex-col gap-3.5">
-  <h3>Summarization</h3>
-  <p class="text-text-secondary text-sm">Souffle uses a local Ollama server to generate meeting summaries.</p>
+  <h3>{$t("settings_intelligence.title")}</h3>
+  <p class="text-text-secondary text-sm">{$t("settings_intelligence.description")}</p>
 
   <div class="flex items-center justify-between gap-4">
     <div>
-      <label for="ollama-url" class="block text-[0.9375rem] font-medium text-text-primary">Ollama URL</label>
-      <span class="text-sm text-text-muted">Address of your local Ollama server.</span>
+      <label for="ollama-url" class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_intelligence.ollama_url")}</label>
+      <span class="text-sm text-text-muted">{$t("settings_intelligence.ollama_url_desc")}</span>
     </div>
     <input id="ollama-url" type="text" value={ollamaUrl} onchange={onOllamaUrlChange} class="field-input max-w-64" />
   </div>
 
   <div class="flex items-center justify-between gap-4">
     <div>
-      <span class="block text-[0.9375rem] font-medium text-text-primary">Connection status</span>
-      <span class="text-sm text-text-muted">{ollamaModels.length} model{ollamaModels.length === 1 ? "" : "s"} found.</span>
+      <span class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_intelligence.connection_status")}</span>
+      <span class="text-sm text-text-muted">{$t("settings_intelligence.models_found", { values: { count: ollamaModels.length } })}</span>
     </div>
     <div class="flex gap-2 items-center">
       <span class="status-dot" class:is-online={ollamaAvailable}></span>
-      <span class="text-sm text-text-muted">{ollamaAvailable ? "Connected" : "Not available"}</span>
-      <button onclick={onRetryOllama} class="btn">Retry</button>
+      <span class="text-sm text-text-muted">{ollamaAvailable ? $t("settings_intelligence.connected") : $t("settings_intelligence.not_available")}</span>
+      <button onclick={onRetryOllama} class="btn">{$t("settings_intelligence.retry")}</button>
     </div>
   </div>
 
   {#if ollamaAvailable && summaryModels.length > 0}
     <div class="flex flex-col gap-1.5">
-      <label for="summary-model" class="field-label">Summarization model</label>
+      <label for="summary-model" class="field-label">{$t("settings_intelligence.summary_model")}</label>
       <select
         id="summary-model"
         value={selectedOllamaModel || summaryModels[0].id}
@@ -62,6 +63,6 @@
       </select>
     </div>
   {:else if ollamaAvailable && ollamaModels.length > 0}
-    <StatusBanner message="No compatible model found. Install a model like Llama or Mistral to enable summaries." />
+    <StatusBanner message={$t("settings_intelligence.no_compatible_model")} />
   {/if}
 </section>

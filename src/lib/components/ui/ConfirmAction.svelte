@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
+
   let {
     label,
-    confirmLabel = "Yes",
-    confirmMessage = "Are you sure?",
+    confirmLabel,
+    confirmMessage,
     variant = "danger",
     onConfirm,
   }: {
@@ -18,7 +20,7 @@
 
 {#if confirming}
   <div class="flex items-center gap-2 flex-wrap">
-    <span class="text-sm text-text-muted">{confirmMessage}</span>
+    <span class="text-sm text-text-muted">{confirmMessage ?? $t("ui.are_you_sure")}</span>
     <button
       onclick={() => {
         onConfirm();
@@ -26,9 +28,9 @@
       }}
       class={`btn ${variant === "danger" ? "btn-danger" : ""}`}
     >
-      {confirmLabel}
+      {confirmLabel ?? $t("ui.yes")}
     </button>
-    <button onclick={() => (confirming = false)} class="btn btn-ghost">Cancel</button>
+    <button onclick={() => (confirming = false)} class="btn btn-ghost">{$t("ui.cancel")}</button>
   </div>
 {:else}
   <button

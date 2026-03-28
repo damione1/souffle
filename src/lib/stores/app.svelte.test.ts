@@ -40,6 +40,7 @@ describe('app store', () => {
     const state = getAppState();
     const newSettings = {
       theme: 'light' as const,
+      locale: 'fr',
       auto_paste: true,
       paste_delay_ms: 200,
       ollama_url: 'http://localhost:11434',

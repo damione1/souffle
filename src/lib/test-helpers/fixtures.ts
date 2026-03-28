@@ -174,6 +174,7 @@ export const mockMeetingList: MeetingListItem[] = [
 
 export const mockSettings: AppSettings = {
   theme: "dark",
+  locale: "",
   auto_paste: false,
   paste_delay_ms: 100,
   ollama_url: "http://localhost:11434",

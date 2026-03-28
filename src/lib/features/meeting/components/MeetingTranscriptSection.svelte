@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import CopyButton from "../../../components/ui/CopyButton.svelte";
   import type { MeetingRecordingSession, TranscriptionSegment } from "../../../types";
   import { buildMeetingTranscriptBlocks } from "../../../utils";
@@ -39,7 +40,7 @@
 
 <section class="surface-card flex flex-col gap-3">
   <div class="flex items-center justify-between gap-4 flex-wrap">
-    <h3>Transcript</h3>
+    <h3>{$t("meeting_transcript.title")}</h3>
     {#if phase === "has_content" && !isRecordingMeeting}
       <CopyButton text={copyText} />
     {/if}
@@ -67,7 +68,7 @@
     {:else}
       <div class="flex items-center justify-center min-h-[200px]">
         <span class="text-text-muted">
-          {phase === "recording_empty" ? "Listening for speech..." : "No transcript available."}
+          {phase === "recording_empty" ? $t("meeting_transcript.listening") : $t("meeting_transcript.no_transcript")}
         </span>
       </div>
     {/if}

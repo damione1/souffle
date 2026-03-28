@@ -10,5 +10,6 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
     globals: true,
+    setupFiles: ['src/lib/test-helpers/setup-i18n.ts'],
   },
 });

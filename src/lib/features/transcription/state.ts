@@ -2,26 +2,26 @@ import type { TranscriptionRuntimePhase } from "../../types";
 
 export type TranscriptionModelOperationState = "idle" | "downloading" | "loading";
 
-export function runtimePhaseHeroLabel(phase: TranscriptionRuntimePhase): string {
+export function runtimePhaseHeroLabelKey(phase: TranscriptionRuntimePhase): string {
   switch (phase) {
     case "download_required":
-      return "Download required";
+      return "runtime_phase.download_required";
     case "load_required":
-      return "Load required";
+      return "runtime_phase.load_required";
     case "ready":
-      return "Model ready";
+      return "runtime_phase.model_ready";
   }
   return phase satisfies never;
 }
 
-export function runtimePhaseAvailabilityLabel(phase: TranscriptionRuntimePhase): string {
+export function runtimePhaseAvailabilityLabelKey(phase: TranscriptionRuntimePhase): string {
   switch (phase) {
     case "download_required":
-      return "Not downloaded";
+      return "runtime_phase.not_downloaded";
     case "load_required":
-      return "Downloaded";
+      return "runtime_phase.downloaded";
     case "ready":
-      return "Ready";
+      return "runtime_phase.ready";
   }
   return phase satisfies never;
 }

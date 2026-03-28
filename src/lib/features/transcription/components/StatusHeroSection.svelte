@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import type { TranscriptionRuntimePhase } from "../../../types";
-  import { runtimePhaseHeroLabel, runtimePhasePillClass } from "../state";
+  import { runtimePhaseHeroLabelKey, runtimePhasePillClass } from "../state";
 
   let {
     profileLabel,
@@ -18,10 +19,10 @@
     <div class="flex flex-wrap gap-2">
       <span class="pill pill-blue">{profileLabel}</span>
       <span class={`pill ${runtimePhasePillClass(runtimePhase)}`}>
-        {runtimePhaseHeroLabel(runtimePhase)}
+        {$t(runtimePhaseHeroLabelKey(runtimePhase))}
       </span>
       <span class={`pill ${autoPaste ? "pill-blue" : "pill-muted"}`}>
-        {autoPaste ? "Auto-paste" : "Manual copy"}
+        {autoPaste ? $t("status_hero.auto_paste") : $t("status_hero.manual_copy")}
       </span>
     </div>
   </div>

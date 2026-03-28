@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Clock3, WandSparkles } from "@lucide/svelte";
+  import { t } from "svelte-i18n";
   import CopyButton from "../../../components/ui/CopyButton.svelte";
   import EmptyState from "../../../components/ui/EmptyState.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
@@ -48,11 +49,11 @@
   );
 
   type SummaryPhase =
-    | "summary_recording"   // has summary + currently recording
-    | "summary_stale"       // has summary but outdated
-    | "summary_current"     // has fresh summary
-    | "recording"           // recording, no summary yet
-    | "empty";              // stopped, no summary
+    | "summary_recording"
+    | "summary_stale"
+    | "summary_current"
+    | "recording"
+    | "empty";
 
   let summaryPhase = $derived.by((): SummaryPhase => {
     if (meeting.summary) {
@@ -67,7 +68,7 @@
 
 <section class="surface-card flex flex-col gap-3">
   <div class="flex items-center justify-between gap-4 flex-wrap">
-    <h3>Summary</h3>
+    <h3>{$t("meeting_summary.title")}</h3>
     {#if meeting.summary}
       <CopyButton text={meeting.summary} />
     {/if}
@@ -86,29 +87,29 @@
 
   {#if summaryPhase === "summary_recording"}
     <div class="flex items-center gap-2 flex-wrap">
-      <span class="pill pill-warning">Recording in progress</span>
-      <span class="text-sm text-text-muted">You can regenerate the summary once the recording is stopped.</span>
+      <span class="pill pill-warning">{$t("meeting_summary.recording_in_progress")}</span>
+      <span class="text-sm text-text-muted">{$t("meeting_summary.can_regenerate")}</span>
     </div>
   {:else if summaryPhase === "summary_stale"}
     <div class="flex items-center gap-2 flex-wrap">
-      <span class="pill pill-warning">Summary outdated</span>
-      <span class="text-sm text-text-muted">New audio was added since this summary was generated.</span>
+      <span class="pill pill-warning">{$t("meeting_summary.summary_outdated")}</span>
+      <span class="text-sm text-text-muted">{$t("meeting_summary.new_audio_added")}</span>
     </div>
   {/if}
 
   {#if summaryPhase === "summary_recording" || summaryPhase === "summary_stale" || summaryPhase === "summary_current"}
     <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-[100px] max-h-[360px] overflow-y-auto text-sm leading-relaxed">{meeting.summary}</div>
     {#if generatedWithLabel}
-      <span class="pill pill-muted self-start">Generated with {generatedWithLabel}</span>
+      <span class="pill pill-muted self-start">{$t("meeting_summary.generated_with", { values: { model: generatedWithLabel } })}</span>
     {/if}
   {:else if summaryPhase === "recording"}
-    <EmptyState message="Stop the recording to generate a summary.">
+    <EmptyState message={$t("meeting_summary.stop_to_generate")}>
       {#snippet icon()}
         <Clock3 size={32} strokeWidth={1.5} />
       {/snippet}
     </EmptyState>
   {:else}
-    <EmptyState message="No summary yet. Generate one below.">
+    <EmptyState message={$t("meeting_summary.no_summary_yet")}>
       {#snippet icon()}
         <WandSparkles size={32} strokeWidth={1.5} />
       {/snippet}
@@ -135,19 +136,19 @@
         <button onclick={onSummarize} disabled={isSummarizing} class="btn btn-primary">
           {#if isSummarizing}
             <Spinner />
-            Generating...
+            {$t("meeting_summary.generating")}
           {:else}
-            {meeting.summary ? "Re-generate Summary" : "Generate Summary"}
+            {meeting.summary ? $t("meeting_summary.regenerate_summary") : $t("meeting_summary.generate_summary")}
           {/if}
         </button>
       </div>
     {:else if !ollamaAvailable}
       <div class="flex items-center gap-2 py-2">
         <span class="status-dot"></span>
-        <span class="text-sm text-text-muted">Connect Ollama in Settings to enable summaries.</span>
+        <span class="text-sm text-text-muted">{$t("meeting_summary.connect_ollama")}</span>
       </div>
     {:else}
-      <StatusBanner message="No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries." />
+      <StatusBanner message={$t("meeting_summary.no_compatible_model")} />
     {/if}
   {/if}
 </section>

@@ -1,0 +1,231 @@
+{
+  "nav": {
+    "transcription": "Transcription",
+    "meeting": "Meeting",
+    "history": "History",
+    "settings": "Settings"
+  },
+  "sidebar": {
+    "recording_meeting": "Meeting",
+    "recording_dictation": "Dictation",
+    "go_to_recording": "Go to active recording"
+  },
+  "settings": {
+    "title": "Settings",
+    "no_model_selected": "No transcription model selected"
+  },
+  "settings_audio": {
+    "title": "Audio",
+    "description": "Choose which microphone Souffle listens to.",
+    "input_device": "Input device",
+    "device_default_suffix": "(default)",
+    "refresh_devices": "Refresh devices",
+    "noise_reduction": "Noise Reduction",
+    "noise_reduction_desc": "Reduce background noise during capture.",
+    "coming_soon": "Coming Soon"
+  },
+  "settings_interface": {
+    "title": "Interface",
+    "theme": "Theme",
+    "theme_dark": "Dark",
+    "theme_light": "Light",
+    "theme_system": "System",
+    "auto_paste": "Auto-paste after dictation",
+    "auto_paste_desc": "Automatically pastes the transcript when you stop recording.",
+    "paste_delay": "Paste delay (ms)",
+    "paste_delay_desc": "Wait time before pasting. Increase if the text lands in the wrong app.",
+    "toggle_recording": "Toggle recording",
+    "toggle_recording_desc": "Press once to start or stop dictation.",
+    "press_keys": "Press keys...",
+    "clear": "Clear",
+    "push_to_talk": "Push-to-talk",
+    "push_to_talk_desc": "Hold to record, release to stop.",
+    "language": "Language",
+    "language_desc": "Choose the interface language."
+  },
+  "settings_intelligence": {
+    "title": "Summarization",
+    "description": "Souffle uses a local Ollama server to generate meeting summaries.",
+    "ollama_url": "Ollama URL",
+    "ollama_url_desc": "Address of your local Ollama server.",
+    "connection_status": "Connection status",
+    "models_found": "{count, plural, one {{count} model found.} other {{count} models found.}}",
+    "connected": "Connected",
+    "not_available": "Not available",
+    "retry": "Retry",
+    "summary_model": "Summarization model",
+    "no_compatible_model": "No compatible model found. Install a model like Llama or Mistral to enable summaries."
+  },
+  "settings_diagnostics": {
+    "title": "Diagnostics",
+    "debug_logs": "Detailed transcription logs",
+    "debug_logs_desc": "Log extra details about speech recognition for troubleshooting.",
+    "debug_logs_aria": "Verbose transcription debug logs"
+  },
+  "settings_about": {
+    "title": "About",
+    "version": "Version",
+    "transcription": "Transcription",
+    "summaries": "Summaries",
+    "not_configured": "Not configured",
+    "privacy": "Privacy",
+    "privacy_value": "Everything runs locally."
+  },
+  "model_gate": {
+    "title": "Transcription Model",
+    "description": "Choose the speech-to-text model Souffle uses for dictation and meetings.",
+    "engine": "Engine",
+    "model": "Model",
+    "runtime": "Runtime",
+    "runtime_suffix": "runtime",
+    "coming_soon_suffix": "(Coming soon)",
+    "languages_label": "Languages:",
+    "streaming": "Streaming",
+    "batch": "Batch",
+    "availability": "Availability",
+    "download_size_varies": "Download size varies by provider.",
+    "gb_download": "{size} GB download",
+    "gb_memory": "{size} GB RAM/VRAM",
+    "download_title": "Download {model}",
+    "download_stored_info": "The model is stored on your Mac and reused across sessions.",
+    "download_model": "Download model",
+    "downloading": "Downloading...",
+    "load_title": "Load {model}",
+    "load_info": "First load may take a few seconds while the model is prepared.",
+    "load_model": "Load model",
+    "loading": "Loading...",
+    "downloading_files": "Downloading model files...",
+    "keep_app_open": "Keep the app open while files download.",
+    "loading_model": "Loading model...",
+    "usually_few_seconds": "Usually takes a few seconds.",
+    "preparing_download": "Preparing download",
+    "files_progress": "{completed}/{total} files"
+  },
+  "runtime_phase": {
+    "download_required": "Download required",
+    "load_required": "Load required",
+    "model_ready": "Model ready",
+    "not_downloaded": "Not downloaded",
+    "downloaded": "Downloaded",
+    "ready": "Ready"
+  },
+  "status_hero": {
+    "auto_paste": "Auto-paste",
+    "manual_copy": "Manual copy"
+  },
+  "recorder": {
+    "heading_locked": "Meeting in progress",
+    "heading_starting": "Starting the microphone...",
+    "heading_recording": "Listening now",
+    "heading_default": "Ready when you are",
+    "desc_locked": "Stop the meeting recording before starting dictation.",
+    "desc_starting": "Starting up...",
+    "desc_recording": "Speak naturally. Text appears as you talk.",
+    "desc_downloading": "Downloading in the background. You can keep using the app.",
+    "desc_needs_download": "Download the model to start using dictation.",
+    "desc_loading": "Loading model...",
+    "desc_needs_load": "Load the model to start recording.",
+    "desc_ready": "Tap the button to begin.",
+    "action_locked": "Meeting recording in progress",
+    "action_starting": "Warming up...",
+    "action_recording": "Tap to stop",
+    "action_downloading": "Downloading model",
+    "action_needs_download": "Download model",
+    "action_loading": "Loading model...",
+    "action_needs_load": "Load model",
+    "action_ready": "Tap to start",
+    "downloading_model_aria": "Downloading model",
+    "download_model_aria": "Download model",
+    "load_model_aria": "Load model",
+    "stop_recording_aria": "Stop recording",
+    "start_recording_aria": "Start recording",
+    "input_label": "Input",
+    "output_label": "Output",
+    "default_device": "Default device",
+    "auto_paste": "Auto-paste",
+    "manual_copy": "Manual copy"
+  },
+  "transcript": {
+    "title": "Transcript",
+    "empty_starting_title": "Warming up...",
+    "empty_recording_title": "Listening for speech",
+    "empty_idle_title": "No transcript yet",
+    "empty_starting_msg": "Text will appear as you speak.",
+    "empty_recording_msg": "Text will appear as you speak.",
+    "empty_idle_msg": "Press the mic button to start."
+  },
+  "dictation_history": {
+    "title": "History",
+    "clear_all": "Clear all",
+    "clear_confirm_label": "Yes, clear",
+    "clear_confirm_msg": "Clear all entries?",
+    "collapse": "Collapse",
+    "expand": "Expand",
+    "copy": "Copy",
+    "delete": "Delete"
+  },
+  "meeting_history": {
+    "title": "Meeting History",
+    "meetings_count": "{count} meetings",
+    "search_placeholder": "Search meetings...",
+    "no_matches_title": "No matches",
+    "no_meetings_title": "No meetings yet",
+    "no_matches_msg": "Try a different search term.",
+    "no_meetings_msg": "Start a meeting recording to build your transcript library.",
+    "summary_outdated": "Summary outdated",
+    "summary": "Summary",
+    "active_recording": "A meeting is being recorded",
+    "click_to_view": "Click to view"
+  },
+  "new_meeting": {
+    "title_placeholder": "Meeting title (optional)",
+    "start_recording": "Start Recording",
+    "locked_by_dictation": "Stop the dictation before starting a meeting.",
+    "model_not_ready": "Download and load the transcription model in Settings first.",
+    "empty_title_hint": "Leave empty to use the current date"
+  },
+  "meeting_header": {
+    "recording_badge": "Recording",
+    "back_to_history": "Back to history",
+    "segments_count": "{count} segments",
+    "session_singular": "session",
+    "session_plural": "sessions",
+    "stop_recording": "Stop Recording",
+    "resume_recording": "Resume Recording",
+    "new_meeting": "New Meeting",
+    "locked_by_dictation": "Stop the dictation before recording a meeting."
+  },
+  "meeting_transcript": {
+    "title": "Transcript",
+    "listening": "Listening for speech...",
+    "no_transcript": "No transcript available."
+  },
+  "meeting_summary": {
+    "title": "Summary",
+    "recording_in_progress": "Recording in progress",
+    "can_regenerate": "You can regenerate the summary once the recording is stopped.",
+    "summary_outdated": "Summary outdated",
+    "new_audio_added": "New audio was added since this summary was generated.",
+    "generated_with": "Generated with {model}",
+    "stop_to_generate": "Stop the recording to generate a summary.",
+    "no_summary_yet": "No summary yet. Generate one below.",
+    "generating": "Generating...",
+    "regenerate_summary": "Re-generate Summary",
+    "generate_summary": "Generate Summary",
+    "connect_ollama": "Connect Ollama in Settings to enable summaries.",
+    "no_compatible_model": "No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries."
+  },
+  "meeting_view": {
+    "loading": "Loading meeting...",
+    "delete_meeting": "Delete meeting",
+    "delete_confirm_label": "Yes, delete",
+    "delete_confirm_msg": "Delete this meeting permanently?"
+  },
+  "ui": {
+    "copied": "Copied!",
+    "copy": "Copy",
+    "yes": "Yes",
+    "are_you_sure": "Are you sure?",
+    "cancel": "Cancel"
+  }
+}

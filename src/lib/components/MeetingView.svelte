@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { t } from "svelte-i18n";
   import { createMeetingController } from "../features/meeting/controller.svelte";
   import MeetingHeaderSection from "../features/meeting/components/MeetingHeaderSection.svelte";
   import MeetingSummarySection from "../features/meeting/components/MeetingSummarySection.svelte";
@@ -47,7 +48,7 @@
   {#if controller.isLoadingMeeting}
     <div class="flex flex-col items-center gap-2 p-8 text-text-muted">
       <Spinner />
-      <p class="text-sm">Loading meeting...</p>
+      <p class="text-sm">{$t("meeting_view.loading")}</p>
     </div>
   {:else if controller.meeting}
     <MeetingHeaderSection
@@ -93,9 +94,9 @@
     {#if !controller.isRecordingMeeting && controller.meeting.id}
       <div class="flex items-center gap-2 pt-2 border-t border-ghost-border">
         <ConfirmAction
-          label="Delete meeting"
-          confirmLabel="Yes, delete"
-          confirmMessage="Delete this meeting permanently?"
+          label={$t("meeting_view.delete_meeting")}
+          confirmLabel={$t("meeting_view.delete_confirm_label")}
+          confirmMessage={$t("meeting_view.delete_confirm_msg")}
           variant="danger"
           onConfirm={controller.deleteMeeting}
         />

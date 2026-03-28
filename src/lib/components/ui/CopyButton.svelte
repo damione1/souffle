@@ -1,5 +1,7 @@
 <script lang="ts">
-  let { text, label = "Copy" }: { text: string; label?: string } = $props();
+  import { t } from "svelte-i18n";
+
+  let { text, label }: { text: string; label?: string } = $props();
   let copied = $state(false);
 
   function copy() {
@@ -11,4 +13,4 @@
   }
 </script>
 
-<button onclick={copy} class="btn">{copied ? "Copied!" : label}</button>
+<button onclick={copy} class="btn">{copied ? $t("ui.copied") : (label ?? $t("ui.copy"))}</button>

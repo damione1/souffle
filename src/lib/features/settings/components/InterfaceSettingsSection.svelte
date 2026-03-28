@@ -1,11 +1,19 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
+  import { SUPPORTED_LOCALES } from "../../../i18n";
   import type { Theme } from "../../../types";
 
   const themeOptions: Theme[] = ["dark", "light", "system"];
+  const themeKeys: Record<Theme, string> = {
+    dark: "settings_interface.theme_dark",
+    light: "settings_interface.theme_light",
+    system: "settings_interface.theme_system",
+  };
 
   let {
     theme,
+    locale,
     autoPaste,
     pasteDelayMs,
     toggleShortcut,
@@ -13,6 +21,7 @@
     recordingField,
     shortcutError,
     onThemeChange,
+    onLocaleChange,
     onAutoPasteChange,
     onPasteDelayChange,
     onStartRecording,
@@ -20,6 +29,7 @@
     formatShortcut,
   }: {
     theme: Theme;
+    locale: string;
     autoPaste: boolean;
     pasteDelayMs: number;
     toggleShortcut: string;
@@ -27,6 +37,7 @@
     recordingField: "toggle" | "ptt" | null;
     shortcutError: string;
     onThemeChange: (theme: Theme) => void;
+    onLocaleChange: (locale: string) => void;
     onAutoPasteChange: (event: Event) => void;
     onPasteDelayChange: (event: Event) => void;
     onStartRecording: (field: "toggle" | "ptt") => void;
@@ -36,11 +47,27 @@
 </script>
 
 <section class="surface-card flex flex-col gap-3.5">
-  <h3>Interface</h3>
+  <h3>{$t("settings_interface.title")}</h3>
 
   <div class="flex items-center justify-between gap-4">
     <div>
-      <span class="block text-[0.9375rem] font-medium text-text-primary">Theme</span>
+      <span class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_interface.language")}</span>
+      <span class="text-sm text-text-muted">{$t("settings_interface.language_desc")}</span>
+    </div>
+    <select
+      value={locale || "en"}
+      onchange={(event) => onLocaleChange((event.currentTarget as HTMLSelectElement).value)}
+      class="field-select max-w-48"
+    >
+      {#each SUPPORTED_LOCALES as loc}
+        <option value={loc.id}>{loc.label}</option>
+      {/each}
+    </select>
+  </div>
+
+  <div class="flex items-center justify-between gap-4">
+    <div>
+      <span class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_interface.theme")}</span>
     </div>
     <div class="flex gap-1">
       {#each themeOptions as themeOption}
@@ -48,7 +75,7 @@
           onclick={() => onThemeChange(themeOption)}
           class={`btn ${theme === themeOption ? "btn-active" : ""}`}
         >
-          {themeOption.charAt(0).toUpperCase() + themeOption.slice(1)}
+          {$t(themeKeys[themeOption])}
         </button>
       {/each}
     </div>
@@ -56,23 +83,23 @@
 
   <div class="flex items-center justify-between gap-4">
     <div>
-      <span class="block text-[0.9375rem] font-medium text-text-primary">Auto-paste after dictation</span>
-      <span class="text-sm text-text-muted">Automatically pastes the transcript when you stop recording.</span>
+      <span class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_interface.auto_paste")}</span>
+      <span class="text-sm text-text-muted">{$t("settings_interface.auto_paste_desc")}</span>
     </div>
     <input
       type="checkbox"
       checked={autoPaste}
       onchange={onAutoPasteChange}
       class="switch"
-      aria-label="Auto-paste after dictation"
+      aria-label={$t("settings_interface.auto_paste")}
     />
   </div>
 
   {#if autoPaste}
     <div class="flex items-center justify-between gap-4">
       <div>
-        <label for="paste-delay" class="block text-[0.9375rem] font-medium text-text-primary">Paste delay (ms)</label>
-        <span class="text-sm text-text-muted">Wait time before pasting. Increase if the text lands in the wrong app.</span>
+        <label for="paste-delay" class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_interface.paste_delay")}</label>
+        <span class="text-sm text-text-muted">{$t("settings_interface.paste_delay_desc")}</span>
       </div>
       <input
         id="paste-delay"
@@ -89,8 +116,8 @@
 
   <div class="flex items-center justify-between gap-4">
     <div>
-      <span class="block text-[0.9375rem] font-medium text-text-primary">Toggle recording</span>
-      <span class="text-sm text-text-muted">Press once to start or stop dictation.</span>
+      <span class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_interface.toggle_recording")}</span>
+      <span class="text-sm text-text-muted">{$t("settings_interface.toggle_recording_desc")}</span>
     </div>
     <div class="flex gap-2 items-center">
       <button
@@ -98,18 +125,18 @@
         class="shortcut-button"
         class:is-recording={recordingField === "toggle"}
       >
-        {recordingField === "toggle" ? "Press keys..." : formatShortcut(toggleShortcut)}
+        {recordingField === "toggle" ? $t("settings_interface.press_keys") : formatShortcut(toggleShortcut)}
       </button>
       {#if toggleShortcut}
-        <button onclick={() => onClearShortcut("toggle")} class="btn btn-ghost text-sm">Clear</button>
+        <button onclick={() => onClearShortcut("toggle")} class="btn btn-ghost text-sm">{$t("settings_interface.clear")}</button>
       {/if}
     </div>
   </div>
 
   <div class="flex items-center justify-between gap-4">
     <div>
-      <span class="block text-[0.9375rem] font-medium text-text-primary">Push-to-talk</span>
-      <span class="text-sm text-text-muted">Hold to record, release to stop.</span>
+      <span class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_interface.push_to_talk")}</span>
+      <span class="text-sm text-text-muted">{$t("settings_interface.push_to_talk_desc")}</span>
     </div>
     <div class="flex gap-2 items-center">
       <button
@@ -117,10 +144,10 @@
         class="shortcut-button"
         class:is-recording={recordingField === "ptt"}
       >
-        {recordingField === "ptt" ? "Press keys..." : formatShortcut(pttShortcut)}
+        {recordingField === "ptt" ? $t("settings_interface.press_keys") : formatShortcut(pttShortcut)}
       </button>
       {#if pttShortcut}
-        <button onclick={() => onClearShortcut("ptt")} class="btn btn-ghost text-sm">Clear</button>
+        <button onclick={() => onClearShortcut("ptt")} class="btn btn-ghost text-sm">{$t("settings_interface.clear")}</button>
       {/if}
     </div>
   </div>

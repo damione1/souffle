@@ -1,4 +1,5 @@
 import { getSettings, selectAudioDevice } from "./api/settings";
+import { setLocale } from "./i18n";
 import { getAppState } from "./stores/app.svelte";
 import { applyTheme } from "./utils/theme";
 
@@ -9,6 +10,10 @@ export async function bootstrapAppState(
   app.settings = settings;
   app.selectedDevice = settings.audio_device ?? "";
   applyTheme(app.settings.theme);
+
+  if (settings.locale) {
+    setLocale(settings.locale);
+  }
 
   if (settings.audio_device) {
     await selectAudioDevice(settings.audio_device);

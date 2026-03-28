@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from "svelte-i18n";
+
   let {
     meetingTitle,
     lockedByDictation,
@@ -20,7 +22,7 @@
   <input
     type="text"
     value={meetingTitle}
-    placeholder="Meeting title (optional)"
+    placeholder={$t("new_meeting.title_placeholder")}
     class="field-input w-full max-w-sm text-center"
     {disabled}
     oninput={(event) => onMeetingTitleChange((event.currentTarget as HTMLInputElement).value)}
@@ -31,13 +33,13 @@
     }}
   />
   <button onclick={onStartRecording} {disabled} class="btn btn-primary btn-lg">
-    Start Recording
+    {$t("new_meeting.start_recording")}
   </button>
   {#if lockedByDictation}
-    <p class="text-sm text-text-muted">Stop the dictation before starting a meeting.</p>
+    <p class="text-sm text-text-muted">{$t("new_meeting.locked_by_dictation")}</p>
   {:else if modelNotReady}
-    <p class="text-sm text-text-muted">Download and load the transcription model in Settings first.</p>
+    <p class="text-sm text-text-muted">{$t("new_meeting.model_not_ready")}</p>
   {:else}
-    <p class="text-sm text-text-muted">Leave empty to use the current date</p>
+    <p class="text-sm text-text-muted">{$t("new_meeting.empty_title_hint")}</p>
   {/if}
 </div>
