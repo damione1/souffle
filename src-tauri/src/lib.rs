@@ -14,6 +14,7 @@ pub mod pipeline;
 pub mod platform;
 pub mod settings;
 pub mod state;
+pub mod state_machine;
 pub mod transcript;
 pub mod tray;
 
@@ -63,12 +64,15 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::save_shortcuts,
             commands::get_shortcuts,
             commands::get_audio_level,
+            commands::get_machine_state,
+            commands::recover_state,
         ])
         .events(collect_events![
             app_events::Navigate,
             app_events::ShortcutToggle,
             app_events::ShortcutPttStart,
             app_events::ShortcutPttStop,
+            app_events::StateChanged,
         ])
 }
 
@@ -121,6 +125,16 @@ pub fn run() {
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);
+
+            // Store the AppHandle so state transitions can emit events
+            let state = app.state::<AppState>();
+            {
+                let mut handle_guard = state
+                    .app_handle
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
+                *handle_guard = Some(app.handle().clone());
+            }
 
             // Load shortcut settings from DB and register
             let state = app.state::<AppState>();

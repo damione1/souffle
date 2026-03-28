@@ -11,7 +11,8 @@
 
   const controller = createMeetingController();
 
-  let isNewMode = $derived(!controller.app.currentMeetingId && !controller.isRecordingMeeting);
+  let lockedByDictation = $derived(controller.app.recordingMode === "dictation");
+
   let sessionCount = $derived(
     controller.meeting
       ? controller.meeting.recording_sessions.length + (controller.isRecordingMeeting ? 1 : 0)
@@ -42,15 +43,7 @@
     <StatusBanner message={controller.statusMessage} variant="warning" />
   {/if}
 
-  {#if isNewMode}
-    <NewMeetingSection
-      meetingTitle={controller.meetingTitle}
-      onMeetingTitleChange={(value) => {
-        controller.meetingTitle = value;
-      }}
-      onStartRecording={controller.startRecording}
-    />
-  {:else if controller.isLoadingMeeting}
+  {#if controller.isLoadingMeeting}
     <div class="flex flex-col items-center gap-2 p-8 text-text-muted">
       <Spinner />
       <p class="text-sm">Loading meeting...</p>
@@ -59,6 +52,7 @@
     <MeetingHeaderSection
       meeting={controller.meeting}
       isRecordingMeeting={controller.isRecordingMeeting}
+      {lockedByDictation}
       segmentCount={displaySegments.length}
       sessionCount={sessionCount}
       canResumeRecording={controller.canResumeRecording}
@@ -66,7 +60,7 @@
         controller.app.currentMeetingId = null;
         controller.app.currentView = "meeting-history";
       }}
-      onNewMeeting={() => controller.app.newMeeting()}
+      onNewMeeting={() => controller.startNew()}
       onResumeRecording={controller.resumeRecording}
       onStopRecording={controller.stopRecording}
     />
@@ -106,5 +100,14 @@
         />
       </div>
     {/if}
+  {:else}
+    <NewMeetingSection
+      meetingTitle={controller.meetingTitle}
+      {lockedByDictation}
+      onMeetingTitleChange={(value) => {
+        controller.meetingTitle = value;
+      }}
+      onStartRecording={controller.startRecording}
+    />
   {/if}
 </div>

@@ -1,4 +1,4 @@
-import type { AppSettings, AppView, TranscriptionRuntimePhase } from "../types";
+import type { AppSettings, AppStateMachine, AppView, TranscriptionRuntimePhase } from "../types";
 
 export type RecordingMode = "idle" | "dictation" | "meeting";
 export type TranscriptionModelOperationState = "idle" | "downloading" | "loading";
@@ -12,7 +12,10 @@ let currentMeetingId = $state<string | null>(null);
 // Selected audio device (persisted across tab switches)
 let selectedDevice = $state("");
 
-// Recording state — shared across views
+// Unified state machine from backend
+let machineState = $state<AppStateMachine>({ state: "idle" });
+
+// Recording state — shared across views (kept for backward compat, now derived from machineState)
 let isRecording = $state(false);
 let recordingMode = $state<RecordingMode>("idle");
 
@@ -37,6 +40,50 @@ let settings = $state<AppSettings>({
   transcription_backend_id: "",
 });
 
+function deriveRecordingMode(state: AppStateMachine): RecordingMode {
+  switch (state.state) {
+    case "recording_dictation":
+      return "dictation";
+    case "recording_meeting":
+    case "stopping":
+      return state.state === "stopping"
+        ? (typeof state.data.was_recording === "object" ? "meeting" : "dictation")
+        : "meeting";
+    default:
+      return "idle";
+  }
+}
+
+function deriveIsRecording(state: AppStateMachine): boolean {
+  return state.state === "recording_dictation"
+    || state.state === "recording_meeting"
+    || state.state === "stopping";
+}
+
+function deriveRuntimePhase(state: AppStateMachine): TranscriptionRuntimePhase {
+  switch (state.state) {
+    case "idle":
+    case "downloading":
+      return "download_required";
+    case "downloaded":
+    case "loading":
+      return "load_required";
+    case "ready":
+    case "recording_dictation":
+    case "recording_meeting":
+    case "stopping":
+    case "unloading":
+      return "ready";
+    case "error":
+      if (state.data.recovery === "retry_from_idle") return "download_required";
+      if (typeof state.data.recovery === "object") {
+        if ("retry_from_downloaded" in state.data.recovery) return "load_required";
+        if ("retry_from_ready" in state.data.recovery) return "ready";
+      }
+      return "download_required";
+  }
+}
+
 export function getAppState() {
   return {
     get currentView() { return currentView; },
@@ -50,6 +97,18 @@ export function getAppState() {
 
     get selectedDevice() { return selectedDevice; },
     set selectedDevice(d: string) { selectedDevice = d; },
+
+    get machineState() { return machineState; },
+    set machineState(s: AppStateMachine) {
+      machineState = s;
+      // Sync derived fields from machine state
+      isRecording = deriveIsRecording(s);
+      recordingMode = deriveRecordingMode(s);
+      // Only update runtime phase from machine if not in a transient operation state
+      if (transcriptionModelOperationState === "idle") {
+        transcriptionRuntimePhase = deriveRuntimePhase(s);
+      }
+    },
 
     get isRecording() { return isRecording; },
     set isRecording(v: boolean) { isRecording = v; },

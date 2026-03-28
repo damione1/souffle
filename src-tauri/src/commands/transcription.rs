@@ -12,6 +12,7 @@ use crate::constants::{AUDIO_FLUSH_MS, PIPELINE_DRAIN_TIMEOUT_SECS, SAMPLE_RATE_
 use crate::lock_ext::MutexExt;
 use crate::pipeline::{InferenceCommand, SegmentCallback};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator, RecordingMode};
+use crate::state_machine::StateAction;
 use crate::transcript::{MeetingRecordingSession, MeetingTranscript};
 
 fn next_audio_session_id(state: &AppState) -> Result<u64, String> {
@@ -275,8 +276,11 @@ pub fn start_transcription(
         let _ = channel_clone.send(seg);
     });
 
-    start_pipeline(&state, on_segment)?;
+    let session_id = start_pipeline(&state, on_segment)?;
     *state.recording_mode.acquire()? = RecordingMode::Dictation;
+
+    // Transition state machine
+    state.apply_transition(StateAction::StartDictation { session_id })?;
 
     info!("Streaming transcription active");
     Ok(())
@@ -291,7 +295,14 @@ pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
         return Err("Not recording".into());
     }
 
+    // Transition to Stopping
+    state.apply_transition(StateAction::StopRecording)?;
+
     stop_pipeline(&state)?;
+
+    // Transition to Ready
+    state.apply_transition(StateAction::StopComplete)?;
+
     info!("Streaming transcription stopped");
     Ok(())
 }
@@ -306,8 +317,10 @@ pub fn start_meeting_recording(
 ) -> Result<(), String> {
     info!(title = %title, "Starting meeting recording");
 
+    let meeting_id = Uuid::new_v4().to_string();
+
     let accumulator = MeetingAccumulator {
-        id: Uuid::new_v4().to_string(),
+        id: meeting_id.clone(),
         title,
         existing_segments: Vec::new(),
         new_segments: Vec::new(),
@@ -321,6 +334,13 @@ pub fn start_meeting_recording(
     };
 
     start_meeting_session(&state, accumulator, channel)?;
+
+    // Get session_id from the pipeline (it was allocated inside start_pipeline)
+    let session_id = *state.next_audio_session_id.acquire()?;
+    state.apply_transition(StateAction::StartMeeting {
+        session_id,
+        meeting_id,
+    })?;
 
     info!("Meeting recording started");
     Ok(())
@@ -349,7 +369,7 @@ pub fn resume_meeting_recording(
     }
 
     let accumulator = MeetingAccumulator {
-        id: meeting.id,
+        id: meeting.id.clone(),
         title: meeting.title,
         existing_segments: meeting.segments,
         new_segments: Vec::new(),
@@ -363,6 +383,12 @@ pub fn resume_meeting_recording(
     };
 
     start_meeting_session(&state, accumulator, channel)?;
+
+    let session_id = *state.next_audio_session_id.acquire()?;
+    state.apply_transition(StateAction::StartMeeting {
+        session_id,
+        meeting_id: meeting_id.clone(),
+    })?;
 
     info!(meeting_id = %meeting_id, "Meeting recording resumed");
     Ok(())
@@ -380,7 +406,13 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
         return Err("Meeting recording is not active".into());
     }
 
+    // Transition to Stopping
+    state.apply_transition(StateAction::StopRecording)?;
+
     stop_pipeline(&state)?;
+
+    // Transition to Ready
+    state.apply_transition(StateAction::StopComplete)?;
 
     let mut acc_guard = state.meeting_accumulator.acquire()?;
     let meeting = acc_guard.take().ok_or("No meeting accumulator")?;

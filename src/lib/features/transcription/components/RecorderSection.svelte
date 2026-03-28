@@ -11,6 +11,7 @@
   let {
     isStartingRecording,
     isRecording,
+    lockedByMeeting,
     runtimePhase,
     modelOperationState,
     downloadFile,
@@ -24,6 +25,7 @@
   }: {
     isStartingRecording: boolean;
     isRecording: boolean;
+    lockedByMeeting: boolean;
     runtimePhase: TranscriptionRuntimePhase;
     modelOperationState: TranscriptionModelOperationState;
     downloadFile: string;
@@ -42,6 +44,7 @@
   let isReady = $derived(runtimePhaseIsReady(runtimePhase));
 
   let actionLabel = $derived.by(() => {
+    if (lockedByMeeting) return "Meeting recording in progress";
     if (isStartingRecording) return "Warming up...";
     if (isRecording) return "Tap to stop";
     if (isDownloadingModel) return "Downloading model";
@@ -54,7 +57,9 @@
 
 <section class="surface-card flex flex-col items-center gap-4 text-center">
   <h3>
-    {#if isStartingRecording}
+    {#if lockedByMeeting}
+      Meeting in progress
+    {:else if isStartingRecording}
       Starting the microphone...
     {:else if isRecording}
       Listening now
@@ -63,7 +68,9 @@
     {/if}
   </h3>
   <p class="text-text-secondary text-sm">
-    {#if isStartingRecording}
+    {#if lockedByMeeting}
+      Stop the meeting recording before starting dictation.
+    {:else if isStartingRecording}
       Warming up the engine.
     {:else if isRecording}
       Speak naturally. Text streams into the panel.
@@ -108,7 +115,7 @@
   {:else}
     <button
       onclick={onToggleRecording}
-      disabled={isLoadingModel || isStartingRecording}
+      disabled={isLoadingModel || isStartingRecording || lockedByMeeting}
       aria-label={isRecording ? "Stop recording" : "Start recording"}
       class="record-button"
       class:is-starting={isStartingRecording}

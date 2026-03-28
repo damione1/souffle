@@ -1,6 +1,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { commands, unwrap } from "./generated";
 import type {
+  AppStateMachine,
   DictationEntry,
   DownloadProgress,
   TranscriptionCatalog,
@@ -62,4 +63,12 @@ export async function clearDictationHistory(): Promise<void> {
 
 export async function pasteText(text: string, delayMs: number): Promise<void> {
   await unwrap(commands.pasteText(text, delayMs));
+}
+
+export async function getMachineState(): Promise<AppStateMachine> {
+  return unwrap(commands.getMachineState());
+}
+
+export async function recoverState(): Promise<AppStateMachine> {
+  return unwrap(commands.recoverState());
 }

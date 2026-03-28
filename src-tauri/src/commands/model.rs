@@ -6,14 +6,15 @@ use crate::engine::{
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
     TranscriptionRuntimeStatus, create_engine, resolve_transcription_profile,
     resolve_transcription_selection, transcription_engine_catalog,
-    transcription_runtime_phase,
 };
 use crate::lock_ext::MutexExt;
 use crate::models;
 use crate::pipeline::TranscriptionPipeline;
 use crate::settings::AppSettings;
 use crate::state::AppState;
+use crate::state_machine::{AppStateMachine, StateAction};
 use std::sync::Arc;
+use tauri::Manager;
 
 fn selected_profile(state: &AppState) -> Result<TranscriptionProfile, String> {
     let settings = AppSettings::load(&state.db)?;
@@ -48,13 +49,16 @@ pub fn get_model_status(
 ) -> Result<TranscriptionRuntimeStatus, String> {
     let profile = resolve_transcription_selection(&selection)?;
     let model_dir = models::model_dir(&profile);
-    let downloaded = models::model_exists(&profile);
-    let loaded = *state.model_loaded.acquire()?;
-    let active_profile = state.active_profile.acquire()?.clone();
-    let phase = transcription_runtime_phase(
-        downloaded,
-        loaded && active_profile.as_ref() == Some(&profile),
-    );
+
+    // Derive phase from the state machine
+    let machine = state.current_machine_state()?;
+    let phase = if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
+        crate::engine::TranscriptionRuntimePhase::Ready
+    } else if models::model_exists(&profile) {
+        crate::engine::TranscriptionRuntimePhase::LoadRequired
+    } else {
+        crate::engine::TranscriptionRuntimePhase::DownloadRequired
+    };
 
     Ok(TranscriptionRuntimeStatus {
         profile: profile.clone(),
@@ -63,17 +67,44 @@ pub fn get_model_status(
     })
 }
 
+/// Return the current state machine state.
+#[tauri::command]
+#[specta::specta]
+pub fn get_machine_state(
+    state: State<'_, AppState>,
+) -> Result<AppStateMachine, String> {
+    state.current_machine_state()
+}
+
+/// Recover from an error state.
+#[tauri::command]
+#[specta::specta]
+pub fn recover_state(
+    state: State<'_, AppState>,
+) -> Result<AppStateMachine, String> {
+    state.apply_transition(StateAction::Recover)
+}
+
 /// Download the selected transcription model.
 /// Progress is streamed back via the Channel API.
 #[tauri::command]
 #[specta::specta]
 pub fn download_model(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
     selection: TranscriptionProfileSelection,
     channel: Channel<models::DownloadProgress>,
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
     if models::model_exists(&profile) {
+        // Ensure machine reflects downloaded state
+        let machine = state.current_machine_state()?;
+        if matches!(machine, AppStateMachine::Idle) {
+            let _ = state.apply_transition(StateAction::StartDownload {
+                profile: profile.clone(),
+            });
+            let _ = state.apply_transition(StateAction::DownloadComplete);
+        }
+
         channel
             .send(models::DownloadProgress {
                 file: "all".into(),
@@ -87,15 +118,37 @@ pub fn download_model(
         return Ok(());
     }
 
+    // Transition to Downloading
+    state.apply_transition(StateAction::StartDownload {
+        profile: profile.clone(),
+    })?;
+
+    // Clone what we need for the thread
     let channel_clone = channel.clone();
+    let app_handle_for_state: Option<tauri::AppHandle> = state
+        .app_handle
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+
     std::thread::Builder::new()
         .name("model-download".into())
         .spawn(move || {
             let result = models::download_model(&profile, |progress| {
                 let _ = channel_clone.send(progress);
             });
+
+            // Helper to apply transition from the thread via AppHandle
+            let apply = |action: StateAction| {
+                if let Some(ref handle) = app_handle_for_state {
+                    let state: tauri::State<'_, AppState> = handle.state();
+                    let _ = state.apply_transition(action);
+                }
+            };
+
             match result {
                 Ok(()) => {
+                    apply(StateAction::DownloadComplete);
                     let _ = channel_clone.send(models::DownloadProgress {
                         file: "all".into(),
                         downloaded_bytes: 0,
@@ -106,6 +159,9 @@ pub fn download_model(
                     });
                 }
                 Err(e) => {
+                    apply(StateAction::Fail {
+                        message: e.clone(),
+                    });
                     let _ = channel_clone.send(models::DownloadProgress {
                         file: "error".into(),
                         downloaded_bytes: 0,
@@ -136,27 +192,65 @@ pub fn load_model(
         return Err("Model not downloaded yet".into());
     }
 
-    if *state.is_recording.acquire()? {
+    let machine = state.current_machine_state()?;
+    if machine.is_recording() {
         return Err("Cannot load the model while recording".into());
     }
 
+    // Check if already loaded with this profile
     {
         let model_loaded = *state.model_loaded.acquire()?;
         let active_profile = state.active_profile.acquire()?.clone();
         let pipeline_ready = state.pipeline.acquire()?.is_some();
         if model_loaded && pipeline_ready && active_profile.as_ref() == Some(&profile) {
+            // Ensure machine state is consistent
+            if !machine.is_model_ready() {
+                // Fix up machine state to reflect reality
+                let _ = state.apply_transition(StateAction::StartLoad);
+                let _ = state.apply_transition(StateAction::LoadComplete);
+            }
             info!("Model already loaded, reusing existing inference pipeline");
             return Ok(());
         }
     }
 
-    {
-        let mut pipeline_guard = state.pipeline.acquire()?;
-        if let Some(mut pipeline) = pipeline_guard.take() {
-            pipeline.shutdown()?;
+    // If model is ready with a different profile, unload first
+    if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
+        state.apply_transition(StateAction::Unload {
+            next_profile: Some(profile.clone()),
+        })?;
+        // Shutdown existing pipeline
+        {
+            let mut pipeline_guard = state.pipeline.acquire()?;
+            if let Some(mut pipeline) = pipeline_guard.take() {
+                pipeline.shutdown()?;
+            }
         }
+        *state.model_loaded.acquire()? = false;
+        state.apply_transition(StateAction::UnloadComplete)?;
+        // Machine is now in Loading { next_profile }
+    } else {
+        // Ensure machine is in Downloaded state before loading
+        let machine = state.current_machine_state()?;
+        if matches!(machine, AppStateMachine::Idle) {
+            // Model exists on disk but machine doesn't know — fix up
+            state.apply_transition(StateAction::StartDownload {
+                profile: profile.clone(),
+            })?;
+            state.apply_transition(StateAction::DownloadComplete)?;
+        }
+
+        // Shutdown existing pipeline if any
+        {
+            let mut pipeline_guard = state.pipeline.acquire()?;
+            if let Some(mut pipeline) = pipeline_guard.take() {
+                pipeline.shutdown()?;
+            }
+        }
+        *state.model_loaded.acquire()? = false;
+
+        state.apply_transition(StateAction::StartLoad)?;
     }
-    *state.model_loaded.acquire()? = false;
 
     let current_profile = state.active_profile.acquire()?.clone();
     let mut engine = state.engine.acquire()?;
@@ -169,9 +263,13 @@ pub fn load_model(
         *engine = create_engine(&profile)?;
     }
     info!(path = %model_dir.display(), "Loading model");
-    engine
-        .load_model(&model_dir)
-        .map_err(|e: crate::engine::EngineError| e.to_string())?;
+    if let Err(e) = engine.load_model(&model_dir) {
+        drop(engine);
+        state.apply_transition(StateAction::Fail {
+            message: e.to_string(),
+        })?;
+        return Err(e.to_string());
+    }
     drop(engine);
 
     // Spawn persistent inference pipeline (lives until app exit)
@@ -186,6 +284,9 @@ pub fn load_model(
                         "Failed to unload model after pipeline startup error: {unload_err}"
                     );
                 }
+                state.apply_transition(StateAction::Fail {
+                    message: e.clone(),
+                })?;
                 return Err(e);
             }
         };
@@ -193,6 +294,8 @@ pub fn load_model(
     *state.pipeline.acquire()? = Some(pipeline);
     *state.active_profile.acquire()? = Some(profile);
     *state.model_loaded.acquire()? = true;
+
+    state.apply_transition(StateAction::LoadComplete)?;
 
     info!("Model loaded, inference pipeline ready");
     Ok(())

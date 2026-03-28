@@ -90,7 +90,7 @@ vi.mock("../transcription/catalog", () => ({
   }),
 }));
 
-const { createMeetingController } = await import("./controller.svelte");
+const { createMeetingController, resetMeetingControllerForTest } = await import("./controller.svelte");
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -187,6 +187,7 @@ function makeCatalog(): TranscriptionCatalog {
 describe("MeetingController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetMeetingControllerForTest();
     mockApp = createMockAppState();
   });
 

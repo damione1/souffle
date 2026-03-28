@@ -2,14 +2,20 @@ use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{Receiver, Sender};
+use tauri::AppHandle;
+use tauri_specta::Event;
+use tracing::debug;
 
+use crate::app_events::StateChanged;
 use crate::audio::AudioChunk;
 use crate::db::Database;
 use crate::engine::{
     SharedTranscriptionEngine, TranscriptionProfile, TranscriptionSegment,
     default_transcription_engine,
 };
+use crate::lock_ext::MutexExt;
 use crate::pipeline::TranscriptionPipeline;
+use crate::state_machine::{AppStateMachine, StateAction};
 use crate::transcript::MeetingRecordingSession;
 
 /// Commands sent to the audio thread
@@ -59,6 +65,10 @@ pub struct AppState {
     pub db: Arc<Database>,
     /// Latest audio RMS level (0.0-1.0), stored as f32 bits in AtomicU32
     pub audio_rms: Arc<AtomicU32>,
+    /// Unified state machine — the source of truth for app lifecycle
+    pub machine: Mutex<AppStateMachine>,
+    /// Tauri app handle for emitting events (set during setup)
+    pub app_handle: Mutex<Option<AppHandle>>,
 }
 
 impl AppState {
@@ -81,6 +91,37 @@ impl AppState {
             meeting_accumulator: Arc::new(Mutex::new(None)),
             db,
             audio_rms,
+            machine: Mutex::new(AppStateMachine::Idle),
+            app_handle: Mutex::new(None),
         }
+    }
+
+    /// Apply a state transition, update the machine, and emit a StateChanged event.
+    pub fn apply_transition(
+        &self,
+        action: StateAction,
+    ) -> Result<AppStateMachine, String> {
+        let mut machine = self.machine.acquire()?;
+        let new_state = machine.clone().transition(action)?;
+        debug!(
+            from = machine.variant_name(),
+            to = new_state.variant_name(),
+            "State transition"
+        );
+        *machine = new_state.clone();
+
+        // Emit event to frontend if app_handle is available
+        if let Ok(handle_guard) = self.app_handle.lock()
+            && let Some(ref handle) = *handle_guard
+        {
+            let _ = StateChanged(new_state.clone()).emit(handle);
+        }
+
+        Ok(new_state)
+    }
+
+    /// Get a clone of the current machine state.
+    pub fn current_machine_state(&self) -> Result<AppStateMachine, String> {
+        Ok(self.machine.acquire()?.clone())
     }
 }

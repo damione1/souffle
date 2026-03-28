@@ -325,6 +325,28 @@ async getAudioLevel() : Promise<Result<number, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Return the current state machine state.
+ */
+async getMachineState() : Promise<Result<AppStateMachine, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_machine_state") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Recover from an error state.
+ */
+async recoverState() : Promise<Result<AppStateMachine, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("recover_state") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -335,12 +357,14 @@ export const events = __makeEvents__<{
 navigate: Navigate,
 shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
-shortcutToggle: ShortcutToggle
+shortcutToggle: ShortcutToggle,
+stateChanged: StateChanged
 }>({
 navigate: "navigate",
 shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
-shortcutToggle: "shortcut-toggle"
+shortcutToggle: "shortcut-toggle",
+stateChanged: "state-changed"
 })
 
 /** user-defined constants **/
@@ -350,6 +374,12 @@ shortcutToggle: "shortcut-toggle"
 /** user-defined types **/
 
 export type AppSettings = { theme: Theme; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string }
+/**
+ * Unified application state machine.
+ * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
+ * with a single enum that enforces valid transitions.
+ */
+export type AppStateMachine = { state: "idle" } | { state: "downloading"; data: { profile: TranscriptionProfile } } | { state: "downloaded"; data: { profile: TranscriptionProfile } } | { state: "loading"; data: { profile: TranscriptionProfile } } | { state: "ready"; data: { profile: TranscriptionProfile } } | { state: "recording_dictation"; data: { profile: TranscriptionProfile; session_id: number } } | { state: "recording_meeting"; data: { profile: TranscriptionProfile; session_id: number; meeting_id: string } } | { state: "stopping"; data: { profile: TranscriptionProfile; was_recording: RecordingKind } } | { state: "unloading"; data: { profile: TranscriptionProfile; next_profile: TranscriptionProfile | null } } | { state: "error"; data: { message: string; recovery: ErrorRecovery } }
 export type AppView = "transcription" | "meeting" | "meeting-history" | "settings"
 /**
  * Info about an available audio input device, sent to frontend
@@ -365,6 +395,7 @@ export type DictationEntry = { id: string; text: string; timestamp: string }
  */
 export type DownloadProgress = { file: string; downloaded_bytes: number; total_bytes: number | null; completed_files: number; total_files: number; status: DownloadStatus }
 export type DownloadStatus = "starting" | "downloading" | "complete" | { error: string }
+export type ErrorRecovery = "retry_from_idle" | { retry_from_downloaded: { profile: TranscriptionProfile } } | { retry_from_ready: { profile: TranscriptionProfile } }
 /**
  * Lightweight item for listing meetings
  */
@@ -378,10 +409,12 @@ export type ModelArtifactDescriptor = { id: string; label: string; description: 
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
 export type OllamaStatus = { available: boolean; base_url: string; models: OllamaModelDescriptor[] }
+export type RecordingKind = "dictation" | { meeting: { meeting_id: string } }
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
+export type StateChanged = AppStateMachine
 export type SummarizeProgress = { text: string; done: boolean }
 export type Theme = "dark" | "light" | "system"
 export type TranscriptionCapabilities = { supports_streaming: boolean; supports_batch_transcription: boolean; supports_language_auto_detect: boolean; supports_word_timestamps: boolean; supports_partial_results: boolean }

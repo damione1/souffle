@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { History, Mic, Settings, Users } from "@lucide/svelte";
+  import { History, Mic, Settings, Users, Radio } from "@lucide/svelte";
   import type { Component } from "svelte";
   import type { AppView } from "../types";
   import { getAppState } from "../stores/app.svelte";
@@ -28,6 +28,10 @@
       icon: Settings,
     },
   ];
+
+  function recordingTargetView(): AppView {
+    return app.recordingMode === "meeting" ? "meeting" : "transcription";
+  }
 </script>
 
 <aside class="w-[200px] min-w-[200px] h-screen flex flex-col gap-6 py-5 px-3 bg-surface-1 border-r border-ghost-border overflow-y-auto max-[800px]:w-[72px] max-[800px]:min-w-[72px] max-[800px]:items-center">
@@ -59,4 +63,17 @@
       </button>
     {/each}
   </nav>
+
+  {#if app.isRecording}
+    <button
+      onclick={() => (app.currentView = recordingTargetView())}
+      class="flex items-center gap-2 mx-2 mt-auto mb-2 px-3 py-2 rounded-default bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors cursor-pointer"
+      aria-label="Go to active recording"
+    >
+      <Radio size={16} strokeWidth={2} class="animate-pulse" aria-hidden="true" />
+      <span class="text-xs font-medium max-[800px]:hidden">
+        {app.recordingMode === "meeting" ? "Meeting" : "Dictation"}
+      </span>
+    </button>
+  {/if}
 </aside>

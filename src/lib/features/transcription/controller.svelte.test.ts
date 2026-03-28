@@ -24,7 +24,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(),
 }));
 
-import { createTranscriptionController } from "./controller.svelte";
+import { createTranscriptionController, resetTranscriptionControllerForTest } from "./controller.svelte";
 import { getAppState } from "../../stores/app.svelte";
 import type {
   TranscriptionCatalog,
@@ -144,6 +144,7 @@ describe("transcription controller", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetTranscriptionControllerForTest();
     mockInvoke.mockImplementation(defaultInvoke);
     mockListen.mockResolvedValue(mockUnlisten);
 

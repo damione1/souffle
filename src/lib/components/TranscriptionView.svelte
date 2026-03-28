@@ -36,6 +36,7 @@
     <RecorderSection
       isStartingRecording={controller.isStartingRecording}
       isRecording={controller.app.isRecording}
+      lockedByMeeting={controller.app.recordingMode === "meeting"}
       runtimePhase={controller.runtimePhase}
       modelOperationState={controller.modelOperationState}
       downloadFile={controller.downloadFile}

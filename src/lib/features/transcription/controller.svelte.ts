@@ -32,7 +32,7 @@ import {
 } from "./runtime";
 import { runtimePhaseIsReady, runtimePhaseRequiresDownload } from "./state";
 
-export function createTranscriptionController() {
+function createTranscriptionControllerInstance() {
   const app = getAppState();
 
   let isStartingRecording = $state(false);
@@ -288,4 +288,20 @@ export function createTranscriptionController() {
     removeHistoryEntry,
     resetHistory,
   };
+}
+
+// Singleton: survives view mount/unmount cycles so transcript and Channel
+// callbacks are never lost when the user switches tabs during recording.
+let instance: ReturnType<typeof createTranscriptionControllerInstance> | null = null;
+
+export function createTranscriptionController() {
+  if (!instance) {
+    instance = createTranscriptionControllerInstance();
+  }
+  return instance;
+}
+
+/** Reset the singleton for testing. */
+export function resetTranscriptionControllerForTest() {
+  instance = null;
 }

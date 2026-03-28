@@ -17,7 +17,7 @@ function defaultMeetingTitle(): string {
   return `Meeting ${new Date().toLocaleDateString()}`;
 }
 
-export function createMeetingController() {
+function createMeetingControllerInstance() {
   const app = getAppState();
 
   let statusMessage = $state("");
@@ -165,16 +165,31 @@ export function createMeetingController() {
   async function stopRecording() {
     try {
       const id = await stopMeetingRecording();
-      isRecordingMeeting = false;
-      app.isRecording = false;
-      app.recordingMode = "idle";
+
+      // Load the completed meeting BEFORE clearing recording flags.
+      // This prevents the view from flashing to "new meeting" mode
+      // during the transition (meeting stays non-null the whole time).
       app.currentMeetingId = id;
       meeting = await getMeeting(id);
       syncSelectedModel(meeting.summary_model);
       liveMeetingSegments = [];
+
+      isRecordingMeeting = false;
+      app.isRecording = false;
+      app.recordingMode = "idle";
     } catch (e) {
       statusMessage = errorMessage(e);
     }
+  }
+
+  /** Clear controller state for starting a fresh meeting. */
+  function startNew() {
+    meeting = null;
+    liveMeetingSegments = [];
+    meetingTitle = "";
+    statusMessage = "";
+    summaryStream = "";
+    app.currentMeetingId = null;
   }
 
   async function summarizeMeeting() {
@@ -234,7 +249,24 @@ export function createMeetingController() {
     startRecording,
     resumeRecording,
     stopRecording,
+    startNew,
     summarizeMeeting,
     deleteMeeting,
   };
+}
+
+// Singleton: survives view mount/unmount cycles so liveMeetingSegments
+// and recording state are never lost when the user switches tabs.
+let instance: ReturnType<typeof createMeetingControllerInstance> | null = null;
+
+export function createMeetingController() {
+  if (!instance) {
+    instance = createMeetingControllerInstance();
+  }
+  return instance;
+}
+
+/** Reset the singleton for testing. */
+export function resetMeetingControllerForTest() {
+  instance = null;
 }

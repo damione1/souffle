@@ -13,6 +13,7 @@
   const app = getAppState();
 
   let unlistenNav: (() => void) | null = null;
+  let unlistenState: (() => void) | null = null;
 
   onMount(() => {
     (async () => {
@@ -29,8 +30,15 @@
       unlistenNav = fn;
     });
 
+    events.stateChanged.listen((event) => {
+      app.machineState = event.payload;
+    }).then((fn) => {
+      unlistenState = fn;
+    });
+
     return () => {
       unlistenNav?.();
+      unlistenState?.();
     };
   });
 </script>

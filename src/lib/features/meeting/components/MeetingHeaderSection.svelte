@@ -6,6 +6,7 @@
   let {
     meeting,
     isRecordingMeeting,
+    lockedByDictation,
     segmentCount,
     sessionCount,
     canResumeRecording,
@@ -16,6 +17,7 @@
   }: {
     meeting: MeetingTranscript;
     isRecordingMeeting: boolean;
+    lockedByDictation: boolean;
     segmentCount: number;
     sessionCount: number;
     canResumeRecording: boolean;
@@ -60,9 +62,15 @@
       </button>
     {:else}
       {#if canResumeRecording}
-        <button onclick={onResumeRecording} class="btn btn-primary">Resume Recording</button>
+        <button onclick={onResumeRecording} disabled={lockedByDictation} class="btn btn-primary">
+          Resume Recording
+        </button>
       {/if}
       <button onclick={onNewMeeting} class="btn">New Meeting</button>
     {/if}
   </div>
 </div>
+
+{#if lockedByDictation && !isRecordingMeeting}
+  <p class="text-sm text-text-muted">Stop the dictation before recording a meeting.</p>
+{/if}
