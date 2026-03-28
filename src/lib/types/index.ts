@@ -21,6 +21,7 @@ export type {
   TranscriptionModelDescriptor,
   TranscriptionProfile,
   TranscriptionProfileSelection,
+  TranscriptionRuntimePhase,
   TranscriptionRuntimeBackendDescriptor,
   TranscriptionRuntimeStatus,
   TranscriptionSegment,

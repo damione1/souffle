@@ -6,6 +6,7 @@ use crate::engine::{
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
     TranscriptionRuntimeStatus, create_engine, resolve_transcription_profile,
     resolve_transcription_selection, transcription_engine_catalog,
+    transcription_runtime_phase,
 };
 use crate::lock_ext::MutexExt;
 use crate::models;
@@ -50,11 +51,14 @@ pub fn get_model_status(
     let downloaded = models::model_exists(&profile);
     let loaded = *state.model_loaded.acquire()?;
     let active_profile = state.active_profile.acquire()?.clone();
+    let phase = transcription_runtime_phase(
+        downloaded,
+        loaded && active_profile.as_ref() == Some(&profile),
+    );
 
     Ok(TranscriptionRuntimeStatus {
         profile: profile.clone(),
-        downloaded,
-        loaded: loaded && active_profile.as_ref() == Some(&profile),
+        phase,
         model_dir: model_dir.display().to_string(),
     })
 }
@@ -75,6 +79,8 @@ pub fn download_model(
                 file: "all".into(),
                 downloaded_bytes: 0,
                 total_bytes: None,
+                completed_files: 1,
+                total_files: 1,
                 status: models::DownloadStatus::Complete,
             })
             .map_err(|e| format!("Channel send: {e}"))?;
@@ -94,6 +100,8 @@ pub fn download_model(
                         file: "all".into(),
                         downloaded_bytes: 0,
                         total_bytes: None,
+                        completed_files: 1,
+                        total_files: 1,
                         status: models::DownloadStatus::Complete,
                     });
                 }
@@ -102,6 +110,8 @@ pub fn download_model(
                         file: "error".into(),
                         downloaded_bytes: 0,
                         total_bytes: None,
+                        completed_files: 0,
+                        total_files: 1,
                         status: models::DownloadStatus::Error(e),
                     });
                 }

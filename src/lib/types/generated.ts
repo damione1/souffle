@@ -363,7 +363,7 @@ export type DictationEntry = { id: string; text: string; timestamp: string }
 /**
  * Download status reported to the frontend
  */
-export type DownloadProgress = { file: string; downloaded_bytes: number; total_bytes: number | null; status: DownloadStatus }
+export type DownloadProgress = { file: string; downloaded_bytes: number; total_bytes: number | null; completed_files: number; total_files: number; status: DownloadStatus }
 export type DownloadStatus = "starting" | "downloading" | "complete" | { error: string }
 /**
  * Lightweight item for listing meetings
@@ -391,7 +391,8 @@ export type TranscriptionModelDescriptor = { id: string; label: string; descript
 export type TranscriptionProfile = { engine_id: string; engine_label: string; model_id: string; model_label: string; backend_id?: string; backend_label?: string }
 export type TranscriptionProfileSelection = { engine_id: string; model_id: string; backend_id: string }
 export type TranscriptionRuntimeBackendDescriptor = { id: string; label: string; description: string; recommended: boolean; available_in_app: boolean; availability_note: string | null; artifacts: ModelArtifactDescriptor[] }
-export type TranscriptionRuntimeStatus = { profile: TranscriptionProfile; downloaded: boolean; loaded: boolean; model_dir: string }
+export type TranscriptionRuntimePhase = "download_required" | "load_required" | "ready"
+export type TranscriptionRuntimeStatus = { profile: TranscriptionProfile; phase: TranscriptionRuntimePhase; model_dir: string }
 /**
  * A piece of transcribed text with metadata
  */

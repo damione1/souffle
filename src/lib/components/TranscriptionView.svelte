@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import { createTranscriptionController } from "../features/transcription/controller.svelte";
   import HistorySection from "../features/transcription/components/HistorySection.svelte";
-  import ModelGateSection from "../features/transcription/components/ModelGateSection.svelte";
   import RecorderSection from "../features/transcription/components/RecorderSection.svelte";
   import StatusHeroSection from "../features/transcription/components/StatusHeroSection.svelte";
   import TranscriptSection from "../features/transcription/components/TranscriptSection.svelte";
@@ -22,31 +21,13 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <ModelGateSection
-    catalog={controller.catalog}
-    selectedEngineId={controller.app.settings.transcription_engine_id}
-    selectedModelId={controller.app.settings.transcription_model_id}
-    selectedBackendId={controller.app.settings.transcription_backend_id}
-    modelDownloaded={controller.modelDownloaded}
-    modelLoaded={controller.modelLoaded}
-    isDownloading={controller.isDownloading}
-    downloadFile={controller.downloadFile}
-    isLoadingModel={controller.isLoadingModel}
-    onSelectEngine={controller.selectEngine}
-    onSelectModel={controller.selectModel}
-    onSelectBackend={controller.selectBackend}
-    onDownloadModel={controller.handleDownloadModel}
-    onLoadModel={controller.handleLoadModel}
-  />
-
   {#if controller.statusMessage}
     <StatusBanner message={controller.statusMessage} variant="warning" />
   {/if}
 
   <StatusHeroSection
     profileLabel={controller.activeProfileLabel}
-    modelLoaded={controller.modelLoaded}
-    modelDownloaded={controller.modelDownloaded}
+    runtimePhase={controller.runtimePhase}
     autoPaste={controller.app.settings.auto_paste}
     pasteDelayMs={controller.app.settings.paste_delay_ms}
   />
@@ -55,10 +36,15 @@
     <RecorderSection
       isStartingRecording={controller.isStartingRecording}
       isRecording={controller.app.isRecording}
-      modelLoaded={controller.modelLoaded}
-      isLoadingModel={controller.isLoadingModel}
+      runtimePhase={controller.runtimePhase}
+      modelOperationState={controller.modelOperationState}
+      downloadFile={controller.downloadFile}
+      downloadCompletedFiles={controller.downloadCompletedFiles}
+      downloadTotalFiles={controller.downloadTotalFiles}
       inputDevice={controller.app.selectedDevice}
       autoPaste={controller.app.settings.auto_paste}
+      onDownloadModel={controller.handleDownloadModel}
+      onLoadModel={controller.handleLoadModel}
       onToggleRecording={() => controller.toggleRecording()}
     />
 

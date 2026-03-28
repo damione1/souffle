@@ -23,6 +23,12 @@ import {
   getFirstAvailableTranscriptionModel,
   getSelectedTranscriptionBackend,
 } from "../transcription/catalog";
+import {
+  refreshTranscriptionRuntimeStatus,
+  resetTranscriptionRuntimeState,
+  startTranscriptionModelDownload,
+  startTranscriptionModelLoad,
+} from "../transcription/runtime";
 
 export function createSettingsController() {
   const app = getAppState();
@@ -48,6 +54,7 @@ export function createSettingsController() {
       checkOllama(),
       loadCatalog(),
     ]);
+    await refreshRuntimeStatus();
   }
 
   async function syncSettings() {
@@ -75,6 +82,14 @@ export function createSettingsController() {
     }
   }
 
+  async function refreshRuntimeStatus() {
+    try {
+      await refreshTranscriptionRuntimeStatus(app, catalog);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
   async function loadShortcuts() {
     try {
       const shortcuts = await getShortcuts();
@@ -86,17 +101,26 @@ export function createSettingsController() {
   }
 
   async function persistSettings(updater: (settings: AppSettings) => void) {
+    const previousSettings = app.settings;
     const nextSettings: AppSettings = {
-      ...app.settings,
+      ...previousSettings,
       audio_device: app.selectedDevice || null,
     };
     updater(nextSettings);
+    const selectionChanged =
+      nextSettings.transcription_engine_id !== previousSettings.transcription_engine_id
+      || nextSettings.transcription_model_id !== previousSettings.transcription_model_id
+      || nextSettings.transcription_backend_id !== previousSettings.transcription_backend_id;
 
     try {
       await saveSettings(nextSettings);
       app.settings = nextSettings;
       app.selectedDevice = nextSettings.audio_device ?? "";
-      await loadCatalog();
+      if (selectionChanged) {
+        resetTranscriptionRuntimeState(app);
+        await loadCatalog();
+        await refreshRuntimeStatus();
+      }
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -191,6 +215,18 @@ export function createSettingsController() {
   async function selectTranscriptionBackend(backendId: string) {
     await persistSettings((settings) => {
       settings.transcription_backend_id = backendId;
+    });
+  }
+
+  async function handleDownloadModel() {
+    await startTranscriptionModelDownload(app, catalog, (message) => {
+      statusMessage = message;
+    });
+  }
+
+  async function handleLoadModel() {
+    await startTranscriptionModelLoad(app, catalog, (message) => {
+      statusMessage = message;
     });
   }
 
@@ -336,17 +372,25 @@ export function createSettingsController() {
     get summaryModels() { return summaryModels; },
     get statusMessage() { return statusMessage; },
     get catalog() { return catalog; },
+    get runtimePhase() { return app.transcriptionRuntimePhase; },
+    get modelOperationState() { return app.transcriptionModelOperationState; },
+    get downloadFile() { return app.downloadFile; },
+    get downloadCompletedFiles() { return app.downloadCompletedFiles; },
+    get downloadTotalFiles() { return app.downloadTotalFiles; },
     get toggleShortcut() { return toggleShortcut; },
     get pttShortcut() { return pttShortcut; },
     get recordingField() { return recordingField; },
     get shortcutError() { return shortcutError; },
     mount,
+    refreshRuntimeStatus,
     refreshDevices,
     onDeviceChange,
     checkOllama,
     selectTranscriptionEngine,
     selectTranscriptionModel,
     selectTranscriptionBackend,
+    handleDownloadModel,
+    handleLoadModel,
     onThemeChange,
     onAutoPasteChange,
     onPasteDelayChange,

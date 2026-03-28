@@ -158,12 +158,32 @@ pub struct TranscriptionCatalog {
     pub selected_backend_id: String,
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptionRuntimePhase {
+    DownloadRequired,
+    LoadRequired,
+    Ready,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionRuntimeStatus {
     pub profile: TranscriptionProfile,
-    pub downloaded: bool,
-    pub loaded: bool,
+    pub phase: TranscriptionRuntimePhase,
     pub model_dir: String,
+}
+
+pub fn transcription_runtime_phase(
+    downloaded: bool,
+    loaded: bool,
+) -> TranscriptionRuntimePhase {
+    if loaded {
+        TranscriptionRuntimePhase::Ready
+    } else if downloaded {
+        TranscriptionRuntimePhase::LoadRequired
+    } else {
+        TranscriptionRuntimePhase::DownloadRequired
+    }
 }
 
 /// Runtime interface implemented by each engine family/backend pair.

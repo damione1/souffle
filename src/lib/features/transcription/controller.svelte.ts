@@ -3,11 +3,8 @@ import {
   addDictationEntry,
   clearDictationHistory,
   deleteDictationEntry,
-  downloadModel,
-  getModelStatus,
   getTranscriptionCatalog,
   listDictationEntries,
-  loadModel,
   pasteText,
   startStreamingTranscription,
   stopStreamingTranscription,
@@ -17,7 +14,6 @@ import { saveSettings } from "../../api/settings";
 import type {
   AppSettings,
   DictationEntry,
-  DownloadProgress,
   TranscriptionCatalog,
   TranscriptionSegment,
 } from "../../types";
@@ -27,8 +23,14 @@ import {
   getFirstAvailableTranscriptionBackend,
   getFirstAvailableTranscriptionModel,
   getSelectedTranscriptionBackend,
-  toSelectedTranscriptionProfileSelection,
 } from "./catalog";
+import {
+  refreshTranscriptionRuntimeStatus,
+  resetTranscriptionRuntimeState,
+  startTranscriptionModelDownload,
+  startTranscriptionModelLoad,
+} from "./runtime";
+import { runtimePhaseIsReady, runtimePhaseRequiresDownload } from "./state";
 
 export function createTranscriptionController() {
   const app = getAppState();
@@ -38,12 +40,6 @@ export function createTranscriptionController() {
   let transcript = $state("");
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
-
-  let modelDownloaded = $state(false);
-  let modelLoaded = $state(false);
-  let isDownloading = $state(false);
-  let downloadFile = $state("");
-  let isLoadingModel = $state(false);
 
   let history = $state<DictationEntry[]>([]);
   let expandedEntryId = $state<string | null>(null);
@@ -58,17 +54,9 @@ export function createTranscriptionController() {
     ) || "Transcription model";
   });
 
-  function currentSelection() {
-    return toSelectedTranscriptionProfileSelection(
-      catalog,
-      app.settings.transcription_engine_id,
-      app.settings.transcription_model_id,
-      app.settings.transcription_backend_id,
-    );
-  }
-
   async function mount() {
-    await Promise.all([refreshCatalog(), refreshRuntimeStatus(), loadHistory()]);
+    await refreshCatalog();
+    await Promise.all([refreshRuntimeStatus(), loadHistory()]);
 
     const unlisten = await Promise.all([
       events.shortcutToggle.listen(() => {
@@ -103,15 +91,7 @@ export function createTranscriptionController() {
 
   async function refreshRuntimeStatus() {
     try {
-      const status = await getModelStatus(currentSelection());
-      modelDownloaded = status.downloaded;
-      modelLoaded = status.loaded;
-      app.settings = {
-        ...app.settings,
-        transcription_engine_id: status.profile.engine_id,
-        transcription_model_id: status.profile.model_id,
-        transcription_backend_id: status.profile.backend_id ?? app.settings.transcription_backend_id,
-      };
+      await refreshTranscriptionRuntimeStatus(app, catalog);
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -128,7 +108,9 @@ export function createTranscriptionController() {
 
     await saveSettings(nextSettings);
     app.settings = nextSettings;
-    await Promise.all([refreshCatalog(), refreshRuntimeStatus()]);
+    resetTranscriptionRuntimeState(app);
+    await refreshCatalog();
+    await refreshRuntimeStatus();
   }
 
   async function selectEngine(engineId: string) {
@@ -201,43 +183,15 @@ export function createTranscriptionController() {
   }
 
   async function handleDownloadModel() {
-    isDownloading = true;
-    statusMessage = "";
-    downloadFile = "";
-
-    try {
-      await downloadModel(currentSelection(), (progress: DownloadProgress) => {
-        downloadFile = progress.file;
-        if (typeof progress.status === "object" && "error" in progress.status) {
-          statusMessage = `Download error: ${progress.status.error}`;
-          isDownloading = false;
-        } else if (progress.status === "complete" && progress.file === "all") {
-          isDownloading = false;
-          modelDownloaded = true;
-          downloadFile = "";
-        } else if (progress.status === "complete") {
-          downloadFile = `${progress.file} done`;
-        }
-      });
-      await refreshRuntimeStatus();
-    } catch (e) {
-      statusMessage = errorMessage(e);
-      isDownloading = false;
-    }
+    await startTranscriptionModelDownload(app, catalog, (message) => {
+      statusMessage = message;
+    });
   }
 
   async function handleLoadModel() {
-    isLoadingModel = true;
-    statusMessage = "";
-    try {
-      await loadModel(currentSelection());
-      modelLoaded = true;
-      await refreshRuntimeStatus();
-    } catch (e) {
-      statusMessage = errorMessage(e);
-    } finally {
-      isLoadingModel = false;
-    }
+    await startTranscriptionModelLoad(app, catalog, (message) => {
+      statusMessage = message;
+    });
   }
 
   async function toggleRecording(fromShortcut = false) {
@@ -275,10 +229,10 @@ export function createTranscriptionController() {
       return;
     }
 
-    if (!modelLoaded) {
-      statusMessage = modelDownloaded
-        ? "Load the selected transcription model before starting dictation."
-        : "Download and load the selected transcription model before starting dictation.";
+    if (!runtimePhaseIsReady(app.transcriptionRuntimePhase)) {
+      statusMessage = runtimePhaseRequiresDownload(app.transcriptionRuntimePhase)
+        ? "Download and load the selected transcription model before starting dictation."
+        : "Load the selected transcription model before starting dictation.";
       return;
     }
 
@@ -287,22 +241,14 @@ export function createTranscriptionController() {
     isStartingRecording = true;
 
     try {
-      let lastTime = 0;
-      const pauseThreshold = 1.5;
-
       await startStreamingTranscription((segment: TranscriptionSegment) => {
         if (segment.is_final) {
           if (transcript) {
-            const gap = segment.start_time - lastTime;
-            const endsWithSentence = /[.!?…]\s*$/.test(transcript);
-            if (gap >= pauseThreshold && endsWithSentence && !transcript.endsWith("\n")) {
-              transcript += "\n\n";
-            } else if (!transcript.endsWith(" ") && !transcript.endsWith("\n") && !segment.text.startsWith(" ")) {
+            if (!transcript.endsWith(" ") && !segment.text.startsWith(" ")) {
               transcript += " ";
             }
           }
           transcript += segment.text;
-          lastTime = segment.start_time;
         }
       });
       app.isRecording = true;
@@ -321,11 +267,11 @@ export function createTranscriptionController() {
     get transcript() { return transcript; },
     get statusMessage() { return statusMessage; },
     get catalog() { return catalog; },
-    get modelDownloaded() { return modelDownloaded; },
-    get modelLoaded() { return modelLoaded; },
-    get isDownloading() { return isDownloading; },
-    get downloadFile() { return downloadFile; },
-    get isLoadingModel() { return isLoadingModel; },
+    get runtimePhase() { return app.transcriptionRuntimePhase; },
+    get modelOperationState() { return app.transcriptionModelOperationState; },
+    get downloadFile() { return app.downloadFile; },
+    get downloadCompletedFiles() { return app.downloadCompletedFiles; },
+    get downloadTotalFiles() { return app.downloadTotalFiles; },
     get history() { return history; },
     get expandedEntryId() { return expandedEntryId; },
     set expandedEntryId(id: string | null) { expandedEntryId = id; },

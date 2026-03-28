@@ -48,7 +48,7 @@ describe('transcription API', () => {
   });
 
   it('getModelStatus calls correct command', async () => {
-    const status = { profile: {}, downloaded: true, loaded: false, model_dir: '/tmp' };
+    const status = { profile: {}, phase: 'load_required', model_dir: '/tmp' };
     mockInvoke.mockResolvedValue(status);
 
     const result = await getModelStatus(selection);

@@ -7,6 +7,7 @@
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
+  import ModelGateSection from "../features/transcription/components/ModelGateSection.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
   const controller = createSettingsController();
@@ -46,19 +47,29 @@
     onRefreshDevices={controller.refreshDevices}
   />
 
-  <IntelligenceSettingsSection
+  <ModelGateSection
     catalog={controller.catalog}
     selectedEngineId={controller.app.settings.transcription_engine_id}
     selectedModelId={controller.app.settings.transcription_model_id}
     selectedBackendId={controller.app.settings.transcription_backend_id}
+    runtimePhase={controller.runtimePhase}
+    modelOperationState={controller.modelOperationState}
+    downloadFile={controller.downloadFile}
+    downloadCompletedFiles={controller.downloadCompletedFiles}
+    downloadTotalFiles={controller.downloadTotalFiles}
+    onSelectEngine={controller.selectTranscriptionEngine}
+    onSelectModel={controller.selectTranscriptionModel}
+    onSelectBackend={controller.selectTranscriptionBackend}
+    onDownloadModel={controller.handleDownloadModel}
+    onLoadModel={controller.handleLoadModel}
+  />
+
+  <IntelligenceSettingsSection
     ollamaUrl={controller.app.settings.ollama_url}
     ollamaAvailable={controller.ollamaAvailable}
     ollamaModels={controller.ollamaModels}
     summaryModels={controller.summaryModels}
     selectedOllamaModel={controller.app.settings.ollama_model}
-    onSelectTranscriptionEngine={controller.selectTranscriptionEngine}
-    onSelectTranscriptionModel={controller.selectTranscriptionModel}
-    onSelectTranscriptionBackend={controller.selectTranscriptionBackend}
     onOllamaUrlChange={controller.onOllamaUrlChange}
     onOllamaModelChange={controller.onOllamaModelChange}
     onRetryOllama={controller.checkOllama}

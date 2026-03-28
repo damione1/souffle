@@ -1,6 +1,7 @@
-import type { AppSettings, AppView } from "../types";
+import type { AppSettings, AppView, TranscriptionRuntimePhase } from "../types";
 
 export type RecordingMode = "idle" | "dictation" | "meeting";
+export type TranscriptionModelOperationState = "idle" | "downloading" | "loading";
 
 // Current view
 let currentView = $state<AppView>("transcription");
@@ -15,6 +16,13 @@ let selectedDevice = $state("");
 let isRecording = $state(false);
 let recordingMode = $state<RecordingMode>("idle");
 
+// Transcription runtime state — shared across views
+let transcriptionRuntimePhase = $state<TranscriptionRuntimePhase>("download_required");
+let transcriptionModelOperationState = $state<TranscriptionModelOperationState>("idle");
+let downloadFile = $state("");
+let downloadCompletedFiles = $state(0);
+let downloadTotalFiles = $state(0);
+
 // Settings with defaults
 let settings = $state<AppSettings>({
   theme: "dark",
@@ -24,9 +32,9 @@ let settings = $state<AppSettings>({
   ollama_model: "",
   debug_transcription: false,
   audio_device: null,
-  transcription_engine_id: "kyutai",
-  transcription_model_id: "stt-1b-en_fr",
-  transcription_backend_id: "candle",
+  transcription_engine_id: "",
+  transcription_model_id: "",
+  transcription_backend_id: "",
 });
 
 export function getAppState() {
@@ -48,6 +56,21 @@ export function getAppState() {
 
     get recordingMode() { return recordingMode; },
     set recordingMode(m: RecordingMode) { recordingMode = m; },
+
+    get transcriptionRuntimePhase() { return transcriptionRuntimePhase; },
+    set transcriptionRuntimePhase(v: TranscriptionRuntimePhase) { transcriptionRuntimePhase = v; },
+
+    get transcriptionModelOperationState() { return transcriptionModelOperationState; },
+    set transcriptionModelOperationState(v: TranscriptionModelOperationState) { transcriptionModelOperationState = v; },
+
+    get downloadFile() { return downloadFile; },
+    set downloadFile(v: string) { downloadFile = v; },
+
+    get downloadCompletedFiles() { return downloadCompletedFiles; },
+    set downloadCompletedFiles(v: number) { downloadCompletedFiles = v; },
+
+    get downloadTotalFiles() { return downloadTotalFiles; },
+    set downloadTotalFiles(v: number) { downloadTotalFiles = v; },
 
     /** Navigate to a specific meeting's detail page */
     openMeeting(id: string) {

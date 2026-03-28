@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -38,7 +39,10 @@ pub struct KyutaiConfig {
 }
 
 impl KyutaiConfig {
-    fn to_lm_config(&self) -> moshi::lm::Config {
+    fn to_lm_config(
+        &self,
+        has_extra_heads: bool,
+    ) -> moshi::lm::Config {
         let transformer = moshi::transformer::Config {
             d_model: self.dim,
             num_heads: self.num_heads,
@@ -71,8 +75,7 @@ impl KyutaiConfig {
             text_out_vocab_size: self.text_card,
             audio_codebooks: self.n_q,
             conditioners: Default::default(),
-            // VAD extra heads: 4 heads, 6 dims each (0.5s, 1s, 2s, 3s horizons)
-            extra_heads: Some(moshi::lm::ExtraHeadsConfig {
+            extra_heads: has_extra_heads.then_some(moshi::lm::ExtraHeadsConfig {
                 num_heads: 4,
                 dim: 6,
             }),
@@ -137,12 +140,13 @@ impl KyutaiEngine {
 
         let dtype = device.bf16_default_to_f32();
         let model_file = model_path.join("model.safetensors");
+        let has_extra_heads = Self::detect_extra_heads(&model_file)?;
         let vb_lm = unsafe {
             candle_nn::VarBuilder::from_mmaped_safetensors(&[&model_file], dtype, device)
                 .map_err(|e| EngineError::LoadError(format!("Model weights reload: {e}")))?
         };
         let lm = moshi::lm::LmModel::new(
-            &config.to_lm_config(),
+            &config.to_lm_config(has_extra_heads),
             moshi::nn::MaybeQuantizedVarBuilder::Real(vb_lm),
         )
         .map_err(|e| EngineError::LoadError(format!("LM model reload: {e}")))?;
@@ -166,6 +170,16 @@ impl KyutaiEngine {
             device,
             model_path,
         })
+    }
+
+    fn detect_extra_heads(model_file: &Path) -> Result<bool, EngineError> {
+        let file = File::open(model_file)
+            .map_err(|e| EngineError::LoadError(format!("Weights open failed: {e}")))?;
+        let mmap = unsafe { memmap2::Mmap::map(&file) }
+            .map_err(|e| EngineError::LoadError(format!("Weights mmap failed: {e}")))?;
+        let (_, metadata) = safetensors::tensor::SafeTensors::read_metadata(&mmap)
+            .map_err(|e| EngineError::LoadError(format!("Weights metadata read failed: {e}")))?;
+        Ok(metadata.info("extra_heads.0.weight").is_some())
     }
 
     fn synchronize_device(device: &Device, context: &str) -> Result<(), EngineError> {

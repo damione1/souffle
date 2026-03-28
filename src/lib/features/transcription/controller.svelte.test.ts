@@ -92,8 +92,7 @@ const fakeStatus: TranscriptionRuntimeStatus = {
     backend_id: "candle",
     backend_label: "Candle",
   },
-  downloaded: true,
-  loaded: true,
+  phase: "ready",
   model_dir: "/tmp/models",
 };
 
@@ -150,8 +149,28 @@ describe("transcription controller", () => {
 
     // Reset shared singleton app state between tests
     const app = getAppState();
+    app.currentView = "transcription";
+    app.currentMeetingId = null;
     app.isRecording = false;
     app.recordingMode = "idle";
+    app.transcriptionRuntimePhase = "download_required";
+    app.transcriptionModelOperationState = "idle";
+    app.downloadFile = "";
+    app.downloadCompletedFiles = 0;
+    app.downloadTotalFiles = 0;
+    app.selectedDevice = "";
+    app.settings = {
+      theme: "dark",
+      auto_paste: false,
+      paste_delay_ms: 100,
+      ollama_url: "http://localhost:11434",
+      ollama_model: "",
+      debug_transcription: false,
+      audio_device: null,
+      transcription_engine_id: "kyutai",
+      transcription_model_id: "stt-1b-en_fr",
+      transcription_backend_id: "candle",
+    };
 
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -166,8 +185,7 @@ describe("transcription controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("get_model_status", { selection });
     expect(mockInvoke).toHaveBeenCalledWith("list_dictation_entries", { limit: 50 });
     expect(ctrl.catalog).toEqual(fakeCatalog);
-    expect(ctrl.modelDownloaded).toBe(true);
-    expect(ctrl.modelLoaded).toBe(true);
+    expect(ctrl.runtimePhase).toBe("ready");
     expect(ctrl.history).toEqual(fakeHistory);
 
     expect(typeof cleanup).toBe("function");
@@ -233,7 +251,7 @@ describe("transcription controller", () => {
   it("toggleRecording not loaded shows message", async () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_model_status") {
-        return Promise.resolve({ ...fakeStatus, downloaded: false, loaded: false });
+        return Promise.resolve({ ...fakeStatus, phase: "download_required" });
       }
       return defaultInvoke(cmd);
     });
@@ -273,12 +291,36 @@ describe("transcription controller", () => {
   it("handleDownloadModel tracks progress", async () => {
     // Override download_model to simulate progress callbacks via the Channel
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_model_status") {
+        return Promise.resolve({ ...fakeStatus, phase: "load_required" });
+      }
       if (cmd === "download_model") {
         const channel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         if (channel?.onmessage) {
-          channel.onmessage({ file: "model.safetensors", downloaded_bytes: 500, total_bytes: 1000, status: "downloading" });
-          channel.onmessage({ file: "model.safetensors", downloaded_bytes: 1000, total_bytes: 1000, status: "complete" });
-          channel.onmessage({ file: "all", downloaded_bytes: 0, total_bytes: null, status: "complete" });
+          channel.onmessage({
+            file: "model.safetensors",
+            downloaded_bytes: 500,
+            total_bytes: 1000,
+            completed_files: 1,
+            total_files: 4,
+            status: "downloading",
+          });
+          channel.onmessage({
+            file: "model.safetensors",
+            downloaded_bytes: 1000,
+            total_bytes: 1000,
+            completed_files: 2,
+            total_files: 4,
+            status: "complete",
+          });
+          channel.onmessage({
+            file: "all",
+            downloaded_bytes: 0,
+            total_bytes: null,
+            completed_files: 4,
+            total_files: 4,
+            status: "complete",
+          });
         }
         return Promise.resolve(null);
       }
@@ -294,17 +336,19 @@ describe("transcription controller", () => {
       "download_model",
       expect.objectContaining({ selection, channel: expect.any(Object) }),
     );
-    expect(ctrl.isDownloading).toBe(false);
-    expect(ctrl.modelDownloaded).toBe(true);
+    expect(ctrl.modelOperationState).toBe("idle");
+    expect(ctrl.runtimePhase).toBe("load_required");
+    expect(ctrl.downloadCompletedFiles).toBe(4);
+    expect(ctrl.downloadTotalFiles).toBe(4);
   });
 
-  it("handleLoadModel success sets modelLoaded", async () => {
+  it("handleLoadModel success sets runtimePhase to ready", async () => {
     let statusCallCount = 0;
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_model_status") {
         statusCallCount++;
         return Promise.resolve(statusCallCount <= 1
-          ? { ...fakeStatus, loaded: false }
+          ? { ...fakeStatus, phase: "load_required" }
           : fakeStatus,
         );
       }
@@ -313,13 +357,13 @@ describe("transcription controller", () => {
 
     const ctrl = createTranscriptionController();
     await ctrl.mount();
-    expect(ctrl.modelLoaded).toBe(false);
+    expect(ctrl.runtimePhase).toBe("load_required");
 
     await ctrl.handleLoadModel();
 
     expect(mockInvoke).toHaveBeenCalledWith("load_model", { selection });
-    expect(ctrl.modelLoaded).toBe(true);
-    expect(ctrl.isLoadingModel).toBe(false);
+    expect(ctrl.runtimePhase).toBe("ready");
+    expect(ctrl.modelOperationState).toBe("idle");
   });
 
   it("removeHistoryEntry updates list", async () => {

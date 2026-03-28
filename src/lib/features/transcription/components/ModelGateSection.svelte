@@ -1,6 +1,7 @@
 <script lang="ts">
+  import ProgressBar from "../../../components/ui/ProgressBar.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
-  import type { TranscriptionCatalog } from "../../../types";
+  import type { TranscriptionCatalog, TranscriptionRuntimePhase } from "../../../types";
   import {
     hasAvailableTranscriptionModel,
     isTranscriptionBackendAvailable,
@@ -9,17 +10,25 @@
     getSelectedTranscriptionEngine,
     getSelectedTranscriptionModel,
   } from "../catalog";
+  import {
+    operationStateIsBusy,
+    runtimePhaseAvailabilityLabel,
+    runtimePhasePillClass,
+    runtimePhaseRequiresDownload,
+    runtimePhaseRequiresLoad,
+    type TranscriptionModelOperationState,
+  } from "../state";
 
   let {
     catalog,
     selectedEngineId,
     selectedModelId,
     selectedBackendId,
-    modelDownloaded,
-    modelLoaded,
-    isDownloading,
+    runtimePhase,
+    modelOperationState,
     downloadFile,
-    isLoadingModel,
+    downloadCompletedFiles,
+    downloadTotalFiles,
     onSelectEngine,
     onSelectModel,
     onSelectBackend,
@@ -30,11 +39,11 @@
     selectedEngineId: string;
     selectedModelId: string;
     selectedBackendId: string;
-    modelDownloaded: boolean;
-    modelLoaded: boolean;
-    isDownloading: boolean;
+    runtimePhase: TranscriptionRuntimePhase;
+    modelOperationState: TranscriptionModelOperationState;
     downloadFile: string;
-    isLoadingModel: boolean;
+    downloadCompletedFiles: number;
+    downloadTotalFiles: number;
     onSelectEngine: (engineId: string) => void | Promise<void>;
     onSelectModel: (modelId: string) => void | Promise<void>;
     onSelectBackend: (backendId: string) => void | Promise<void>;
@@ -52,6 +61,11 @@
   let selectedAvailabilityNote = $derived(
     selectedModel?.availability_note ?? selectedBackend?.availability_note ?? null,
   );
+  let isDownloading = $derived(modelOperationState === "downloading");
+  let isLoadingModel = $derived(modelOperationState === "loading");
+  let requiresDownload = $derived(runtimePhaseRequiresDownload(runtimePhase));
+  let requiresLoad = $derived(runtimePhaseRequiresLoad(runtimePhase));
+  let isBusy = $derived(operationStateIsBusy(modelOperationState));
 
   function formatDownloadSize(bytes: number | null): string {
     if (!bytes || bytes <= 0) return "Download size varies by provider.";
@@ -62,6 +76,14 @@
     if (!bytes || bytes <= 0) return null;
     return `${(bytes / 1_000_000_000).toFixed(1)} GB RAM/VRAM`;
   }
+
+  let downloadLabel = $derived.by(() => {
+    if (!isDownloading) return "";
+    if (downloadTotalFiles > 0) {
+      return `${downloadCompletedFiles}/${downloadTotalFiles} files`;
+    }
+    return "Preparing download";
+  });
 </script>
 
 <section class="surface-card flex flex-col gap-4">
@@ -73,8 +95,8 @@
       </p>
     </div>
 
-    <span class={`pill ${modelLoaded ? "pill-success" : modelDownloaded ? "pill-warning" : "pill-muted"}`}>
-      {modelLoaded ? "Ready" : modelDownloaded ? "Downloaded" : "Not downloaded"}
+    <span class={`pill ${runtimePhasePillClass(runtimePhase)}`}>
+      {runtimePhaseAvailabilityLabel(runtimePhase)}
     </span>
   </div>
 
@@ -87,6 +109,7 @@
           value={selectedEngineId}
           onchange={(event) => onSelectEngine((event.currentTarget as HTMLSelectElement).value)}
           class="field-select"
+          disabled={isBusy}
         >
           {#each catalog.engines as engine}
             <option value={engine.id} disabled={!hasAvailableTranscriptionModel(engine)}>
@@ -106,7 +129,7 @@
           value={selectedModelId}
           onchange={(event) => onSelectModel((event.currentTarget as HTMLSelectElement).value)}
           class="field-select"
-          disabled={availableModels.length === 0}
+          disabled={availableModels.length === 0 || isBusy}
         >
           {#each availableModels as model}
             <option value={model.id} disabled={!isTranscriptionModelAvailable(model)}>
@@ -140,6 +163,7 @@
           value={selectedBackendId}
           onchange={(event) => onSelectBackend((event.currentTarget as HTMLSelectElement).value)}
           class="field-select"
+          disabled={isBusy}
         >
           {#each availableBackends as backend}
             <option value={backend.id} disabled={!isTranscriptionBackendAvailable(backend)}>
@@ -169,22 +193,22 @@
   <div class="flex items-center justify-between gap-4 flex-wrap">
     <div class="min-w-0">
       <strong class="block text-text-primary">
-        {!modelDownloaded
+        {requiresDownload
           ? `Download ${selectedModel?.label ?? "the selected model"}`
-          : !modelLoaded
+          : requiresLoad
             ? `Load ${selectedModel?.label ?? "the selected model"}`
             : `${selectedModel?.label ?? "Selected model"} is ready`}
       </strong>
       <p class="text-text-muted text-sm">
-        {!modelDownloaded
+        {requiresDownload
           ? "The model is stored locally and reused across sessions."
-          : !modelLoaded
+          : requiresLoad
             ? "The first load warms up the tokenizer, weights, and Metal kernels."
             : "You can switch profiles at any time. The runtime status follows the selected DTO."}
       </p>
     </div>
 
-    {#if !modelDownloaded}
+    {#if requiresDownload}
       <button onclick={onDownloadModel} class="btn btn-primary" disabled={isDownloading}>
         {#if isDownloading}
           <Spinner />
@@ -193,7 +217,7 @@
           Download model
         {/if}
       </button>
-    {:else if !modelLoaded}
+    {:else if requiresLoad}
       <button onclick={onLoadModel} class="btn btn-primary" disabled={isLoadingModel}>
         {#if isLoadingModel}
           <Spinner />
@@ -207,12 +231,21 @@
     {/if}
   </div>
 
-  {#if isDownloading || isLoadingModel}
+  {#if isBusy}
     <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border">
       <strong>{isDownloading ? (downloadFile || "Downloading model files...") : "Preparing engine..."}</strong>
       <p class="text-text-muted text-sm">
         {isDownloading ? "Keep the app open while files download." : "Usually takes a few seconds on first load."}
       </p>
+      {#if isDownloading}
+        <div class="mt-3">
+          <ProgressBar
+            value={downloadCompletedFiles}
+            max={downloadTotalFiles || 1}
+            label={downloadLabel}
+          />
+        </div>
+      {/if}
     </div>
   {/if}
 </section>

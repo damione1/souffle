@@ -84,8 +84,7 @@ export const mockRuntimeStatus: TranscriptionRuntimeStatus = {
     backend_id: "candle",
     backend_label: "Candle",
   },
-  downloaded: true,
-  loaded: true,
+  phase: "ready",
   model_dir: "/mock/models/kyutai/stt-1b-en_fr/candle",
 };
 

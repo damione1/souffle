@@ -9,6 +9,8 @@ pub struct DownloadProgress {
     pub file: String,
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
+    pub completed_files: u32,
+    pub total_files: u32,
     pub status: DownloadStatus,
 }
 
@@ -59,11 +61,15 @@ pub fn download_model(
         hf_hub::api::sync::Api::new().map_err(|e| format!("HuggingFace API init failed: {e}"))?;
     let repo = api.model(artifact.repository.clone());
 
-    // First download config.json to discover other file names
+    // The full file count is only known after config.json is available.
+    let mut completed_files = 0u32;
+
     progress_callback(DownloadProgress {
         file: "config.json".into(),
         downloaded_bytes: 0,
         total_bytes: None,
+        completed_files,
+        total_files: 0,
         status: DownloadStatus::Starting,
     });
 
@@ -80,6 +86,11 @@ pub fn download_model(
         file: "config.json".into(),
         downloaded_bytes: 0,
         total_bytes: None,
+        total_files: 0,
+        completed_files: {
+            completed_files += 1;
+            completed_files
+        },
         status: DownloadStatus::Complete,
     });
 
@@ -102,6 +113,7 @@ pub fn download_model(
         (mimi_name, mimi_name),
         (tokenizer_name, tokenizer_name),
     ];
+    let total_files = (1 + files_to_download.len()) as u32;
 
     for (repo_file, local_name) in &files_to_download {
         info!(file = repo_file, "Downloading");
@@ -109,6 +121,8 @@ pub fn download_model(
             file: local_name.to_string(),
             downloaded_bytes: 0,
             total_bytes: None,
+            completed_files,
+            total_files,
             status: DownloadStatus::Downloading,
         });
 
@@ -138,6 +152,11 @@ pub fn download_model(
             file: local_name.to_string(),
             downloaded_bytes: 0,
             total_bytes: None,
+            completed_files: {
+                completed_files += 1;
+                completed_files
+            },
+            total_files,
             status: DownloadStatus::Complete,
         });
         info!(file = local_name, "Download complete");

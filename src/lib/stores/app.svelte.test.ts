@@ -9,9 +9,14 @@ describe('app store', () => {
     expect(state.recordingMode).toBe('idle');
     expect(state.currentMeetingId).toBeNull();
     expect(state.selectedDevice).toBe('');
+    expect(state.transcriptionRuntimePhase).toBe('download_required');
+    expect(state.transcriptionModelOperationState).toBe('idle');
+    expect(state.downloadFile).toBe('');
+    expect(state.downloadCompletedFiles).toBe(0);
+    expect(state.downloadTotalFiles).toBe(0);
     expect(state.settings.theme).toBe('dark');
     expect(state.settings.auto_paste).toBe(false);
-    expect(state.settings.transcription_engine_id).toBe('kyutai');
+    expect(state.settings.transcription_engine_id).toBe('');
   });
 
   it('openMeeting sets id and navigates to meeting view', () => {
