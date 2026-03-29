@@ -73,6 +73,15 @@
         recordingSessions={controller.meeting.recording_sessions}
         liveSessionStartIndex={liveSessionStartIndex}
         isRecordingMeeting={controller.isRecordingMeeting}
+        hasEditedTranscript={controller.meeting.edited_transcript != null}
+        isEditing={controller.isEditingTranscript}
+        editedTranscriptDraft={controller.editedTranscriptDraft}
+        onStartEdit={controller.startEditingTranscript}
+        onCancelEdit={controller.cancelEditingTranscript}
+        onSaveEdit={controller.saveTranscriptEdit}
+        onSaveAndSummarize={controller.saveTranscriptAndSummarize}
+        onResetEdited={controller.resetEditedTranscript}
+        onEditDraftChange={(value) => { controller.editedTranscriptDraft = value; }}
       />
 
       <MeetingSummarySection

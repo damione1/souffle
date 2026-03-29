@@ -45,7 +45,7 @@ impl Database {
                 i32::from(meeting.summary_is_stale),
                 meeting.summary_model,
                 meeting.summary_generated_at.map(|dt| dt.to_rfc3339()),
-                None::<String>,
+                meeting.edited_transcript,
             ],
         )
         .map_err(|e| format!("Insert meeting: {e}"))?;
@@ -116,7 +116,8 @@ impl Database {
                     summary,
                     summary_is_stale,
                     summary_model,
-                    summary_generated_at
+                    summary_generated_at,
+                    edited_transcript
                  FROM meetings
                  WHERE id = ?1",
                 params![id],
@@ -133,6 +134,7 @@ impl Database {
                         summary_is_stale: row.get::<_, i32>(8)? != 0,
                         summary_model: row.get(9)?,
                         summary_generated_at: row.get(10)?,
+                        edited_transcript: row.get(11)?,
                     })
                 },
             )
@@ -189,6 +191,7 @@ impl Database {
             summary_is_stale: meeting.summary_is_stale,
             summary_model: meeting.summary_model,
             summary_generated_at,
+            edited_transcript: meeting.edited_transcript,
         })
     }
 
@@ -271,6 +274,32 @@ impl Database {
         Ok(())
     }
 
+    /// Save an edited transcript for a meeting.
+    pub fn save_edited_transcript(
+        &self,
+        id: &str,
+        edited_transcript: Option<&str>,
+    ) -> Result<(), String> {
+        let conn = self.conn.acquire()?;
+        conn.execute(
+            "UPDATE meetings SET edited_transcript = ?1 WHERE id = ?2",
+            params![edited_transcript, id],
+        )
+        .map_err(|e| format!("Update edited transcript: {e}"))?;
+        Ok(())
+    }
+
+    /// Load the edited transcript for a meeting.
+    pub fn load_edited_transcript(&self, id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.acquire()?;
+        conn.query_row(
+            "SELECT edited_transcript FROM meetings WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Load edited transcript: {e}"))
+    }
+
     /// Check if a meeting with the given ID exists.
     pub fn meeting_exists(&self, id: &str) -> Result<bool, String> {
         let conn = self.conn.acquire()?;
@@ -297,6 +326,7 @@ struct MeetingRow {
     summary_is_stale: bool,
     summary_model: Option<String>,
     summary_generated_at: Option<String>,
+    edited_transcript: Option<String>,
 }
 
 impl MeetingRow {
@@ -392,5 +422,33 @@ mod tests {
     fn load_nonexistent_meeting_returns_error() {
         let (db, _dir) = test_db();
         assert!(db.load_meeting("nonexistent").is_err());
+    }
+
+    #[test]
+    fn save_and_load_edited_transcript() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+
+        // Initially no edited transcript
+        let edited = db.load_edited_transcript("m1").unwrap();
+        assert!(edited.is_none());
+
+        // Save edited transcript
+        db.save_edited_transcript("m1", Some("Edited version of transcript"))
+            .unwrap();
+        let edited = db.load_edited_transcript("m1").unwrap();
+        assert_eq!(edited.as_deref(), Some("Edited version of transcript"));
+
+        // Verify load_meeting also returns it
+        let meeting = db.load_meeting("m1").unwrap();
+        assert_eq!(
+            meeting.edited_transcript.as_deref(),
+            Some("Edited version of transcript")
+        );
+
+        // Clear edited transcript
+        db.save_edited_transcript("m1", None).unwrap();
+        let edited = db.load_edited_transcript("m1").unwrap();
+        assert!(edited.is_none());
     }
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { RefreshCw } from "@lucide/svelte";
   import { t } from "svelte-i18n";
+  import SettingsField from "../../../components/ui/SettingsField.svelte";
   import type { AudioDeviceInfo } from "../../../types";
 
   let {
@@ -36,14 +37,16 @@
     </div>
   </div>
 
-  <div class="flex items-center justify-between gap-4 opacity-50">
-    <div>
-      <span class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_audio.noise_reduction")}</span>
-      <span class="text-sm text-text-muted">{$t("settings_audio.noise_reduction_desc")}</span>
-    </div>
-    <div class="flex gap-2 items-center">
-      <span class="pill pill-muted">{$t("settings_audio.coming_soon")}</span>
-      <input type="checkbox" disabled class="switch" />
-    </div>
-  </div>
+  <SettingsField
+    label={$t("settings_audio.noise_reduction")}
+    description={$t("settings_audio.noise_reduction_desc")}
+    disabled
+  >
+    {#snippet control()}
+      <div class="flex gap-2 items-center">
+        <span class="pill pill-muted">{$t("settings_audio.coming_soon")}</span>
+        <input type="checkbox" disabled class="switch" />
+      </div>
+    {/snippet}
+  </SettingsField>
 </section>

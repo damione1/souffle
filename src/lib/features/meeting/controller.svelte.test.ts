@@ -117,6 +117,7 @@ function makeMeeting(overrides: Partial<MeetingTranscript> = {}): MeetingTranscr
     summary_is_stale: false,
     summary_model: null,
     summary_generated_at: null,
+    edited_transcript: null,
     ...overrides,
   };
 }

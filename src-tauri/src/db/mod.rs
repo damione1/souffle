@@ -2,6 +2,7 @@ pub mod dictation;
 pub mod meetings;
 pub mod migrate;
 pub mod schema;
+pub mod search;
 pub mod settings;
 
 use std::path::Path;
@@ -119,6 +120,12 @@ impl Database {
                 schema::migrate_meetings_to_v3(&mut conn)?;
                 conn.execute("UPDATE schema_version SET version = 3", [])
                     .map_err(|e| format!("Update schema version v3: {e}"))?;
+            }
+
+            if current_version < 4 {
+                schema::migrate_text_search_to_v4(&mut conn)?;
+                conn.execute("UPDATE schema_version SET version = 4", [])
+                    .map_err(|e| format!("Update schema version v4: {e}"))?;
             }
 
             info!("Schema migration complete");

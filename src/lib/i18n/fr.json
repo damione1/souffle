@@ -162,12 +162,15 @@
     "collapse": "Réduire",
     "expand": "Développer",
     "copy": "Copier",
-    "delete": "Supprimer"
+    "delete": "Supprimer",
+    "search_placeholder": "Rechercher dans l'historique de dictée...",
+    "search_results_count": "{count} sur {total} entrées",
+    "no_search_results": "Aucune entrée correspondante."
   },
   "meeting_history": {
     "title": "Historique des réunions",
     "meetings_count": "{count} réunions",
-    "search_placeholder": "Rechercher des réunions...",
+    "search_placeholder": "Rechercher dans les réunions et dictées...",
     "no_matches_title": "Aucun résultat",
     "no_meetings_title": "Pas encore de réunions",
     "no_matches_msg": "Essayez un autre terme de recherche.",
@@ -175,7 +178,11 @@
     "summary_outdated": "Résumé obsolète",
     "summary": "Résumé",
     "active_recording": "Une réunion est en cours d'enregistrement",
-    "click_to_view": "Cliquer pour voir"
+    "click_to_view": "Cliquer pour voir",
+    "search_results": "Résultats de recherche",
+    "results_count": "{count} résultats",
+    "source_meeting": "Réunion",
+    "source_dictation": "Dictée"
   },
   "new_meeting": {
     "title_placeholder": "Titre de la réunion (optionnel)",
@@ -198,7 +205,15 @@
   "meeting_transcript": {
     "title": "Transcription",
     "listening": "Écoute de la parole...",
-    "no_transcript": "Aucune transcription disponible."
+    "no_transcript": "Aucune transcription disponible.",
+    "edit": "Modifier",
+    "editing": "Modification de la transcription",
+    "edit_hint": "Modifiez la transcription avant de générer un résumé.",
+    "save": "Enregistrer",
+    "save_and_summarize": "Enregistrer et résumer",
+    "cancel_edit": "Annuler",
+    "edited_badge": "Modifié",
+    "reset_to_original": "Revenir à l'original"
   },
   "meeting_summary": {
     "title": "Résumé",

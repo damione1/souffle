@@ -4,8 +4,8 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 3: session-aware meetings without legacy engine storage
-pub const SCHEMA_VERSION: i64 = 3;
+/// Schema version 4: content-storing FTS5 table (was contentless in v1-v3)
+pub const SCHEMA_VERSION: i64 = 4;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -78,7 +78,16 @@ pub const CREATE_SETTINGS: &str = "
     );
 ";
 
+/// FTS5 table — content-storing (v4+). Enables snippet()/highlight().
 pub const CREATE_TEXT_SEARCH: &str = "
+    CREATE VIRTUAL TABLE IF NOT EXISTS text_search USING fts5(
+        content, source_type, source_id
+    );
+";
+
+/// Legacy contentless FTS5 table (v1-v3). Kept for v1 schema creation path
+/// so that fresh databases go straight to v4 migration which recreates it.
+pub const CREATE_TEXT_SEARCH_V1: &str = "
     CREATE VIRTUAL TABLE IF NOT EXISTS text_search USING fts5(
         content, source_type, source_id, content=''
     );
@@ -108,7 +117,7 @@ pub const SCHEMA_V1: &[&str] = &[
     CREATE_SEGMENTS_INDEX,
     CREATE_DICTATION_ENTRIES,
     CREATE_SETTINGS,
-    CREATE_TEXT_SEARCH,
+    CREATE_TEXT_SEARCH_V1,
     CREATE_EMBEDDINGS,
     CREATE_EMBEDDINGS_INDEX,
 ];
@@ -286,6 +295,47 @@ pub fn migrate_meetings_to_v3(conn: &mut Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// Migrate FTS5 text_search from contentless (content='') to content-storing.
+/// Drops the old table, recreates with stored content, and re-indexes all
+/// existing meetings and dictation entries.
+pub fn migrate_text_search_to_v4(conn: &mut Connection) -> Result<(), String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Begin v4 migration transaction: {e}"))?;
+
+    // Drop the contentless FTS5 table and recreate as content-storing
+    tx.execute_batch("DROP TABLE IF EXISTS text_search;")
+        .map_err(|e| format!("Drop contentless text_search: {e}"))?;
+
+    tx.execute_batch(CREATE_TEXT_SEARCH)
+        .map_err(|e| format!("Create content-storing text_search: {e}"))?;
+
+    // Re-index all meetings: concatenate segment texts per meeting
+    tx.execute_batch(
+        "INSERT INTO text_search (content, source_type, source_id)
+         SELECT GROUP_CONCAT(s.text, ' '), 'meeting', m.id
+         FROM meetings m
+         JOIN segments s ON s.meeting_id = m.id
+         GROUP BY m.id
+         HAVING GROUP_CONCAT(s.text, ' ') != ''",
+    )
+    .map_err(|e| format!("Re-index meetings in FTS: {e}"))?;
+
+    // Re-index all dictation entries
+    tx.execute_batch(
+        "INSERT INTO text_search (content, source_type, source_id)
+         SELECT text, 'dictation', id
+         FROM dictation_entries
+         WHERE text != ''",
+    )
+    .map_err(|e| format!("Re-index dictation in FTS: {e}"))?;
+
+    tx.commit()
+        .map_err(|e| format!("Commit v4 migration: {e}"))?;
+
+    Ok(())
+}
+
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
@@ -299,7 +349,7 @@ mod tests {
     use super::{
         CREATE_DICTATION_ENTRIES, CREATE_EMBEDDINGS, CREATE_EMBEDDINGS_INDEX, CREATE_MEETINGS_V1,
         CREATE_SCHEMA_VERSION, CREATE_SEGMENTS, CREATE_SEGMENTS_INDEX, CREATE_SETTINGS,
-        CREATE_TEXT_SEARCH, SCHEMA_V2,
+        CREATE_TEXT_SEARCH_V1, SCHEMA_V2,
     };
     use crate::db::Database;
     use tempfile::TempDir;
@@ -337,7 +387,7 @@ mod tests {
         conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
         conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
-        conn.execute_batch(CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(CREATE_TEXT_SEARCH_V1).unwrap();
         conn.execute_batch(CREATE_EMBEDDINGS).unwrap();
         conn.execute_batch(CREATE_EMBEDDINGS_INDEX).unwrap();
         conn.execute_batch(SCHEMA_V2[0]).unwrap();

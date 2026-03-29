@@ -3,6 +3,7 @@ import { commands, unwrap } from "./generated";
 import type {
   MeetingListItem,
   MeetingTranscript,
+  SearchResult,
   SummarizeProgress,
   TranscriptionSegment,
 } from "../types";
@@ -49,4 +50,12 @@ export async function summarizeMeeting(
 
 export async function deleteMeeting(id: string): Promise<void> {
   await unwrap(commands.deleteMeeting(id));
+}
+
+export async function searchText(query: string, limit?: number): Promise<SearchResult[]> {
+  return unwrap(commands.searchText(query, limit ?? null));
+}
+
+export async function saveEditedTranscript(id: string, editedTranscript: string | null): Promise<void> {
+  await unwrap(commands.saveEditedTranscript(id, editedTranscript));
 }

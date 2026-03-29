@@ -36,6 +36,8 @@
     meetings={controller.meetings}
     filteredMeetings={controller.filteredMeetings}
     statusMessage={controller.statusMessage}
+    searchResults={controller.searchResults}
+    isSearching={controller.isSearching}
     bind:searchQuery={controller.searchQuery}
     onOpenMeeting={controller.openMeeting}
   />

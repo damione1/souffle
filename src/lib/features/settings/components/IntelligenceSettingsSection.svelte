@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
+  import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { OllamaModelDescriptor } from "../../../types";
 
@@ -28,25 +29,28 @@
   <h3>{$t("settings_intelligence.title")}</h3>
   <p class="text-text-secondary text-sm">{$t("settings_intelligence.description")}</p>
 
-  <div class="flex items-center justify-between gap-4">
-    <div>
-      <label for="ollama-url" class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_intelligence.ollama_url")}</label>
-      <span class="text-sm text-text-muted">{$t("settings_intelligence.ollama_url_desc")}</span>
-    </div>
-    <input id="ollama-url" type="text" value={ollamaUrl} onchange={onOllamaUrlChange} class="field-input max-w-64" />
-  </div>
+  <SettingsField
+    label={$t("settings_intelligence.ollama_url")}
+    description={$t("settings_intelligence.ollama_url_desc")}
+    htmlFor="ollama-url"
+  >
+    {#snippet control()}
+      <input id="ollama-url" type="text" value={ollamaUrl} onchange={onOllamaUrlChange} class="field-input max-w-64" />
+    {/snippet}
+  </SettingsField>
 
-  <div class="flex items-center justify-between gap-4">
-    <div>
-      <span class="block text-[0.9375rem] font-medium text-text-primary">{$t("settings_intelligence.connection_status")}</span>
-      <span class="text-sm text-text-muted">{$t("settings_intelligence.models_found", { values: { count: ollamaModels.length } })}</span>
-    </div>
-    <div class="flex gap-2 items-center">
-      <span class="status-dot" class:is-online={ollamaAvailable}></span>
-      <span class="text-sm text-text-muted">{ollamaAvailable ? $t("settings_intelligence.connected") : $t("settings_intelligence.not_available")}</span>
-      <button onclick={onRetryOllama} class="btn">{$t("settings_intelligence.retry")}</button>
-    </div>
-  </div>
+  <SettingsField
+    label={$t("settings_intelligence.connection_status")}
+    description={$t("settings_intelligence.models_found", { values: { count: ollamaModels.length } })}
+  >
+    {#snippet control()}
+      <div class="flex gap-2 items-center">
+        <span class="status-dot" class:is-online={ollamaAvailable}></span>
+        <span class="text-sm text-text-muted">{ollamaAvailable ? $t("settings_intelligence.connected") : $t("settings_intelligence.not_available")}</span>
+        <button onclick={onRetryOllama} class="btn">{$t("settings_intelligence.retry")}</button>
+      </div>
+    {/snippet}
+  </SettingsField>
 
   {#if ollamaAvailable && summaryModels.length > 0}
     <div class="flex flex-col gap-1.5">

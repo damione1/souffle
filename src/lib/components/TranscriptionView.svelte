@@ -55,10 +55,13 @@
     />
   </div>
 
-  {#if controller.history.length > 0}
+  {#if controller.history.length > 0 || controller.historySearchQuery}
     <HistorySection
       history={controller.history}
+      filteredHistory={controller.filteredHistory}
       expandedEntryId={controller.expandedEntryId}
+      searchResults={controller.historySearchResults}
+      bind:searchQuery={controller.historySearchQuery}
       onToggleEntry={(id) => {
         controller.expandedEntryId = controller.expandedEntryId === id ? null : id;
       }}

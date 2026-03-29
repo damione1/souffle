@@ -20,6 +20,8 @@ import {
   stopMeetingRecording,
   summarizeMeeting,
   deleteMeeting,
+  searchText,
+  saveEditedTranscript,
 } from './meetings';
 
 describe('meetings API', () => {
@@ -89,5 +91,39 @@ describe('meetings API', () => {
     await deleteMeeting('meeting-1');
 
     expect(mockInvoke).toHaveBeenCalledWith('delete_meeting', expect.objectContaining({ id: 'meeting-1' }), undefined);
+  });
+
+  it('searchText passes query and limit', async () => {
+    const results = [{ source_type: 'meeting', source_id: 'm1', snippet: '<mark>Hello</mark> world', rank: 1.0 }];
+    mockInvoke.mockResolvedValue(results);
+
+    const result = await searchText('Hello', 10);
+
+    expect(mockInvoke).toHaveBeenCalledWith('search_text', expect.objectContaining({ query: 'Hello', limit: 10 }), undefined);
+    expect(result).toEqual(results);
+  });
+
+  it('searchText defaults limit to null', async () => {
+    mockInvoke.mockResolvedValue([]);
+
+    await searchText('test');
+
+    expect(mockInvoke).toHaveBeenCalledWith('search_text', expect.objectContaining({ query: 'test', limit: null }), undefined);
+  });
+
+  it('saveEditedTranscript passes id and text', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await saveEditedTranscript('meeting-1', 'Edited text');
+
+    expect(mockInvoke).toHaveBeenCalledWith('save_edited_transcript', expect.objectContaining({ id: 'meeting-1', editedTranscript: 'Edited text' }), undefined);
+  });
+
+  it('saveEditedTranscript passes null to clear', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await saveEditedTranscript('meeting-1', null);
+
+    expect(mockInvoke).toHaveBeenCalledWith('save_edited_transcript', expect.objectContaining({ id: 'meeting-1', editedTranscript: null }), undefined);
   });
 });

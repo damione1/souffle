@@ -51,6 +51,7 @@ pub struct MeetingTranscript {
     pub summary_is_stale: bool,
     pub summary_model: Option<String>,
     pub summary_generated_at: Option<DateTime<Utc>>,
+    pub edited_transcript: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -72,6 +73,8 @@ struct MeetingTranscriptWire {
     summary_is_stale: Option<bool>,
     summary_model: Option<String>,
     summary_generated_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    edited_transcript: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for MeetingTranscript {
@@ -107,6 +110,7 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             summary_is_stale: wire.summary_is_stale.unwrap_or(false),
             summary_model: wire.summary_model,
             summary_generated_at: wire.summary_generated_at,
+            edited_transcript: wire.edited_transcript,
         })
     }
 }
@@ -225,6 +229,7 @@ mod tests {
             summary_is_stale: false,
             summary_model: Some("test-model".to_string()),
             summary_generated_at: None,
+            edited_transcript: None,
         };
 
         let json = serde_json::to_string(&meeting).unwrap();
@@ -261,6 +266,7 @@ mod tests {
             summary_is_stale: true,
             summary_model: None,
             summary_generated_at: None,
+            edited_transcript: None,
         };
 
         let item = MeetingListItem::from(&transcript);

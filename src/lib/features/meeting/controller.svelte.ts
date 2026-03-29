@@ -2,6 +2,7 @@ import {
   deleteMeeting as removeMeeting,
   getMeeting,
   resumeMeetingRecording,
+  saveEditedTranscript,
   startMeetingRecording,
   stopMeetingRecording,
   summarizeMeeting as runMeetingSummary,
@@ -27,6 +28,9 @@ function createMeetingControllerInstance() {
   let isSummarizing = $state(false);
   let summaryStream = $state("");
   let transcriptionCatalog = $state<TranscriptionCatalog | null>(null);
+
+  let isEditingTranscript = $state(false);
+  let editedTranscriptDraft = $state("");
 
   let isRecordingMeeting = $derived(
     app.machineState.state === "recording_meeting"
@@ -137,6 +141,7 @@ function createMeetingControllerInstance() {
         summary_is_stale: false,
         summary_model: null,
         summary_generated_at: null,
+        edited_transcript: null,
       };
       meetingTitle = "";
     } catch (e) {
@@ -212,6 +217,49 @@ function createMeetingControllerInstance() {
     }
   }
 
+  function startEditingTranscript() {
+    if (!meeting) return;
+    // Use edited_transcript if available, otherwise join segments
+    editedTranscriptDraft = meeting.edited_transcript
+      ?? meeting.segments.map((s) => s.text).join(" ");
+    isEditingTranscript = true;
+  }
+
+  function cancelEditingTranscript() {
+    isEditingTranscript = false;
+    editedTranscriptDraft = "";
+  }
+
+  async function saveTranscriptEdit() {
+    if (!meeting || !meeting.id) return;
+    try {
+      const textToSave = editedTranscriptDraft.trim() || null;
+      await saveEditedTranscript(meeting.id, textToSave);
+      meeting = await getMeeting(meeting.id);
+      isEditingTranscript = false;
+      editedTranscriptDraft = "";
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
+  async function saveTranscriptAndSummarize() {
+    await saveTranscriptEdit();
+    if (!isEditingTranscript) {
+      await summarizeMeeting();
+    }
+  }
+
+  async function resetEditedTranscript() {
+    if (!meeting || !meeting.id) return;
+    try {
+      await saveEditedTranscript(meeting.id, null);
+      meeting = await getMeeting(meeting.id);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
   async function deleteMeeting() {
     if (!meeting || !meeting.id) return;
     try {
@@ -240,6 +288,9 @@ function createMeetingControllerInstance() {
     get meeting() { return meeting; },
     get isLoadingMeeting() { return isLoadingMeeting; },
     get canResumeRecording() { return canResumeRecording; },
+    get isEditingTranscript() { return isEditingTranscript; },
+    get editedTranscriptDraft() { return editedTranscriptDraft; },
+    set editedTranscriptDraft(value: string) { editedTranscriptDraft = value; },
     mount,
     onMeetingSelectionChange,
     checkOllama,
@@ -249,6 +300,11 @@ function createMeetingControllerInstance() {
     startNew,
     summarizeMeeting,
     deleteMeeting,
+    startEditingTranscript,
+    cancelEditingTranscript,
+    saveTranscriptEdit,
+    saveTranscriptAndSummarize,
+    resetEditedTranscript,
   };
 }
 

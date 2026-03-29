@@ -17,7 +17,7 @@ import type {
   TranscriptionCatalog,
   TranscriptionSegment,
 } from "../../types";
-import { errorMessage } from "../../utils";
+import { createDebouncedSearch, errorMessage, matchedIdsForType } from "../../utils";
 import {
   formatSelectedTranscriptionLabel,
   getFirstAvailableTranscriptionBackend,
@@ -42,6 +42,21 @@ function createTranscriptionControllerInstance() {
 
   let history = $state<DictationEntry[]>([]);
   let expandedEntryId = $state<string | null>(null);
+  let historySearchQuery = $state("");
+  const historySearch = createDebouncedSearch(250, 50);
+
+  let filteredHistory = $derived.by(() => {
+    const query = historySearchQuery.trim().toLowerCase();
+    if (!query) return history;
+
+    if (historySearch.results.length > 0) {
+      const matched = matchedIdsForType(historySearch.results, "dictation");
+      return history.filter((entry) => matched.has(entry.id));
+    }
+
+    // Fallback to local text filtering while search is in progress
+    return history.filter((entry) => entry.text.toLowerCase().includes(query));
+  });
 
   let activeProfileLabel = $derived.by(() => {
     if (!catalog) return "Transcription model";
@@ -181,6 +196,11 @@ function createTranscriptionControllerInstance() {
     }
   }
 
+  function onHistorySearchQueryChange(query: string) {
+    historySearchQuery = query;
+    historySearch.update(query);
+  }
+
   async function handleDownloadModel() {
     await startTranscriptionModelDownload(app, catalog, (message) => {
       statusMessage = message;
@@ -268,8 +288,13 @@ function createTranscriptionControllerInstance() {
     get downloadCompletedFiles() { return app.downloadCompletedFiles; },
     get downloadTotalFiles() { return app.downloadTotalFiles; },
     get history() { return history; },
+    get filteredHistory() { return filteredHistory; },
     get expandedEntryId() { return expandedEntryId; },
     set expandedEntryId(id: string | null) { expandedEntryId = id; },
+    get historySearchQuery() { return historySearchQuery; },
+    set historySearchQuery(value: string) { onHistorySearchQueryChange(value); },
+    get historySearchResults() { return historySearch.results; },
+    get isSearchingHistory() { return historySearch.isSearching; },
     get activeProfileLabel() { return activeProfileLabel; },
     mount,
     refreshCatalog,

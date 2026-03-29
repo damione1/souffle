@@ -184,6 +184,17 @@ async deleteMeeting(id: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Save an edited transcript for a meeting
+ */
+async saveEditedTranscript(id: string, editedTranscript: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_edited_transcript", { id, editedTranscript }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Check if Ollama is available and list models
  */
 async checkOllama() : Promise<Result<OllamaStatus, string>> {
@@ -200,6 +211,17 @@ async checkOllama() : Promise<Result<OllamaStatus, string>> {
 async summarizeMeeting(id: string, model: string, channel: TAURI_CHANNEL<SummarizeProgress>) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("summarize_meeting", { id, model, channel }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Full-text search across meetings and dictation entries
+ */
+async searchText(query: string, limit: number | null) : Promise<Result<SearchResult[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("search_text", { query, limit }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -382,12 +404,16 @@ export type MeetingRecordingSession = { id: string; started_at: string; ended_at
 /**
  * Full meeting transcript stored as JSON
  */
-export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null }
+export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; edited_transcript: string | null }
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
 export type OllamaStatus = { available: boolean; base_url: string; models: OllamaModelDescriptor[] }
 export type RecordingKind = "dictation" | { meeting: { meeting_id: string } }
+/**
+ * Search result from FTS5 full-text search
+ */
+export type SearchResult = { source_type: string; source_id: string; snippet: string; rank: number }
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }

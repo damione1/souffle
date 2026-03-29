@@ -372,6 +372,27 @@ img {
   background: var(--color-success);
 }
 
+/* ─── Settings field typography ─── */
+.setting-label {
+  display: block;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.setting-desc {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+/* ─── Search highlight (FTS5 <mark> tags) ─── */
+.search-highlight mark {
+  background: color-mix(in srgb, var(--color-accent-blue) 25%, transparent);
+  color: var(--color-text-primary);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
 /* ─── Record button ─── */
 .record-button {
   position: relative;

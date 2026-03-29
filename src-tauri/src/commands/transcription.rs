@@ -109,6 +109,7 @@ fn build_meeting_transcript(
         summary_is_stale: meeting.summary_is_stale || (has_summary && had_new_segments),
         summary_model: meeting.summary_model,
         summary_generated_at: meeting.summary_generated_at,
+        edited_transcript: None,
     }
 }
 

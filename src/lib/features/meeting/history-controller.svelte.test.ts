@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { MeetingListItem } from "../../types";
+import type { MeetingListItem, SearchResult } from "../../types";
 
 const mockListMeetings = vi.fn<() => Promise<MeetingListItem[]>>();
+const mockSearchText = vi.fn<(query: string, limit?: number) => Promise<SearchResult[]>>();
 
 vi.mock("../../api/meetings", () => ({
   listMeetings: (...args: unknown[]) => mockListMeetings(...(args as [])),
+  searchText: (...args: unknown[]) => mockSearchText(...(args as [string, number?])),
 }));
 
 const mockOpenMeeting = vi.fn();
@@ -59,7 +61,7 @@ describe("MeetingHistoryController", () => {
     expect(ctrl.meetings).toEqual([]);
   });
 
-  it("search query filters by title", async () => {
+  it("search query filters by title (fallback when no FTS results)", async () => {
     const items = [
       makeMeetingItem({ id: "m1", title: "Standup" }),
       makeMeetingItem({ id: "m2", title: "Retrospective" }),
@@ -83,5 +85,13 @@ describe("MeetingHistoryController", () => {
     ctrl.openMeeting("m42");
 
     expect(mockOpenMeeting).toHaveBeenCalledWith("m42");
+  });
+
+  it("exposes searchResults and isSearching state", () => {
+    mockListMeetings.mockResolvedValue([]);
+
+    const ctrl = createMeetingHistoryController();
+    expect(ctrl.searchResults).toEqual([]);
+    expect(ctrl.isSearching).toBe(false);
   });
 });

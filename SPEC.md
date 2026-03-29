@@ -675,14 +675,14 @@ Built with Tauri, Candle, and open-source technologies."
 - Runtime debug logs are gated behind a persisted `debug_transcription` toggle
 - Session boundaries are isolated with session-tagged audio chunks and callback-level gating
 
-### Phase 4: Unified Storage & Search ✅ (Core complete, search still in progress)
+### Phase 4: Unified Storage & Search ✅ (Steps 5-6 complete, vector search pending)
 - [x] SQLite unified storage (`souffle.db` via rusqlite with bundled-full/FTS5)
 - [x] Meeting CRUD via SQLite (replaces JSON file I/O)
 - [x] JSON → SQLite auto-migration (existing meetings imported on first run)
 - [x] Dictation history backend (replaces frontend-only tauri-plugin-store)
 - [x] Settings migration to SQLite key-value table (tauri-plugin-store removed entirely)
-- [ ] FTS5 full-text search across meetings and dictation
-- [ ] Transcript review/edit before summarization
+- [x] FTS5 full-text search across meetings and dictation
+- [x] Transcript review/edit before summarization
 - [ ] Vector embeddings + semantic search
 
 **Implementation notes:**
@@ -699,26 +699,31 @@ Built with Tauri, Candle, and open-source technologies."
 
 **Roadmap (future sessions):**
 
-#### Step 5: Full-text search
-- FTS5 search across meetings and dictation entries
-- `search_text(query)` command returning snippets with `<mark>` highlighting
-- Search bar UI above meeting list in Recordings tab
-- Query: `SELECT snippet(text_search, 0, '<mark>', '</mark>', '...', 32), source_type, source_id, rank FROM text_search WHERE text_search MATCH ? ORDER BY rank LIMIT 20`
+#### Step 5: Full-text search ✅
+- [x] FTS5 search across meetings and dictation entries
+- [x] `search_text(query)` command returning snippets with `<mark>` highlighting
+- [x] Search bar UI above meeting list in Recordings tab
+- [x] Search bar UI in dictation history section
+- [x] Debounced FTS5 search (250ms) with highlighted snippets in cards
+- [x] Schema v4 migration: contentless FTS5 → content-storing, re-indexes all data
+- [x] Query: `SELECT snippet(text_search, 0, '<mark>', '</mark>', '...', 32), source_type, source_id, rank FROM text_search WHERE text_search MATCH ? ORDER BY rank LIMIT 20`
 
-#### Step 6: Transcript review/edit before summarization
-- `edited_transcript TEXT` column on meetings (ALTER TABLE in schema v2)
-- "Review & Edit" button in expanded meeting card → textarea pre-filled with segment text
-- "Save & Summarize" / "Save" / "Cancel" actions
-- `summarize_meeting` uses `edited_transcript` if present, else joins segments
+#### Step 6: Transcript review/edit before summarization ✅
+- [x] `edited_transcript TEXT` column on meetings (schema v4)
+- [x] "Review & Edit" pencil button on transcript section → textarea pre-filled with segment text
+- [x] "Save & Summarize" / "Save" / "Cancel" actions
+- [x] `summarize_meeting` uses `edited_transcript` if present, else joins segments
+- [x] "Edited" badge when transcript has been edited
+- [x] "Reset to original" button clears `edited_transcript` back to null
 
 #### Step 7: Vector embeddings + semantic search
-- `EmbeddingProvider` trait with `embed(texts) -> Vec<Vec<f32>>`, `dimensions()`, `model_name()`
-- Ollama primary: `POST /api/embed` with `nomic-embed-text` model
-- On-device fallback: Candle sentence transformer (all-MiniLM-L6-v2, ~80MB)
-- Chunk meeting transcript into ~200-word chunks with 50-word overlap
-- Store `Vec<f32>` as BLOB via `f32::to_le_bytes()`
-- Cosine similarity search in Rust (load all embeddings, compute, sort, return top-K)
-- Generate embeddings after `stop_meeting_recording` or on-demand via button
+- [ ] `EmbeddingProvider` trait with `embed(texts) -> Vec<Vec<f32>>`, `dimensions()`, `model_name()`
+- [ ] Ollama primary: `POST /api/embed` with `nomic-embed-text` model
+- [ ] On-device fallback: Candle sentence transformer (all-MiniLM-L6-v2, ~80MB)
+- [ ] Chunk meeting transcript into ~200-word chunks with 50-word overlap
+- [ ] Store `Vec<f32>` as BLOB via `f32::to_le_bytes()`
+- [ ] Cosine similarity search in Rust (load all embeddings, compute, sort, return top-K)
+- [ ] Generate embeddings after `stop_meeting_recording` or on-demand via button
 
 #### Step 8: Meeting detection pipeline
 - Process detection via `sysinfo`

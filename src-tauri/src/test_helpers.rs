@@ -59,6 +59,7 @@ pub mod fixtures {
             summary_is_stale: false,
             summary_model: None,
             summary_generated_at: None,
+            edited_transcript: None,
         }
     }
 

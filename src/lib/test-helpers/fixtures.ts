@@ -147,6 +147,7 @@ export const mockMeeting: MeetingTranscript = {
   summary_is_stale: false,
   summary_model: null,
   summary_generated_at: null,
+  edited_transcript: null,
 };
 
 export const mockMeetingList: MeetingListItem[] = [

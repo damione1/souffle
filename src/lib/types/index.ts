@@ -28,4 +28,5 @@ export type {
   TranscriptionRuntimeBackendDescriptor,
   TranscriptionRuntimeStatus,
   TranscriptionSegment,
+  SearchResult,
 } from "./generated";

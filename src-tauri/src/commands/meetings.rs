@@ -1,6 +1,7 @@
 use tauri::State;
 use tauri::ipc::Channel;
 
+use crate::db::search::SearchResult;
 use crate::settings::AppSettings;
 use crate::state::AppState;
 
@@ -30,6 +31,19 @@ pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), Stri
     state.db.delete_meeting(&id)
 }
 
+/// Save an edited transcript for a meeting
+#[tauri::command]
+#[specta::specta]
+pub fn save_edited_transcript(
+    state: State<'_, AppState>,
+    id: String,
+    edited_transcript: Option<String>,
+) -> Result<(), String> {
+    state
+        .db
+        .save_edited_transcript(&id, edited_transcript.as_deref())
+}
+
 /// Check if Ollama is available and list models
 #[tauri::command]
 #[specta::specta]
@@ -52,12 +66,15 @@ pub async fn summarize_meeting(
     let transcript = state.db.load_meeting(&id)?;
     let settings = AppSettings::load(&state.db)?;
 
-    let text: String = transcript
-        .segments
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let text = match transcript.edited_transcript {
+        Some(ref edited) if !edited.is_empty() => edited.clone(),
+        _ => transcript
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
 
     if text.is_empty() {
         return Err("Transcript has no text".into());
@@ -78,4 +95,18 @@ pub async fn summarize_meeting(
     db.update_meeting_summary(&id, &summary, &model)?;
 
     Ok(())
+}
+
+/// Full-text search across meetings and dictation entries
+#[tauri::command]
+#[specta::specta]
+pub fn search_text(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<i64>,
+) -> Result<Vec<SearchResult>, String> {
+    if query.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    state.db.search_text(&query, limit.unwrap_or(20))
 }

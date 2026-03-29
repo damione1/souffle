@@ -162,12 +162,15 @@
     "collapse": "Collapse",
     "expand": "Expand",
     "copy": "Copy",
-    "delete": "Delete"
+    "delete": "Delete",
+    "search_placeholder": "Search dictation history...",
+    "search_results_count": "{count} of {total} entries",
+    "no_search_results": "No matching entries."
   },
   "meeting_history": {
     "title": "Meeting History",
     "meetings_count": "{count} meetings",
-    "search_placeholder": "Search meetings...",
+    "search_placeholder": "Search meetings and dictation...",
     "no_matches_title": "No matches",
     "no_meetings_title": "No meetings yet",
     "no_matches_msg": "Try a different search term.",
@@ -175,7 +178,11 @@
     "summary_outdated": "Summary outdated",
     "summary": "Summary",
     "active_recording": "A meeting is being recorded",
-    "click_to_view": "Click to view"
+    "click_to_view": "Click to view",
+    "search_results": "Search Results",
+    "results_count": "{count} results",
+    "source_meeting": "Meeting",
+    "source_dictation": "Dictation"
   },
   "new_meeting": {
     "title_placeholder": "Meeting title (optional)",
@@ -198,7 +205,15 @@
   "meeting_transcript": {
     "title": "Transcript",
     "listening": "Listening for speech...",
-    "no_transcript": "No transcript available."
+    "no_transcript": "No transcript available.",
+    "edit": "Edit",
+    "editing": "Editing Transcript",
+    "edit_hint": "Edit the transcript before generating a summary.",
+    "save": "Save",
+    "save_and_summarize": "Save & Summarize",
+    "cancel_edit": "Cancel",
+    "edited_badge": "Edited",
+    "reset_to_original": "Reset to original"
   },
   "meeting_summary": {
     "title": "Summary",
