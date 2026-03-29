@@ -741,13 +741,38 @@ Built with Tauri, Candle, and open-source technologies."
 - Never use a short read timeout for large pulls; only use a connect timeout
 
 ### Phase 5: Distribution (Target: 1 week)
-- [ ] Apple Developer Program enrollment
-- [ ] Code signing + notarization pipeline (GitHub Actions)
+- [ ] Apple Developer Program enrollment ($99/year — required for signing + notarization)
+- [ ] Code signing (Developer ID certificate) + notarization pipeline (GitHub Actions, `xcrun notarytool`)
 - [ ] DMG installer with custom icon
-- [ ] Auto-updater via GitHub releases
+- [ ] Auto-updater via GitHub releases (`tauri-plugin-updater`)
 - [ ] Autostart toggle via `tauri-plugin-autostart` with Ventura+ Login Items validation
 - [ ] Verify login-item behavior for signed/notarized builds and document uninstall cleanup
 - [ ] README, website/landing page
+
+**Distribution strategy: Direct website + notarized DMG (not App Store)**
+
+App Store is not viable for Souffle — sandboxing restrictions conflict with core features:
+- System audio capture (BlackHole virtual device workaround blocked in sandbox)
+- Accessibility permission for auto-paste (`enigo` Cmd+V simulation) — gray area in App Store review
+- Global shortcuts outside the app window
+- Localhost network access to Ollama (`localhost:11434`) needs entitlement justification
+- 30% Apple cut on a one-time purchase indie app is prohibitive
+
+Direct distribution with notarized DMG gives full system access, no review gatekeeping, and ~5% payment fees vs 30%. Notarization ensures no Gatekeeper warnings — users double-click and it works. This is the standard for pro Mac tools (Raycast, CleanShot, etc.).
+
+**Licensing & monetization strategy:**
+
+- **Payment + license keys**: Lemon Squeezy or Polar.sh (handles payment, tax compliance, key generation, download hosting, ~5-8% fee)
+- **Activation**: Hybrid offline-signed keys with one-time online activation
+  1. User purchases → receives license key
+  2. First launch → enters key → app calls serverless validation endpoint → stores signed activation token locally (Ed25519)
+  3. Subsequent launches → validates local token offline (public key embedded in binary)
+  4. Grace period: 30 days without re-check if offline
+- **Revocation**: Online activation enables device fingerprinting and key revocation if needed
+- **Server**: Single serverless function (Cloudflare Worker / Vercel edge function, ~50 lines)
+- **Rust crates**: `ed25519-dalek` for token signing/verification
+- **Anti-piracy posture**: Don't over-invest in DRM. Rust compiled binary + code signing + signed activation token is more protection than 90% of indie Mac apps. The audience (professionals) buys; the niche is too small for crack groups. Gate features that involve real data flow (unlimited history, export, summary) rather than boolean flags.
+- **Feature gating ideas**: Free tier = core STT. Paid = unlimited meeting history, transcript editing, summary generation, export, search
 
 ### Phase 6: Multi-Engine & Meeting Intelligence (v1.5+, future)
 - [ ] Whisper engine via whisper-rs (Metal acceleration)
