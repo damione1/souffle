@@ -235,9 +235,13 @@ pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
     // Transition to Stopping
     state.apply_transition(StateAction::StopRecording)?;
 
-    stop_pipeline(&state)?;
+    // Pipeline stop can fail (e.g. drain timeout) but we MUST complete the
+    // state transition — otherwise the machine stays stuck in Stopping.
+    if let Err(e) = stop_pipeline(&state) {
+        tracing::warn!("Pipeline stop failed: {e}");
+    }
 
-    // Transition to Ready
+    // Transition to Ready even if pipeline stop failed
     state.apply_transition(StateAction::StopComplete)?;
 
     info!("Streaming transcription stopped");
@@ -346,9 +350,12 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
     // Transition to Stopping
     state.apply_transition(StateAction::StopRecording)?;
 
-    stop_pipeline(&state)?;
+    // stop_pipeline can fail (e.g. drain timeout) but we MUST complete the
+    // state transition regardless — otherwise the machine stays stuck in
+    // Stopping and the user can never recover without restarting.
+    let pipeline_err = stop_pipeline(&state).err();
 
-    // Transition to Ready
+    // Transition to Ready even if pipeline stop failed
     state.apply_transition(StateAction::StopComplete)?;
 
     let mut acc_guard = state.meeting_accumulator.acquire()?;
@@ -363,6 +370,10 @@ pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, Stri
         sessions = transcript.recording_sessions.len(),
         "Meeting recording saved"
     );
+
+    if let Some(err) = pipeline_err {
+        tracing::warn!("Pipeline stop failed (meeting saved anyway): {err}");
+    }
 
     Ok(id)
 }
