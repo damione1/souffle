@@ -254,15 +254,11 @@ pub fn load_model(
     // what profile the user last selected, so we can't rely on machine
     // state to decide whether to recreate. Engine creation is cheap.
     //
-    // Explicitly unload the old engine first to release GPU/Metal resources
-    // before creating the new one. Without this, switching from Kyutai
-    // (Candle Metal) to Whisper (whisper.cpp Metal) can crash because the
-    // old engine's Metal residency sets are still alive when the new engine
-    // tries to initialize its own Metal backend.
+    // Drop the old engine by replacing it. Do NOT call unload_model()
+    // explicitly — SentencePiece (Kyutai) and ONNX Runtime (vad-rs) share
+    // protobuf globals, and calling unload triggers a heap corruption
+    // SIGABRT in TrainerSpec::SharedDtor. The Box::drop path is safer.
     let mut engine = state.engine.acquire()?;
-    if let Err(e) = engine.unload_model() {
-        tracing::warn!("Failed to unload previous engine during swap: {e}");
-    }
     *engine = create_engine(&profile)?;
     info!(path = %model_dir.display(), "Loading model");
     if let Err(e) = engine.load_model(&model_dir) {
