@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use tauri::State;
 use tauri::ipc::Channel;
+use tauri::Manager;
 use tracing::info;
 
 use crate::engine::{
@@ -10,11 +13,10 @@ use crate::engine::{
 use crate::lock_ext::MutexExt;
 use crate::models;
 use crate::pipeline::TranscriptionPipeline;
+use crate::platform::with_autorelease_pool;
 use crate::settings::AppSettings;
 use crate::state::AppState;
 use crate::state_machine::{AppStateMachine, StateAction};
-use std::sync::Arc;
-use tauri::Manager;
 
 fn selected_profile(state: &AppState) -> Result<TranscriptionProfile, String> {
     let settings = AppSettings::load(&state.db)?;
@@ -249,26 +251,40 @@ pub fn load_model(
         state.apply_transition(StateAction::StartLoad)?;
     }
 
-    // Always create a fresh engine instance for the requested profile.
-    // On app restart the default engine is KyutaiEngine regardless of
-    // what profile the user last selected, so we can't rely on machine
-    // state to decide whether to recreate. Engine creation is cheap.
+    // Swap engine: drop old engine FIRST, completely, before creating new one.
     //
-    // Drop the old engine by replacing it. Do NOT call unload_model()
-    // explicitly — SentencePiece (Kyutai) and ONNX Runtime (vad-rs) share
-    // protobuf globals, and calling unload triggers a heap corruption
-    // SIGABRT in TrainerSpec::SharedDtor. The Box::drop path is safer.
-    let mut engine = state.engine.acquire()?;
-    *engine = create_engine(&profile)?;
-    info!(path = %model_dir.display(), "Loading model");
-    if let Err(e) = engine.load_model(&model_dir) {
-        drop(engine);
-        state.apply_transition(StateAction::Fail {
-            message: e.to_string(),
-        })?;
-        return Err(e.to_string());
+    // SentencePiece (Kyutai) and ONNX Runtime (vad-rs) both statically link
+    // protobuf, sharing global descriptor pools. Dropping the old engine while
+    // any protobuf state from ort is alive corrupts the heap (SIGABRT in
+    // TrainerSpec::SharedDtor). Following Handy's approach: take the old engine
+    // out, release the mutex, drop it in an autorelease pool (for Metal/ObjC
+    // cleanup), then create and load the new engine separately.
+    {
+        let old_engine = {
+            let mut guard = state.engine.acquire()?;
+            std::mem::replace(&mut *guard, crate::engine::default_transcription_engine())
+        };
+        // Old engine drops here, outside the mutex, in an autorelease pool
+        // for proper Metal residency set cleanup.
+        with_autorelease_pool(move || {
+            drop(old_engine);
+        });
     }
-    drop(engine);
+
+    // Now create and load the new engine into a clean state
+    let new_engine = create_engine(&profile)?;
+    info!(path = %model_dir.display(), "Loading model");
+    {
+        let mut guard = state.engine.acquire()?;
+        *guard = new_engine;
+        if let Err(e) = guard.load_model(&model_dir) {
+            drop(guard);
+            state.apply_transition(StateAction::Fail {
+                message: e.to_string(),
+            })?;
+            return Err(e.to_string());
+        }
+    }
 
     // Spawn persistent inference pipeline (lives until app exit)
     let pipeline =
