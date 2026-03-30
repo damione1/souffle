@@ -58,11 +58,14 @@
     downloadFile={controller.downloadFile}
     downloadCompletedFiles={controller.downloadCompletedFiles}
     downloadTotalFiles={controller.downloadTotalFiles}
+    downloadedBytes={controller.downloadedBytes}
+    downloadTotalBytes={controller.downloadTotalBytes}
     onSelectEngine={controller.selectTranscriptionEngine}
     onSelectModel={controller.selectTranscriptionModel}
     onSelectBackend={controller.selectTranscriptionBackend}
     onDownloadModel={controller.handleDownloadModel}
     onLoadModel={controller.handleLoadModel}
+    onDeleteModel={controller.handleDeleteModel}
   />
 
   <IntelligenceSettingsSection

@@ -774,13 +774,56 @@ Direct distribution with notarized DMG gives full system access, no review gatek
 - **Anti-piracy posture**: Don't over-invest in DRM. Rust compiled binary + code signing + signed activation token is more protection than 90% of indie Mac apps. The audience (professionals) buys; the niche is too small for crack groups. Gate features that involve real data flow (unlimited history, export, summary) rather than boolean flags.
 - **Feature gating ideas**: Free tier = core STT. Paid = unlimited meeting history, transcript editing, summary generation, export, search
 
-### Phase 6: Multi-Engine & Meeting Intelligence (v1.5+, future)
-- [ ] Whisper engine via whisper-rs (Metal acceleration)
-- [ ] Engine switching in settings without restart
-- [ ] Parakeet engine via ort crate (v2)
-- [ ] Speaker diarization via `pyannote-rs` post-processing (preferred first implementation)
-- [ ] Meeting detection pipeline via `sysinfo` + CoreAudio device state + EventKit (+ optional window-title signal)
-- [ ] Optional tray-positioned mini window / popover via `tauri-plugin-positioner`
+### Phase 6: Multi-Engine & Meeting Intelligence (v1.5+)
+
+#### Step 1 — Per-engine audio requirements ✅
+- [x] `TranscriptionEngine::audio_requirements()` trait method returns `AudioInputRequirements`
+- [x] Pipeline `active_loop` reads `chunk_size_samples` from engine (replaces hardcoded `MIMI_FRAME_SIZE`)
+- [x] `Resampler::new(source_rate, channels, target_rate)` — configurable target rate per engine
+- [x] `AudioCommand::Start { session_id, target_sample_rate }` — audio thread reconfigures per engine
+
+#### Step 2 — Whisper engine via whisper-rs ✅
+- [x] `whisper-rs` 0.16 dependency with `metal` + `tracing_backend` features
+- [x] `engine/whisper.rs` — `WhisperEngine` implementing `TranscriptionEngine` trait
+- [x] Batch-oriented: accumulates PCM internally, transcribes on 5s chunk boundary or flush
+- [x] GGML model loading (auto-detects `.bin` in model directory)
+- [x] Catalog updated: Whisper turbo `available_in_app: true`, backend `whisper-rs`
+- [x] Artifact: `ggerganov/whisper.cpp` / `ggml-large-v3-turbo.bin` (~1.6GB)
+- [x] `create_engine()` factory routes `(whisper, whisper-rs)` → `WhisperEngine`
+
+#### Step 3 — Engine switching in settings without restart ✅
+- [x] State machine already supports `Unload { next_profile }` → `Loading` → `Ready`
+- [x] `load_model` command detects profile change and triggers unload→reload cycle
+- [x] Audio thread reconfigures sample rate on each recording session start
+
+#### Step 4 — Parakeet engine via ort crate (v2, future)
+- [ ] `ort` crate dependency (ONNX Runtime with CoreML backend)
+- [ ] `engine/parakeet.rs` — `ParakeetEngine` implementing `TranscriptionEngine`
+- [ ] Catalog activation: Parakeet TDT-CTC 1.1B model, `nemo` backend
+- [ ] ONNX model artifacts from NVIDIA NeMo collection on HuggingFace
+
+#### Step 5 — Speaker diarization via pyannote-rs
+- [ ] `DiarizationEngine` trait in `engine/diarization.rs`
+- [ ] `SpeakerSegment { speaker_id, start_time, end_time, label }` DTO
+- [ ] `speaker_id: Option<String>` field on `TranscriptionSegment`
+- [ ] DB schema v5: `speaker_id` column on `segments` table
+- [ ] `PyAnnoteEngine` implementation using `pyannote-rs` (ONNX-based)
+- [ ] Post-processing: run after meeting stop, align speakers to text segments by timestamp
+- [ ] `enable_diarization: bool` setting, audio buffer retention during meeting recording
+
+#### Step 6 — Meeting detection pipeline
+- [ ] `meeting_detection/mod.rs` module with background polling thread (5s interval)
+- [ ] Signal sources: `sysinfo` (process list: Zoom/Teams/Meet/FaceTime), CoreAudio device state, EventKit calendar
+- [ ] `MeetingDetectionEvent` DTO with `DetectionSource` enum
+- [ ] Tauri event emission on meeting start/end detection
+- [ ] Notification + auto-record option
+- [ ] `enable_meeting_detection: bool` and `detection_apps: Vec<String>` settings
+
+#### Step 7 — Tray-positioned mini window / popover
+- [ ] `tauri-plugin-positioner` dependency
+- [ ] Small window (~300×200) positioned near tray icon
+- [ ] Content: recording status, mini waveform, start/stop button
+- [ ] `tray_mini_window: bool` setting
 
 ---
 

@@ -1,5 +1,5 @@
 import { getOllamaStatus } from "../../api/ollama";
-import { getTranscriptionCatalog } from "../../api/transcription";
+import { deleteModel, getTranscriptionCatalog } from "../../api/transcription";
 import {
   getSettings,
   getShortcuts,
@@ -25,6 +25,7 @@ import {
   getSelectedTranscriptionBackend,
 } from "../transcription/catalog";
 import {
+  currentTranscriptionSelection,
   refreshTranscriptionRuntimeStatus,
   resetTranscriptionRuntimeState,
   startTranscriptionModelDownload,
@@ -231,6 +232,17 @@ export function createSettingsController() {
     });
   }
 
+  async function handleDeleteModel() {
+    try {
+      const selection = currentTranscriptionSelection(app, catalog);
+      await deleteModel(selection);
+      resetTranscriptionRuntimeState(app);
+      await refreshRuntimeStatus();
+    } catch (error) {
+      statusMessage = errorMessage(error);
+    }
+  }
+
   function onThemeChange(theme: Theme) {
     applyTheme(theme);
     void persistSettings((settings) => {
@@ -385,6 +397,8 @@ export function createSettingsController() {
     get downloadFile() { return app.downloadFile; },
     get downloadCompletedFiles() { return app.downloadCompletedFiles; },
     get downloadTotalFiles() { return app.downloadTotalFiles; },
+    get downloadedBytes() { return app.downloadedBytes; },
+    get downloadTotalBytes() { return app.downloadTotalBytes; },
     get toggleShortcut() { return toggleShortcut; },
     get pttShortcut() { return pttShortcut; },
     get recordingField() { return recordingField; },
@@ -399,6 +413,7 @@ export function createSettingsController() {
     selectTranscriptionBackend,
     handleDownloadModel,
     handleLoadModel,
+    handleDeleteModel,
     onThemeChange,
     onLocaleChange,
     onAutoPasteChange,

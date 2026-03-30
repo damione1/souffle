@@ -99,7 +99,9 @@
     "loading_model": "Chargement du modèle...",
     "usually_few_seconds": "Prend généralement quelques secondes.",
     "preparing_download": "Préparation du téléchargement",
-    "files_progress": "{completed}/{total} fichiers"
+    "files_progress": "{completed}/{total} fichiers",
+    "delete_model": "Supprimer les fichiers du modèle",
+    "delete_confirm": "Supprimer les fichiers du modèle téléchargé ?"
   },
   "runtime_phase": {
     "download_required": "Téléchargement requis",

@@ -20,7 +20,11 @@ use crate::transcript::MeetingRecordingSession;
 
 /// Commands sent to the audio thread
 pub enum AudioCommand {
-    Start(u64),
+    Start {
+        session_id: u64,
+        target_sample_rate: u32,
+        mic_gain: f32,
+    },
     Stop,
     SelectDevice(String),
 }

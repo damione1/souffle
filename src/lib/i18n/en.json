@@ -99,7 +99,9 @@
     "loading_model": "Loading model...",
     "usually_few_seconds": "Usually takes a few seconds.",
     "preparing_download": "Preparing download",
-    "files_progress": "{completed}/{total} files"
+    "files_progress": "{completed}/{total} files",
+    "delete_model": "Delete model files",
+    "delete_confirm": "Delete downloaded model files from disk?"
   },
   "runtime_phase": {
     "download_required": "Download required",

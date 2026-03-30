@@ -22,8 +22,8 @@
     runtimePhase,
     modelOperationState,
     downloadFile,
-    downloadCompletedFiles,
-    downloadTotalFiles,
+    downloadedBytes,
+    downloadTotalBytes,
     inputDevice,
     autoPaste,
     onDownloadModel,
@@ -36,8 +36,8 @@
     runtimePhase: TranscriptionRuntimePhase;
     modelOperationState: TranscriptionModelOperationState;
     downloadFile: string;
-    downloadCompletedFiles: number;
-    downloadTotalFiles: number;
+    downloadedBytes: number;
+    downloadTotalBytes: number | null;
     inputDevice: string;
     autoPaste: boolean;
     onDownloadModel: () => void | Promise<void>;
@@ -130,8 +130,8 @@
   {#if phase === "downloading"}
     <div class="w-full max-w-xs">
       <ProgressBar
-        value={downloadCompletedFiles}
-        max={downloadTotalFiles || 1}
+        value={downloadedBytes}
+        max={downloadTotalBytes && downloadTotalBytes > 0 ? downloadTotalBytes : 100}
         label={downloadFile || $t("model_gate.preparing_download")}
       />
     </div>

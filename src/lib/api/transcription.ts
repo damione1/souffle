@@ -33,6 +33,10 @@ export async function loadModel(selection: TranscriptionProfileSelection): Promi
   await unwrap(commands.loadModel(selection));
 }
 
+export async function deleteModel(selection: TranscriptionProfileSelection): Promise<void> {
+  await unwrap(commands.deleteModel(selection));
+}
+
 export async function startStreamingTranscription(
   onSegment: (segment: TranscriptionSegment) => void,
 ): Promise<void> {

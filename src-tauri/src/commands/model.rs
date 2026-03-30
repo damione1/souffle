@@ -197,6 +197,13 @@ pub fn load_model(
         return Err("Cannot load the model while recording".into());
     }
 
+    // Auto-recover from Error state so "Load model" works after a failure
+    if matches!(machine, AppStateMachine::Error { .. }) {
+        state.apply_transition(StateAction::Recover)?;
+    }
+
+    let machine = state.current_machine_state()?;
+
     // Check if already loaded with this profile
     {
         let pipeline_ready = state.pipeline.acquire()?.is_some();
@@ -242,16 +249,12 @@ pub fn load_model(
         state.apply_transition(StateAction::StartLoad)?;
     }
 
-    let current_profile = state.current_machine_state()?.active_profile().cloned();
+    // Always create a fresh engine instance for the requested profile.
+    // On app restart the default engine is KyutaiEngine regardless of
+    // what profile the user last selected, so we can't rely on machine
+    // state to decide whether to recreate. Engine creation is cheap.
     let mut engine = state.engine.acquire()?;
-    if current_profile
-        .as_ref()
-        .is_none_or(|current| {
-            current.engine_id != profile.engine_id || current.backend_id != profile.backend_id
-        })
-    {
-        *engine = create_engine(&profile)?;
-    }
+    *engine = create_engine(&profile)?;
     info!(path = %model_dir.display(), "Loading model");
     if let Err(e) = engine.load_model(&model_dir) {
         drop(engine);
@@ -286,6 +289,33 @@ pub fn load_model(
     state.apply_transition(StateAction::LoadComplete)?;
 
     info!("Model loaded, inference pipeline ready");
+    Ok(())
+}
+
+/// Delete a downloaded model from disk.
+#[tauri::command]
+#[specta::specta]
+pub fn delete_model(
+    state: State<'_, AppState>,
+    selection: TranscriptionProfileSelection,
+) -> Result<(), String> {
+    let profile = resolve_transcription_selection(&selection)?;
+
+    // Cannot delete the actively loaded model
+    let machine = state.current_machine_state()?;
+    if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
+        return Err("Cannot delete the currently loaded model. Unload it first or switch to a different model.".into());
+    }
+
+    let model_dir = models::model_dir(&profile);
+    models::download::delete_model_files(&model_dir)?;
+
+    info!(
+        engine = %profile.engine_id,
+        model = %profile.model_id,
+        "Model files deleted"
+    );
+
     Ok(())
 }
 

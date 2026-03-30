@@ -1,17 +1,8 @@
 use rubato::{FftFixedInOut, Resampler as RubatoResampler};
 use tracing::{info, warn};
 
-/// Kyutai Mimi codec expects 24kHz audio input
-const TARGET_SAMPLE_RATE: usize = 24_000;
-
-/// Fixed gain applied to microphone input.
-/// Live mic capture typically produces -30dBFS peaks (max_amp ~0.03).
-/// The Kyutai model was trained with -24dB to +15dB augmentation,
-/// so we need to boost by ~15x to reach the model's expected range.
-const MIC_GAIN: f32 = 15.0;
-
-/// Wraps rubato for high-quality resampling to 24kHz mono f32,
-/// with a fixed gain boost for live mic input.
+/// Wraps rubato for high-quality resampling to the engine's expected
+/// sample rate as mono f32, with a configurable gain for live mic input.
 ///
 /// Buffers input samples internally so the FFT resampler always
 /// receives complete chunks (no zero-padding artifacts).
@@ -20,20 +11,23 @@ pub struct Resampler {
     source_channels: usize,
     /// Accumulation buffer for incomplete chunks
     input_buffer: Vec<f32>,
+    /// Gain factor applied after resampling (engine-dependent)
+    gain: f32,
 }
 
 impl Resampler {
-    pub fn new(source_rate: u32, source_channels: u16) -> Self {
+    pub fn new(source_rate: u32, source_channels: u16, target_rate: u32, gain: f32) -> Self {
         let source_rate = source_rate as usize;
+        let target_rate = target_rate as usize;
         let source_channels = source_channels as usize;
 
-        let resampler = if source_rate != TARGET_SAMPLE_RATE {
-            match FftFixedInOut::new(source_rate, TARGET_SAMPLE_RATE, 1024, 1) {
+        let resampler = if source_rate != target_rate {
+            match FftFixedInOut::new(source_rate, target_rate, 1024, 1) {
                 Ok(r) => {
                     info!(
                         "Resampler created: {}Hz → {}Hz, chunk_in={}, chunk_out={}",
                         source_rate,
-                        TARGET_SAMPLE_RATE,
+                        target_rate,
                         r.input_frames_next(),
                         r.output_frames_next()
                     );
@@ -41,12 +35,12 @@ impl Resampler {
                 }
                 Err(e) => {
                     warn!("Resampler creation failed: {e}");
-                    warn!("Audio will NOT be resampled — model expects 24kHz!");
+                    warn!("Audio will NOT be resampled — model expects {target_rate}Hz!");
                     None
                 }
             }
         } else {
-            info!("Source rate matches target (24kHz), no resampling needed");
+            info!("Source rate matches target ({target_rate}Hz), no resampling needed");
             None
         };
 
@@ -54,6 +48,7 @@ impl Resampler {
             resampler,
             source_channels,
             input_buffer: Vec::new(),
+            gain,
         }
     }
 
@@ -91,9 +86,11 @@ impl Resampler {
             mono
         };
 
-        // Step 3: apply fixed gain and hard-clip to [-1.0, 1.0]
-        for sample in &mut resampled {
-            *sample = (*sample * MIC_GAIN).clamp(-1.0, 1.0);
+        // Step 3: apply engine-specific gain and hard-clip to [-1.0, 1.0]
+        if self.gain != 1.0 {
+            for sample in &mut resampled {
+                *sample = (*sample * self.gain).clamp(-1.0, 1.0);
+            }
         }
 
         resampled

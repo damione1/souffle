@@ -15,6 +15,8 @@ export function resetTranscriptionRuntimeState(app: AppState) {
   app.downloadFile = "";
   app.downloadCompletedFiles = 0;
   app.downloadTotalFiles = 0;
+  app.downloadedBytes = 0;
+  app.downloadTotalBytes = null;
 }
 
 export function currentTranscriptionSelection(
@@ -53,6 +55,8 @@ export async function startTranscriptionModelDownload(
   app.downloadFile = "";
   app.downloadCompletedFiles = 0;
   app.downloadTotalFiles = 0;
+  app.downloadedBytes = 0;
+  app.downloadTotalBytes = null;
   setStatusMessage("");
 
   try {
@@ -62,6 +66,10 @@ export async function startTranscriptionModelDownload(
         app.downloadFile = progress.file;
         app.downloadCompletedFiles = progress.completed_files;
         app.downloadTotalFiles = progress.total_files;
+        app.downloadedBytes = progress.downloaded_bytes;
+        if (progress.total_bytes !== null) {
+          app.downloadTotalBytes = progress.total_bytes;
+        }
 
         if (typeof progress.status === "object" && "error" in progress.status) {
           setStatusMessage(`Download error: ${progress.status.error}`);
@@ -70,6 +78,8 @@ export async function startTranscriptionModelDownload(
 
         if (progress.status === "complete" && progress.file === "all") {
           app.downloadFile = "";
+          app.downloadedBytes = 0;
+          app.downloadTotalBytes = null;
           void refreshTranscriptionRuntimeStatus(app, catalog).catch((error) => {
             setStatusMessage(errorMessage(error));
           });

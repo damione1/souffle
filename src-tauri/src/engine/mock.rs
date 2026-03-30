@@ -1,7 +1,7 @@
 //! Mock transcription engine for testing pipeline behavior without GPU/hardware.
 #![cfg(test)]
 
-use super::{EngineError, TranscriptionEngine, TranscriptionSegment};
+use super::{AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -100,5 +100,13 @@ impl TranscriptionEngine for MockEngine {
 
     fn reset_state(&self) -> Result<(), EngineError> {
         Ok(())
+    }
+
+    fn audio_requirements(&self) -> AudioInputRequirements {
+        AudioInputRequirements {
+            sample_rate_hz: crate::constants::SAMPLE_RATE,
+            channels: 1,
+            chunk_size_samples: crate::constants::MIMI_FRAME_SIZE as u32,
+        }
     }
 }

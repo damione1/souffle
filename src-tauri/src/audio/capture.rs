@@ -83,8 +83,8 @@ impl AudioCapture {
                 // Block on commands from main thread
                 while let Ok(cmd) = cmd_rx.recv() {
                     match cmd {
-                        AudioCommand::Start(session_id) => {
-                            if let Err(e) = capture.start(session_id) {
+                        AudioCommand::Start { session_id, target_sample_rate, mic_gain } => {
+                            if let Err(e) = capture.start(session_id, target_sample_rate, mic_gain) {
                                 warn!("Failed to start audio capture: {e}");
                             }
                         }
@@ -128,7 +128,7 @@ impl AudioCapture {
             .ok_or_else(|| "No input device available".to_string())
     }
 
-    fn start(&mut self, session_id: u64) -> Result<(), String> {
+    fn start(&mut self, session_id: u64, target_sample_rate: u32, mic_gain: f32) -> Result<(), String> {
         // Ensure any previous callback stops emitting immediately.
         self.active_session_id.store(0, Ordering::Release);
         self.stream.take();
@@ -144,7 +144,7 @@ impl AudioCapture {
 
         info!("Audio config: {sample_rate}Hz, {channels}ch");
 
-        let mut resampler = Resampler::new(sample_rate, channels);
+        let mut resampler = Resampler::new(sample_rate, channels, target_sample_rate, mic_gain);
         let sender = self.audio_sender.clone();
         let active_session_id = Arc::clone(&self.active_session_id);
         let rms_ref = Arc::clone(&self.audio_rms);

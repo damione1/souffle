@@ -38,6 +38,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_transcription_catalog,
             commands::get_model_status,
             commands::download_model,
+            commands::delete_model,
             commands::load_model,
             commands::start_transcription,
             commands::stop_transcription,
@@ -154,10 +155,29 @@ pub fn run() {
             info!("Souffle started");
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .unwrap_or_else(|e| {
-            tracing::error!("Tauri runtime error: {e}");
+            tracing::error!("Tauri build error: {e}");
             std::process::exit(1);
+        })
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                // Explicitly release engine GPU resources before process exit.
+                // whisper.cpp's Metal backend uses residency sets that must be
+                // freed before the Metal device is destroyed. Without this,
+                // the C++ static destructor order causes a ggml_metal_rsets_free
+                // assertion failure (SIGABRT) on exit.
+                let state = app.state::<AppState>();
+                if let Ok(mut pipeline) = state.pipeline.lock()
+                    && let Some(mut p) = pipeline.take()
+                {
+                    let _ = p.shutdown();
+                }
+                if let Ok(mut engine) = state.engine.lock() {
+                    let _ = engine.unload_model();
+                }
+                info!("Engine and pipeline shut down cleanly");
+            }
         });
 }
 

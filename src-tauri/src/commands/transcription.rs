@@ -135,12 +135,12 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
         tracing::debug!(drained, "Cleared stale audio chunks before reset");
     }
 
-    // Reset while the pipeline is idle
-    state
-        .engine
-        .acquire()?
-        .reset_state()
-        .map_err(|e| format!("State reset: {e}"))?;
+    // Reset while the pipeline is idle and read audio requirements
+    let (target_sample_rate, mic_gain) = {
+        let engine = state.engine.acquire()?;
+        engine.reset_state().map_err(|e| format!("State reset: {e}"))?;
+        (engine.audio_requirements().sample_rate_hz, engine.mic_gain())
+    };
 
     // Send Start before audio capture begins
     let pipe_guard = state.pipeline.acquire()?;
@@ -152,7 +152,7 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
 
     state
         .audio_cmd_sender
-        .send(AudioCommand::Start(session_id))
+        .send(AudioCommand::Start { session_id, target_sample_rate, mic_gain })
         .map_err(|e| format!("Audio start: {e}"))?;
 
     Ok(session_id)

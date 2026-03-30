@@ -569,4 +569,35 @@ mod tests {
             other => panic!("Expected Downloading, got {:?}", other),
         }
     }
+
+    #[test]
+    fn error_recovery_then_download_and_load() {
+        // Simulates the fix: recover from error, then re-download + load
+        let profile = test_profile();
+        let state = AppStateMachine::Error {
+            message: "previous failure".into(),
+            recovery: ErrorRecovery::RetryFromIdle,
+        };
+        let state = state.transition(StateAction::Recover).unwrap();
+        assert!(matches!(state, AppStateMachine::Idle));
+
+        let state = state
+            .transition(StateAction::StartDownload {
+                profile: profile.clone(),
+            })
+            .unwrap();
+        let state = state.transition(StateAction::DownloadComplete).unwrap();
+        let state = state.transition(StateAction::StartLoad).unwrap();
+        let state = state.transition(StateAction::LoadComplete).unwrap();
+        assert!(matches!(state, AppStateMachine::Ready { .. }));
+    }
+
+    #[test]
+    fn error_cannot_start_load_directly() {
+        let state = AppStateMachine::Error {
+            message: "oops".into(),
+            recovery: ErrorRecovery::RetryFromIdle,
+        };
+        assert!(state.transition(StateAction::StartLoad).is_err());
+    }
 }

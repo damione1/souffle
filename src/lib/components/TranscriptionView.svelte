@@ -39,8 +39,8 @@
       runtimePhase={controller.runtimePhase}
       modelOperationState={controller.modelOperationState}
       downloadFile={controller.downloadFile}
-      downloadCompletedFiles={controller.downloadCompletedFiles}
-      downloadTotalFiles={controller.downloadTotalFiles}
+      downloadedBytes={controller.downloadedBytes}
+      downloadTotalBytes={controller.downloadTotalBytes}
       inputDevice={controller.app.selectedDevice}
       autoPaste={controller.app.settings.auto_paste}
       onDownloadModel={controller.handleDownloadModel}

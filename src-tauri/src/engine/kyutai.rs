@@ -6,7 +6,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use candle_core::{Device, Tensor};
 use tracing::{debug, info, trace};
 
-use super::{EngineError, TranscriptionEngine, TranscriptionSegment};
+use super::{
+    AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
+    collapse_whitespace,
+};
 use crate::constants::{MIMI_FRAME_SIZE, SAMPLE_RATE};
 use crate::platform::with_autorelease_pool;
 
@@ -500,5 +503,24 @@ impl TranscriptionEngine for KyutaiEngine {
 
     fn reset_state(&self) -> Result<(), EngineError> {
         KyutaiEngine::reset_state(self)
+    }
+
+    fn audio_requirements(&self) -> AudioInputRequirements {
+        AudioInputRequirements {
+            sample_rate_hz: SAMPLE_RATE,
+            channels: 1,
+            chunk_size_samples: MIMI_FRAME_SIZE as u32,
+        }
+    }
+
+    fn mic_gain(&self) -> f32 {
+        1.0
+    }
+
+    fn normalize_text(&self, text: &str) -> String {
+        // SentencePiece uses ▁ (U+2581) as word-boundary marker.
+        // Replace with space, then trim/collapse.
+        let normalized = text.replace('▁', " ");
+        collapse_whitespace(&normalized)
     }
 }

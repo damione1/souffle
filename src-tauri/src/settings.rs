@@ -400,6 +400,20 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_accepts_whisper_engine() {
+        let s = AppSettings {
+            transcription_engine_id: "whisper".to_string(),
+            transcription_model_id: "turbo".to_string(),
+            transcription_backend_id: "whisper-rs".to_string(),
+            ..AppSettings::default()
+        };
+        let clean = s.sanitize_for_save().unwrap();
+        assert_eq!(clean.transcription_engine_id, "whisper");
+        assert_eq!(clean.transcription_model_id, "turbo");
+        assert_eq!(clean.transcription_backend_id, "whisper-rs");
+    }
+
+    #[test]
     fn sanitize_falls_back_to_default_for_unavailable_stub_engine() {
         let s = AppSettings {
             transcription_engine_id: "whisper".to_string(),

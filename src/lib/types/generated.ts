@@ -40,6 +40,17 @@ async downloadModel(selection: TranscriptionProfileSelection, channel: TAURI_CHA
 }
 },
 /**
+ * Delete a downloaded model from disk.
+ */
+async deleteModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_model", { selection }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Load the model into memory (GPU/CPU). Must be called after download.
  * Also spawns the persistent inference pipeline thread.
  */

@@ -4,7 +4,6 @@ use crossbeam_channel::Receiver;
 use tracing::{debug, error, info, warn};
 
 use crate::audio::AudioChunk;
-use crate::constants::MIMI_FRAME_SIZE;
 use crate::engine::{SharedTranscriptionEngine, TranscriptionEngine, TranscriptionSegment};
 use crate::platform::with_autorelease_pool;
 
@@ -144,6 +143,7 @@ impl TranscriptionPipeline {
         on_segment: &SegmentCallback,
         session_id: u64,
     ) -> bool {
+        let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
         let mut audio_buffer: Vec<f32> = Vec::new();
         let mut frames_processed: u64 = 0;
         let mut skipped_chunks: u64 = 0;
@@ -176,8 +176,8 @@ impl TranscriptionPipeline {
                     }
 
                     // Process all buffered audio through the engine (frame by frame)
-                    while audio_buffer.len() >= MIMI_FRAME_SIZE {
-                        let frame: Vec<f32> = audio_buffer.drain(..MIMI_FRAME_SIZE).collect();
+                    while audio_buffer.len() >= chunk_size {
+                        let frame: Vec<f32> = audio_buffer.drain(..chunk_size).collect();
                         match engine.transcribe(&frame, None) {
                             Ok(segments) => {
                                 for seg in &segments {
@@ -187,7 +187,7 @@ impl TranscriptionPipeline {
                                             seg.text, seg.is_final
                                         );
                                     }
-                                    on_segment(seg.clone());
+                                    Self::emit_normalized(engine, seg.clone(), on_segment);
                                 }
                             }
                             Err(e) => {
@@ -209,7 +209,7 @@ impl TranscriptionPipeline {
                                 debug!("Flush: {} segments", segments.len());
                             }
                             for seg in segments {
-                                on_segment(seg);
+                                Self::emit_normalized(engine, seg, on_segment);
                             }
                         }
                         Err(e) => error!("Flush error: {e}"),
@@ -241,16 +241,16 @@ impl TranscriptionPipeline {
 
                     audio_buffer.extend_from_slice(&chunk.samples);
 
-                    // Process complete 1920-sample frames
-                    while audio_buffer.len() >= MIMI_FRAME_SIZE {
-                        let frame: Vec<f32> = audio_buffer.drain(..MIMI_FRAME_SIZE).collect();
+                    // Process complete engine-sized frames
+                    while audio_buffer.len() >= chunk_size {
+                        let frame: Vec<f32> = audio_buffer.drain(..chunk_size).collect();
                         match engine.transcribe(&frame, None) {
                             Ok(segments) => {
                                 for seg in &segments {
                                     if crate::debug::transcription_debug_enabled() {
                                         debug!("Segment: {:?} final={}", seg.text, seg.is_final);
                                     }
-                                    on_segment(seg.clone());
+                                    Self::emit_normalized(engine, seg.clone(), on_segment);
                                 }
                             }
                             Err(e) => {
@@ -262,9 +262,11 @@ impl TranscriptionPipeline {
                         if crate::debug::transcription_debug_enabled()
                             && frames_processed.is_multiple_of(50)
                         {
+                            let frame_duration = chunk_size as f64
+                                / engine.audio_requirements().sample_rate_hz as f64;
                             debug!(
                                 "Processed {frames_processed} frames ({:.1}s)",
-                                frames_processed as f64 * 0.08,
+                                frames_processed as f64 * frame_duration,
                             );
                         }
                     }
@@ -286,10 +288,22 @@ impl TranscriptionPipeline {
         match engine.transcribe(audio, None) {
             Ok(segments) => {
                 for seg in segments {
-                    on_segment(seg);
+                    Self::emit_normalized(engine, seg, on_segment);
                 }
             }
             Err(e) => error!("Transcribe error: {e}"),
+        }
+    }
+
+    /// Normalize engine-specific tokens from segment text before emitting.
+    fn emit_normalized(
+        engine: &dyn TranscriptionEngine,
+        mut segment: crate::engine::TranscriptionSegment,
+        on_segment: &SegmentCallback,
+    ) {
+        segment.text = engine.normalize_text(&segment.text);
+        if !segment.text.is_empty() {
+            on_segment(segment);
         }
     }
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
+  import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
   import ProgressBar from "../../../components/ui/ProgressBar.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
   import type { TranscriptionCatalog, TranscriptionRuntimePhase } from "../../../types";
@@ -29,11 +30,14 @@
     downloadFile,
     downloadCompletedFiles,
     downloadTotalFiles,
+    downloadedBytes,
+    downloadTotalBytes,
     onSelectEngine,
     onSelectModel,
     onSelectBackend,
     onDownloadModel,
     onLoadModel,
+    onDeleteModel,
   }: {
     catalog: TranscriptionCatalog | null;
     selectedEngineId: string;
@@ -44,11 +48,14 @@
     downloadFile: string;
     downloadCompletedFiles: number;
     downloadTotalFiles: number;
+    downloadedBytes: number;
+    downloadTotalBytes: number | null;
     onSelectEngine: (engineId: string) => void | Promise<void>;
     onSelectModel: (modelId: string) => void | Promise<void>;
     onSelectBackend: (backendId: string) => void | Promise<void>;
     onDownloadModel: () => void | Promise<void>;
     onLoadModel: () => void | Promise<void>;
+    onDeleteModel: () => void | Promise<void>;
   } = $props();
 
   let selectedEngine = $derived(getSelectedTranscriptionEngine(catalog, selectedEngineId));
@@ -82,13 +89,33 @@
     return $t("model_gate.gb_memory", { values: { size: (bytes / 1_000_000_000).toFixed(1) } });
   }
 
+  function formatBytes(bytes: number): string {
+    if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+    if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} MB`;
+    if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(0)} KB`;
+    return `${bytes} B`;
+  }
+
   let downloadLabel = $derived.by(() => {
     if (phase !== "downloading") return "";
+    if (downloadedBytes > 0 && downloadTotalBytes && downloadTotalBytes > 0) {
+      return `${formatBytes(downloadedBytes)} / ${formatBytes(downloadTotalBytes)}`;
+    }
+    if (downloadedBytes > 0) {
+      return formatBytes(downloadedBytes);
+    }
     if (downloadTotalFiles > 0) {
       return $t("model_gate.files_progress", { values: { completed: downloadCompletedFiles, total: downloadTotalFiles } });
     }
     return $t("model_gate.preparing_download");
   });
+
+  let downloadProgressValue = $derived(downloadedBytes);
+  let downloadProgressMax = $derived(downloadTotalBytes && downloadTotalBytes > 0 ? downloadTotalBytes : 100);
+
+  let canDeleteModel = $derived(
+    phase !== "downloading" && phase !== "loading" && (runtimePhase === "load_required" || runtimePhase === "ready"),
+  );
 </script>
 
 <section class="surface-card flex flex-col gap-4">
@@ -181,10 +208,9 @@
         {/if}
       </div>
     {:else if selectedBackend}
-      <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border">
-        <strong class="block text-text-primary">{selectedBackend.label} {$t("model_gate.runtime_suffix")}</strong>
-        <p class="text-text-muted text-sm">{selectedBackend.description}</p>
-      </div>
+      <p class="text-sm text-text-muted">
+        {$t("model_gate.runtime")}: {selectedBackend.label} — {selectedBackend.description}
+      </p>
     {/if}
   {/if}
 
@@ -222,13 +248,24 @@
       <strong>{downloadFile || $t("model_gate.downloading_files")}</strong>
       <p class="text-text-muted text-sm">{$t("model_gate.keep_app_open")}</p>
       <div class="mt-3">
-        <ProgressBar value={downloadCompletedFiles} max={downloadTotalFiles || 1} label={downloadLabel} />
+        <ProgressBar value={downloadProgressValue} max={downloadProgressMax} label={downloadLabel} />
       </div>
     </div>
   {:else if phase === "loading"}
     <div class="rounded-default bg-surface-3 px-4 py-3 outline-1 outline-ghost-border">
       <strong>{$t("model_gate.loading_model")}</strong>
       <p class="text-text-muted text-sm">{$t("model_gate.usually_few_seconds")}</p>
+    </div>
+  {/if}
+
+  {#if canDeleteModel}
+    <div class="flex justify-end">
+      <ConfirmAction
+        label={$t("model_gate.delete_model")}
+        confirmMessage={$t("model_gate.delete_confirm")}
+        variant="danger"
+        onConfirm={onDeleteModel}
+      />
     </div>
   {/if}
 </section>

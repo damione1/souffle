@@ -1,4 +1,5 @@
 pub mod kyutai;
+pub mod whisper;
 
 #[cfg(test)]
 pub mod mock;
@@ -14,11 +15,13 @@ pub const WHISPER_MODEL_TURBO_ID: &str = "turbo";
 pub const PARAKEET_ENGINE_ID: &str = "parakeet";
 pub const PARAKEET_MODEL_TDT_1_1B_ID: &str = "parakeet-tdt_ctc-1.1b";
 pub const CANDLE_BACKEND_ID: &str = "candle";
+pub const WHISPER_RS_BACKEND_ID: &str = "whisper-rs";
 pub const CTRANSLATE2_BACKEND_ID: &str = "ctranslate2";
 pub const NEMO_BACKEND_ID: &str = "nemo";
 
 const KYUTAI_1B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-1b-en-fr";
 const KYUTAI_2_6B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-2-6b-en";
+const WHISPER_TURBO_GGML_ARTIFACT_ID: &str = "hf-ggml-large-v3-turbo";
 
 pub type SharedTranscriptionEngine = Arc<Mutex<Box<dyn TranscriptionEngine>>>;
 
@@ -198,6 +201,21 @@ pub trait TranscriptionEngine: Send + Sync {
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn flush(&self) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn reset_state(&self) -> Result<(), EngineError>;
+    /// Audio format requirements for this engine's inference pipeline.
+    /// Used by the audio capture thread (target sample rate) and the
+    /// inference pipeline (chunk size) to adapt to each engine.
+    fn audio_requirements(&self) -> AudioInputRequirements;
+    /// Gain factor applied to raw microphone input before inference.
+    fn mic_gain(&self) -> f32 {
+        1.0
+    }
+    /// Normalize engine-specific tokens from transcribed text.
+    /// Called by the pipeline on every segment before emitting to the frontend.
+    /// Each engine overrides this to strip its own special tokens
+    /// (e.g., SentencePiece `▁` for Kyutai, `[_TT_xxx]` for Whisper).
+    fn normalize_text(&self, text: &str) -> String {
+        text.to_string()
+    }
 }
 
 /// A piece of transcribed text with metadata
@@ -209,6 +227,25 @@ pub struct TranscriptionSegment {
     pub is_final: bool,
     pub language: Option<String>,
     pub confidence: Option<f32>,
+}
+
+/// Collapse runs of whitespace to single spaces and trim.
+/// Shared by engine normalize_text implementations.
+pub fn collapse_whitespace(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut last_was_space = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            if !last_was_space {
+                result.push(' ');
+            }
+            last_was_space = true;
+        } else {
+            result.push(ch);
+            last_was_space = false;
+        }
+    }
+    result.trim().to_string()
 }
 
 /// Errors that engines can produce
@@ -371,6 +408,7 @@ pub fn resolve_transcription_artifact(
 pub fn create_engine(profile: &TranscriptionProfile) -> Result<Box<dyn TranscriptionEngine>, String> {
     match (profile.engine_id.as_str(), profile.backend_id.as_str()) {
         (KYUTAI_ENGINE_ID, CANDLE_BACKEND_ID) => Ok(Box::new(kyutai::KyutaiEngine::new())),
+        (WHISPER_ENGINE_ID, WHISPER_RS_BACKEND_ID) => Ok(Box::new(whisper::WhisperEngine::new())),
         _ => Err(format!(
             "No runtime implementation registered for '{}:{}'",
             profile.engine_id, profile.backend_id
@@ -472,13 +510,13 @@ fn kyutai_candle_backend(
 }
 
 fn whisper_turbo_model_descriptor() -> TranscriptionModelDescriptor {
-    let note = "Catalog stub only. Whisper runtimes are not implemented in this app build yet.";
     TranscriptionModelDescriptor {
         id: WHISPER_MODEL_TURBO_ID.to_string(),
-        label: "Turbo".to_string(),
-        description: "Fast multilingual Whisper profile recommended for transcription workloads.".to_string(),
-        download_size_bytes: None,
-        recommended_memory_bytes: Some(6_000_000_000),
+        label: "Large V3 Turbo".to_string(),
+        description: "Fast multilingual Whisper model. Batch transcription with Metal acceleration."
+            .to_string(),
+        download_size_bytes: Some(1_620_000_000),
+        recommended_memory_bytes: Some(3_000_000_000),
         supported_languages: vec!["multilingual".to_string()],
         capabilities: TranscriptionCapabilities {
             supports_streaming: false,
@@ -490,17 +528,34 @@ fn whisper_turbo_model_descriptor() -> TranscriptionModelDescriptor {
         audio_input: AudioInputRequirements {
             sample_rate_hz: 16_000,
             channels: 1,
-            chunk_size_samples: 30 * 16_000,
+            chunk_size_samples: 16_000 * 5,
         },
-        available_in_app: false,
-        availability_note: Some(note.to_string()),
-        backends: vec![planned_backend(
-            CTRANSLATE2_BACKEND_ID,
-            "CTranslate2",
-            "Planned runtime backend for efficient local Whisper inference.",
-            note,
-        )],
-        recommended_backend_id: CTRANSLATE2_BACKEND_ID.to_string(),
+        available_in_app: true,
+        availability_note: None,
+        backends: vec![whisper_rs_backend()],
+        recommended_backend_id: WHISPER_RS_BACKEND_ID.to_string(),
+    }
+}
+
+fn whisper_rs_backend() -> TranscriptionRuntimeBackendDescriptor {
+    TranscriptionRuntimeBackendDescriptor {
+        id: WHISPER_RS_BACKEND_ID.to_string(),
+        label: "whisper.cpp".to_string(),
+        description: "whisper.cpp via whisper-rs with Metal GPU acceleration.".to_string(),
+        recommended: true,
+        available_in_app: true,
+        availability_note: None,
+        artifacts: vec![ModelArtifactDescriptor {
+            id: WHISPER_TURBO_GGML_ARTIFACT_ID.to_string(),
+            label: "Hugging Face".to_string(),
+            description: "GGML F16 weights for whisper-large-v3-turbo.".to_string(),
+            provider: "huggingface".to_string(),
+            repository: "ggerganov/whisper.cpp".to_string(),
+            revision: None,
+            file_format: "ggml".to_string(),
+            download_size_bytes: Some(1_620_000_000),
+            required_files: vec!["ggml-large-v3-turbo.bin".to_string()],
+        }],
     }
 }
 
@@ -667,14 +722,26 @@ mod tests {
     }
 
     #[test]
-    fn resolve_profile_rejects_unavailable_whisper_stub() {
+    fn resolve_profile_whisper_turbo() {
+        let p = resolve_transcription_profile(
+            Some(WHISPER_ENGINE_ID),
+            Some(WHISPER_MODEL_TURBO_ID),
+            Some(WHISPER_RS_BACKEND_ID),
+        )
+        .unwrap();
+        assert_eq!(p.engine_id, WHISPER_ENGINE_ID);
+        assert_eq!(p.model_id, WHISPER_MODEL_TURBO_ID);
+        assert_eq!(p.backend_id, WHISPER_RS_BACKEND_ID);
+    }
+
+    #[test]
+    fn resolve_profile_rejects_old_whisper_ctranslate2_backend() {
         let r = resolve_transcription_profile(
             Some(WHISPER_ENGINE_ID),
             Some(WHISPER_MODEL_TURBO_ID),
             Some(CTRANSLATE2_BACKEND_ID),
         );
         assert!(r.is_err());
-        assert!(r.unwrap_err().contains("not implemented in this app build"));
     }
 
     #[test]
@@ -729,6 +796,43 @@ mod tests {
     }
 
     #[test]
+    fn create_engine_whisper() {
+        let profile = resolve_transcription_profile(
+            Some(WHISPER_ENGINE_ID),
+            Some(WHISPER_MODEL_TURBO_ID),
+            Some(WHISPER_RS_BACKEND_ID),
+        )
+        .unwrap();
+        let e = create_engine(&profile);
+        assert!(e.is_ok());
+    }
+
+    #[test]
+    fn whisper_engine_audio_requirements() {
+        let engine = whisper::WhisperEngine::new();
+        let reqs = engine.audio_requirements();
+        assert_eq!(reqs.sample_rate_hz, 16_000);
+        assert_eq!(reqs.channels, 1);
+        assert!(reqs.chunk_size_samples > 0);
+    }
+
+    #[test]
+    fn whisper_artifact_has_ggml_file() {
+        let profile = resolve_transcription_profile(
+            Some(WHISPER_ENGINE_ID),
+            Some(WHISPER_MODEL_TURBO_ID),
+            Some(WHISPER_RS_BACKEND_ID),
+        )
+        .unwrap();
+        let artifact = resolve_transcription_artifact(&profile).unwrap();
+        assert_eq!(artifact.file_format, "ggml");
+        assert!(artifact
+            .required_files
+            .iter()
+            .any(|f| f.ends_with(".bin")));
+    }
+
+    #[test]
     fn create_engine_unknown_backend() {
         let profile = TranscriptionProfile {
             backend_id: "unknown".into(),
@@ -778,5 +882,48 @@ mod tests {
         assert_eq!(p.engine_id, "some-custom-engine");
         assert_eq!(p.model_id, "legacy");
         assert_eq!(p.backend_id, CANDLE_BACKEND_ID);
+    }
+
+    #[test]
+    fn whisper_engine_reset_clears_buffer() {
+        let engine = whisper::WhisperEngine::new();
+        // reset_state should not fail on a fresh engine
+        assert!(engine.reset_state().is_ok());
+    }
+
+    #[test]
+    fn whisper_engine_flush_without_load_returns_error() {
+        let engine = whisper::WhisperEngine::new();
+        assert!(engine.flush().is_err());
+    }
+
+    #[test]
+    fn whisper_engine_transcribe_without_load_returns_error() {
+        let engine = whisper::WhisperEngine::new();
+        let audio = vec![0.0f32; 16_000];
+        assert!(engine.transcribe(&audio, None).is_err());
+    }
+
+    #[test]
+    fn create_engine_whisper_returns_correct_audio_requirements() {
+        let profile = resolve_transcription_profile(
+            Some(WHISPER_ENGINE_ID),
+            Some(WHISPER_MODEL_TURBO_ID),
+            Some(WHISPER_RS_BACKEND_ID),
+        )
+        .unwrap();
+        let engine = create_engine(&profile).unwrap();
+        let reqs = engine.audio_requirements();
+        assert_eq!(reqs.sample_rate_hz, 16_000);
+        assert_ne!(reqs.chunk_size_samples, crate::constants::MIMI_FRAME_SIZE as u32);
+    }
+
+    #[test]
+    fn create_engine_kyutai_returns_correct_audio_requirements() {
+        let profile = default_transcription_profile();
+        let engine = create_engine(&profile).unwrap();
+        let reqs = engine.audio_requirements();
+        assert_eq!(reqs.sample_rate_hz, crate::constants::SAMPLE_RATE);
+        assert_eq!(reqs.chunk_size_samples, crate::constants::MIMI_FRAME_SIZE as u32);
     }
 }

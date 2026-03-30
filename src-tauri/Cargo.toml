@@ -49,9 +49,12 @@ sentencepiece = "0.11.3"
 hf-hub = "0.4.3"
 memmap2 = "0.9"
 safetensors = "0.7"
-reqwest = { version = "0.12", features = ["stream"] }
+reqwest = { version = "0.12", features = ["stream", "blocking"] }
 futures-util = "0.3"
 sha2 = "0.10"
+
+# Phase 6: Whisper engine via whisper.cpp
+whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }
 
 # Phase 4: SQLite unified storage
 rusqlite = { version = "0.33", features = ["bundled-full"] }

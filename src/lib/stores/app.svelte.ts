@@ -23,6 +23,8 @@ let transcriptionRuntimePhase = $state<TranscriptionRuntimePhase>("download_requ
 let downloadFile = $state("");
 let downloadCompletedFiles = $state(0);
 let downloadTotalFiles = $state(0);
+let downloadedBytes = $state(0);
+let downloadTotalBytes = $state<number | null>(null);
 
 // Settings with defaults
 let settings = $state<AppSettings>({
@@ -129,6 +131,12 @@ export function getAppState() {
 
     get downloadTotalFiles() { return downloadTotalFiles; },
     set downloadTotalFiles(v: number) { downloadTotalFiles = v; },
+
+    get downloadedBytes() { return downloadedBytes; },
+    set downloadedBytes(v: number) { downloadedBytes = v; },
+
+    get downloadTotalBytes() { return downloadTotalBytes; },
+    set downloadTotalBytes(v: number | null) { downloadTotalBytes = v; },
 
     /** Navigate to a specific meeting's detail page */
     openMeeting(id: string) {

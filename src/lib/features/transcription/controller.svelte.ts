@@ -3,6 +3,7 @@ import {
   addDictationEntry,
   clearDictationHistory,
   deleteDictationEntry,
+  deleteModel,
   getTranscriptionCatalog,
   listDictationEntries,
   pasteText,
@@ -25,6 +26,7 @@ import {
   getSelectedTranscriptionBackend,
 } from "./catalog";
 import {
+  currentTranscriptionSelection,
   refreshTranscriptionRuntimeStatus,
   resetTranscriptionRuntimeState,
   startTranscriptionModelDownload,
@@ -213,6 +215,17 @@ function createTranscriptionControllerInstance() {
     });
   }
 
+  async function handleDeleteModel() {
+    try {
+      const selection = currentTranscriptionSelection(app, catalog);
+      await deleteModel(selection);
+      resetTranscriptionRuntimeState(app);
+      await refreshRuntimeStatus();
+    } catch (error) {
+      statusMessage = errorMessage(error);
+    }
+  }
+
   async function toggleRecording(fromShortcut = false) {
     if (isStartingRecording || isStopping) return;
 
@@ -287,6 +300,8 @@ function createTranscriptionControllerInstance() {
     get downloadFile() { return app.downloadFile; },
     get downloadCompletedFiles() { return app.downloadCompletedFiles; },
     get downloadTotalFiles() { return app.downloadTotalFiles; },
+    get downloadedBytes() { return app.downloadedBytes; },
+    get downloadTotalBytes() { return app.downloadTotalBytes; },
     get history() { return history; },
     get filteredHistory() { return filteredHistory; },
     get expandedEntryId() { return expandedEntryId; },
@@ -304,6 +319,7 @@ function createTranscriptionControllerInstance() {
     selectBackend,
     handleDownloadModel,
     handleLoadModel,
+    handleDeleteModel,
     toggleRecording,
     removeHistoryEntry,
     resetHistory,
