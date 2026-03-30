@@ -13,7 +13,6 @@ use crate::engine::{
 use crate::lock_ext::MutexExt;
 use crate::models;
 use crate::pipeline::TranscriptionPipeline;
-use crate::platform::with_autorelease_pool;
 use crate::settings::AppSettings;
 use crate::state::AppState;
 use crate::state_machine::{AppStateMachine, StateAction};
@@ -251,32 +250,30 @@ pub fn load_model(
         state.apply_transition(StateAction::StartLoad)?;
     }
 
-    // Swap engine: drop old engine FIRST, completely, before creating new one.
+    // Swap engine: intentionally LEAK the old engine instead of dropping it.
     //
-    // SentencePiece (Kyutai) and ONNX Runtime (vad-rs) both statically link
-    // protobuf, sharing global descriptor pools. Dropping the old engine while
-    // any protobuf state from ort is alive corrupts the heap (SIGABRT in
-    // TrainerSpec::SharedDtor). Following Handy's approach: take the old engine
-    // out, release the mutex, drop it in an autorelease pool (for Metal/ObjC
-    // cleanup), then create and load the new engine separately.
+    // sentencepiece-sys and ort-sys both statically link their own copy of
+    // Google Protobuf. Two copies of protobuf in the same process corrupt
+    // each other's global descriptor pools. When SentencePiece's destructor
+    // runs (TrainerSpec::SharedDtor), it tries to free protobuf objects whose
+    // backing memory was already reclaimed by ort's protobuf copy → SIGABRT
+    // "pointer being freed was not allocated".
+    //
+    // Handy avoids this by not using Kyutai/moshi (no sentencepiece). Since
+    // Souffle uses both engines, we leak the old engine on swap. The leaked
+    // memory (~50MB for a loaded model) is bounded to one engine and gets
+    // reclaimed on process exit. This is the only safe option when two
+    // C++ libraries statically link conflicting protobuf versions.
     {
-        let old_engine = {
-            let mut guard = state.engine.acquire()?;
-            std::mem::replace(&mut *guard, crate::engine::default_transcription_engine())
-        };
-        // Old engine drops here, outside the mutex, in an autorelease pool
-        // for proper Metal residency set cleanup.
-        with_autorelease_pool(move || {
-            drop(old_engine);
-        });
+        let mut guard = state.engine.acquire()?;
+        let old_engine = std::mem::replace(&mut *guard, create_engine(&profile)?);
+        // Intentionally leak — do NOT drop. Protobuf double-free otherwise.
+        std::mem::forget(old_engine);
     }
 
-    // Now create and load the new engine into a clean state
-    let new_engine = create_engine(&profile)?;
     info!(path = %model_dir.display(), "Loading model");
     {
         let mut guard = state.engine.acquire()?;
-        *guard = new_engine;
         if let Err(e) = guard.load_model(&model_dir) {
             drop(guard);
             state.apply_transition(StateAction::Fail {

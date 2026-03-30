@@ -179,10 +179,11 @@ pub fn run() {
                 {
                     let _ = p.shutdown();
                 }
-                if let Ok(mut engine) = state.engine.lock() {
-                    let _ = engine.unload_model();
-                }
-                info!("Engine and pipeline shut down cleanly");
+                // Do NOT call engine.unload_model() here — SentencePiece's
+                // protobuf destructor crashes when ort has also been loaded
+                // in the same process. The OS reclaims all resources on exit.
+                // Pipeline shutdown above already stops the inference thread.
+                info!("Pipeline shut down, engine resources released by OS on exit");
             }
         });
 }
