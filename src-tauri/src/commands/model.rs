@@ -250,38 +250,29 @@ pub fn load_model(
         state.apply_transition(StateAction::StartLoad)?;
     }
 
-    // Swap engine: intentionally LEAK the old engine instead of dropping it.
-    //
-    // sentencepiece-sys and ort-sys both statically link their own copy of
-    // Google Protobuf. Two copies of protobuf in the same process corrupt
-    // each other's global descriptor pools. When SentencePiece's destructor
-    // runs (TrainerSpec::SharedDtor), it tries to free protobuf objects whose
-    // backing memory was already reclaimed by ort's protobuf copy → SIGABRT
-    // "pointer being freed was not allocated".
-    //
-    // Handy avoids this by not using Kyutai/moshi (no sentencepiece). Since
-    // Souffle uses both engines, we leak the old engine on swap. The leaked
-    // memory (~50MB for a loaded model) is bounded to one engine and gets
-    // reclaimed on process exit. This is the only safe option when two
-    // C++ libraries statically link conflicting protobuf versions.
+    // Swap engine cleanly: drop old engine outside the mutex, then create new.
+    // vad-rs uses ort's load-dynamic feature, so ONNX Runtime loads via dlopen
+    // and its protobuf symbols stay isolated — no conflict with sentencepiece.
     {
-        let mut guard = state.engine.acquire()?;
-        let old_engine = std::mem::replace(&mut *guard, create_engine(&profile)?);
-        // Intentionally leak — do NOT drop. Protobuf double-free otherwise.
-        std::mem::forget(old_engine);
+        let old_engine = {
+            let mut guard = state.engine.acquire()?;
+            std::mem::replace(&mut *guard, create_engine(&profile)?)
+        };
+        // Old engine drops here, outside the mutex. Autorelease pool ensures
+        // Metal/ObjC objects (Candle, whisper.cpp) are released properly.
+        crate::platform::with_autorelease_pool(|| drop(old_engine));
     }
 
     info!(path = %model_dir.display(), "Loading model");
-    {
-        let mut guard = state.engine.acquire()?;
-        if let Err(e) = guard.load_model(&model_dir) {
-            drop(guard);
-            state.apply_transition(StateAction::Fail {
-                message: e.to_string(),
-            })?;
-            return Err(e.to_string());
-        }
+    let mut engine = state.engine.acquire()?;
+    if let Err(e) = engine.load_model(&model_dir) {
+        drop(engine);
+        state.apply_transition(StateAction::Fail {
+            message: e.to_string(),
+        })?;
+        return Err(e.to_string());
     }
+    drop(engine);
 
     // Spawn persistent inference pipeline (lives until app exit)
     let pipeline =

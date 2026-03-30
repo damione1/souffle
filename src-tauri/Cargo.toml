@@ -60,7 +60,8 @@ whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }
 rusqlite = { version = "0.33", features = ["bundled-full"] }
 
 # Phase 7A: Pipeline quality filters
-vad-rs = { git = "https://github.com/cjpais/vad-rs", default-features = false }
+vad-rs = { git = "https://github.com/cjpais/vad-rs", default-features = false, features = ["load-dynamic"] }
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic"] }
 strsim = "0.11"
 regex = "1"
 

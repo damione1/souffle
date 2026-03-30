@@ -113,42 +113,60 @@ pub struct DictionaryEntry {
 // ── VAD model path resolution ──────────────────────────
 
 const VAD_MODEL_FILENAME: &str = "silero_vad_v4.onnx";
+const ORT_DYLIB_FILENAME: &str = "libonnxruntime.dylib";
 
-/// Resolve the Silero VAD model file path.
-/// Checks multiple locations in order:
-/// 1. Tauri bundled resources (production): next to the binary under resources/
-/// 2. Development: src-tauri/resources/ relative to the binary
-/// 3. App data directory
-pub fn resolve_vad_model_path() -> Option<PathBuf> {
+/// Search for a resource file in standard locations.
+fn resolve_resource(filename: &str) -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
         .map(|bin_dir| {
             vec![
-                // Production Tauri app: resources bundled next to binary
-                bin_dir.join("resources").join(VAD_MODEL_FILENAME),
-                // macOS .app bundle: ../Resources/resources/
-                bin_dir
-                    .join("../Resources/resources")
-                    .join(VAD_MODEL_FILENAME),
-                // Dev mode: src-tauri/resources/ (cargo tauri dev runs from src-tauri/)
-                PathBuf::from("resources").join(VAD_MODEL_FILENAME),
+                bin_dir.join("resources").join(filename),
+                bin_dir.join("../Resources/resources").join(filename),
+                PathBuf::from("resources").join(filename),
             ]
         })
         .unwrap_or_default();
 
     for path in &candidates {
         if path.exists() {
-            tracing::info!(path = %path.display(), "Found Silero VAD model");
             return Some(path.clone());
         }
     }
-
-    tracing::warn!(
-        "Silero VAD model not found in any of: {:?}",
-        candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()
-    );
     None
+}
+
+/// Resolve the Silero VAD model file path.
+pub fn resolve_vad_model_path() -> Option<PathBuf> {
+    let path = resolve_resource(VAD_MODEL_FILENAME);
+    if let Some(ref p) = path {
+        tracing::info!(path = %p.display(), "Found Silero VAD model");
+    } else {
+        tracing::warn!("Silero VAD model ({VAD_MODEL_FILENAME}) not found");
+    }
+    path
+}
+
+/// Initialize ONNX Runtime with the bundled dylib (load-dynamic mode).
+/// Must be called once before creating any VAD filter.
+/// Safe to call multiple times — ort ignores re-initialization.
+pub fn ensure_ort_initialized() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(dylib_path) = resolve_resource(ORT_DYLIB_FILENAME) {
+            tracing::info!(path = %dylib_path.display(), "Loading ONNX Runtime dylib");
+            match ort::init_from(&dylib_path) {
+                Ok(builder) => { builder.commit(); }
+                Err(e) => tracing::warn!("Failed to init ort with bundled dylib: {e}"),
+            }
+        } else {
+            tracing::warn!(
+                "ONNX Runtime dylib ({ORT_DYLIB_FILENAME}) not found — VAD will be unavailable"
+            );
+        }
+    });
 }
 
 // ── Factory functions ──────────────────────────────────
@@ -156,6 +174,7 @@ pub fn resolve_vad_model_path() -> Option<PathBuf> {
 pub fn build_audio_filters(config: &PipelineConfig, source_sample_rate: u32) -> AudioFilterChain {
     let mut filters: Vec<Box<dyn AudioFilter>> = Vec::new();
     if config.vad_enabled {
+        ensure_ort_initialized();
         if let Some(model_path) = &config.vad_model_path {
             match audio_vad::SileroVadFilter::new(model_path, source_sample_rate) {
                 Ok(vad) => filters.push(Box::new(vad)),
