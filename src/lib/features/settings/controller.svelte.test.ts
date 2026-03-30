@@ -57,6 +57,10 @@ const defaultSettings: AppSettings = {
   transcription_engine_id: "kyutai",
   transcription_model_id: "stt-1b-en_fr",
   transcription_backend_id: "candle",
+  vad_enabled: true,
+  filler_removal: true,
+  stutter_collapse: false,
+  dictionary_correction: true,
 };
 
 const fakeDevices: AudioDeviceInfo[] = [

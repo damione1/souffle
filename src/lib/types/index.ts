@@ -5,6 +5,7 @@ export type {
   AudioDeviceInfo,
   AudioInputRequirements,
   DictationEntry,
+  DictionaryEntry,
   DownloadProgress,
   DownloadStatus,
   ErrorRecovery,

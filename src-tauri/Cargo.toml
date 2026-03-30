@@ -59,6 +59,11 @@ whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }
 # Phase 4: SQLite unified storage
 rusqlite = { version = "0.33", features = ["bundled-full"] }
 
+# Phase 7A: Pipeline quality filters
+vad-rs = { git = "https://github.com/cjpais/vad-rs", default-features = false }
+strsim = "0.11"
+regex = "1"
+
 # Phase 3: Clipboard/paste + Ollama
 arboard = "3"
 enigo = { version = "0.3", features = ["serde"] }

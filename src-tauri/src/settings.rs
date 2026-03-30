@@ -17,6 +17,10 @@ const AUDIO_DEVICE_KEY: &str = "audio_device";
 const TRANSCRIPTION_ENGINE_ID_KEY: &str = "transcription_engine_id";
 const TRANSCRIPTION_MODEL_ID_KEY: &str = "transcription_model_id";
 const TRANSCRIPTION_BACKEND_ID_KEY: &str = "transcription_backend_id";
+const VAD_ENABLED_KEY: &str = "vad_enabled";
+const FILLER_REMOVAL_KEY: &str = "filler_removal";
+const STUTTER_COLLAPSE_KEY: &str = "stutter_collapse";
+const DICTIONARY_CORRECTION_KEY: &str = "dictionary_correction";
 const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
@@ -43,6 +47,10 @@ pub struct AppSettings {
     pub transcription_engine_id: String,
     pub transcription_model_id: String,
     pub transcription_backend_id: String,
+    pub vad_enabled: bool,
+    pub filler_removal: bool,
+    pub stutter_collapse: bool,
+    pub dictionary_correction: bool,
 }
 
 impl Default for AppSettings {
@@ -59,11 +67,31 @@ impl Default for AppSettings {
             transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
             transcription_model_id: KYUTAI_MODEL_ID.to_string(),
             transcription_backend_id: CANDLE_BACKEND_ID.to_string(),
+            vad_enabled: true,
+            filler_removal: true,
+            stutter_collapse: false,
+            dictionary_correction: true,
         }
     }
 }
 
 impl AppSettings {
+    pub fn pipeline_config(&self) -> crate::filter::PipelineConfig {
+        let vad_model_path = if self.vad_enabled {
+            crate::filter::resolve_vad_model_path()
+        } else {
+            None
+        };
+
+        crate::filter::PipelineConfig {
+            vad_enabled: self.vad_enabled,
+            vad_model_path,
+            filler_removal_enabled: self.filler_removal,
+            stutter_collapse_enabled: self.stutter_collapse,
+            dictionary_correction_enabled: self.dictionary_correction,
+        }
+    }
+
     pub fn load(db: &Database) -> Result<Self, String> {
         let mut settings = Self::default();
 
@@ -107,6 +135,18 @@ impl AppSettings {
             read_json_setting::<String>(db, TRANSCRIPTION_BACKEND_ID_KEY)?
         {
             settings.transcription_backend_id = transcription_backend_id;
+        }
+        if let Some(vad_enabled) = read_json_setting::<bool>(db, VAD_ENABLED_KEY)? {
+            settings.vad_enabled = vad_enabled;
+        }
+        if let Some(filler_removal) = read_json_setting::<bool>(db, FILLER_REMOVAL_KEY)? {
+            settings.filler_removal = filler_removal;
+        }
+        if let Some(stutter_collapse) = read_json_setting::<bool>(db, STUTTER_COLLAPSE_KEY)? {
+            settings.stutter_collapse = stutter_collapse;
+        }
+        if let Some(dictionary_correction) = read_json_setting::<bool>(db, DICTIONARY_CORRECTION_KEY)? {
+            settings.dictionary_correction = dictionary_correction;
         }
 
         Ok(settings.sanitized())
@@ -210,6 +250,10 @@ impl AppSettings {
             &normalized.transcription_backend_id,
         )?;
         write_json_setting(db, DEBUG_TRANSCRIPTION_KEY, &normalized.debug_transcription)?;
+        write_json_setting(db, VAD_ENABLED_KEY, &normalized.vad_enabled)?;
+        write_json_setting(db, FILLER_REMOVAL_KEY, &normalized.filler_removal)?;
+        write_json_setting(db, STUTTER_COLLAPSE_KEY, &normalized.stutter_collapse)?;
+        write_json_setting(db, DICTIONARY_CORRECTION_KEY, &normalized.dictionary_correction)?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
             write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
@@ -326,6 +370,10 @@ mod tests {
             transcription_engine_id: "kyutai".into(),
             transcription_model_id: "stt-1b-en_fr".into(),
             transcription_backend_id: "candle".into(),
+            vad_enabled: true,
+            filler_removal: true,
+            stutter_collapse: false,
+            dictionary_correction: true,
         };
 
         settings.save(&db).expect("save settings");

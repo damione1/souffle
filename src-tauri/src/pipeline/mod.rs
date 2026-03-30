@@ -5,6 +5,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::audio::AudioChunk;
 use crate::engine::{SharedTranscriptionEngine, TranscriptionEngine, TranscriptionSegment};
+use crate::filter::{
+    AudioFilterChain, DictionaryEntry, PipelineConfig, TextFilterChain, build_audio_filters,
+    build_text_filters,
+};
 use crate::platform::with_autorelease_pool;
 
 /// Callback type for streaming segments to the frontend
@@ -12,10 +16,15 @@ pub type SegmentCallback = Box<dyn Fn(TranscriptionSegment) + Send + 'static>;
 
 /// Commands sent to the inference thread
 pub enum InferenceCommand {
-    /// Start a new transcription session with the given segment callback
+    /// Start a new transcription session with the given segment callback.
+    /// Filter chains are built ON the inference thread to avoid Metal/ONNX
+    /// conflicts between ort (Silero VAD) and whisper.cpp on the main thread.
     Start {
         session_id: u64,
         on_segment: SegmentCallback,
+        pipeline_config: PipelineConfig,
+        source_sample_rate: u32,
+        dictionary_entries: Vec<DictionaryEntry>,
     },
     /// Stop transcribing, flush remaining audio, signal completion via sender
     Stop(crossbeam_channel::Sender<()>),
@@ -83,11 +92,22 @@ impl TranscriptionPipeline {
                 Ok(InferenceCommand::Start {
                     session_id,
                     on_segment,
+                    pipeline_config,
+                    source_sample_rate,
+                    dictionary_entries,
                 }) => {
                     session_count += 1;
                     info!(
                         "Inference session {session_count} starting (audio session {session_id})"
                     );
+
+                    // Build filter chains ON the inference thread to keep ONNX
+                    // Runtime (Silero VAD) init on the same thread as whisper.cpp
+                    // Metal work, avoiding Metal residency set conflicts.
+                    let mut audio_filters =
+                        build_audio_filters(&pipeline_config, source_sample_rate);
+                    let text_filters =
+                        build_text_filters(&pipeline_config, dictionary_entries);
 
                     // Hold engine lock for the entire active session.
                     // State reset is done by the caller before sending Start,
@@ -111,6 +131,8 @@ impl TranscriptionPipeline {
                             guard.as_ref(),
                             &on_segment,
                             session_id,
+                            &mut audio_filters,
+                            &text_filters,
                         )
                     });
                     drop(guard);
@@ -142,6 +164,8 @@ impl TranscriptionPipeline {
         engine: &dyn TranscriptionEngine,
         on_segment: &SegmentCallback,
         session_id: u64,
+        audio_filters: &mut AudioFilterChain,
+        text_filters: &TextFilterChain,
     ) -> bool {
         let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
         let mut audio_buffer: Vec<f32> = Vec::new();
@@ -187,7 +211,7 @@ impl TranscriptionPipeline {
                                             seg.text, seg.is_final
                                         );
                                     }
-                                    Self::emit_normalized(engine, seg.clone(), on_segment);
+                                    Self::emit_filtered(engine, text_filters, seg.clone(), on_segment);
                                 }
                             }
                             Err(e) => {
@@ -198,7 +222,7 @@ impl TranscriptionPipeline {
                     }
                     // Process any remaining partial frame
                     if !audio_buffer.is_empty() {
-                        Self::process_frames(engine, &audio_buffer, on_segment);
+                        Self::process_frames(engine, text_filters, &audio_buffer, on_segment);
                         audio_buffer.clear();
                     }
 
@@ -209,7 +233,7 @@ impl TranscriptionPipeline {
                                 debug!("Flush: {} segments", segments.len());
                             }
                             for seg in segments {
-                                Self::emit_normalized(engine, seg, on_segment);
+                                Self::emit_filtered(engine, text_filters, seg, on_segment);
                             }
                         }
                         Err(e) => error!("Flush error: {e}"),
@@ -244,13 +268,17 @@ impl TranscriptionPipeline {
                     // Process complete engine-sized frames
                     while audio_buffer.len() >= chunk_size {
                         let frame: Vec<f32> = audio_buffer.drain(..chunk_size).collect();
+                        if !audio_filters.process(&frame) {
+                            frames_processed += 1;
+                            continue; // VAD says no speech — skip this frame
+                        }
                         match engine.transcribe(&frame, None) {
                             Ok(segments) => {
                                 for seg in &segments {
                                     if crate::debug::transcription_debug_enabled() {
                                         debug!("Segment: {:?} final={}", seg.text, seg.is_final);
                                     }
-                                    Self::emit_normalized(engine, seg.clone(), on_segment);
+                                    Self::emit_filtered(engine, text_filters, seg.clone(), on_segment);
                                 }
                             }
                             Err(e) => {
@@ -282,26 +310,31 @@ impl TranscriptionPipeline {
 
     fn process_frames(
         engine: &dyn TranscriptionEngine,
+        text_filters: &TextFilterChain,
         audio: &[f32],
         on_segment: &SegmentCallback,
     ) {
         match engine.transcribe(audio, None) {
             Ok(segments) => {
                 for seg in segments {
-                    Self::emit_normalized(engine, seg, on_segment);
+                    Self::emit_filtered(engine, text_filters, seg, on_segment);
                 }
             }
             Err(e) => error!("Transcribe error: {e}"),
         }
     }
 
-    /// Normalize engine-specific tokens from segment text before emitting.
-    fn emit_normalized(
+    /// Normalize engine-specific tokens, then apply text filter chain before emitting.
+    fn emit_filtered(
         engine: &dyn TranscriptionEngine,
+        text_filters: &TextFilterChain,
         mut segment: crate::engine::TranscriptionSegment,
         on_segment: &SegmentCallback,
     ) {
+        // Step 1: engine-specific normalization (strip [_TT_], ▁, etc.)
         segment.text = engine.normalize_text(&segment.text);
+        // Step 2: shared text filter chain (filler, stutter, dictionary, whitespace)
+        segment.text = text_filters.apply(&segment.text);
         if !segment.text.is_empty() {
             on_segment(segment);
         }
@@ -329,7 +362,20 @@ mod tests {
     use crate::engine::mock::MockEngine;
     use crate::engine::TranscriptionSegment;
 
+    use crate::filter::PipelineConfig;
+
     use super::{InferenceCommand, TranscriptionPipeline};
+
+    /// Helper: create a disabled filter config for tests (no VAD, no text filters).
+    fn noop_filter_config() -> PipelineConfig {
+        PipelineConfig {
+            vad_enabled: false,
+            vad_model_path: None,
+            filler_removal_enabled: false,
+            stutter_collapse_enabled: false,
+            dictionary_correction_enabled: false,
+        }
+    }
 
     /// Helper: create a TranscriptionSegment with the given text.
     fn seg(text: &str) -> TranscriptionSegment {
@@ -380,6 +426,9 @@ mod tests {
                 on_segment: Box::new(move |s| {
                     collected_cb.lock().unwrap().push(s);
                 }),
+                pipeline_config: noop_filter_config(),
+                source_sample_rate: 16000,
+                dictionary_entries: vec![],
             })
             .expect("start");
 
@@ -423,6 +472,9 @@ mod tests {
             .send(InferenceCommand::Start {
                 session_id: 1,
                 on_segment: Box::new(|_| {}),
+                pipeline_config: noop_filter_config(),
+                source_sample_rate: 16000,
+                dictionary_entries: vec![],
             })
             .expect("start");
 
@@ -459,6 +511,9 @@ mod tests {
                 on_segment: Box::new(move |s| {
                     collected_cb.lock().unwrap().push(s);
                 }),
+                pipeline_config: noop_filter_config(),
+                source_sample_rate: 16000,
+                dictionary_entries: vec![],
             })
             .expect("start");
 
@@ -503,6 +558,9 @@ mod tests {
                 on_segment: Box::new(move |s| {
                     collected_cb.lock().unwrap().push(s);
                 }),
+                pipeline_config: noop_filter_config(),
+                source_sample_rate: 16000,
+                dictionary_entries: vec![],
             })
             .expect("start");
 
@@ -555,6 +613,9 @@ mod tests {
                 on_segment: Box::new(move |s| {
                     cb1.lock().unwrap().push(s);
                 }),
+                pipeline_config: noop_filter_config(),
+                source_sample_rate: 16000,
+                dictionary_entries: vec![],
             })
             .expect("start session 1");
 
@@ -578,6 +639,9 @@ mod tests {
                 on_segment: Box::new(move |s| {
                     cb2.lock().unwrap().push(s);
                 }),
+                pipeline_config: noop_filter_config(),
+                source_sample_rate: 16000,
+                dictionary_entries: vec![],
             })
             .expect("start session 2");
 
@@ -629,6 +693,9 @@ mod tests {
                 on_segment: Box::new(move |s| {
                     collected_cb.lock().unwrap().push(s);
                 }),
+                pipeline_config: noop_filter_config(),
+                source_sample_rate: 16000,
+                dictionary_entries: vec![],
             })
             .expect("start");
 

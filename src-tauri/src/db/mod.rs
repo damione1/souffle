@@ -1,4 +1,5 @@
 pub mod dictation;
+pub mod dictionary;
 pub mod meetings;
 pub mod migrate;
 pub mod schema;
@@ -126,6 +127,13 @@ impl Database {
                 schema::migrate_text_search_to_v4(&mut conn)?;
                 conn.execute("UPDATE schema_version SET version = 4", [])
                     .map_err(|e| format!("Update schema version v4: {e}"))?;
+            }
+
+            if current_version < 5 {
+                conn.execute_batch(schema::CREATE_DICTIONARY)
+                    .map_err(|e| format!("Schema migration v5 (dictionary): {e}"))?;
+                conn.execute("UPDATE schema_version SET version = 5", [])
+                    .map_err(|e| format!("Update schema version v5: {e}"))?;
             }
 
             info!("Schema migration complete");

@@ -142,12 +142,21 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
         (engine.audio_requirements().sample_rate_hz, engine.mic_gain())
     };
 
+    // Snapshot settings and dictionary for the inference thread to build filter chains.
+    // Filter chains are built on the inference thread to avoid Metal/ONNX conflicts.
+    let settings = crate::settings::AppSettings::load(&state.db)?;
+    let pipeline_config = settings.pipeline_config();
+    let dictionary_entries = state.db.list_dictionary_entries()?;
+
     // Send Start before audio capture begins
     let pipe_guard = state.pipeline.acquire()?;
     let pipeline = pipe_guard.as_ref().ok_or("Pipeline not initialized")?;
     pipeline.send(InferenceCommand::Start {
         session_id,
         on_segment,
+        pipeline_config,
+        source_sample_rate: target_sample_rate,
+        dictionary_entries,
     })?;
 
     state

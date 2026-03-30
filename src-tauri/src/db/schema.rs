@@ -4,8 +4,8 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 4: content-storing FTS5 table (was contentless in v1-v3)
-pub const SCHEMA_VERSION: i64 = 4;
+/// Schema version 5: dictionary table for custom term corrections
+pub const SCHEMA_VERSION: i64 = 5;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -107,6 +107,17 @@ pub const CREATE_EMBEDDINGS: &str = "
 
 pub const CREATE_EMBEDDINGS_INDEX: &str = "
     CREATE INDEX IF NOT EXISTS idx_embeddings_meeting ON embeddings(meeting_id);
+";
+
+pub const CREATE_DICTIONARY: &str = "
+    CREATE TABLE IF NOT EXISTS dictionary (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        term TEXT NOT NULL COLLATE NOCASE,
+        phonetic_code TEXT,
+        category TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(term)
+    );
 ";
 
 /// All schema creation statements in order

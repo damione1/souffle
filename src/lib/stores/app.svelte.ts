@@ -39,6 +39,10 @@ let settings = $state<AppSettings>({
   transcription_engine_id: "",
   transcription_model_id: "",
   transcription_backend_id: "",
+  vad_enabled: true,
+  filler_removal: true,
+  stutter_collapse: false,
+  dictionary_correction: true,
 });
 
 function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {

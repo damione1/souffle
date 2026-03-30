@@ -16,13 +16,29 @@
   },
   "settings_audio": {
     "title": "Audio",
-    "description": "Choisissez le microphone utilisé par Souffle.",
+    "description": "Choisissez le microphone utilisé par Souffle et configurez le traitement audio.",
     "input_device": "Périphérique d'entrée",
     "device_default_suffix": "(par défaut)",
     "refresh_devices": "Actualiser les périphériques",
-    "noise_reduction": "Réduction du bruit",
-    "noise_reduction_desc": "Réduit le bruit de fond pendant la capture.",
-    "coming_soon": "Bientôt disponible"
+    "vad_enabled": "Détection d'activité vocale",
+    "vad_enabled_desc": "Filtre le silence et le bruit avant la transcription avec Silero VAD.",
+    "filler_removal": "Suppression des mots de remplissage",
+    "filler_removal_desc": "Supprime les mots comme « euh », « hm », « um » des transcriptions.",
+    "stutter_collapse": "Réduction des bégaiements",
+    "stutter_collapse_desc": "Réduit les mots répétés (3+ répétitions) en une seule occurrence.",
+    "dictionary_correction": "Correction par dictionnaire",
+    "dictionary_correction_desc": "Corrige les mots mal reconnus à l'aide de votre dictionnaire personnalisé."
+  },
+  "settings_dictionary": {
+    "title": "Dictionnaire personnalisé",
+    "description": "Ajoutez des noms propres, termes techniques ou noms souvent mal reconnus.",
+    "term": "Terme",
+    "term_placeholder": "ex. Kubernetes",
+    "category": "Catégorie",
+    "category_placeholder": "ex. tech",
+    "add_entry": "Ajouter une entrée",
+    "delete": "Supprimer",
+    "empty": "Aucune entrée dans le dictionnaire personnalisé."
   },
   "settings_interface": {
     "title": "Interface",

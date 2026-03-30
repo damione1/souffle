@@ -3,6 +3,7 @@
   import { t } from "svelte-i18n";
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
+  import DictionarySettingsSection from "../features/settings/components/DictionarySettingsSection.svelte";
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
@@ -44,8 +45,16 @@
   <AudioSettingsSection
     audioDevices={controller.audioDevices}
     selectedDevice={controller.app.selectedDevice}
+    vadEnabled={controller.app.settings.vad_enabled}
+    fillerRemoval={controller.app.settings.filler_removal}
+    stutterCollapse={controller.app.settings.stutter_collapse}
+    dictionaryCorrection={controller.app.settings.dictionary_correction}
     onDeviceChange={controller.onDeviceChange}
     onRefreshDevices={controller.refreshDevices}
+    onVadEnabledChange={controller.onVadEnabledChange}
+    onFillerRemovalChange={controller.onFillerRemovalChange}
+    onStutterCollapseChange={controller.onStutterCollapseChange}
+    onDictionaryCorrectionChange={controller.onDictionaryCorrectionChange}
   />
 
   <ModelGateSection
@@ -95,6 +104,12 @@
     onStartRecording={controller.startRecording}
     onClearShortcut={controller.clearShortcut}
     formatShortcut={controller.formatShortcut}
+  />
+
+  <DictionarySettingsSection
+    entries={controller.dictionaryEntries}
+    onAdd={controller.handleAddDictionaryEntry}
+    onDelete={controller.handleDeleteDictionaryEntry}
   />
 
   <DiagnosticsSettingsSection

@@ -358,6 +358,46 @@ async recoverState() : Promise<Result<AppStateMachine, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async listDictionary() : Promise<Result<DictionaryEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_dictionary") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async addDictionaryEntry(term: string, phoneticCode: string | null, category: string | null) : Promise<Result<DictionaryEntry, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_dictionary_entry", { term, phoneticCode, category }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateDictionaryEntry(id: number, term: string, phoneticCode: string | null, category: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_dictionary_entry", { id, term, phoneticCode, category }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteDictionaryEntry(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_dictionary_entry", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async clearDictionary() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_dictionary") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -384,7 +424,7 @@ stateChanged: "state-changed"
 
 /** user-defined types **/
 
-export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string }
+export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
@@ -401,6 +441,7 @@ export type AudioInputRequirements = { sample_rate_hz: number; channels: number;
  * A dictation history entry
  */
 export type DictationEntry = { id: string; text: string; timestamp: string }
+export type DictionaryEntry = { id: number; term: string; phonetic_code: string | null; category: string | null; created_at: string }
 /**
  * Download status reported to the frontend
  */

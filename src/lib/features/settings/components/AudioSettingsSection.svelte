@@ -7,13 +7,29 @@
   let {
     audioDevices,
     selectedDevice,
+    vadEnabled,
+    fillerRemoval,
+    stutterCollapse,
+    dictionaryCorrection,
     onDeviceChange,
     onRefreshDevices,
+    onVadEnabledChange,
+    onFillerRemovalChange,
+    onStutterCollapseChange,
+    onDictionaryCorrectionChange,
   }: {
     audioDevices: AudioDeviceInfo[];
     selectedDevice: string;
+    vadEnabled: boolean;
+    fillerRemoval: boolean;
+    stutterCollapse: boolean;
+    dictionaryCorrection: boolean;
     onDeviceChange: (event: Event) => void | Promise<void>;
     onRefreshDevices: () => void | Promise<void>;
+    onVadEnabledChange: (event: Event) => void | Promise<void>;
+    onFillerRemovalChange: (event: Event) => void | Promise<void>;
+    onStutterCollapseChange: (event: Event) => void | Promise<void>;
+    onDictionaryCorrectionChange: (event: Event) => void | Promise<void>;
   } = $props();
 </script>
 
@@ -38,15 +54,38 @@
   </div>
 
   <SettingsField
-    label={$t("settings_audio.noise_reduction")}
-    description={$t("settings_audio.noise_reduction_desc")}
-    disabled
+    label={$t("settings_audio.vad_enabled")}
+    description={$t("settings_audio.vad_enabled_desc")}
   >
     {#snippet control()}
-      <div class="flex gap-2 items-center">
-        <span class="pill pill-muted">{$t("settings_audio.coming_soon")}</span>
-        <input type="checkbox" disabled class="switch" />
-      </div>
+      <input type="checkbox" checked={vadEnabled} onchange={onVadEnabledChange} class="switch" aria-label={$t("settings_audio.vad_enabled")} />
+    {/snippet}
+  </SettingsField>
+
+  <SettingsField
+    label={$t("settings_audio.filler_removal")}
+    description={$t("settings_audio.filler_removal_desc")}
+  >
+    {#snippet control()}
+      <input type="checkbox" checked={fillerRemoval} onchange={onFillerRemovalChange} class="switch" aria-label={$t("settings_audio.filler_removal")} />
+    {/snippet}
+  </SettingsField>
+
+  <SettingsField
+    label={$t("settings_audio.stutter_collapse")}
+    description={$t("settings_audio.stutter_collapse_desc")}
+  >
+    {#snippet control()}
+      <input type="checkbox" checked={stutterCollapse} onchange={onStutterCollapseChange} class="switch" aria-label={$t("settings_audio.stutter_collapse")} />
+    {/snippet}
+  </SettingsField>
+
+  <SettingsField
+    label={$t("settings_audio.dictionary_correction")}
+    description={$t("settings_audio.dictionary_correction_desc")}
+  >
+    {#snippet control()}
+      <input type="checkbox" checked={dictionaryCorrection} onchange={onDictionaryCorrectionChange} class="switch" aria-label={$t("settings_audio.dictionary_correction")} />
     {/snippet}
   </SettingsField>
 </section>

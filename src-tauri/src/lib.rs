@@ -7,6 +7,7 @@ pub mod db;
 pub mod debug;
 pub mod engine;
 pub mod errors;
+pub mod filter;
 pub mod lock_ext;
 pub mod models;
 pub mod ollama;
@@ -67,6 +68,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_audio_level,
             commands::get_machine_state,
             commands::recover_state,
+            commands::list_dictionary,
+            commands::add_dictionary_entry,
+            commands::update_dictionary_entry,
+            commands::delete_dictionary_entry,
+            commands::clear_dictionary,
         ])
         .events(collect_events![
             app_events::Navigate,

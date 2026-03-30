@@ -22,10 +22,6 @@ const CHUNK_SAMPLES: usize = WHISPER_SAMPLE_RATE as usize * 5;
 /// Minimum audio for meaningful inference (1 second).
 const MIN_INFERENCE_SAMPLES: usize = WHISPER_SAMPLE_RATE as usize;
 
-/// RMS energy threshold for speech detection.
-/// Raw mic speech at -37dBFS has energy ~0.0002, so threshold must be lower.
-const VAD_ENERGY_THRESHOLD: f32 = 0.00005;
-
 /// Segments with no-speech probability above this are discarded.
 const NO_SPEECH_PROB_THRESHOLD: f32 = 0.6;
 
@@ -96,15 +92,6 @@ impl WhisperEngine {
         }
     }
 
-    /// Simple energy-based VAD.
-    fn has_speech(audio: &[f32]) -> bool {
-        if audio.is_empty() {
-            return false;
-        }
-        let energy: f32 = audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32;
-        energy > VAD_ENERGY_THRESHOLD
-    }
-
     /// Run inference on a chunk of audio. Returns detected language code
     /// alongside the transcription segments.
     fn run_inference(
@@ -112,7 +99,7 @@ impl WhisperEngine {
         audio: &[f32],
         language: Option<&str>,
     ) -> Result<(Vec<TranscriptionSegment>, Option<String>), EngineError> {
-        if audio.is_empty() || !Self::has_speech(audio) {
+        if audio.is_empty() {
             return Ok((vec![], None));
         }
 

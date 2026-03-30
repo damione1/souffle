@@ -16,13 +16,29 @@
   },
   "settings_audio": {
     "title": "Audio",
-    "description": "Choose which microphone Souffle listens to.",
+    "description": "Choose which microphone Souffle listens to and configure audio processing.",
     "input_device": "Input device",
     "device_default_suffix": "(default)",
     "refresh_devices": "Refresh devices",
-    "noise_reduction": "Noise Reduction",
-    "noise_reduction_desc": "Reduce background noise during capture.",
-    "coming_soon": "Coming Soon"
+    "vad_enabled": "Voice Activity Detection",
+    "vad_enabled_desc": "Filter out silence and noise before transcription using Silero VAD.",
+    "filler_removal": "Filler Word Removal",
+    "filler_removal_desc": "Remove filler words like \"uh\", \"um\", \"euh\" from transcriptions.",
+    "stutter_collapse": "Stutter Collapse",
+    "stutter_collapse_desc": "Collapse repeated words (3+ repetitions) into a single occurrence.",
+    "dictionary_correction": "Dictionary Correction",
+    "dictionary_correction_desc": "Correct misrecognized words using your custom dictionary."
+  },
+  "settings_dictionary": {
+    "title": "Custom Dictionary",
+    "description": "Add proper nouns, technical terms, or names that are often misrecognized.",
+    "term": "Term",
+    "term_placeholder": "e.g. Kubernetes",
+    "category": "Category",
+    "category_placeholder": "e.g. tech",
+    "add_entry": "Add entry",
+    "delete": "Delete",
+    "empty": "No custom dictionary entries yet."
   },
   "settings_interface": {
     "title": "Interface",

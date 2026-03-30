@@ -8,11 +8,17 @@ import {
   saveShortcuts as persistShortcutSettings,
   selectAudioDevice,
 } from "../../api/settings";
+import {
+  listDictionary,
+  addDictionaryEntry as apiAddDictionaryEntry,
+  deleteDictionaryEntry as apiDeleteDictionaryEntry,
+} from "../../api/dictionary";
 import { setLocale } from "../../i18n";
 import { getAppState } from "../../stores/app.svelte";
 import type {
   AppSettings,
   AudioDeviceInfo,
+  DictionaryEntry,
   OllamaModelDescriptor,
   ShortcutSettings,
   Theme,
@@ -46,6 +52,8 @@ export function createSettingsController() {
   let recordingField = $state<"toggle" | "ptt" | null>(null);
   let shortcutError = $state("");
 
+  let dictionaryEntries = $state<DictionaryEntry[]>([]);
+
   let summaryModels = $derived(ollamaModels.filter((model) => model.can_summarize));
 
   async function mount() {
@@ -55,6 +63,7 @@ export function createSettingsController() {
       refreshDevices(),
       checkOllama(),
       loadCatalog(),
+      loadDictionary(),
     ]);
     await refreshRuntimeStatus();
   }
@@ -292,6 +301,52 @@ export function createSettingsController() {
     });
   }
 
+  function onVadEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.vad_enabled = checked;
+    });
+  }
+
+  function onFillerRemovalChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.filler_removal = checked;
+    });
+  }
+
+  function onStutterCollapseChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.stutter_collapse = checked;
+    });
+  }
+
+  function onDictionaryCorrectionChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.dictionary_correction = checked;
+    });
+  }
+
+  async function loadDictionary() {
+    try {
+      dictionaryEntries = await listDictionary();
+    } catch (e) {
+      console.warn("Failed to load dictionary:", e);
+    }
+  }
+
+  async function handleAddDictionaryEntry(term: string, phoneticCode: string | null, category: string | null) {
+    const entry = await apiAddDictionaryEntry(term, phoneticCode, category);
+    dictionaryEntries = [...dictionaryEntries, entry].sort((a, b) => a.term.localeCompare(b.term));
+  }
+
+  async function handleDeleteDictionaryEntry(id: number) {
+    await apiDeleteDictionaryEntry(id);
+    dictionaryEntries = dictionaryEntries.filter((e) => e.id !== id);
+  }
+
   function keyEventToShortcut(event: KeyboardEvent): string | null {
     if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return null;
     const parts: string[] = [];
@@ -403,6 +458,7 @@ export function createSettingsController() {
     get pttShortcut() { return pttShortcut; },
     get recordingField() { return recordingField; },
     get shortcutError() { return shortcutError; },
+    get dictionaryEntries() { return dictionaryEntries; },
     mount,
     refreshRuntimeStatus,
     refreshDevices,
@@ -421,6 +477,12 @@ export function createSettingsController() {
     onDebugTranscriptionChange,
     onOllamaUrlChange,
     onOllamaModelChange,
+    onVadEnabledChange,
+    onFillerRemovalChange,
+    onStutterCollapseChange,
+    onDictionaryCorrectionChange,
+    handleAddDictionaryEntry,
+    handleDeleteDictionaryEntry,
     startRecording,
     handleKeyDown,
     clearShortcut,

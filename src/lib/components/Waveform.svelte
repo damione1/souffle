@@ -82,10 +82,14 @@
 
     function resize() {
       if (!canvas) return;
+      const dpr = window.devicePixelRatio;
       const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * window.devicePixelRatio;
-      canvas.height = rect.height * window.devicePixelRatio;
-      ctx!.scale(window.devicePixelRatio, window.devicePixelRatio);
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      // Reset transform before scaling — scale() is cumulative, so without
+      // this, repeated resize calls compound the scale factor, shifting bars
+      // to the bottom-right.
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
     resize();
