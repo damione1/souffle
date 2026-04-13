@@ -796,6 +796,31 @@ Direct distribution with notarized DMG gives full system access, no review gatek
 - [x] `load_model` command detects profile change and triggers unload→reload cycle
 - [x] Audio thread reconfigures sample rate on each recording session start
 
+#### Whisper Integration — Lessons Learned
+
+The whisper-rs/whisper.cpp integration required solving several non-obvious issues:
+
+**`detect_language=true` is detect-only mode (critical)**
+In whisper.cpp, `params.detect_language = true` runs language detection then **returns immediately without transcribing** (`return 0` at line 6824). This is by design (PR #853) — it's a CLI feature for querying a file's language. The correct way to auto-detect AND transcribe is `set_language(None)` (null pointer), which triggers the same detection code path but does NOT early-return. The whisper-rs docs are misleading: they say `set_detect_language` has "the same effect" as `set_language(None)` — it does not.
+
+**Language caching for streaming chunks**
+Auto-detection on every 5-second chunk causes hallucinations (decoder fills silence with counting sequences like "44, 44, 44...") and repetition loop failures requiring temperature fallback (0.0 → 0.2 → 0.4 → 0.6). Fix: auto-detect on first chunk, cache the result in `detected_language: Mutex<Option<String>>`, use explicit language for all subsequent chunks. Reset on `reset_state()`.
+
+**`print_special` affects segment text, not just console output**
+In whisper.cpp (line 7615), `print_special` controls what tokens go into `result_all[].text` returned by the API: `if (params.print_special || tokens_cur[i].id < whisper_token_eot(ctx))`. With `print_special=false`, only word tokens are stored. This is correct for our use — `normalize_text()` handles any remaining special tokens.
+
+**`single_segment=true` required for short chunks**
+Without it, the decoder generates EOT immediately on 5-second audio. With explicit language + `single_segment=true`, decoding is stable. With `language=None` + `single_segment=true`, decoding works after the detect_language fix above.
+
+**Mic gain abstraction**
+Kyutai previously used 15x mic gain to compensate for low audio levels. This clipped Whisper audio. Added `mic_gain()` to the `TranscriptionEngine` trait — both engines now return 1.0 (Kyutai quality actually improved with 1x gain).
+
+**Engine hot-swap on restart**
+`load_model` checked machine state profile to skip `create_engine()`, but the machine state was just set while the actual engine was still the previous one (Kyutai). Fix: always create a fresh engine on `load_model`.
+
+**Metal cleanup on exit**
+Without explicit engine unload before exit, `ggml_metal_rsets_free` assertion fires (SIGABRT). Fix: `.build().run(|app, event|)` pattern with `ExitRequested` handler that unloads engine and shuts down pipeline.
+
 #### Step 4 — Parakeet engine via ort crate (v2, future)
 - [ ] `ort` crate dependency (ONNX Runtime with CoreML backend)
 - [ ] `engine/parakeet.rs` — `ParakeetEngine` implementing `TranscriptionEngine`
@@ -824,6 +849,205 @@ Direct distribution with notarized DMG gives full system access, no review gatek
 - [ ] Small window (~300×200) positioned near tray icon
 - [ ] Content: recording status, mini waveform, start/stop button
 - [ ] `tray_mini_window: bool` setting
+
+### Phase 7A: Pipeline Quality (Immediate Fixes)
+
+Whisper transcription quality in Souffle is notably worse than competing apps using the same model. The primary culprit is our primitive energy-based VAD (lets noise through → hallucinations) and lack of text post-processing. These steps directly improve transcription results.
+
+#### Step 1 — Silero VAD v5 (Replace Energy VAD)
+
+**Problem**: `has_speech()` in whisper.rs uses RMS energy threshold (0.00005). Too primitive — lets background noise through causing Whisper hallucinations, rejects quiet speech.
+
+**Solution**: Silero VAD v5 neural model with smoothing wrapper.
+
+**Crate**: `voice-activity-detector` 0.2.1 (bundles Silero v5 ONNX ~2MB, uses `ort` runtime)
+- Frame: 512 samples at 16kHz (32ms)
+- Sub-millisecond latency on CPU (no GPU needed)
+- 6000+ language support
+
+**Architecture**:
+- [ ] New file: `src-tauri/src/pipeline/vad.rs` — `SmoothedVad` wrapper
+- [ ] SmoothedVad: onset ~14 frames (~450ms), hangover ~14 frames (~450ms), prefill ~14 frames
+- [ ] Runs in pipeline `active_loop` BEFORE `engine.transcribe()`
+- [ ] For 16kHz engines (Whisper): direct passthrough to VAD
+- [ ] For 24kHz engines (Kyutai): internal 24→16kHz mini-downsample in VAD wrapper (cheap 3:2 decimation)
+- [ ] Remove `WhisperEngine::has_speech()` and `VAD_ENERGY_THRESHOLD`
+- [ ] Preload VAD in parallel with model loading
+
+**Alternatives considered**:
+- `webrtc-vad` 0.1.0 — GMM-based, faster (<1ms) but significantly less accurate than neural
+- `silero-vad-rust` 6.2.0 — supports v4+v5 but less maintained
+- Custom energy VAD — current approach, too primitive
+
+#### Step 2 — Text Post-Processing Pipeline
+
+**Problem**: Raw Whisper/Kyutai output contains filler words ("uh", "um", "euh"), stutters ("wh wh what"), and no cross-engine text cleanup.
+
+**Solution**: Composable text filter chain applied after engine-specific `normalize_text()`.
+
+**Architecture**:
+- [ ] New file: `src-tauri/src/pipeline/text_filters.rs`
+- [ ] Trait: `TextFilter { fn apply(&mut self, text: &str) -> String; fn reset(&mut self); }`
+- [ ] Filters built as `Vec<Box<dyn TextFilter>>` per-session from user settings
+- [ ] Applied in `emit_normalized()` after `engine.normalize_text()`
+
+**Filters**:
+1. `FillerWordFilter` — regex removal of "uh", "um", "ah", "hmm", "euh", "hein", etc. (~50 LOC)
+2. `StutterCollapseFilter` — collapse 3+ consecutive repetitions of ANY word (~40 LOC)
+3. `WhitespaceNormalizationFilter` — wraps existing `collapse_whitespace()`
+
+No new crate needed — pure Rust regex + string processing.
+
+#### Step 3 — Custom Word Dictionary with Fuzzy Matching
+
+**Problem**: STT misrecognizes proper nouns, technical terms, company names.
+
+**Solution**: User-maintained dictionary with Levenshtein + Soundex correction.
+
+**Crates**:
+- `strsim` 0.11 (rapidfuzz team) — Levenshtein, Jaro-Winkler, Damerau-Levenshtein
+- Hand-rolled Soundex (~40 LOC) — no good maintained Rust crate exists
+
+**Architecture**:
+- [ ] New SQLite table: `custom_dictionary(id, word, phonetic_code, category, created_at)`
+- [ ] New file: `src-tauri/src/db/dictionary.rs` — CRUD operations
+- [ ] New file: `src-tauri/src/commands/dictionary.rs` — Tauri commands
+- [ ] `CustomWordFilter` in text_filters.rs — loads dictionary at session start, applies per-segment
+- [ ] Matching: normalized Levenshtein distance < 0.18 AND/OR Soundex match → replace
+- [ ] Frontend: DictionarySettingsSection.svelte for word list management (add/remove/import)
+
+#### Step 4 — Settings Integration
+
+- [ ] New settings: `enable_vad` (default: true), `enable_filler_removal` (default: true), `enable_stutter_collapse` (default: false), `enable_custom_dictionary` (default: true)
+- [ ] Frontend: Replace "coming soon" pills in AudioSettingsSection with actual toggles
+- [ ] All filters configurable per-user, stutter collapse off by default (some users want verbatim)
+
+### Phase 7B: Pipeline Features
+
+#### Step 5 — Pipeline Filter Architecture (Refactor)
+
+Formalize audio + text processing into composable filter chains.
+
+**Audio filters** — trait: `AudioFilter { fn process(&mut self, samples: &[f32], sample_rate: u32) -> Vec<f32>; fn reset(&mut self); }`
+- [ ] `VadGateFilter` — wraps SmoothedVad from Step 1
+- [ ] `NoiseGateFilter` — simple amplitude gate (future)
+- [ ] `GainFilter` — wraps existing mic_gain logic
+
+**Text filters** — already done in Step 2, formalize into same filter chain architecture.
+
+Benefits ALL engines (Whisper, Kyutai, future Parakeet).
+
+#### Step 6 — Model Unload Timeout
+
+**Problem**: STT models consume 1.6–5.6GB GPU memory even when idle.
+
+**Solution**: Configurable auto-unload after idle period.
+- [ ] Options: Never (default), Immediately, 2/5/10/15 min, 1 hour
+- [ ] Implementation: `cmd_rx.recv_timeout()` in inference thread idle loop
+- [ ] On timeout: `engine.unload_model()`, emit state change event
+- [ ] On next Start: detect unloaded, trigger reload
+
+#### Step 7 — Save Audio Recording (WAV)
+
+**Problem**: Can't re-transcribe with different model, audio lost after session.
+
+**Solution**: Save audio to WAV alongside transcript.
+- [ ] Save BEFORE transcription starts (data safety)
+- [ ] Crate: `hound` 3.5 (already in Cargo.toml)
+- [ ] Format: 16-bit PCM mono at engine target rate
+- [ ] Storage: `{app_data_dir}/recordings/{meeting_id}.wav`
+- [ ] ~1.9 MB/min at 16kHz → ~115 MB/hour
+- [ ] Setting: `save_audio_recordings: bool` (default: false)
+- [ ] Add `audio_file_path` column to meetings table
+
+#### Step 8 — SHA256 Model Verification
+
+**Problem**: Corrupt partial downloads cause infinite retry loops.
+
+**Solution**: SHA256 checksum verification after download.
+- [ ] Crate: `sha2` (likely already transitive dep)
+- [ ] Hardcode expected hashes for known models
+- [ ] On mismatch: delete partial file, emit error event, retry from scratch
+- [ ] Custom models: skip verification
+
+#### Step 9 — Clamshell Mode (macOS)
+
+**Problem**: Must manually re-select mic when closing/opening laptop lid.
+
+**Solution**: Auto-switch to configured external mic on clamshell.
+- [ ] Detect device changes via cpal device enumeration (poll or CoreAudio notification)
+- [ ] Setting: `clamshell_mic_device: Option<String>`
+- [ ] When built-in mic disappears → switch to clamshell device
+- [ ] When built-in mic reappears → switch back
+
+#### Step 10 — Always-On Microphone
+
+**Problem**: ~50–200ms stream startup latency on recording start.
+
+**Solution**: Keep cpal stream open between recordings.
+- [ ] Stream stays in `play()` state, audio callback checks active session
+- [ ] When no session: still compute RMS for waveform, don't send to pipeline
+- [ ] On Start: just set session_id, instant audio delivery
+- [ ] Setting: `always_on_mic: bool` (default: false)
+
+#### Step 11 — History Pagination
+
+**Problem**: Large history loads all entries at once.
+
+**Solution**: Paginated queries.
+- [ ] `get_meetings(limit, offset) → PaginatedResult { entries, has_more }`
+- [ ] Same for dictation history
+- [ ] Frontend: infinite scroll or "Load more" button
+
+#### Step 12 — GPU Enumeration (Whisper)
+
+**Problem**: No way to select specific GPU for Whisper inference.
+
+**Solution**: List available GPUs with VRAM info.
+- [ ] Expose via whisper-rs/whisper.cpp GPU enumeration
+- [ ] Setting: `whisper_gpu_device: i32` (Auto = -1)
+- [ ] Frontend: GPU dropdown in engine settings with VRAM display
+- [ ] Cache GPU list at startup (OnceLock)
+
+#### Implementation Order
+
+1. Step 1 (Silero VAD) — Highest impact on quality
+2. Step 2 (Text filters) — Second highest impact
+3. Step 3 (Custom dictionary) — Builds on Step 2
+4. Step 4 (Settings) — Wire Steps 1–3 to UI
+5. Step 7 (WAV recording) — Data safety, enables re-transcription
+6. Step 8 (SHA256 verification) — Download reliability
+7. Step 6 (Model unload) — Memory management
+8. Step 11 (History pagination) — Performance
+9. Step 10 (Always-on mic) — Latency improvement
+10. Step 5 (Filter architecture refactor) — Formalize pipeline
+11. Step 9 (Clamshell) — macOS-specific, CoreAudio FFI complexity
+12. Step 12 (GPU enumeration) — Nice-to-have for multi-GPU systems
+
+#### Engine Impact Matrix
+
+| Feature | Kyutai | Whisper | Parakeet (future) |
+|---------|--------|---------|-------------------|
+| Silero VAD | Drop non-speech | Replace energy VAD | Shared |
+| Filler removal | High impact | Moderate | Shared |
+| Stutter collapse | High (streaming) | Low (batch) | Shared |
+| Custom dictionary | All | All | All |
+| Model unload | ~2.4–5.6GB freed | ~1.6GB freed | Shared |
+| WAV recording | All | All | All |
+
+#### Library Summary
+
+| Component | Recommended | Version | Rationale |
+|-----------|------------|---------|-----------|
+| VAD | `voice-activity-detector` | 0.2.1 | Best maintained, bundles Silero v5 ONNX |
+| ONNX Runtime | `ort` (transitive) | 2.0.0-rc.10+ | Required by VAD crate |
+| String similarity | `strsim` | 0.11 | Well-maintained (rapidfuzz team) |
+| Phonetic matching | Hand-rolled Soundex | ~40 LOC | No good Rust crate exists |
+| Text cleanup | Custom module | ~120 LOC | No Rust crate for STT text cleanup |
+| WAV recording | `hound` | 3.5 | Already in Cargo.toml |
+| SHA256 | `sha2` | latest | Standard, likely already transitive |
+
+**NOT recommended**: `transcribe-rs` (batch-only, no streaming), `natural` (poorly maintained), `ttaw` (low adoption), `webrtc-vad` (less accurate than Silero neural VAD)
 
 ---
 
