@@ -316,5 +316,10 @@
     "delete_model": "Delete downloaded model",
     "delete_model_confirm": "Delete",
     "delete_model_msg": "The model files will be removed; you'll need to download them again."
+  },
+  "pill": {
+    "dictation": "Dictating",
+    "meeting": "Meeting",
+    "stop": "Stop recording"
   }
 }

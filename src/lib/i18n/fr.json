@@ -316,5 +316,10 @@
     "delete_model": "Supprimer le modèle téléchargé",
     "delete_model_confirm": "Supprimer",
     "delete_model_msg": "Les fichiers du modèle seront supprimés ; il faudra les retélécharger."
+  },
+  "pill": {
+    "dictation": "Dictée",
+    "meeting": "Meeting",
+    "stop": "Arrêter l'enregistrement"
   }
 }

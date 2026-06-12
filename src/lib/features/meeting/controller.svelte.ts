@@ -389,6 +389,14 @@ export function notifyMeetingAborted() {
   instance?.handleRecordingAborted();
 }
 
+/** The floating pill (or tray) asked to stop the active meeting; run the
+ * full stop pipeline so the meeting is saved normally. */
+export function notifyMeetingStopRequested() {
+  if (instance?.isRecordingMeeting) {
+    void instance.stopRecording();
+  }
+}
+
 // Singleton: survives view mount/unmount cycles so liveMeetingSegments
 // and recording state are never lost when the user switches tabs.
 let instance: ReturnType<typeof createMeetingControllerInstance> | null = null;

@@ -9,7 +9,10 @@
   import { recoverState } from "./lib/api/transcription";
   import { bootstrapAppState } from "./lib/bootstrap";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
-  import { notifyMeetingAborted } from "./lib/features/meeting/controller.svelte";
+  import {
+    notifyMeetingAborted,
+    notifyMeetingStopRequested,
+  } from "./lib/features/meeting/controller.svelte";
   import {
     createTranscriptionController,
     notifyDictationAborted,
@@ -28,6 +31,7 @@
   let unlistenPipelineError: (() => void) | null = null;
 
   let unlistenSystemAudio: (() => void) | null = null;
+  let unlistenMeetingStop: (() => void) | null = null;
 
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
@@ -109,6 +113,12 @@
       unlistenSystemAudio = fn;
     });
 
+    events.meetingStopRequested.listen(() => {
+      notifyMeetingStopRequested();
+    }).then((fn) => {
+      unlistenMeetingStop = fn;
+    });
+
     return () => {
       cleanupTranscription();
       unlistenNav?.();
@@ -116,6 +126,7 @@
       unlistenHealth?.();
       unlistenPipelineError?.();
       unlistenSystemAudio?.();
+      unlistenMeetingStop?.();
     };
   });
 </script>

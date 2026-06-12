@@ -449,6 +449,7 @@ async clearDictionary() : Promise<Result<null, string>> {
 
 
 export const events = __makeEvents__<{
+meetingStopRequested: MeetingStopRequested,
 navigate: Navigate,
 pipelineError: PipelineError,
 shortcutPttStart: ShortcutPttStart,
@@ -458,6 +459,7 @@ stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
 transcriptionHealth: TranscriptionHealth
 }>({
+meetingStopRequested: "meeting-stop-requested",
 navigate: "navigate",
 pipelineError: "pipeline-error",
 shortcutPttStart: "shortcut-ptt-start",
@@ -517,6 +519,12 @@ export type HealthStatus = "healthy" |
  */
 export type MeetingListItem = { id: string; title: string; started_at: string; duration_seconds: number; has_summary: boolean; summary_is_stale: boolean }
 export type MeetingRecordingSession = { id: string; started_at: string; ended_at: string; duration_seconds: number; start_segment_index: number; end_segment_index: number }
+/**
+ * Emitted by the floating recording pill (or the tray) to ask the meeting
+ * controller in the main window to stop the active meeting through its
+ * normal stop pipeline.
+ */
+export type MeetingStopRequested = null
 /**
  * Full meeting transcript stored as JSON
  */

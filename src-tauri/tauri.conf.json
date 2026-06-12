@@ -13,6 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
+        "label": "main",
         "title": "Soufflé",
         "width": 1100,
         "height": 700,
@@ -21,6 +22,22 @@
         "resizable": true,
         "fullscreen": false,
         "center": true
+      },
+      {
+        "label": "pill",
+        "title": "",
+        "width": 280,
+        "height": 64,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "shadow": false,
+        "focus": false,
+        "acceptFirstMouse": true,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
@@ -29,7 +46,8 @@
     "trayIcon": {
       "iconPath": "icons/icon.png",
       "iconAsTemplate": true
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
