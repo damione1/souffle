@@ -163,7 +163,8 @@
     "output_label": "Output",
     "default_device": "Default device",
     "auto_paste": "Auto-paste",
-    "manual_copy": "Manual copy"
+    "manual_copy": "Manual copy",
+    "desc_preparing": "Preparing the model… one moment."
   },
   "transcript": {
     "title": "Transcript",

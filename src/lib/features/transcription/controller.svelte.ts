@@ -3,7 +3,6 @@ import {
   addDictationEntry,
   clearDictationHistory,
   deleteDictationEntry,
-  deleteModel,
   getTranscriptionCatalog,
   listDictationEntries,
   pasteText,
@@ -11,27 +10,14 @@ import {
   stopStreamingTranscription,
 } from "../../api/transcription";
 import { events } from "../../api/generated";
-import { saveSettings } from "../../api/settings";
 import type {
-  AppSettings,
   DictationEntry,
   TranscriptionCatalog,
   TranscriptionSegment,
 } from "../../types";
 import { createDebouncedSearch, errorMessage, matchedIdsForType } from "../../utils";
-import {
-  formatSelectedTranscriptionLabel,
-  getFirstAvailableTranscriptionBackend,
-  getFirstAvailableTranscriptionModel,
-  getSelectedTranscriptionBackend,
-} from "./catalog";
-import {
-  currentTranscriptionSelection,
-  refreshTranscriptionRuntimeStatus,
-  resetTranscriptionRuntimeState,
-  startTranscriptionModelDownload,
-  startTranscriptionModelLoad,
-} from "./runtime";
+import { formatSelectedTranscriptionLabel } from "./catalog";
+import { refreshTranscriptionRuntimeStatus } from "./runtime";
 
 function createTranscriptionControllerInstance() {
   const app = getAppState();
@@ -117,53 +103,6 @@ function createTranscriptionControllerInstance() {
     }
   }
 
-  async function persistSelection(engineId: string, modelId: string, backendId: string) {
-    const nextSettings: AppSettings = {
-      ...app.settings,
-      audio_device: app.selectedDevice || null,
-      transcription_engine_id: engineId,
-      transcription_model_id: modelId,
-      transcription_backend_id: backendId,
-    };
-
-    await saveSettings(nextSettings);
-    app.settings = nextSettings;
-    resetTranscriptionRuntimeState(app);
-    await refreshCatalog();
-    await refreshRuntimeStatus();
-  }
-
-  async function selectEngine(engineId: string) {
-    if (!catalog) return;
-    const engine = catalog.engines.find((candidate) => candidate.id === engineId);
-    const fallbackModel = getFirstAvailableTranscriptionModel(engine ?? null);
-    const fallbackBackendId = getFirstAvailableTranscriptionBackend(fallbackModel)?.id;
-    if (!fallbackModel || !fallbackBackendId) return;
-    await persistSelection(engineId, fallbackModel.id, fallbackBackendId);
-  }
-
-  async function selectModel(modelId: string) {
-    const backend = getSelectedTranscriptionBackend(
-      catalog,
-      app.settings.transcription_engine_id,
-      modelId,
-      app.settings.transcription_backend_id,
-    );
-    await persistSelection(
-      app.settings.transcription_engine_id,
-      modelId,
-      backend?.id ?? app.settings.transcription_backend_id,
-    );
-  }
-
-  async function selectBackend(backendId: string) {
-    await persistSelection(
-      app.settings.transcription_engine_id,
-      app.settings.transcription_model_id,
-      backendId,
-    );
-  }
-
   async function loadHistory() {
     try {
       history = await listDictationEntries(50);
@@ -205,29 +144,6 @@ function createTranscriptionControllerInstance() {
   function onHistorySearchQueryChange(query: string) {
     historySearchQuery = query;
     historySearch.update(query);
-  }
-
-  async function handleDownloadModel() {
-    await startTranscriptionModelDownload(app, catalog, (message) => {
-      statusMessage = message;
-    });
-  }
-
-  async function handleLoadModel() {
-    await startTranscriptionModelLoad(app, catalog, (message) => {
-      statusMessage = message;
-    });
-  }
-
-  async function handleDeleteModel() {
-    try {
-      const selection = currentTranscriptionSelection(app, catalog);
-      await deleteModel(selection);
-      resetTranscriptionRuntimeState(app);
-      await refreshRuntimeStatus();
-    } catch (error) {
-      statusMessage = errorMessage(error);
-    }
   }
 
   async function toggleRecording(fromShortcut = false) {
@@ -334,12 +250,6 @@ function createTranscriptionControllerInstance() {
     mount,
     refreshCatalog,
     refreshRuntimeStatus,
-    selectEngine,
-    selectModel,
-    selectBackend,
-    handleDownloadModel,
-    handleLoadModel,
-    handleDeleteModel,
     toggleRecording,
     removeHistoryEntry,
     resetHistory,

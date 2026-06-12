@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createTranscriptionController } from "../features/transcription/controller.svelte";
+  import DictationHero from "../features/transcription/components/DictationHero.svelte";
   import HistorySection from "../features/transcription/components/HistorySection.svelte";
-  import RecorderSection from "../features/transcription/components/RecorderSection.svelte";
-  import StatusHeroSection from "../features/transcription/components/StatusHeroSection.svelte";
   import TranscriptSection from "../features/transcription/components/TranscriptSection.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
+  import StatusChip from "./ui/StatusChip.svelte";
 
   // The controller is a singleton mounted by App.svelte (shortcut listeners
   // must outlive this view).
@@ -16,26 +16,24 @@
     <StatusBanner message={controller.statusMessage} variant="warning" />
   {/if}
 
-  <StatusHeroSection
-    profileLabel={controller.activeProfileLabel}
-    runtimePhase={controller.runtimePhase}
-    autoPaste={controller.app.settings.auto_paste}
-  />
+  <div class="flex justify-end">
+    <StatusChip
+      phase={controller.runtimePhase}
+      operationState={controller.modelOperationState}
+      downloadedBytes={controller.downloadedBytes}
+      downloadTotalBytes={controller.downloadTotalBytes}
+    />
+  </div>
+
+  <!-- Reserved slot: calendar-detected meeting suggestion card will land
+       here once calendar sync exists ({#if suggestion} … {/if}). -->
 
   <div class="grid grid-cols-[minmax(280px,1fr)_minmax(280px,1.2fr)] gap-4 max-[700px]:grid-cols-1">
-    <RecorderSection
+    <DictationHero
       isStartingRecording={controller.isStartingRecording}
       isRecording={controller.app.isRecording}
       lockedByMeeting={controller.app.recordingMode === "meeting"}
       runtimePhase={controller.runtimePhase}
-      modelOperationState={controller.modelOperationState}
-      downloadFile={controller.downloadFile}
-      downloadedBytes={controller.downloadedBytes}
-      downloadTotalBytes={controller.downloadTotalBytes}
-      inputDevice={controller.app.selectedDevice}
-      autoPaste={controller.app.settings.auto_paste}
-      onDownloadModel={controller.handleDownloadModel}
-      onLoadModel={controller.handleLoadModel}
       onToggleRecording={() => controller.toggleRecording()}
     />
 

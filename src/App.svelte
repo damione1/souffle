@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import Sidebar from "./lib/components/Sidebar.svelte";
-  import Waveform from "./lib/components/Waveform.svelte";
   import TranscriptionView from "./lib/components/TranscriptionView.svelte";
   import MeetingView from "./lib/components/MeetingView.svelte";
   import MeetingHistoryView from "./lib/components/MeetingHistoryView.svelte";
@@ -182,8 +181,6 @@
           : $t("pipeline.lagging")}
       </div>
     {/if}
-
-    <Waveform active={app.isRecording} />
   </div>
 </div>
 {/if}

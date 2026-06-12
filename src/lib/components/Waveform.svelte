@@ -2,7 +2,19 @@
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
 
-  let { active = false }: { active?: boolean } = $props();
+  let {
+    active = false,
+    variant = "footer",
+  }: {
+    active?: boolean;
+    variant?: "footer" | "inline" | "pill";
+  } = $props();
+
+  const wrapperClass = {
+    footer: "w-full h-10 shrink-0 border-t border-ghost-border bg-surface-1",
+    inline: "w-full h-12 shrink-0",
+    pill: "w-full h-8 shrink-0",
+  }[variant];
 
   let canvas: HTMLCanvasElement | undefined = $state();
   let animationId = 0;
@@ -101,6 +113,6 @@
   });
 </script>
 
-<div class="w-full h-10 shrink-0 border-t border-ghost-border bg-surface-1">
+<div class={wrapperClass}>
   <canvas bind:this={canvas} class="block w-full h-full"></canvas>
 </div>

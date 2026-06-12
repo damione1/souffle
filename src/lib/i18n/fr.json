@@ -163,7 +163,8 @@
     "output_label": "Sortie",
     "default_device": "Périphérique par défaut",
     "auto_paste": "Collage auto",
-    "manual_copy": "Copie manuelle"
+    "manual_copy": "Copie manuelle",
+    "desc_preparing": "Préparation du modèle… un instant."
   },
   "transcript": {
     "title": "Transcription",

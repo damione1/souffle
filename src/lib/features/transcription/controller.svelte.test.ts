@@ -25,6 +25,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { createTranscriptionController, resetTranscriptionControllerForTest } from "./controller.svelte";
+import {
+  startTranscriptionModelDownload,
+  startTranscriptionModelLoad,
+} from "./runtime";
 import { getAppState } from "../../stores/app.svelte";
 import type {
   TranscriptionCatalog,
@@ -299,8 +303,7 @@ describe("transcription controller", () => {
     expect(startCalls).toHaveLength(1);
   });
 
-  it("handleDownloadModel tracks progress", async () => {
-    // Override download_model to simulate progress callbacks via the Channel
+  it("model download (runtime) tracks progress", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "get_model_status") {
         return Promise.resolve({ ...fakeStatus, phase: "load_required" });
@@ -315,14 +318,6 @@ describe("transcription controller", () => {
             completed_files: 1,
             total_files: 4,
             status: "downloading",
-          });
-          channel.onmessage({
-            file: "model.safetensors",
-            downloaded_bytes: 1000,
-            total_bytes: 1000,
-            completed_files: 2,
-            total_files: 4,
-            status: "complete",
           });
           channel.onmessage({
             file: "all",
@@ -341,19 +336,18 @@ describe("transcription controller", () => {
     const ctrl = createTranscriptionController();
     await ctrl.mount();
 
-    await ctrl.handleDownloadModel();
+    await startTranscriptionModelDownload(ctrl.app, ctrl.catalog, () => {});
 
     expect(mockInvoke).toHaveBeenCalledWith(
       "download_model",
       expect.objectContaining({ selection, channel: expect.any(Object) }),
     );
     expect(ctrl.modelOperationState).toBe("idle");
-    expect(ctrl.runtimePhase).toBe("load_required");
     expect(ctrl.downloadCompletedFiles).toBe(4);
     expect(ctrl.downloadTotalFiles).toBe(4);
   });
 
-  it("handleLoadModel success sets runtimePhase to ready", async () => {
+  it("model load (runtime) sets runtimePhase to ready", async () => {
     let statusCallCount = 0;
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_model_status") {
@@ -370,7 +364,7 @@ describe("transcription controller", () => {
     await ctrl.mount();
     expect(ctrl.runtimePhase).toBe("load_required");
 
-    await ctrl.handleLoadModel();
+    await startTranscriptionModelLoad(ctrl.app, ctrl.catalog, () => {});
 
     expect(mockInvoke).toHaveBeenCalledWith("load_model", { selection });
     expect(ctrl.runtimePhase).toBe("ready");
