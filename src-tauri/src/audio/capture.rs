@@ -30,6 +30,25 @@ const MEETING_TICK: Duration = Duration::from_millis(5);
 /// polling keeps everything on this thread instead of a listener callback.
 const ROUTE_CHECK_TICKS: u32 = 400;
 
+/// Wake-up cadence during dictation sessions — only needed for mic health
+/// checks, so much coarser than the meeting tick.
+const DICTATION_TICK: Duration = Duration::from_millis(500);
+
+/// How often an active session verifies its input device is still alive and
+/// still the system default (closing the laptop lid switches the default
+/// input to a headset or webcam mic — the stream must follow it).
+const MIC_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Everything needed to rebuild the capture leg mid-session when the input
+/// device fails or the default input changes.
+#[derive(Clone)]
+struct StartParams {
+    session_id: u64,
+    target_sample_rate: u32,
+    mic_gain: f32,
+    capture_system_audio: bool,
+}
+
 /// Per-session state for meeting mode (mic + system audio).
 struct MeetingState {
     session_id: u64,
@@ -168,6 +187,14 @@ pub struct AudioCapture {
     meeting: Option<MeetingState>,
     /// For emitting SystemAudioStatus events (set during app setup).
     app: Option<tauri::AppHandle>,
+    /// Parameters of the running session, kept for mid-session rebuilds.
+    active_params: Option<StartParams>,
+    /// Name of the input device the current stream was built on.
+    mic_device_name: Option<String>,
+    /// Set by the cpal error callback when the stream dies (e.g. its device
+    /// disappeared); the next mic health check rebuilds the capture leg.
+    stream_failed: Arc<std::sync::atomic::AtomicBool>,
+    last_mic_check: Instant,
 }
 
 impl AudioCapture {
@@ -197,16 +224,31 @@ impl AudioCapture {
                     dropped_counter,
                     meeting: None,
                     app: None,
+                    active_params: None,
+                    mic_device_name: None,
+                    stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    last_mic_check: Instant::now(),
                 };
 
-                // Block on commands; while a meeting is active, wake every
-                // few ms to run the mixer instead.
+                // Block on commands while idle; during sessions, wake
+                // periodically to run the meeting mixer and mic health checks.
                 loop {
-                    let cmd = if capture.meeting.is_some() {
-                        match cmd_rx.recv_timeout(MEETING_TICK) {
+                    let timeout = if capture.meeting.is_some() {
+                        Some(MEETING_TICK)
+                    } else if capture.active_params.is_some() {
+                        Some(DICTATION_TICK)
+                    } else {
+                        None
+                    };
+                    let cmd = if let Some(timeout) = timeout {
+                        match cmd_rx.recv_timeout(timeout) {
                             Ok(cmd) => cmd,
                             Err(RecvTimeoutError::Timeout) => {
                                 capture.meeting_tick();
+                                if capture.last_mic_check.elapsed() >= MIC_CHECK_INTERVAL {
+                                    capture.last_mic_check = Instant::now();
+                                    capture.check_mic_health();
+                                }
                                 continue;
                             }
                             Err(RecvTimeoutError::Disconnected) => break,
@@ -290,10 +332,23 @@ impl AudioCapture {
         self.stream.take();
         self.meeting.take();
 
+        // Stored before any fallible step so a failed (re)build is retried
+        // by the next mic health check instead of killing the session.
+        self.active_params = Some(StartParams {
+            session_id,
+            target_sample_rate,
+            mic_gain,
+            capture_system_audio,
+        });
+        self.stream_failed
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.mic_device_name = None;
+
         let device = self.find_device()?;
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".into());
         info!("Using input device: {device_name}");
+        self.mic_device_name = Some(device_name.clone());
 
         let config = Self::preferred_config(&device)?;
         let sample_rate = config.sample_rate.0;
@@ -323,8 +378,10 @@ impl AudioCapture {
         let rms_ref = Arc::clone(&self.audio_rms);
         let dropped_counter = Arc::clone(&self.dropped_counter);
 
-        let err_fn = |err: cpal::StreamError| {
+        let stream_failed = Arc::clone(&self.stream_failed);
+        let err_fn = move |err: cpal::StreamError| {
             error!("Audio stream error: {err}");
+            stream_failed.store(true, std::sync::atomic::Ordering::Relaxed);
         };
 
         // Reset the first-chunk logging flag for each new recording session
@@ -459,8 +516,10 @@ impl AudioCapture {
         let aec_active = false;
 
         let active_session_id = Arc::clone(&self.active_session_id);
-        let err_fn = |err: cpal::StreamError| {
+        let stream_failed = Arc::clone(&self.stream_failed);
+        let err_fn = move |err: cpal::StreamError| {
             error!("Audio stream error: {err}");
+            stream_failed.store(true, std::sync::atomic::Ordering::Relaxed);
         };
         let stream = device
             .build_input_stream(
@@ -496,6 +555,47 @@ impl AudioCapture {
 
         info!("Meeting audio capture started (mic + system audio)");
         Ok(())
+    }
+
+    /// Rebuild the capture leg when the stream died or the default input
+    /// device changed (lid closed, headset plugged in…). The session keeps
+    /// its id, so the engine actor sees one continuous stream; at most a
+    /// couple of seconds of audio are lost.
+    fn check_mic_health(&mut self) {
+        let Some(params) = self.active_params.clone() else {
+            return;
+        };
+
+        let failed = self
+            .stream_failed
+            .swap(false, std::sync::atomic::Ordering::Relaxed);
+
+        // Only follow the system default when the user hasn't pinned a
+        // device; a pinned device that vanishes surfaces as a stream error
+        // and falls back to the default on rebuild.
+        let default_changed = self.selected_device.is_none()
+            && self.mic_device_name.is_some()
+            && cpal::default_host()
+                .default_input_device()
+                .and_then(|d| d.name().ok())
+                != self.mic_device_name;
+
+        if !failed && !default_changed {
+            return;
+        }
+
+        info!(
+            "Input device {} — rebuilding audio capture",
+            if failed { "failed" } else { "changed" }
+        );
+        if let Err(e) = self.start(
+            params.session_id,
+            params.target_sample_rate,
+            params.mic_gain,
+            params.capture_system_audio,
+        ) {
+            warn!("Capture rebuild failed (will retry): {e}");
+        }
     }
 
     /// Periodic mixer pump while a meeting session is active.
@@ -536,8 +636,17 @@ impl AudioCapture {
     }
 
     fn stop(&mut self) {
-        let session_id = self.active_session_id.swap(0, Ordering::AcqRel);
+        let mut session_id = self.active_session_id.swap(0, Ordering::AcqRel);
+        // A session whose stream died mid-rebuild has id 0 in the atomic but
+        // still owes the actor its EndOfStream marker.
+        if session_id == 0
+            && let Some(params) = &self.active_params
+        {
+            session_id = params.session_id;
+        }
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
+        self.active_params = None;
+        self.mic_device_name = None;
 
         // Dropping the stream is synchronous — after this, no callback runs.
         let had_stream = self.stream.take().is_some();
