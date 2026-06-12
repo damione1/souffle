@@ -71,6 +71,60 @@ describe('groupIntoParagraphs', () => {
     const result = groupIntoParagraphs(segments, 1.5);
     expect(result).toHaveLength(2);
   });
+
+  it('breaks continuous speech after max sentences without any pause', () => {
+    // 6 sentences, 0.5s apart — no pause ever reaches the 1.5s threshold.
+    const segments = Array.from({ length: 6 }, (_, i) =>
+      seg(`Sentence number ${i + 1}.`, i * 0.5),
+    );
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result).toHaveLength(2);
+    expect(result[0].text).toContain('Sentence number 4.');
+    expect(result[1].text).toContain('Sentence number 5.');
+  });
+
+  it('breaks at the next sentence end once the soft length cap is reached', () => {
+    const longSentence = `${'word '.repeat(100).trim()}.`; // ~500 chars
+    const segments = [
+      seg(longSentence, 0),
+      seg('Short follow-up.', 0.5),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result).toHaveLength(2);
+    expect(result[1].text).toBe('Short follow-up.');
+  });
+
+  it('hard-breaks punctuation-less streams at the length ceiling', () => {
+    // 300 words, no punctuation at all — must still split eventually.
+    const segments = Array.from({ length: 300 }, (_, i) =>
+      seg(`word${i}`, i * 0.1),
+    );
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result.length).toBeGreaterThan(1);
+    for (const paragraph of result) {
+      expect(paragraph.text.length).toBeLessThan(800);
+    }
+  });
+
+  it('counts multiple sentences inside one segment (batch engines)', () => {
+    // Whisper/Parakeet style: each segment holds several sentences.
+    const segments = [
+      seg('First one. Second one. Third one.', 0),
+      seg('Fourth one. Fifth one.', 5),
+      seg('Sixth one.', 10),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result.length).toBeGreaterThan(1);
+  });
+
+  it('ignores negative gaps from legacy window-relative timestamps', () => {
+    const segments = [
+      seg('From window one.', 4.0, 4.5),
+      seg('From window two', 0.2), // timestamp restarted — not a pause
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result).toHaveLength(1);
+  });
 });
 
 describe('buildMeetingTranscriptBlocks', () => {

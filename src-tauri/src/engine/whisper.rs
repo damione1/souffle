@@ -74,6 +74,10 @@ pub struct WhisperEngine {
     /// Cached language from first auto-detect inference.
     /// Subsequent chunks reuse the detected language for stable decoding.
     detected_language: Option<String>,
+    /// Samples already sent to inference this session. whisper.cpp timestamps
+    /// are relative to each window; this offsets them to session time so
+    /// pauses and [H:MM] markers are meaningful across windows.
+    consumed_samples: usize,
 }
 
 impl Default for WhisperEngine {
@@ -88,7 +92,16 @@ impl WhisperEngine {
             model: None,
             audio_buffer: Vec::new(),
             detected_language: None,
+            consumed_samples: 0,
         }
+    }
+
+    /// Session-time offset (seconds) for the next inference window,
+    /// then advance by the window length.
+    fn take_window_offset(&mut self, window_len: usize) -> f64 {
+        let offset = self.consumed_samples as f64 / WHISPER_SAMPLE_RATE as f64;
+        self.consumed_samples += window_len;
+        offset
     }
 
     /// Run inference on a chunk of audio. Returns detected language code
@@ -243,6 +256,7 @@ impl TranscriptionEngine for WhisperEngine {
         }
 
         let to_process: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let offset = self.take_window_offset(to_process.len());
         let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
 
         // Use cached language if available, otherwise auto-detect
@@ -252,11 +266,15 @@ impl TranscriptionEngine for WhisperEngine {
             self.detected_language.clone()
         };
 
-        let (segments, detected) = Self::run_inference(
+        let (mut segments, detected) = Self::run_inference(
             &loaded.ctx,
             &to_process,
             effective_lang.as_deref().or(language),
         )?;
+        for seg in &mut segments {
+            seg.start_time += offset;
+            seg.end_time += offset;
+        }
 
         // Cache detected language from first successful auto-detect
         if language.is_none()
@@ -281,9 +299,14 @@ impl TranscriptionEngine for WhisperEngine {
         }
 
         let remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let offset = self.take_window_offset(remaining.len());
         let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
-        let (segments, _) =
+        let (mut segments, _) =
             Self::run_inference(&loaded.ctx, &remaining, self.detected_language.as_deref())?;
+        for seg in &mut segments {
+            seg.start_time += offset;
+            seg.end_time += offset;
+        }
         Ok(segments)
     }
 
@@ -291,6 +314,7 @@ impl TranscriptionEngine for WhisperEngine {
         self.audio_buffer.clear();
         // Clear cached language so next session auto-detects fresh
         self.detected_language = None;
+        self.consumed_samples = 0;
         Ok(())
     }
 

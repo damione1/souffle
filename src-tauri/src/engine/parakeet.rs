@@ -27,6 +27,9 @@ const MIN_INFERENCE_SAMPLES: usize = PARAKEET_SAMPLE_RATE as usize / 2;
 pub struct ParakeetEngine {
     model: Option<ParakeetTDT>,
     audio_buffer: Vec<f32>,
+    /// Samples already sent to inference this session. Token timestamps are
+    /// relative to each window; this offsets them to session time.
+    consumed_samples: usize,
 }
 
 impl Default for ParakeetEngine {
@@ -40,12 +43,22 @@ impl ParakeetEngine {
         Self {
             model: None,
             audio_buffer: Vec::new(),
+            consumed_samples: 0,
         }
+    }
+
+    /// Session-time offset (seconds) for the next inference window,
+    /// then advance by the window length.
+    fn take_window_offset(&mut self, window_len: usize) -> f64 {
+        let offset = self.consumed_samples as f64 / PARAKEET_SAMPLE_RATE as f64;
+        self.consumed_samples += window_len;
+        offset
     }
 
     fn run_inference(
         model: &mut ParakeetTDT,
         audio: Vec<f32>,
+        offset: f64,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
         if audio.is_empty() {
             return Ok(vec![]);
@@ -69,8 +82,8 @@ impl ParakeetEngine {
             .filter(|token| !token.text.trim().is_empty())
             .map(|token| TranscriptionSegment {
                 text: token.text.clone(),
-                start_time: token.start as f64,
-                end_time: token.end as f64,
+                start_time: token.start as f64 + offset,
+                end_time: token.end as f64 + offset,
                 is_final: true,
                 language: None,
                 confidence: None,
@@ -81,8 +94,8 @@ impl ParakeetEngine {
         if segments.is_empty() && !result.text.trim().is_empty() {
             segments.push(TranscriptionSegment {
                 text: result.text,
-                start_time: 0.0,
-                end_time: 0.0,
+                start_time: offset,
+                end_time: offset,
                 is_final: true,
                 language: None,
                 confidence: None,
@@ -132,8 +145,9 @@ impl TranscriptionEngine for ParakeetEngine {
         }
 
         let to_process: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let offset = self.take_window_offset(to_process.len());
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
-        Self::run_inference(model, to_process)
+        Self::run_inference(model, to_process, offset)
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
@@ -147,13 +161,15 @@ impl TranscriptionEngine for ParakeetEngine {
         }
 
         let remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let offset = self.take_window_offset(remaining.len());
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
-        Self::run_inference(model, remaining)
+        Self::run_inference(model, remaining, offset)
     }
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
         // TDT inference is stateless per window; only our buffer carries over.
         self.audio_buffer.clear();
+        self.consumed_samples = 0;
         Ok(())
     }
 
