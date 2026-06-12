@@ -45,12 +45,15 @@
   <AudioSettingsSection
     audioDevices={controller.audioDevices}
     selectedDevice={controller.app.selectedDevice}
+    captureSystemAudio={controller.app.settings.capture_system_audio}
+    systemAudioSupported={controller.systemAudioSupported}
     vadEnabled={controller.app.settings.vad_enabled}
     fillerRemoval={controller.app.settings.filler_removal}
     stutterCollapse={controller.app.settings.stutter_collapse}
     dictionaryCorrection={controller.app.settings.dictionary_correction}
     onDeviceChange={controller.onDeviceChange}
     onRefreshDevices={controller.refreshDevices}
+    onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
     onVadEnabledChange={controller.onVadEnabledChange}
     onFillerRemovalChange={controller.onFillerRemovalChange}
     onStutterCollapseChange={controller.onStutterCollapseChange}

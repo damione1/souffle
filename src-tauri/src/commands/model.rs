@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use tauri::State;
 use tauri::ipc::Channel;
 use tauri::Manager;
@@ -7,12 +5,10 @@ use tracing::info;
 
 use crate::engine::{
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
-    TranscriptionRuntimeStatus, create_engine, resolve_transcription_profile,
-    resolve_transcription_selection, transcription_engine_catalog,
+    TranscriptionRuntimeStatus, resolve_transcription_profile, resolve_transcription_selection,
+    transcription_engine_catalog,
 };
-use crate::lock_ext::MutexExt;
 use crate::models;
-use crate::pipeline::TranscriptionPipeline;
 use crate::settings::AppSettings;
 use crate::state::AppState;
 use crate::state_machine::{AppStateMachine, StateAction};
@@ -180,7 +176,8 @@ pub fn download_model(
 }
 
 /// Load the model into memory (GPU/CPU). Must be called after download.
-/// Also spawns the persistent inference pipeline thread.
+/// The engine actor creates the engine, swaps out any previous one, and
+/// loads the weights — all on its own thread.
 #[tauri::command]
 #[specta::specta]
 pub fn load_model(
@@ -206,12 +203,9 @@ pub fn load_model(
     let machine = state.current_machine_state()?;
 
     // Check if already loaded with this profile
-    {
-        let pipeline_ready = state.pipeline.acquire()?.is_some();
-        if machine.is_model_ready() && pipeline_ready && machine.active_profile() == Some(&profile) {
-            info!("Model already loaded, reusing existing inference pipeline");
-            return Ok(());
-        }
+    if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
+        info!("Model already loaded, reusing existing engine");
+        return Ok(());
     }
 
     // If model is ready with a different profile, unload first
@@ -219,13 +213,7 @@ pub fn load_model(
         state.apply_transition(StateAction::Unload {
             next_profile: Some(profile.clone()),
         })?;
-        // Shutdown existing pipeline
-        {
-            let mut pipeline_guard = state.pipeline.acquire()?;
-            if let Some(mut pipeline) = pipeline_guard.take() {
-                pipeline.shutdown()?;
-            }
-        }
+        state.engine_actor.unload_model()?;
         state.apply_transition(StateAction::UnloadComplete)?;
         // Machine is now in Loading { next_profile }
     } else {
@@ -239,65 +227,18 @@ pub fn load_model(
             state.apply_transition(StateAction::DownloadComplete)?;
         }
 
-        // Shutdown existing pipeline if any
-        {
-            let mut pipeline_guard = state.pipeline.acquire()?;
-            if let Some(mut pipeline) = pipeline_guard.take() {
-                pipeline.shutdown()?;
-            }
-        }
-
         state.apply_transition(StateAction::StartLoad)?;
     }
 
-    // Swap engine cleanly: drop old engine outside the mutex, then create new.
-    // vad-rs uses ort's load-dynamic feature, so ONNX Runtime loads via dlopen
-    // and its protobuf symbols stay isolated — no conflict with sentencepiece.
-    {
-        let old_engine = {
-            let mut guard = state.engine.acquire()?;
-            std::mem::replace(&mut *guard, create_engine(&profile)?)
-        };
-        // Old engine drops here, outside the mutex. Autorelease pool ensures
-        // Metal/ObjC objects (Candle, whisper.cpp) are released properly.
-        crate::platform::with_autorelease_pool(|| drop(old_engine));
-    }
-
     info!(path = %model_dir.display(), "Loading model");
-    let mut engine = state.engine.acquire()?;
-    if let Err(e) = engine.load_model(&model_dir) {
-        drop(engine);
-        state.apply_transition(StateAction::Fail {
-            message: e.to_string(),
-        })?;
-        return Err(e.to_string());
+    if let Err(e) = state.engine_actor.load_model(profile, model_dir) {
+        state.apply_transition(StateAction::Fail { message: e.clone() })?;
+        return Err(e);
     }
-    drop(engine);
-
-    // Spawn persistent inference pipeline (lives until app exit)
-    let pipeline =
-        match TranscriptionPipeline::spawn(state.audio_receiver.clone(), Arc::clone(&state.engine))
-        {
-            Ok(pipeline) => pipeline,
-            Err(e) => {
-                let mut engine = state.engine.acquire()?;
-                if let Err(unload_err) = engine.unload_model() {
-                    tracing::warn!(
-                        "Failed to unload model after pipeline startup error: {unload_err}"
-                    );
-                }
-                state.apply_transition(StateAction::Fail {
-                    message: e.clone(),
-                })?;
-                return Err(e);
-            }
-        };
-
-    *state.pipeline.acquire()? = Some(pipeline);
 
     state.apply_transition(StateAction::LoadComplete)?;
 
-    info!("Model loaded, inference pipeline ready");
+    info!("Model loaded, engine ready");
     Ok(())
 }
 
@@ -352,10 +293,7 @@ pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String>
     let mut audio = pcm;
     audio.resize(audio.len() + SILENCE_SUFFIX_SAMPLES, 0.0);
 
-    let engine = state.engine.acquire()?;
-    engine.reset_state().map_err(|e| e.to_string())?;
-
-    let result = engine.transcribe(&audio, None).map_err(|e| e.to_string())?;
+    let result = state.engine_actor.debug_transcribe(audio)?;
 
     let text: String = result
         .iter()

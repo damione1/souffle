@@ -27,7 +27,9 @@
     "stutter_collapse": "Stutter Collapse",
     "stutter_collapse_desc": "Collapse repeated words (3+ repetitions) into a single occurrence.",
     "dictionary_correction": "Dictionary Correction",
-    "dictionary_correction_desc": "Correct misrecognized words using your custom dictionary."
+    "dictionary_correction_desc": "Correct misrecognized words using your custom dictionary.",
+    "capture_system_audio": "System Audio Capture",
+    "capture_system_audio_desc": "During meetings, capture the computer's audio output (Teams, Zoom…) alongside the microphone. No configuration needed."
   },
   "settings_dictionary": {
     "title": "Custom Dictionary",
@@ -218,7 +220,9 @@
     "stop_recording": "Stop Recording",
     "resume_recording": "Resume Recording",
     "new_meeting": "New Meeting",
-    "locked_by_dictation": "Stop the dictation before recording a meeting."
+    "locked_by_dictation": "Stop the dictation before recording a meeting.",
+    "system_audio_active": "System audio",
+    "system_audio_unavailable": "Mic only"
   },
   "meeting_transcript": {
     "title": "Transcript",
@@ -260,5 +264,12 @@
     "yes": "Yes",
     "are_you_sure": "Are you sure?",
     "cancel": "Cancel"
+  },
+  "pipeline": {
+    "error": "Transcription error",
+    "dismiss": "Dismiss",
+    "lagging": "Transcription is running behind the audio — words may appear with a delay.",
+    "stalled": "Transcription appears stalled — audio is queuing up without being processed.",
+    "recover": "Retry"
   }
 }

@@ -9,9 +9,14 @@ A private, local speech-to-text desktop app for macOS. Everything runs on your m
 - **Meeting summaries** — Generate summaries from your transcripts using a local Ollama model.
 - **Full-text search** — All transcripts and dictation entries are indexed and searchable.
 
-## Speech model
+## Speech models
 
-Souffle uses [Kyutai STT 1B](https://huggingface.co/kyutai/stt-1b-en_fr-candle) (French + English), a ~2.4 GB model that runs locally with Metal GPU acceleration on Apple Silicon. The model is downloaded on first launch from HuggingFace.
+All models run locally and are downloaded on first use from HuggingFace:
+
+- [Kyutai STT 1B](https://huggingface.co/kyutai/stt-1b-en_fr-candle) (default) — French + English streaming transcription, ~2.4 GB, Metal GPU via Candle
+- [Kyutai STT 2.6B](https://huggingface.co/kyutai/stt-2.6b-en-candle) — English, higher quality, ~5.6 GB
+- [Whisper Large V3 Turbo](https://huggingface.co/ggerganov/whisper.cpp) — multilingual, ~1.6 GB, Metal via whisper.cpp
+- [Parakeet TDT 0.6B v3](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) — 25 languages with punctuation and capitalization, ~670 MB int8, fast CPU inference via ONNX Runtime
 
 ## Prerequisites
 
@@ -28,7 +33,7 @@ Souffle uses [Kyutai STT 1B](https://huggingface.co/kyutai/stt-1b-en_fr-candle) 
 npm install
 
 # Run in development mode
-cargo tauri dev
+npm run tauri dev
 ```
 
 On first launch, the app will prompt you to download and load the speech model (~2.4 GB). This is a one-time step.
@@ -36,7 +41,7 @@ On first launch, the app will prompt you to download and load the speech model (
 ## Building for production
 
 ```bash
-cargo tauri build
+npm run tauri build
 ```
 
 The `.dmg` installer is output to `src-tauri/target/release/bundle/dmg/`.

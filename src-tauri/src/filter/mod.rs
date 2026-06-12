@@ -113,33 +113,10 @@ pub struct DictionaryEntry {
 // ── VAD model path resolution ──────────────────────────
 
 const VAD_MODEL_FILENAME: &str = "silero_vad_v4.onnx";
-const ORT_DYLIB_FILENAME: &str = "libonnxruntime.dylib";
-
-/// Search for a resource file in standard locations.
-fn resolve_resource(filename: &str) -> Option<PathBuf> {
-    let candidates: Vec<PathBuf> = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
-        .map(|bin_dir| {
-            vec![
-                bin_dir.join("resources").join(filename),
-                bin_dir.join("../Resources/resources").join(filename),
-                PathBuf::from("resources").join(filename),
-            ]
-        })
-        .unwrap_or_default();
-
-    for path in &candidates {
-        if path.exists() {
-            return Some(path.clone());
-        }
-    }
-    None
-}
 
 /// Resolve the Silero VAD model file path.
 pub fn resolve_vad_model_path() -> Option<PathBuf> {
-    let path = resolve_resource(VAD_MODEL_FILENAME);
+    let path = crate::ort_runtime::resolve_resource(VAD_MODEL_FILENAME);
     if let Some(ref p) = path {
         tracing::info!(path = %p.display(), "Found Silero VAD model");
     } else {
@@ -148,33 +125,12 @@ pub fn resolve_vad_model_path() -> Option<PathBuf> {
     path
 }
 
-/// Initialize ONNX Runtime with the bundled dylib (load-dynamic mode).
-/// Must be called once before creating any VAD filter.
-/// Safe to call multiple times — ort ignores re-initialization.
-pub fn ensure_ort_initialized() {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(dylib_path) = resolve_resource(ORT_DYLIB_FILENAME) {
-            tracing::info!(path = %dylib_path.display(), "Loading ONNX Runtime dylib");
-            match ort::init_from(&dylib_path) {
-                Ok(builder) => { builder.commit(); }
-                Err(e) => tracing::warn!("Failed to init ort with bundled dylib: {e}"),
-            }
-        } else {
-            tracing::warn!(
-                "ONNX Runtime dylib ({ORT_DYLIB_FILENAME}) not found — VAD will be unavailable"
-            );
-        }
-    });
-}
-
 // ── Factory functions ──────────────────────────────────
 
 pub fn build_audio_filters(config: &PipelineConfig, source_sample_rate: u32) -> AudioFilterChain {
     let mut filters: Vec<Box<dyn AudioFilter>> = Vec::new();
     if config.vad_enabled {
-        ensure_ort_initialized();
+        crate::ort_runtime::ensure_ort_initialized();
         if let Some(model_path) = &config.vad_model_path {
             match audio_vad::SileroVadFilter::new(model_path, source_sample_rate) {
                 Ok(vad) => filters.push(Box::new(vad)),
@@ -231,6 +187,38 @@ mod tests {
             Box::new(text_whitespace::WhitespaceNormFilter),
         ]);
         assert_eq!(chain.apply(""), "");
+    }
+
+    /// Regression check for the bundled ONNX Runtime dylib: actually loads it
+    /// via ort load-dynamic and runs Silero VAD inference. Catches dylib/API
+    /// version mismatches (e.g. ort api-24 vs an older bundled runtime).
+    /// Skips when the bundled resources are not present (e.g. bare CI).
+    #[test]
+    fn silero_vad_runs_against_bundled_ort_dylib() {
+        let Some(model_path) = resolve_vad_model_path() else {
+            eprintln!("skipping: silero_vad_v4.onnx not found");
+            return;
+        };
+        if crate::ort_runtime::resolve_resource("libonnxruntime.dylib").is_none() {
+            eprintln!("skipping: libonnxruntime.dylib not found");
+            return;
+        }
+
+        let config = PipelineConfig {
+            vad_enabled: true,
+            vad_model_path: Some(model_path),
+            filler_removal_enabled: false,
+            stutter_collapse_enabled: false,
+            dictionary_correction_enabled: false,
+        };
+        let mut chain = build_audio_filters(&config, 16_000);
+        // If the dylib failed to load, the VAD filter was silently skipped and
+        // the empty chain would forward silence — which must be suppressed.
+        let silence = vec![0.0f32; 480 * 4];
+        assert!(
+            !chain.process(&silence),
+            "VAD did not gate silence — Silero filter missing (ort dylib load failed?)"
+        );
     }
 
     #[test]

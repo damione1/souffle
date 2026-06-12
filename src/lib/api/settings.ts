@@ -24,3 +24,7 @@ export async function listAudioDevices(): Promise<AudioDeviceInfo[]> {
 export async function selectAudioDevice(deviceName: string): Promise<void> {
   await unwrap(commands.selectAudioDevice(deviceName));
 }
+
+export async function getSystemAudioSupport(): Promise<boolean> {
+  return commands.getSystemAudioSupport();
+}

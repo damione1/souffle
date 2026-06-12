@@ -184,6 +184,16 @@ function createMeetingControllerInstance() {
     }
   }
 
+  /** The backend aborted the recording session (machine went to Error).
+   * The backend salvages the accumulated meeting to history before failing. */
+  function handleRecordingAborted() {
+    liveMeetingSegments = [];
+    meeting = null;
+    app.currentMeetingId = null;
+    statusMessage =
+      "Recording was interrupted — the meeting recorded so far was saved to history.";
+  }
+
   /** Clear controller state for starting a fresh meeting. */
   function startNew() {
     meeting = null;
@@ -305,7 +315,14 @@ function createMeetingControllerInstance() {
     saveTranscriptEdit,
     saveTranscriptAndSummarize,
     resetEditedTranscript,
+    handleRecordingAborted,
   };
+}
+
+/** Called from the global StateChanged listener when a meeting session
+ * is aborted by the backend. No-op if the controller was never created. */
+export function notifyMeetingAborted() {
+  instance?.handleRecordingAborted();
 }
 
 // Singleton: survives view mount/unmount cycles so liveMeetingSegments

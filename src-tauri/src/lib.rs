@@ -11,6 +11,7 @@ pub mod filter;
 pub mod lock_ext;
 pub mod models;
 pub mod ollama;
+pub mod ort_runtime;
 pub mod pipeline;
 pub mod platform;
 pub mod settings;
@@ -66,6 +67,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::save_shortcuts,
             commands::get_shortcuts,
             commands::get_audio_level,
+            commands::get_system_audio_support,
+            commands::debug_record_system_audio,
             commands::get_machine_state,
             commands::recover_state,
             commands::list_dictionary,
@@ -80,16 +83,36 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::ShortcutPttStart,
             app_events::ShortcutPttStop,
             app_events::StateChanged,
+            app_events::TranscriptionHealth,
+            app_events::PipelineError,
+            app_events::SystemAudioStatus,
         ])
 }
 
 pub fn run() {
     // Create the shared audio RMS level
     let audio_rms = Arc::new(std::sync::atomic::AtomicU32::new(0f32.to_bits()));
+    // Chunks dropped by the capture callback — read by the actor for health reporting
+    let dropped_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     // Spawn the audio thread before Tauri starts (cpal Stream is !Send on macOS)
-    let (cmd_tx, audio_rx) = match AudioCapture::spawn(Arc::clone(&audio_rms)) {
-        Ok(channels) => channels,
+    let (cmd_tx, audio_rx) =
+        match AudioCapture::spawn(Arc::clone(&audio_rms), Arc::clone(&dropped_counter)) {
+            Ok(channels) => channels,
+            Err(e) => {
+                tracing::error!("Fatal: {e}");
+                std::process::exit(1);
+            }
+        };
+
+    // Spawn the engine actor — the single thread that owns the transcription
+    // engine and consumes captured audio.
+    let engine_actor = match pipeline::EngineActorHandle::spawn(
+        audio_rx,
+        dropped_counter,
+        Box::new(engine::create_engine),
+    ) {
+        Ok(actor) => actor,
         Err(e) => {
             tracing::error!("Fatal: {e}");
             std::process::exit(1);
@@ -128,7 +151,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .manage(AppState::new(cmd_tx, audio_rx, database, audio_rms))
+        .manage(AppState::new(cmd_tx, engine_actor, database, audio_rms))
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);
@@ -142,6 +165,10 @@ pub fn run() {
                     .map_err(|e| format!("Lock poisoned: {e}"))?;
                 *handle_guard = Some(app.handle().clone());
             }
+            state.engine_actor.attach_app(app.handle().clone());
+            let _ = state
+                .audio_cmd_sender
+                .send(state::AudioCommand::AttachApp(app.handle().clone()));
 
             // Load shortcut settings from DB and register
             let state = app.state::<AppState>();
@@ -168,21 +195,15 @@ pub fn run() {
         })
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                // Explicitly release engine GPU resources before process exit.
-                // whisper.cpp's Metal backend uses residency sets that must be
-                // freed before the Metal device is destroyed. Without this,
-                // the C++ static destructor order causes a ggml_metal_rsets_free
-                // assertion failure (SIGABRT) on exit.
+                // Shut down the engine actor before process exit. It unloads
+                // and drops the engine on its own thread — whisper.cpp's Metal
+                // residency sets and Candle's Metal objects must be freed
+                // before the Metal device is destroyed, otherwise C++ static
+                // destructor order causes a ggml_metal_rsets_free SIGABRT.
                 let state = app.state::<AppState>();
-                if let Ok(mut pipeline) = state.pipeline.lock()
-                    && let Some(mut p) = pipeline.take()
-                {
-                    let _ = p.shutdown();
+                if let Err(e) = state.engine_actor.shutdown() {
+                    tracing::warn!("Engine actor shutdown failed: {e}");
                 }
-                if let Ok(mut engine) = state.engine.lock() {
-                    let _ = engine.unload_model();
-                }
-                info!("Engine and pipeline shut down cleanly");
             }
         });
 }

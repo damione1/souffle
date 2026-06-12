@@ -3,6 +3,7 @@ import { deleteModel, getTranscriptionCatalog } from "../../api/transcription";
 import {
   getSettings,
   getShortcuts,
+  getSystemAudioSupport,
   listAudioDevices,
   saveSettings,
   saveShortcuts as persistShortcutSettings,
@@ -42,6 +43,7 @@ export function createSettingsController() {
   const app = getAppState();
 
   let audioDevices = $state<AudioDeviceInfo[]>([]);
+  let systemAudioSupported = $state(false);
   let ollamaAvailable = $state(false);
   let ollamaModels = $state<OllamaModelDescriptor[]>([]);
   let statusMessage = $state("");
@@ -58,6 +60,9 @@ export function createSettingsController() {
 
   async function mount() {
     await syncSettings();
+    getSystemAudioSupport()
+      .then((supported) => { systemAudioSupported = supported; })
+      .catch(() => { systemAudioSupported = false; });
     await Promise.all([
       loadShortcuts(),
       refreshDevices(),
@@ -329,6 +334,13 @@ export function createSettingsController() {
     });
   }
 
+  function onCaptureSystemAudioChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.capture_system_audio = checked;
+    });
+  }
+
   async function loadDictionary() {
     try {
       dictionaryEntries = await listDictionary();
@@ -477,6 +489,8 @@ export function createSettingsController() {
     onDebugTranscriptionChange,
     onOllamaUrlChange,
     onOllamaModelChange,
+    get systemAudioSupported() { return systemAudioSupported; },
+    onCaptureSystemAudioChange,
     onVadEnabledChange,
     onFillerRemovalChange,
     onStutterCollapseChange,

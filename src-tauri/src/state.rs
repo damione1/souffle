@@ -1,20 +1,16 @@
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Sender;
 use tauri::AppHandle;
 use tauri_specta::Event;
 use tracing::debug;
 
 use crate::app_events::StateChanged;
-use crate::audio::AudioChunk;
 use crate::db::Database;
-use crate::engine::{
-    SharedTranscriptionEngine, TranscriptionProfile, TranscriptionSegment,
-    default_transcription_engine,
-};
+use crate::engine::{TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
-use crate::pipeline::TranscriptionPipeline;
+use crate::pipeline::EngineActorHandle;
 use crate::state_machine::{AppStateMachine, StateAction};
 use crate::transcript::MeetingRecordingSession;
 
@@ -24,9 +20,15 @@ pub enum AudioCommand {
         session_id: u64,
         target_sample_rate: u32,
         mic_gain: f32,
+        /// Meeting mode: also capture system audio via a Core Audio tap
+        /// and mix it with the microphone.
+        capture_system_audio: bool,
     },
     Stop,
     SelectDevice(String),
+    /// Give the audio thread an AppHandle so meeting mode can emit
+    /// SystemAudioStatus events.
+    AttachApp(AppHandle),
 }
 
 /// Accumulated meeting segments while recording
@@ -46,12 +48,11 @@ pub struct MeetingAccumulator {
 
 /// Shared application state, managed by Tauri.
 /// AudioCapture lives on its own thread (cpal Stream is !Send on macOS),
-/// so we communicate with it via a command channel.
+/// and the transcription engine lives on the engine actor thread —
+/// both are driven via command channels.
 pub struct AppState {
     pub audio_cmd_sender: Sender<AudioCommand>,
-    pub audio_receiver: Receiver<AudioChunk>,
-    pub engine: SharedTranscriptionEngine,
-    pub pipeline: Mutex<Option<TranscriptionPipeline>>,
+    pub engine_actor: EngineActorHandle,
     pub next_audio_session_id: Mutex<u64>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     pub db: Arc<Database>,
@@ -66,15 +67,13 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         audio_cmd_sender: Sender<AudioCommand>,
-        audio_receiver: Receiver<AudioChunk>,
+        engine_actor: EngineActorHandle,
         db: Arc<Database>,
         audio_rms: Arc<AtomicU32>,
     ) -> Self {
         Self {
             audio_cmd_sender,
-            audio_receiver,
-            engine: Arc::new(Mutex::new(default_transcription_engine())),
-            pipeline: Mutex::new(None),
+            engine_actor,
             next_audio_session_id: Mutex::new(0),
             meeting_accumulator: Arc::new(Mutex::new(None)),
             db,

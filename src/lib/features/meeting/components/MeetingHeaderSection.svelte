@@ -7,6 +7,7 @@
   let {
     meeting,
     isRecordingMeeting,
+    systemAudioStatus,
     lockedByDictation,
     segmentCount,
     sessionCount,
@@ -18,6 +19,7 @@
   }: {
     meeting: MeetingTranscript;
     isRecordingMeeting: boolean;
+    systemAudioStatus: import("../../../types").SystemAudioStatus | null;
     lockedByDictation: boolean;
     segmentCount: number;
     sessionCount: number;
@@ -34,6 +36,13 @@
     {#if isRecordingMeeting}
       <span class="pill pill-danger inline-flex items-center gap-1.5">
         <span class="recording-dot"></span> {$t("meeting_header.recording_badge")}
+        {#if systemAudioStatus}
+          {#if systemAudioStatus.active}
+            <span class="pill pill-blue">{$t("meeting_header.system_audio_active")}</span>
+          {:else}
+            <span class="pill pill-muted" title={systemAudioStatus.reason ?? ""}>{$t("meeting_header.system_audio_unavailable")}</span>
+          {/if}
+        {/if}
       </span>
     {:else}
       <button onclick={onBack} class="btn btn-ghost py-1 px-0 text-sm gap-1 mb-1">

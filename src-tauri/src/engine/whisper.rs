@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use tracing::{debug, info};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
@@ -69,12 +68,16 @@ struct LoadedWhisperModel {
 /// Whisper STT engine via whisper-rs (whisper.cpp bindings).
 /// Batch-oriented: accumulates audio, triggers inference every CHUNK_SAMPLES.
 pub struct WhisperEngine {
-    model: Mutex<Option<LoadedWhisperModel>>,
+    model: Option<LoadedWhisperModel>,
     /// Audio buffer — accumulates until chunk threshold
-    audio_buffer: Mutex<Vec<f32>>,
+    audio_buffer: Vec<f32>,
     /// Cached language from first auto-detect inference.
     /// Subsequent chunks reuse the detected language for stable decoding.
-    detected_language: Mutex<Option<String>>,
+    detected_language: Option<String>,
+    /// Samples already sent to inference this session. whisper.cpp timestamps
+    /// are relative to each window; this offsets them to session time so
+    /// pauses and [H:MM] markers are meaningful across windows.
+    consumed_samples: usize,
 }
 
 impl Default for WhisperEngine {
@@ -86,10 +89,19 @@ impl Default for WhisperEngine {
 impl WhisperEngine {
     pub fn new() -> Self {
         Self {
-            model: Mutex::new(None),
-            audio_buffer: Mutex::new(Vec::new()),
-            detected_language: Mutex::new(None),
+            model: None,
+            audio_buffer: Vec::new(),
+            detected_language: None,
+            consumed_samples: 0,
         }
+    }
+
+    /// Session-time offset (seconds) for the next inference window,
+    /// then advance by the window length.
+    fn take_window_offset(&mut self, window_len: usize) -> f64 {
+        let offset = self.consumed_samples as f64 / WHISPER_SAMPLE_RATE as f64;
+        self.consumed_samples += window_len;
+        offset
     }
 
     /// Run inference on a chunk of audio. Returns detected language code
@@ -211,11 +223,7 @@ impl TranscriptionEngine for WhisperEngine {
         )
         .map_err(|e| EngineError::LoadError(format!("Whisper model load: {e}")))?;
 
-        let mut guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::LoadError("Lock poisoned".into()))?;
-        *guard = Some(LoadedWhisperModel {
+        self.model = Some(LoadedWhisperModel {
             ctx,
             model_path: bin_path,
         });
@@ -225,118 +233,88 @@ impl TranscriptionEngine for WhisperEngine {
     }
 
     fn unload_model(&mut self) -> Result<(), EngineError> {
-        let mut guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::LoadError("Lock poisoned".into()))?;
-        *guard = None;
-
-        let mut buf = self
-            .audio_buffer
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-        buf.clear();
+        self.model = None;
+        self.audio_buffer.clear();
 
         info!("Whisper model unloaded");
         Ok(())
     }
 
     fn transcribe(
-        &self,
+        &mut self,
         audio: &[f32],
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        let guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-        let loaded = guard.as_ref().ok_or(EngineError::NotInitialized)?;
+        if self.model.is_none() {
+            return Err(EngineError::NotInitialized);
+        }
 
-        let mut buf = self
-            .audio_buffer
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
+        self.audio_buffer.extend_from_slice(audio);
 
-        buf.extend_from_slice(audio);
-
-        if buf.len() < CHUNK_SAMPLES {
+        if self.audio_buffer.len() < CHUNK_SAMPLES {
             return Ok(vec![]);
         }
 
-        let to_process: Vec<f32> = buf.drain(..).collect();
+        let to_process: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let offset = self.take_window_offset(to_process.len());
+        let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
 
         // Use cached language if available, otherwise auto-detect
         let effective_lang = if language.is_some() {
             language.map(String::from)
         } else {
-            self.detected_language
-                .lock()
-                .ok()
-                .and_then(|g| g.clone())
+            self.detected_language.clone()
         };
 
-        let (segments, detected) = Self::run_inference(
+        let (mut segments, detected) = Self::run_inference(
             &loaded.ctx,
             &to_process,
             effective_lang.as_deref().or(language),
         )?;
+        for seg in &mut segments {
+            seg.start_time += offset;
+            seg.end_time += offset;
+        }
 
         // Cache detected language from first successful auto-detect
-        if language.is_none() {
-            if let Some(ref lang) = detected {
-                let mut cached = self
-                    .detected_language
-                    .lock()
-                    .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-                if cached.is_none() {
-                    info!(language = %lang, "Whisper auto-detected language, caching for session");
-                    *cached = Some(lang.clone());
-                }
-            }
+        if language.is_none()
+            && let Some(ref lang) = detected
+            && self.detected_language.is_none()
+        {
+            info!(language = %lang, "Whisper auto-detected language, caching for session");
+            self.detected_language = Some(lang.clone());
         }
 
         Ok(segments)
     }
 
-    fn flush(&self) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        let guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-        let loaded = guard.as_ref().ok_or(EngineError::NotInitialized)?;
+    fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        if self.model.is_none() {
+            return Err(EngineError::NotInitialized);
+        }
 
-        let mut buf = self
-            .audio_buffer
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-
-        if buf.len() < MIN_INFERENCE_SAMPLES {
-            buf.clear();
+        if self.audio_buffer.len() < MIN_INFERENCE_SAMPLES {
+            self.audio_buffer.clear();
             return Ok(vec![]);
         }
 
-        let remaining: Vec<f32> = buf.drain(..).collect();
-        let cached_lang = self
-            .detected_language
-            .lock()
-            .ok()
-            .and_then(|g| g.clone());
-        let (segments, _) =
-            Self::run_inference(&loaded.ctx, &remaining, cached_lang.as_deref())?;
+        let remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let offset = self.take_window_offset(remaining.len());
+        let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+        let (mut segments, _) =
+            Self::run_inference(&loaded.ctx, &remaining, self.detected_language.as_deref())?;
+        for seg in &mut segments {
+            seg.start_time += offset;
+            seg.end_time += offset;
+        }
         Ok(segments)
     }
 
-    fn reset_state(&self) -> Result<(), EngineError> {
-        let mut buf = self
-            .audio_buffer
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-        buf.clear();
-
+    fn reset_state(&mut self) -> Result<(), EngineError> {
+        self.audio_buffer.clear();
         // Clear cached language so next session auto-detects fresh
-        if let Ok(mut lang) = self.detected_language.lock() {
-            *lang = None;
-        }
+        self.detected_language = None;
+        self.consumed_samples = 0;
         Ok(())
     }
 

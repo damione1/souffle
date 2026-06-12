@@ -6,10 +6,9 @@ use tauri::ipc::Channel;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::audio::AudioChunk;
-use crate::constants::{AUDIO_FLUSH_MS, PIPELINE_DRAIN_TIMEOUT_SECS};
+use crate::constants::STOP_REPLY_TIMEOUT_SECS;
 use crate::lock_ext::MutexExt;
-use crate::pipeline::{InferenceCommand, SegmentCallback};
+use crate::pipeline::{SegmentCallback, SessionConfig};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator};
 use crate::state_machine::StateAction;
 use crate::transcript::{MeetingRecordingSession, MeetingTranscript};
@@ -18,14 +17,6 @@ fn next_audio_session_id(state: &AppState) -> Result<u64, String> {
     let mut guard = state.next_audio_session_id.acquire()?;
     *guard += 1;
     Ok(*guard)
-}
-
-fn drain_audio_queue(receiver: &crossbeam_channel::Receiver<AudioChunk>) -> usize {
-    let mut drained = 0usize;
-    while receiver.try_recv().is_ok() {
-        drained += 1;
-    }
-    drained
 }
 
 fn current_active_profile(state: &AppState) -> Result<crate::engine::TranscriptionProfile, String> {
@@ -57,7 +48,7 @@ fn start_meeting_session(
         }
     });
 
-    if let Err(error) = start_pipeline(state, on_segment) {
+    if let Err(error) = start_pipeline(state, on_segment, PipelineMode::Meeting) {
         let mut acc = state.meeting_accumulator.acquire()?;
         *acc = None;
         return Err(error);
@@ -66,7 +57,9 @@ fn start_meeting_session(
     Ok(())
 }
 
-fn build_meeting_transcript(
+/// Also used by the engine actor to salvage a meeting when its recording
+/// session aborts mid-way.
+pub(crate) fn build_meeting_transcript(
     meeting: MeetingAccumulator,
     ended_at: chrono::DateTime<chrono::Utc>,
 ) -> MeetingTranscript {
@@ -113,9 +106,20 @@ fn build_meeting_transcript(
     }
 }
 
-/// Shared logic for starting a recording pipeline.
-/// Validates preconditions, drains stale audio, resets engine, sends Start command, begins audio capture.
-fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, String> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PipelineMode {
+    Dictation,
+    Meeting,
+}
+
+/// Shared logic for starting a recording session.
+/// Validates preconditions, starts the actor session (which drains stale
+/// audio, resets the engine, and builds filter chains), then begins audio capture.
+fn start_pipeline(
+    state: &AppState,
+    on_segment: SegmentCallback,
+    mode: PipelineMode,
+) -> Result<u64, String> {
     let machine = state.current_machine_state()?;
     if !machine.is_model_ready() {
         return Err("Model not loaded".into());
@@ -129,73 +133,62 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
 
     let session_id = next_audio_session_id(state)?;
 
-    // Clear stale audio chunks before reset
-    let drained = drain_audio_queue(&state.audio_receiver);
-    if crate::debug::transcription_debug_enabled() && drained > 0 {
-        tracing::debug!(drained, "Cleared stale audio chunks before reset");
-    }
-
-    // Reset while the pipeline is idle and read audio requirements
-    let (target_sample_rate, mic_gain) = {
-        let engine = state.engine.acquire()?;
-        engine.reset_state().map_err(|e| format!("State reset: {e}"))?;
-        (engine.audio_requirements().sample_rate_hz, engine.mic_gain())
+    // Snapshot settings and dictionary; the actor builds filter chains on its
+    // own thread to keep ONNX/Metal work off the command thread.
+    let settings = crate::settings::AppSettings::load(&state.db)?;
+    let config = SessionConfig {
+        pipeline_config: settings.pipeline_config(),
+        dictionary_entries: state.db.list_dictionary_entries()?,
     };
 
-    // Snapshot settings and dictionary for the inference thread to build filter chains.
-    // Filter chains are built on the inference thread to avoid Metal/ONNX conflicts.
-    let settings = crate::settings::AppSettings::load(&state.db)?;
-    let pipeline_config = settings.pipeline_config();
-    let dictionary_entries = state.db.list_dictionary_entries()?;
+    // Meetings also capture system audio (the other participants) when the
+    // setting is on and the OS supports Core Audio taps.
+    let capture_system_audio = mode == PipelineMode::Meeting
+        && settings.capture_system_audio
+        && crate::platform::system_audio_capture_supported();
 
-    // Send Start before audio capture begins
-    let pipe_guard = state.pipeline.acquire()?;
-    let pipeline = pipe_guard.as_ref().ok_or("Pipeline not initialized")?;
-    pipeline.send(InferenceCommand::Start {
-        session_id,
-        on_segment,
-        pipeline_config,
-        source_sample_rate: target_sample_rate,
-        dictionary_entries,
-    })?;
+    // The actor replies once the engine is reset and ready for audio.
+    let info = state
+        .engine_actor
+        .start_session(session_id, config, on_segment)?;
 
     state
         .audio_cmd_sender
-        .send(AudioCommand::Start { session_id, target_sample_rate, mic_gain })
+        .send(AudioCommand::Start {
+            session_id,
+            target_sample_rate: info.audio.sample_rate_hz,
+            mic_gain: info.mic_gain,
+            capture_system_audio,
+        })
         .map_err(|e| format!("Audio start: {e}"))?;
 
     Ok(session_id)
 }
 
-/// Shared logic for stopping a recording pipeline.
-/// Stops audio, flushes buffers, drains pipeline, sets idle state.
+/// Shared logic for stopping a recording session.
+/// Stops audio capture (which emits an EndOfStream marker once its stream is
+/// dropped and the resampler flushed), then asks the actor to stop — the actor
+/// finishes when that marker arrives, so the drain is event-ordered, not timed.
 fn stop_pipeline(state: &AppState) -> Result<(), String> {
-    // 1. Stop audio capture FIRST
+    // Audio thread drops the cpal stream, flushes the resampler tail, and
+    // sends EndOfStream as the final message of this session.
     state
         .audio_cmd_sender
         .send(AudioCommand::Stop)
         .map_err(|e| format!("Audio stop: {e}"))?;
 
-    // 2. Wait for audio thread to flush its internal buffers
-    std::thread::sleep(Duration::from_millis(AUDIO_FLUSH_MS));
-
-    // 3. Stop pipeline session — drains remaining audio and flushes engine
-    let (done_tx, done_rx) = crossbeam_channel::bounded(1);
-    {
-        let pipe_guard = state.pipeline.acquire()?;
-        if let Some(pipeline) = pipe_guard.as_ref() {
-            pipeline.send(InferenceCommand::Stop(done_tx))?;
-        }
-    }
-
-    // 4. Wait for drain/flush to complete
-    done_rx
-        .recv_timeout(Duration::from_secs(PIPELINE_DRAIN_TIMEOUT_SECS))
-        .map_err(|_| "Pipeline drain timeout".to_string())?;
-
-    let drained = drain_audio_queue(&state.audio_receiver);
-    if crate::debug::transcription_debug_enabled() && drained > 0 {
-        tracing::debug!(drained, "Cleared trailing audio chunks after stop");
+    // The actor drains everything up to EndOfStream and flushes the engine.
+    // The timeout is last-resort safety; callers complete state transitions
+    // even when this errors.
+    let summary = state
+        .engine_actor
+        .stop_session(Duration::from_secs(STOP_REPLY_TIMEOUT_SECS))?;
+    if crate::debug::transcription_debug_enabled() {
+        tracing::debug!(
+            frames = summary.frames_processed,
+            skipped = summary.skipped_chunks,
+            "Session stopped"
+        );
     }
 
     Ok(())
@@ -215,7 +208,7 @@ pub fn start_transcription(
         let _ = channel_clone.send(seg);
     });
 
-    let session_id = start_pipeline(&state, on_segment)?;
+    let session_id = start_pipeline(&state, on_segment, PipelineMode::Dictation)?;
 
     // Transition state machine
     state.apply_transition(StateAction::StartDictation { session_id })?;
