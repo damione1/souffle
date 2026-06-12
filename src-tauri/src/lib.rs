@@ -67,6 +67,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::save_shortcuts,
             commands::get_shortcuts,
             commands::get_audio_level,
+            commands::get_system_audio_support,
+            commands::debug_record_system_audio,
             commands::get_machine_state,
             commands::recover_state,
             commands::list_dictionary,

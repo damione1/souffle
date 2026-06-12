@@ -72,6 +72,15 @@ regex = "1"
 arboard = "3"
 enigo = { version = "0.3", features = ["serde"] }
 
+# System audio capture via Core Audio process taps (macOS 14.4+) + echo cancellation
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-core-foundation = "0.3"
+objc2-core-audio = "0.3"
+objc2-core-audio-types = "0.3"
+ringbuf = "0.5"
+sonora = "0.1"
+
 [dev-dependencies]
 tempfile = "3"
 

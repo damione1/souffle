@@ -20,3 +20,22 @@ pub fn with_autorelease_pool<T, F: FnOnce() -> T>(f: F) -> T {
 pub fn with_autorelease_pool<T, F: FnOnce() -> T>(f: F) -> T {
     f()
 }
+
+/// Whether Core Audio process taps are available (macOS 14.4+).
+/// All tap calls must be gated behind this check — the symbols are weakly
+/// linked and crash on older systems.
+#[cfg(target_os = "macos")]
+pub fn system_audio_capture_supported() -> bool {
+    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+
+    NSProcessInfo::processInfo().isOperatingSystemAtLeastVersion(NSOperatingSystemVersion {
+        majorVersion: 14,
+        minorVersion: 4,
+        patchVersion: 0,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn system_audio_capture_supported() -> bool {
+    false
+}

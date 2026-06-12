@@ -339,6 +339,12 @@ async getAudioLevel() : Promise<Result<number, string>> {
 }
 },
 /**
+ * Whether system-audio capture (Core Audio process taps) is available on this OS
+ */
+async getSystemAudioSupport() : Promise<boolean> {
+    return await TAURI_INVOKE("get_system_audio_support");
+},
+/**
  * Return the current state machine state.
  */
 async getMachineState() : Promise<Result<AppStateMachine, string>> {
