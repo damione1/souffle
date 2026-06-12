@@ -191,16 +191,18 @@ pub fn transcription_runtime_phase(
 
 /// Runtime interface implemented by each engine family/backend pair.
 /// Product metadata belongs in descriptors, not on the runtime itself.
-pub trait TranscriptionEngine: Send + Sync {
+/// Methods take &mut self: engines are owned and driven by a single thread,
+/// so they need no interior locking.
+pub trait TranscriptionEngine: Send {
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError>;
     fn unload_model(&mut self) -> Result<(), EngineError>;
     fn transcribe(
-        &self,
+        &mut self,
         audio: &[f32],
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
-    fn flush(&self) -> Result<Vec<TranscriptionSegment>, EngineError>;
-    fn reset_state(&self) -> Result<(), EngineError>;
+    fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError>;
+    fn reset_state(&mut self) -> Result<(), EngineError>;
     /// Audio format requirements for this engine's inference pipeline.
     /// Used by the audio capture thread (target sample rate) and the
     /// inference pipeline (chunk size) to adapt to each engine.
@@ -886,20 +888,20 @@ mod tests {
 
     #[test]
     fn whisper_engine_reset_clears_buffer() {
-        let engine = whisper::WhisperEngine::new();
+        let mut engine = whisper::WhisperEngine::new();
         // reset_state should not fail on a fresh engine
         assert!(engine.reset_state().is_ok());
     }
 
     #[test]
     fn whisper_engine_flush_without_load_returns_error() {
-        let engine = whisper::WhisperEngine::new();
+        let mut engine = whisper::WhisperEngine::new();
         assert!(engine.flush().is_err());
     }
 
     #[test]
     fn whisper_engine_transcribe_without_load_returns_error() {
-        let engine = whisper::WhisperEngine::new();
+        let mut engine = whisper::WhisperEngine::new();
         let audio = vec![0.0f32; 16_000];
         assert!(engine.transcribe(&audio, None).is_err());
     }

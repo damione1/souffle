@@ -101,7 +101,7 @@ struct LoadedModel {
 /// Uses moshi crate for Mimi audio codec + decoder-only transformer.
 /// Streaming: feed 1920-sample (80ms @ 24kHz) chunks, get words back.
 pub struct KyutaiEngine {
-    model: Mutex<Option<LoadedModel>>,
+    model: Option<LoadedModel>,
 }
 
 impl Default for KyutaiEngine {
@@ -112,9 +112,7 @@ impl Default for KyutaiEngine {
 
 impl KyutaiEngine {
     pub fn new() -> Self {
-        Self {
-            model: Mutex::new(None),
-        }
+        Self { model: None }
     }
 
     fn select_device() -> Result<Device, EngineError> {
@@ -197,22 +195,18 @@ impl KyutaiEngine {
     /// positional encoding to start at the wrong offset with empty KV caches.
     /// Teardown and rebuild use separate autorelease pools so stale Metal
     /// objects are drained before a fresh device/model is created.
-    pub fn reset_state(&self) -> Result<(), EngineError> {
+    pub fn reset_state(&mut self) -> Result<(), EngineError> {
         FRAME_COUNT.store(0, Ordering::Relaxed);
         if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
             *dbg = None;
         }
 
-        let mut guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
         {
-            let loaded = guard.as_ref().ok_or(EngineError::NotInitialized)?;
+            let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
             Self::synchronize_device(&loaded.device, "Metal sync before reset")?;
         }
 
-        let old = guard.take().ok_or(EngineError::NotInitialized)?;
+        let old = self.model.take().ok_or(EngineError::NotInitialized)?;
         let LoadedModel {
             state: old_state,
             text_tokenizer,
@@ -231,7 +225,7 @@ impl KyutaiEngine {
             Self::build_loaded_model(device, model_path, config, text_tokenizer)
         })?;
 
-        *guard = Some(rebuilt);
+        self.model = Some(rebuilt);
         info!("ASR state rebuilt for new session");
         Ok(())
     }
@@ -266,24 +260,16 @@ impl TranscriptionEngine for KyutaiEngine {
 
         info!("Kyutai STT model fully loaded");
 
-        let mut guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::LoadError("Lock poisoned".into()))?;
-        *guard = Some(loaded);
+        self.model = Some(loaded);
 
         Ok(())
     }
 
     fn unload_model(&mut self) -> Result<(), EngineError> {
-        let mut guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::LoadError("Lock poisoned".into()))?;
-        if let Some(loaded) = guard.as_ref() {
+        if let Some(loaded) = self.model.as_ref() {
             Self::synchronize_device(&loaded.device, "Metal sync before unload")?;
         }
-        if let Some(loaded) = guard.take() {
+        if let Some(loaded) = self.model.take() {
             with_autorelease_pool(move || {
                 drop(loaded);
             });
@@ -293,16 +279,12 @@ impl TranscriptionEngine for KyutaiEngine {
     }
 
     fn transcribe(
-        &self,
+        &mut self,
         audio: &[f32],
         _language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
         let debug_enabled = crate::debug::transcription_debug_enabled();
-        let mut guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-        let model = guard.as_mut().ok_or(EngineError::NotInitialized)?;
+        let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
 
         let mut segments = Vec::new();
 
@@ -485,23 +467,18 @@ impl TranscriptionEngine for KyutaiEngine {
         Ok(segments)
     }
 
-    fn flush(&self) -> Result<Vec<TranscriptionSegment>, EngineError> {
+    fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
         // Feed silence suffix to push any remaining words out of the model's
         // internal pipeline (audio_delay + 1 second of silence)
-        let guard = self
-            .model
-            .lock()
-            .map_err(|_| EngineError::InferenceError("Lock poisoned".into()))?;
-        let model = guard.as_ref().ok_or(EngineError::NotInitialized)?;
+        let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
         let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
         let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
         let silence = vec![0.0f32; silence_samples];
-        drop(guard);
 
         self.transcribe(&silence, None)
     }
 
-    fn reset_state(&self) -> Result<(), EngineError> {
+    fn reset_state(&mut self) -> Result<(), EngineError> {
         KyutaiEngine::reset_state(self)
     }
 

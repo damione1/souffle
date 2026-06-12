@@ -137,7 +137,7 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
 
     // Reset while the pipeline is idle and read audio requirements
     let (target_sample_rate, mic_gain) = {
-        let engine = state.engine.acquire()?;
+        let mut engine = state.engine.acquire()?;
         engine.reset_state().map_err(|e| format!("State reset: {e}"))?;
         (engine.audio_requirements().sample_rate_hz, engine.mic_gain())
     };

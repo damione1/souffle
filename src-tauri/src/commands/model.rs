@@ -352,7 +352,7 @@ pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String>
     let mut audio = pcm;
     audio.resize(audio.len() + SILENCE_SUFFIX_SAMPLES, 0.0);
 
-    let engine = state.engine.acquire()?;
+    let mut engine = state.engine.acquire()?;
     engine.reset_state().map_err(|e| e.to_string())?;
 
     let result = engine.transcribe(&audio, None).map_err(|e| e.to_string())?;

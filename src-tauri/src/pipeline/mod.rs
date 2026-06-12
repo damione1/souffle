@@ -112,7 +112,7 @@ impl TranscriptionPipeline {
                     // Hold engine lock for the entire active session.
                     // State reset is done by the caller before sending Start,
                     // so teardown/rebuild never overlaps active inference.
-                    let guard = match engine.lock() {
+                    let mut guard = match engine.lock() {
                         Ok(g) => g,
                         Err(e) => {
                             error!("Engine lock failed: {e}");
@@ -128,7 +128,7 @@ impl TranscriptionPipeline {
                         Self::active_loop(
                             &cmd_rx,
                             &audio_rx,
-                            guard.as_ref(),
+                            guard.as_mut(),
                             &on_segment,
                             session_id,
                             &mut audio_filters,
@@ -161,7 +161,7 @@ impl TranscriptionPipeline {
     fn active_loop(
         cmd_rx: &crossbeam_channel::Receiver<InferenceCommand>,
         audio_rx: &Receiver<AudioChunk>,
-        engine: &dyn TranscriptionEngine,
+        engine: &mut dyn TranscriptionEngine,
         on_segment: &SegmentCallback,
         session_id: u64,
         audio_filters: &mut AudioFilterChain,
@@ -309,7 +309,7 @@ impl TranscriptionPipeline {
     }
 
     fn process_frames(
-        engine: &dyn TranscriptionEngine,
+        engine: &mut dyn TranscriptionEngine,
         text_filters: &TextFilterChain,
         audio: &[f32],
         on_segment: &SegmentCallback,
