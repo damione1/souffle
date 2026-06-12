@@ -16,6 +16,9 @@ pub const SILENCE_SUFFIX_SAMPLES: usize = 36_000;
 /// Mimi codec frame size: 1920 samples = 80ms at 24kHz
 pub const MIMI_FRAME_SIZE: usize = 1920;
 
+/// Mimi codec frame rate (24000 / 1920)
+pub const MIMI_FRAMES_PER_SECOND: f64 = 12.5;
+
 /// Application bundle identifier
 pub const APP_IDENTIFIER: &str = "com.souffle.app";
 
