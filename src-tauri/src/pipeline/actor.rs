@@ -337,9 +337,10 @@ impl EngineActor {
     }
 
     /// A session died mid-recording: tell the audio thread to stop, surface
-    /// the error to the frontend, and fail the state machine so the UI leaves
-    /// the recording state. Without this, the old pipeline died silently and
-    /// the app looked like it "just stopped transcribing".
+    /// the error to the frontend, salvage any in-progress meeting, and fail
+    /// the state machine so the UI leaves the recording state. Without this,
+    /// the old pipeline died silently and the app looked like it "just
+    /// stopped transcribing".
     fn handle_session_abort(&mut self, message: String) {
         if let Some(app) = &self.app {
             let _ = PipelineError {
@@ -350,6 +351,29 @@ impl EngineActor {
 
             let state = app.state::<crate::state::AppState>();
             let _ = state.audio_cmd_sender.send(crate::state::AudioCommand::Stop);
+
+            // Salvage an in-progress meeting: stop_meeting_recording can no
+            // longer run once the machine is in Error, so the accumulated
+            // segments would otherwise be lost.
+            let accumulator = state
+                .meeting_accumulator
+                .lock()
+                .ok()
+                .and_then(|mut guard| guard.take());
+            if let Some(meeting) = accumulator {
+                let transcript = crate::commands::transcription::build_meeting_transcript(
+                    meeting,
+                    chrono::Utc::now(),
+                );
+                match state.db.save_meeting(&transcript) {
+                    Ok(()) => info!(
+                        id = %transcript.id,
+                        "Meeting salvaged to history after session abort"
+                    ),
+                    Err(e) => error!("Failed to salvage meeting after session abort: {e}"),
+                }
+            }
+
             if let Err(e) = state.apply_transition(crate::state_machine::StateAction::Fail {
                 message,
             }) {

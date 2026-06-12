@@ -57,7 +57,9 @@ fn start_meeting_session(
     Ok(())
 }
 
-fn build_meeting_transcript(
+/// Also used by the engine actor to salvage a meeting when its recording
+/// session aborts mid-way.
+pub(crate) fn build_meeting_transcript(
     meeting: MeetingAccumulator,
     ended_at: chrono::DateTime<chrono::Utc>,
 ) -> MeetingTranscript {

@@ -8,8 +8,12 @@
   import MeetingHistoryView from "./lib/components/MeetingHistoryView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
   import { events } from "./lib/api/generated";
+  import { recoverState } from "./lib/api/transcription";
   import { bootstrapAppState } from "./lib/bootstrap";
+  import { notifyMeetingAborted } from "./lib/features/meeting/controller.svelte";
+  import { notifyDictationAborted } from "./lib/features/transcription/controller.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
+  import { errorMessage } from "./lib/utils";
 
   const app = getAppState();
 
@@ -21,6 +25,36 @@
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
   );
+
+  const machineError = $derived(
+    app.machineState.state === "error" ? app.machineState.data : null,
+  );
+  let isRecovering = $state(false);
+
+  async function recoverFromError() {
+    isRecovering = true;
+    try {
+      app.machineState = await recoverState();
+      app.pipelineError = null;
+    } catch (e) {
+      console.warn("State recovery failed:", errorMessage(e));
+    } finally {
+      isRecovering = false;
+    }
+  }
+
+  function wasRecording(state: typeof app.machineState): "dictation" | "meeting" | null {
+    switch (state.state) {
+      case "recording_dictation":
+        return "dictation";
+      case "recording_meeting":
+        return "meeting";
+      case "stopping":
+        return typeof state.data.was_recording === "object" ? "meeting" : "dictation";
+      default:
+        return null;
+    }
+  }
 
   onMount(() => {
     (async () => {
@@ -38,7 +72,12 @@
     });
 
     events.stateChanged.listen((event) => {
+      // Detect a backend-initiated session abort (recording → error) so the
+      // recorder controllers can reset their local state.
+      const aborted = event.payload.state === "error" ? wasRecording(app.machineState) : null;
       app.machineState = event.payload;
+      if (aborted === "dictation") notifyDictationAborted();
+      else if (aborted === "meeting") notifyMeetingAborted();
     }).then((fn) => {
       unlistenState = fn;
     });
@@ -80,7 +119,23 @@
       {/if}
     </main>
 
-    {#if app.pipelineError}
+    {#if machineError}
+      <div
+        class="flex items-center justify-between gap-3 border-t border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400"
+        role="alert"
+      >
+        <span class="truncate">
+          {$t("pipeline.error")}: {machineError.message}
+        </span>
+        <button
+          class="shrink-0 rounded border border-red-500/40 px-2 py-0.5 text-xs hover:bg-red-500/20 disabled:opacity-50"
+          disabled={isRecovering}
+          onclick={recoverFromError}
+        >
+          {$t("pipeline.recover")}
+        </button>
+      </div>
+    {:else if app.pipelineError}
       <div
         class="flex items-center justify-between gap-3 border-t border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400"
         role="alert"

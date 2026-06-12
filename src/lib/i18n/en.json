@@ -265,6 +265,7 @@
     "error": "Transcription error",
     "dismiss": "Dismiss",
     "lagging": "Transcription is running behind the audio — words may appear with a delay.",
-    "stalled": "Transcription appears stalled — audio is queuing up without being processed."
+    "stalled": "Transcription appears stalled — audio is queuing up without being processed.",
+    "recover": "Retry"
   }
 }

@@ -4,7 +4,7 @@ mod dictionary;
 mod meetings;
 mod model;
 mod settings;
-mod transcription;
+pub(crate) mod transcription;
 
 pub use audio::*;
 pub use dictation::*;

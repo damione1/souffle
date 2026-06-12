@@ -42,6 +42,10 @@ function createTranscriptionControllerInstance() {
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
 
+  // Incremented for every session start (and on abort) so segment-channel
+  // callbacks from a previous session can never write into a new one.
+  let sessionGeneration = 0;
+
   let history = $state<DictationEntry[]>([]);
   let expandedEntryId = $state<string | null>(null);
   let historySearchQuery = $state("");
@@ -269,9 +273,12 @@ function createTranscriptionControllerInstance() {
     transcript = "";
     statusMessage = "";
     isStartingRecording = true;
+    sessionGeneration += 1;
+    const generation = sessionGeneration;
 
     try {
       await startStreamingTranscription((segment: TranscriptionSegment) => {
+        if (generation !== sessionGeneration) return; // stale session
         if (segment.is_final) {
           if (transcript) {
             if (!transcript.endsWith(" ") && !segment.text.startsWith(" ")) {
@@ -285,6 +292,19 @@ function createTranscriptionControllerInstance() {
       statusMessage = errorMessage(e);
     } finally {
       isStartingRecording = false;
+    }
+  }
+
+  /** The backend aborted the recording session (machine went to Error). */
+  function handleRecordingAborted() {
+    sessionGeneration += 1; // cut off in-flight segments from the dead session
+    isStartingRecording = false;
+    isStopping = false;
+    if (transcript.trim()) {
+      void addHistoryEntry(transcript);
+      statusMessage = "Recording was interrupted — the partial transcript was saved to history.";
+    } else {
+      statusMessage = "Recording was interrupted.";
     }
   }
 
@@ -323,7 +343,14 @@ function createTranscriptionControllerInstance() {
     toggleRecording,
     removeHistoryEntry,
     resetHistory,
+    handleRecordingAborted,
   };
+}
+
+/** Called from the global StateChanged listener when a dictation session
+ * is aborted by the backend. No-op if the controller was never created. */
+export function notifyDictationAborted() {
+  instance?.handleRecordingAborted();
 }
 
 // Singleton: survives view mount/unmount cycles so transcript and Channel
