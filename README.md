@@ -33,7 +33,7 @@ All models run locally and are downloaded on first use from HuggingFace:
 npm install
 
 # Run in development mode
-cargo tauri dev
+npm run tauri dev
 ```
 
 On first launch, the app will prompt you to download and load the speech model (~2.4 GB). This is a one-time step.
@@ -41,7 +41,7 @@ On first launch, the app will prompt you to download and load the speech model (
 ## Building for production
 
 ```bash
-cargo tauri build
+npm run tauri build
 ```
 
 The `.dmg` installer is output to `src-tauri/target/release/bundle/dmg/`.
