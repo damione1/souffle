@@ -29,8 +29,9 @@ impl Database {
                 summary_is_stale,
                 summary_model,
                 summary_generated_at,
-                edited_transcript
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                edited_transcript,
+                notes
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 meeting.id,
                 meeting.title,
@@ -46,6 +47,7 @@ impl Database {
                 meeting.summary_model,
                 meeting.summary_generated_at.map(|dt| dt.to_rfc3339()),
                 meeting.edited_transcript,
+                meeting.notes,
             ],
         )
         .map_err(|e| format!("Insert meeting: {e}"))?;
@@ -117,7 +119,8 @@ impl Database {
                     summary_is_stale,
                     summary_model,
                     summary_generated_at,
-                    edited_transcript
+                    edited_transcript,
+                    notes
                  FROM meetings
                  WHERE id = ?1",
                 params![id],
@@ -135,6 +138,7 @@ impl Database {
                         summary_model: row.get(9)?,
                         summary_generated_at: row.get(10)?,
                         edited_transcript: row.get(11)?,
+                        notes: row.get(12)?,
                     })
                 },
             )
@@ -192,7 +196,18 @@ impl Database {
             summary_model: meeting.summary_model,
             summary_generated_at,
             edited_transcript: meeting.edited_transcript,
+            notes: meeting.notes,
         })
+    }
+
+    pub fn save_meeting_notes(&self, id: &str, notes: Option<&str>) -> Result<(), String> {
+        let conn = self.conn.acquire()?;
+        conn.execute(
+            "UPDATE meetings SET notes = ?1 WHERE id = ?2",
+            params![notes, id],
+        )
+        .map_err(|e| format!("Update meeting notes: {e}"))?;
+        Ok(())
     }
 
     /// List all meetings (lightweight, no segments).
@@ -337,6 +352,7 @@ struct MeetingRow {
     summary_model: Option<String>,
     summary_generated_at: Option<String>,
     edited_transcript: Option<String>,
+    notes: Option<String>,
 }
 
 impl MeetingRow {
@@ -381,6 +397,28 @@ mod tests {
             loaded.transcription_profile,
             TranscriptionProfile::default()
         );
+    }
+
+    #[test]
+    fn meeting_notes_round_trip() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.notes = Some("remember the budget question".to_string());
+        db.save_meeting(&meeting).unwrap();
+
+        assert_eq!(
+            db.load_meeting("m1").unwrap().notes.as_deref(),
+            Some("remember the budget question")
+        );
+
+        db.save_meeting_notes("m1", Some("updated notes")).unwrap();
+        assert_eq!(
+            db.load_meeting("m1").unwrap().notes.as_deref(),
+            Some("updated notes")
+        );
+
+        db.save_meeting_notes("m1", None).unwrap();
+        assert_eq!(db.load_meeting("m1").unwrap().notes, None);
     }
 
     #[test]

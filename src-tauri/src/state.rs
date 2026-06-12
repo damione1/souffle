@@ -44,6 +44,8 @@ pub struct MeetingAccumulator {
     pub summary_is_stale: bool,
     pub summary_model: Option<String>,
     pub summary_generated_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Notes the user types while the meeting records; persisted at stop.
+    pub notes: Option<String>,
 }
 
 /// Shared application state, managed by Tauri.

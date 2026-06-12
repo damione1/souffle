@@ -52,6 +52,9 @@ pub struct MeetingTranscript {
     pub summary_model: Option<String>,
     pub summary_generated_at: Option<DateTime<Utc>>,
     pub edited_transcript: Option<String>,
+    /// Free-form notes the user typed during the meeting; fed into the
+    /// summary prompt.
+    pub notes: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +78,8 @@ struct MeetingTranscriptWire {
     summary_generated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     edited_transcript: Option<String>,
+    #[serde(default)]
+    notes: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for MeetingTranscript {
@@ -111,6 +116,7 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             summary_model: wire.summary_model,
             summary_generated_at: wire.summary_generated_at,
             edited_transcript: wire.edited_transcript,
+            notes: wire.notes,
         })
     }
 }
@@ -230,6 +236,7 @@ mod tests {
             summary_model: Some("test-model".to_string()),
             summary_generated_at: None,
             edited_transcript: None,
+            notes: None,
         };
 
         let json = serde_json::to_string(&meeting).unwrap();
@@ -267,6 +274,7 @@ mod tests {
             summary_model: None,
             summary_generated_at: None,
             edited_transcript: None,
+            notes: None,
         };
 
         let item = MeetingListItem::from(&transcript);

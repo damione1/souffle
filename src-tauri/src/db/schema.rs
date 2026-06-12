@@ -5,7 +5,7 @@ use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
 /// Schema version 5: dictionary table for custom term corrections
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (

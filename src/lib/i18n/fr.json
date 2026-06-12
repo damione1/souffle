@@ -295,5 +295,12 @@
     "new_button": "Nouveau meeting",
     "locked_by_dictation": "Arrêtez la dictée avant d'enregistrer un meeting.",
     "model_not_ready": "Le modèle est encore en cours de chargement."
+  },
+  "meeting_notes": {
+    "title": "Notes",
+    "placeholder": "Notez décisions, actions, noms… Elles affineront le résumé.",
+    "hint": "Les notes sont sauvegardées avec le meeting et servent à améliorer le résumé généré.",
+    "saving": "Enregistrement…",
+    "saved": "Enregistré"
   }
 }

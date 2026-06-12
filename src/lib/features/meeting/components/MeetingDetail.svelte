@@ -2,6 +2,7 @@
   import { t } from "svelte-i18n";
   import type { createMeetingController } from "../controller.svelte";
   import MeetingHeaderSection from "./MeetingHeaderSection.svelte";
+  import MeetingNotesSection from "./MeetingNotesSection.svelte";
   import MeetingSummarySection from "./MeetingSummarySection.svelte";
   import MeetingTranscriptSection from "./MeetingTranscriptSection.svelte";
   import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
@@ -55,6 +56,13 @@
     />
 
     <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
+      {#if controller.isRecordingMeeting}
+        <MeetingNotesSection
+          notes={controller.notesDraft}
+          saveState={controller.notesSaveState}
+          onNotesChange={controller.onNotesChange}
+        />
+      {/if}
       <MeetingTranscriptSection
         segments={displaySegments}
         recordingSessions={controller.meeting.recording_sessions}
@@ -85,6 +93,14 @@
         isSummarizing={controller.isSummarizing}
         summaryStream={controller.summaryStream}
       />
+
+      {#if !controller.isRecordingMeeting}
+        <MeetingNotesSection
+          notes={controller.notesDraft}
+          saveState={controller.notesSaveState}
+          onNotesChange={controller.onNotesChange}
+        />
+      {/if}
     </div>
 
     {#if !controller.isRecordingMeeting && controller.meeting.id}

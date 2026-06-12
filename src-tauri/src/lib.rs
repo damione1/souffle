@@ -55,6 +55,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_meeting,
             commands::delete_meeting,
             commands::rename_meeting,
+            commands::save_meeting_notes,
             commands::save_edited_transcript,
             commands::check_ollama,
             commands::summarize_meeting,

@@ -208,6 +208,19 @@ async renameMeeting(id: string, title: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Save the user's live meeting notes. Targets the in-memory accumulator
+ * while that meeting is still recording (it only reaches the DB at stop),
+ * the DB otherwise.
+ */
+async saveMeetingNotes(id: string, notes: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_meeting_notes", { id, notes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Save an edited transcript for a meeting
  */
 async saveEditedTranscript(id: string, editedTranscript: string | null) : Promise<Result<null, string>> {
@@ -507,7 +520,12 @@ export type MeetingRecordingSession = { id: string; started_at: string; ended_at
 /**
  * Full meeting transcript stored as JSON
  */
-export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; edited_transcript: string | null }
+export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; edited_transcript: string | null; 
+/**
+ * Free-form notes the user typed during the meeting; fed into the
+ * summary prompt.
+ */
+notes: string | null }
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }

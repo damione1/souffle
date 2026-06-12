@@ -295,5 +295,12 @@
     "new_button": "New meeting",
     "locked_by_dictation": "Stop the dictation before recording a meeting.",
     "model_not_ready": "The model is still loading."
+  },
+  "meeting_notes": {
+    "title": "Notes",
+    "placeholder": "Jot down decisions, action items, names… They will sharpen the summary.",
+    "hint": "Notes are saved with the meeting and used to improve the generated summary.",
+    "saving": "Saving…",
+    "saved": "Saved"
   }
 }

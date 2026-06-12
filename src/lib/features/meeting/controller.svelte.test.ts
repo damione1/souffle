@@ -20,6 +20,8 @@ const mockResumeMeetingRecording = vi.fn<
 const mockStopMeetingRecording = vi.fn<() => Promise<string>>();
 const mockGetMeeting = vi.fn<(id: string) => Promise<MeetingTranscript>>();
 const mockDeleteMeeting = vi.fn<(id: string) => Promise<void>>();
+const mockRenameMeeting = vi.fn<(id: string, title: string) => Promise<void>>();
+const mockSaveMeetingNotes = vi.fn<(id: string, notes: string | null) => Promise<void>>();
 const mockSummarizeMeeting = vi.fn<
   (id: string, model: string, onProgress: (p: SummarizeProgress) => void) => Promise<void>
 >();
@@ -32,6 +34,10 @@ vi.mock("../../api/meetings", () => ({
   stopMeetingRecording: (...a: unknown[]) => mockStopMeetingRecording(...(a as [])),
   getMeeting: (...a: unknown[]) => mockGetMeeting(...(a as [string])),
   deleteMeeting: (...a: unknown[]) => mockDeleteMeeting(...(a as [string])),
+  renameMeeting: (...a: unknown[]) => mockRenameMeeting(...(a as [string, string])),
+  saveMeetingNotes: (...a: unknown[]) =>
+    mockSaveMeetingNotes(...(a as [string, string | null])),
+  saveEditedTranscript: vi.fn(),
   summarizeMeeting: (...a: unknown[]) =>
     mockSummarizeMeeting(
       ...(a as [string, string, (p: SummarizeProgress) => void]),
@@ -301,6 +307,39 @@ describe("MeetingController", () => {
     expect(mockDeleteMeeting).toHaveBeenCalledWith("meet-1");
     expect(ctrl.meeting).toBeNull();
     expect(mockApp.currentMeetingId).toBeNull();
+  });
+
+  it("notes autosave debounces and targets the live accumulator id", async () => {
+    vi.useFakeTimers();
+    try {
+      mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+      mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+      mockStartMeetingRecording.mockResolvedValue(undefined);
+      mockSaveMeetingNotes.mockResolvedValue(undefined);
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+      await ctrl.startRecording();
+      mockApp.machineState = {
+        state: "recording_meeting",
+        data: {
+          profile: makeMeeting().transcription_profile,
+          session_id: 1,
+          meeting_id: "live-1",
+        },
+      } as import("../../types").AppStateMachine;
+
+      ctrl.onNotesChange("first");
+      ctrl.onNotesChange("first draft");
+      expect(mockSaveMeetingNotes).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(900);
+      expect(mockSaveMeetingNotes).toHaveBeenCalledTimes(1);
+      expect(mockSaveMeetingNotes).toHaveBeenCalledWith("live-1", "first draft");
+      expect(ctrl.notesSaveState).toBe("saved");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("canResumeRecording is true when meeting loaded and not recording", async () => {

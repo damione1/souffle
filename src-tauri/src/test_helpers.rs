@@ -60,6 +60,7 @@ pub mod fixtures {
             summary_model: None,
             summary_generated_at: None,
             edited_transcript: None,
+            notes: None,
         }
     }
 

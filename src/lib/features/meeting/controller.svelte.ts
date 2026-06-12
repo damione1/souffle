@@ -4,6 +4,7 @@ import {
   renameMeeting as applyMeetingRename,
   resumeMeetingRecording,
   saveEditedTranscript,
+  saveMeetingNotes,
   startMeetingRecording,
   stopMeetingRecording,
   summarizeMeeting as runMeetingSummary,
@@ -32,6 +33,11 @@ function createMeetingControllerInstance() {
 
   let isEditingTranscript = $state(false);
   let editedTranscriptDraft = $state("");
+
+  const NOTES_DEBOUNCE_MS = 800;
+  let notesDraft = $state("");
+  let notesSaveState = $state<"idle" | "pending" | "saved">("idle");
+  let notesTimer: ReturnType<typeof setTimeout> | null = null;
 
   let isRecordingMeeting = $derived(
     app.machineState.state === "recording_meeting"
@@ -90,10 +96,44 @@ function createMeetingControllerInstance() {
     try {
       meeting = await getMeeting(id);
       syncSelectedModel(meeting.summary_model);
+      notesDraft = meeting.notes ?? "";
+      notesSaveState = "idle";
     } catch (e) {
       statusMessage = errorMessage(e);
     } finally {
       isLoadingMeeting = false;
+    }
+  }
+
+  /** The meeting id to write notes against: the accumulator id while
+   * recording (the row doesn't exist in the DB yet), the row id after. */
+  function notesTargetId(): string {
+    const machineState = app.machineState;
+    if (machineState.state === "recording_meeting") return machineState.data.meeting_id;
+    return meeting?.id ?? "";
+  }
+
+  function onNotesChange(value: string) {
+    notesDraft = value;
+    notesSaveState = "pending";
+    if (notesTimer) clearTimeout(notesTimer);
+    notesTimer = setTimeout(() => void flushNotes(), NOTES_DEBOUNCE_MS);
+  }
+
+  async function flushNotes() {
+    if (notesTimer) {
+      clearTimeout(notesTimer);
+      notesTimer = null;
+    }
+    if (notesSaveState !== "pending") return;
+    const id = notesTargetId();
+    if (!id) return;
+    try {
+      await saveMeetingNotes(id, notesDraft.trim() || null);
+      notesSaveState = "saved";
+    } catch (e) {
+      statusMessage = errorMessage(e);
+      notesSaveState = "idle";
     }
   }
 
@@ -116,6 +156,8 @@ function createMeetingControllerInstance() {
       statusMessage = "";
       summaryStream = "";
       meeting = null;
+      notesDraft = "";
+      notesSaveState = "idle";
       const transcriptionProfile = toSelectedTranscriptionProfile(
         transcriptionCatalog,
         app.settings.transcription_engine_id,
@@ -169,6 +211,8 @@ function createMeetingControllerInstance() {
 
   async function stopRecording() {
     try {
+      // Unsaved notes must reach the accumulator before it is persisted.
+      await flushNotes();
       const id = await stopMeetingRecording();
 
       // Load the completed meeting BEFORE clearing recording flags.
@@ -177,6 +221,7 @@ function createMeetingControllerInstance() {
       app.currentMeetingId = id;
       meeting = await getMeeting(id);
       syncSelectedModel(meeting.summary_model);
+      notesDraft = meeting.notes ?? "";
       liveMeetingSegments = [];
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -195,6 +240,7 @@ function createMeetingControllerInstance() {
 
   /** Leave the detail view: clear the open meeting and return to the list. */
   function closeMeeting() {
+    void flushNotes();
     meeting = null;
     liveMeetingSegments = [];
     statusMessage = "";
@@ -314,6 +360,10 @@ function createMeetingControllerInstance() {
     get isEditingTranscript() { return isEditingTranscript; },
     get editedTranscriptDraft() { return editedTranscriptDraft; },
     set editedTranscriptDraft(value: string) { editedTranscriptDraft = value; },
+    get notesDraft() { return notesDraft; },
+    get notesSaveState() { return notesSaveState; },
+    onNotesChange,
+    flushNotes,
     mount,
     onMeetingSelectionChange,
     checkOllama,
