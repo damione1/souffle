@@ -339,6 +339,24 @@ async getAudioLevel() : Promise<Result<number, string>> {
 }
 },
 /**
+ * Whether system-audio capture (Core Audio process taps) is available on this OS
+ */
+async getSystemAudioSupport() : Promise<boolean> {
+    return await TAURI_INVOKE("get_system_audio_support");
+},
+/**
+ * Debug: record system audio for `seconds` and write it to a WAV file.
+ * Returns the file path. Exercises the tap end-to-end (TCC prompt included).
+ */
+async debugRecordSystemAudio(seconds: number) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("debug_record_system_audio", { seconds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Return the current state machine state.
  */
 async getMachineState() : Promise<Result<AppStateMachine, string>> {
@@ -412,6 +430,7 @@ shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
 shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
+systemAudioStatus: SystemAudioStatus,
 transcriptionHealth: TranscriptionHealth
 }>({
 navigate: "navigate",
@@ -420,6 +439,7 @@ shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
 shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
+systemAudioStatus: "system-audio-status",
 transcriptionHealth: "transcription-health"
 })
 
@@ -429,7 +449,12 @@ transcriptionHealth: "transcription-health"
 
 /** user-defined types **/
 
-export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean }
+export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean; 
+/**
+ * Meeting mode: capture system audio (other participants) alongside
+ * the microphone via a Core Audio tap.
+ */
+capture_system_audio: boolean }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
@@ -499,6 +524,16 @@ export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
 export type StateChanged = AppStateMachine
 export type SummarizeProgress = { text: string; done: boolean }
+/**
+ * State of the system-audio capture leg of a meeting session, emitted when
+ * the session starts and whenever the leg changes (e.g. tap rebuild after
+ * an output device switch).
+ */
+export type SystemAudioStatus = { active: boolean; 
+/**
+ * Present when inactive because of an error (e.g. permission denied).
+ */
+reason: string | null }
 export type Theme = "dark" | "light" | "system"
 export type TranscriptionCapabilities = { supports_streaming: boolean; supports_batch_transcription: boolean; supports_language_auto_detect: boolean; supports_word_timestamps: boolean; supports_partial_results: boolean }
 export type TranscriptionCatalog = { engines: TranscriptionEngineDescriptor[]; selected_engine_id: string; selected_model_id: string; selected_backend_id: string }

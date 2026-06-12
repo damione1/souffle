@@ -20,9 +20,15 @@ pub enum AudioCommand {
         session_id: u64,
         target_sample_rate: u32,
         mic_gain: f32,
+        /// Meeting mode: also capture system audio via a Core Audio tap
+        /// and mix it with the microphone.
+        capture_system_audio: bool,
     },
     Stop,
     SelectDevice(String),
+    /// Give the audio thread an AppHandle so meeting mode can emit
+    /// SystemAudioStatus events.
+    AttachApp(AppHandle),
 }
 
 /// Accumulated meeting segments while recording

@@ -21,6 +21,7 @@ const VAD_ENABLED_KEY: &str = "vad_enabled";
 const FILLER_REMOVAL_KEY: &str = "filler_removal";
 const STUTTER_COLLAPSE_KEY: &str = "stutter_collapse";
 const DICTIONARY_CORRECTION_KEY: &str = "dictionary_correction";
+const CAPTURE_SYSTEM_AUDIO_KEY: &str = "capture_system_audio";
 const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
@@ -51,6 +52,9 @@ pub struct AppSettings {
     pub filler_removal: bool,
     pub stutter_collapse: bool,
     pub dictionary_correction: bool,
+    /// Meeting mode: capture system audio (other participants) alongside
+    /// the microphone via a Core Audio tap.
+    pub capture_system_audio: bool,
 }
 
 impl Default for AppSettings {
@@ -71,6 +75,7 @@ impl Default for AppSettings {
             filler_removal: true,
             stutter_collapse: false,
             dictionary_correction: true,
+            capture_system_audio: true,
         }
     }
 }
@@ -147,6 +152,9 @@ impl AppSettings {
         }
         if let Some(dictionary_correction) = read_json_setting::<bool>(db, DICTIONARY_CORRECTION_KEY)? {
             settings.dictionary_correction = dictionary_correction;
+        }
+        if let Some(capture_system_audio) = read_json_setting::<bool>(db, CAPTURE_SYSTEM_AUDIO_KEY)? {
+            settings.capture_system_audio = capture_system_audio;
         }
 
         Ok(settings.sanitized())
@@ -254,6 +262,7 @@ impl AppSettings {
         write_json_setting(db, FILLER_REMOVAL_KEY, &normalized.filler_removal)?;
         write_json_setting(db, STUTTER_COLLAPSE_KEY, &normalized.stutter_collapse)?;
         write_json_setting(db, DICTIONARY_CORRECTION_KEY, &normalized.dictionary_correction)?;
+        write_json_setting(db, CAPTURE_SYSTEM_AUDIO_KEY, &normalized.capture_system_audio)?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
             write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
@@ -374,6 +383,7 @@ mod tests {
             filler_removal: true,
             stutter_collapse: false,
             dictionary_correction: true,
+            capture_system_audio: true,
         };
 
         settings.save(&db).expect("save settings");
