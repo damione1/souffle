@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { History, Mic, Settings, Users, Radio } from "@lucide/svelte";
+  import { Mic, Settings, Users, Radio } from "@lucide/svelte";
   import type { Component } from "svelte";
   import { t } from "svelte-i18n";
   import type { AppView } from "../types";
@@ -9,13 +9,12 @@
 
   const tabs: { id: AppView; labelKey: string; icon: Component }[] = [
     { id: "transcription", labelKey: "nav.transcription", icon: Mic },
-    { id: "meeting", labelKey: "nav.meeting", icon: Users },
-    { id: "meeting-history", labelKey: "nav.history", icon: History },
+    { id: "meetings", labelKey: "nav.meetings", icon: Users },
     { id: "settings", labelKey: "nav.settings", icon: Settings },
   ];
 
   function recordingTargetView(): AppView {
-    return app.recordingMode === "meeting" ? "meeting" : "transcription";
+    return app.recordingMode === "meeting" ? "meetings" : "transcription";
   }
 </script>
 

@@ -8,8 +8,7 @@ use crate::state_machine::AppStateMachine;
 #[serde(rename_all = "kebab-case")]
 pub enum AppView {
     Transcription,
-    Meeting,
-    MeetingHistory,
+    Meetings,
     Settings,
 }
 

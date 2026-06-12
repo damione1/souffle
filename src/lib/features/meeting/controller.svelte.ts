@@ -1,6 +1,7 @@
 import {
   deleteMeeting as removeMeeting,
   getMeeting,
+  renameMeeting as applyMeetingRename,
   resumeMeetingRecording,
   saveEditedTranscript,
   startMeetingRecording,
@@ -37,7 +38,6 @@ function createMeetingControllerInstance() {
     || (app.machineState.state === "stopping"
         && typeof app.machineState.data?.was_recording === "object"),
   );
-  let meetingTitle = $state("");
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
 
   let meeting = $state<MeetingTranscript | null>(null);
@@ -111,7 +111,7 @@ function createMeetingControllerInstance() {
 
   async function startRecording() {
     try {
-      const title = meetingTitle.trim() || defaultMeetingTitle();
+      const title = defaultMeetingTitle();
       liveMeetingSegments = [];
       statusMessage = "";
       summaryStream = "";
@@ -143,7 +143,6 @@ function createMeetingControllerInstance() {
         summary_generated_at: null,
         edited_transcript: null,
       };
-      meetingTitle = "";
     } catch (e) {
       statusMessage = errorMessage(e);
       liveMeetingSegments = [];
@@ -194,14 +193,32 @@ function createMeetingControllerInstance() {
       "Recording was interrupted — the meeting recorded so far was saved to history.";
   }
 
-  /** Clear controller state for starting a fresh meeting. */
-  function startNew() {
+  /** Leave the detail view: clear the open meeting and return to the list. */
+  function closeMeeting() {
     meeting = null;
     liveMeetingSegments = [];
-    meetingTitle = "";
     statusMessage = "";
     summaryStream = "";
     app.currentMeetingId = null;
+  }
+
+  /** Rename the open meeting (works while recording too). */
+  async function renameMeeting(title: string) {
+    if (!meeting) return;
+    const trimmed = title.trim();
+    if (!trimmed || trimmed === meeting.title) return;
+    try {
+      // A live meeting that hasn't been stopped yet has the accumulator id
+      // in the machine state, not in the (placeholder) meeting object.
+      const machineState = app.machineState;
+      const id = meeting.id
+        || (machineState.state === "recording_meeting" ? machineState.data.meeting_id : "");
+      if (!id) return;
+      await applyMeetingRename(id, trimmed);
+      meeting = { ...meeting, title: trimmed };
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
   }
 
   async function summarizeMeeting() {
@@ -274,9 +291,7 @@ function createMeetingControllerInstance() {
     if (!meeting || !meeting.id) return;
     try {
       await removeMeeting(meeting.id);
-      meeting = null;
-      app.currentMeetingId = null;
-      app.currentView = "meeting-history";
+      closeMeeting();
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -292,8 +307,6 @@ function createMeetingControllerInstance() {
     get isSummarizing() { return isSummarizing; },
     get summaryStream() { return summaryStream; },
     get isRecordingMeeting() { return isRecordingMeeting; },
-    get meetingTitle() { return meetingTitle; },
-    set meetingTitle(value: string) { meetingTitle = value; },
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
     get isLoadingMeeting() { return isLoadingMeeting; },
@@ -307,7 +320,8 @@ function createMeetingControllerInstance() {
     startRecording,
     resumeRecording,
     stopRecording,
-    startNew,
+    closeMeeting,
+    renameMeeting,
     summarizeMeeting,
     deleteMeeting,
     startEditingTranscript,

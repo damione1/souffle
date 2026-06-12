@@ -1,19 +1,16 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import { createMeetingController } from "../features/meeting/controller.svelte";
-  import MeetingHeaderSection from "../features/meeting/components/MeetingHeaderSection.svelte";
-  import MeetingSummarySection from "../features/meeting/components/MeetingSummarySection.svelte";
-  import MeetingTranscriptSection from "../features/meeting/components/MeetingTranscriptSection.svelte";
-  import NewMeetingSection from "../features/meeting/components/NewMeetingSection.svelte";
-  import ConfirmAction from "./ui/ConfirmAction.svelte";
-  import Spinner from "./ui/Spinner.svelte";
-  import StatusBanner from "./ui/StatusBanner.svelte";
+  import type { createMeetingController } from "../controller.svelte";
+  import MeetingHeaderSection from "./MeetingHeaderSection.svelte";
+  import MeetingSummarySection from "./MeetingSummarySection.svelte";
+  import MeetingTranscriptSection from "./MeetingTranscriptSection.svelte";
+  import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
+  import Spinner from "../../../components/ui/Spinner.svelte";
+  import StatusBanner from "../../../components/ui/StatusBanner.svelte";
 
-  const controller = createMeetingController();
+  let { controller }: { controller: ReturnType<typeof createMeetingController> } = $props();
 
   let lockedByDictation = $derived(controller.app.recordingMode === "dictation");
-  let modelNotReady = $derived(controller.app.transcriptionRuntimePhase !== "ready");
 
   let sessionCount = $derived(
     controller.meeting
@@ -30,14 +27,6 @@
       ? (controller.meeting?.segments.length ?? null)
       : null,
   );
-
-  onMount(() => {
-    void controller.mount();
-  });
-
-  $effect(() => {
-    void controller.onMeetingSelectionChange(controller.app.currentMeetingId);
-  });
 </script>
 
 <div class="flex flex-col gap-4">
@@ -45,12 +34,12 @@
     <StatusBanner message={controller.statusMessage} variant="warning" />
   {/if}
 
-  {#if controller.isLoadingMeeting}
+  {#if controller.isLoadingMeeting || !controller.meeting}
     <div class="flex flex-col items-center gap-2 p-8 text-text-muted">
       <Spinner />
       <p class="text-sm">{$t("meeting_view.loading")}</p>
     </div>
-  {:else if controller.meeting}
+  {:else}
     <MeetingHeaderSection
       meeting={controller.meeting}
       isRecordingMeeting={controller.isRecordingMeeting}
@@ -59,11 +48,8 @@
       segmentCount={displaySegments.length}
       sessionCount={sessionCount}
       canResumeRecording={controller.canResumeRecording}
-      onBack={() => {
-        controller.app.currentMeetingId = null;
-        controller.app.currentView = "meeting-history";
-      }}
-      onNewMeeting={() => controller.startNew()}
+      onBack={() => controller.closeMeeting()}
+      onRename={(title) => void controller.renameMeeting(title)}
       onResumeRecording={controller.resumeRecording}
       onStopRecording={controller.stopRecording}
     />
@@ -112,15 +98,5 @@
         />
       </div>
     {/if}
-  {:else}
-    <NewMeetingSection
-      meetingTitle={controller.meetingTitle}
-      {lockedByDictation}
-      {modelNotReady}
-      onMeetingTitleChange={(value) => {
-        controller.meetingTitle = value;
-      }}
-      onStartRecording={controller.startRecording}
-    />
   {/if}
 </div>

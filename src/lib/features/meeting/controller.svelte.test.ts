@@ -209,20 +209,18 @@ describe("MeetingController", () => {
     expect(ctrl.summaryModels[0].id).toBe("llama3");
   });
 
-  it("startRecording calls API and clears title", async () => {
+  it("startRecording starts with a dated default title", async () => {
     mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockStartMeetingRecording.mockResolvedValue(undefined);
 
     const ctrl = createMeetingController();
     await ctrl.mount();
-    ctrl.meetingTitle = "Sprint Review";
     await ctrl.startRecording();
 
     expect(mockStartMeetingRecording).toHaveBeenCalledOnce();
-    expect(mockStartMeetingRecording.mock.calls[0][0]).toBe("Sprint Review");
-    // Title is cleared after start
-    expect(ctrl.meetingTitle).toBe("");
+    expect(mockStartMeetingRecording.mock.calls[0][0]).toMatch(/^Meeting /);
+    expect(ctrl.meeting?.title).toMatch(/^Meeting /);
   });
 
   it("stopRecording saves and loads meeting", async () => {
@@ -288,7 +286,7 @@ describe("MeetingController", () => {
     expect(ctrl.isSummarizing).toBe(false);
   });
 
-  it("deleteMeeting clears state and navigates to history", async () => {
+  it("deleteMeeting clears state and returns to the list", async () => {
     mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
@@ -303,7 +301,6 @@ describe("MeetingController", () => {
     expect(mockDeleteMeeting).toHaveBeenCalledWith("meet-1");
     expect(ctrl.meeting).toBeNull();
     expect(mockApp.currentMeetingId).toBeNull();
-    expect(mockApp.currentView).toBe("meeting-history");
   });
 
   it("canResumeRecording is true when meeting loaded and not recording", async () => {

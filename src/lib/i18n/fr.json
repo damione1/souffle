@@ -3,7 +3,8 @@
     "transcription": "Transcription",
     "meeting": "Réunion",
     "history": "Historique",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "meetings": "Meetings"
   },
   "sidebar": {
     "recording_meeting": "Réunion",
@@ -223,7 +224,8 @@
     "new_meeting": "Nouvelle réunion",
     "locked_by_dictation": "Arrêtez la dictée avant d'enregistrer une réunion.",
     "system_audio_active": "Audio système",
-    "system_audio_unavailable": "Micro seul"
+    "system_audio_unavailable": "Micro seul",
+    "rename_aria": "Renommer le meeting"
   },
   "meeting_transcript": {
     "title": "Transcription",
@@ -287,5 +289,11 @@
     "loading": "Chargement du modèle…",
     "downloading": "Téléchargement",
     "model_required": "Modèle requis"
+  },
+  "meetings": {
+    "title": "Meetings",
+    "new_button": "Nouveau meeting",
+    "locked_by_dictation": "Arrêtez la dictée avant d'enregistrer un meeting.",
+    "model_not_ready": "Le modèle est encore en cours de chargement."
   }
 }

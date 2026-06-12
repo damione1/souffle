@@ -31,6 +31,30 @@ pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), Stri
     state.db.delete_meeting(&id)
 }
 
+/// Rename a meeting. Targets the in-memory accumulator while that meeting
+/// is still recording (it only reaches the DB at stop), the DB otherwise.
+#[tauri::command]
+#[specta::specta]
+pub fn rename_meeting(state: State<'_, AppState>, id: String, title: String) -> Result<(), String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("Title cannot be empty".into());
+    }
+
+    {
+        use crate::lock_ext::MutexExt;
+        let mut acc = state.meeting_accumulator.acquire()?;
+        if let Some(ref mut meeting) = *acc
+            && meeting.id == id
+        {
+            meeting.title = title;
+            return Ok(());
+        }
+    }
+
+    state.db.update_meeting_title(&id, &title)
+}
+
 /// Save an edited transcript for a meeting
 #[tauri::command]
 #[specta::specta]

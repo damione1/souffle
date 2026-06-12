@@ -196,6 +196,18 @@ async deleteMeeting(id: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Rename a meeting. Targets the in-memory accumulator while that meeting
+ * is still recording (it only reaches the DB at stop), the DB otherwise.
+ */
+async renameMeeting(id: string, title: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_meeting", { id, title }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Save an edited transcript for a meeting
  */
 async saveEditedTranscript(id: string, editedTranscript: string | null) : Promise<Result<null, string>> {
@@ -461,7 +473,7 @@ capture_system_audio: boolean }
  * with a single enum that enforces valid transitions.
  */
 export type AppStateMachine = { state: "idle" } | { state: "downloading"; data: { profile: TranscriptionProfile } } | { state: "downloaded"; data: { profile: TranscriptionProfile } } | { state: "loading"; data: { profile: TranscriptionProfile } } | { state: "ready"; data: { profile: TranscriptionProfile } } | { state: "recording_dictation"; data: { profile: TranscriptionProfile; session_id: number } } | { state: "recording_meeting"; data: { profile: TranscriptionProfile; session_id: number; meeting_id: string } } | { state: "stopping"; data: { profile: TranscriptionProfile; was_recording: RecordingKind } } | { state: "unloading"; data: { profile: TranscriptionProfile; next_profile: TranscriptionProfile | null } } | { state: "error"; data: { message: string; recovery: ErrorRecovery } }
-export type AppView = "transcription" | "meeting" | "meeting-history" | "settings"
+export type AppView = "transcription" | "meetings" | "settings"
 /**
  * Info about an available audio input device, sent to frontend
  */

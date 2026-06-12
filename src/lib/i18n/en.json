@@ -3,7 +3,8 @@
     "transcription": "Transcription",
     "meeting": "Meeting",
     "history": "History",
-    "settings": "Settings"
+    "settings": "Settings",
+    "meetings": "Meetings"
   },
   "sidebar": {
     "recording_meeting": "Meeting",
@@ -223,7 +224,8 @@
     "new_meeting": "New Meeting",
     "locked_by_dictation": "Stop the dictation before recording a meeting.",
     "system_audio_active": "System audio",
-    "system_audio_unavailable": "Mic only"
+    "system_audio_unavailable": "Mic only",
+    "rename_aria": "Rename meeting"
   },
   "meeting_transcript": {
     "title": "Transcript",
@@ -287,5 +289,11 @@
     "loading": "Loading model…",
     "downloading": "Downloading",
     "model_required": "Model required"
+  },
+  "meetings": {
+    "title": "Meetings",
+    "new_button": "New meeting",
+    "locked_by_dictation": "Stop the dictation before recording a meeting.",
+    "model_not_ready": "The model is still loading."
   }
 }

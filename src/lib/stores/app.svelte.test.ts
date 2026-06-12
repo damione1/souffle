@@ -19,21 +19,21 @@ describe('app store', () => {
     expect(state.settings.transcription_engine_id).toBe('');
   });
 
-  it('openMeeting sets id and navigates to meeting view', () => {
+  it('openMeeting sets id and navigates to the meetings view', () => {
     const state = getAppState();
     state.openMeeting('test-meeting-id');
     expect(state.currentMeetingId).toBe('test-meeting-id');
-    expect(state.currentView).toBe('meeting');
+    expect(state.currentView).toBe('meetings');
   });
 
-  it('newMeeting clears id and sets meeting view', () => {
+  it('newMeeting clears id and navigates to the meetings view', () => {
     const state = getAppState();
     // Set some existing state first
     state.openMeeting('existing-id');
     // Now create new meeting
     state.newMeeting();
     expect(state.currentMeetingId).toBeNull();
-    expect(state.currentView).toBe('meeting');
+    expect(state.currentView).toBe('meetings');
   });
 
   it('settings setter updates correctly', () => {

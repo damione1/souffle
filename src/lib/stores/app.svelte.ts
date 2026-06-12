@@ -183,13 +183,13 @@ export function getAppState() {
     /** Navigate to a specific meeting's detail page */
     openMeeting(id: string) {
       currentMeetingId = id;
-      currentView = "meeting";
+      currentView = "meetings";
     },
 
-    /** Navigate to meeting tab in "new meeting" mode */
+    /** Navigate to the meetings list */
     newMeeting() {
       currentMeetingId = null;
-      currentView = "meeting";
+      currentView = "meetings";
     },
   };
 }

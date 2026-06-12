@@ -3,8 +3,7 @@
   import { t } from "svelte-i18n";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import TranscriptionView from "./lib/components/TranscriptionView.svelte";
-  import MeetingView from "./lib/components/MeetingView.svelte";
-  import MeetingHistoryView from "./lib/components/MeetingHistoryView.svelte";
+  import MeetingsView from "./lib/components/MeetingsView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
   import { events } from "./lib/api/generated";
   import { recoverState } from "./lib/api/transcription";
@@ -131,10 +130,8 @@
     <main class="flex-1 p-6 overflow-y-auto">
       {#if app.currentView === "transcription"}
         <TranscriptionView />
-      {:else if app.currentView === "meeting"}
-        <MeetingView />
-      {:else if app.currentView === "meeting-history"}
-        <MeetingHistoryView />
+      {:else if app.currentView === "meetings"}
+        <MeetingsView />
       {:else if app.currentView === "settings"}
         <SettingsView />
       {/if}

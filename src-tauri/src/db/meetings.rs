@@ -275,6 +275,16 @@ impl Database {
     }
 
     /// Save an edited transcript for a meeting.
+    pub fn update_meeting_title(&self, id: &str, title: &str) -> Result<(), String> {
+        let conn = self.conn.acquire()?;
+        conn.execute(
+            "UPDATE meetings SET title = ?1 WHERE id = ?2",
+            params![title, id],
+        )
+        .map_err(|e| format!("Update meeting title: {e}"))?;
+        Ok(())
+    }
+
     pub fn save_edited_transcript(
         &self,
         id: &str,
