@@ -1,13 +1,30 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
+use ringbuf::HeapRb;
+use ringbuf::traits::{Producer, Split};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
+use super::mixer::MeetingMixer;
 use super::resampler::Resampler;
 use crate::state::AudioCommand;
+
+/// Mixer cadence while a meeting session is active. Rings hold ~2s, so the
+/// 5ms tick has plenty of slack; it only exists to pace the mixer, the
+/// real-time callbacks never wait on it.
+const MEETING_TICK: Duration = Duration::from_millis(5);
+
+/// Per-session state for meeting mode (mic + system audio).
+struct MeetingState {
+    session_id: u64,
+    mixer: MeetingMixer,
+    /// None when tap creation failed — the mixer then runs mic-only.
+    #[cfg(target_os = "macos")]
+    tap: Option<super::system_tap::SystemTap>,
+}
 
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
@@ -77,6 +94,8 @@ pub struct AudioCapture {
     resampler: Option<Arc<Mutex<Resampler>>>,
     /// Counts chunks dropped because the audio channel was full.
     dropped_counter: Arc<AtomicU64>,
+    /// Active meeting-mode session (mic + system audio mixed on this thread).
+    meeting: Option<MeetingState>,
 }
 
 impl AudioCapture {
@@ -104,13 +123,41 @@ impl AudioCapture {
                     audio_rms,
                     resampler: None,
                     dropped_counter,
+                    meeting: None,
                 };
 
-                // Block on commands from main thread
-                while let Ok(cmd) = cmd_rx.recv() {
+                // Block on commands; while a meeting is active, wake every
+                // few ms to run the mixer instead.
+                loop {
+                    let cmd = if capture.meeting.is_some() {
+                        match cmd_rx.recv_timeout(MEETING_TICK) {
+                            Ok(cmd) => cmd,
+                            Err(RecvTimeoutError::Timeout) => {
+                                capture.meeting_tick();
+                                continue;
+                            }
+                            Err(RecvTimeoutError::Disconnected) => break,
+                        }
+                    } else {
+                        match cmd_rx.recv() {
+                            Ok(cmd) => cmd,
+                            Err(_) => break,
+                        }
+                    };
+
                     match cmd {
-                        AudioCommand::Start { session_id, target_sample_rate, mic_gain } => {
-                            if let Err(e) = capture.start(session_id, target_sample_rate, mic_gain) {
+                        AudioCommand::Start {
+                            session_id,
+                            target_sample_rate,
+                            mic_gain,
+                            capture_system_audio,
+                        } => {
+                            if let Err(e) = capture.start(
+                                session_id,
+                                target_sample_rate,
+                                mic_gain,
+                                capture_system_audio,
+                            ) {
                                 warn!("Failed to start audio capture: {e}");
                             }
                         }
@@ -154,10 +201,18 @@ impl AudioCapture {
             .ok_or_else(|| "No input device available".to_string())
     }
 
-    fn start(&mut self, session_id: u64, target_sample_rate: u32, mic_gain: f32) -> Result<(), String> {
-        // Ensure any previous callback stops emitting immediately.
+    fn start(
+        &mut self,
+        session_id: u64,
+        target_sample_rate: u32,
+        mic_gain: f32,
+        capture_system_audio: bool,
+    ) -> Result<(), String> {
+        // Ensure any previous callback stops emitting immediately, and tear
+        // down any leftover meeting state (tap included).
         self.active_session_id.store(0, Ordering::Release);
         self.stream.take();
+        self.meeting.take();
 
         let device = self.find_device()?;
 
@@ -169,6 +224,16 @@ impl AudioCapture {
         let channels = config.channels;
 
         info!("Audio config: {sample_rate}Hz, {channels}ch");
+
+        if capture_system_audio {
+            return self.start_meeting(
+                &device,
+                &config,
+                session_id,
+                target_sample_rate,
+                mic_gain,
+            );
+        }
 
         let resampler = Arc::new(Mutex::new(Resampler::new(
             sample_rate,
@@ -250,12 +315,153 @@ impl AudioCapture {
         Ok(())
     }
 
+    /// Meeting mode: the cpal callback only pushes raw samples into a ring
+    /// buffer; a system-audio tap fills a second ring; `meeting_tick()` on
+    /// this thread resamples, mixes, and forwards to the engine.
+    fn start_meeting(
+        &mut self,
+        device: &Device,
+        config: &StreamConfig,
+        session_id: u64,
+        target_sample_rate: u32,
+        mic_gain: f32,
+    ) -> Result<(), String> {
+        let sample_rate = config.sample_rate.0;
+        let channels = config.channels;
+
+        // ~2s of headroom per ring; the 5ms tick drains far faster.
+        let mic_capacity = (sample_rate as usize * channels as usize) * 2;
+        let (mut mic_prod, mic_cons) = HeapRb::<f32>::new(mic_capacity).split();
+        let (tap_prod, tap_cons) = HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
+
+        #[cfg(target_os = "macos")]
+        let (tap, tap_rate) = match super::system_tap::SystemTap::start(tap_prod) {
+            Ok(tap) => {
+                let rate = tap.sample_rate() as u32;
+                (Some(tap), rate)
+            }
+            Err(e) => {
+                warn!("System audio capture unavailable, recording mic only: {e}");
+                (None, super::mixer::MIX_RATE)
+            }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let tap_rate = {
+            drop(tap_prod);
+            super::mixer::MIX_RATE
+        };
+
+        let mixer = MeetingMixer::new(
+            mic_cons,
+            sample_rate,
+            channels,
+            mic_gain,
+            tap_cons,
+            tap_rate,
+            target_sample_rate,
+        );
+
+        let active_session_id = Arc::clone(&self.active_session_id);
+        let err_fn = |err: cpal::StreamError| {
+            error!("Audio stream error: {err}");
+        };
+        let stream = device
+            .build_input_stream(
+                config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    if active_session_id.load(Ordering::Acquire) != session_id {
+                        return;
+                    }
+                    // Ring full means the mixer is wedged; losing mic samples
+                    // here is the only safe option in a realtime callback.
+                    let _ = mic_prod.push_slice(data);
+                },
+                err_fn,
+                None,
+            )
+            .map_err(|e| format!("Failed to build input stream: {e}"))?;
+
+        self.active_session_id.store(session_id, Ordering::Release);
+        stream
+            .play()
+            .map_err(|e| format!("Failed to start stream: {e}"))?;
+        self.stream = Some(stream);
+        self.meeting = Some(MeetingState {
+            session_id,
+            mixer,
+            #[cfg(target_os = "macos")]
+            tap,
+        });
+
+        info!("Meeting audio capture started (mic + system audio)");
+        Ok(())
+    }
+
+    /// Periodic mixer pump while a meeting session is active.
+    fn meeting_tick(&mut self) {
+        let Some(meeting) = self.meeting.as_mut() else {
+            return;
+        };
+        let samples = meeting.mixer.tick();
+        if samples.is_empty() {
+            return;
+        }
+
+        let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
+        let rms = (sum_sq / samples.len() as f32).sqrt();
+        self.audio_rms
+            .store((rms * 8.0).min(1.0).to_bits(), Ordering::Relaxed);
+
+        if self
+            .audio_sender
+            .try_send(AudioMessage::Chunk(AudioChunk {
+                session_id: meeting.session_id,
+                samples,
+                captured_at: Instant::now(),
+            }))
+            .is_err()
+        {
+            let dropped = self.dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            if dropped == 1 || dropped.is_multiple_of(100) {
+                warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
+            }
+        }
+    }
+
     fn stop(&mut self) {
         let session_id = self.active_session_id.swap(0, Ordering::AcqRel);
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
 
         // Dropping the stream is synchronous — after this, no callback runs.
         let had_stream = self.stream.take().is_some();
+
+        if let Some(mut meeting) = self.meeting.take() {
+            // Tear down the tap first so its ring stops filling; then one
+            // final flush drains both rings and all resampler tails.
+            #[cfg(target_os = "macos")]
+            meeting.tap.take();
+
+            if session_id != 0 {
+                let tail = meeting.mixer.flush();
+                if !tail.is_empty() {
+                    let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
+                        session_id,
+                        samples: tail,
+                        captured_at: Instant::now(),
+                    }));
+                }
+                let discarded = meeting.mixer.tap_discarded();
+                if discarded > 0 {
+                    warn!("Discarded {discarded} system-audio samples to bound drift");
+                }
+                self.send_end_of_stream(session_id);
+            }
+
+            if had_stream {
+                info!("Meeting audio capture stopped");
+            }
+            return;
+        }
 
         if session_id != 0 {
             // Flush the resampler's remaining partial chunk so the last
@@ -273,25 +479,29 @@ impl AudioCapture {
                 }
             }
 
-            // EndOfStream is the signal the actor's stop waits on. The actor
-            // is normally draining, so this sends immediately; the timeout
-            // only matters if no one is consuming (e.g. session aborted) —
-            // then we give up rather than wedge the audio thread, and the
-            // actor's own EOS-wait deadline covers the stop path.
-            if self
-                .audio_sender
-                .send_timeout(
-                    AudioMessage::EndOfStream { session_id },
-                    std::time::Duration::from_secs(1),
-                )
-                .is_err()
-            {
-                warn!("Could not deliver end-of-stream marker (channel full or closed)");
-            }
+            self.send_end_of_stream(session_id);
         }
 
         if had_stream {
             info!("Audio capture stopped");
+        }
+    }
+
+    /// EndOfStream is the signal the actor's stop waits on. The actor is
+    /// normally draining, so this sends immediately; the timeout only
+    /// matters if no one is consuming (e.g. session aborted) — then we give
+    /// up rather than wedge the audio thread, and the actor's own EOS-wait
+    /// deadline covers the stop path.
+    fn send_end_of_stream(&self, session_id: u64) {
+        if self
+            .audio_sender
+            .send_timeout(
+                AudioMessage::EndOfStream { session_id },
+                Duration::from_secs(1),
+            )
+            .is_err()
+        {
+            warn!("Could not deliver end-of-stream marker (channel full or closed)");
         }
     }
 

@@ -1,4 +1,5 @@
 pub mod capture;
+pub mod mixer;
 pub mod output_route;
 pub mod resampler;
 pub mod system_tap;

@@ -48,7 +48,7 @@ fn start_meeting_session(
         }
     });
 
-    if let Err(error) = start_pipeline(state, on_segment) {
+    if let Err(error) = start_pipeline(state, on_segment, PipelineMode::Meeting) {
         let mut acc = state.meeting_accumulator.acquire()?;
         *acc = None;
         return Err(error);
@@ -106,10 +106,20 @@ pub(crate) fn build_meeting_transcript(
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PipelineMode {
+    Dictation,
+    Meeting,
+}
+
 /// Shared logic for starting a recording session.
 /// Validates preconditions, starts the actor session (which drains stale
 /// audio, resets the engine, and builds filter chains), then begins audio capture.
-fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, String> {
+fn start_pipeline(
+    state: &AppState,
+    on_segment: SegmentCallback,
+    mode: PipelineMode,
+) -> Result<u64, String> {
     let machine = state.current_machine_state()?;
     if !machine.is_model_ready() {
         return Err("Model not loaded".into());
@@ -131,6 +141,12 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
         dictionary_entries: state.db.list_dictionary_entries()?,
     };
 
+    // Meetings also capture system audio (the other participants) when the
+    // setting is on and the OS supports Core Audio taps.
+    let capture_system_audio = mode == PipelineMode::Meeting
+        && settings.capture_system_audio
+        && crate::platform::system_audio_capture_supported();
+
     // The actor replies once the engine is reset and ready for audio.
     let info = state
         .engine_actor
@@ -142,6 +158,7 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
             session_id,
             target_sample_rate: info.audio.sample_rate_hz,
             mic_gain: info.mic_gain,
+            capture_system_audio,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
@@ -191,7 +208,7 @@ pub fn start_transcription(
         let _ = channel_clone.send(seg);
     });
 
-    let session_id = start_pipeline(&state, on_segment)?;
+    let session_id = start_pipeline(&state, on_segment, PipelineMode::Dictation)?;
 
     // Transition state machine
     state.apply_transition(StateAction::StartDictation { session_id })?;

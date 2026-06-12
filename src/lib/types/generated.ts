@@ -345,6 +345,18 @@ async getSystemAudioSupport() : Promise<boolean> {
     return await TAURI_INVOKE("get_system_audio_support");
 },
 /**
+ * Debug: record system audio for `seconds` and write it to a WAV file.
+ * Returns the file path. Exercises the tap end-to-end (TCC prompt included).
+ */
+async debugRecordSystemAudio(seconds: number) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("debug_record_system_audio", { seconds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Return the current state machine state.
  */
 async getMachineState() : Promise<Result<AppStateMachine, string>> {
@@ -435,7 +447,12 @@ transcriptionHealth: "transcription-health"
 
 /** user-defined types **/
 
-export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean }
+export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean; 
+/**
+ * Meeting mode: capture system audio (other participants) alongside
+ * the microphone via a Core Audio tap.
+ */
+capture_system_audio: boolean }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
