@@ -54,49 +54,22 @@ struct MeetingState {
     session_id: u64,
     mixer: MeetingMixer,
     /// None when tap creation failed — the mixer then runs mic-only.
+    /// The tap itself lives on its own thread; dropping the handle tears
+    /// it down without blocking this thread. Its aggregate references no
+    /// physical device, so output-device changes don't require a rebuild.
     #[cfg(target_os = "macos")]
-    tap: Option<super::system_tap::SystemTap>,
-    /// UID of the output device the tap's aggregate is built on; when the
-    /// default output changes, the tap must be rebuilt.
-    #[cfg(target_os = "macos")]
-    output_uid: Option<String>,
+    tap: Option<super::system_tap::TapHandle>,
     /// Whether echo cancellation is currently engaged (speakers route).
     aec_active: bool,
     ticks: u32,
 }
 
 impl MeetingState {
-    /// React to default-output route changes: rebuild the tap when the
-    /// device itself changed (its aggregate is clocked on the old device),
-    /// and engage/disengage echo cancellation when switching between
-    /// speakers and headphones.
+    /// Engage/disengage echo cancellation when the default output switches
+    /// between built-in speakers and anything else (headphones, Bluetooth…).
     #[cfg(target_os = "macos")]
-    fn check_output_route(&mut self, app: Option<&tauri::AppHandle>) {
-        use super::{aec, mixer, output_route, system_tap};
-
-        let current_uid = output_route::default_output_device()
-            .and_then(output_route::device_uid)
-            .ok();
-
-        if self.tap.is_some() && current_uid != self.output_uid {
-            info!("Default output device changed — rebuilding system audio tap");
-            self.tap.take();
-            let (tap_prod, tap_cons) =
-                HeapRb::<f32>::new(mixer::MIX_RATE as usize * 2).split();
-            match system_tap::SystemTap::start(tap_prod) {
-                Ok(tap) => {
-                    let rate = tap.sample_rate() as u32;
-                    self.mixer.replace_tap(tap_cons, rate);
-                    self.tap = Some(tap);
-                    emit_system_audio_status(app, true, None);
-                }
-                Err(e) => {
-                    warn!("Tap rebuild failed, continuing mic-only: {e}");
-                    emit_system_audio_status(app, false, Some(e));
-                }
-            }
-            self.output_uid = current_uid;
-        }
+    fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {
+        use super::{aec, mixer, output_route};
 
         let speakers = self.tap.is_some() && output_route::output_is_builtin_speakers();
         if speakers != self.aec_active {
@@ -467,54 +440,8 @@ impl AudioCapture {
         let (mut mic_prod, mic_cons) = HeapRb::<f32>::new(mic_capacity).split();
         let (tap_prod, tap_cons) = HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
 
-        #[cfg(target_os = "macos")]
-        let (tap, tap_rate) = match super::system_tap::SystemTap::start(tap_prod) {
-            Ok(tap) => {
-                let rate = tap.sample_rate() as u32;
-                emit_system_audio_status(self.app.as_ref(), true, None);
-                (Some(tap), rate)
-            }
-            Err(e) => {
-                warn!("System audio capture unavailable, recording mic only: {e}");
-                emit_system_audio_status(self.app.as_ref(), false, Some(e));
-                (None, super::mixer::MIX_RATE)
-            }
-        };
-        #[cfg(not(target_os = "macos"))]
-        let tap_rate = {
-            drop(tap_prod);
-            super::mixer::MIX_RATE
-        };
-
-        let mut mixer = MeetingMixer::new(
-            mic_cons,
-            sample_rate,
-            channels,
-            mic_gain,
-            tap_cons,
-            tap_rate,
-            target_sample_rate,
-        );
-
-        // Echo cancellation only matters when system audio can leak from
-        // the speakers back into the mic — and only if we actually have the
-        // system-audio reference signal to cancel against.
-        #[cfg(target_os = "macos")]
-        let (aec_active, output_uid) = {
-            let speakers =
-                tap.is_some() && super::output_route::output_is_builtin_speakers();
-            if speakers {
-                info!("Built-in speakers detected — echo cancellation engaged");
-                mixer.set_aec(Some(super::aec::Aec::new(super::mixer::MIX_RATE)));
-            }
-            let uid = super::output_route::default_output_device()
-                .and_then(super::output_route::device_uid)
-                .ok();
-            (speakers, uid)
-        };
-        #[cfg(not(target_os = "macos"))]
-        let aec_active = false;
-
+        // Mic stream first: it's the session's pacing clock and must never
+        // be held hostage by tap startup (see system_tap.rs module docs).
         let active_session_id = Arc::clone(&self.active_session_id);
         let stream_failed = Arc::clone(&self.stream_failed);
         let err_fn = move |err: cpal::StreamError| {
@@ -536,19 +463,63 @@ impl AudioCapture {
                 None,
             )
             .map_err(|e| format!("Failed to build input stream: {e}"))?;
-
-        self.active_session_id.store(session_id, Ordering::Release);
         stream
             .play()
             .map_err(|e| format!("Failed to start stream: {e}"))?;
+
+        #[cfg(target_os = "macos")]
+        let (tap, tap_rate) =
+            match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
+                Ok(tap) => {
+                    let rate = tap.sample_rate;
+                    emit_system_audio_status(self.app.as_ref(), true, None);
+                    (Some(tap), rate)
+                }
+                Err(e) => {
+                    warn!("System audio capture unavailable, recording mic only: {e}");
+                    emit_system_audio_status(self.app.as_ref(), false, Some(e));
+                    (None, super::mixer::MIX_RATE)
+                }
+            };
+        #[cfg(not(target_os = "macos"))]
+        let tap_rate = {
+            drop(tap_prod);
+            super::mixer::MIX_RATE
+        };
+
+        let mut mixer = MeetingMixer::new(
+            mic_cons,
+            sample_rate,
+            channels,
+            mic_gain,
+            tap_cons,
+            tap_rate,
+            target_sample_rate,
+        );
+
+        // Echo cancellation only matters when system audio can leak from
+        // the speakers back into the mic — and only if we actually have the
+        // system-audio reference signal to cancel against.
+        #[cfg(target_os = "macos")]
+        let aec_active = {
+            let speakers =
+                tap.is_some() && super::output_route::output_is_builtin_speakers();
+            if speakers {
+                info!("Built-in speakers detected — echo cancellation engaged");
+                mixer.set_aec(Some(super::aec::Aec::new(super::mixer::MIX_RATE)));
+            }
+            speakers
+        };
+        #[cfg(not(target_os = "macos"))]
+        let aec_active = false;
+
+        self.active_session_id.store(session_id, Ordering::Release);
         self.stream = Some(stream);
         self.meeting = Some(MeetingState {
             session_id,
             mixer,
             #[cfg(target_os = "macos")]
             tap,
-            #[cfg(target_os = "macos")]
-            output_uid,
             aec_active,
             ticks: 0,
         });

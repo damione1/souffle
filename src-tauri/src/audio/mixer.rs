@@ -74,15 +74,6 @@ impl MeetingMixer {
         self.aec = aec;
     }
 
-    /// Swap in a new system-audio source mid-session (the tap is rebuilt
-    /// when the default output device changes). Buffered tap samples from
-    /// the old device are dropped; the mic leg is unaffected.
-    pub fn replace_tap(&mut self, tap: HeapCons<f32>, tap_rate: u32) {
-        self.tap = tap;
-        self.tap_to_mix = Resampler::new(tap_rate, 1, MIX_RATE, 1.0);
-        self.tap_fifo.clear();
-    }
-
     /// Drain both rings, mix every complete 10ms frame, and return the
     /// resulting engine-rate samples (possibly empty).
     pub fn tick(&mut self) -> Vec<f32> {

@@ -80,6 +80,8 @@ objc2-core-audio = "0.3"
 objc2-core-audio-types = "0.3"
 ringbuf = "0.5"
 sonora = "0.1"
+block2 = "0.6"
+dispatch2 = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

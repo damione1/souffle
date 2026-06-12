@@ -6016,6 +6016,7 @@ name = "souffle"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "block2 0.6.2",
  "candle-core",
  "candle-nn",
  "candle-transformers",
@@ -6023,6 +6024,7 @@ dependencies = [
  "cpal",
  "crossbeam-channel",
  "dirs-next",
+ "dispatch2",
  "enigo",
  "futures-util",
  "hf-hub",
