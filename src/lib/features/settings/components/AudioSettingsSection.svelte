@@ -7,12 +7,15 @@
   let {
     audioDevices,
     selectedDevice,
+    captureSystemAudio,
+    systemAudioSupported,
     vadEnabled,
     fillerRemoval,
     stutterCollapse,
     dictionaryCorrection,
     onDeviceChange,
     onRefreshDevices,
+    onCaptureSystemAudioChange,
     onVadEnabledChange,
     onFillerRemovalChange,
     onStutterCollapseChange,
@@ -20,12 +23,15 @@
   }: {
     audioDevices: AudioDeviceInfo[];
     selectedDevice: string;
+    captureSystemAudio: boolean;
+    systemAudioSupported: boolean;
     vadEnabled: boolean;
     fillerRemoval: boolean;
     stutterCollapse: boolean;
     dictionaryCorrection: boolean;
     onDeviceChange: (event: Event) => void | Promise<void>;
     onRefreshDevices: () => void | Promise<void>;
+    onCaptureSystemAudioChange: (event: Event) => void | Promise<void>;
     onVadEnabledChange: (event: Event) => void | Promise<void>;
     onFillerRemovalChange: (event: Event) => void | Promise<void>;
     onStutterCollapseChange: (event: Event) => void | Promise<void>;
@@ -52,6 +58,17 @@
       </button>
     </div>
   </div>
+
+  {#if systemAudioSupported}
+    <SettingsField
+      label={$t("settings_audio.capture_system_audio")}
+      description={$t("settings_audio.capture_system_audio_desc")}
+    >
+      {#snippet control()}
+        <input type="checkbox" checked={captureSystemAudio} onchange={onCaptureSystemAudioChange} class="switch" aria-label={$t("settings_audio.capture_system_audio")} />
+      {/snippet}
+    </SettingsField>
+  {/if}
 
   <SettingsField
     label={$t("settings_audio.vad_enabled")}

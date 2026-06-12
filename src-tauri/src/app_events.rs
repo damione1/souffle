@@ -66,3 +66,13 @@ pub struct PipelineError {
     pub scope: PipelineErrorScope,
     pub message: String,
 }
+
+/// State of the system-audio capture leg of a meeting session, emitted when
+/// the session starts and whenever the leg changes (e.g. tap rebuild after
+/// an output device switch).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct SystemAudioStatus {
+    pub active: bool,
+    /// Present when inactive because of an error (e.g. permission denied).
+    pub reason: Option<String>,
+}

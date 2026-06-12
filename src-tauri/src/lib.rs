@@ -85,6 +85,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::StateChanged,
             app_events::TranscriptionHealth,
             app_events::PipelineError,
+            app_events::SystemAudioStatus,
         ])
 }
 
@@ -165,6 +166,9 @@ pub fn run() {
                 *handle_guard = Some(app.handle().clone());
             }
             state.engine_actor.attach_app(app.handle().clone());
+            let _ = state
+                .audio_cmd_sender
+                .send(state::AudioCommand::AttachApp(app.handle().clone()));
 
             // Load shortcut settings from DB and register
             let state = app.state::<AppState>();

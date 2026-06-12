@@ -26,6 +26,9 @@ pub enum AudioCommand {
     },
     Stop,
     SelectDevice(String),
+    /// Give the audio thread an AppHandle so meeting mode can emit
+    /// SystemAudioStatus events.
+    AttachApp(AppHandle),
 }
 
 /// Accumulated meeting segments while recording

@@ -61,7 +61,9 @@ A polished, privacy-first desktop application for local speech-to-text transcrip
 ### Audio
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
-| Audio capture | cpal | 0.15.x | Microphone capture on macOS; system audio via BlackHole virtual device workaround |
+| Audio capture | cpal | 0.15.x | Microphone capture on macOS |
+| System audio capture | objc2-core-audio | 0.3.x | Core Audio process tap (macOS 14.4+) — native capture of all process output, no virtual device |
+| Echo cancellation | sonora | 0.1.x | Pure-Rust WebRTC AEC3; cancels speaker leakage from the mic during meetings |
 | Resampling | rubato | 0.15+ | High-quality resample to 24kHz mono f32 (Mimi/Kyutai requirement) |
 | Audio I/O | hound | 3.5+ | WAV debug capture / offline inspection |
 | VAD / end-of-turn | Kyutai semantic VAD heads | via moshi | Built-in end-of-turn scoring from the model |
@@ -348,11 +350,42 @@ Reference implementation: https://github.com/kyutai-labs/delayed-streams-modelin
   - users can re-run summarization on an existing meeting with a different model
 
 **Current technical limitations**
-- System audio capture is still not true native CoreAudio loopback; the practical workaround is selecting BlackHole as the input device.
 - The session-boundary fix is validated manually, not yet by an automated regression or soak test.
 - Summary quality still depends heavily on using a proper text-generation model in Ollama.
 
-### 3.7 Engine Actor Refactor (2026-06-11)
+### 3.7 Native system-audio capture for meetings (2026-06-12)
+
+Meeting mode now captures two audio sources with zero user configuration — no
+more Audio MIDI Setup aggregate devices or BlackHole:
+
+- **Microphone**: unchanged cpal capture.
+- **System audio**: a mono global Core Audio process tap (macOS 14.4+,
+  `CATapDescription` + `AudioHardwareCreateProcessTap`) wrapped in a private,
+  programmatically created aggregate device whose IOProc delivers the mixed
+  output of all processes. Requires the "System Audio Recording Only" TCC
+  permission (`NSAudioCaptureUsageDescription` in `Info.plist`); the prompt
+  fires on first tap creation. Denial or any tap failure degrades gracefully
+  to mic-only and surfaces a `SystemAudioStatus` event to the UI.
+
+**Topology** (`audio/mixer.rs`): both real-time callbacks (cpal, tap IOProc)
+only push raw samples into lock-free SPSC rings. While a meeting is active the
+audio thread's command loop switches from blocking `recv()` to a 5ms
+`recv_timeout()` tick that drives `MeetingMixer`: resample both legs to 48kHz,
+pair into 10ms frames (mic paces; missing tap = zeros), optional AEC, sum +
+clamp, resample to the engine rate, and forward `AudioMessage::Chunk` exactly
+as before — the engine actor and EndOfStream drain contract are untouched.
+Dictation keeps the original direct-callback path.
+
+**Echo cancellation** (`audio/aec.rs`): when the default output routes to the
+built-in speakers (transport `BuiltIn` + data source `'ispk'`), the tap leg is
+fed to a WebRTC AEC3 (`sonora`) as the render signal and the mic leg is
+processed as capture, so remote participants played out loud are not
+transcribed twice. With headphones the AEC is skipped entirely. The meeting
+tick re-checks the output route every ~2s, rebuilding the tap when the default
+output device changes and toggling AEC on speaker/headphone switches. Tap
+drift against the mic clock is bounded by dropping tap lead beyond 250ms.
+
+### 3.8 Engine Actor Refactor (2026-06-11)
 
 **Why:** adding the second engine (Whisper) and the Silero VAD filter exposed
 two failure classes. (1) The pipeline could silently stop transcribing: the
@@ -404,7 +437,7 @@ threads with manual ordering) kept the hazard alive for every new engine.
 **Trigger:** Manual start from app window or tray menu
 **Flow:**
 1. User selects "Start Meeting Recording" from tray menu or app window
-2. Audio capture starts from the currently selected input device (microphone, or BlackHole if the user wants system audio)
+2. Audio capture starts from the currently selected input device, plus a native system-audio tap (Core Audio process tap, macOS 14.4+) mixed in — capturing Teams/Zoom output with zero configuration
 3. Audio is streamed through the same persistent Kyutai inference pipeline used by dictation
 4. Live transcript segments are shown in the Recordings view while the meeting is active
 5. Tray icon shows "recording meeting" state (pulsing indicator)
@@ -698,7 +731,7 @@ Built with Tauri, Candle, and open-source technologies."
 
 ### Phase 3: Polish & Features (Target: 2 weeks) ✅ COMPLETE
 - [x] Dictation mode: auto-paste via clipboard + Cmd+V simulation
-- [x] Meeting recording mode: mic recording with live transcription (system audio deferred — BlackHole workaround documented)
+- [x] Meeting recording mode: mic recording with live transcription (native system-audio capture added 2026-06-12 via Core Audio process tap)
 - [x] Meeting transcript storage and history view (later migrated from JSON to SQLite in Phase 4)
 - [x] Ollama integration for meeting summarization (streaming)
 - [x] Settings UI: audio device, auto-paste, Ollama config, theme
@@ -797,7 +830,7 @@ Built with Tauri, Candle, and open-source technologies."
 **Distribution strategy: Direct website + notarized DMG (not App Store)**
 
 App Store is not viable for Souffle — sandboxing restrictions conflict with core features:
-- System audio capture (BlackHole virtual device workaround blocked in sandbox)
+- System audio capture via Core Audio process taps (TCC-gated, hostile to sandbox review)
 - Accessibility permission for auto-paste (`enigo` Cmd+V simulation) — gray area in App Store review
 - Global shortcuts outside the app window
 - Localhost network access to Ollama (`localhost:11434`) needs entitlement justification
@@ -1102,7 +1135,8 @@ Benefits ALL engines (Whisper, Kyutai, future Parakeet).
 |------|--------|------------|------------|
 | Candle Metal perf on M4 Pro insufficient for real-time 1B model | Critical | Medium | **Validate in Phase 2 ASAP.** Fallback: Whisper via whisper-rs (proven). Candle Metal is less optimized than whisper.cpp Metal. |
 | Kyutai stt-rs is demo-quality, not production-ready | High | Medium | Budget extra time to harden. Isolate in engine trait so replacement is cheap. |
-| Native CoreAudio loopback / system-audio capture on macOS remains fragile | High | Low | Current workaround is BlackHole as the selected input device. Longer-term fallback: ScreenCaptureKit or a different capture backend. |
+| ~~Native CoreAudio loopback / system-audio capture on macOS remains fragile~~ | ~~High~~ | ~~Low~~ | ✅ **Resolved on 2026-06-12**: native Core Audio process tap + programmatic aggregate device (macOS 14.4+), with mic-only graceful degradation. Fallback if needed: ScreenCaptureKit. |
+| sonora (pure-Rust WebRTC AEC3) is v0.1 and may have quality gaps | Medium | Medium | Isolated behind `audio/aec.rs` wrapper; drop-in fallback is the C++-backed `webrtc-audio-processing` crate. |
 | ~~Multi-session transcription leaked/contaminated audio between sessions~~ | ~~Critical~~ | ~~High~~ | ✅ **Resolved on 2026-03-19**: session-tagged audio chunks, callback-level `active_session_id` gating, stale-queue draining, serialized reset/start ordering, and clean Kyutai/Metal state rebuild. Add soak tests later. |
 | ~~Mimi codec sample rate mismatch~~ | ~~Medium~~ | ~~Medium~~ | ✅ **Resolved in Phase 2**: Confirmed 24kHz. Pipeline updated from 16kHz to 24kHz. |
 | macOS notarization rejects binary with Candle Metal shaders | Medium | Low | Test notarization early in Phase 2, not Phase 4. |
@@ -1121,7 +1155,11 @@ voxtral/
       lib.rs               # Re-exports
       audio/
         mod.rs             # Audio module exports
-        capture.rs         # cpal microphone + system audio capture
+        capture.rs         # cpal microphone capture + meeting mixer tick loop
+        system_tap.rs      # Core Audio process tap (system audio, macOS 14.4+)
+        mixer.rs           # Two-source meeting mixer (mic + system audio)
+        aec.rs             # Echo cancellation wrapper (sonora / WebRTC AEC3)
+        output_route.rs    # Default-output route detection (speakers vs headphones)
         resampler.rs       # rubato wrapper
       db/
         mod.rs             # SQLite database entry point

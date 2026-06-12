@@ -3,6 +3,7 @@ import type {
   AppStateMachine,
   AppView,
   PipelineError,
+  SystemAudioStatus,
   TranscriptionHealth,
   TranscriptionRuntimePhase,
 } from "../types";
@@ -28,6 +29,9 @@ let transcriptionRuntimePhase = $state<TranscriptionRuntimePhase>("download_requ
 
 // Latest pipeline health snapshot while recording (cleared when recording ends)
 let transcriptionHealth = $state<TranscriptionHealth | null>(null);
+
+// System-audio capture status for the current meeting session
+let systemAudioStatus = $state<SystemAudioStatus | null>(null);
 
 // Last pipeline error surfaced by the backend (dismissable)
 let pipelineError = $state<PipelineError | null>(null);
@@ -56,6 +60,7 @@ let settings = $state<AppSettings>({
   filler_removal: true,
   stutter_collapse: false,
   dictionary_correction: true,
+  capture_system_audio: true,
 });
 
 function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {
@@ -128,11 +133,15 @@ export function getAppState() {
       // Health snapshots only make sense while recording
       if (deriveRecordingMode(s) === "idle") {
         transcriptionHealth = null;
+        systemAudioStatus = null;
       }
     },
 
     get transcriptionHealth() { return transcriptionHealth; },
     set transcriptionHealth(h: TranscriptionHealth | null) { transcriptionHealth = h; },
+
+    get systemAudioStatus() { return systemAudioStatus; },
+    set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },
 
     get pipelineError() { return pipelineError; },
     set pipelineError(e: PipelineError | null) { pipelineError = e; },

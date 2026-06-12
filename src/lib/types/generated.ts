@@ -430,6 +430,7 @@ shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
 shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
+systemAudioStatus: SystemAudioStatus,
 transcriptionHealth: TranscriptionHealth
 }>({
 navigate: "navigate",
@@ -438,6 +439,7 @@ shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
 shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
+systemAudioStatus: "system-audio-status",
 transcriptionHealth: "transcription-health"
 })
 
@@ -522,6 +524,16 @@ export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
 export type StateChanged = AppStateMachine
 export type SummarizeProgress = { text: string; done: boolean }
+/**
+ * State of the system-audio capture leg of a meeting session, emitted when
+ * the session starts and whenever the leg changes (e.g. tap rebuild after
+ * an output device switch).
+ */
+export type SystemAudioStatus = { active: boolean; 
+/**
+ * Present when inactive because of an error (e.g. permission denied).
+ */
+reason: string | null }
 export type Theme = "dark" | "light" | "system"
 export type TranscriptionCapabilities = { supports_streaming: boolean; supports_batch_transcription: boolean; supports_language_auto_detect: boolean; supports_word_timestamps: boolean; supports_partial_results: boolean }
 export type TranscriptionCatalog = { engines: TranscriptionEngineDescriptor[]; selected_engine_id: string; selected_model_id: string; selected_backend_id: string }

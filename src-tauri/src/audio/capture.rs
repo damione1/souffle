@@ -12,6 +12,14 @@ use super::mixer::MeetingMixer;
 use super::resampler::Resampler;
 use crate::state::AudioCommand;
 
+/// Tell the frontend whether the system-audio leg of a meeting is live.
+fn emit_system_audio_status(app: Option<&tauri::AppHandle>, active: bool, reason: Option<String>) {
+    use tauri_specta::Event;
+    if let Some(app) = app {
+        let _ = crate::app_events::SystemAudioStatus { active, reason }.emit(app);
+    }
+}
+
 /// Mixer cadence while a meeting session is active. Rings hold ~2s, so the
 /// 5ms tick has plenty of slack; it only exists to pace the mixer, the
 /// real-time callbacks never wait on it.
@@ -44,7 +52,7 @@ impl MeetingState {
     /// and engage/disengage echo cancellation when switching between
     /// speakers and headphones.
     #[cfg(target_os = "macos")]
-    fn check_output_route(&mut self) {
+    fn check_output_route(&mut self, app: Option<&tauri::AppHandle>) {
         use super::{aec, mixer, output_route, system_tap};
 
         let current_uid = output_route::default_output_device()
@@ -61,9 +69,11 @@ impl MeetingState {
                     let rate = tap.sample_rate() as u32;
                     self.mixer.replace_tap(tap_cons, rate);
                     self.tap = Some(tap);
+                    emit_system_audio_status(app, true, None);
                 }
                 Err(e) => {
                     warn!("Tap rebuild failed, continuing mic-only: {e}");
+                    emit_system_audio_status(app, false, Some(e));
                 }
             }
             self.output_uid = current_uid;
@@ -83,7 +93,7 @@ impl MeetingState {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn check_output_route(&mut self) {}
+    fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {}
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +166,8 @@ pub struct AudioCapture {
     dropped_counter: Arc<AtomicU64>,
     /// Active meeting-mode session (mic + system audio mixed on this thread).
     meeting: Option<MeetingState>,
+    /// For emitting SystemAudioStatus events (set during app setup).
+    app: Option<tauri::AppHandle>,
 }
 
 impl AudioCapture {
@@ -184,6 +196,7 @@ impl AudioCapture {
                     resampler: None,
                     dropped_counter,
                     meeting: None,
+                    app: None,
                 };
 
                 // Block on commands; while a meeting is active, wake every
@@ -227,6 +240,9 @@ impl AudioCapture {
                         AudioCommand::SelectDevice(name) => {
                             info!("Selected input device: {name}");
                             capture.selected_device = Some(name);
+                        }
+                        AudioCommand::AttachApp(app) => {
+                            capture.app = Some(app);
                         }
                     }
                 }
@@ -398,10 +414,12 @@ impl AudioCapture {
         let (tap, tap_rate) = match super::system_tap::SystemTap::start(tap_prod) {
             Ok(tap) => {
                 let rate = tap.sample_rate() as u32;
+                emit_system_audio_status(self.app.as_ref(), true, None);
                 (Some(tap), rate)
             }
             Err(e) => {
                 warn!("System audio capture unavailable, recording mic only: {e}");
+                emit_system_audio_status(self.app.as_ref(), false, Some(e));
                 (None, super::mixer::MIX_RATE)
             }
         };
@@ -488,7 +506,7 @@ impl AudioCapture {
 
         meeting.ticks += 1;
         if meeting.ticks.is_multiple_of(ROUTE_CHECK_TICKS) {
-            meeting.check_output_route();
+            meeting.check_output_route(self.app.as_ref());
         }
 
         let samples = meeting.mixer.tick();

@@ -21,6 +21,7 @@ export type {
   Theme,
   HealthStatus,
   PipelineError,
+  SystemAudioStatus,
   TranscriptionHealth,
   TranscriptionCapabilities,
   TranscriptionCatalog,

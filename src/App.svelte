@@ -22,6 +22,8 @@
   let unlistenHealth: (() => void) | null = null;
   let unlistenPipelineError: (() => void) | null = null;
 
+  let unlistenSystemAudio: (() => void) | null = null;
+
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
   );
@@ -94,11 +96,18 @@
       unlistenPipelineError = fn;
     });
 
+    events.systemAudioStatus.listen((event) => {
+      app.systemAudioStatus = event.payload;
+    }).then((fn) => {
+      unlistenSystemAudio = fn;
+    });
+
     return () => {
       unlistenNav?.();
       unlistenState?.();
       unlistenHealth?.();
       unlistenPipelineError?.();
+      unlistenSystemAudio?.();
     };
   });
 </script>
