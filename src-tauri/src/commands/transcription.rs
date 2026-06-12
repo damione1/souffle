@@ -6,7 +6,7 @@ use tauri::ipc::Channel;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::constants::{AUDIO_FLUSH_MS, PIPELINE_DRAIN_TIMEOUT_SECS};
+use crate::constants::STOP_REPLY_TIMEOUT_SECS;
 use crate::lock_ext::MutexExt;
 use crate::pipeline::{SegmentCallback, SessionConfig};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator};
@@ -147,24 +147,23 @@ fn start_pipeline(state: &AppState, on_segment: SegmentCallback) -> Result<u64, 
 }
 
 /// Shared logic for stopping a recording session.
-/// Stops audio capture, then asks the actor to drain remaining audio and
-/// flush the engine.
+/// Stops audio capture (which emits an EndOfStream marker once its stream is
+/// dropped and the resampler flushed), then asks the actor to stop — the actor
+/// finishes when that marker arrives, so the drain is event-ordered, not timed.
 fn stop_pipeline(state: &AppState) -> Result<(), String> {
-    // 1. Stop audio capture FIRST
+    // Audio thread drops the cpal stream, flushes the resampler tail, and
+    // sends EndOfStream as the final message of this session.
     state
         .audio_cmd_sender
         .send(AudioCommand::Stop)
         .map_err(|e| format!("Audio stop: {e}"))?;
 
-    // 2. Wait for audio thread to flush its internal buffers
-    std::thread::sleep(Duration::from_millis(AUDIO_FLUSH_MS));
-
-    // 3. Stop the actor session — drains remaining audio and flushes engine.
+    // The actor drains everything up to EndOfStream and flushes the engine.
     // The timeout is last-resort safety; callers complete state transitions
     // even when this errors.
     let summary = state
         .engine_actor
-        .stop_session(Duration::from_secs(PIPELINE_DRAIN_TIMEOUT_SECS))?;
+        .stop_session(Duration::from_secs(STOP_REPLY_TIMEOUT_SECS))?;
     if crate::debug::transcription_debug_enabled() {
         tracing::debug!(
             frames = summary.frames_processed,

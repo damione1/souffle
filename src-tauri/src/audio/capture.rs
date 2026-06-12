@@ -1,8 +1,9 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use crossbeam_channel::{Receiver, Sender};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tracing::{debug, error, info, warn};
 
 use super::resampler::Resampler;
@@ -12,6 +13,18 @@ use crate::state::AudioCommand;
 pub struct AudioChunk {
     pub session_id: u64,
     pub samples: Vec<f32>,
+    /// When the chunk left the capture callback — used for lag tracking.
+    pub captured_at: Instant,
+}
+
+/// Messages flowing from the capture thread to the engine actor.
+#[derive(Debug, Clone)]
+pub enum AudioMessage {
+    Chunk(AudioChunk),
+    /// Sent after the cpal stream is dropped and the resampler flushed —
+    /// guaranteed to be the last message of a session, so the actor can
+    /// drain deterministically instead of sleeping.
+    EndOfStream { session_id: u64 },
 }
 
 /// Info about an available audio input device, sent to frontend
@@ -54,22 +67,26 @@ pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
 /// This struct lives on a dedicated thread because cpal's Stream is !Send on macOS.
 pub struct AudioCapture {
     stream: Option<Stream>,
-    audio_sender: Sender<AudioChunk>,
+    audio_sender: Sender<AudioMessage>,
     selected_device: Option<String>,
     active_session_id: Arc<AtomicU64>,
     audio_rms: Arc<AtomicU32>,
+    /// Shared with the cpal callback so stop() can flush the resampler tail
+    /// after the stream is dropped (no callback runs by then, so the lock
+    /// is uncontended).
+    resampler: Option<Arc<Mutex<Resampler>>>,
 }
 
 impl AudioCapture {
     /// Spawn the audio thread. Returns channels for commanding it and receiving audio.
     pub fn spawn(
         audio_rms: Arc<AtomicU32>,
-    ) -> Result<(Sender<AudioCommand>, Receiver<AudioChunk>), String> {
+    ) -> Result<(Sender<AudioCommand>, Receiver<AudioMessage>), String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
         // Bounded channel: many small chunks per second from cpal; inference (Kyutai/Metal)
         // can lag real-time. If this fills, try_send drops audio while RMS/waveform still
         // updates — use a generous bound so the inference thread can catch up.
-        let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioChunk>(512);
+        let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioMessage>(512);
 
         std::thread::Builder::new()
             .name("audio-capture".into())
@@ -80,6 +97,7 @@ impl AudioCapture {
                     selected_device: None,
                     active_session_id: Arc::new(AtomicU64::new(0)),
                     audio_rms,
+                    resampler: None,
                 };
 
                 // Block on commands from main thread
@@ -146,7 +164,13 @@ impl AudioCapture {
 
         info!("Audio config: {sample_rate}Hz, {channels}ch");
 
-        let mut resampler = Resampler::new(sample_rate, channels, target_sample_rate, mic_gain);
+        let resampler = Arc::new(Mutex::new(Resampler::new(
+            sample_rate,
+            channels,
+            target_sample_rate,
+            mic_gain,
+        )));
+        self.resampler = Some(Arc::clone(&resampler));
         let sender = self.audio_sender.clone();
         let active_session_id = Arc::clone(&self.active_session_id);
         let rms_ref = Arc::clone(&self.audio_rms);
@@ -167,7 +191,10 @@ impl AudioCapture {
                         return;
                     }
 
-                    let resampled = resampler.process(data);
+                    let resampled = match resampler.lock() {
+                        Ok(mut r) => r.process(data),
+                        Err(_) => return,
+                    };
                     if !resampled.is_empty() {
                         // Compute RMS for waveform visualization
                         let sum_sq: f32 = resampled.iter().map(|s| s * s).sum();
@@ -187,10 +214,11 @@ impl AudioCapture {
                             );
                         }
                         if sender
-                            .try_send(AudioChunk {
+                            .try_send(AudioMessage::Chunk(AudioChunk {
                                 session_id,
                                 samples: resampled,
-                            })
+                                captured_at: Instant::now(),
+                            }))
                             .is_err()
                         {
                             warn!("Audio buffer full, dropping samples");
@@ -213,9 +241,36 @@ impl AudioCapture {
     }
 
     fn stop(&mut self) {
-        self.active_session_id.store(0, Ordering::Release);
+        let session_id = self.active_session_id.swap(0, Ordering::AcqRel);
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
-        if self.stream.take().is_some() {
+
+        // Dropping the stream is synchronous — after this, no callback runs.
+        let had_stream = self.stream.take().is_some();
+
+        if session_id != 0 {
+            // Flush the resampler's remaining partial chunk so the last
+            // spoken samples reach the engine instead of being discarded.
+            if let Some(resampler) = self.resampler.take()
+                && let Ok(mut r) = resampler.lock()
+            {
+                let tail = r.flush();
+                if !tail.is_empty() {
+                    let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
+                        session_id,
+                        samples: tail,
+                        captured_at: Instant::now(),
+                    }));
+                }
+            }
+
+            // Blocking send: the consumer is draining, and EndOfStream must
+            // arrive — it is the signal the actor's stop waits on.
+            let _ = self
+                .audio_sender
+                .send(AudioMessage::EndOfStream { session_id });
+        }
+
+        if had_stream {
             info!("Audio capture stopped");
         }
     }

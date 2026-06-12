@@ -95,4 +95,32 @@ impl Resampler {
 
         resampled
     }
+
+    /// Flush the remaining partial chunk by zero-padding it to a full FFT
+    /// frame and resampling once. Called when capture stops so the last
+    /// spoken samples are not discarded; the zero tail is harmless silence.
+    pub fn flush(&mut self) -> Vec<f32> {
+        let Some(ref mut resampler) = self.resampler else {
+            return std::mem::take(&mut self.input_buffer);
+        };
+        if self.input_buffer.is_empty() {
+            return Vec::new();
+        }
+
+        let frames_needed = resampler.input_frames_next();
+        let mut chunk = std::mem::take(&mut self.input_buffer);
+        chunk.resize(frames_needed, 0.0);
+
+        let mut output = match resampler.process(&[chunk], None) {
+            Ok(result) => result[0].clone(),
+            Err(_) => return Vec::new(),
+        };
+
+        if self.gain != 1.0 {
+            for sample in &mut output {
+                *sample = (*sample * self.gain).clamp(-1.0, 1.0);
+            }
+        }
+        output
+    }
 }

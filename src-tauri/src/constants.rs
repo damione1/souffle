@@ -4,11 +4,11 @@ pub const SAMPLE_RATE: u32 = 24_000;
 /// Sample rate as f64 for duration calculations
 pub const SAMPLE_RATE_F64: f64 = 24_000.0;
 
-/// Milliseconds to wait for audio thread to flush its buffers after stop
-pub const AUDIO_FLUSH_MS: u64 = 300;
-
-/// Timeout for pipeline drain/flush on stop (seconds)
-pub const PIPELINE_DRAIN_TIMEOUT_SECS: u64 = 5;
+/// Last-resort timeout waiting for the engine actor's stop reply (seconds).
+/// The stop itself is event-ordered (EndOfStream marker); this only fires if
+/// the actor is wedged. Generous because the final drain can include real
+/// inference work on buffered audio.
+pub const STOP_REPLY_TIMEOUT_SECS: u64 = 15;
 
 /// 1.5 seconds of silence at 24kHz — used as suffix for flushing
 pub const SILENCE_SUFFIX_SAMPLES: usize = 36_000;

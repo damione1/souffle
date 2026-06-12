@@ -8,12 +8,12 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
 use tracing::{debug, error, info, warn};
 
-use crate::audio::AudioChunk;
+use crate::audio::AudioMessage;
 use crate::engine::{
     AudioInputRequirements, TranscriptionEngine, TranscriptionProfile, TranscriptionSegment,
 };
@@ -85,7 +85,7 @@ pub struct EngineActorHandle {
 
 impl EngineActorHandle {
     /// Spawn the actor thread. It owns the audio receiver and (eventually) the engine.
-    pub fn spawn(audio_rx: Receiver<AudioChunk>, factory: EngineFactory) -> Result<Self, String> {
+    pub fn spawn(audio_rx: Receiver<AudioMessage>, factory: EngineFactory) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EngineCommand>();
 
         let handle = std::thread::Builder::new()
@@ -215,7 +215,7 @@ impl Drop for EngineActorHandle {
 /// The actor itself — only ever touched by its own thread.
 struct EngineActor {
     cmd_rx: Receiver<EngineCommand>,
-    audio_rx: Receiver<AudioChunk>,
+    audio_rx: Receiver<AudioMessage>,
     factory: EngineFactory,
     engine: Option<Box<dyn TranscriptionEngine>>,
 }
@@ -404,10 +404,14 @@ impl EngineActor {
     }
 }
 
+/// How long stop waits for the audio thread's EndOfStream marker before
+/// draining anyway. Only reached if the audio thread died mid-session.
+const EOS_WAIT: Duration = Duration::from_secs(5);
+
 /// Process audio frames while the session is active.
 fn active_session_loop(
     cmd_rx: &Receiver<EngineCommand>,
-    audio_rx: &Receiver<AudioChunk>,
+    audio_rx: &Receiver<AudioMessage>,
     engine: &mut dyn TranscriptionEngine,
     on_segment: &SegmentCallback,
     session_id: u64,
@@ -417,6 +421,9 @@ fn active_session_loop(
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
     let mut audio_buffer: Vec<f32> = Vec::new();
     let mut summary = SessionSummary::default();
+    let mut eos_received = false;
+    // Stop request waiting for this session's EndOfStream marker.
+    let mut pending_stop: Option<(Sender<Result<SessionSummary, String>>, Instant)> = None;
 
     loop {
         // Check for commands (non-blocking)
@@ -425,16 +432,21 @@ fn active_session_loop(
                 if crate::debug::transcription_debug_enabled() {
                     debug!("Stopping ({} frames processed)", summary.frames_processed);
                 }
-                finish_session(
-                    audio_rx,
-                    engine,
-                    on_segment,
-                    session_id,
-                    text_filters,
-                    &mut audio_buffer,
-                    &mut summary,
-                );
-                return SessionEnd::Stopped(reply, summary);
+                if eos_received {
+                    finish_session(
+                        audio_rx,
+                        engine,
+                        on_segment,
+                        session_id,
+                        text_filters,
+                        &mut audio_buffer,
+                        &mut summary,
+                    );
+                    return SessionEnd::Stopped(reply, summary);
+                }
+                // All audio up to the stream drop is still in flight —
+                // keep consuming until EndOfStream arrives.
+                pending_stop = Some((reply, Instant::now()));
             }
             Ok(EngineCommand::Shutdown) => return SessionEnd::Shutdown,
             Ok(EngineCommand::LoadModel { reply, .. }) => {
@@ -452,9 +464,46 @@ fn active_session_loop(
             Err(_) => {}
         }
 
+        // Safety net: if stop was requested but EndOfStream never arrives
+        // (audio thread died), drain what we have and finish anyway.
+        if let Some((_, requested_at)) = &pending_stop
+            && requested_at.elapsed() > EOS_WAIT
+        {
+            warn!("End-of-stream marker never arrived; finishing session anyway");
+            let (reply, _) = pending_stop.take().expect("pending_stop checked above");
+            finish_session(
+                audio_rx,
+                engine,
+                on_segment,
+                session_id,
+                text_filters,
+                &mut audio_buffer,
+                &mut summary,
+            );
+            return SessionEnd::Stopped(reply, summary);
+        }
+
         // Read audio with short timeout so command checks stay responsive
         match audio_rx.recv_timeout(Duration::from_millis(50)) {
-            Ok(chunk) => {
+            Ok(AudioMessage::EndOfStream { session_id: eos_id }) => {
+                if eos_id != session_id {
+                    continue; // stale marker from a previous session
+                }
+                eos_received = true;
+                if let Some((reply, _)) = pending_stop.take() {
+                    finish_session(
+                        audio_rx,
+                        engine,
+                        on_segment,
+                        session_id,
+                        text_filters,
+                        &mut audio_buffer,
+                        &mut summary,
+                    );
+                    return SessionEnd::Stopped(reply, summary);
+                }
+            }
+            Ok(AudioMessage::Chunk(chunk)) => {
                 if chunk.session_id != session_id {
                     summary.skipped_chunks += 1;
                     if crate::debug::transcription_debug_enabled()
@@ -515,7 +564,7 @@ fn active_session_loop(
 
 /// Drain remaining audio, run it through the engine, and flush.
 fn finish_session(
-    audio_rx: &Receiver<AudioChunk>,
+    audio_rx: &Receiver<AudioMessage>,
     engine: &mut dyn TranscriptionEngine,
     on_segment: &SegmentCallback,
     session_id: u64,
@@ -525,15 +574,17 @@ fn finish_session(
 ) {
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
 
-    // Drain ALL remaining audio from the channel. Audio capture was stopped
-    // before this command was sent, so we just collect what's left.
+    // Collect anything still queued (normally nothing — EndOfStream is the
+    // last message — but the EOS-timeout path can leave chunks behind).
     let mut drained = 0usize;
-    while let Ok(chunk) = audio_rx.try_recv() {
-        if chunk.session_id == session_id {
-            audio_buffer.extend_from_slice(&chunk.samples);
-            drained += 1;
-        } else {
-            summary.skipped_chunks += 1;
+    while let Ok(msg) = audio_rx.try_recv() {
+        match msg {
+            AudioMessage::Chunk(chunk) if chunk.session_id == session_id => {
+                audio_buffer.extend_from_slice(&chunk.samples);
+                drained += 1;
+            }
+            AudioMessage::Chunk(_) => summary.skipped_chunks += 1,
+            AudioMessage::EndOfStream { .. } => {}
         }
     }
     if drained > 0 && crate::debug::transcription_debug_enabled() {
@@ -610,7 +661,7 @@ mod tests {
 
     use crossbeam_channel::{Sender, unbounded};
 
-    use crate::audio::AudioChunk;
+    use crate::audio::{AudioChunk, AudioMessage};
     use crate::constants::MIMI_FRAME_SIZE;
     use crate::engine::mock::MockEngine;
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
@@ -648,17 +699,22 @@ mod tests {
         }
     }
 
-    /// Helper: create an AudioChunk with MIMI_FRAME_SIZE samples for the given session.
-    fn audio_chunk(session_id: u64) -> AudioChunk {
-        AudioChunk {
+    /// Helper: create a chunk message with MIMI_FRAME_SIZE samples for the given session.
+    fn audio_chunk(session_id: u64) -> AudioMessage {
+        AudioMessage::Chunk(AudioChunk {
             session_id,
             samples: vec![0.0f32; MIMI_FRAME_SIZE],
-        }
+            captured_at: std::time::Instant::now(),
+        })
+    }
+
+    fn end_of_stream(session_id: u64) -> AudioMessage {
+        AudioMessage::EndOfStream { session_id }
     }
 
     /// Spawn an actor whose factory hands out the given pre-configured mock
     /// (built on the actor thread, mirroring how production uses create_engine).
-    fn spawn_with_mock(mock: MockEngine) -> (EngineActorHandle, Sender<AudioChunk>) {
+    fn spawn_with_mock(mock: MockEngine) -> (EngineActorHandle, Sender<AudioMessage>) {
         let (audio_tx, audio_rx) = unbounded();
         let cell = Mutex::new(Some(mock));
         let actor = EngineActorHandle::spawn(
@@ -708,7 +764,7 @@ mod tests {
         for _ in 0..3 {
             audio_tx.send(audio_chunk(1)).unwrap();
         }
-        std::thread::sleep(Duration::from_millis(300));
+        audio_tx.send(end_of_stream(1)).unwrap();
 
         actor
             .stop_session(Duration::from_secs(2))
@@ -730,7 +786,7 @@ mod tests {
             .start_session(1, session_config(), Box::new(|_| {}))
             .expect("start");
         audio_tx.send(audio_chunk(1)).unwrap();
-        std::thread::sleep(Duration::from_millis(100));
+        audio_tx.send(end_of_stream(1)).unwrap();
 
         actor
             .stop_session(Duration::from_secs(2))
@@ -740,11 +796,11 @@ mod tests {
     #[test]
     fn actor_flush_on_stop() {
         let mock = MockEngine::new().with_flush_response(Ok(vec![seg("flushed")]));
-        let (actor, _audio_tx) = spawn_with_mock(mock);
+        let (actor, audio_tx) = spawn_with_mock(mock);
 
         let (collected, cb) = collecting_callback();
         actor.start_session(1, session_config(), cb).expect("start");
-        std::thread::sleep(Duration::from_millis(100));
+        audio_tx.send(end_of_stream(1)).unwrap();
 
         actor.stop_session(Duration::from_secs(2)).expect("stop");
 
@@ -757,28 +813,58 @@ mod tests {
     }
 
     #[test]
-    fn actor_drains_remaining_on_stop() {
+    fn actor_drains_all_audio_sent_before_stop() {
         let mock = MockEngine::new().with_transcribe_response(Ok(vec![seg("drained")]), 5);
         let (actor, audio_tx) = spawn_with_mock(mock);
 
         let (collected, cb) = collecting_callback();
         actor.start_session(1, session_config(), cb).expect("start");
 
-        // Send multiple chunks quickly, then immediately stop. Some will be
-        // processed in the active loop, the rest drained during stop.
+        // Send multiple chunks then EndOfStream, then immediately stop.
+        // Stop waits for EndOfStream, so every chunk must be transcribed —
+        // deterministically, without sleeps.
         for _ in 0..5 {
             audio_tx.send(audio_chunk(1)).unwrap();
         }
+        audio_tx.send(end_of_stream(1)).unwrap();
 
         let summary = actor.stop_session(Duration::from_secs(2)).expect("stop");
-        assert!(summary.frames_processed >= 1);
+        assert_eq!(summary.frames_processed, 5);
 
         let segments = collected.lock().unwrap();
         let drained_count = segments.iter().filter(|s| s.text == "drained").count();
-        assert!(
-            drained_count >= 1,
-            "Expected at least 1 'drained' segment from queued audio, got {drained_count}"
+        assert_eq!(
+            drained_count, 5,
+            "All chunks sent before EndOfStream must be transcribed"
         );
+    }
+
+    #[test]
+    fn actor_stop_before_audio_waits_for_end_of_stream() {
+        let mock = MockEngine::new().with_transcribe_response(Ok(vec![seg("late")]), 2);
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        let (collected, cb) = collecting_callback();
+        actor.start_session(1, session_config(), cb).expect("start");
+
+        // Request stop on a separate thread BEFORE any audio arrives, then
+        // deliver audio + EndOfStream. The stop must wait and still process it.
+        let stopper = {
+            let audio_tx = audio_tx.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(100));
+                audio_tx.send(audio_chunk(1)).unwrap();
+                audio_tx.send(audio_chunk(1)).unwrap();
+                audio_tx.send(end_of_stream(1)).unwrap();
+            })
+        };
+
+        let summary = actor.stop_session(Duration::from_secs(3)).expect("stop");
+        stopper.join().unwrap();
+
+        assert_eq!(summary.frames_processed, 2);
+        let segments = collected.lock().unwrap();
+        assert_eq!(segments.iter().filter(|s| s.text == "late").count(), 2);
     }
 
     #[test]
@@ -796,7 +882,7 @@ mod tests {
             .start_session(1, session_config(), cb1)
             .expect("start session 1");
         audio_tx.send(audio_chunk(1)).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
+        audio_tx.send(end_of_stream(1)).unwrap();
         actor
             .stop_session(Duration::from_secs(2))
             .expect("stop session 1");
@@ -807,7 +893,7 @@ mod tests {
             .start_session(2, session_config(), cb2)
             .expect("start session 2");
         audio_tx.send(audio_chunk(2)).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
+        audio_tx.send(end_of_stream(2)).unwrap();
         actor
             .stop_session(Duration::from_secs(2))
             .expect("stop session 2");
@@ -832,18 +918,15 @@ mod tests {
         let (collected, cb) = collecting_callback();
         actor.start_session(2, session_config(), cb).expect("start");
 
-        // Send stale chunks (session_id=1, but active session is 2)
+        // Stale chunks (session_id=1), then one valid chunk (session_id=2)
         for _ in 0..3 {
             audio_tx.send(audio_chunk(1)).unwrap();
         }
-        std::thread::sleep(Duration::from_millis(200));
-
-        // Now send one valid chunk (session_id=2)
         audio_tx.send(audio_chunk(2)).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
+        audio_tx.send(end_of_stream(2)).unwrap();
 
         let summary = actor.stop_session(Duration::from_secs(2)).expect("stop");
-        assert!(summary.skipped_chunks >= 3, "stale chunks should be counted");
+        assert_eq!(summary.skipped_chunks, 3, "stale chunks should be counted");
 
         let segments = collected.lock().unwrap();
         let fresh_count = segments.iter().filter(|s| s.text == "fresh").count();
@@ -855,7 +938,7 @@ mod tests {
 
     #[test]
     fn actor_start_without_model_fails() {
-        let (audio_tx, audio_rx) = unbounded::<AudioChunk>();
+        let (audio_tx, audio_rx) = unbounded::<AudioMessage>();
         let _keep = audio_tx;
         let actor = EngineActorHandle::spawn(
             audio_rx,
