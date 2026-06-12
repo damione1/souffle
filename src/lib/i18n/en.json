@@ -271,5 +271,20 @@
     "lagging": "Transcription is running behind the audio — words may appear with a delay.",
     "stalled": "Transcription appears stalled — audio is queuing up without being processed.",
     "recover": "Retry"
+  },
+  "onboarding": {
+    "tagline": "Local speech-to-text for dictation and meetings.",
+    "local_note": "100% local — nothing ever leaves your Mac. No account, no cloud.",
+    "model_label": "Transcription model",
+    "model_hint": "Downloaded once (1–2 GB), then everything runs offline. You can switch models later in Settings.",
+    "start_button": "Download and get started",
+    "downloading": "Downloading the model…",
+    "loading": "Loading the model…"
+  },
+  "status_chip": {
+    "ready": "Ready",
+    "loading": "Loading model…",
+    "downloading": "Downloading",
+    "model_required": "Model required"
   }
 }

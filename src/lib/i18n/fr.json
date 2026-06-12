@@ -271,5 +271,20 @@
     "lagging": "La transcription prend du retard sur l'audio — les mots peuvent apparaître avec un délai.",
     "stalled": "La transcription semble bloquée — l'audio s'accumule sans être traité.",
     "recover": "Réessayer"
+  },
+  "onboarding": {
+    "tagline": "Transcription vocale locale pour la dictée et les meetings.",
+    "local_note": "100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud.",
+    "model_label": "Modèle de transcription",
+    "model_hint": "Téléchargé une seule fois (1–2 Go), puis tout fonctionne hors ligne. Changeable plus tard dans les réglages.",
+    "start_button": "Télécharger et commencer",
+    "downloading": "Téléchargement du modèle…",
+    "loading": "Chargement du modèle…"
+  },
+  "status_chip": {
+    "ready": "Prêt",
+    "loading": "Chargement du modèle…",
+    "downloading": "Téléchargement",
+    "model_required": "Modèle requis"
   }
 }

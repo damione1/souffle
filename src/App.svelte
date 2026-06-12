@@ -10,12 +10,19 @@
   import { events } from "./lib/api/generated";
   import { recoverState } from "./lib/api/transcription";
   import { bootstrapAppState } from "./lib/bootstrap";
+  import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
   import { notifyMeetingAborted } from "./lib/features/meeting/controller.svelte";
-  import { notifyDictationAborted } from "./lib/features/transcription/controller.svelte";
+  import {
+    createTranscriptionController,
+    notifyDictationAborted,
+  } from "./lib/features/transcription/controller.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
   import { errorMessage } from "./lib/utils";
 
   const app = getAppState();
+  // Mounted app-level so the global dictation shortcut works whatever view
+  // (or the onboarding screen) is displayed.
+  const transcription = createTranscriptionController();
 
   let unlistenNav: (() => void) | null = null;
   let unlistenState: (() => void) | null = null;
@@ -59,12 +66,14 @@
   }
 
   onMount(() => {
+    let cleanupTranscription = () => {};
     (async () => {
       try {
         await bootstrapAppState(app);
       } catch {
         // First run, no settings yet.
       }
+      cleanupTranscription = (await transcription.mount()) ?? (() => {});
     })();
 
     events.navigate.listen((event) => {
@@ -103,6 +112,7 @@
     });
 
     return () => {
+      cleanupTranscription();
       unlistenNav?.();
       unlistenState?.();
       unlistenHealth?.();
@@ -112,6 +122,9 @@
   });
 </script>
 
+{#if app.showOnboarding}
+  <OnboardingView />
+{:else}
 <div class="flex h-screen overflow-hidden">
   <Sidebar />
 
@@ -173,3 +186,4 @@
     <Waveform active={app.isRecording} />
   </div>
 </div>
+{/if}

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { createTranscriptionController } from "../features/transcription/controller.svelte";
   import HistorySection from "../features/transcription/components/HistorySection.svelte";
   import RecorderSection from "../features/transcription/components/RecorderSection.svelte";
@@ -7,17 +6,9 @@
   import TranscriptSection from "../features/transcription/components/TranscriptSection.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
+  // The controller is a singleton mounted by App.svelte (shortcut listeners
+  // must outlive this view).
   const controller = createTranscriptionController();
-
-  onMount(() => {
-    let cleanup = () => {};
-
-    void (async () => {
-      cleanup = (await controller.mount()) ?? (() => {});
-    })();
-
-    return () => cleanup();
-  });
 </script>
 
 <div class="flex flex-col gap-4">

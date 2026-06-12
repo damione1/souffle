@@ -33,6 +33,9 @@ let transcriptionHealth = $state<TranscriptionHealth | null>(null);
 // System-audio capture status for the current meeting session
 let systemAudioStatus = $state<SystemAudioStatus | null>(null);
 
+// First-run onboarding (model not downloaded yet) — derived at bootstrap
+let showOnboarding = $state(false);
+
 // Last pipeline error surfaced by the backend (dismissable)
 let pipelineError = $state<PipelineError | null>(null);
 
@@ -142,6 +145,9 @@ export function getAppState() {
 
     get systemAudioStatus() { return systemAudioStatus; },
     set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },
+
+    get showOnboarding() { return showOnboarding; },
+    set showOnboarding(v: boolean) { showOnboarding = v; },
 
     get pipelineError() { return pipelineError; },
     set pipelineError(e: PipelineError | null) { pipelineError = e; },
