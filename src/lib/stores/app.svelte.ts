@@ -1,4 +1,11 @@
-import type { AppSettings, AppStateMachine, AppView, TranscriptionRuntimePhase } from "../types";
+import type {
+  AppSettings,
+  AppStateMachine,
+  AppView,
+  PipelineError,
+  TranscriptionHealth,
+  TranscriptionRuntimePhase,
+} from "../types";
 import type { TranscriptionModelOperationState } from "../features/transcription/state";
 
 // Current view
@@ -18,6 +25,12 @@ let machineState = $state<AppStateMachine>({ state: "idle" });
 // model in settings (machine stays Ready with old profile while the UI
 // shows "download required" for the new one).
 let transcriptionRuntimePhase = $state<TranscriptionRuntimePhase>("download_required");
+
+// Latest pipeline health snapshot while recording (cleared when recording ends)
+let transcriptionHealth = $state<TranscriptionHealth | null>(null);
+
+// Last pipeline error surfaced by the backend (dismissable)
+let pipelineError = $state<PipelineError | null>(null);
 
 // Download progress — pure UI state, not derivable from machine
 let downloadFile = $state("");
@@ -112,7 +125,17 @@ export function getAppState() {
       if (deriveModelOperationState(s) === "idle") {
         transcriptionRuntimePhase = deriveRuntimePhase(s);
       }
+      // Health snapshots only make sense while recording
+      if (deriveRecordingMode(s) === "idle") {
+        transcriptionHealth = null;
+      }
     },
+
+    get transcriptionHealth() { return transcriptionHealth; },
+    set transcriptionHealth(h: TranscriptionHealth | null) { transcriptionHealth = h; },
+
+    get pipelineError() { return pipelineError; },
+    set pipelineError(e: PipelineError | null) { pipelineError = e; },
 
     // Derived from machineState — no separate $state
     get isRecording() {

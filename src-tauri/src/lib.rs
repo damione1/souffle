@@ -80,26 +80,32 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::ShortcutPttStart,
             app_events::ShortcutPttStop,
             app_events::StateChanged,
+            app_events::TranscriptionHealth,
+            app_events::PipelineError,
         ])
 }
 
 pub fn run() {
     // Create the shared audio RMS level
     let audio_rms = Arc::new(std::sync::atomic::AtomicU32::new(0f32.to_bits()));
+    // Chunks dropped by the capture callback — read by the actor for health reporting
+    let dropped_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     // Spawn the audio thread before Tauri starts (cpal Stream is !Send on macOS)
-    let (cmd_tx, audio_rx) = match AudioCapture::spawn(Arc::clone(&audio_rms)) {
-        Ok(channels) => channels,
-        Err(e) => {
-            tracing::error!("Fatal: {e}");
-            std::process::exit(1);
-        }
-    };
+    let (cmd_tx, audio_rx) =
+        match AudioCapture::spawn(Arc::clone(&audio_rms), Arc::clone(&dropped_counter)) {
+            Ok(channels) => channels,
+            Err(e) => {
+                tracing::error!("Fatal: {e}");
+                std::process::exit(1);
+            }
+        };
 
     // Spawn the engine actor — the single thread that owns the transcription
     // engine and consumes captured audio.
     let engine_actor = match pipeline::EngineActorHandle::spawn(
         audio_rx,
+        dropped_counter,
         Box::new(|profile| engine::create_engine(profile)),
     ) {
         Ok(actor) => actor,
@@ -155,6 +161,7 @@ pub fn run() {
                     .map_err(|e| format!("Lock poisoned: {e}"))?;
                 *handle_guard = Some(app.handle().clone());
             }
+            state.engine_actor.attach_app(app.handle().clone());
 
             // Load shortcut settings from DB and register
             let state = app.state::<AppState>();

@@ -260,5 +260,11 @@
     "yes": "Oui",
     "are_you_sure": "Êtes-vous sûr ?",
     "cancel": "Annuler"
+  },
+  "pipeline": {
+    "error": "Erreur de transcription",
+    "dismiss": "Fermer",
+    "lagging": "La transcription prend du retard sur l'audio — les mots peuvent apparaître avec un délai.",
+    "stalled": "La transcription semble bloquée — l'audio s'accumule sans être traité."
   }
 }

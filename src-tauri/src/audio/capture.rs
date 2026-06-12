@@ -75,12 +75,17 @@ pub struct AudioCapture {
     /// after the stream is dropped (no callback runs by then, so the lock
     /// is uncontended).
     resampler: Option<Arc<Mutex<Resampler>>>,
+    /// Counts chunks dropped because the audio channel was full.
+    dropped_counter: Arc<AtomicU64>,
 }
 
 impl AudioCapture {
     /// Spawn the audio thread. Returns channels for commanding it and receiving audio.
+    /// `dropped_counter` is incremented for every chunk lost to a full channel;
+    /// the engine actor resets and reads it for health reporting.
     pub fn spawn(
         audio_rms: Arc<AtomicU32>,
+        dropped_counter: Arc<AtomicU64>,
     ) -> Result<(Sender<AudioCommand>, Receiver<AudioMessage>), String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
         // Bounded channel: many small chunks per second from cpal; inference (Kyutai/Metal)
@@ -98,6 +103,7 @@ impl AudioCapture {
                     active_session_id: Arc::new(AtomicU64::new(0)),
                     audio_rms,
                     resampler: None,
+                    dropped_counter,
                 };
 
                 // Block on commands from main thread
@@ -174,6 +180,7 @@ impl AudioCapture {
         let sender = self.audio_sender.clone();
         let active_session_id = Arc::clone(&self.active_session_id);
         let rms_ref = Arc::clone(&self.audio_rms);
+        let dropped_counter = Arc::clone(&self.dropped_counter);
 
         let err_fn = |err: cpal::StreamError| {
             error!("Audio stream error: {err}");
@@ -221,7 +228,10 @@ impl AudioCapture {
                             }))
                             .is_err()
                         {
-                            warn!("Audio buffer full, dropping samples");
+                            let dropped = dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                            if dropped == 1 || dropped.is_multiple_of(100) {
+                                warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
+                            }
                         }
                     }
                 },
@@ -263,11 +273,21 @@ impl AudioCapture {
                 }
             }
 
-            // Blocking send: the consumer is draining, and EndOfStream must
-            // arrive — it is the signal the actor's stop waits on.
-            let _ = self
+            // EndOfStream is the signal the actor's stop waits on. The actor
+            // is normally draining, so this sends immediately; the timeout
+            // only matters if no one is consuming (e.g. session aborted) —
+            // then we give up rather than wedge the audio thread, and the
+            // actor's own EOS-wait deadline covers the stop path.
+            if self
                 .audio_sender
-                .send(AudioMessage::EndOfStream { session_id });
+                .send_timeout(
+                    AudioMessage::EndOfStream { session_id },
+                    std::time::Duration::from_secs(1),
+                )
+                .is_err()
+            {
+                warn!("Could not deliver end-of-stream marker (channel full or closed)");
+            }
         }
 
         if had_stream {

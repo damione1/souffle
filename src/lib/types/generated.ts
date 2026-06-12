@@ -407,16 +407,20 @@ async clearDictionary() : Promise<Result<null, string>> {
 
 export const events = __makeEvents__<{
 navigate: Navigate,
+pipelineError: PipelineError,
 shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
 shortcutToggle: ShortcutToggle,
-stateChanged: StateChanged
+stateChanged: StateChanged,
+transcriptionHealth: TranscriptionHealth
 }>({
 navigate: "navigate",
+pipelineError: "pipeline-error",
 shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
 shortcutToggle: "shortcut-toggle",
-stateChanged: "state-changed"
+stateChanged: "state-changed",
+transcriptionHealth: "transcription-health"
 })
 
 /** user-defined constants **/
@@ -449,6 +453,15 @@ export type DictionaryEntry = { id: number; term: string; phonetic_code: string 
 export type DownloadProgress = { file: string; downloaded_bytes: number; total_bytes: number | null; completed_files: number; total_files: number; status: DownloadStatus }
 export type DownloadStatus = "starting" | "downloading" | "complete" | { error: string }
 export type ErrorRecovery = "retry_from_idle" | { retry_from_downloaded: { profile: TranscriptionProfile } } | { retry_from_ready: { profile: TranscriptionProfile } }
+export type HealthStatus = "healthy" | 
+/**
+ * Inference is behind real-time, or audio chunks were dropped.
+ */
+"lagging" | 
+/**
+ * No frame has been processed for several seconds while audio is queued.
+ */
+"stalled"
 /**
  * Lightweight item for listing meetings
  */
@@ -462,6 +475,19 @@ export type ModelArtifactDescriptor = { id: string; label: string; description: 
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
 export type OllamaStatus = { available: boolean; base_url: string; models: OllamaModelDescriptor[] }
+/**
+ * Pipeline failure surfaced to the frontend instead of dying silently in logs.
+ */
+export type PipelineError = { scope: PipelineErrorScope; message: string }
+export type PipelineErrorScope = 
+/**
+ * A single frame failed to transcribe and was skipped.
+ */
+"frame" | 
+/**
+ * The session was aborted (e.g. repeated engine failures).
+ */
+"session"
 export type RecordingKind = "dictation" | { meeting: { meeting_id: string } }
 /**
  * Search result from FTS5 full-text search
@@ -477,6 +503,22 @@ export type Theme = "dark" | "light" | "system"
 export type TranscriptionCapabilities = { supports_streaming: boolean; supports_batch_transcription: boolean; supports_language_auto_detect: boolean; supports_word_timestamps: boolean; supports_partial_results: boolean }
 export type TranscriptionCatalog = { engines: TranscriptionEngineDescriptor[]; selected_engine_id: string; selected_model_id: string; selected_backend_id: string }
 export type TranscriptionEngineDescriptor = { id: string; label: string; description: string; models: TranscriptionModelDescriptor[] }
+/**
+ * Periodic pipeline health snapshot emitted during recording sessions.
+ */
+export type TranscriptionHealth = { session_id: number; status: HealthStatus; 
+/**
+ * Audio chunks waiting in the capture→inference channel.
+ */
+queue_depth: number; 
+/**
+ * Age of the most-delayed chunk processed in the last window (ms).
+ */
+lag_ms: number; 
+/**
+ * Chunks dropped by the capture callback since the session started.
+ */
+dropped_chunks: number }
 export type TranscriptionModelDescriptor = { id: string; label: string; description: string; download_size_bytes: number | null; recommended_memory_bytes: number | null; supported_languages: string[]; capabilities: TranscriptionCapabilities; audio_input: AudioInputRequirements; available_in_app: boolean; availability_note: string | null; backends: TranscriptionRuntimeBackendDescriptor[]; recommended_backend_id: string }
 export type TranscriptionProfile = { engine_id: string; engine_label: string; model_id: string; model_label: string; backend_id?: string; backend_label?: string }
 export type TranscriptionProfileSelection = { engine_id: string; model_id: string; backend_id: string }

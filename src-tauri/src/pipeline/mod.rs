@@ -1,6 +1,7 @@
 //! Transcription pipeline: the engine actor and its session types.
 
 mod actor;
+mod health;
 
 pub use actor::{
     EngineActorHandle, EngineCommand, EngineFactory, EngineInfo, SessionConfig, SessionSummary,

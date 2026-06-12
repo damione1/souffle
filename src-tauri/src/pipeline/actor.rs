@@ -8,11 +8,16 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
+use tauri::Manager;
+use tauri_specta::Event;
 use tracing::{debug, error, info, warn};
 
+use crate::app_events::{PipelineError, PipelineErrorScope};
 use crate::audio::AudioMessage;
 use crate::engine::{
     AudioInputRequirements, TranscriptionEngine, TranscriptionProfile, TranscriptionSegment,
@@ -24,6 +29,7 @@ use crate::filter::{
 use crate::platform::with_autorelease_pool;
 
 use super::SegmentCallback;
+use super::health::SessionHealth;
 
 /// Creates engines ON the actor thread. Production uses `crate::engine::create_engine`;
 /// tests inject factories that produce mock engines.
@@ -43,6 +49,8 @@ pub struct EngineInfo {
 pub struct SessionSummary {
     pub frames_processed: u64,
     pub skipped_chunks: u64,
+    /// Chunks the capture callback dropped because the channel was full.
+    pub dropped_chunks: u64,
 }
 
 /// Snapshot of settings the actor needs to build filter chains for a session.
@@ -52,6 +60,9 @@ pub struct SessionConfig {
 }
 
 pub enum EngineCommand {
+    /// Give the actor an AppHandle so it can emit health/error events and
+    /// fail the state machine on mid-session fatalities. Sent once in setup.
+    AttachApp(tauri::AppHandle),
     LoadModel {
         profile: TranscriptionProfile,
         model_dir: PathBuf,
@@ -85,7 +96,12 @@ pub struct EngineActorHandle {
 
 impl EngineActorHandle {
     /// Spawn the actor thread. It owns the audio receiver and (eventually) the engine.
-    pub fn spawn(audio_rx: Receiver<AudioMessage>, factory: EngineFactory) -> Result<Self, String> {
+    /// `dropped_counter` is shared with the audio capture callback for health reporting.
+    pub fn spawn(
+        audio_rx: Receiver<AudioMessage>,
+        dropped_counter: Arc<AtomicU64>,
+        factory: EngineFactory,
+    ) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EngineCommand>();
 
         let handle = std::thread::Builder::new()
@@ -96,6 +112,8 @@ impl EngineActorHandle {
                     audio_rx,
                     factory,
                     engine: None,
+                    app: None,
+                    dropped_counter,
                 }
                 .run();
             })
@@ -124,6 +142,11 @@ impl EngineActorHandle {
                 .recv()
                 .map_err(|_| "Engine actor disconnected".to_string())?,
         }
+    }
+
+    /// Fire-and-forget: hand the actor an AppHandle for event emission.
+    pub fn attach_app(&self, app: tauri::AppHandle) {
+        let _ = self.cmd_tx.send(EngineCommand::AttachApp(app));
     }
 
     /// Load (or swap to) a model. Blocks for the duration of the load —
@@ -218,6 +241,8 @@ struct EngineActor {
     audio_rx: Receiver<AudioMessage>,
     factory: EngineFactory,
     engine: Option<Box<dyn TranscriptionEngine>>,
+    app: Option<tauri::AppHandle>,
+    dropped_counter: Arc<AtomicU64>,
 }
 
 /// Outcome of an active session loop.
@@ -226,6 +251,8 @@ enum SessionEnd {
     Stopped(Sender<Result<SessionSummary, String>>, SessionSummary),
     /// Session never started — error already reported on the setup reply.
     SetupFailed,
+    /// Session aborted mid-recording (e.g. repeated engine failures).
+    Aborted(String),
     /// Shutdown requested mid-session.
     Shutdown,
     /// Audio channel disconnected — nothing more can ever be transcribed.
@@ -244,6 +271,9 @@ impl EngineActor {
             };
 
             match cmd {
+                EngineCommand::AttachApp(app) => {
+                    self.app = Some(app);
+                }
                 EngineCommand::LoadModel {
                     profile,
                     model_dir,
@@ -276,6 +306,10 @@ impl EngineActor {
                         SessionEnd::SetupFailed => {
                             warn!("Inference session {session_count} failed during setup");
                         }
+                        SessionEnd::Aborted(message) => {
+                            error!("Inference session {session_count} aborted: {message}");
+                            self.handle_session_abort(message);
+                        }
                         SessionEnd::Shutdown => break,
                         SessionEnd::AudioGone => {
                             error!("Audio channel disconnected, engine actor exiting");
@@ -300,6 +334,31 @@ impl EngineActor {
         // not from a static destructor at process exit.
         with_autorelease_pool(|| self.drop_engine());
         info!("Engine actor shut down cleanly");
+    }
+
+    /// A session died mid-recording: tell the audio thread to stop, surface
+    /// the error to the frontend, and fail the state machine so the UI leaves
+    /// the recording state. Without this, the old pipeline died silently and
+    /// the app looked like it "just stopped transcribing".
+    fn handle_session_abort(&mut self, message: String) {
+        if let Some(app) = &self.app {
+            let _ = PipelineError {
+                scope: PipelineErrorScope::Session,
+                message: message.clone(),
+            }
+            .emit(app);
+
+            let state = app.state::<crate::state::AppState>();
+            let _ = state.audio_cmd_sender.send(crate::state::AudioCommand::Stop);
+            if let Err(e) = state.apply_transition(crate::state_machine::StateAction::Fail {
+                message,
+            }) {
+                warn!("Failed to apply Fail transition after session abort: {e}");
+            }
+        }
+        // Drain whatever audio is still queued (including the EndOfStream the
+        // audio thread sends on Stop) so nothing stale leaks into the next session.
+        self.drain_audio_queue();
     }
 
     fn drop_engine(&mut self) {
@@ -380,6 +439,7 @@ impl EngineActor {
         // Caller may now start audio capture.
         let _ = reply.send(Ok(info));
 
+        let mut health = SessionHealth::start(session_id, Arc::clone(&self.dropped_counter));
         let engine = self
             .engine
             .as_mut()
@@ -392,6 +452,8 @@ impl EngineActor {
             session_id,
             &mut audio_filters,
             &text_filters,
+            &mut health,
+            self.app.as_ref(),
         )
     }
 
@@ -408,7 +470,12 @@ impl EngineActor {
 /// draining anyway. Only reached if the audio thread died mid-session.
 const EOS_WAIT: Duration = Duration::from_secs(5);
 
+/// Abort the session after this many consecutive transcribe failures
+/// (~2 seconds of audio at Kyutai's 80ms frames).
+const MAX_CONSECUTIVE_FRAME_ERRORS: u32 = 25;
+
 /// Process audio frames while the session is active.
+#[allow(clippy::too_many_arguments)]
 fn active_session_loop(
     cmd_rx: &Receiver<EngineCommand>,
     audio_rx: &Receiver<AudioMessage>,
@@ -417,22 +484,34 @@ fn active_session_loop(
     session_id: u64,
     audio_filters: &mut AudioFilterChain,
     text_filters: &TextFilterChain,
+    health: &mut SessionHealth,
+    app: Option<&tauri::AppHandle>,
 ) -> SessionEnd {
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
     let mut audio_buffer: Vec<f32> = Vec::new();
     let mut summary = SessionSummary::default();
     let mut eos_received = false;
+    let mut consecutive_errors: u32 = 0;
     // Stop request waiting for this session's EndOfStream marker.
     let mut pending_stop: Option<(Sender<Result<SessionSummary, String>>, Instant)> = None;
 
     loop {
+        // Periodic health snapshot to the frontend
+        if let Some(snapshot) = health.tick(audio_rx.len())
+            && let Some(app) = app
+        {
+            let _ = snapshot.emit(app);
+        }
+
         // Check for commands (non-blocking)
         match cmd_rx.try_recv() {
+            Ok(EngineCommand::AttachApp(_)) => {}
             Ok(EngineCommand::StopSession { reply }) => {
                 if crate::debug::transcription_debug_enabled() {
                     debug!("Stopping ({} frames processed)", summary.frames_processed);
                 }
                 if eos_received {
+                    summary.dropped_chunks = health.dropped_chunks();
                     finish_session(
                         audio_rx,
                         engine,
@@ -471,6 +550,7 @@ fn active_session_loop(
         {
             warn!("End-of-stream marker never arrived; finishing session anyway");
             let (reply, _) = pending_stop.take().expect("pending_stop checked above");
+            summary.dropped_chunks = health.dropped_chunks();
             finish_session(
                 audio_rx,
                 engine,
@@ -491,6 +571,7 @@ fn active_session_loop(
                 }
                 eos_received = true;
                 if let Some((reply, _)) = pending_stop.take() {
+                    summary.dropped_chunks = health.dropped_chunks();
                     finish_session(
                         audio_rx,
                         engine,
@@ -517,6 +598,7 @@ fn active_session_loop(
                     continue;
                 }
 
+                health.note_chunk(chunk.captured_at);
                 audio_buffer.extend_from_slice(&chunk.samples);
 
                 // Process complete engine-sized frames
@@ -524,10 +606,12 @@ fn active_session_loop(
                     let frame: Vec<f32> = audio_buffer.drain(..chunk_size).collect();
                     if !audio_filters.process(&frame) {
                         summary.frames_processed += 1;
+                        health.note_frame();
                         continue; // VAD says no speech — skip this frame
                     }
                     match engine.transcribe(&frame, None) {
                         Ok(segments) => {
+                            consecutive_errors = 0;
                             for seg in segments {
                                 if crate::debug::transcription_debug_enabled() {
                                     debug!("Segment: {:?} final={}", seg.text, seg.is_final);
@@ -536,11 +620,34 @@ fn active_session_loop(
                             }
                         }
                         Err(e) => {
-                            // Do not tear down the session — log and skip this frame.
+                            // A lone failure is skipped (and surfaced); a streak
+                            // means the engine is broken — abort instead of
+                            // silently eating audio for the rest of the session.
+                            consecutive_errors += 1;
                             error!("Transcribe error (frame skipped): {e}");
+                            if consecutive_errors == 1
+                                && let Some(app) = app
+                            {
+                                let _ = PipelineError {
+                                    scope: PipelineErrorScope::Frame,
+                                    message: e.to_string(),
+                                }
+                                .emit(app);
+                            }
+                            if consecutive_errors >= MAX_CONSECUTIVE_FRAME_ERRORS {
+                                if let Some((reply, _)) = pending_stop.take() {
+                                    let _ = reply.send(Err(format!(
+                                        "Session aborted: {e}"
+                                    )));
+                                }
+                                return SessionEnd::Aborted(format!(
+                                    "Transcription failed {MAX_CONSECUTIVE_FRAME_ERRORS} frames in a row: {e}"
+                                ));
+                            }
                         }
                     }
                     summary.frames_processed += 1;
+                    health.note_frame();
                     if crate::debug::transcription_debug_enabled()
                         && summary.frames_processed.is_multiple_of(50)
                     {
@@ -719,6 +826,7 @@ mod tests {
         let cell = Mutex::new(Some(mock));
         let actor = EngineActorHandle::spawn(
             audio_rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
             Box::new(move |_profile| {
                 cell.lock()
                     .unwrap()
@@ -942,6 +1050,7 @@ mod tests {
         let _keep = audio_tx;
         let actor = EngineActorHandle::spawn(
             audio_rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
             Box::new(|_| Err("no engine in this test".into())),
         )
         .expect("spawn");
@@ -950,6 +1059,41 @@ mod tests {
             .start_session(1, session_config(), Box::new(|_| {}))
             .expect_err("start without model must fail");
         assert!(err.contains("No model loaded"), "got: {err}");
+    }
+
+    #[test]
+    fn actor_aborts_after_consecutive_errors_and_recovers() {
+        let mock = MockEngine::new().with_transcribe_response(
+            Err(crate::engine::EngineError::InferenceError("gpu lost".into())),
+            super::MAX_CONSECUTIVE_FRAME_ERRORS as usize,
+        );
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect("start");
+        for _ in 0..super::MAX_CONSECUTIVE_FRAME_ERRORS {
+            audio_tx.send(audio_chunk(1)).unwrap();
+        }
+        audio_tx.send(end_of_stream(1)).unwrap();
+
+        // Depending on timing, stop either lands after the abort (idle →
+        // default summary) or while aborting (Err mentioning the abort).
+        match actor.stop_session(Duration::from_secs(3)) {
+            Ok(summary) => assert_eq!(summary.frames_processed, 0),
+            Err(e) => assert!(e.contains("aborted"), "unexpected error: {e}"),
+        }
+
+        // The actor must remain usable: a new session starts and stops cleanly
+        // (the mock's error queue is exhausted, so transcribe returns Ok).
+        actor
+            .start_session(2, session_config(), Box::new(|_| {}))
+            .expect("recover with a new session");
+        audio_tx.send(audio_chunk(2)).unwrap();
+        audio_tx.send(end_of_stream(2)).unwrap();
+        actor
+            .stop_session(Duration::from_secs(2))
+            .expect("stop recovered session");
     }
 
     #[test]
