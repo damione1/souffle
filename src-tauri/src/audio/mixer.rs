@@ -11,6 +11,7 @@
 use ringbuf::HeapCons;
 use ringbuf::traits::Consumer;
 
+use super::aec::Aec;
 use super::resampler::Resampler;
 
 /// Common processing rate; 48kHz matches the tap's native rate and is a
@@ -32,6 +33,9 @@ pub struct MeetingMixer {
     mic_fifo: Vec<f32>,
     tap_fifo: Vec<f32>,
     scratch: Vec<f32>,
+    /// Echo cancellation, active only when the output routes to the
+    /// built-in speakers (headphones can't leak into the mic).
+    aec: Option<Aec>,
     /// Tap samples discarded to bound drift; logged at session end.
     tap_discarded: u64,
 }
@@ -58,8 +62,25 @@ impl MeetingMixer {
             mic_fifo: Vec::new(),
             tap_fifo: Vec::new(),
             scratch: vec![0.0; 4096],
+            aec: None,
             tap_discarded: 0,
         }
+    }
+
+    /// Enable/disable echo cancellation (e.g. when the output route changes
+    /// between speakers and headphones mid-session). Passing a fresh `Aec`
+    /// also resets convergence state.
+    pub fn set_aec(&mut self, aec: Option<Aec>) {
+        self.aec = aec;
+    }
+
+    /// Swap in a new system-audio source mid-session (the tap is rebuilt
+    /// when the default output device changes). Buffered tap samples from
+    /// the old device are dropped; the mic leg is unaffected.
+    pub fn replace_tap(&mut self, tap: HeapCons<f32>, tap_rate: u32) {
+        self.tap = tap;
+        self.tap_to_mix = Resampler::new(tap_rate, 1, MIX_RATE, 1.0);
+        self.tap_fifo.clear();
     }
 
     /// Drain both rings, mix every complete 10ms frame, and return the
@@ -133,17 +154,28 @@ impl MeetingMixer {
         }
     }
 
-    /// Take `n` mic samples, sum the available tap samples over them
-    /// (zeros when the system is silent), clamp.
-    /// This is where echo cancellation will hook in: the tap frame is the
-    /// render (reference) signal, the mic frame is the capture signal.
+    /// Take `n` mic samples, cancel the echo of the system audio in them
+    /// (speakers only), then sum the tap leg over them (zeros when the
+    /// system is silent) and clamp.
     fn mix_frame(&mut self, n: usize) -> Vec<f32> {
-        let mut frame: Vec<f32> = self.mic_fifo.drain(..n).collect();
+        let mut mic: Vec<f32> = self.mic_fifo.drain(..n).collect();
         let tap_n = n.min(self.tap_fifo.len());
-        for (sample, tap) in frame.iter_mut().zip(self.tap_fifo.drain(..tap_n)) {
-            *sample = (*sample + tap).clamp(-1.0, 1.0);
+        let mut tap: Vec<f32> = self.tap_fifo.drain(..tap_n).collect();
+        tap.resize(n, 0.0);
+
+        // AEC works on exact 10ms frames; the only shorter frames are the
+        // final flush tail, where skipping cancellation is harmless.
+        if n == FRAME_SAMPLES
+            && let Some(aec) = self.aec.as_mut()
+        {
+            aec.process_render(&tap);
+            aec.process_capture(&mut mic);
         }
-        frame
+
+        for (sample, tap) in mic.iter_mut().zip(&tap) {
+            *sample = (*sample + *tap).clamp(-1.0, 1.0);
+        }
+        mic
     }
 }
 

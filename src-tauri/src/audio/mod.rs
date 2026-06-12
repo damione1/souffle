@@ -1,3 +1,4 @@
+pub mod aec;
 pub mod capture;
 pub mod mixer;
 pub mod output_route;
