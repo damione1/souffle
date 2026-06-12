@@ -29,9 +29,7 @@
 <div class="flex h-screen items-center justify-center p-8">
   <div class="surface-card flex w-full max-w-md flex-col gap-6 p-8 text-center">
     <div class="flex flex-col items-center gap-3">
-      <span class="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-blue font-heading text-3xl font-extrabold text-white">
-        S
-      </span>
+      <img src="/favicon.svg" alt="" class="h-16 w-16 rounded-2xl" aria-hidden="true" />
       <h1 class="font-heading text-2xl font-bold">Soufflé</h1>
       <p class="text-text-secondary text-sm">{$t("onboarding.tagline")}</p>
       <p class="inline-flex items-center gap-1.5 text-xs text-text-muted">

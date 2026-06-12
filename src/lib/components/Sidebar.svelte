@@ -20,7 +20,7 @@
 
 <aside class="w-[200px] min-w-[200px] h-screen flex flex-col gap-6 py-5 px-3 bg-surface-1 border-r border-ghost-border overflow-y-auto max-[800px]:w-[72px] max-[800px]:min-w-[72px] max-[800px]:items-center">
   <div class="flex items-center gap-2.5 px-2 max-[800px]:justify-center max-[800px]:px-0">
-    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-accent-blue text-white font-heading font-extrabold text-base shrink-0">S</span>
+    <img src="/favicon.svg" alt="" class="w-8 h-8 rounded-lg shrink-0" aria-hidden="true" />
     <span class="font-heading font-bold text-lg text-text-primary tracking-tight max-[800px]:hidden">Soufflé</span>
   </div>
 
