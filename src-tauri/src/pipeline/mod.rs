@@ -282,8 +282,8 @@ impl TranscriptionPipeline {
                                 }
                             }
                             Err(e) => {
-                                error!("Transcribe error: {e}");
-                                return false;
+                                // Do not tear down the inference thread — log and skip this frame.
+                                error!("Transcribe error (frame skipped): {e}");
                             }
                         }
                         frames_processed += 1;

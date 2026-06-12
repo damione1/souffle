@@ -66,8 +66,10 @@ impl AudioCapture {
         audio_rms: Arc<AtomicU32>,
     ) -> Result<(Sender<AudioCommand>, Receiver<AudioChunk>), String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
-        // Bounded channel: ~30 seconds of audio at 24kHz in 1-second chunks
-        let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioChunk>(30);
+        // Bounded channel: many small chunks per second from cpal; inference (Kyutai/Metal)
+        // can lag real-time. If this fills, try_send drops audio while RMS/waveform still
+        // updates — use a generous bound so the inference thread can catch up.
+        let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioChunk>(512);
 
         std::thread::Builder::new()
             .name("audio-capture".into())
