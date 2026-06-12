@@ -302,5 +302,19 @@
     "hint": "Notes are saved with the meeting and used to improve the generated summary.",
     "saving": "Saving…",
     "saved": "Saved"
+  },
+  "settings_model": {
+    "title": "Transcription model",
+    "description": "Pick a model — it downloads and loads automatically. Everything runs on this Mac.",
+    "downloading": "Downloading…"
+  },
+  "settings_advanced": {
+    "title": "Advanced",
+    "description": "Audio processing, integrations, and diagnostics. Defaults work well.",
+    "model_storage": "Model storage",
+    "model_storage_desc": "Remove the downloaded model files from disk.",
+    "delete_model": "Delete downloaded model",
+    "delete_model_confirm": "Delete",
+    "delete_model_msg": "The model files will be removed; you'll need to download them again."
   }
 }

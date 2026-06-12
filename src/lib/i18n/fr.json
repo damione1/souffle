@@ -302,5 +302,19 @@
     "hint": "Les notes sont sauvegardées avec le meeting et servent à améliorer le résumé généré.",
     "saving": "Enregistrement…",
     "saved": "Enregistré"
+  },
+  "settings_model": {
+    "title": "Modèle de transcription",
+    "description": "Choisissez un modèle — il se télécharge et se charge automatiquement. Tout tourne sur ce Mac.",
+    "downloading": "Téléchargement…"
+  },
+  "settings_advanced": {
+    "title": "Avancé",
+    "description": "Traitement audio, intégrations et diagnostics. Les valeurs par défaut conviennent.",
+    "model_storage": "Stockage du modèle",
+    "model_storage_desc": "Supprimer les fichiers du modèle téléchargé du disque.",
+    "delete_model": "Supprimer le modèle téléchargé",
+    "delete_model_confirm": "Supprimer",
+    "delete_model_msg": "Les fichiers du modèle seront supprimés ; il faudra les retélécharger."
   }
 }

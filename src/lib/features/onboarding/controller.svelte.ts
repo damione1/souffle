@@ -3,22 +3,11 @@ import { getTranscriptionCatalog } from "../../api/transcription";
 import { saveSettings } from "../../api/settings";
 import type { AppSettings, TranscriptionCatalog } from "../../types";
 import { errorMessage } from "../../utils";
-import {
-  getFirstAvailableTranscriptionBackend,
-  isTranscriptionModelAvailable,
-} from "../transcription/catalog";
+import { listAvailableModelOptions } from "../transcription/catalog";
 import {
   resetTranscriptionRuntimeState,
   startTranscriptionModelDownload,
 } from "../transcription/runtime";
-
-export interface OnboardingModelOption {
-  key: string;
-  engineId: string;
-  modelId: string;
-  backendId: string;
-  label: string;
-}
 
 export function createOnboardingController() {
   const app = getAppState();
@@ -28,21 +17,7 @@ export function createOnboardingController() {
   let statusMessage = $state("");
   let isStarting = $state(false);
 
-  const options = $derived.by((): OnboardingModelOption[] => {
-    if (!catalog) return [];
-    return catalog.engines.flatMap((engine) =>
-      engine.models.filter(isTranscriptionModelAvailable).map((model) => {
-        const backend = getFirstAvailableTranscriptionBackend(model);
-        return {
-          key: `${engine.id}:${model.id}`,
-          engineId: engine.id,
-          modelId: model.id,
-          backendId: backend?.id ?? "",
-          label: `${engine.label} — ${model.label}`,
-        };
-      }),
-    );
-  });
+  const options = $derived(listAvailableModelOptions(catalog));
 
   async function mount() {
     try {
