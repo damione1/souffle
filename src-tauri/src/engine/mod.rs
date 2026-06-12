@@ -5,7 +5,6 @@ pub mod whisper;
 pub mod mock;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 pub const KYUTAI_ENGINE_ID: &str = "kyutai";
 pub const KYUTAI_MODEL_ID: &str = "stt-1b-en_fr";
@@ -22,8 +21,6 @@ pub const NEMO_BACKEND_ID: &str = "nemo";
 const KYUTAI_1B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-1b-en-fr";
 const KYUTAI_2_6B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-2-6b-en";
 const WHISPER_TURBO_GGML_ARTIFACT_ID: &str = "hf-ggml-large-v3-turbo";
-
-pub type SharedTranscriptionEngine = Arc<Mutex<Box<dyn TranscriptionEngine>>>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionProfileSelection {
@@ -191,9 +188,9 @@ pub fn transcription_runtime_phase(
 
 /// Runtime interface implemented by each engine family/backend pair.
 /// Product metadata belongs in descriptors, not on the runtime itself.
-/// Methods take &mut self: engines are owned and driven by a single thread,
-/// so they need no interior locking.
-pub trait TranscriptionEngine: Send {
+/// Methods take &mut self and there is no Send/Sync bound: engines are
+/// created, used, and dropped on the engine actor thread only.
+pub trait TranscriptionEngine {
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError>;
     fn unload_model(&mut self) -> Result<(), EngineError>;
     fn transcribe(
@@ -416,10 +413,6 @@ pub fn create_engine(profile: &TranscriptionProfile) -> Result<Box<dyn Transcrip
             profile.engine_id, profile.backend_id
         )),
     }
-}
-
-pub fn default_transcription_engine() -> Box<dyn TranscriptionEngine> {
-    Box::new(kyutai::KyutaiEngine::new())
 }
 
 fn kyutai_1b_model_descriptor() -> TranscriptionModelDescriptor {

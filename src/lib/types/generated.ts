@@ -52,7 +52,8 @@ async deleteModel(selection: TranscriptionProfileSelection) : Promise<Result<nul
 },
 /**
  * Load the model into memory (GPU/CPU). Must be called after download.
- * Also spawns the persistent inference pipeline thread.
+ * The engine actor creates the engine, swaps out any previous one, and
+ * loads the weights — all on its own thread.
  */
 async loadModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {
     try {
