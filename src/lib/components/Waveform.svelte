@@ -10,11 +10,13 @@
     variant?: "footer" | "inline" | "pill";
   } = $props();
 
-  const wrapperClass = {
-    footer: "w-full h-10 shrink-0 border-t border-ghost-border bg-surface-1",
-    inline: "w-full h-12 shrink-0",
-    pill: "w-full h-8 shrink-0",
-  }[variant];
+  const wrapperClass = $derived(
+    {
+      footer: "w-full h-10 shrink-0 border-t border-ghost-border bg-surface-1",
+      inline: "w-full h-12 shrink-0",
+      pill: "w-full h-8 shrink-0",
+    }[variant],
+  );
 
   let canvas: HTMLCanvasElement | undefined = $state();
   let animationId = 0;
