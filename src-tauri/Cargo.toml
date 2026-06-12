@@ -59,9 +59,12 @@ whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }
 # Phase 4: SQLite unified storage
 rusqlite = { version = "0.33", features = ["bundled-full"] }
 
-# Phase 7A: Pipeline quality filters
+# Pipeline quality filters + Parakeet (all share the bundled ONNX Runtime
+# dylib via ort load-dynamic — never link onnxruntime statically here, its
+# protobuf copy corrupts sentencepiece's; see commit 508f3a4)
 vad-rs = { git = "https://github.com/cjpais/vad-rs", default-features = false, features = ["load-dynamic"] }
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic"] }
+parakeet-rs = { version = "=0.3.6", default-features = false, features = ["load-dynamic"] }
 strsim = "0.11"
 regex = "1"
 

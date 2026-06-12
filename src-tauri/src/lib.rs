@@ -11,6 +11,7 @@ pub mod filter;
 pub mod lock_ext;
 pub mod models;
 pub mod ollama;
+pub mod ort_runtime;
 pub mod pipeline;
 pub mod platform;
 pub mod settings;
@@ -106,7 +107,7 @@ pub fn run() {
     let engine_actor = match pipeline::EngineActorHandle::spawn(
         audio_rx,
         dropped_counter,
-        Box::new(|profile| engine::create_engine(profile)),
+        Box::new(engine::create_engine),
     ) {
         Ok(actor) => actor,
         Err(e) => {

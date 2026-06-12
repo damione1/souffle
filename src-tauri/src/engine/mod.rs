@@ -1,4 +1,5 @@
 pub mod kyutai;
+pub mod parakeet;
 pub mod whisper;
 
 #[cfg(test)]
@@ -12,15 +13,16 @@ pub const KYUTAI_MODEL_2_6B_ID: &str = "stt-2.6b-en";
 pub const WHISPER_ENGINE_ID: &str = "whisper";
 pub const WHISPER_MODEL_TURBO_ID: &str = "turbo";
 pub const PARAKEET_ENGINE_ID: &str = "parakeet";
-pub const PARAKEET_MODEL_TDT_1_1B_ID: &str = "parakeet-tdt_ctc-1.1b";
+pub const PARAKEET_MODEL_TDT_06B_V3_ID: &str = "parakeet-tdt-0.6b-v3";
 pub const CANDLE_BACKEND_ID: &str = "candle";
 pub const WHISPER_RS_BACKEND_ID: &str = "whisper-rs";
 pub const CTRANSLATE2_BACKEND_ID: &str = "ctranslate2";
-pub const NEMO_BACKEND_ID: &str = "nemo";
+pub const ORT_BACKEND_ID: &str = "onnx-ort";
 
 const KYUTAI_1B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-1b-en-fr";
 const KYUTAI_2_6B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-2-6b-en";
 const WHISPER_TURBO_GGML_ARTIFACT_ID: &str = "hf-ggml-large-v3-turbo";
+const PARAKEET_TDT_06B_V3_ONNX_ARTIFACT_ID: &str = "hf-onnx-parakeet-tdt-0-6b-v3";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
 pub struct TranscriptionProfileSelection {
@@ -281,8 +283,8 @@ pub fn transcription_engine_catalog() -> Vec<TranscriptionEngineDescriptor> {
         TranscriptionEngineDescriptor {
             id: PARAKEET_ENGINE_ID.to_string(),
             label: "Parakeet".to_string(),
-            description: "NVIDIA speech recognition family optimized for high-throughput English ASR.".to_string(),
-            models: vec![parakeet_tdt_1_1b_model_descriptor()],
+            description: "NVIDIA speech recognition family with fast multilingual transcription, punctuation, and capitalization.".to_string(),
+            models: vec![parakeet_tdt_06b_v3_model_descriptor()],
         },
     ]
 }
@@ -408,6 +410,7 @@ pub fn create_engine(profile: &TranscriptionProfile) -> Result<Box<dyn Transcrip
     match (profile.engine_id.as_str(), profile.backend_id.as_str()) {
         (KYUTAI_ENGINE_ID, CANDLE_BACKEND_ID) => Ok(Box::new(kyutai::KyutaiEngine::new())),
         (WHISPER_ENGINE_ID, WHISPER_RS_BACKEND_ID) => Ok(Box::new(whisper::WhisperEngine::new())),
+        (PARAKEET_ENGINE_ID, ORT_BACKEND_ID) => Ok(Box::new(parakeet::ParakeetEngine::new())),
         _ => Err(format!(
             "No runtime implementation registered for '{}:{}'",
             profile.engine_id, profile.backend_id
@@ -554,53 +557,57 @@ fn whisper_rs_backend() -> TranscriptionRuntimeBackendDescriptor {
     }
 }
 
-fn parakeet_tdt_1_1b_model_descriptor() -> TranscriptionModelDescriptor {
-    let note = "Catalog stub only. Parakeet runtimes are not implemented in this app build yet.";
+fn parakeet_tdt_06b_v3_model_descriptor() -> TranscriptionModelDescriptor {
     TranscriptionModelDescriptor {
-        id: PARAKEET_MODEL_TDT_1_1B_ID.to_string(),
-        label: "TDT-CTC 1.1B".to_string(),
-        description: "High-throughput English Parakeet profile with punctuation and capitalization.".to_string(),
-        download_size_bytes: None,
-        recommended_memory_bytes: Some(8_000_000_000),
-        supported_languages: vec!["en".to_string()],
+        id: PARAKEET_MODEL_TDT_06B_V3_ID.to_string(),
+        label: "TDT 0.6B v3".to_string(),
+        description: "Multilingual Parakeet model (25 languages incl. French and English) with punctuation and capitalization. Quantized int8, CPU inference.".to_string(),
+        download_size_bytes: Some(672_000_000),
+        recommended_memory_bytes: Some(3_000_000_000),
+        supported_languages: vec!["multilingual".to_string()],
         capabilities: TranscriptionCapabilities {
             supports_streaming: false,
             supports_batch_transcription: true,
-            supports_language_auto_detect: false,
-            supports_word_timestamps: false,
+            supports_language_auto_detect: true,
+            supports_word_timestamps: true,
             supports_partial_results: false,
         },
         audio_input: AudioInputRequirements {
             sample_rate_hz: 16_000,
             channels: 1,
-            chunk_size_samples: 30 * 16_000,
+            chunk_size_samples: 16_000 * 5,
         },
-        available_in_app: false,
-        availability_note: Some(note.to_string()),
-        backends: vec![planned_backend(
-            NEMO_BACKEND_ID,
-            "NeMo",
-            "Planned runtime backend for NVIDIA Parakeet integration.",
-            note,
-        )],
-        recommended_backend_id: NEMO_BACKEND_ID.to_string(),
+        available_in_app: true,
+        availability_note: None,
+        backends: vec![parakeet_ort_backend()],
+        recommended_backend_id: ORT_BACKEND_ID.to_string(),
     }
 }
 
-fn planned_backend(
-    id: &str,
-    label: &str,
-    description: &str,
-    note: &str,
-) -> TranscriptionRuntimeBackendDescriptor {
+fn parakeet_ort_backend() -> TranscriptionRuntimeBackendDescriptor {
     TranscriptionRuntimeBackendDescriptor {
-        id: id.to_string(),
-        label: label.to_string(),
-        description: description.to_string(),
+        id: ORT_BACKEND_ID.to_string(),
+        label: "ONNX Runtime".to_string(),
+        description: "ONNX Runtime via parakeet-rs, sharing the app's bundled dynamic runtime."
+            .to_string(),
         recommended: true,
-        available_in_app: false,
-        availability_note: Some(note.to_string()),
-        artifacts: vec![],
+        available_in_app: true,
+        availability_note: None,
+        artifacts: vec![ModelArtifactDescriptor {
+            id: PARAKEET_TDT_06B_V3_ONNX_ARTIFACT_ID.to_string(),
+            label: "Hugging Face".to_string(),
+            description: "Community ONNX export (int8) of NVIDIA parakeet-tdt-0.6b-v3.".to_string(),
+            provider: "huggingface".to_string(),
+            repository: "istupakov/parakeet-tdt-0.6b-v3-onnx".to_string(),
+            revision: None,
+            file_format: "onnx".to_string(),
+            download_size_bytes: Some(672_000_000),
+            required_files: vec![
+                "encoder-model.int8.onnx".to_string(),
+                "decoder_joint-model.int8.onnx".to_string(),
+                "vocab.txt".to_string(),
+            ],
+        }],
     }
 }
 
@@ -740,14 +747,48 @@ mod tests {
     }
 
     #[test]
-    fn resolve_profile_rejects_unavailable_parakeet_stub() {
-        let r = resolve_transcription_profile(
+    fn resolve_profile_parakeet_tdt_06b_v3() {
+        let p = resolve_transcription_profile(
             Some(PARAKEET_ENGINE_ID),
-            Some(PARAKEET_MODEL_TDT_1_1B_ID),
-            Some(NEMO_BACKEND_ID),
-        );
-        assert!(r.is_err());
-        assert!(r.unwrap_err().contains("not implemented in this app build"));
+            Some(PARAKEET_MODEL_TDT_06B_V3_ID),
+            Some(ORT_BACKEND_ID),
+        )
+        .unwrap();
+        assert_eq!(p.engine_id, PARAKEET_ENGINE_ID);
+        assert_eq!(p.model_id, PARAKEET_MODEL_TDT_06B_V3_ID);
+        assert_eq!(p.backend_id, ORT_BACKEND_ID);
+    }
+
+    #[test]
+    fn create_engine_parakeet() {
+        let profile = resolve_transcription_profile(
+            Some(PARAKEET_ENGINE_ID),
+            Some(PARAKEET_MODEL_TDT_06B_V3_ID),
+            Some(ORT_BACKEND_ID),
+        )
+        .unwrap();
+        let engine = create_engine(&profile).unwrap();
+        let reqs = engine.audio_requirements();
+        assert_eq!(reqs.sample_rate_hz, 16_000);
+        assert_eq!(reqs.chunk_size_samples, 16_000 * 5);
+    }
+
+    #[test]
+    fn parakeet_artifact_has_int8_onnx_files() {
+        let profile = resolve_transcription_profile(
+            Some(PARAKEET_ENGINE_ID),
+            Some(PARAKEET_MODEL_TDT_06B_V3_ID),
+            Some(ORT_BACKEND_ID),
+        )
+        .unwrap();
+        let artifact = resolve_transcription_artifact(&profile).unwrap();
+        assert_eq!(artifact.file_format, "onnx");
+        assert!(artifact.required_files.iter().any(|f| f == "encoder-model.int8.onnx"));
+        assert!(artifact.required_files.iter().any(|f| f == "decoder_joint-model.int8.onnx"));
+        assert!(artifact.required_files.iter().any(|f| f == "vocab.txt"));
+        // config.json must NOT be listed: it would trigger the Kyutai-specific
+        // config-discovery path in the downloader.
+        assert!(!artifact.required_files.iter().any(|f| f == "config.json"));
     }
 
     #[test]
