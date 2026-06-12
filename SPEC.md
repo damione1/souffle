@@ -56,7 +56,7 @@ A polished, privacy-first desktop application for local speech-to-text transcrip
 | Inference runtime | Candle (Rust) | Native Rust ML inference framework by HuggingFace |
 | Model format | Candle/safetensors | Native format for Kyutai models |
 | Fallback engine (v1.5) | Whisper large-v3-turbo | Via whisper-rs, broader language support |
-| Future engine (v2) | Parakeet TDT 0.6B v3 | Via ort crate (ONNX Runtime), 25 EU languages |
+| Third engine (v2, shipped) | Parakeet TDT 0.6B v3 int8 | Via parakeet-rs + ort load-dynamic (shared bundled ONNX Runtime), 25 languages incl. FR/EN, punctuation/capitalization, CPU |
 
 ### Audio
 | Component | Technology | Version | Purpose |
@@ -151,46 +151,43 @@ All STT engines MUST implement a common Rust trait. This is the foundation for m
 /// Core trait that ALL transcription engines must implement.
 /// Adding a new engine (Whisper, Parakeet, Kyutai, future models)
 /// means implementing this trait - nothing else changes.
-pub trait TranscriptionEngine: Send + Sync {
-    /// Human-readable engine name for UI display
-    fn name(&self) -> &str;
+///
+/// OWNERSHIP MODEL: engines are created, used, swapped, and dropped
+/// exclusively on the engine actor thread (see 3.3). The trait therefore
+/// has NO Send/Sync bound and methods take &mut self — engines need no
+/// interior locking, and !Send inference types (e.g. parakeet-rs's
+/// ParakeetTDT) are usable. Product metadata (labels, languages,
+/// capabilities) lives in the catalog descriptors, not on the runtime.
+pub trait TranscriptionEngine {
+    /// Load model weights into memory from the given directory.
+    fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError>;
 
-    /// Supported languages as ISO 639-1 codes
-    fn supported_languages(&self) -> Vec<String>;
-
-    /// Whether this engine supports true streaming (token-by-token)
-    /// vs chunk-based processing (e.g., Whisper's 30s windows)
-    fn supports_streaming(&self) -> bool;
-
-    /// Initialize the engine, load model weights into memory.
-    /// Called once at startup or when user switches engines.
-    /// `model_path`: absolute path to model weights on disk.
-    /// `device`: target compute device (CPU, Metal GPU, etc.)
-    fn load_model(&mut self, model_path: &Path, device: Device) -> Result<(), EngineError>;
-
-    /// Unload model from memory. Called when switching engines
-    /// or shutting down. Must free all GPU/CPU memory.
+    /// Unload model from memory. Must free all GPU/CPU memory.
     fn unload_model(&mut self) -> Result<(), EngineError>;
 
     /// Process an audio chunk and return transcription segments.
-    /// `audio`: raw PCM f32 samples at 16kHz mono.
-    /// `language`: optional language hint (None = auto-detect).
-    /// Returns zero or more segments (streaming engines may return
-    /// partial/non-final segments).
+    /// Audio arrives resampled to `audio_requirements().sample_rate_hz`.
     fn transcribe(
-        &self,
+        &mut self,
         audio: &[f32],
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
 
-    /// For streaming engines: signal that audio input has ended.
-    /// Returns any remaining buffered segments.
-    /// Non-streaming engines can return Ok(vec![]).
-    fn flush(&self) -> Result<Vec<TranscriptionSegment>, EngineError>;
+    /// Signal that audio input has ended; return remaining buffered segments.
+    fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError>;
 
-    /// Estimated VRAM/RAM usage in bytes for the loaded model.
-    /// Used by UI to warn users about memory pressure.
-    fn memory_usage(&self) -> Option<u64>;
+    /// Reset per-session state (called before each recording session).
+    fn reset_state(&mut self) -> Result<(), EngineError>;
+
+    /// Sample rate / channels / chunk size this engine expects; drives
+    /// audio capture resampling and pipeline framing.
+    fn audio_requirements(&self) -> AudioInputRequirements;
+
+    /// Gain factor applied to raw microphone input before inference.
+    fn mic_gain(&self) -> f32 { 1.0 }
+
+    /// Strip engine-specific tokens (SentencePiece ▁, Whisper [_TT_], …).
+    fn normalize_text(&self, text: &str) -> String { text.to_string() }
 }
 
 /// A piece of transcribed text with metadata
@@ -222,28 +219,50 @@ pub enum EngineError {
 }
 ```
 
-### 3.3 Threading Model
+### 3.3 Threading Model — Engine Actor
 
 **CRITICAL: Never run inference on the tokio async runtime.**
 
 ```
-Main thread (tokio)     - Tauri event loop, IPC, UI commands
-Audio thread (std)      - cpal audio capture callback, ring buffer write
-Inference thread (std)  - Engine.transcribe() calls, CPU/GPU bound
-Resampling (inline)     - rubato runs in audio thread before buffer write
+Main thread (tokio)        - Tauri event loop, IPC, UI commands
+Audio thread (std)         - cpal capture callback, resample, enqueue
+Engine actor thread (std)  - OWNS the engine: create/load/transcribe/swap/drop
 
 Communication:
-  Audio thread --[crossbeam-channel]--> Inference thread
-  Inference thread --[tauri::ipc::Channel]--> Frontend (streaming segments)
+  Audio thread --[crossbeam bounded(512) AudioMessage]--> Engine actor
+  Commands --[crossbeam unbounded EngineCommand + bounded(1) replies]--> Engine actor
+  Engine actor --[tauri::ipc::Channel]--> Frontend (streaming segments)
+  Engine actor --[tauri-specta events]--> Frontend (TranscriptionHealth, PipelineError)
   Frontend --[tauri::command]--> Main thread (start/stop/config)
 ```
 
-**Current audio queue design:**
-- `crossbeam-channel::bounded` carries session-tagged `AudioChunk` values from capture to inference
-- Audio is resampled inline to 24kHz mono f32 before enqueue
-- Each chunk is tagged with a monotonically increasing `session_id`
-- The capture callback only emits when its `active_session_id` matches the current session
-- Start/stop paths drain stale chunks to keep session boundaries clean
+**Engine actor (`pipeline/actor.rs`):** spawned once at startup, lives for the
+app's lifetime. All engine lifecycle happens on this one thread, driven by
+`EngineCommand::{LoadModel, UnloadModel, StartSession, StopSession, …}` with
+bounded(1) reply channels. This is what makes native-library teardown safe:
+sentencepiece (Kyutai) and ONNX Runtime (VAD/Parakeet, dlopen'ed via ort
+load-dynamic) never see cross-thread create/drop ordering, and autorelease
+pools live in exactly two places (per-command/per-session in the actor,
+per-frame inside engines).
+
+**Audio queue & deterministic stop:**
+- `AudioMessage::Chunk` carries session-tagged samples plus `captured_at` (lag tracking)
+- The capture callback `try_send`s; on a full channel it drops the chunk and
+  increments a shared counter surfaced in health events — capture never blocks
+- On stop, the audio thread drops the cpal stream (synchronous), flushes the
+  resampler's partial chunk, then sends `AudioMessage::EndOfStream` as the
+  guaranteed-last message; the actor finishes the session when that marker
+  arrives (no sleeps, no guess timeouts — a 15s reply timeout remains as a
+  last-resort safety net and stop failures never wedge the state machine)
+- Stale chunks/markers from previous sessions are filtered by `session_id`
+  and drained at session start
+
+**Health & failure surfacing:** during a session the actor emits
+`TranscriptionHealth` (~1/s: queue depth, chunk lag, dropped chunks,
+Healthy/Lagging/Stalled) and `PipelineError` events. A single transcribe
+failure skips the frame; 25 consecutive failures abort the session, stop
+audio capture, and fail the state machine — the pipeline can no longer die
+silently while the UI looks like it is still recording.
 
 ### 3.4 Model Management
 
@@ -332,6 +351,32 @@ Reference implementation: https://github.com/kyutai-labs/delayed-streams-modelin
 - System audio capture is still not true native CoreAudio loopback; the practical workaround is selecting BlackHole as the input device.
 - The session-boundary fix is validated manually, not yet by an automated regression or soak test.
 - Summary quality still depends heavily on using a proper text-generation model in Ollama.
+
+### 3.7 Engine Actor Refactor (2026-06-11)
+
+**Why:** adding the second engine (Whisper) and the Silero VAD filter exposed
+two failure classes. (1) The pipeline could silently stop transcribing: the
+bounded audio channel filled when inference lagged real-time and audio was
+dropped without signal, and a single transcribe error killed the inference
+thread while the UI still looked like it was recording. (2) Protobuf
+double-free crashes between sentencepiece (static protobuf) and ONNX
+Runtime — fixed by ort `load-dynamic`, but the shared
+`Arc<Mutex<Box<dyn TranscriptionEngine>>>` (created/used/dropped on different
+threads with manual ordering) kept the hazard alive for every new engine.
+
+**What changed:**
+- Engine ownership moved into a single **engine actor thread** (section 3.3);
+  `Arc<Mutex<engine>>`, the per-load pipeline respawn, and the fragile
+  swap/drop ordering in `load_model` were deleted
+- `TranscriptionEngine` lost its `Send + Sync` bound and interior Mutexes;
+  methods take `&mut self`
+- Stop/drain became event-ordered via an `EndOfStream` marker (no more
+  300ms sleep + 5s drain timeout); the resampler's final partial chunk is
+  flushed instead of discarded
+- Pipeline health (lag/queue/drops) and errors are emitted to the frontend;
+  sessions abort visibly after repeated engine failures
+- Parakeet TDT 0.6B v3 implemented on the shared dynamic ONNX Runtime,
+  proving the third-engine path the refactor was designed for
 
 ---
 
@@ -821,11 +866,11 @@ Kyutai previously used 15x mic gain to compensate for low audio levels. This cli
 **Metal cleanup on exit**
 Without explicit engine unload before exit, `ggml_metal_rsets_free` assertion fires (SIGABRT). Fix: `.build().run(|app, event|)` pattern with `ExitRequested` handler that unloads engine and shuts down pipeline.
 
-#### Step 4 — Parakeet engine via ort crate (v2, future)
-- [ ] `ort` crate dependency (ONNX Runtime with CoreML backend)
-- [ ] `engine/parakeet.rs` — `ParakeetEngine` implementing `TranscriptionEngine`
-- [ ] Catalog activation: Parakeet TDT-CTC 1.1B model, `nemo` backend
-- [ ] ONNX model artifacts from NVIDIA NeMo collection on HuggingFace
+#### Step 4 — Parakeet engine (shipped 2026-06-11)
+- [x] `parakeet-rs 0.3.6` (default-features off, `load-dynamic`) sharing the bundled ONNX Runtime dylib (upgraded to 1.24.4 for ort api-24)
+- [x] `engine/parakeet.rs` — `ParakeetEngine` implementing `TranscriptionEngine` (16kHz, 5s windows, CPU int8; CoreML is slower than CPU for these dynamic-shape graphs)
+- [x] Catalog activation: **TDT 0.6B v3** (`istupakov/parakeet-tdt-0.6b-v3-onnx`, int8, ~670MB), `onnx-ort` backend — the original TDT-CTC 1.1B target has no ONNX export anywhere and is English-only/older-generation, so the multilingual v3 replaced it
+- [x] Verified by real inference on synthesized EN and FR speech (punctuation + capitalization confirmed)
 
 #### Step 5 — Speaker diarization via pyannote-rs
 - [ ] `DiarizationEngine` trait in `engine/diarization.rs`
