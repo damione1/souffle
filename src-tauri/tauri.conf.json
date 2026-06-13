@@ -1,6 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui/main/tauri.conf.json",
-  "productName": "Souffle",
+  "productName": "Soufflé",
+  "mainBinaryName": "souffle",
   "version": "0.1.0",
   "identifier": "com.souffle.app",
   "build": {
@@ -61,7 +62,8 @@
     ],
     "macOS": {
       "entitlements": "./entitlements.plist",
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true
     }
   },
   "plugins": {}

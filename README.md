@@ -46,6 +46,38 @@ npm run tauri build
 
 The `.dmg` installer is output to `src-tauri/target/release/bundle/dmg/`.
 
+Without a signing identity the bundle is only ad-hoc signed: it runs on the
+build machine, but any other Mac will quarantine it on arrival (AirDrop,
+download…) and Gatekeeper reports it as *"damaged and can't be opened"*.
+Recipients can bypass that with `xattr -cr /Applications/Soufflé.app`, but the
+real fix is signing + notarization.
+
+### Signing & notarization (distribution)
+
+Requires an [Apple Developer Program](https://developer.apple.com/programs/)
+membership and a **Developer ID Application** certificate installed in the
+keychain (Xcode → Settings → Accounts → Manage Certificates, or
+developer.apple.com → Certificates). Check it with:
+
+```bash
+security find-identity -v -p codesigning
+```
+
+Then build with the signing/notarization environment set — Tauri picks these
+up automatically and staples the notarization ticket to the DMG:
+
+```bash
+export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export APPLE_ID="you@example.com"            # Apple ID of the developer account
+export APPLE_PASSWORD="app-specific-pwd"      # appleid.apple.com → App-Specific Passwords
+export APPLE_TEAM_ID="TEAMID"
+npm run tauri build
+```
+
+The hardened runtime is enabled with the entitlements in
+`src-tauri/entitlements.plist` (JIT/unsigned-memory exceptions required by the
+Metal inference runtimes).
+
 ## Running tests
 
 ```bash
