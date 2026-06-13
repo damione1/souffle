@@ -353,7 +353,22 @@ Reference implementation: https://github.com/kyutai-labs/delayed-streams-modelin
 - The session-boundary fix is validated manually, not yet by an automated regression or soak test.
 - Summary quality still depends heavily on using a proper text-generation model in Ollama.
 
-### 3.7 Native system-audio capture for meetings (2026-06-12)
+### 3.7 Single-surface "notebook" UI (2026-06-12)
+
+The window is one surface (no sidebar/tabs): header (status chip, settings
+gear), an action hero (Dictate with its shortcut, Meeting in one click), a
+full-text search field, and a unified day-grouped timeline of dictations
+(inline expand + copy) and meetings (push to detail with transcript | notes |
+summary). While recording, the hero becomes a live session card with the
+streaming transcript and, for meetings, the notes panel. Settings open as a
+modal sheet (gear / ⌘, / tray). The main window uses native vibrancy
+(`underWindowBackground`) with an overlay title bar. The timeline reserves an
+"upcoming today" section above past items for the future macOS calendar
+integration (today's events with a start-transcription affordance).
+First-run onboarding (model pick + download + auto-load) and the floating
+recording pill are unchanged.
+
+### 3.8 Native system-audio capture for meetings (2026-06-12)
 
 Meeting mode now captures two audio sources with zero user configuration — no
 more Audio MIDI Setup aggregate devices or BlackHole:
@@ -385,7 +400,7 @@ tick re-checks the output route every ~2s, rebuilding the tap when the default
 output device changes and toggling AEC on speaker/headphone switches. Tap
 drift against the mic clock is bounded by dropping tap lead beyond 250ms.
 
-### 3.8 Engine Actor Refactor (2026-06-11)
+### 3.9 Engine Actor Refactor (2026-06-11)
 
 **Why:** adding the second engine (Whisper) and the Silero VAD filter exposed
 two failure classes. (1) The pipeline could silently stop transcribing: the

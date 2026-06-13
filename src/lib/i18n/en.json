@@ -1,14 +1,4 @@
 {
-  "nav": {
-    "transcription": "Transcription",
-    "settings": "Settings",
-    "meetings": "Meetings"
-  },
-  "sidebar": {
-    "recording_meeting": "Meeting",
-    "recording_dictation": "Dictation",
-    "go_to_recording": "Go to active recording"
-  },
   "settings": {
     "title": "Settings",
     "no_model_selected": "No transcription model selected"
@@ -88,55 +78,6 @@
     "privacy": "Privacy",
     "privacy_value": "Everything runs locally."
   },
-  "recorder": {
-    "heading_locked": "Meeting in progress",
-    "heading_starting": "Starting the microphone...",
-    "heading_recording": "Listening now",
-    "heading_default": "Ready when you are",
-    "desc_locked": "Stop the meeting recording before starting dictation.",
-    "desc_starting": "Starting up...",
-    "desc_recording": "Speak naturally. Text appears as you talk.",
-    "desc_ready": "Tap the button to begin.",
-    "stop_recording_aria": "Stop recording",
-    "start_recording_aria": "Start recording",
-    "desc_preparing": "Preparing the model… one moment."
-  },
-  "transcript": {
-    "title": "Transcript",
-    "empty_starting_title": "Warming up...",
-    "empty_recording_title": "Listening for speech",
-    "empty_idle_title": "No transcript yet",
-    "empty_starting_msg": "Text will appear as you speak.",
-    "empty_recording_msg": "Text will appear as you speak.",
-    "empty_idle_msg": "Press the mic button to start."
-  },
-  "dictation_history": {
-    "title": "History",
-    "clear_all": "Clear all",
-    "clear_confirm_label": "Yes, clear",
-    "clear_confirm_msg": "Clear all entries?",
-    "collapse": "Collapse",
-    "expand": "Expand",
-    "copy": "Copy",
-    "delete": "Delete",
-    "search_placeholder": "Search dictation history...",
-    "search_results_count": "{count} of {total} entries",
-    "no_search_results": "No matching entries."
-  },
-  "meeting_history": {
-    "title": "Meeting History",
-    "meetings_count": "{count} meetings",
-    "search_placeholder": "Search meetings and dictation...",
-    "no_matches_title": "No matches",
-    "no_meetings_title": "No meetings yet",
-    "no_matches_msg": "Try a different search term.",
-    "no_meetings_msg": "Start a meeting recording to build your transcript library.",
-    "summary_outdated": "Summary outdated",
-    "summary": "Summary",
-    "search_results": "Search Results",
-    "results_count": "{count} results",
-    "source_dictation": "Dictation"
-  },
   "meeting_header": {
     "recording_badge": "Recording",
     "back_to_history": "Back to history",
@@ -212,12 +153,6 @@
     "loading": "Loading model…",
     "downloading": "Downloading",
     "model_required": "Model required"
-  },
-  "meetings": {
-    "title": "Meetings",
-    "new_button": "New meeting",
-    "locked_by_dictation": "Stop the dictation before recording a meeting.",
-    "model_not_ready": "The model is still loading."
   },
   "meeting_notes": {
     "title": "Notes",

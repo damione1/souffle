@@ -1,14 +1,4 @@
 {
-  "nav": {
-    "transcription": "Transcription",
-    "settings": "Paramètres",
-    "meetings": "Meetings"
-  },
-  "sidebar": {
-    "recording_meeting": "Réunion",
-    "recording_dictation": "Dictée",
-    "go_to_recording": "Aller à l'enregistrement actif"
-  },
   "settings": {
     "title": "Paramètres",
     "no_model_selected": "Aucun modèle de transcription sélectionné"
@@ -88,55 +78,6 @@
     "privacy": "Confidentialité",
     "privacy_value": "Tout fonctionne localement."
   },
-  "recorder": {
-    "heading_locked": "Réunion en cours",
-    "heading_starting": "Démarrage du microphone...",
-    "heading_recording": "Écoute en cours",
-    "heading_default": "Prêt quand vous l'êtes",
-    "desc_locked": "Arrêtez l'enregistrement de la réunion avant de démarrer la dictée.",
-    "desc_starting": "Démarrage...",
-    "desc_recording": "Parlez naturellement. Le texte apparaît au fur et à mesure.",
-    "desc_ready": "Appuyez sur le bouton pour commencer.",
-    "stop_recording_aria": "Arrêter l'enregistrement",
-    "start_recording_aria": "Démarrer l'enregistrement",
-    "desc_preparing": "Préparation du modèle… un instant."
-  },
-  "transcript": {
-    "title": "Transcription",
-    "empty_starting_title": "Préparation...",
-    "empty_recording_title": "Écoute de la parole",
-    "empty_idle_title": "Pas encore de transcription",
-    "empty_starting_msg": "Le texte apparaîtra pendant que vous parlez.",
-    "empty_recording_msg": "Le texte apparaîtra pendant que vous parlez.",
-    "empty_idle_msg": "Appuyez sur le bouton micro pour commencer."
-  },
-  "dictation_history": {
-    "title": "Historique",
-    "clear_all": "Tout effacer",
-    "clear_confirm_label": "Oui, effacer",
-    "clear_confirm_msg": "Effacer toutes les entrées ?",
-    "collapse": "Réduire",
-    "expand": "Développer",
-    "copy": "Copier",
-    "delete": "Supprimer",
-    "search_placeholder": "Rechercher dans l'historique de dictée...",
-    "search_results_count": "{count} sur {total} entrées",
-    "no_search_results": "Aucune entrée correspondante."
-  },
-  "meeting_history": {
-    "title": "Historique des réunions",
-    "meetings_count": "{count} réunions",
-    "search_placeholder": "Rechercher dans les réunions et dictées...",
-    "no_matches_title": "Aucun résultat",
-    "no_meetings_title": "Pas encore de réunions",
-    "no_matches_msg": "Essayez un autre terme de recherche.",
-    "no_meetings_msg": "Démarrez un enregistrement de réunion pour constituer votre bibliothèque de transcriptions.",
-    "summary_outdated": "Résumé obsolète",
-    "summary": "Résumé",
-    "search_results": "Résultats de recherche",
-    "results_count": "{count} résultats",
-    "source_dictation": "Dictée"
-  },
   "meeting_header": {
     "recording_badge": "Enregistrement",
     "back_to_history": "Retour à l'historique",
@@ -212,12 +153,6 @@
     "loading": "Chargement du modèle…",
     "downloading": "Téléchargement",
     "model_required": "Modèle requis"
-  },
-  "meetings": {
-    "title": "Meetings",
-    "new_button": "Nouveau meeting",
-    "locked_by_dictation": "Arrêtez la dictée avant d'enregistrer un meeting.",
-    "model_not_ready": "Le modèle est encore en cours de chargement."
   },
   "meeting_notes": {
     "title": "Notes",
