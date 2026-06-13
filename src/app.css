@@ -91,16 +91,17 @@
   --color-glass-bg: rgba(255, 255, 255, 0.7);
 }
 
-html,
-body.pill-body {
-  background: transparent;
-}
-
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--color-canvas);
+  /* Semi-opaque over the native vibrancy material (underWindowBackground);
+     the solid token remains the fallback tint. */
+  background: color-mix(in srgb, var(--color-canvas) 82%, transparent);
   color: var(--color-text-primary);
+}
+
+body.pill-body {
+  background: transparent;
 }
 
 h1, h2, h3, h4 {
@@ -148,7 +149,7 @@ img {
 
 /* ─── Surface card ─── */
 .surface-card {
-  background: var(--color-surface-2);
+  background: color-mix(in srgb, var(--color-surface-2) 88%, transparent);
   border-radius: 1rem;
   outline: 1px solid var(--color-ghost-border);
   padding: 1.25rem;

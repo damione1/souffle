@@ -22,7 +22,16 @@
         "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "windowEffects": {
+          "effects": [
+            "underWindowBackground"
+          ],
+          "state": "active"
+        }
       },
       {
         "label": "pill",
