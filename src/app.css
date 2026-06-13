@@ -57,8 +57,11 @@
   --color-warning: #e0a458;
   --color-danger: #d6705f;
 
-  --color-ghost-border: rgba(228, 212, 190, 0.12);
+  --color-ghost-border: rgba(228, 212, 190, 0.1);
   --color-glass-bg: rgba(39, 31, 24, 0.72);
+
+  /* Cards lift with a soft warm shadow in light mode; none in dark. */
+  --shadow-card: none;
 
   --font-family-heading: "Manrope", system-ui, sans-serif;
   --font-family-body: "Inter", system-ui, sans-serif;
@@ -97,8 +100,9 @@
   --color-success: #6f8a5c;
   --color-warning: #c5893f;
   --color-danger: #c25a47;
-  --color-ghost-border: rgba(62, 46, 30, 0.1);
+  --color-ghost-border: rgba(62, 46, 30, 0.08);
   --color-glass-bg: rgba(253, 250, 244, 0.72);
+  --shadow-card: 0 1px 2px rgba(60, 46, 30, 0.04), 0 10px 28px -16px rgba(60, 46, 30, 0.16);
 }
 
 body {
@@ -159,9 +163,10 @@ img {
 
 /* ─── Surface card ─── */
 .surface-card {
-  background: color-mix(in srgb, var(--color-surface-2) 88%, transparent);
-  border-radius: 1rem;
+  background: color-mix(in srgb, var(--color-surface-1) 92%, transparent);
+  border-radius: var(--radius-card);
   outline: 1px solid var(--color-ghost-border);
+  box-shadow: var(--shadow-card);
   padding: 1.25rem;
 }
 

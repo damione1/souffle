@@ -70,28 +70,29 @@
         onDictate={() => void transcription.toggleRecording()}
         onMeeting={() => void meeting.startRecording()}
       />
+
+      <label class="flex items-center gap-2.5 rounded-xl bg-surface-2/70 px-3.5 py-2.5 outline-1 outline-ghost-border focus-within:outline-accent/50">
+        <Search size={15} class="shrink-0 text-text-muted" aria-hidden="true" />
+        <input
+          type="text"
+          bind:value={timeline.searchQuery}
+          placeholder={$t("home.search_placeholder")}
+          class="w-full bg-transparent text-sm outline-none placeholder:text-text-muted"
+        />
+      </label>
+
+      {#if timeline.statusMessage}
+        <StatusBanner message={timeline.statusMessage} />
+      {/if}
+
+      <TimelineSection controller={timeline} />
     {:else}
+      <!-- During a live session, the session card is the only focus. -->
       <LiveSessionCard
         mode={recordingMode === "meeting" ? "meeting" : "dictation"}
         {transcription}
         {meeting}
       />
     {/if}
-
-    <label class="flex items-center gap-2.5 rounded-xl bg-surface-2/70 px-3.5 py-2.5 outline-1 outline-ghost-border focus-within:outline-accent/50">
-      <Search size={15} class="shrink-0 text-text-muted" aria-hidden="true" />
-      <input
-        type="text"
-        bind:value={timeline.searchQuery}
-        placeholder={$t("home.search_placeholder")}
-        class="w-full bg-transparent text-sm outline-none placeholder:text-text-muted"
-      />
-    </label>
-
-    {#if timeline.statusMessage}
-      <StatusBanner message={timeline.statusMessage} />
-    {/if}
-
-    <TimelineSection controller={timeline} />
   {/if}
 </div>
