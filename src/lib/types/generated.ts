@@ -488,7 +488,7 @@ capture_system_audio: boolean }
  * with a single enum that enforces valid transitions.
  */
 export type AppStateMachine = { state: "idle" } | { state: "downloading"; data: { profile: TranscriptionProfile } } | { state: "downloaded"; data: { profile: TranscriptionProfile } } | { state: "loading"; data: { profile: TranscriptionProfile } } | { state: "ready"; data: { profile: TranscriptionProfile } } | { state: "recording_dictation"; data: { profile: TranscriptionProfile; session_id: number } } | { state: "recording_meeting"; data: { profile: TranscriptionProfile; session_id: number; meeting_id: string } } | { state: "stopping"; data: { profile: TranscriptionProfile; was_recording: RecordingKind } } | { state: "unloading"; data: { profile: TranscriptionProfile; next_profile: TranscriptionProfile | null } } | { state: "error"; data: { message: string; recovery: ErrorRecovery } }
-export type AppView = "transcription" | "meetings" | "settings"
+export type AppView = "home" | "settings"
 /**
  * Info about an available audio input device, sent to frontend
  */

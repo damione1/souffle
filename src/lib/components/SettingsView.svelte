@@ -38,8 +38,6 @@
 <svelte:window onkeydown={controller.handleKeyDown} />
 
 <div class="flex flex-col gap-4">
-  <h2>{$t("settings.title")}</h2>
-
   {#if controller.statusMessage}
     <StatusBanner message={controller.statusMessage} />
   {/if}

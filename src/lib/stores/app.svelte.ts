@@ -1,7 +1,6 @@
 import type {
   AppSettings,
   AppStateMachine,
-  AppView,
   PipelineError,
   SystemAudioStatus,
   TranscriptionHealth,
@@ -9,8 +8,8 @@ import type {
 } from "../types";
 import type { TranscriptionModelOperationState } from "../features/transcription/state";
 
-// Current view
-let currentView = $state<AppView>("transcription");
+// Settings sheet visibility (the app is otherwise a single home surface)
+let settingsOpen = $state(false);
 
 // Current meeting ID (when viewing a specific meeting)
 let currentMeetingId = $state<string | null>(null);
@@ -113,8 +112,8 @@ function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOp
 
 export function getAppState() {
   return {
-    get currentView() { return currentView; },
-    set currentView(v: AppView) { currentView = v; },
+    get settingsOpen() { return settingsOpen; },
+    set settingsOpen(v: boolean) { settingsOpen = v; },
 
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },
@@ -180,16 +179,9 @@ export function getAppState() {
     get downloadTotalBytes() { return downloadTotalBytes; },
     set downloadTotalBytes(v: number | null) { downloadTotalBytes = v; },
 
-    /** Navigate to a specific meeting's detail page */
+    /** Open a meeting's detail view */
     openMeeting(id: string) {
       currentMeetingId = id;
-      currentView = "meetings";
-    },
-
-    /** Navigate to the meetings list */
-    newMeeting() {
-      currentMeetingId = null;
-      currentView = "meetings";
     },
   };
 }

@@ -25,7 +25,7 @@ import type {
   Theme,
   TranscriptionCatalog,
 } from "../../types";
-import { applyTheme, errorMessage } from "../../utils";
+import { applyTheme, errorMessage, formatShortcutLabel } from "../../utils";
 import {
   getFirstAvailableTranscriptionBackend,
   getFirstAvailableTranscriptionModel,
@@ -415,12 +415,7 @@ export function createSettingsController() {
   }
 
   function formatShortcut(shortcut: string): string {
-    if (!shortcut) return "Not set";
-    return shortcut
-      .replace(/CommandOrControl/g, "\u2318")
-      .replace(/Shift/g, "\u21E7")
-      .replace(/Alt/g, "\u2325")
-      .replace(/\+/g, " ");
+    return formatShortcutLabel(shortcut) || "Not set";
   }
 
   function startRecording(field: "toggle" | "ptt") {

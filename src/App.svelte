@@ -1,10 +1,11 @@
 <script lang="ts">
+  import { Settings as SettingsIcon } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import Sidebar from "./lib/components/Sidebar.svelte";
-  import TranscriptionView from "./lib/components/TranscriptionView.svelte";
-  import MeetingsView from "./lib/components/MeetingsView.svelte";
+  import HomeView from "./lib/components/HomeView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
+  import Sheet from "./lib/components/ui/Sheet.svelte";
+  import StatusChip from "./lib/components/ui/StatusChip.svelte";
   import { events } from "./lib/api/generated";
   import { recoverState } from "./lib/api/transcription";
   import { bootstrapAppState } from "./lib/bootstrap";
@@ -79,7 +80,12 @@
     })();
 
     events.navigate.listen((event) => {
-      app.currentView = event.payload;
+      if (event.payload === "settings") {
+        app.settingsOpen = true;
+      } else {
+        app.settingsOpen = false;
+        app.currentMeetingId = null;
+      }
     }).then((fn) => {
       unlistenNav = fn;
     });
@@ -131,21 +137,45 @@
   });
 </script>
 
+<svelte:window
+  onkeydown={(event) => {
+    if (event.key === "," && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      app.settingsOpen = !app.settingsOpen;
+    }
+  }}
+/>
+
 {#if app.showOnboarding}
   <OnboardingView />
 {:else}
-<div class="flex h-screen overflow-hidden">
-  <Sidebar />
+<div class="flex h-screen flex-col overflow-hidden">
+  <header
+    data-tauri-drag-region
+    class="flex shrink-0 items-center gap-3 px-5 pt-3 pb-2 pl-[88px]"
+  >
+    <img src="/favicon.svg" alt="" class="h-6 w-6 rounded-md" aria-hidden="true" data-tauri-drag-region />
+    <span class="font-heading text-sm font-bold tracking-tight" data-tauri-drag-region>Soufflé</span>
+    <span class="flex-1" data-tauri-drag-region></span>
+    <StatusChip
+      phase={app.transcriptionRuntimePhase}
+      operationState={app.transcriptionModelOperationState}
+      downloadedBytes={app.downloadedBytes}
+      downloadTotalBytes={app.downloadTotalBytes}
+    />
+    <button
+      onclick={() => (app.settingsOpen = true)}
+      class="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+      aria-label={$t("settings.title")}
+      title="⌘,"
+    >
+      <SettingsIcon size={17} aria-hidden="true" />
+    </button>
+  </header>
 
   <div class="flex flex-1 flex-col min-w-0 overflow-hidden">
-    <main class="flex-1 p-6 overflow-y-auto">
-      {#if app.currentView === "transcription"}
-        <TranscriptionView />
-      {:else if app.currentView === "meetings"}
-        <MeetingsView />
-      {:else if app.currentView === "settings"}
-        <SettingsView />
-      {/if}
+    <main class="flex-1 overflow-y-auto px-6 pb-6 pt-2">
+      <HomeView />
     </main>
 
     {#if machineError}
@@ -191,4 +221,10 @@
     {/if}
   </div>
 </div>
+
+{#if app.settingsOpen}
+  <Sheet title={$t("settings.title")} onClose={() => (app.settingsOpen = false)}>
+    <SettingsView />
+  </Sheet>
+{/if}
 {/if}

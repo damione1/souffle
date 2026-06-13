@@ -244,5 +244,29 @@
     "dictation": "Dictée",
     "meeting": "Meeting",
     "stop": "Arrêter l'enregistrement"
+  },
+  "home": {
+    "dictate": "Dicter",
+    "dictate_hint": "Définissez un raccourci dans les réglages",
+    "meeting": "Meeting",
+    "meeting_hint": "Enregistrer et transcrire en un clic",
+    "live_dictation": "Dictée",
+    "live_meeting": "Meeting",
+    "stop": "Stop",
+    "listening": "À l'écoute…",
+    "search_placeholder": "Rechercher dans tout…"
+  },
+  "timeline": {
+    "today": "Aujourd'hui",
+    "yesterday": "Hier",
+    "upcoming_today": "À venir aujourd'hui",
+    "summary_ready": "Résumé prêt",
+    "summary_stale": "Résumé obsolète",
+    "delete": "Supprimer",
+    "confirm_delete": "Confirmer",
+    "empty_title": "Rien ici pour l'instant",
+    "empty_msg": "Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.",
+    "no_matches_title": "Aucun résultat",
+    "no_matches_msg": "Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions."
   }
 }

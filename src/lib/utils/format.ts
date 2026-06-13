@@ -1,4 +1,14 @@
 /** Format seconds as "M:SS" */
+/** "CommandOrControl+Shift+Space" → "⌘ ⇧ Space" for display. */
+export function formatShortcutLabel(shortcut: string): string {
+  if (!shortcut) return "";
+  return shortcut
+    .replace(/CommandOrControl/g, "\u2318")
+    .replace(/Shift/g, "\u21E7")
+    .replace(/Alt/g, "\u2325")
+    .replace(/\+/g, " ");
+}
+
 export function formatTimestamp(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);

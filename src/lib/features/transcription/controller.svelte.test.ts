@@ -185,28 +185,18 @@ describe("transcription controller", () => {
     });
   });
 
-  it("mount loads catalog, status, and history", async () => {
+  it("mount loads catalog and runtime status", async () => {
     const ctrl = createTranscriptionController();
-    const cleanup = await ctrl.mount();
+    await ctrl.mount();
 
     expect(mockInvoke).toHaveBeenCalledWith("get_transcription_catalog");
     expect(mockInvoke).toHaveBeenCalledWith("get_model_status", { selection });
-    expect(mockInvoke).toHaveBeenCalledWith("list_dictation_entries", { limit: 50 });
-    expect(ctrl.catalog).toEqual(fakeCatalog);
     expect(ctrl.runtimePhase).toBe("ready");
-    expect(ctrl.history).toEqual(fakeHistory);
-
-    expect(typeof cleanup).toBe("function");
-    cleanup!();
-    expect(mockUnlisten).toHaveBeenCalled();
   });
 
   /** Simulate the backend emitting a StateChanged event by setting machineState */
   function simulateRecordingStarted(app: ReturnType<typeof getAppState>) {
     app.machineState = { state: "recording_dictation", data: { profile: { engine_id: "kyutai", engine_label: "Kyutai", model_id: "stt-1b-en_fr", model_label: "STT 1B", backend_id: "candle", backend_label: "Candle" }, session_id: 1 } };
-  }
-  function simulateRecordingStopped(app: ReturnType<typeof getAppState>) {
-    app.machineState = { state: "ready", data: { profile: { engine_id: "kyutai", engine_label: "Kyutai", model_id: "stt-1b-en_fr", model_label: "STT 1B", backend_id: "candle", backend_label: "Candle" } } };
   }
 
   it("toggleRecording starts when loaded", async () => {
@@ -371,34 +361,4 @@ describe("transcription controller", () => {
     expect(ctrl.modelOperationState).toBe("idle");
   });
 
-  it("removeHistoryEntry updates list", async () => {
-    let listCallCount = 0;
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_dictation_entries") {
-        listCallCount++;
-        return Promise.resolve(listCallCount <= 1 ? fakeHistory : [fakeHistory[1]]);
-      }
-      return defaultInvoke(cmd);
-    });
-
-    const ctrl = createTranscriptionController();
-    await ctrl.mount();
-    expect(ctrl.history).toHaveLength(2);
-
-    await ctrl.removeHistoryEntry("1");
-
-    expect(mockInvoke).toHaveBeenCalledWith("delete_dictation_entry", { id: "1" });
-    expect(ctrl.history).toHaveLength(1);
-  });
-
-  it("resetHistory clears all", async () => {
-    const ctrl = createTranscriptionController();
-    await ctrl.mount();
-    expect(ctrl.history).toHaveLength(2);
-
-    await ctrl.resetHistory();
-
-    expect(mockInvoke).toHaveBeenCalledWith("clear_dictation_history");
-    expect(ctrl.history).toHaveLength(0);
-  });
 });

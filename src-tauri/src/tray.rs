@@ -117,10 +117,10 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = MeetingStopRequested.emit(app);
                     info!("Meeting stop via tray");
                 } else if let Some(window) = app.get_webview_window("main") {
-                    // Starting needs the meeting view; show it ready to record.
+                    // Starting needs the main window; show the home screen.
                     let _ = window.show();
                     let _ = window.set_focus();
-                    let _ = Navigate(AppView::Meetings).emit(app);
+                    let _ = Navigate(AppView::Home).emit(app);
                 }
             }
             "settings" => {

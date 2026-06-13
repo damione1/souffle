@@ -244,5 +244,29 @@
     "dictation": "Dictating",
     "meeting": "Meeting",
     "stop": "Stop recording"
+  },
+  "home": {
+    "dictate": "Dictate",
+    "dictate_hint": "Set a shortcut in Settings",
+    "meeting": "Meeting",
+    "meeting_hint": "Record & transcribe in one click",
+    "live_dictation": "Dictating",
+    "live_meeting": "Meeting",
+    "stop": "Stop",
+    "listening": "Listening…",
+    "search_placeholder": "Search everything…"
+  },
+  "timeline": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "upcoming_today": "Coming up today",
+    "summary_ready": "Summary ready",
+    "summary_stale": "Summary outdated",
+    "delete": "Delete",
+    "confirm_delete": "Confirm",
+    "empty_title": "Nothing here yet",
+    "empty_msg": "Your dictations and meetings will appear here, newest first.",
+    "no_matches_title": "No matches",
+    "no_matches_msg": "Try different keywords — search covers every transcript."
   }
 }

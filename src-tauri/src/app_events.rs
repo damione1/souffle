@@ -7,8 +7,7 @@ use crate::state_machine::AppStateMachine;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum AppView {
-    Transcription,
-    Meetings,
+    Home,
     Settings,
 }
 
