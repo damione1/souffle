@@ -24,7 +24,7 @@
     aria-label={label || "Progress"}
   >
     <div
-      class="h-full rounded-full bg-accent-blue transition-[width] duration-200 ease-out"
+      class="h-full rounded-full bg-accent transition-[width] duration-200 ease-out"
       style={`width: ${percent}%`}
     ></div>
   </div>

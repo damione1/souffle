@@ -30,7 +30,7 @@
     <button onclick={onOpen} class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
       <span
         class={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-          item.kind === "meeting" ? "bg-accent-blue/15 text-accent-blue" : "bg-surface-3 text-text-muted"
+          item.kind === "meeting" ? "bg-accent/15 text-accent" : "bg-surface-3 text-text-muted"
         }`}
         aria-hidden="true"
       >
@@ -48,7 +48,7 @@
       <span class="flex shrink-0 items-center gap-2 text-xs text-text-muted">
         {#if item.hasSummary}
           <span
-            class={item.summaryIsStale ? "text-amber-400" : "text-accent-blue"}
+            class={item.summaryIsStale ? "text-warning" : "text-accent"}
             title={item.summaryIsStale ? $t("timeline.summary_stale") : $t("timeline.summary_ready")}
           >
             <Sparkles size={13} aria-hidden="true" />

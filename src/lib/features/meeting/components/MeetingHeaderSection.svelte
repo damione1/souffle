@@ -60,7 +60,7 @@
         <span class="recording-dot"></span> {$t("meeting_header.recording_badge")}
         {#if systemAudioStatus}
           {#if systemAudioStatus.active}
-            <span class="pill pill-blue">{$t("meeting_header.system_audio_active")}</span>
+            <span class="pill pill-accent">{$t("meeting_header.system_audio_active")}</span>
           {:else}
             <span class="pill pill-muted" title={systemAudioStatus.reason ?? ""}>{$t("meeting_header.system_audio_unavailable")}</span>
           {/if}
@@ -103,7 +103,7 @@
       {/if}
       <span class="text-sm text-text-muted">{$t("meeting_header.segments_count", { values: { count: segmentCount } })}</span>
       <span class="pill pill-muted">{sessionCount} {sessionCount === 1 ? $t("meeting_header.session_singular") : $t("meeting_header.session_plural")}</span>
-      <span class="pill pill-blue">{meeting.transcription_profile.engine_label}</span>
+      <span class="pill pill-accent">{meeting.transcription_profile.engine_label}</span>
       <span class="pill pill-muted">{meeting.transcription_profile.model_label}</span>
     </div>
   </div>

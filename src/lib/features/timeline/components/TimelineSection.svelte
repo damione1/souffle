@@ -45,7 +45,7 @@
       <div class="surface-card flex flex-col gap-1 p-1.5">
         {#each upcoming as event}
           <div class="flex items-center gap-3 rounded-lg px-3 py-2.5">
-            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-400" aria-hidden="true">
+            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sage/15 text-sage" aria-hidden="true">
               <CalendarClock size={14} />
             </span>
             <span class="min-w-0 flex-1 truncate text-sm">{event.title}</span>

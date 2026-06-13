@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { FileText } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import type { createMeetingController } from "../controller.svelte";
   import MeetingHeaderSection from "./MeetingHeaderSection.svelte";
   import MeetingNotesSection from "./MeetingNotesSection.svelte";
   import MeetingSummarySection from "./MeetingSummarySection.svelte";
   import MeetingTranscriptSection from "./MeetingTranscriptSection.svelte";
+  import Accordion from "../../../components/ui/Accordion.svelte";
   import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
@@ -28,6 +30,8 @@
       ? (controller.meeting?.segments.length ?? null)
       : null,
   );
+
+  let transcriptOpen = $state(false);
 </script>
 
 <div class="flex flex-col gap-4">
@@ -55,14 +59,38 @@
       onStopRecording={controller.stopRecording}
     />
 
-    <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
-      {#if controller.isRecordingMeeting}
-        <MeetingNotesSection
-          notes={controller.notesDraft}
-          saveState={controller.notesSaveState}
-          onNotesChange={controller.onNotesChange}
-        />
-      {/if}
+    <!-- Notes are the focus: what the user wrote, front and center. -->
+    <MeetingNotesSection
+      large
+      notes={controller.notesDraft}
+      saveState={controller.notesSaveState}
+      onNotesChange={controller.onNotesChange}
+    />
+
+    <!-- AI summary, generated from notes + transcript. -->
+    <MeetingSummarySection
+      meeting={controller.meeting}
+      isRecordingMeeting={controller.isRecordingMeeting}
+      segments={displaySegments}
+      ollamaAvailable={controller.ollamaAvailable}
+      summaryModels={controller.summaryModels}
+      selectedModel={controller.selectedModel}
+      onSelectModel={(modelId) => {
+        controller.selectedModel = modelId;
+      }}
+      onSummarize={controller.summarizeMeeting}
+      isSummarizing={controller.isSummarizing}
+      summaryStream={controller.summaryStream}
+    />
+
+    <!-- Raw transcript is secondary: tucked into a collapsible panel. -->
+    <Accordion title={$t("meeting_transcript.title")} bind:open={transcriptOpen}>
+      {#snippet trailing()}
+        <span class="inline-flex items-center gap-1.5 text-xs text-text-muted">
+          <FileText size={13} aria-hidden="true" />
+          {$t("meeting_transcript.segments_count", { values: { count: displaySegments.length } })}
+        </span>
+      {/snippet}
       <MeetingTranscriptSection
         segments={displaySegments}
         recordingSessions={controller.meeting.recording_sessions}
@@ -78,33 +106,10 @@
         onResetEdited={controller.resetEditedTranscript}
         onEditDraftChange={(value) => { controller.editedTranscriptDraft = value; }}
       />
-
-      <MeetingSummarySection
-        meeting={controller.meeting}
-        isRecordingMeeting={controller.isRecordingMeeting}
-        segments={displaySegments}
-        ollamaAvailable={controller.ollamaAvailable}
-        summaryModels={controller.summaryModels}
-        selectedModel={controller.selectedModel}
-        onSelectModel={(modelId) => {
-          controller.selectedModel = modelId;
-        }}
-        onSummarize={controller.summarizeMeeting}
-        isSummarizing={controller.isSummarizing}
-        summaryStream={controller.summaryStream}
-      />
-
-      {#if !controller.isRecordingMeeting}
-        <MeetingNotesSection
-          notes={controller.notesDraft}
-          saveState={controller.notesSaveState}
-          onNotesChange={controller.onNotesChange}
-        />
-      {/if}
-    </div>
+    </Accordion>
 
     {#if !controller.isRecordingMeeting && controller.meeting.id}
-      <div class="flex items-center gap-2 pt-2 border-t border-ghost-border">
+      <div class="flex items-center gap-2 pt-1">
         <ConfirmAction
           label={$t("meeting_view.delete_meeting")}
           confirmLabel={$t("meeting_view.delete_confirm_label")}

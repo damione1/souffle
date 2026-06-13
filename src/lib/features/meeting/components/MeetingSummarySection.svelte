@@ -78,7 +78,7 @@
     <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
       {#each keyPoints as point, index}
         <div class="flex gap-3 p-3.5 bg-surface-2 rounded-default outline-1 outline-ghost-border items-start">
-          <span class="flex items-center justify-center w-6 h-6 rounded-full bg-accent-blue/15 text-accent-blue text-xs font-bold shrink-0">{index + 1}</span>
+          <span class="flex items-center justify-center w-6 h-6 rounded-full bg-accent/15 text-accent text-xs font-bold shrink-0">{index + 1}</span>
           <p class="m-0 text-sm text-text-secondary leading-normal">{point.replace(/^[-•*\d.)]+\s*/, "").trim()}</p>
         </div>
       {/each}

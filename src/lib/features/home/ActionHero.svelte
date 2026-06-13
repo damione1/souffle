@@ -19,9 +19,9 @@
   <button
     onclick={onDictate}
     disabled={!modelReady}
-    class="surface-card group flex cursor-pointer items-center gap-4 !p-5 text-left transition-[outline-color,transform] duration-150 hover:outline-accent-blue/40 active:scale-[0.99] disabled:cursor-default disabled:opacity-50"
+    class="surface-card group flex cursor-pointer items-center gap-4 !p-5 text-left transition-[outline-color,transform] duration-150 hover:outline-accent/40 active:scale-[0.99] disabled:cursor-default disabled:opacity-50"
   >
-    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-blue/15 text-accent-blue transition-colors group-hover:bg-accent-blue group-hover:text-white">
+    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent transition-colors group-hover:bg-accent group-hover:text-white">
       <Mic size={20} aria-hidden="true" />
     </span>
     <span class="flex min-w-0 flex-col">
@@ -39,9 +39,9 @@
   <button
     onclick={onMeeting}
     disabled={!modelReady}
-    class="surface-card group flex cursor-pointer items-center gap-4 !p-5 text-left transition-[outline-color,transform] duration-150 hover:outline-accent-blue/40 active:scale-[0.99] disabled:cursor-default disabled:opacity-50"
+    class="surface-card group flex cursor-pointer items-center gap-4 !p-5 text-left transition-[outline-color,transform] duration-150 hover:outline-accent/40 active:scale-[0.99] disabled:cursor-default disabled:opacity-50"
   >
-    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400 transition-colors group-hover:bg-emerald-500 group-hover:text-white">
+    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sage/15 text-sage transition-colors group-hover:bg-sage group-hover:text-white">
       <Users size={20} aria-hidden="true" />
     </span>
     <span class="flex min-w-0 flex-col">

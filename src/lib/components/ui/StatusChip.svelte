@@ -36,10 +36,10 @@
   <span
     class={`h-1.5 w-1.5 rounded-full ${
       status.tone === "ready"
-        ? "bg-emerald-400"
+        ? "bg-sage"
         : status.tone === "busy"
-          ? "animate-pulse bg-accent-blue"
-          : "bg-amber-400"
+          ? "animate-pulse bg-accent"
+          : "bg-warning"
     }`}
     aria-hidden="true"
   ></span>

@@ -78,7 +78,7 @@
       />
     {/if}
 
-    <label class="flex items-center gap-2.5 rounded-xl bg-surface-2/70 px-3.5 py-2.5 outline-1 outline-ghost-border focus-within:outline-accent-blue/50">
+    <label class="flex items-center gap-2.5 rounded-xl bg-surface-2/70 px-3.5 py-2.5 outline-1 outline-ghost-border focus-within:outline-accent/50">
       <Search size={15} class="shrink-0 text-text-muted" aria-hidden="true" />
       <input
         type="text"
