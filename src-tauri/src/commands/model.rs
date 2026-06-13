@@ -115,6 +115,20 @@ pub fn download_model(
         return Ok(());
     }
 
+    // Switching to a different, not-yet-downloaded model while one is loaded:
+    // drop the current engine first so the state machine can move out of
+    // Ready (it tracks a single profile through download → load → ready).
+    let machine = state.current_machine_state()?;
+    if machine.is_recording() {
+        return Err("Cannot switch models while recording".into());
+    }
+    if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
+        state.apply_transition(StateAction::Unload { next_profile: None })?;
+        state.engine_actor.unload_model()?;
+        state.apply_transition(StateAction::UnloadComplete)?;
+        // Machine is now Downloaded { current } — different from `profile`.
+    }
+
     // Transition to Downloading
     state.apply_transition(StateAction::StartDownload {
         profile: profile.clone(),
