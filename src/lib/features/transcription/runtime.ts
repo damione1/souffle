@@ -2,6 +2,7 @@ import { getAppState } from "../../stores/app.svelte";
 import {
   downloadModel,
   getModelStatus,
+  getTranscriptionCatalog,
   loadModel,
 } from "../../api/transcription";
 import type { DownloadProgress, TranscriptionCatalog } from "../../types";
@@ -49,6 +50,7 @@ export async function startTranscriptionModelDownload(
   app: AppState,
   catalog: TranscriptionCatalog | null,
   setStatusMessage: (message: string) => void,
+  options: { autoLoad?: boolean } = {},
 ) {
   if (app.transcriptionModelOperationState !== "idle") return;
 
@@ -80,9 +82,15 @@ export async function startTranscriptionModelDownload(
           app.downloadFile = "";
           app.downloadedBytes = 0;
           app.downloadTotalBytes = null;
-          void refreshTranscriptionRuntimeStatus(app, catalog).catch((error) => {
-            setStatusMessage(errorMessage(error));
-          });
+          void refreshTranscriptionRuntimeStatus(app, catalog)
+            .then(() => {
+              if (options.autoLoad && app.transcriptionRuntimePhase === "load_required") {
+                return startTranscriptionModelLoad(app, catalog, setStatusMessage);
+              }
+            })
+            .catch((error) => {
+              setStatusMessage(errorMessage(error));
+            });
           return;
         }
 
@@ -93,6 +101,55 @@ export async function startTranscriptionModelDownload(
     );
   } catch (error) {
     setStatusMessage(errorMessage(error));
+  }
+}
+
+/// What to do with the selected model when the app starts.
+export function decideStartupModelAction(
+  phase: AppState["transcriptionRuntimePhase"],
+  machineState: string,
+): "load" | "onboarding" | "none" {
+  if (phase === "download_required") return "onboarding";
+  // Only auto-load from a settled cold state; a webview reload while the
+  // backend is loading/ready/recording must not re-trigger anything.
+  if (phase === "load_required" && (machineState === "idle" || machineState === "downloaded")) {
+    return "load";
+  }
+  return "none";
+}
+
+/** Startup flow: auto-load the last-selected model, or surface onboarding
+ * when nothing is downloaded yet. Fire-and-forget from bootstrap; progress
+ * reaches the UI through StateChanged events. */
+export async function runStartupModelFlow(app: AppState): Promise<void> {
+  let catalog: TranscriptionCatalog | null = null;
+  try {
+    catalog = await getTranscriptionCatalog();
+  } catch {
+    return; // Backend unavailable; StateChanged events will catch us up.
+  }
+  app.settings = {
+    ...app.settings,
+    transcription_engine_id: catalog.selected_engine_id,
+    transcription_model_id: catalog.selected_model_id,
+    transcription_backend_id: catalog.selected_backend_id,
+  };
+
+  try {
+    await refreshTranscriptionRuntimeStatus(app, catalog);
+  } catch {
+    return;
+  }
+
+  switch (decideStartupModelAction(app.transcriptionRuntimePhase, app.machineState.state)) {
+    case "onboarding":
+      app.showOnboarding = true;
+      break;
+    case "load":
+      void startTranscriptionModelLoad(app, catalog, () => {});
+      break;
+    case "none":
+      break;
   }
 }
 

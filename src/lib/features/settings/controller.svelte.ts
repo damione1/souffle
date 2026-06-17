@@ -25,10 +25,11 @@ import type {
   Theme,
   TranscriptionCatalog,
 } from "../../types";
-import { applyTheme, errorMessage } from "../../utils";
+import { applyTheme, errorMessage, formatShortcutLabel } from "../../utils";
 import {
   getFirstAvailableTranscriptionBackend,
   getFirstAvailableTranscriptionModel,
+  listAvailableModelOptions,
   getSelectedTranscriptionBackend,
 } from "../transcription/catalog";
 import {
@@ -199,6 +200,32 @@ export function createSettingsController() {
     } catch {
       ollamaAvailable = false;
       ollamaModels = [];
+    }
+  }
+
+  /** Simple-picker selection: persist the (engine, model, backend) triple,
+   * then download (if needed) and load without further clicks. */
+  async function selectModelOption(key: string) {
+    const option = listAvailableModelOptions(catalog).find((candidate) => candidate.key === key);
+    if (!option) return;
+
+    await persistSettings((settings) => {
+      settings.transcription_engine_id = option.engineId;
+      settings.transcription_model_id = option.modelId;
+      settings.transcription_backend_id = option.backendId;
+    });
+
+    if (app.transcriptionRuntimePhase === "download_required") {
+      await startTranscriptionModelDownload(
+        app,
+        catalog,
+        (message) => { statusMessage = message; },
+        { autoLoad: true },
+      );
+    } else if (app.transcriptionRuntimePhase === "load_required") {
+      await startTranscriptionModelLoad(app, catalog, (message) => {
+        statusMessage = message;
+      });
     }
   }
 
@@ -388,12 +415,7 @@ export function createSettingsController() {
   }
 
   function formatShortcut(shortcut: string): string {
-    if (!shortcut) return "Not set";
-    return shortcut
-      .replace(/CommandOrControl/g, "\u2318")
-      .replace(/Shift/g, "\u21E7")
-      .replace(/Alt/g, "\u2325")
-      .replace(/\+/g, " ");
+    return formatShortcutLabel(shortcut) || "Not set";
   }
 
   function startRecording(field: "toggle" | "ptt") {
@@ -476,11 +498,7 @@ export function createSettingsController() {
     refreshDevices,
     onDeviceChange,
     checkOllama,
-    selectTranscriptionEngine,
-    selectTranscriptionModel,
-    selectTranscriptionBackend,
-    handleDownloadModel,
-    handleLoadModel,
+    selectModelOption,
     handleDeleteModel,
     onThemeChange,
     onLocaleChange,

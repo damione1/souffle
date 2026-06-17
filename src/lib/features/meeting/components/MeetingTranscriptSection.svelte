@@ -57,7 +57,7 @@
   );
 </script>
 
-<section class="surface-card flex flex-col gap-3">
+<section class="flex flex-col gap-3">
   <div class="flex items-center justify-between gap-4 flex-wrap">
     <div class="flex items-center gap-2">
       <h3>{isEditing ? $t("meeting_transcript.editing") : $t("meeting_transcript.title")}</h3>
@@ -107,7 +107,7 @@
       </button>
     </div>
   {:else}
-    <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary min-h-60 max-h-[480px] overflow-y-auto text-sm leading-relaxed">
+    <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary min-h-40 max-h-[460px] overflow-y-auto text-sm leading-relaxed">
       {#if phase === "has_content"}
         {#each transcriptBlocks as block}
           {#if block.type === "paragraph"}

@@ -1,8 +1,10 @@
 import {
   deleteMeeting as removeMeeting,
   getMeeting,
+  renameMeeting as applyMeetingRename,
   resumeMeetingRecording,
   saveEditedTranscript,
+  saveMeetingNotes,
   startMeetingRecording,
   stopMeetingRecording,
   summarizeMeeting as runMeetingSummary,
@@ -32,12 +34,16 @@ function createMeetingControllerInstance() {
   let isEditingTranscript = $state(false);
   let editedTranscriptDraft = $state("");
 
+  const NOTES_DEBOUNCE_MS = 800;
+  let notesDraft = $state("");
+  let notesSaveState = $state<"idle" | "pending" | "saved">("idle");
+  let notesTimer: ReturnType<typeof setTimeout> | null = null;
+
   let isRecordingMeeting = $derived(
     app.machineState.state === "recording_meeting"
     || (app.machineState.state === "stopping"
         && typeof app.machineState.data?.was_recording === "object"),
   );
-  let meetingTitle = $state("");
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
 
   let meeting = $state<MeetingTranscript | null>(null);
@@ -90,10 +96,44 @@ function createMeetingControllerInstance() {
     try {
       meeting = await getMeeting(id);
       syncSelectedModel(meeting.summary_model);
+      notesDraft = meeting.notes ?? "";
+      notesSaveState = "idle";
     } catch (e) {
       statusMessage = errorMessage(e);
     } finally {
       isLoadingMeeting = false;
+    }
+  }
+
+  /** The meeting id to write notes against: the accumulator id while
+   * recording (the row doesn't exist in the DB yet), the row id after. */
+  function notesTargetId(): string {
+    const machineState = app.machineState;
+    if (machineState.state === "recording_meeting") return machineState.data.meeting_id;
+    return meeting?.id ?? "";
+  }
+
+  function onNotesChange(value: string) {
+    notesDraft = value;
+    notesSaveState = "pending";
+    if (notesTimer) clearTimeout(notesTimer);
+    notesTimer = setTimeout(() => void flushNotes(), NOTES_DEBOUNCE_MS);
+  }
+
+  async function flushNotes() {
+    if (notesTimer) {
+      clearTimeout(notesTimer);
+      notesTimer = null;
+    }
+    if (notesSaveState !== "pending") return;
+    const id = notesTargetId();
+    if (!id) return;
+    try {
+      await saveMeetingNotes(id, notesDraft.trim() || null);
+      notesSaveState = "saved";
+    } catch (e) {
+      statusMessage = errorMessage(e);
+      notesSaveState = "idle";
     }
   }
 
@@ -111,11 +151,13 @@ function createMeetingControllerInstance() {
 
   async function startRecording() {
     try {
-      const title = meetingTitle.trim() || defaultMeetingTitle();
+      const title = defaultMeetingTitle();
       liveMeetingSegments = [];
       statusMessage = "";
       summaryStream = "";
       meeting = null;
+      notesDraft = "";
+      notesSaveState = "idle";
       const transcriptionProfile = toSelectedTranscriptionProfile(
         transcriptionCatalog,
         app.settings.transcription_engine_id,
@@ -143,7 +185,6 @@ function createMeetingControllerInstance() {
         summary_generated_at: null,
         edited_transcript: null,
       };
-      meetingTitle = "";
     } catch (e) {
       statusMessage = errorMessage(e);
       liveMeetingSegments = [];
@@ -170,6 +211,8 @@ function createMeetingControllerInstance() {
 
   async function stopRecording() {
     try {
+      // Unsaved notes must reach the accumulator before it is persisted.
+      await flushNotes();
       const id = await stopMeetingRecording();
 
       // Load the completed meeting BEFORE clearing recording flags.
@@ -178,6 +221,7 @@ function createMeetingControllerInstance() {
       app.currentMeetingId = id;
       meeting = await getMeeting(id);
       syncSelectedModel(meeting.summary_model);
+      notesDraft = meeting.notes ?? "";
       liveMeetingSegments = [];
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -194,14 +238,33 @@ function createMeetingControllerInstance() {
       "Recording was interrupted — the meeting recorded so far was saved to history.";
   }
 
-  /** Clear controller state for starting a fresh meeting. */
-  function startNew() {
+  /** Leave the detail view: clear the open meeting and return to the list. */
+  function closeMeeting() {
+    void flushNotes();
     meeting = null;
     liveMeetingSegments = [];
-    meetingTitle = "";
     statusMessage = "";
     summaryStream = "";
     app.currentMeetingId = null;
+  }
+
+  /** Rename the open meeting (works while recording too). */
+  async function renameMeeting(title: string) {
+    if (!meeting) return;
+    const trimmed = title.trim();
+    if (!trimmed || trimmed === meeting.title) return;
+    try {
+      // A live meeting that hasn't been stopped yet has the accumulator id
+      // in the machine state, not in the (placeholder) meeting object.
+      const machineState = app.machineState;
+      const id = meeting.id
+        || (machineState.state === "recording_meeting" ? machineState.data.meeting_id : "");
+      if (!id) return;
+      await applyMeetingRename(id, trimmed);
+      meeting = { ...meeting, title: trimmed };
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
   }
 
   async function summarizeMeeting() {
@@ -274,9 +337,7 @@ function createMeetingControllerInstance() {
     if (!meeting || !meeting.id) return;
     try {
       await removeMeeting(meeting.id);
-      meeting = null;
-      app.currentMeetingId = null;
-      app.currentView = "meeting-history";
+      closeMeeting();
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -292,8 +353,6 @@ function createMeetingControllerInstance() {
     get isSummarizing() { return isSummarizing; },
     get summaryStream() { return summaryStream; },
     get isRecordingMeeting() { return isRecordingMeeting; },
-    get meetingTitle() { return meetingTitle; },
-    set meetingTitle(value: string) { meetingTitle = value; },
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
     get isLoadingMeeting() { return isLoadingMeeting; },
@@ -301,13 +360,18 @@ function createMeetingControllerInstance() {
     get isEditingTranscript() { return isEditingTranscript; },
     get editedTranscriptDraft() { return editedTranscriptDraft; },
     set editedTranscriptDraft(value: string) { editedTranscriptDraft = value; },
+    get notesDraft() { return notesDraft; },
+    get notesSaveState() { return notesSaveState; },
+    onNotesChange,
+    flushNotes,
     mount,
     onMeetingSelectionChange,
     checkOllama,
     startRecording,
     resumeRecording,
     stopRecording,
-    startNew,
+    closeMeeting,
+    renameMeeting,
     summarizeMeeting,
     deleteMeeting,
     startEditingTranscript,
@@ -323,6 +387,14 @@ function createMeetingControllerInstance() {
  * is aborted by the backend. No-op if the controller was never created. */
 export function notifyMeetingAborted() {
   instance?.handleRecordingAborted();
+}
+
+/** The floating pill (or tray) asked to stop the active meeting; run the
+ * full stop pipeline so the meeting is saved normally. */
+export function notifyMeetingStopRequested() {
+  if (instance?.isRecordingMeeting) {
+    void instance.stopRecording();
+  }
 }
 
 // Singleton: survives view mount/unmount cycles so liveMeetingSegments

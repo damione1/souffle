@@ -1,21 +1,30 @@
 <script lang="ts">
+  import { Settings as SettingsIcon } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import Sidebar from "./lib/components/Sidebar.svelte";
-  import Waveform from "./lib/components/Waveform.svelte";
-  import TranscriptionView from "./lib/components/TranscriptionView.svelte";
-  import MeetingView from "./lib/components/MeetingView.svelte";
-  import MeetingHistoryView from "./lib/components/MeetingHistoryView.svelte";
+  import HomeView from "./lib/components/HomeView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
+  import Sheet from "./lib/components/ui/Sheet.svelte";
+  import StatusChip from "./lib/components/ui/StatusChip.svelte";
   import { events } from "./lib/api/generated";
   import { recoverState } from "./lib/api/transcription";
   import { bootstrapAppState } from "./lib/bootstrap";
-  import { notifyMeetingAborted } from "./lib/features/meeting/controller.svelte";
-  import { notifyDictationAborted } from "./lib/features/transcription/controller.svelte";
+  import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
+  import {
+    notifyMeetingAborted,
+    notifyMeetingStopRequested,
+  } from "./lib/features/meeting/controller.svelte";
+  import {
+    createTranscriptionController,
+    notifyDictationAborted,
+  } from "./lib/features/transcription/controller.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
   import { errorMessage } from "./lib/utils";
 
   const app = getAppState();
+  // Mounted app-level so the global dictation shortcut works whatever view
+  // (or the onboarding screen) is displayed.
+  const transcription = createTranscriptionController();
 
   let unlistenNav: (() => void) | null = null;
   let unlistenState: (() => void) | null = null;
@@ -23,6 +32,7 @@
   let unlistenPipelineError: (() => void) | null = null;
 
   let unlistenSystemAudio: (() => void) | null = null;
+  let unlistenMeetingStop: (() => void) | null = null;
 
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
@@ -59,16 +69,23 @@
   }
 
   onMount(() => {
+    let cleanupTranscription = () => {};
     (async () => {
       try {
         await bootstrapAppState(app);
       } catch {
         // First run, no settings yet.
       }
+      cleanupTranscription = (await transcription.mount()) ?? (() => {});
     })();
 
     events.navigate.listen((event) => {
-      app.currentView = event.payload;
+      if (event.payload === "settings") {
+        app.settingsOpen = true;
+      } else {
+        app.settingsOpen = false;
+        app.currentMeetingId = null;
+      }
     }).then((fn) => {
       unlistenNav = fn;
     });
@@ -102,30 +119,63 @@
       unlistenSystemAudio = fn;
     });
 
+    events.meetingStopRequested.listen(() => {
+      notifyMeetingStopRequested();
+    }).then((fn) => {
+      unlistenMeetingStop = fn;
+    });
+
     return () => {
+      cleanupTranscription();
       unlistenNav?.();
       unlistenState?.();
       unlistenHealth?.();
       unlistenPipelineError?.();
       unlistenSystemAudio?.();
+      unlistenMeetingStop?.();
     };
   });
 </script>
 
-<div class="flex h-screen overflow-hidden">
-  <Sidebar />
+<svelte:window
+  onkeydown={(event) => {
+    if (event.key === "," && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      app.settingsOpen = !app.settingsOpen;
+    }
+  }}
+/>
+
+{#if app.showOnboarding}
+  <OnboardingView />
+{:else}
+<div class="flex h-screen flex-col overflow-hidden">
+  <header
+    data-tauri-drag-region
+    class="flex shrink-0 items-center gap-3 px-5 pt-3 pb-2 pl-[88px]"
+  >
+    <img src="/favicon.svg" alt="" class="h-6 w-6 rounded-md" aria-hidden="true" data-tauri-drag-region />
+    <span class="font-heading text-sm font-bold tracking-tight" data-tauri-drag-region>Soufflé</span>
+    <span class="flex-1" data-tauri-drag-region></span>
+    <StatusChip
+      phase={app.transcriptionRuntimePhase}
+      operationState={app.transcriptionModelOperationState}
+      downloadedBytes={app.downloadedBytes}
+      downloadTotalBytes={app.downloadTotalBytes}
+    />
+    <button
+      onclick={() => (app.settingsOpen = true)}
+      class="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+      aria-label={$t("settings.title")}
+      title="⌘,"
+    >
+      <SettingsIcon size={17} aria-hidden="true" />
+    </button>
+  </header>
 
   <div class="flex flex-1 flex-col min-w-0 overflow-hidden">
-    <main class="flex-1 p-6 overflow-y-auto">
-      {#if app.currentView === "transcription"}
-        <TranscriptionView />
-      {:else if app.currentView === "meeting"}
-        <MeetingView />
-      {:else if app.currentView === "meeting-history"}
-        <MeetingHistoryView />
-      {:else if app.currentView === "settings"}
-        <SettingsView />
-      {/if}
+    <main class="flex-1 overflow-y-auto px-6 pb-6 pt-2">
+      <HomeView />
     </main>
 
     {#if machineError}
@@ -169,7 +219,12 @@
           : $t("pipeline.lagging")}
       </div>
     {/if}
-
-    <Waveform active={app.isRecording} />
   </div>
 </div>
+
+{#if app.settingsOpen}
+  <Sheet title={$t("settings.title")} onClose={() => (app.settingsOpen = false)}>
+    <SettingsView />
+  </Sheet>
+{/if}
+{/if}

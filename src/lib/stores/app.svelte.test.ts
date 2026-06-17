@@ -4,7 +4,7 @@ import { getAppState } from './app.svelte';
 describe('app store', () => {
   it('has correct initial state defaults', () => {
     const state = getAppState();
-    expect(state.currentView).toBe('transcription');
+    expect(state.settingsOpen).toBe(false);
     expect(state.isRecording).toBe(false);
     expect(state.recordingMode).toBe('idle');
     expect(state.currentMeetingId).toBeNull();
@@ -19,21 +19,18 @@ describe('app store', () => {
     expect(state.settings.transcription_engine_id).toBe('');
   });
 
-  it('openMeeting sets id and navigates to meeting view', () => {
+  it('openMeeting sets id and navigates to the meetings view', () => {
     const state = getAppState();
     state.openMeeting('test-meeting-id');
     expect(state.currentMeetingId).toBe('test-meeting-id');
-    expect(state.currentView).toBe('meeting');
   });
 
-  it('newMeeting clears id and sets meeting view', () => {
+  it('settingsOpen toggles', () => {
     const state = getAppState();
-    // Set some existing state first
-    state.openMeeting('existing-id');
-    // Now create new meeting
-    state.newMeeting();
-    expect(state.currentMeetingId).toBeNull();
-    expect(state.currentView).toBe('meeting');
+    state.settingsOpen = true;
+    expect(state.settingsOpen).toBe(true);
+    state.settingsOpen = false;
+    expect(state.settingsOpen).toBe(false);
   });
 
   it('settings setter updates correctly', () => {

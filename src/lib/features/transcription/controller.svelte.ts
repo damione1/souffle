@@ -1,37 +1,28 @@
 import { getAppState } from "../../stores/app.svelte";
 import {
   addDictationEntry,
-  clearDictationHistory,
-  deleteDictationEntry,
-  deleteModel,
   getTranscriptionCatalog,
-  listDictationEntries,
   pasteText,
   startStreamingTranscription,
   stopStreamingTranscription,
 } from "../../api/transcription";
 import { events } from "../../api/generated";
-import { saveSettings } from "../../api/settings";
-import type {
-  AppSettings,
-  DictationEntry,
-  TranscriptionCatalog,
-  TranscriptionSegment,
-} from "../../types";
-import { createDebouncedSearch, errorMessage, matchedIdsForType } from "../../utils";
-import {
-  formatSelectedTranscriptionLabel,
-  getFirstAvailableTranscriptionBackend,
-  getFirstAvailableTranscriptionModel,
-  getSelectedTranscriptionBackend,
-} from "./catalog";
-import {
-  currentTranscriptionSelection,
-  refreshTranscriptionRuntimeStatus,
-  resetTranscriptionRuntimeState,
-  startTranscriptionModelDownload,
-  startTranscriptionModelLoad,
-} from "./runtime";
+import { createTimelineController } from "../timeline/controller.svelte";
+import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import { errorMessage } from "../../utils";
+import { formatSelectedTranscriptionLabel } from "./catalog";
+import { refreshTranscriptionRuntimeStatus } from "./runtime";
+
+/** Persist a finished dictation and surface it in the timeline. */
+async function saveToHistory(text: string) {
+  if (!text.trim()) return;
+  try {
+    await addDictationEntry(text.trim());
+    await createTimelineController().refresh();
+  } catch (e) {
+    console.warn("Failed to save dictation entry:", e);
+  }
+}
 
 function createTranscriptionControllerInstance() {
   const app = getAppState();
@@ -46,24 +37,6 @@ function createTranscriptionControllerInstance() {
   // callbacks from a previous session can never write into a new one.
   let sessionGeneration = 0;
 
-  let history = $state<DictationEntry[]>([]);
-  let expandedEntryId = $state<string | null>(null);
-  let historySearchQuery = $state("");
-  const historySearch = createDebouncedSearch(250, 50);
-
-  let filteredHistory = $derived.by(() => {
-    const query = historySearchQuery.trim().toLowerCase();
-    if (!query) return history;
-
-    if (historySearch.results.length > 0) {
-      const matched = matchedIdsForType(historySearch.results, "dictation");
-      return history.filter((entry) => matched.has(entry.id));
-    }
-
-    // Fallback to local text filtering while search is in progress
-    return history.filter((entry) => entry.text.toLowerCase().includes(query));
-  });
-
   let activeProfileLabel = $derived.by(() => {
     if (!catalog) return "Transcription model";
     return formatSelectedTranscriptionLabel(
@@ -76,7 +49,7 @@ function createTranscriptionControllerInstance() {
 
   async function mount() {
     await refreshCatalog();
-    await Promise.all([refreshRuntimeStatus(), loadHistory()]);
+    await refreshRuntimeStatus();
 
     const unlisten = await Promise.all([
       events.shortcutToggle.listen(() => {
@@ -117,119 +90,6 @@ function createTranscriptionControllerInstance() {
     }
   }
 
-  async function persistSelection(engineId: string, modelId: string, backendId: string) {
-    const nextSettings: AppSettings = {
-      ...app.settings,
-      audio_device: app.selectedDevice || null,
-      transcription_engine_id: engineId,
-      transcription_model_id: modelId,
-      transcription_backend_id: backendId,
-    };
-
-    await saveSettings(nextSettings);
-    app.settings = nextSettings;
-    resetTranscriptionRuntimeState(app);
-    await refreshCatalog();
-    await refreshRuntimeStatus();
-  }
-
-  async function selectEngine(engineId: string) {
-    if (!catalog) return;
-    const engine = catalog.engines.find((candidate) => candidate.id === engineId);
-    const fallbackModel = getFirstAvailableTranscriptionModel(engine ?? null);
-    const fallbackBackendId = getFirstAvailableTranscriptionBackend(fallbackModel)?.id;
-    if (!fallbackModel || !fallbackBackendId) return;
-    await persistSelection(engineId, fallbackModel.id, fallbackBackendId);
-  }
-
-  async function selectModel(modelId: string) {
-    const backend = getSelectedTranscriptionBackend(
-      catalog,
-      app.settings.transcription_engine_id,
-      modelId,
-      app.settings.transcription_backend_id,
-    );
-    await persistSelection(
-      app.settings.transcription_engine_id,
-      modelId,
-      backend?.id ?? app.settings.transcription_backend_id,
-    );
-  }
-
-  async function selectBackend(backendId: string) {
-    await persistSelection(
-      app.settings.transcription_engine_id,
-      app.settings.transcription_model_id,
-      backendId,
-    );
-  }
-
-  async function loadHistory() {
-    try {
-      history = await listDictationEntries(50);
-    } catch {
-      history = [];
-    }
-  }
-
-  async function addHistoryEntry(text: string) {
-    if (!text.trim()) return;
-    try {
-      await addDictationEntry(text.trim());
-      await loadHistory();
-    } catch (e) {
-      console.warn("Failed to save dictation entry:", e);
-    }
-  }
-
-  async function removeHistoryEntry(id: string) {
-    try {
-      await deleteDictationEntry(id);
-      if (expandedEntryId === id) expandedEntryId = null;
-      await loadHistory();
-    } catch (e) {
-      console.warn("Failed to delete dictation entry:", e);
-    }
-  }
-
-  async function resetHistory() {
-    try {
-      await clearDictationHistory();
-      history = [];
-      expandedEntryId = null;
-    } catch (e) {
-      console.warn("Failed to clear history:", e);
-    }
-  }
-
-  function onHistorySearchQueryChange(query: string) {
-    historySearchQuery = query;
-    historySearch.update(query);
-  }
-
-  async function handleDownloadModel() {
-    await startTranscriptionModelDownload(app, catalog, (message) => {
-      statusMessage = message;
-    });
-  }
-
-  async function handleLoadModel() {
-    await startTranscriptionModelLoad(app, catalog, (message) => {
-      statusMessage = message;
-    });
-  }
-
-  async function handleDeleteModel() {
-    try {
-      const selection = currentTranscriptionSelection(app, catalog);
-      await deleteModel(selection);
-      resetTranscriptionRuntimeState(app);
-      await refreshRuntimeStatus();
-    } catch (error) {
-      statusMessage = errorMessage(error);
-    }
-  }
-
   async function toggleRecording(fromShortcut = false) {
     if (isStartingRecording || isStopping) return;
 
@@ -238,7 +98,7 @@ function createTranscriptionControllerInstance() {
       try {
         await stopStreamingTranscription();
 
-        await addHistoryEntry(transcript);
+        await saveToHistory(transcript);
 
         if (transcript.trim()) {
           if (fromShortcut && app.settings.auto_paste) {
@@ -301,7 +161,7 @@ function createTranscriptionControllerInstance() {
     isStartingRecording = false;
     isStopping = false;
     if (transcript.trim()) {
-      void addHistoryEntry(transcript);
+      void saveToHistory(transcript);
       statusMessage = "Recording was interrupted — the partial transcript was saved to history.";
     } else {
       statusMessage = "Recording was interrupted.";
@@ -322,27 +182,11 @@ function createTranscriptionControllerInstance() {
     get downloadTotalFiles() { return app.downloadTotalFiles; },
     get downloadedBytes() { return app.downloadedBytes; },
     get downloadTotalBytes() { return app.downloadTotalBytes; },
-    get history() { return history; },
-    get filteredHistory() { return filteredHistory; },
-    get expandedEntryId() { return expandedEntryId; },
-    set expandedEntryId(id: string | null) { expandedEntryId = id; },
-    get historySearchQuery() { return historySearchQuery; },
-    set historySearchQuery(value: string) { onHistorySearchQueryChange(value); },
-    get historySearchResults() { return historySearch.results; },
-    get isSearchingHistory() { return historySearch.isSearching; },
     get activeProfileLabel() { return activeProfileLabel; },
     mount,
     refreshCatalog,
     refreshRuntimeStatus,
-    selectEngine,
-    selectModel,
-    selectBackend,
-    handleDownloadModel,
-    handleLoadModel,
-    handleDeleteModel,
     toggleRecording,
-    removeHistoryEntry,
-    resetHistory,
     handleRecordingAborted,
   };
 }

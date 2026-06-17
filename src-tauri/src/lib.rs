@@ -12,6 +12,7 @@ pub mod lock_ext;
 pub mod models;
 pub mod ollama;
 pub mod ort_runtime;
+pub mod pill;
 pub mod pipeline;
 pub mod platform;
 pub mod settings;
@@ -54,6 +55,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::list_meetings,
             commands::get_meeting,
             commands::delete_meeting,
+            commands::rename_meeting,
+            commands::save_meeting_notes,
             commands::save_edited_transcript,
             commands::check_ollama,
             commands::summarize_meeting,
@@ -86,6 +89,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::TranscriptionHealth,
             app_events::PipelineError,
             app_events::SystemAudioStatus,
+            app_events::MeetingStopRequested,
         ])
 }
 

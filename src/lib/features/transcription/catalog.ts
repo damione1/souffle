@@ -111,6 +111,34 @@ export function toSelectedTranscriptionProfileSelection(
   };
 }
 
+export interface FlatModelOption {
+  key: string;
+  engineId: string;
+  modelId: string;
+  backendId: string;
+  label: string;
+}
+
+/** All installable (engine, model) pairs flattened for simple pickers,
+ * with the backend auto-resolved. */
+export function listAvailableModelOptions(
+  catalog: TranscriptionCatalog | null,
+): FlatModelOption[] {
+  if (!catalog) return [];
+  return catalog.engines.flatMap((engine) =>
+    engine.models.filter(isTranscriptionModelAvailable).map((model) => {
+      const backend = getFirstAvailableTranscriptionBackend(model);
+      return {
+        key: `${engine.id}:${model.id}`,
+        engineId: engine.id,
+        modelId: model.id,
+        backendId: backend?.id ?? "",
+        label: `${engine.label} — ${model.label}`,
+      };
+    }),
+  );
+}
+
 export function formatSelectedTranscriptionLabel(
   catalog: TranscriptionCatalog | null,
   engineId: string,

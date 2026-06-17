@@ -31,6 +31,56 @@ pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), Stri
     state.db.delete_meeting(&id)
 }
 
+/// Save the user's live meeting notes. Targets the in-memory accumulator
+/// while that meeting is still recording (it only reaches the DB at stop),
+/// the DB otherwise.
+#[tauri::command]
+#[specta::specta]
+pub fn save_meeting_notes(
+    state: State<'_, AppState>,
+    id: String,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let notes = notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+
+    {
+        use crate::lock_ext::MutexExt;
+        let mut acc = state.meeting_accumulator.acquire()?;
+        if let Some(ref mut meeting) = *acc
+            && meeting.id == id
+        {
+            meeting.notes = notes;
+            return Ok(());
+        }
+    }
+
+    state.db.save_meeting_notes(&id, notes.as_deref())
+}
+
+/// Rename a meeting. Targets the in-memory accumulator while that meeting
+/// is still recording (it only reaches the DB at stop), the DB otherwise.
+#[tauri::command]
+#[specta::specta]
+pub fn rename_meeting(state: State<'_, AppState>, id: String, title: String) -> Result<(), String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("Title cannot be empty".into());
+    }
+
+    {
+        use crate::lock_ext::MutexExt;
+        let mut acc = state.meeting_accumulator.acquire()?;
+        if let Some(ref mut meeting) = *acc
+            && meeting.id == id
+        {
+            meeting.title = title;
+            return Ok(());
+        }
+    }
+
+    state.db.update_meeting_title(&id, &title)
+}
+
 /// Save an edited transcript for a meeting
 #[tauri::command]
 #[specta::specta]
@@ -84,6 +134,7 @@ pub async fn summarize_meeting(
     let db = state.db.clone();
     let summary = crate::ollama::summarize_stream(
         &text,
+        transcript.notes.as_deref(),
         &model,
         Some(&settings.ollama_url),
         move |progress| {

@@ -1,5 +1,13 @@
 import { Channel } from "@tauri-apps/api/core";
 import { commands, unwrap } from "./generated";
+
+export async function renameMeeting(id: string, title: string): Promise<void> {
+  await unwrap(commands.renameMeeting(id, title));
+}
+
+export async function saveMeetingNotes(id: string, notes: string | null): Promise<void> {
+  await unwrap(commands.saveMeetingNotes(id, notes));
+}
 import type {
   MeetingListItem,
   MeetingTranscript,

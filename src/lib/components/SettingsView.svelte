@@ -2,14 +2,16 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
+  import AdvancedSettingsSection from "../features/settings/components/AdvancedSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
   import DictionarySettingsSection from "../features/settings/components/DictionarySettingsSection.svelte";
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
+  import ModelSettingsSection from "../features/settings/components/ModelSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
-  import ModelGateSection from "../features/transcription/components/ModelGateSection.svelte";
+  import ConfirmAction from "./ui/ConfirmAction.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
   const controller = createSettingsController();
@@ -36,59 +38,20 @@
 <svelte:window onkeydown={controller.handleKeyDown} />
 
 <div class="flex flex-col gap-4">
-  <h2>{$t("settings.title")}</h2>
-
   {#if controller.statusMessage}
     <StatusBanner message={controller.statusMessage} />
   {/if}
 
-  <AudioSettingsSection
-    audioDevices={controller.audioDevices}
-    selectedDevice={controller.app.selectedDevice}
-    captureSystemAudio={controller.app.settings.capture_system_audio}
-    systemAudioSupported={controller.systemAudioSupported}
-    vadEnabled={controller.app.settings.vad_enabled}
-    fillerRemoval={controller.app.settings.filler_removal}
-    stutterCollapse={controller.app.settings.stutter_collapse}
-    dictionaryCorrection={controller.app.settings.dictionary_correction}
-    onDeviceChange={controller.onDeviceChange}
-    onRefreshDevices={controller.refreshDevices}
-    onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
-    onVadEnabledChange={controller.onVadEnabledChange}
-    onFillerRemovalChange={controller.onFillerRemovalChange}
-    onStutterCollapseChange={controller.onStutterCollapseChange}
-    onDictionaryCorrectionChange={controller.onDictionaryCorrectionChange}
-  />
-
-  <ModelGateSection
+  <ModelSettingsSection
     catalog={controller.catalog}
     selectedEngineId={controller.app.settings.transcription_engine_id}
     selectedModelId={controller.app.settings.transcription_model_id}
-    selectedBackendId={controller.app.settings.transcription_backend_id}
     runtimePhase={controller.runtimePhase}
-    modelOperationState={controller.modelOperationState}
-    downloadFile={controller.downloadFile}
-    downloadCompletedFiles={controller.downloadCompletedFiles}
-    downloadTotalFiles={controller.downloadTotalFiles}
+    operationState={controller.modelOperationState}
     downloadedBytes={controller.downloadedBytes}
     downloadTotalBytes={controller.downloadTotalBytes}
-    onSelectEngine={controller.selectTranscriptionEngine}
-    onSelectModel={controller.selectTranscriptionModel}
-    onSelectBackend={controller.selectTranscriptionBackend}
-    onDownloadModel={controller.handleDownloadModel}
-    onLoadModel={controller.handleLoadModel}
-    onDeleteModel={controller.handleDeleteModel}
-  />
-
-  <IntelligenceSettingsSection
-    ollamaUrl={controller.app.settings.ollama_url}
-    ollamaAvailable={controller.ollamaAvailable}
-    ollamaModels={controller.ollamaModels}
-    summaryModels={controller.summaryModels}
-    selectedOllamaModel={controller.app.settings.ollama_model}
-    onOllamaUrlChange={controller.onOllamaUrlChange}
-    onOllamaModelChange={controller.onOllamaModelChange}
-    onRetryOllama={controller.checkOllama}
+    downloadFile={controller.downloadFile}
+    onSelectModel={controller.selectModelOption}
   />
 
   <InterfaceSettingsSection
@@ -115,10 +78,55 @@
     onDelete={controller.handleDeleteDictionaryEntry}
   />
 
-  <DiagnosticsSettingsSection
-    debugTranscription={controller.app.settings.debug_transcription}
-    onDebugTranscriptionChange={controller.onDebugTranscriptionChange}
-  />
+  <AdvancedSettingsSection>
+    <AudioSettingsSection
+      audioDevices={controller.audioDevices}
+      selectedDevice={controller.app.selectedDevice}
+      captureSystemAudio={controller.app.settings.capture_system_audio}
+      systemAudioSupported={controller.systemAudioSupported}
+      vadEnabled={controller.app.settings.vad_enabled}
+      fillerRemoval={controller.app.settings.filler_removal}
+      stutterCollapse={controller.app.settings.stutter_collapse}
+      dictionaryCorrection={controller.app.settings.dictionary_correction}
+      onDeviceChange={controller.onDeviceChange}
+      onRefreshDevices={controller.refreshDevices}
+      onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
+      onVadEnabledChange={controller.onVadEnabledChange}
+      onFillerRemovalChange={controller.onFillerRemovalChange}
+      onStutterCollapseChange={controller.onStutterCollapseChange}
+      onDictionaryCorrectionChange={controller.onDictionaryCorrectionChange}
+    />
+
+    <IntelligenceSettingsSection
+      ollamaUrl={controller.app.settings.ollama_url}
+      ollamaAvailable={controller.ollamaAvailable}
+      ollamaModels={controller.ollamaModels}
+      summaryModels={controller.summaryModels}
+      selectedOllamaModel={controller.app.settings.ollama_model}
+      onOllamaUrlChange={controller.onOllamaUrlChange}
+      onOllamaModelChange={controller.onOllamaModelChange}
+      onRetryOllama={controller.checkOllama}
+    />
+
+    <DiagnosticsSettingsSection
+      debugTranscription={controller.app.settings.debug_transcription}
+      onDebugTranscriptionChange={controller.onDebugTranscriptionChange}
+    />
+
+    <section class="surface-card flex flex-col gap-2">
+      <h3>{$t("settings_advanced.model_storage")}</h3>
+      <p class="text-text-secondary text-sm">{$t("settings_advanced.model_storage_desc")}</p>
+      <div>
+        <ConfirmAction
+          label={$t("settings_advanced.delete_model")}
+          confirmLabel={$t("settings_advanced.delete_model_confirm")}
+          confirmMessage={$t("settings_advanced.delete_model_msg")}
+          variant="danger"
+          onConfirm={controller.handleDeleteModel}
+        />
+      </div>
+    </section>
+  </AdvancedSettingsSection>
 
   <AboutSettingsSection
     selectedTranscriptionLabel={selectedTranscriptionLabel}

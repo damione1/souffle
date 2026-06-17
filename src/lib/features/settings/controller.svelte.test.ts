@@ -268,7 +268,7 @@ describe("settings controller", () => {
     }));
   });
 
-  it("selectTranscriptionModel refreshes runtime state for the new profile", async () => {
+  it("selectModelOption persists the profile and refreshes runtime state", async () => {
     let currentModelId = "stt-1b-en_fr";
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       switch (cmd) {
@@ -316,10 +316,9 @@ describe("settings controller", () => {
 
     expect(ctrl.runtimePhase).toBe("ready");
 
-    await ctrl.selectTranscriptionModel("stt-2.6b-en");
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
 
     expect(ctrl.app.settings.transcription_model_id).toBe("stt-2.6b-en");
-    expect(ctrl.runtimePhase).toBe("download_required");
     expect(mockInvoke).toHaveBeenCalledWith("get_model_status", {
       selection: {
         engine_id: "kyutai",
@@ -327,6 +326,17 @@ describe("settings controller", () => {
         backend_id: "candle",
       },
     });
+    // The simple picker chains the download automatically.
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "download_model",
+      expect.objectContaining({
+        selection: {
+          engine_id: "kyutai",
+          model_id: "stt-2.6b-en",
+          backend_id: "candle",
+        },
+      }),
+    );
   });
 
   it("shortcut recording flow", async () => {

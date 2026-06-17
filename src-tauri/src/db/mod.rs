@@ -136,6 +136,13 @@ impl Database {
                     .map_err(|e| format!("Update schema version v5: {e}"))?;
             }
 
+            if current_version < 6 {
+                conn.execute("ALTER TABLE meetings ADD COLUMN notes TEXT", [])
+                    .map_err(|e| format!("Schema migration v6 (meeting notes): {e}"))?;
+                conn.execute("UPDATE schema_version SET version = 6", [])
+                    .map_err(|e| format!("Update schema version v6: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

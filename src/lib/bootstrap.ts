@@ -1,5 +1,6 @@
 import { getSettings, selectAudioDevice } from "./api/settings";
 import { getMachineState } from "./api/transcription";
+import { runStartupModelFlow } from "./features/transcription/runtime";
 import { setLocale } from "./i18n";
 import { getAppState } from "./stores/app.svelte";
 import { applyTheme } from "./utils/theme";
@@ -27,4 +28,8 @@ export async function bootstrapAppState(
   if (settings.audio_device) {
     await selectAudioDevice(settings.audio_device);
   }
+
+  // Zero-ceremony startup: auto-load the last-selected model, or show
+  // first-run onboarding when no model is downloaded yet.
+  await runStartupModelFlow(app);
 }

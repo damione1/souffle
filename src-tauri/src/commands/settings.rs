@@ -17,10 +17,18 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
 /// Save the typed application settings.
 #[tauri::command]
 #[specta::specta]
-pub fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
+pub fn save_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: AppSettings,
+) -> Result<(), String> {
     let settings = settings.sanitize_for_save()?;
     settings.save(&state.db)?;
     crate::debug::set_transcription_debug(settings.debug_transcription);
+    // A locale change must relabel the tray menu immediately.
+    if let Ok(machine) = state.current_machine_state() {
+        crate::tray::sync(&app, &machine);
+    }
     Ok(())
 }
 

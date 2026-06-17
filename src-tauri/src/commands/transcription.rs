@@ -103,6 +103,7 @@ pub(crate) fn build_meeting_transcript(
         summary_model: meeting.summary_model,
         summary_generated_at: meeting.summary_generated_at,
         edited_transcript: None,
+        notes: meeting.notes,
     }
 }
 
@@ -265,6 +266,7 @@ pub fn start_meeting_recording(
         summary_is_stale: false,
         summary_model: None,
         summary_generated_at: None,
+        notes: None,
     };
 
     start_meeting_session(&state, accumulator, channel)?;
@@ -314,6 +316,7 @@ pub fn resume_meeting_recording(
         summary_is_stale: meeting.summary_is_stale,
         summary_model: meeting.summary_model,
         summary_generated_at: meeting.summary_generated_at,
+        notes: meeting.notes,
     };
 
     start_meeting_session(&state, accumulator, channel)?;
@@ -426,6 +429,7 @@ mod tests {
                 summary_is_stale: false,
                 summary_model: Some("qwen".to_string()),
                 summary_generated_at: Some(first_end),
+                notes: None,
             },
             second_end,
         );
@@ -459,6 +463,7 @@ mod tests {
                 summary_is_stale: false,
                 summary_model: Some("qwen".to_string()),
                 summary_generated_at: Some(started_at),
+                notes: None,
             },
             ended_at,
         );

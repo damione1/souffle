@@ -10,8 +10,16 @@ use super::{
     AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
     collapse_whitespace,
 };
-use crate::constants::{MIMI_FRAME_SIZE, SAMPLE_RATE};
+use crate::constants::{MIMI_FRAME_SIZE, MIMI_FRAMES_PER_SECOND, SAMPLE_RATE};
 use crate::platform::with_autorelease_pool;
+
+/// Extra-head index used for pause detection, matching Kyutai's reference
+/// stt-rs example (`prs[2][0] > 0.5`).
+const VAD_PAUSE_HEAD: usize = 2;
+const VAD_PAUSE_THRESHOLD: f32 = 0.5;
+/// Safety margin (frames) on top of the ASR delay before trusting the VAD
+/// pause streak: semantic VAD can fire slightly before speech fully clears.
+const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
 
 /// Debug frame counter — reset per session for clean logging
 static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -90,11 +98,18 @@ impl KyutaiConfig {
 struct LoadedModel {
     state: moshi::asr::State,
     text_tokenizer: sentencepiece::SentencePieceProcessor,
-    #[allow(dead_code)]
     config: KyutaiConfig,
     device: Device,
     #[allow(dead_code)]
     model_path: std::path::PathBuf,
+    /// Silence prefix (config audio_silence_prefix_seconds) still to be fed
+    /// before the first real audio of the session.
+    prefix_pending: bool,
+    /// Word timestamps include the silence prefix; subtract this to report
+    /// times relative to the real audio.
+    time_offset_seconds: f64,
+    /// Consecutive frames where the semantic VAD pause head fired.
+    vad_pause_streak: usize,
 }
 
 /// Kyutai STT engine implementation.
@@ -152,7 +167,8 @@ impl KyutaiEngine {
         )
         .map_err(|e| EngineError::LoadError(format!("LM model reload: {e}")))?;
 
-        let asr_delay_in_tokens = (config.stt_config.audio_delay_seconds * 12.5) as usize;
+        let asr_delay_in_tokens =
+            (config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
         moshi::asr::State::new(1, asr_delay_in_tokens, 0., audio_tokenizer, lm)
             .map_err(|e| EngineError::LoadError(format!("ASR state init: {e}")))
     }
@@ -170,7 +186,16 @@ impl KyutaiEngine {
             config,
             device,
             model_path,
+            prefix_pending: true,
+            time_offset_seconds: 0.0,
+            vad_pause_streak: 0,
         })
+    }
+
+    /// Silence prefix length in whole Mimi frames. Rounded up so the prefix
+    /// never leaves a partial frame that would zero-pad real audio mid-stream.
+    fn prefix_frame_count(prefix_seconds: f64) -> usize {
+        (prefix_seconds * MIMI_FRAMES_PER_SECOND).ceil() as usize
     }
 
     fn detect_extra_heads(model_file: &Path) -> Result<bool, EngineError> {
@@ -213,6 +238,7 @@ impl KyutaiEngine {
             config,
             device: old_device,
             model_path,
+            ..
         } = old;
 
         with_autorelease_pool(move || {
@@ -340,6 +366,33 @@ impl TranscriptionEngine for KyutaiEngine {
         // without conflicting with mutable borrow of model.state
         let device = model.device.clone();
 
+        // The model is trained with audio_silence_prefix_seconds of leading
+        // silence; feed it before the first real audio of each session.
+        let prefixed;
+        let audio = if model.prefix_pending {
+            model.prefix_pending = false;
+            let prefix_frames =
+                Self::prefix_frame_count(model.config.stt_config.audio_silence_prefix_seconds);
+            if prefix_frames > 0 {
+                model.time_offset_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
+                info!(
+                    frames = prefix_frames,
+                    seconds = model.time_offset_seconds,
+                    "Feeding silence prefix before session audio"
+                );
+                prefixed = {
+                    let mut v = vec![0.0f32; prefix_frames * MIMI_FRAME_SIZE];
+                    v.extend_from_slice(audio);
+                    v
+                };
+                &prefixed[..]
+            } else {
+                audio
+            }
+        } else {
+            audio
+        };
+
         // Process audio in MIMI_FRAME_SIZE-sample frames (80ms at 24kHz)
         for chunk in audio.chunks(MIMI_FRAME_SIZE) {
             let padded;
@@ -444,10 +497,11 @@ impl TranscriptionEngine for KyutaiEngine {
                             // decoded text. EndWord is just a timing boundary that can
                             // arrive 5+ seconds later; waiting for it causes truncation
                             // at end of speech.
+                            let start_time = (*start_time - model.time_offset_seconds).max(0.0);
                             segments.push(TranscriptionSegment {
                                 text,
-                                start_time: *start_time,
-                                end_time: *start_time,
+                                start_time,
+                                end_time: start_time,
                                 is_final: true,
                                 language: None,
                                 confidence: None,
@@ -457,8 +511,17 @@ impl TranscriptionEngine for KyutaiEngine {
                     moshi::asr::AsrMsg::EndWord { .. } => {
                         // Timing boundary only — word was already emitted on Word event
                     }
-                    moshi::asr::AsrMsg::Step { .. } => {
-                        // VAD probabilities — logged above
+                    moshi::asr::AsrMsg::Step { prs, .. } => {
+                        // Semantic VAD (models with extra heads only): track how
+                        // long the pause head has been firing so flush() can skip
+                        // the silence suffix when the delay window is already drained.
+                        if let Some(p) = prs.get(VAD_PAUSE_HEAD).and_then(|h| h.first()) {
+                            if *p > VAD_PAUSE_THRESHOLD {
+                                model.vad_pause_streak += 1;
+                            } else {
+                                model.vad_pause_streak = 0;
+                            }
+                        }
                     }
                 }
             }
@@ -468,9 +531,24 @@ impl TranscriptionEngine for KyutaiEngine {
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+
+        // Words are emitted audio_delay after they are spoken. If the semantic
+        // VAD has reported a pause for longer than that delay (plus margin),
+        // every word has already cleared the pipeline and the silence suffix
+        // would only burn inference time at stop.
+        let delay_frames =
+            (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
+        if model.vad_pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES {
+            info!(
+                streak = model.vad_pause_streak,
+                delay_frames, "VAD pause covers ASR delay, skipping silence flush"
+            );
+            return Ok(Vec::new());
+        }
+
         // Feed silence suffix to push any remaining words out of the model's
         // internal pipeline (audio_delay + 1 second of silence)
-        let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
         let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
         let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
         let silence = vec![0.0f32; silence_samples];
@@ -499,5 +577,26 @@ impl TranscriptionEngine for KyutaiEngine {
         // Replace with space, then trim/collapse.
         let normalized = text.replace('▁', " ");
         collapse_whitespace(&normalized)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefix_frame_count_zero_for_no_prefix() {
+        // stt-1b-en_fr-candle config: audio_silence_prefix_seconds = 0.0
+        assert_eq!(KyutaiEngine::prefix_frame_count(0.0), 0);
+    }
+
+    #[test]
+    fn prefix_frame_count_rounds_up_to_whole_frames() {
+        // stt-2.6b-en-candle config: audio_silence_prefix_seconds = 1.0
+        // 1.0s * 12.5 = 12.5 frames -> 13 whole frames, never a partial
+        // frame that would zero-pad real audio mid-stream.
+        assert_eq!(KyutaiEngine::prefix_frame_count(1.0), 13);
+        assert_eq!(KyutaiEngine::prefix_frame_count(0.5), 7);
+        assert_eq!(KyutaiEngine::prefix_frame_count(2.0), 25);
     }
 }

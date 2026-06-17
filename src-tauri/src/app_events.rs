@@ -7,9 +7,7 @@ use crate::state_machine::AppStateMachine;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum AppView {
-    Transcription,
-    Meeting,
-    MeetingHistory,
+    Home,
     Settings,
 }
 
@@ -66,6 +64,12 @@ pub struct PipelineError {
     pub scope: PipelineErrorScope,
     pub message: String,
 }
+
+/// Emitted by the floating recording pill (or the tray) to ask the meeting
+/// controller in the main window to stop the active meeting through its
+/// normal stop pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct MeetingStopRequested;
 
 /// State of the system-audio capture leg of a meeting session, emitted when
 /// the session starts and whenever the leg changes (e.g. tap rebuild after

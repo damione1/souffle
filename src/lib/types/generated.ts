@@ -196,6 +196,31 @@ async deleteMeeting(id: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Rename a meeting. Targets the in-memory accumulator while that meeting
+ * is still recording (it only reaches the DB at stop), the DB otherwise.
+ */
+async renameMeeting(id: string, title: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_meeting", { id, title }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Save the user's live meeting notes. Targets the in-memory accumulator
+ * while that meeting is still recording (it only reaches the DB at stop),
+ * the DB otherwise.
+ */
+async saveMeetingNotes(id: string, notes: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_meeting_notes", { id, notes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Save an edited transcript for a meeting
  */
 async saveEditedTranscript(id: string, editedTranscript: string | null) : Promise<Result<null, string>> {
@@ -424,6 +449,7 @@ async clearDictionary() : Promise<Result<null, string>> {
 
 
 export const events = __makeEvents__<{
+meetingStopRequested: MeetingStopRequested,
 navigate: Navigate,
 pipelineError: PipelineError,
 shortcutPttStart: ShortcutPttStart,
@@ -433,6 +459,7 @@ stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
 transcriptionHealth: TranscriptionHealth
 }>({
+meetingStopRequested: "meeting-stop-requested",
 navigate: "navigate",
 pipelineError: "pipeline-error",
 shortcutPttStart: "shortcut-ptt-start",
@@ -461,7 +488,7 @@ capture_system_audio: boolean }
  * with a single enum that enforces valid transitions.
  */
 export type AppStateMachine = { state: "idle" } | { state: "downloading"; data: { profile: TranscriptionProfile } } | { state: "downloaded"; data: { profile: TranscriptionProfile } } | { state: "loading"; data: { profile: TranscriptionProfile } } | { state: "ready"; data: { profile: TranscriptionProfile } } | { state: "recording_dictation"; data: { profile: TranscriptionProfile; session_id: number } } | { state: "recording_meeting"; data: { profile: TranscriptionProfile; session_id: number; meeting_id: string } } | { state: "stopping"; data: { profile: TranscriptionProfile; was_recording: RecordingKind } } | { state: "unloading"; data: { profile: TranscriptionProfile; next_profile: TranscriptionProfile | null } } | { state: "error"; data: { message: string; recovery: ErrorRecovery } }
-export type AppView = "transcription" | "meeting" | "meeting-history" | "settings"
+export type AppView = "home" | "settings"
 /**
  * Info about an available audio input device, sent to frontend
  */
@@ -493,9 +520,20 @@ export type HealthStatus = "healthy" |
 export type MeetingListItem = { id: string; title: string; started_at: string; duration_seconds: number; has_summary: boolean; summary_is_stale: boolean }
 export type MeetingRecordingSession = { id: string; started_at: string; ended_at: string; duration_seconds: number; start_segment_index: number; end_segment_index: number }
 /**
+ * Emitted by the floating recording pill (or the tray) to ask the meeting
+ * controller in the main window to stop the active meeting through its
+ * normal stop pipeline.
+ */
+export type MeetingStopRequested = null
+/**
  * Full meeting transcript stored as JSON
  */
-export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; edited_transcript: string | null }
+export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; edited_transcript: string | null; 
+/**
+ * Free-form notes the user typed during the meeting; fed into the
+ * summary prompt.
+ */
+notes: string | null }
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }

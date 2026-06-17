@@ -183,10 +183,25 @@ pub async fn check_available(base_url: Option<&str>) -> OllamaStatus {
     }
 }
 
+/// Build the user prompt for summarization. Notes the user took during
+/// the meeting are appended as their own section so the model can weigh
+/// them (decisions, action items, corrections) alongside the transcript.
+pub fn build_summarize_prompt(transcript_text: &str, notes: Option<&str>) -> String {
+    let mut prompt = format!("Transcript:\n---\n{transcript_text}\n---");
+    if let Some(notes) = notes.map(str::trim).filter(|n| !n.is_empty()) {
+        prompt.push_str(&format!(
+            "\n\nUser notes (taken live during the meeting; treat them as \
+             authoritative context for the summary):\n---\n{notes}\n---"
+        ));
+    }
+    prompt
+}
+
 /// Stream a summary of the transcript from Ollama.
 /// Calls `on_chunk` for each streaming token.
 pub async fn summarize_stream(
     transcript_text: &str,
+    notes: Option<&str>,
     model: &str,
     base_url: Option<&str>,
     on_chunk: impl Fn(SummarizeProgress),
@@ -206,7 +221,7 @@ pub async fn summarize_stream(
 
     let body = GenerateRequest {
         model: model.to_string(),
-        prompt: format!("Transcript:\n---\n{transcript_text}\n---"),
+        prompt: build_summarize_prompt(transcript_text, notes),
         system: OLLAMA_SUMMARIZE_PROMPT.to_string(),
         stream: true,
         options: GenerateOptions { temperature: 0.0 },
@@ -251,7 +266,31 @@ pub async fn summarize_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_summary_capable_model, model_descriptors, sanitize_summary};
+    use super::{
+        build_summarize_prompt, is_summary_capable_model, model_descriptors, sanitize_summary,
+    };
+
+    #[test]
+    fn prompt_without_notes_is_transcript_only() {
+        let prompt = build_summarize_prompt("hello world", None);
+        assert!(prompt.contains("Transcript:\n---\nhello world\n---"));
+        assert!(!prompt.contains("User notes"));
+    }
+
+    #[test]
+    fn prompt_includes_user_notes_section() {
+        let prompt = build_summarize_prompt("hello", Some("decision: ship friday"));
+        assert!(prompt.contains("User notes"));
+        assert!(prompt.contains("decision: ship friday"));
+        // Transcript stays first so the notes read as added context.
+        assert!(prompt.find("Transcript:").unwrap() < prompt.find("User notes").unwrap());
+    }
+
+    #[test]
+    fn blank_notes_are_ignored() {
+        let prompt = build_summarize_prompt("hello", Some("   "));
+        assert!(!prompt.contains("User notes"));
+    }
 
     #[test]
     fn rejects_speech_and_embedding_models_for_summary() {
