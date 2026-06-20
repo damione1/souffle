@@ -15,6 +15,8 @@ export type {
   ModelArtifactDescriptor,
   OllamaModelDescriptor,
   OllamaStatus,
+  PermState,
+  PermissionStatus,
   RecordingKind,
   ShortcutSettings,
   SummarizeProgress,

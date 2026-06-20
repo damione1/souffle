@@ -10,6 +10,7 @@
   import { recoverState } from "./lib/api/transcription";
   import { bootstrapAppState } from "./lib/bootstrap";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
+  import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
   import {
     notifyMeetingAborted,
     notifyMeetingFinalized,
@@ -44,6 +45,7 @@
     app.machineState.state === "error" ? app.machineState.data : null,
   );
   let isRecovering = $state(false);
+  let showPermissions = $state(false);
 
   async function recoverFromError() {
     isRecovering = true;
@@ -80,6 +82,14 @@
       }
       cleanupTranscription = (await transcription.mount()) ?? (() => {});
     })();
+
+    // First-run permissions walkthrough (mic, system audio, accessibility) so
+    // the user grants everything up front instead of hitting prompts piecemeal.
+    try {
+      showPermissions = localStorage.getItem("permissionsOnboarded") !== "1";
+    } catch {
+      showPermissions = false;
+    }
 
     events.navigate.listen((event) => {
       if (event.payload === "settings") {
@@ -236,4 +246,8 @@
     <SettingsView />
   </Sheet>
 {/if}
+{/if}
+
+{#if showPermissions}
+  <PermissionsOnboarding onClose={() => (showPermissions = false)} />
 {/if}

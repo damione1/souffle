@@ -454,6 +454,30 @@ async clearDictionary() : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Cheap, non-prompting snapshot for the onboarding's initial render.
+ */
+async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_permission_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Trigger the native prompt (or open System Settings) for one permission.
+ * `kind` is "microphone" | "system_audio" | "accessibility". The probe opens
+ * a device, so it runs off the command thread.
+ */
+async requestPermission(kind: string) : Promise<Result<PermState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("request_permission", { kind }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -560,6 +584,17 @@ export type ModelArtifactDescriptor = { id: string; label: string; description: 
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
 export type OllamaStatus = { available: boolean; base_url: string; models: OllamaModelDescriptor[] }
+export type PermState = "granted" | "denied" | 
+/**
+ * Not yet probed — the user hasn't triggered this one (probing would
+ * prompt, so we don't do it unsolicited at startup).
+ */
+"unknown" | 
+/**
+ * The OS doesn't support this capability (e.g. taps need macOS 14.4+).
+ */
+"unsupported"
+export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState }
 /**
  * Pipeline failure surfaced to the frontend instead of dying silently in logs.
  */

@@ -12,6 +12,7 @@ pub mod lock_ext;
 pub mod models;
 pub mod ollama;
 pub mod ort_runtime;
+pub mod permissions;
 pub mod pill;
 pub mod pipeline;
 pub mod platform;
@@ -102,6 +103,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::update_dictionary_entry,
             commands::delete_dictionary_entry,
             commands::clear_dictionary,
+            commands::get_permission_status,
+            commands::request_permission,
         ])
         .events(collect_events![
             app_events::Navigate,
