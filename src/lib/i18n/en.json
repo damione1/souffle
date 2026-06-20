@@ -189,6 +189,7 @@
     "live_dictation": "Dictating",
     "live_meeting": "Meeting",
     "stop": "Stop",
+    "stopping": "Finishing…",
     "listening": "Listening…",
     "search_placeholder": "Search everything…"
   },

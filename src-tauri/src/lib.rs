@@ -90,6 +90,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::PipelineError,
             app_events::SystemAudioStatus,
             app_events::MeetingStopRequested,
+            app_events::MeetingFinalized,
         ])
 }
 
@@ -116,7 +117,7 @@ pub fn run() {
         dropped_counter,
         Box::new(engine::create_engine),
     ) {
-        Ok(actor) => actor,
+        Ok(actor) => Arc::new(actor),
         Err(e) => {
             tracing::error!("Fatal: {e}");
             std::process::exit(1);
@@ -134,6 +135,14 @@ pub fn run() {
         }
     };
     debug::init_from_db(&database);
+
+    // Finalize any meeting left mid-recording by a previous crash, so the
+    // incrementally-persisted segments show up cleanly in history.
+    match database.recover_unfinished_meetings() {
+        Ok(0) => {}
+        Ok(n) => info!(count = n, "Recovered unfinished meetings from a previous run"),
+        Err(e) => tracing::warn!("Meeting recovery failed: {e}"),
+    }
 
     let specta = specta_builder();
 

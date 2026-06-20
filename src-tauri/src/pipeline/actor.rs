@@ -312,8 +312,15 @@ impl EngineActor {
                         }
                         SessionEnd::Shutdown => break,
                         SessionEnd::AudioGone => {
-                            error!("Audio channel disconnected, engine actor exiting");
-                            break;
+                            // The audio thread vanished mid-session. Rather than
+                            // kill the actor (which would silently swallow every
+                            // future command), salvage the meeting and surface a
+                            // recoverable error so the user can retry — same path
+                            // as a session abort. The actor stays alive.
+                            error!("Audio channel disconnected mid-session; recovering");
+                            self.handle_session_abort(
+                                "Audio capture stopped unexpectedly".to_string(),
+                            );
                         }
                     }
                 }

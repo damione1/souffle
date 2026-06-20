@@ -130,12 +130,21 @@ impl AppStateMachine {
                 was_recording: RecordingKind::Meeting { meeting_id },
             }),
             (Stopping { profile, .. }, StopComplete) => Ok(Ready { profile }),
-            (RecordingDictation { profile, .. }, Fail { message }) | (RecordingMeeting { profile, .. }, Fail { message }) => {
-                Ok(Error {
-                    message,
-                    recovery: ErrorRecovery::RetryFromReady { profile },
-                })
-            }
+            // Idempotent: the decoupled stop finalizes in a background task, so a
+            // late/duplicate StopComplete (e.g. after an abort already moved the
+            // machine on) must not wedge or error noisily.
+            (Ready { profile }, StopComplete) => Ok(Ready { profile }),
+            // `Fail` is total over every model-loaded state. The async/decoupled
+            // stop widens the `Stopping` window, so an abort can land while the
+            // machine is Stopping (or already Ready) — without these arms it would
+            // hit the invalid-transition catch-all and stick in `Stopping`.
+            (RecordingDictation { profile, .. }, Fail { message })
+            | (RecordingMeeting { profile, .. }, Fail { message })
+            | (Stopping { profile, .. }, Fail { message })
+            | (Ready { profile }, Fail { message }) => Ok(Error {
+                message,
+                recovery: ErrorRecovery::RetryFromReady { profile },
+            }),
 
             // --- Unload / model swap ---
             (Ready { profile }, Unload { next_profile }) => Ok(Unloading {
@@ -400,6 +409,46 @@ mod tests {
             }
             other => panic!("Expected Downloaded, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn stopping_can_fail_without_wedging() {
+        // The decoupled stop sits in Stopping during background finalize; an
+        // abort that lands here must move to a recoverable Error, not stick.
+        let state = AppStateMachine::Stopping {
+            profile: test_profile(),
+            was_recording: RecordingKind::Meeting {
+                meeting_id: "m1".into(),
+            },
+        };
+        let state = state
+            .transition(StateAction::Fail {
+                message: "audio gone".into(),
+            })
+            .unwrap();
+        assert!(matches!(state, AppStateMachine::Error { .. }));
+        let state = state.transition(StateAction::Recover).unwrap();
+        assert!(matches!(state, AppStateMachine::Ready { .. }));
+    }
+
+    #[test]
+    fn ready_can_fail_and_tolerates_late_stop_complete() {
+        let profile = test_profile();
+        // A late abort after stop already finalized (machine back to Ready).
+        let failed = AppStateMachine::Ready {
+            profile: profile.clone(),
+        }
+        .transition(StateAction::Fail {
+            message: "late abort".into(),
+        })
+        .unwrap();
+        assert!(matches!(failed, AppStateMachine::Error { .. }));
+
+        // A duplicate/late StopComplete on Ready is a harmless no-op.
+        let ready = AppStateMachine::Ready { profile }
+            .transition(StateAction::StopComplete)
+            .unwrap();
+        assert!(matches!(ready, AppStateMachine::Ready { .. }));
     }
 
     #[test]

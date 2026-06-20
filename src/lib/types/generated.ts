@@ -65,6 +65,9 @@ async loadModel(selection: TranscriptionProfileSelection) : Promise<Result<null,
 },
 /**
  * Start streaming transcription.
+ * 
+ * `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
+ * blocking wait runs off-thread and the window never freezes.
  */
 async startTranscription(channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
     try {
@@ -76,6 +79,10 @@ async startTranscription(channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise
 },
 /**
  * Stop streaming transcription.
+ * 
+ * Awaits the drain so the frontend's assembled transcript (used for clipboard
+ * and dictation history) is complete before this resolves. The drain runs in
+ * `spawn_blocking`, so awaiting it does not freeze the window.
  */
 async stopTranscription() : Promise<Result<null, string>> {
     try {
@@ -153,6 +160,11 @@ async resumeMeetingRecording(meetingId: string, channel: TAURI_CHANNEL<Transcrip
 },
 /**
  * Stop meeting recording and save transcript.
+ * 
+ * Decoupled stop: transitions to Stopping, returns the (already-known) meeting
+ * id immediately, and drains + saves in the background. Segments were persisted
+ * incrementally during the meeting, so the detail view can render right away
+ * and reconcile when the `MeetingFinalized` event fires.
  */
 async stopMeetingRecording() : Promise<Result<string, string>> {
     try {
@@ -449,6 +461,7 @@ async clearDictionary() : Promise<Result<null, string>> {
 
 
 export const events = __makeEvents__<{
+meetingFinalized: MeetingFinalized,
 meetingStopRequested: MeetingStopRequested,
 navigate: Navigate,
 pipelineError: PipelineError,
@@ -459,6 +472,7 @@ stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
 transcriptionHealth: TranscriptionHealth
 }>({
+meetingFinalized: "meeting-finalized",
 meetingStopRequested: "meeting-stop-requested",
 navigate: "navigate",
 pipelineError: "pipeline-error",
@@ -514,6 +528,14 @@ export type HealthStatus = "healthy" |
  * No frame has been processed for several seconds while audio is queued.
  */
 "stalled"
+/**
+ * Emitted once a stopped meeting has been fully drained and saved in the
+ * background, so the detail view can refresh from the now-complete record.
+ * `stop_meeting_recording` returns before this work finishes (decoupled stop),
+ * so the UI shows the partially-persisted meeting immediately and reconciles
+ * when this arrives.
+ */
+export type MeetingFinalized = { id: string }
 /**
  * Lightweight item for listing meetings
  */

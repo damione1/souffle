@@ -12,6 +12,7 @@
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
   import {
     notifyMeetingAborted,
+    notifyMeetingFinalized,
     notifyMeetingStopRequested,
   } from "./lib/features/meeting/controller.svelte";
   import {
@@ -33,6 +34,7 @@
 
   let unlistenSystemAudio: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
+  let unlistenMeetingFinalized: (() => void) | null = null;
 
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
@@ -125,6 +127,12 @@
       unlistenMeetingStop = fn;
     });
 
+    events.meetingFinalized.listen((event) => {
+      notifyMeetingFinalized(event.payload.id);
+    }).then((fn) => {
+      unlistenMeetingFinalized = fn;
+    });
+
     return () => {
       cleanupTranscription();
       unlistenNav?.();
@@ -133,6 +141,7 @@
       unlistenPipelineError?.();
       unlistenSystemAudio?.();
       unlistenMeetingStop?.();
+      unlistenMeetingFinalized?.();
     };
   });
 </script>

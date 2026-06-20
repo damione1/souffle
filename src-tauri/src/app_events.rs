@@ -71,6 +71,16 @@ pub struct PipelineError {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct MeetingStopRequested;
 
+/// Emitted once a stopped meeting has been fully drained and saved in the
+/// background, so the detail view can refresh from the now-complete record.
+/// `stop_meeting_recording` returns before this work finishes (decoupled stop),
+/// so the UI shows the partially-persisted meeting immediately and reconciles
+/// when this arrives.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct MeetingFinalized {
+    pub id: String,
+}
+
 /// State of the system-audio capture leg of a meeting session, emitted when
 /// the session starts and whenever the leg changes (e.g. tap rebuild after
 /// an output device switch).

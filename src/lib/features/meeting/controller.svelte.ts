@@ -48,6 +48,12 @@ function createMeetingControllerInstance() {
 
   let meeting = $state<MeetingTranscript | null>(null);
   let isLoadingMeeting = $state(false);
+  // True from the moment Stop is clicked until the backend finishes draining +
+  // saving (machine leaves "stopping"). Drives the Stop button's spinner and
+  // guards against double-stop. `stopRequested` covers the brief gap before the
+  // machine reports "stopping".
+  let stopRequested = $state(false);
+  let isStopping = $derived(stopRequested || app.machineState.state === "stopping");
   let canResumeRecording = $derived(
     Boolean(meeting?.id)
     && !isRecordingMeeting
@@ -210,22 +216,41 @@ function createMeetingControllerInstance() {
   }
 
   async function stopRecording() {
+    if (isStopping) return; // guard against double-stop
+    stopRequested = true;
     try {
       // Unsaved notes must reach the accumulator before it is persisted.
       await flushNotes();
+      // Decoupled stop: returns the id immediately; the backend drains and
+      // saves in the background and emits `meetingFinalized` when done.
       const id = await stopMeetingRecording();
-
-      // Load the completed meeting BEFORE clearing recording flags.
-      // This prevents the view from flashing to "new meeting" mode
-      // during the transition (meeting stays non-null the whole time).
       app.currentMeetingId = id;
-      meeting = await getMeeting(id);
-      syncSelectedModel(meeting.summary_model);
-      notesDraft = meeting.notes ?? "";
-      liveMeetingSegments = [];
+
+      // Optimistically load the partially-persisted meeting so the detail view
+      // has data the instant the machine flips to idle. The header + most
+      // segments are already on disk from incremental persistence; the
+      // `meetingFinalized` event reloads the authoritative version.
+      try {
+        meeting = await getMeeting(id);
+        syncSelectedModel(meeting.summary_model);
+        notesDraft = meeting.notes ?? "";
+      } catch {
+        // Header may not be queryable yet in a rare race; finalize reloads it.
+      }
     } catch (e) {
       statusMessage = errorMessage(e);
+    } finally {
+      stopRequested = false;
     }
+  }
+
+  /** The backend finished draining + saving a stopped meeting. Reload the
+   * now-complete record (ended_at, duration, all segments) and drop the live
+   * buffer. No-op if the user already navigated elsewhere. */
+  function handleMeetingFinalized(id: string) {
+    if (app.currentMeetingId !== id && meeting?.id !== id) return;
+    liveMeetingSegments = [];
+    void loadMeeting(id);
   }
 
   /** The backend aborted the recording session (machine went to Error).
@@ -356,6 +381,7 @@ function createMeetingControllerInstance() {
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
     get isLoadingMeeting() { return isLoadingMeeting; },
+    get isStopping() { return isStopping; },
     get canResumeRecording() { return canResumeRecording; },
     get isEditingTranscript() { return isEditingTranscript; },
     get editedTranscriptDraft() { return editedTranscriptDraft; },
@@ -380,6 +406,7 @@ function createMeetingControllerInstance() {
     saveTranscriptAndSummarize,
     resetEditedTranscript,
     handleRecordingAborted,
+    handleMeetingFinalized,
   };
 }
 
@@ -387,6 +414,12 @@ function createMeetingControllerInstance() {
  * is aborted by the backend. No-op if the controller was never created. */
 export function notifyMeetingAborted() {
   instance?.handleRecordingAborted();
+}
+
+/** Called from the global MeetingFinalized listener when a stopped meeting has
+ * been fully drained and saved in the background. */
+export function notifyMeetingFinalized(id: string) {
+  instance?.handleMeetingFinalized(id);
 }
 
 /** The floating pill (or tray) asked to stop the active meeting; run the
