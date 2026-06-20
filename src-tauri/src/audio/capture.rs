@@ -217,7 +217,21 @@ impl AudioCapture {
                         match cmd_rx.recv_timeout(timeout) {
                             Ok(cmd) => cmd,
                             Err(RecvTimeoutError::Timeout) => {
-                                capture.meeting_tick();
+                                // The mixer/resampler/AEC run here on raw audio.
+                                // A panic in any of them must not abort the whole
+                                // app: catch it, end the session, and let the
+                                // engine actor recover via its AudioGone path
+                                // (the meeting is already incrementally saved).
+                                let ticked = std::panic::catch_unwind(
+                                    std::panic::AssertUnwindSafe(|| capture.meeting_tick()),
+                                );
+                                if ticked.is_err() {
+                                    tracing::error!(
+                                        "Audio mixer panicked; ending session to keep the app alive"
+                                    );
+                                    capture.abort_after_panic();
+                                    break;
+                                }
                                 if capture.last_mic_check.elapsed() >= MIC_CHECK_INTERVAL {
                                     capture.last_mic_check = Instant::now();
                                     capture.check_mic_health();
@@ -356,6 +370,10 @@ impl AudioCapture {
             error!("Audio stream error: {err}");
             stream_failed.store(true, std::sync::atomic::Ordering::Relaxed);
         };
+        // Second handle so a panic inside the realtime callback (e.g. the
+        // resampler) can flag the stream for rebuild instead of unwinding
+        // across the CoreAudio C boundary (which would be UB).
+        let stream_failed_cb = Arc::clone(&self.stream_failed);
 
         // Reset the first-chunk logging flag for each new recording session
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -369,6 +387,7 @@ impl AudioCapture {
                         return;
                     }
 
+                    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let resampled = match resampler.lock() {
                         Ok(mut r) => r.process(data),
                         Err(_) => return,
@@ -404,6 +423,10 @@ impl AudioCapture {
                                 warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
                             }
                         }
+                    }
+                    }));
+                    if caught.is_err() {
+                        stream_failed_cb.store(true, Ordering::Relaxed);
                     }
                 },
                 err_fn,
@@ -603,6 +626,28 @@ impl AudioCapture {
             if dropped == 1 || dropped.is_multiple_of(100) {
                 warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
             }
+        }
+    }
+
+    /// Tear down the current session after a panic in the tick path, without
+    /// running any of the (possibly corrupt) flush paths. The audio thread then
+    /// exits; the engine actor observes the closed audio channel (AudioGone) and
+    /// recovers — salvaging the meeting accumulated so far and surfacing a
+    /// recoverable error — instead of the whole app aborting.
+    fn abort_after_panic(&mut self) {
+        self.active_session_id.store(0, Ordering::Release);
+        self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
+        self.active_params = None;
+        self.mic_device_name = None;
+        self.stream.take();
+        self.resampler.take();
+        #[cfg(target_os = "macos")]
+        if let Some(mut meeting) = self.meeting.take() {
+            meeting.tap.take();
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.meeting.take();
         }
     }
 

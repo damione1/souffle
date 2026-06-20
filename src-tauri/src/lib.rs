@@ -35,6 +35,29 @@ use tracing::info;
 /// Default shortcut strings
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 
+/// Log every panic (thread, message, location) before it unwinds. The macOS
+/// crash report only says "abort() called" with no Rust context, so without
+/// this a pipeline-thread panic is undiagnosable. Chains to the default hook.
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("<unnamed>");
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown location>".to_string());
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_string());
+        tracing::error!(thread = name, location = %location, "PANIC: {message}");
+        default(info);
+    }));
+}
+
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
@@ -95,6 +118,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
 }
 
 pub fn run() {
+    install_panic_hook();
+
     // Create the shared audio RMS level
     let audio_rms = Arc::new(std::sync::atomic::AtomicU32::new(0f32.to_bits()));
     // Chunks dropped by the capture callback — read by the actor for health reporting

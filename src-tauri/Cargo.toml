@@ -91,4 +91,8 @@ strip = true
 lto = true
 codegen-units = 1
 opt-level = "s"
-panic = "abort"
+# Unwind (not abort) so a panic on a pipeline worker thread can be caught at
+# the thread/FFI boundary and recovered, instead of SIGABRT-ing the whole app.
+# Every C->Rust callback (cpal/tap) is wrapped in catch_unwind so no panic
+# unwinds across the FFI boundary (which would be UB).
+panic = "unwind"

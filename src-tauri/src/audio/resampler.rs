@@ -75,8 +75,10 @@ impl Resampler {
             // Only process complete chunks — no zero-padding
             while self.input_buffer.len() >= frames_needed {
                 let chunk: Vec<f32> = self.input_buffer.drain(..frames_needed).collect();
-                if let Ok(result) = resampler.process(&[chunk], None) {
-                    output.extend_from_slice(&result[0]);
+                if let Ok(result) = resampler.process(&[chunk], None)
+                    && let Some(channel) = result.first()
+                {
+                    output.extend_from_slice(channel);
                 }
             }
             // Remaining samples stay in input_buffer for the next call
@@ -112,7 +114,10 @@ impl Resampler {
         chunk.resize(frames_needed, 0.0);
 
         let mut output = match resampler.process(&[chunk], None) {
-            Ok(result) => result[0].clone(),
+            Ok(result) => match result.first() {
+                Some(channel) => channel.clone(),
+                None => return Vec::new(),
+            },
             Err(_) => return Vec::new(),
         };
 

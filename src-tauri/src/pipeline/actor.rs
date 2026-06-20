@@ -640,7 +640,18 @@ fn active_session_loop(
                         health.note_frame();
                         continue; // VAD says no speech — skip this frame
                     }
-                    match engine.transcribe(&frame, None) {
+                    // A panic in the engine (candle/whisper/Metal) must not
+                    // abort the whole app: catch it and treat it like a frame
+                    // error so the streak logic below can recover or abort the
+                    // session cleanly.
+                    let transcribe_result: Result<Vec<TranscriptionSegment>, String> =
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            engine.transcribe(&frame, None)
+                        })) {
+                            Ok(inner) => inner.map_err(|e| e.to_string()),
+                            Err(_) => Err("engine panicked during transcribe".to_string()),
+                        };
+                    match transcribe_result {
                         Ok(segments) => {
                             consecutive_errors = 0;
                             for seg in segments {
@@ -661,7 +672,7 @@ fn active_session_loop(
                             {
                                 let _ = PipelineError {
                                     scope: PipelineErrorScope::Frame,
-                                    message: e.to_string(),
+                                    message: e.clone(),
                                 }
                                 .emit(app);
                             }
@@ -732,7 +743,7 @@ fn finish_session(
     // Process all buffered audio through the engine (frame by frame)
     while audio_buffer.len() >= chunk_size {
         let frame: Vec<f32> = audio_buffer.drain(..chunk_size).collect();
-        match engine.transcribe(&frame, None) {
+        match catch_engine(|| engine.transcribe(&frame, None)) {
             Ok(segments) => {
                 for seg in segments {
                     if crate::debug::transcription_debug_enabled() {
@@ -750,7 +761,7 @@ fn finish_session(
     }
     // Process any remaining partial frame
     if !audio_buffer.is_empty() {
-        match engine.transcribe(audio_buffer, None) {
+        match catch_engine(|| engine.transcribe(audio_buffer, None)) {
             Ok(segments) => {
                 for seg in segments {
                     emit_filtered(engine, text_filters, seg, on_segment);
@@ -762,7 +773,7 @@ fn finish_session(
     }
 
     // Flush engine (e.g. feeds silence to extract remaining buffered tokens)
-    match engine.flush() {
+    match catch_engine(|| engine.flush()) {
         Ok(segments) => {
             if crate::debug::transcription_debug_enabled() {
                 debug!("Flush: {} segments", segments.len());
@@ -772,6 +783,18 @@ fn finish_session(
             }
         }
         Err(e) => error!("Flush error: {e}"),
+    }
+}
+
+/// Run a fallible engine call, converting a panic into an `Err` so a bug in the
+/// engine/Metal/candle path degrades to a logged error instead of unwinding out
+/// of the actor thread (or, under abort, taking down the whole process).
+fn catch_engine<T, E: std::string::ToString>(
+    f: impl FnOnce() -> Result<T, E>,
+) -> Result<T, String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(inner) => inner.map_err(|e| e.to_string()),
+        Err(_) => Err("engine panicked".to_string()),
     }
 }
 
