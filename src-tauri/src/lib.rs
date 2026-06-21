@@ -36,6 +36,44 @@ use tracing::info;
 /// Default shortcut strings
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 
+/// Hold the non-blocking writer's worker guard for the process lifetime; if it
+/// drops, file logging silently stops.
+static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+    std::sync::OnceLock::new();
+
+/// Initialize logging to a rolling file under the app data dir (and stderr for
+/// terminal runs). Without this, every `tracing` event — including the panic
+/// hook and the whole pipeline's debug trail — is discarded, making field
+/// crashes and stalls undiagnosable. Verbose pipeline `debug!` lines are gated
+/// behind the in-app "Detailed transcription logs" setting, so the default
+/// `souffle=debug` filter only surfaces them once the user turns that on.
+fn init_logging() {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    let filter = EnvFilter::try_from_env("SOUFFLE_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("souffle=debug,warn"));
+
+    // File layer is best-effort: if the log dir can't be created we still get
+    // stderr (useful for `cargo tauri dev`).
+    let log_dir = constants::app_data_dir().join("logs");
+    let file_layer = if std::fs::create_dir_all(&log_dir).is_ok() {
+        let (writer, guard) =
+            tracing_appender::non_blocking(tracing_appender::rolling::daily(&log_dir, "souffle.log"));
+        let _ = LOG_GUARD.set(guard);
+        Some(fmt::layer().with_ansi(false).with_writer(writer))
+    } else {
+        None
+    };
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(file_layer)
+        .try_init();
+}
+
 /// Log every panic (thread, message, location) before it unwinds. The macOS
 /// crash report only says "abort() called" with no Rust context, so without
 /// this a pipeline-thread panic is undiagnosable. Chains to the default hook.
@@ -121,6 +159,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
 }
 
 pub fn run() {
+    init_logging();
     install_panic_hook();
 
     // Create the shared audio RMS level

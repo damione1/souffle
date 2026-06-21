@@ -526,12 +526,33 @@ fn active_session_loop(
     // Stop request waiting for this session's EndOfStream marker.
     let mut pending_stop: Option<(Sender<Result<SessionSummary, String>>, Instant)> = None;
 
+    // Always-on diagnostics: a session that silently stops transcribing (engine
+    // emits nothing, or VAD gates everything) looks identical to "still
+    // recording" from the UI. This heartbeat makes the failure mode legible in
+    // the log without the verbose debug setting.
+    let mut vad_skipped: u64 = 0;
+    let mut segments_emitted: u64 = 0;
+    let mut last_heartbeat = Instant::now();
+    const HEARTBEAT: Duration = Duration::from_secs(30);
+
     loop {
         // Periodic health snapshot to the frontend
         if let Some(snapshot) = health.tick(audio_rx.len())
             && let Some(app) = app
         {
             let _ = snapshot.emit(app);
+        }
+
+        if last_heartbeat.elapsed() >= HEARTBEAT {
+            last_heartbeat = Instant::now();
+            info!(
+                session_id,
+                transcribed_frames = summary.frames_processed,
+                vad_skipped,
+                segments_emitted,
+                audio_backlog = audio_rx.len(),
+                "Session heartbeat"
+            );
         }
 
         // Check for commands (non-blocking)
@@ -637,6 +658,7 @@ fn active_session_loop(
                     let frame: Vec<f32> = audio_buffer.drain(..chunk_size).collect();
                     if !audio_filters.process(&frame) {
                         summary.frames_processed += 1;
+                        vad_skipped += 1;
                         health.note_frame();
                         continue; // VAD says no speech — skip this frame
                     }
@@ -658,6 +680,7 @@ fn active_session_loop(
                                 if crate::debug::transcription_debug_enabled() {
                                     debug!("Segment: {:?} final={}", seg.text, seg.is_final);
                                 }
+                                segments_emitted += 1;
                                 emit_filtered(engine, text_filters, seg, on_segment);
                             }
                         }
