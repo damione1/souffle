@@ -20,7 +20,8 @@ use tracing::{debug, error, info, warn};
 use crate::app_events::{PipelineError, PipelineErrorScope};
 use crate::audio::AudioMessage;
 use crate::engine::{
-    AudioInputRequirements, TranscriptionEngine, TranscriptionProfile, TranscriptionSegment,
+    AudioInputRequirements, Speaker, TranscriptionEngine, TranscriptionProfile,
+    TranscriptionSegment,
 };
 use crate::filter::{
     AudioFilterChain, DictionaryEntry, PipelineConfig, TextFilterChain, build_audio_filters,
@@ -57,6 +58,9 @@ pub struct SessionSummary {
 pub struct SessionConfig {
     pub pipeline_config: PipelineConfig,
     pub dictionary_entries: Vec<DictionaryEntry>,
+    /// Diarized meeting: run a second engine so the mic (Me) and system audio
+    /// (Them) legs are transcribed separately and segments are speaker-tagged.
+    pub diarize: bool,
 }
 
 pub enum EngineCommand {
@@ -112,6 +116,8 @@ impl EngineActorHandle {
                     audio_rx,
                     factory,
                     engine: None,
+                    engine_them: None,
+                    loaded: None,
                     app: None,
                     dropped_counter,
                 }
@@ -238,6 +244,13 @@ struct EngineActor {
     audio_rx: Receiver<AudioMessage>,
     factory: EngineFactory,
     engine: Option<Box<dyn TranscriptionEngine>>,
+    /// Second engine for diarized meetings (transcribes the system-audio leg
+    /// while `engine` handles the mic). Built lazily on the first diarized
+    /// session and kept loaded; dropped on model swap/unload.
+    engine_them: Option<Box<dyn TranscriptionEngine>>,
+    /// The profile + model dir of the loaded model, kept so the second engine
+    /// can be created with the same model.
+    loaded: Option<(TranscriptionProfile, PathBuf)>,
     app: Option<tauri::AppHandle>,
     dropped_counter: Arc<AtomicU64>,
 }
@@ -393,12 +406,17 @@ impl EngineActor {
     }
 
     fn drop_engine(&mut self) {
-        if let Some(mut engine) = self.engine.take() {
+        for engine in [self.engine.take(), self.engine_them.take()]
+            .into_iter()
+            .flatten()
+        {
+            let mut engine = engine;
             if let Err(e) = engine.unload_model() {
                 warn!("Engine unload failed: {e}");
             }
             drop(engine);
         }
+        self.loaded = None;
     }
 
     fn handle_load(
@@ -417,7 +435,26 @@ impl EngineActor {
             mic_gain: engine.mic_gain(),
         };
         self.engine = Some(engine);
+        // Remember what's loaded so a second engine for diarization can be
+        // created with the same model.
+        self.loaded = Some((profile.clone(), model_dir.to_path_buf()));
         Ok(info)
+    }
+
+    /// Ensure the second (system-audio) engine exists and is loaded, building it
+    /// from the same model as the primary. Returns an error if no model is loaded.
+    fn ensure_engine_them(&mut self) -> Result<(), String> {
+        if self.engine_them.is_some() {
+            return Ok(());
+        }
+        let (profile, model_dir) = self
+            .loaded
+            .clone()
+            .ok_or("No model loaded for diarization")?;
+        let mut engine = (self.factory)(&profile)?;
+        engine.load_model(&model_dir).map_err(|e| e.to_string())?;
+        self.engine_them = Some(engine);
+        Ok(())
     }
 
     fn handle_debug_transcribe(
@@ -444,43 +481,104 @@ impl EngineActor {
             debug!(drained, "Cleared stale audio chunks before session start");
         }
 
-        let Some(engine) = self.engine.as_mut() else {
+        if self.engine.is_none() {
             let _ = reply.send(Err("No model loaded".into()));
-            return SessionEnd::SetupFailed;
-        };
-
-        if let Err(e) = engine.reset_state() {
-            let _ = reply.send(Err(format!("State reset: {e}")));
             return SessionEnd::SetupFailed;
         }
 
-        let info = EngineInfo {
-            audio: engine.audio_requirements(),
-            mic_gain: engine.mic_gain(),
+        // Diarized meetings need a second engine for the system-audio leg.
+        if config.diarize
+            && let Err(e) = self.ensure_engine_them()
+        {
+            let _ = reply.send(Err(format!("Diarization setup: {e}")));
+            return SessionEnd::SetupFailed;
+        }
+
+        // Reset engine state(s) for the new session.
+        if let Err(e) = self.engine.as_mut().expect("checked above").reset_state() {
+            let _ = reply.send(Err(format!("State reset: {e}")));
+            return SessionEnd::SetupFailed;
+        }
+        if config.diarize
+            && let Some(them) = self.engine_them.as_mut()
+            && let Err(e) = them.reset_state()
+        {
+            let _ = reply.send(Err(format!("State reset (system audio engine): {e}")));
+            return SessionEnd::SetupFailed;
+        }
+
+        let info = {
+            let engine = self.engine.as_ref().expect("checked above");
+            EngineInfo {
+                audio: engine.audio_requirements(),
+                mic_gain: engine.mic_gain(),
+            }
         };
+        let sample_rate = info.audio.sample_rate_hz;
 
         // Filter chains are built on this thread so ONNX Runtime (Silero VAD)
         // initialization shares the thread with engine Metal work.
-        let mut audio_filters =
-            build_audio_filters(&config.pipeline_config, info.audio.sample_rate_hz);
+        let me_filters = build_audio_filters(&config.pipeline_config, sample_rate);
         let text_filters = build_text_filters(&config.pipeline_config, config.dictionary_entries);
 
         // Caller may now start audio capture.
         let _ = reply.send(Ok(info));
 
         let mut health = SessionHealth::start(session_id, Arc::clone(&self.dropped_counter));
-        let engine = self.engine.as_mut().expect("engine present: checked above");
-        active_session_loop(
-            &self.cmd_rx,
-            &self.audio_rx,
-            engine.as_mut(),
-            &on_segment,
-            session_id,
-            &mut audio_filters,
-            &text_filters,
-            &mut health,
-            self.app.as_ref(),
-        )
+
+        if config.diarize {
+            // Each lane gets its own VAD chain (independent stream state).
+            let them_filters = build_audio_filters(&config.pipeline_config, sample_rate);
+            // engine and engine_them are disjoint fields, so both can be borrowed
+            // mutably at once.
+            let me_engine = self.engine.as_mut().expect("primary present");
+            let me_engine = me_engine.as_mut();
+            let them_engine = self
+                .engine_them
+                .as_mut()
+                .expect("system-audio engine present: ensured above");
+            let them_engine = them_engine.as_mut();
+            let mut lanes = [
+                DiarizedLane {
+                    speaker: Speaker::Me,
+                    engine: me_engine,
+                    audio_filters: me_filters,
+                    buffer: Vec::new(),
+                    consecutive_errors: 0,
+                },
+                DiarizedLane {
+                    speaker: Speaker::Them,
+                    engine: them_engine,
+                    audio_filters: them_filters,
+                    buffer: Vec::new(),
+                    consecutive_errors: 0,
+                },
+            ];
+            active_diarized_loop(
+                &self.cmd_rx,
+                &self.audio_rx,
+                &mut lanes,
+                &on_segment,
+                session_id,
+                &text_filters,
+                &mut health,
+                self.app.as_ref(),
+            )
+        } else {
+            let mut audio_filters = me_filters;
+            let engine = self.engine.as_mut().expect("primary present");
+            active_session_loop(
+                &self.cmd_rx,
+                &self.audio_rx,
+                engine.as_mut(),
+                &on_segment,
+                session_id,
+                &mut audio_filters,
+                &text_filters,
+                &mut health,
+                self.app.as_ref(),
+            )
+        }
     }
 
     fn drain_audio_queue(&self) -> usize {
@@ -803,6 +901,269 @@ fn finish_session(
     }
 }
 
+/// One speaker's transcription lane in a diarized meeting.
+struct DiarizedLane<'a> {
+    speaker: Speaker,
+    engine: &'a mut dyn TranscriptionEngine,
+    audio_filters: AudioFilterChain,
+    buffer: Vec<f32>,
+    consecutive_errors: u32,
+}
+
+/// Pick the lane for an audio chunk by its speaker tag (untagged → lane 0).
+fn lane_index(lanes: &[DiarizedLane], speaker: Option<Speaker>) -> usize {
+    match speaker {
+        Some(s) => lanes.iter().position(|l| l.speaker == s).unwrap_or(0),
+        None => 0,
+    }
+}
+
+/// Diarized session loop: one engine per audio source (mic = Me, system audio =
+/// Them). Mirrors `active_session_loop`'s command/stop/health scaffolding but
+/// demultiplexes the speaker-tagged audio to the matching engine and tags every
+/// emitted segment. Kept separate so the single-stream path (dictation,
+/// non-diarized meetings) stays unchanged.
+#[allow(clippy::too_many_arguments)]
+fn active_diarized_loop(
+    cmd_rx: &Receiver<EngineCommand>,
+    audio_rx: &Receiver<AudioMessage>,
+    lanes: &mut [DiarizedLane],
+    on_segment: &SegmentCallback,
+    session_id: u64,
+    text_filters: &TextFilterChain,
+    health: &mut SessionHealth,
+    app: Option<&tauri::AppHandle>,
+) -> SessionEnd {
+    let chunk_size = lanes[0].engine.audio_requirements().chunk_size_samples as usize;
+    let mut summary = SessionSummary::default();
+    let mut eos_received = false;
+    let mut pending_stop: Option<(Sender<Result<SessionSummary, String>>, Instant)> = None;
+    let mut segments_emitted: u64 = 0;
+    let mut vad_skipped: u64 = 0;
+    let mut last_heartbeat = Instant::now();
+    const HEARTBEAT: Duration = Duration::from_secs(30);
+
+    loop {
+        if let Some(snapshot) = health.tick(audio_rx.len())
+            && let Some(app) = app
+        {
+            let _ = snapshot.emit(app);
+        }
+
+        if last_heartbeat.elapsed() >= HEARTBEAT {
+            last_heartbeat = Instant::now();
+            info!(
+                session_id,
+                transcribed_frames = summary.frames_processed,
+                vad_skipped,
+                segments_emitted,
+                audio_backlog = audio_rx.len(),
+                "Diarized session heartbeat"
+            );
+        }
+
+        match cmd_rx.try_recv() {
+            Ok(EngineCommand::AttachApp(_)) => {}
+            Ok(EngineCommand::StopSession { reply }) => {
+                if eos_received {
+                    summary.dropped_chunks = health.dropped_chunks();
+                    finish_diarized(
+                        audio_rx,
+                        lanes,
+                        on_segment,
+                        session_id,
+                        text_filters,
+                        &mut summary,
+                    );
+                    return SessionEnd::Stopped(reply, summary);
+                }
+                pending_stop = Some((reply, Instant::now()));
+            }
+            Ok(EngineCommand::Shutdown) => return SessionEnd::Shutdown,
+            Ok(EngineCommand::LoadModel { reply, .. }) => {
+                let _ = reply.send(Err("Recording session active".into()));
+            }
+            Ok(EngineCommand::UnloadModel { reply }) => {
+                let _ = reply.send(Err("Recording session active".into()));
+            }
+            Ok(EngineCommand::StartSession { reply, .. }) => {
+                let _ = reply.send(Err("Recording session active".into()));
+            }
+            Ok(EngineCommand::DebugTranscribe { reply, .. }) => {
+                let _ = reply.send(Err("Recording session active".into()));
+            }
+            Err(_) => {}
+        }
+
+        if let Some((_, requested_at)) = &pending_stop
+            && requested_at.elapsed() > EOS_WAIT
+        {
+            warn!("End-of-stream marker never arrived; finishing diarized session anyway");
+            let (reply, _) = pending_stop.take().expect("pending_stop checked above");
+            summary.dropped_chunks = health.dropped_chunks();
+            finish_diarized(
+                audio_rx,
+                lanes,
+                on_segment,
+                session_id,
+                text_filters,
+                &mut summary,
+            );
+            return SessionEnd::Stopped(reply, summary);
+        }
+
+        match audio_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(AudioMessage::EndOfStream { session_id: eos_id }) => {
+                if eos_id != session_id {
+                    continue;
+                }
+                eos_received = true;
+                if let Some((reply, _)) = pending_stop.take() {
+                    summary.dropped_chunks = health.dropped_chunks();
+                    finish_diarized(
+                        audio_rx,
+                        lanes,
+                        on_segment,
+                        session_id,
+                        text_filters,
+                        &mut summary,
+                    );
+                    return SessionEnd::Stopped(reply, summary);
+                }
+            }
+            Ok(AudioMessage::Chunk(chunk)) => {
+                if chunk.session_id != session_id {
+                    summary.skipped_chunks += 1;
+                    continue;
+                }
+                health.note_chunk(chunk.captured_at);
+                let idx = lane_index(lanes, chunk.speaker);
+                let lane = &mut lanes[idx];
+                lane.buffer.extend_from_slice(&chunk.samples);
+
+                while lane.buffer.len() >= chunk_size {
+                    let frame: Vec<f32> = lane.buffer.drain(..chunk_size).collect();
+                    if !lane.audio_filters.process(&frame) {
+                        summary.frames_processed += 1;
+                        vad_skipped += 1;
+                        health.note_frame();
+                        continue;
+                    }
+                    let speaker = lane.speaker;
+                    let result: Result<Vec<TranscriptionSegment>, String> =
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            lane.engine.transcribe(&frame, None)
+                        })) {
+                            Ok(inner) => inner.map_err(|e| e.to_string()),
+                            Err(_) => Err("engine panicked during transcribe".to_string()),
+                        };
+                    match result {
+                        Ok(segments) => {
+                            lane.consecutive_errors = 0;
+                            for mut seg in segments {
+                                seg.speaker = Some(speaker);
+                                segments_emitted += 1;
+                                emit_filtered(lane.engine, text_filters, seg, on_segment);
+                            }
+                        }
+                        Err(e) => {
+                            lane.consecutive_errors += 1;
+                            error!("Transcribe error ({speaker:?}, frame skipped): {e}");
+                            if lane.consecutive_errors == 1
+                                && let Some(app) = app
+                            {
+                                let _ = PipelineError {
+                                    scope: PipelineErrorScope::Frame,
+                                    message: e.clone(),
+                                }
+                                .emit(app);
+                            }
+                            if lane.consecutive_errors >= MAX_CONSECUTIVE_FRAME_ERRORS {
+                                if let Some((reply, _)) = pending_stop.take() {
+                                    let _ = reply.send(Err(format!("Session aborted: {e}")));
+                                }
+                                return SessionEnd::Aborted(format!(
+                                    "Transcription failed {MAX_CONSECUTIVE_FRAME_ERRORS} frames in a row: {e}"
+                                ));
+                            }
+                        }
+                    }
+                    summary.frames_processed += 1;
+                    health.note_frame();
+                }
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                return SessionEnd::AudioGone;
+            }
+        }
+    }
+}
+
+/// Drain remaining audio per lane, transcribe it, and flush each engine.
+fn finish_diarized(
+    audio_rx: &Receiver<AudioMessage>,
+    lanes: &mut [DiarizedLane],
+    on_segment: &SegmentCallback,
+    session_id: u64,
+    text_filters: &TextFilterChain,
+    summary: &mut SessionSummary,
+) {
+    let chunk_size = lanes[0].engine.audio_requirements().chunk_size_samples as usize;
+
+    while let Ok(msg) = audio_rx.try_recv() {
+        match msg {
+            AudioMessage::Chunk(chunk) if chunk.session_id == session_id => {
+                let idx = lane_index(lanes, chunk.speaker);
+                lanes[idx].buffer.extend_from_slice(&chunk.samples);
+            }
+            AudioMessage::Chunk(_) => summary.skipped_chunks += 1,
+            AudioMessage::EndOfStream { .. } => {}
+        }
+    }
+
+    for lane in lanes.iter_mut() {
+        let speaker = lane.speaker;
+        while lane.buffer.len() >= chunk_size {
+            let frame: Vec<f32> = lane.buffer.drain(..chunk_size).collect();
+            match catch_engine(|| lane.engine.transcribe(&frame, None)) {
+                Ok(segments) => {
+                    for mut seg in segments {
+                        seg.speaker = Some(speaker);
+                        emit_filtered(lane.engine, text_filters, seg, on_segment);
+                    }
+                }
+                Err(e) => {
+                    error!("Transcribe error during drain ({speaker:?}): {e}");
+                    break;
+                }
+            }
+            summary.frames_processed += 1;
+        }
+        if !lane.buffer.is_empty() {
+            let tail = std::mem::take(&mut lane.buffer);
+            match catch_engine(|| lane.engine.transcribe(&tail, None)) {
+                Ok(segments) => {
+                    for mut seg in segments {
+                        seg.speaker = Some(speaker);
+                        emit_filtered(lane.engine, text_filters, seg, on_segment);
+                    }
+                }
+                Err(e) => error!("Transcribe error on partial frame ({speaker:?}): {e}"),
+            }
+        }
+        match catch_engine(|| lane.engine.flush()) {
+            Ok(segments) => {
+                for mut seg in segments {
+                    seg.speaker = Some(speaker);
+                    emit_filtered(lane.engine, text_filters, seg, on_segment);
+                }
+            }
+            Err(e) => error!("Flush error ({speaker:?}): {e}"),
+        }
+    }
+}
+
 /// Run a fallible engine call, converting a panic into an `Err` so a bug in the
 /// engine/Metal/candle path degrades to a logged error instead of unwinding out
 /// of the actor thread (or, under abort, taking down the whole process).
@@ -842,7 +1203,7 @@ mod tests {
     use crate::audio::{AudioChunk, AudioMessage};
     use crate::constants::MIMI_FRAME_SIZE;
     use crate::engine::mock::MockEngine;
-    use crate::engine::{TranscriptionSegment, default_transcription_profile};
+    use crate::engine::{Speaker, TranscriptionSegment, default_transcription_profile};
     use crate::filter::PipelineConfig;
 
     use super::{EngineActorHandle, SessionConfig};
@@ -862,6 +1223,7 @@ mod tests {
         SessionConfig {
             pipeline_config: noop_filter_config(),
             dictionary_entries: vec![],
+            diarize: false,
         }
     }
 
@@ -932,6 +1294,92 @@ mod tests {
         let (actor, _audio_tx) = spawn_with_mock(MockEngine::new());
         actor.shutdown().expect("first shutdown");
         actor.shutdown().expect("second shutdown");
+    }
+
+    /// Spawn an actor whose factory hands out two mocks in order (primary, then
+    /// the second engine for diarization).
+    fn spawn_with_two_mocks(
+        primary: MockEngine,
+        secondary: MockEngine,
+    ) -> (EngineActorHandle, Sender<AudioMessage>) {
+        let (audio_tx, audio_rx) = unbounded();
+        // pop() yields the last element first, so push secondary then primary.
+        let cell = Mutex::new(vec![secondary, primary]);
+        let actor = EngineActorHandle::spawn(
+            audio_rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Box::new(move |_profile| {
+                cell.lock()
+                    .unwrap()
+                    .pop()
+                    .map(|m| Box::new(m) as Box<dyn crate::engine::TranscriptionEngine>)
+                    .ok_or_else(|| "no more mock engines".to_string())
+            }),
+        )
+        .expect("spawn actor");
+        actor
+            .load_model(default_transcription_profile(), PathBuf::from("/tmp"))
+            .expect("load mock model");
+        (actor, audio_tx)
+    }
+
+    fn audio_chunk_from(session_id: u64, speaker: Option<Speaker>) -> AudioMessage {
+        AudioMessage::Chunk(AudioChunk {
+            session_id,
+            samples: vec![0.0f32; MIMI_FRAME_SIZE],
+            captured_at: std::time::Instant::now(),
+            speaker,
+        })
+    }
+
+    #[test]
+    fn diarized_session_tags_segments_by_source() {
+        let me = MockEngine::new().with_transcribe_response(Ok(vec![seg("me-speaks")]), 5);
+        let them = MockEngine::new().with_transcribe_response(Ok(vec![seg("them-speaks")]), 5);
+        let (actor, audio_tx) = spawn_with_two_mocks(me, them);
+
+        let (collected, cb) = collecting_callback();
+        let cfg = SessionConfig {
+            pipeline_config: noop_filter_config(),
+            dictionary_entries: vec![],
+            diarize: true,
+        };
+        actor.start_session(1, cfg, cb).expect("start diarized");
+
+        for _ in 0..3 {
+            audio_tx
+                .send(audio_chunk_from(1, Some(Speaker::Me)))
+                .unwrap();
+            audio_tx
+                .send(audio_chunk_from(1, Some(Speaker::Them)))
+                .unwrap();
+        }
+        audio_tx.send(end_of_stream(1)).unwrap();
+        actor
+            .stop_session(Duration::from_secs(2))
+            .expect("stop diarized");
+
+        let segments = collected.lock().unwrap();
+        assert!(
+            segments
+                .iter()
+                .any(|s| s.speaker == Some(Speaker::Me) && s.text == "me-speaks"),
+            "expected a Me segment, got: {:?}",
+            segments
+                .iter()
+                .map(|s| (&s.text, s.speaker))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            segments
+                .iter()
+                .any(|s| s.speaker == Some(Speaker::Them) && s.text == "them-speaks"),
+            "expected a Them segment, got: {:?}",
+            segments
+                .iter()
+                .map(|s| (&s.text, s.speaker))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

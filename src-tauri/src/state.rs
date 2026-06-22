@@ -23,6 +23,10 @@ pub enum AudioCommand {
         /// Meeting mode: also capture system audio via a Core Audio tap
         /// and mix it with the microphone.
         capture_system_audio: bool,
+        /// Diarized meeting: emit the mic (Me) and system audio (Them) as two
+        /// source-tagged streams instead of one mixed stream, so each can be
+        /// transcribed by its own engine. Only meaningful with system audio.
+        diarize: bool,
     },
     Stop,
     SelectDevice(String),

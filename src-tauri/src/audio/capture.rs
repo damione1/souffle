@@ -47,6 +47,7 @@ struct StartParams {
     target_sample_rate: u32,
     mic_gain: f32,
     capture_system_audio: bool,
+    diarize: bool,
 }
 
 /// Per-session state for meeting mode (mic + system audio).
@@ -61,6 +62,9 @@ struct MeetingState {
     tap: Option<super::system_tap::TapHandle>,
     /// Whether echo cancellation is currently engaged (speakers route).
     aec_active: bool,
+    /// Emit mic (Me) and system audio (Them) as two source-tagged streams
+    /// instead of one mixed stream.
+    diarize: bool,
     ticks: u32,
 }
 
@@ -260,12 +264,14 @@ impl AudioCapture {
                             target_sample_rate,
                             mic_gain,
                             capture_system_audio,
+                            diarize,
                         } => {
                             if let Err(e) = capture.start(
                                 session_id,
                                 target_sample_rate,
                                 mic_gain,
                                 capture_system_audio,
+                                diarize,
                             ) {
                                 warn!("Failed to start audio capture: {e}");
                             }
@@ -319,6 +325,7 @@ impl AudioCapture {
         target_sample_rate: u32,
         mic_gain: f32,
         capture_system_audio: bool,
+        diarize: bool,
     ) -> Result<(), String> {
         // Ensure any previous callback stops emitting immediately, and tear
         // down any leftover meeting state (tap included).
@@ -333,6 +340,7 @@ impl AudioCapture {
             target_sample_rate,
             mic_gain,
             capture_system_audio,
+            diarize,
         });
         self.stream_failed
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -351,7 +359,14 @@ impl AudioCapture {
         info!("Audio config: {sample_rate}Hz, {channels}ch");
 
         if capture_system_audio {
-            return self.start_meeting(&device, &config, session_id, target_sample_rate, mic_gain);
+            return self.start_meeting(
+                &device,
+                &config,
+                session_id,
+                target_sample_rate,
+                mic_gain,
+                diarize,
+            );
         }
 
         let resampler = Arc::new(Mutex::new(Resampler::new(
@@ -455,6 +470,7 @@ impl AudioCapture {
         session_id: u64,
         target_sample_rate: u32,
         mic_gain: f32,
+        diarize: bool,
     ) -> Result<(), String> {
         let sample_rate = config.sample_rate.0;
         let channels = config.channels;
@@ -543,6 +559,7 @@ impl AudioCapture {
             #[cfg(target_os = "macos")]
             tap,
             aec_active,
+            diarize,
             ticks: 0,
         });
 
@@ -586,6 +603,7 @@ impl AudioCapture {
             params.target_sample_rate,
             params.mic_gain,
             params.capture_system_audio,
+            params.diarize,
         ) {
             warn!("Capture rebuild failed (will retry): {e}");
         }
@@ -593,32 +611,65 @@ impl AudioCapture {
 
     /// Periodic mixer pump while a meeting session is active.
     fn meeting_tick(&mut self) {
-        let Some(meeting) = self.meeting.as_mut() else {
-            return;
+        // Do all mixer work inside this borrow, then release it before calling
+        // &self/&mut self helpers (sending, RMS) to satisfy the borrow checker.
+        let (session_id, diarize, mixed, me, them) = {
+            let Some(meeting) = self.meeting.as_mut() else {
+                return;
+            };
+            meeting.ticks += 1;
+            if meeting.ticks.is_multiple_of(ROUTE_CHECK_TICKS) {
+                meeting.check_output_route(self.app.as_ref());
+            }
+            if meeting.diarize {
+                let (me, them) = meeting.mixer.tick_split();
+                (meeting.session_id, true, Vec::new(), me, them)
+            } else {
+                let mixed = meeting.mixer.tick();
+                (meeting.session_id, false, mixed, Vec::new(), Vec::new())
+            }
         };
 
-        meeting.ticks += 1;
-        if meeting.ticks.is_multiple_of(ROUTE_CHECK_TICKS) {
-            meeting.check_output_route(self.app.as_ref());
+        use crate::engine::Speaker;
+        if diarize {
+            self.store_meeting_rms(&me, &them);
+            self.send_meeting_chunk(session_id, me, Some(Speaker::Me));
+            self.send_meeting_chunk(session_id, them, Some(Speaker::Them));
+        } else {
+            self.store_meeting_rms(&mixed, &[]);
+            self.send_meeting_chunk(session_id, mixed, None);
         }
+    }
 
-        let samples = meeting.mixer.tick();
+    /// Update the shared RMS level (waveform) from one or two legs combined.
+    fn store_meeting_rms(&self, a: &[f32], b: &[f32]) {
+        let n = a.len() + b.len();
+        if n == 0 {
+            return;
+        }
+        let sum_sq: f32 = a.iter().chain(b).map(|s| s * s).sum();
+        let rms = (sum_sq / n as f32).sqrt();
+        self.audio_rms
+            .store((rms * 8.0).min(1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    /// Forward one meeting chunk to the engine actor, tagged with its source.
+    fn send_meeting_chunk(
+        &self,
+        session_id: u64,
+        samples: Vec<f32>,
+        speaker: Option<crate::engine::Speaker>,
+    ) {
         if samples.is_empty() {
             return;
         }
-
-        let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
-        let rms = (sum_sq / samples.len() as f32).sqrt();
-        self.audio_rms
-            .store((rms * 8.0).min(1.0).to_bits(), Ordering::Relaxed);
-
         if self
             .audio_sender
             .try_send(AudioMessage::Chunk(AudioChunk {
-                session_id: meeting.session_id,
+                session_id,
                 samples,
                 captured_at: Instant::now(),
-                speaker: None,
+                speaker,
             }))
             .is_err()
         {
@@ -676,14 +727,13 @@ impl AudioCapture {
             meeting.tap.take();
 
             if session_id != 0 {
-                let tail = meeting.mixer.flush();
-                if !tail.is_empty() {
-                    let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
-                        session_id,
-                        samples: tail,
-                        captured_at: Instant::now(),
-                        speaker: None,
-                    }));
+                if meeting.diarize {
+                    let (me, them) = meeting.mixer.flush_split();
+                    self.send_meeting_chunk(session_id, me, Some(crate::engine::Speaker::Me));
+                    self.send_meeting_chunk(session_id, them, Some(crate::engine::Speaker::Them));
+                } else {
+                    let tail = meeting.mixer.flush();
+                    self.send_meeting_chunk(session_id, tail, None);
                 }
                 let discarded = meeting.mixer.tap_discarded();
                 if discarded > 0 {

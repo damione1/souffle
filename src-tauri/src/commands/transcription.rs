@@ -228,16 +228,22 @@ fn start_pipeline_blocking(
     // Snapshot settings and dictionary; the actor builds filter chains on its
     // own thread to keep ONNX/Metal work off the command thread.
     let settings = crate::settings::AppSettings::load(db)?;
-    let config = SessionConfig {
-        pipeline_config: settings.pipeline_config(),
-        dictionary_entries: db.list_dictionary_entries()?,
-    };
 
     // Meetings also capture system audio (the other participants) when the
     // setting is on and the OS supports Core Audio taps.
     let capture_system_audio = mode == PipelineMode::Meeting
         && settings.capture_system_audio
         && crate::platform::system_audio_capture_supported();
+    // With system audio captured, transcribe the mic (Me) and system audio
+    // (Them) on separate engines so segments are speaker-labelled. Without a
+    // distinct system-audio leg there is nothing to separate.
+    let diarize = capture_system_audio;
+
+    let config = SessionConfig {
+        pipeline_config: settings.pipeline_config(),
+        dictionary_entries: db.list_dictionary_entries()?,
+        diarize,
+    };
 
     // The actor replies once the engine is reset and ready for audio.
     let info = engine_actor.start_session(session_id, config, on_segment)?;
@@ -248,6 +254,7 @@ fn start_pipeline_blocking(
             target_sample_rate: info.audio.sample_rate_hz,
             mic_gain: info.mic_gain,
             capture_system_audio,
+            diarize,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
