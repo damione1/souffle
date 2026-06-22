@@ -617,6 +617,12 @@ export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
+/**
+ * Who produced a segment in a diarized meeting: the microphone is the local
+ * user (Me), system audio is everyone else (Them). `None` = single-stream
+ * session (dictation, or a meeting recorded without diarization).
+ */
+export type Speaker = "me" | "them"
 export type StateChanged = AppStateMachine
 export type SummarizeProgress = { text: string; done: boolean }
 /**
@@ -658,7 +664,11 @@ export type TranscriptionRuntimeStatus = { profile: TranscriptionProfile; phase:
 /**
  * A piece of transcribed text with metadata
  */
-export type TranscriptionSegment = { text: string; start_time: number; end_time: number; is_final: boolean; language: string | null; confidence: number | null }
+export type TranscriptionSegment = { text: string; start_time: number; end_time: number; is_final: boolean; language: string | null; confidence: number | null; 
+/**
+ * Set by the pipeline for diarized meetings; `None` otherwise.
+ */
+speaker?: Speaker | null }
 
 /** tauri-specta globals **/
 

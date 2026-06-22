@@ -62,17 +62,28 @@ pub enum ErrorRecovery {
 
 /// Internal-only actions that drive state transitions.
 pub enum StateAction {
-    StartDownload { profile: TranscriptionProfile },
+    StartDownload {
+        profile: TranscriptionProfile,
+    },
     DownloadComplete,
     StartLoad,
     LoadComplete,
-    StartDictation { session_id: u64 },
-    StartMeeting { session_id: u64, meeting_id: String },
+    StartDictation {
+        session_id: u64,
+    },
+    StartMeeting {
+        session_id: u64,
+        meeting_id: String,
+    },
     StopRecording,
     StopComplete,
-    Unload { next_profile: Option<TranscriptionProfile> },
+    Unload {
+        next_profile: Option<TranscriptionProfile>,
+    },
     UnloadComplete,
-    Fail { message: String },
+    Fail {
+        message: String,
+    },
     Recover,
 }
 
@@ -85,9 +96,7 @@ impl AppStateMachine {
 
         match (self, action) {
             // --- Download transitions ---
-            (Idle, StartDownload { profile }) => Ok(Downloading {
-                profile,
-            }),
+            (Idle, StartDownload { profile }) => Ok(Downloading { profile }),
             (Downloaded { profile: current }, StartDownload { profile }) if current != profile => {
                 Ok(Downloading { profile })
             }
@@ -112,20 +121,31 @@ impl AppStateMachine {
                 profile,
                 session_id,
             }),
-            (Ready { profile }, StartMeeting { session_id, meeting_id }) => {
-                Ok(RecordingMeeting {
-                    profile,
+            (
+                Ready { profile },
+                StartMeeting {
                     session_id,
                     meeting_id,
-                })
-            }
+                },
+            ) => Ok(RecordingMeeting {
+                profile,
+                session_id,
+                meeting_id,
+            }),
 
             // --- Stop recording ---
             (RecordingDictation { profile, .. }, StopRecording) => Ok(Stopping {
                 profile,
                 was_recording: RecordingKind::Dictation,
             }),
-            (RecordingMeeting { profile, meeting_id, .. }, StopRecording) => Ok(Stopping {
+            (
+                RecordingMeeting {
+                    profile,
+                    meeting_id,
+                    ..
+                },
+                StopRecording,
+            ) => Ok(Stopping {
                 profile,
                 was_recording: RecordingKind::Meeting { meeting_id },
             }),
@@ -151,26 +171,54 @@ impl AppStateMachine {
                 profile,
                 next_profile,
             }),
-            (Unloading { next_profile: Some(next), .. }, UnloadComplete) => Ok(Loading {
-                profile: next,
-            }),
-            (Unloading { profile, next_profile: None, .. }, UnloadComplete) => {
-                Ok(Downloaded { profile })
-            }
+            (
+                Unloading {
+                    next_profile: Some(next),
+                    ..
+                },
+                UnloadComplete,
+            ) => Ok(Loading { profile: next }),
+            (
+                Unloading {
+                    profile,
+                    next_profile: None,
+                    ..
+                },
+                UnloadComplete,
+            ) => Ok(Downloaded { profile }),
 
             // --- Error recovery ---
-            (Error { recovery: ErrorRecovery::RetryFromIdle, .. }, Recover) => Ok(Idle),
-            (Error { recovery: ErrorRecovery::RetryFromDownloaded { profile }, .. }, Recover) => {
-                Ok(Downloaded { profile })
-            }
-            (Error { recovery: ErrorRecovery::RetryFromReady { profile }, .. }, Recover) => {
-                Ok(Ready { profile })
-            }
+            (
+                Error {
+                    recovery: ErrorRecovery::RetryFromIdle,
+                    ..
+                },
+                Recover,
+            ) => Ok(Idle),
+            (
+                Error {
+                    recovery: ErrorRecovery::RetryFromDownloaded { profile },
+                    ..
+                },
+                Recover,
+            ) => Ok(Downloaded { profile }),
+            (
+                Error {
+                    recovery: ErrorRecovery::RetryFromReady { profile },
+                    ..
+                },
+                Recover,
+            ) => Ok(Ready { profile }),
 
             // --- Already in target state (idempotent) ---
-            (Downloaded { profile: ref current }, StartDownload { ref profile }) if current == profile => {
-                Ok(Downloaded { profile: profile.clone() })
-            }
+            (
+                Downloaded {
+                    profile: ref current,
+                },
+                StartDownload { ref profile },
+            ) if current == profile => Ok(Downloaded {
+                profile: profile.clone(),
+            }),
 
             // --- Invalid transition ---
             (state, _action) => Err(format!(
@@ -366,9 +414,7 @@ mod tests {
             profile: test_profile(),
         };
         let state = state
-            .transition(StateAction::Unload {
-                next_profile: None,
-            })
+            .transition(StateAction::Unload { next_profile: None })
             .unwrap();
         let state = state.transition(StateAction::UnloadComplete).unwrap();
         assert!(matches!(state, AppStateMachine::Downloaded { .. }));
@@ -478,9 +524,11 @@ mod tests {
     #[test]
     fn idle_cannot_start_recording() {
         let state = AppStateMachine::Idle;
-        assert!(state
-            .transition(StateAction::StartDictation { session_id: 1 })
-            .is_err());
+        assert!(
+            state
+                .transition(StateAction::StartDictation { session_id: 1 })
+                .is_err()
+        );
     }
 
     #[test]
@@ -489,12 +537,14 @@ mod tests {
             profile: test_profile(),
             session_id: 1,
         };
-        assert!(state
-            .transition(StateAction::StartMeeting {
-                session_id: 2,
-                meeting_id: "m".into()
-            })
-            .is_err());
+        assert!(
+            state
+                .transition(StateAction::StartMeeting {
+                    session_id: 2,
+                    meeting_id: "m".into()
+                })
+                .is_err()
+        );
     }
 
     #[test]
@@ -511,11 +561,11 @@ mod tests {
             profile: test_profile(),
             session_id: 1,
         };
-        assert!(state
-            .transition(StateAction::Unload {
-                next_profile: None
-            })
-            .is_err());
+        assert!(
+            state
+                .transition(StateAction::Unload { next_profile: None })
+                .is_err()
+        );
     }
 
     // --- Helper methods ---
@@ -523,46 +573,56 @@ mod tests {
     #[test]
     fn is_model_ready_for_ready_and_recording_states() {
         assert!(!AppStateMachine::Idle.is_model_ready());
-        assert!(!AppStateMachine::Downloaded {
-            profile: test_profile()
-        }
-        .is_model_ready());
-        assert!(AppStateMachine::Ready {
-            profile: test_profile()
-        }
-        .is_model_ready());
-        assert!(AppStateMachine::RecordingDictation {
-            profile: test_profile(),
-            session_id: 1
-        }
-        .is_model_ready());
+        assert!(
+            !AppStateMachine::Downloaded {
+                profile: test_profile()
+            }
+            .is_model_ready()
+        );
+        assert!(
+            AppStateMachine::Ready {
+                profile: test_profile()
+            }
+            .is_model_ready()
+        );
+        assert!(
+            AppStateMachine::RecordingDictation {
+                profile: test_profile(),
+                session_id: 1
+            }
+            .is_model_ready()
+        );
     }
 
     #[test]
     fn active_profile_returns_none_for_idle_and_error() {
         assert!(AppStateMachine::Idle.active_profile().is_none());
-        assert!(AppStateMachine::Error {
-            message: "x".into(),
-            recovery: ErrorRecovery::RetryFromIdle
-        }
-        .active_profile()
-        .is_none());
+        assert!(
+            AppStateMachine::Error {
+                message: "x".into(),
+                recovery: ErrorRecovery::RetryFromIdle
+            }
+            .active_profile()
+            .is_none()
+        );
     }
 
     #[test]
     fn active_profile_returns_some_for_all_other_states() {
         let p = test_profile();
-        assert!(AppStateMachine::Ready {
-            profile: p.clone()
-        }
-        .active_profile()
-        .is_some());
-        assert!(AppStateMachine::RecordingDictation {
-            profile: p,
-            session_id: 1
-        }
-        .active_profile()
-        .is_some());
+        assert!(
+            AppStateMachine::Ready { profile: p.clone() }
+                .active_profile()
+                .is_some()
+        );
+        assert!(
+            AppStateMachine::RecordingDictation {
+                profile: p,
+                session_id: 1
+            }
+            .active_profile()
+            .is_some()
+        );
     }
 
     #[test]
@@ -598,7 +658,10 @@ mod tests {
             profile: profile.clone(),
         });
         assert!(result.is_ok());
-        assert!(matches!(result.unwrap(), AppStateMachine::Downloaded { .. }));
+        assert!(matches!(
+            result.unwrap(),
+            AppStateMachine::Downloaded { .. }
+        ));
     }
 
     #[test]

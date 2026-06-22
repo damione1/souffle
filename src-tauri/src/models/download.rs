@@ -32,7 +32,10 @@ pub fn model_exists(model_dir: &Path, required_files: &[String]) -> bool {
     if !model_dir.exists() {
         return false;
     }
-    if !required_files.iter().all(|file| model_dir.join(file).exists()) {
+    if !required_files
+        .iter()
+        .all(|file| model_dir.join(file).exists())
+    {
         return false;
     }
 
@@ -99,7 +102,11 @@ pub fn download_model(
     for repo_file in &files_to_download {
         info!(file = %repo_file, "Downloading");
 
-        let url = hf_download_url(&artifact.repository, repo_file, artifact.revision.as_deref());
+        let url = hf_download_url(
+            &artifact.repository,
+            repo_file,
+            artifact.revision.as_deref(),
+        );
         let dest = model_dir.join(repo_file);
 
         download_file_with_progress(
@@ -144,8 +151,7 @@ fn download_and_discover_config(
         status: DownloadStatus::Starting,
     });
 
-    let api =
-        hf_hub::api::sync::Api::new().map_err(|e| format!("HuggingFace API init: {e}"))?;
+    let api = hf_hub::api::sync::Api::new().map_err(|e| format!("HuggingFace API init: {e}"))?;
     let repo = api.model(artifact.repository.clone());
 
     let config_cached = repo
@@ -259,8 +265,7 @@ fn download_file_with_progress(
     drop(file);
 
     // Atomic rename
-    std::fs::rename(&temp_dest, dest)
-        .map_err(|e| format!("Rename error for {file_label}: {e}"))?;
+    std::fs::rename(&temp_dest, dest).map_err(|e| format!("Rename error for {file_label}: {e}"))?;
 
     Ok(())
 }
@@ -277,8 +282,7 @@ pub fn delete_model_files(model_dir: &Path) -> Result<(), String> {
     if !model_dir.exists() {
         return Ok(());
     }
-    std::fs::remove_dir_all(model_dir)
-        .map_err(|e| format!("Failed to delete model files: {e}"))
+    std::fs::remove_dir_all(model_dir).map_err(|e| format!("Failed to delete model files: {e}"))
 }
 
 #[cfg(test)]
@@ -411,7 +415,11 @@ mod tests {
 
     #[test]
     fn hf_download_url_custom_revision() {
-        let url = hf_download_url("kyutai/stt-1b-en_fr-candle", "model.safetensors", Some("v1.0"));
+        let url = hf_download_url(
+            "kyutai/stt-1b-en_fr-candle",
+            "model.safetensors",
+            Some("v1.0"),
+        );
         assert_eq!(
             url,
             "https://huggingface.co/kyutai/stt-1b-en_fr-candle/resolve/v1.0/model.safetensors"

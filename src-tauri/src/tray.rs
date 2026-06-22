@@ -188,11 +188,19 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
 
     if let Some(handles) = app.try_state::<TrayHandles>() {
         let _ = handles.dictation.set_text(label(
-            if dictating { "stop_dictation" } else { "start_dictation" },
+            if dictating {
+                "stop_dictation"
+            } else {
+                "start_dictation"
+            },
             fr,
         ));
         let _ = handles.meeting.set_text(label(
-            if meeting { "stop_meeting" } else { "start_meeting" },
+            if meeting {
+                "stop_meeting"
+            } else {
+                "start_meeting"
+            },
             fr,
         ));
     }

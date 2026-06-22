@@ -93,10 +93,7 @@ impl AppState {
     }
 
     /// Apply a state transition, update the machine, and emit a StateChanged event.
-    pub fn apply_transition(
-        &self,
-        action: StateAction,
-    ) -> Result<AppStateMachine, String> {
+    pub fn apply_transition(&self, action: StateAction) -> Result<AppStateMachine, String> {
         let mut machine = self.machine.acquire()?;
         let new_state = machine.clone().transition(action)?;
         debug!(

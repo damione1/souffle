@@ -70,7 +70,8 @@ impl Aec {
         let mut out = vec![0.0; self.frame_len];
         let apm = &mut self.apm;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            apm.process_capture_f32(&[&frame[..]], &mut [&mut out[..]]).is_ok()
+            apm.process_capture_f32(&[&frame[..]], &mut [&mut out[..]])
+                .is_ok()
         }));
         match result {
             Ok(true) => frame.copy_from_slice(&out),
@@ -117,7 +118,11 @@ mod tests {
             let mut mic: Vec<f32> = (0..frame)
                 .map(|i| {
                     let idx = start + i;
-                    if idx >= delay { tone[idx - delay] * 0.3 } else { 0.0 }
+                    if idx >= delay {
+                        tone[idx - delay] * 0.3
+                    } else {
+                        0.0
+                    }
                 })
                 .collect();
             aec.process_capture(&mut mic);

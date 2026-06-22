@@ -45,6 +45,7 @@ pub mod fixtures {
                     is_final: true,
                     language: Some("en".to_string()),
                     confidence: Some(0.95),
+                    speaker: None,
                 },
                 TranscriptionSegment {
                     text: "second segment".to_string(),
@@ -53,6 +54,7 @@ pub mod fixtures {
                     is_final: true,
                     language: None,
                     confidence: None,
+                    speaker: None,
                 },
             ],
             summary: None,
@@ -73,6 +75,7 @@ pub mod fixtures {
             is_final: true,
             language: Some("en".to_string()),
             confidence: Some(0.95),
+            speaker: None,
         }
     }
 }

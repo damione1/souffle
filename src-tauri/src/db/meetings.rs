@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 
-use crate::engine::{TranscriptionProfile, TranscriptionSegment};
+use crate::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
 use crate::transcript::{MeetingListItem, MeetingRecordingSession, MeetingTranscript};
 
@@ -60,8 +60,8 @@ impl Database {
 
         for (i, seg) in meeting.segments.iter().enumerate() {
             tx.execute(
-                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     meeting.id,
                     seg.text,
@@ -71,6 +71,7 @@ impl Database {
                     seg.language,
                     seg.confidence,
                     i as i64,
+                    seg.speaker.map(Speaker::as_str),
                 ],
             )
             .map_err(|e| format!("Insert segment: {e}"))?;
@@ -165,8 +166,8 @@ impl Database {
             .map_err(|e| format!("Transaction: {e}"))?;
         for (i, seg) in segments.iter().enumerate() {
             tx.execute(
-                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     meeting_id,
                     seg.text,
@@ -176,6 +177,7 @@ impl Database {
                     seg.language,
                     seg.confidence,
                     start_sort_order + i as i64,
+                    seg.speaker.map(Speaker::as_str),
                 ],
             )
             .map_err(|e| format!("Append segment: {e}"))?;
@@ -283,7 +285,7 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT text, start_time, end_time, is_final, language, confidence
+                "SELECT text, start_time, end_time, is_final, language, confidence, speaker
                  FROM segments WHERE meeting_id = ?1 ORDER BY sort_order",
             )
             .map_err(|e| format!("Prepare: {e}"))?;
@@ -297,6 +299,10 @@ impl Database {
                     is_final: row.get::<_, i32>(3)? != 0,
                     language: row.get(4)?,
                     confidence: row.get(5)?,
+                    speaker: row
+                        .get::<_, Option<String>>(6)?
+                        .as_deref()
+                        .and_then(Speaker::parse),
                 })
             })
             .map_err(|e| format!("Query segments: {e}"))?
@@ -616,6 +622,7 @@ mod tests {
             is_final: true,
             language: None,
             confidence: None,
+            speaker: None,
         };
 
         db.append_segments("live", &[seg("one", 0.0), seg("two", 1.0)], 0)
@@ -649,6 +656,7 @@ mod tests {
                 is_final: true,
                 language: None,
                 confidence: None,
+                speaker: None,
             }],
             0,
         )

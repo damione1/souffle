@@ -7,9 +7,9 @@
 //! the engine lifecycle across command and inference threads.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -197,10 +197,7 @@ impl EngineActorHandle {
     }
 
     /// Feed raw samples through reset + transcribe, for diagnostics.
-    pub fn debug_transcribe(
-        &self,
-        samples: Vec<f32>,
-    ) -> Result<Vec<TranscriptionSegment>, String> {
+    pub fn debug_transcribe(&self, samples: Vec<f32>) -> Result<Vec<TranscriptionSegment>, String> {
         self.request(
             |reply| EngineCommand::DebugTranscribe { samples, reply },
             None,
@@ -279,8 +276,7 @@ impl EngineActor {
                     model_dir,
                     reply,
                 } => {
-                    let result =
-                        with_autorelease_pool(|| self.handle_load(&profile, &model_dir));
+                    let result = with_autorelease_pool(|| self.handle_load(&profile, &model_dir));
                     let _ = reply.send(result);
                 }
                 EngineCommand::UnloadModel { reply } => {
@@ -294,7 +290,9 @@ impl EngineActor {
                     reply,
                 } => {
                     session_count += 1;
-                    info!("Inference session {session_count} starting (audio session {session_id})");
+                    info!(
+                        "Inference session {session_count} starting (audio session {session_id})"
+                    );
                     let end = with_autorelease_pool(|| {
                         self.handle_session(session_id, config, on_segment, reply)
                     });
@@ -357,7 +355,9 @@ impl EngineActor {
             .emit(app);
 
             let state = app.state::<crate::state::AppState>();
-            let _ = state.audio_cmd_sender.send(crate::state::AudioCommand::Stop);
+            let _ = state
+                .audio_cmd_sender
+                .send(crate::state::AudioCommand::Stop);
 
             // Salvage an in-progress meeting: stop_meeting_recording can no
             // longer run once the machine is in Error, so the accumulated
@@ -381,9 +381,9 @@ impl EngineActor {
                 }
             }
 
-            if let Err(e) = state.apply_transition(crate::state_machine::StateAction::Fail {
-                message,
-            }) {
+            if let Err(e) =
+                state.apply_transition(crate::state_machine::StateAction::Fail { message })
+            {
                 warn!("Failed to apply Fail transition after session abort: {e}");
             }
         }
@@ -411,9 +411,7 @@ impl EngineActor {
         self.drop_engine();
 
         let mut engine = (self.factory)(profile)?;
-        engine
-            .load_model(model_dir)
-            .map_err(|e| e.to_string())?;
+        engine.load_model(model_dir).map_err(|e| e.to_string())?;
         let info = EngineInfo {
             audio: engine.audio_requirements(),
             mic_gain: engine.mic_gain(),
@@ -471,10 +469,7 @@ impl EngineActor {
         let _ = reply.send(Ok(info));
 
         let mut health = SessionHealth::start(session_id, Arc::clone(&self.dropped_counter));
-        let engine = self
-            .engine
-            .as_mut()
-            .expect("engine present: checked above");
+        let engine = self.engine.as_mut().expect("engine present: checked above");
         active_session_loop(
             &self.cmd_rx,
             &self.audio_rx,
@@ -640,7 +635,8 @@ fn active_session_loop(
                 if chunk.session_id != session_id {
                     summary.skipped_chunks += 1;
                     if crate::debug::transcription_debug_enabled()
-                        && (summary.skipped_chunks <= 5 || summary.skipped_chunks.is_multiple_of(25))
+                        && (summary.skipped_chunks <= 5
+                            || summary.skipped_chunks.is_multiple_of(25))
                     {
                         debug!(
                             "Ignoring stale audio chunk from session {} while expecting {}",
@@ -701,9 +697,7 @@ fn active_session_loop(
                             }
                             if consecutive_errors >= MAX_CONSECUTIVE_FRAME_ERRORS {
                                 if let Some((reply, _)) = pending_stop.take() {
-                                    let _ = reply.send(Err(format!(
-                                        "Session aborted: {e}"
-                                    )));
+                                    let _ = reply.send(Err(format!("Session aborted: {e}")));
                                 }
                                 return SessionEnd::Aborted(format!(
                                     "Transcription failed {MAX_CONSECUTIVE_FRAME_ERRORS} frames in a row: {e}"
@@ -880,6 +874,7 @@ mod tests {
             is_final: false,
             language: None,
             confidence: None,
+            speaker: None,
         }
     }
 
@@ -1141,7 +1136,9 @@ mod tests {
     #[test]
     fn actor_aborts_after_consecutive_errors_and_recovers() {
         let mock = MockEngine::new().with_transcribe_response(
-            Err(crate::engine::EngineError::InferenceError("gpu lost".into())),
+            Err(crate::engine::EngineError::InferenceError(
+                "gpu lost".into(),
+            )),
             super::MAX_CONSECUTIVE_FRAME_ERRORS as usize,
         );
         let (actor, audio_tx) = spawn_with_mock(mock);

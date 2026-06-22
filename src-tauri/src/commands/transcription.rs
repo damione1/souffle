@@ -101,7 +101,9 @@ async fn launch_meeting(
 
     // Persist the header before any segments so a crash leaves a recoverable
     // row (ended_at IS NULL) and segment FK targets exist.
-    state.db.upsert_meeting_header(&meeting_header(&accumulator))?;
+    state
+        .db
+        .upsert_meeting_header(&meeting_header(&accumulator))?;
 
     {
         let mut acc = state.meeting_accumulator.acquire()?;
@@ -119,7 +121,14 @@ async fn launch_meeting(
     let db = Arc::clone(&state.db);
     let acc = Arc::clone(&state.meeting_accumulator);
     let res = tauri::async_runtime::spawn_blocking(move || {
-        start_pipeline_blocking(&actor, &audio, &db, session_id, PipelineMode::Meeting, on_segment)
+        start_pipeline_blocking(
+            &actor,
+            &audio,
+            &db,
+            session_id,
+            PipelineMode::Meeting,
+            on_segment,
+        )
     })
     .await
     .map_err(|e| format!("Join start task: {e}"))?;
@@ -306,7 +315,14 @@ pub async fn start_transcription(
     let audio = state.audio_cmd_sender.clone();
     let db = Arc::clone(&state.db);
     tauri::async_runtime::spawn_blocking(move || {
-        start_pipeline_blocking(&actor, &audio, &db, session_id, PipelineMode::Dictation, on_segment)
+        start_pipeline_blocking(
+            &actor,
+            &audio,
+            &db,
+            session_id,
+            PipelineMode::Dictation,
+            on_segment,
+        )
     })
     .await
     .map_err(|e| format!("Join start task: {e}"))??;
@@ -336,11 +352,10 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
     let audio = state.audio_cmd_sender.clone();
     // Pipeline stop can fail (e.g. drain timeout) but we MUST complete the
     // state transition — otherwise the machine stays stuck in Stopping.
-    let stop_result = tauri::async_runtime::spawn_blocking(move || {
-        stop_pipeline_blocking(&actor, &audio)
-    })
-    .await
-    .map_err(|e| format!("Join stop task: {e}"))?;
+    let stop_result =
+        tauri::async_runtime::spawn_blocking(move || stop_pipeline_blocking(&actor, &audio))
+            .await
+            .map_err(|e| format!("Join stop task: {e}"))?;
     if let Err(e) = stop_result {
         warn!("Pipeline stop failed: {e}");
     }
@@ -468,7 +483,10 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
     if !machine.is_recording() {
         return Err("Not recording".into());
     }
-    if !matches!(machine, crate::state_machine::AppStateMachine::RecordingMeeting { .. }) {
+    if !matches!(
+        machine,
+        crate::state_machine::AppStateMachine::RecordingMeeting { .. }
+    ) {
         return Err("Meeting recording is not active".into());
     }
 
@@ -494,7 +512,8 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
 
-        let pipeline_err = stop_pipeline_blocking(&state.engine_actor, &state.audio_cmd_sender).err();
+        let pipeline_err =
+            stop_pipeline_blocking(&state.engine_actor, &state.audio_cmd_sender).err();
 
         // Authoritative full save from the in-memory accumulator (overwrites the
         // incrementally-persisted rows with the complete, finalized transcript).
@@ -562,6 +581,7 @@ mod tests {
                     is_final: true,
                     language: None,
                     confidence: None,
+                    speaker: None,
                 }],
                 new_segments: vec![TranscriptionSegment {
                     text: "Appended".to_string(),
@@ -570,6 +590,7 @@ mod tests {
                     is_final: true,
                     language: None,
                     confidence: None,
+                    speaker: None,
                 }],
                 recording_sessions: vec![MeetingRecordingSession::completed(
                     "session-1".to_string(),

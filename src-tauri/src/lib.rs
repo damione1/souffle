@@ -59,8 +59,10 @@ fn init_logging() {
     // stderr (useful for `cargo tauri dev`).
     let log_dir = constants::app_data_dir().join("logs");
     let file_layer = if std::fs::create_dir_all(&log_dir).is_ok() {
-        let (writer, guard) =
-            tracing_appender::non_blocking(tracing_appender::rolling::daily(&log_dir, "souffle.log"));
+        let (writer, guard) = tracing_appender::non_blocking(tracing_appender::rolling::daily(
+            &log_dir,
+            "souffle.log",
+        ));
         let _ = LOG_GUARD.set(guard);
         Some(fmt::layer().with_ansi(false).with_writer(writer))
     } else {
@@ -207,7 +209,10 @@ pub fn run() {
     // incrementally-persisted segments show up cleanly in history.
     match database.recover_unfinished_meetings() {
         Ok(0) => {}
-        Ok(n) => info!(count = n, "Recovered unfinished meetings from a previous run"),
+        Ok(n) => info!(
+            count = n,
+            "Recovered unfinished meetings from a previous run"
+        ),
         Err(e) => tracing::warn!("Meeting recovery failed: {e}"),
     }
 

@@ -22,9 +22,7 @@ impl DictionaryFilter {
             .into_iter()
             .map(|e| {
                 let term_lower = e.term.to_lowercase();
-                let phonetic_code = e
-                    .phonetic_code
-                    .or_else(|| soundex(&e.term));
+                let phonetic_code = e.phonetic_code.or_else(|| soundex(&e.term));
                 DictionaryMatch {
                     term: e.term,
                     term_lower,

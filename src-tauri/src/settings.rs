@@ -150,10 +150,13 @@ impl AppSettings {
         if let Some(stutter_collapse) = read_json_setting::<bool>(db, STUTTER_COLLAPSE_KEY)? {
             settings.stutter_collapse = stutter_collapse;
         }
-        if let Some(dictionary_correction) = read_json_setting::<bool>(db, DICTIONARY_CORRECTION_KEY)? {
+        if let Some(dictionary_correction) =
+            read_json_setting::<bool>(db, DICTIONARY_CORRECTION_KEY)?
+        {
             settings.dictionary_correction = dictionary_correction;
         }
-        if let Some(capture_system_audio) = read_json_setting::<bool>(db, CAPTURE_SYSTEM_AUDIO_KEY)? {
+        if let Some(capture_system_audio) = read_json_setting::<bool>(db, CAPTURE_SYSTEM_AUDIO_KEY)?
+        {
             settings.capture_system_audio = capture_system_audio;
         }
 
@@ -190,7 +193,8 @@ impl AppSettings {
         normalized.ollama_model = normalized.ollama_model.trim().to_string();
         normalized.transcription_engine_id = normalized.transcription_engine_id.trim().to_string();
         normalized.transcription_model_id = normalized.transcription_model_id.trim().to_string();
-        normalized.transcription_backend_id = normalized.transcription_backend_id.trim().to_string();
+        normalized.transcription_backend_id =
+            normalized.transcription_backend_id.trim().to_string();
         normalized.audio_device = normalized
             .audio_device
             .as_ref()
@@ -261,8 +265,16 @@ impl AppSettings {
         write_json_setting(db, VAD_ENABLED_KEY, &normalized.vad_enabled)?;
         write_json_setting(db, FILLER_REMOVAL_KEY, &normalized.filler_removal)?;
         write_json_setting(db, STUTTER_COLLAPSE_KEY, &normalized.stutter_collapse)?;
-        write_json_setting(db, DICTIONARY_CORRECTION_KEY, &normalized.dictionary_correction)?;
-        write_json_setting(db, CAPTURE_SYSTEM_AUDIO_KEY, &normalized.capture_system_audio)?;
+        write_json_setting(
+            db,
+            DICTIONARY_CORRECTION_KEY,
+            &normalized.dictionary_correction,
+        )?;
+        write_json_setting(
+            db,
+            CAPTURE_SYSTEM_AUDIO_KEY,
+            &normalized.capture_system_audio,
+        )?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
             write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;

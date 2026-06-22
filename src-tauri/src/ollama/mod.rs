@@ -305,7 +305,10 @@ async fn generate_once(
         prompt,
         system: system.to_string(),
         stream: false,
-        options: GenerateOptions { temperature, num_ctx },
+        options: GenerateOptions {
+            temperature,
+            num_ctx,
+        },
     };
     let resp = client
         .post(format!("{url}/api/generate"))
@@ -341,7 +344,10 @@ async fn generate_stream(
         prompt,
         system: system.to_string(),
         stream: true,
-        options: GenerateOptions { temperature, num_ctx },
+        options: GenerateOptions {
+            temperature,
+            num_ctx,
+        },
     };
     let resp = client
         .post(format!("{url}/api/generate"))
@@ -433,7 +439,15 @@ pub async fn summarize_stream(
             n,
             chunk
         );
-        generate_once(&client, url, model, OLLAMA_MAP_PROMPT, user, MAP_NUM_CTX, 0.2)
+        generate_once(
+            &client,
+            url,
+            model,
+            OLLAMA_MAP_PROMPT,
+            user,
+            MAP_NUM_CTX,
+            0.2,
+        )
     });
     let part_summaries = futures_util::future::try_join_all(maps).await?;
 
@@ -478,7 +492,11 @@ mod tests {
         let total = CHUNK_WORDS * 3;
         let words: Vec<String> = (0..total).map(|i| i.to_string()).collect();
         let chunks = chunk_transcript(&words.join(" "));
-        assert!(chunks.len() >= 3, "expected multiple chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() >= 3,
+            "expected multiple chunks, got {}",
+            chunks.len()
+        );
         // Consecutive chunks overlap: last words of chunk 0 reappear in chunk 1.
         let step = CHUNK_WORDS - CHUNK_OVERLAP_WORDS;
         // chunk 1 starts at word `step`; it must contain word `step` and the

@@ -21,11 +21,9 @@ pub fn add_dictionary_entry(
     if term.is_empty() {
         return Err("Term cannot be empty".into());
     }
-    state.db.add_dictionary_entry(
-        term,
-        phonetic_code.as_deref(),
-        category.as_deref(),
-    )
+    state
+        .db
+        .add_dictionary_entry(term, phonetic_code.as_deref(), category.as_deref())
 }
 
 #[tauri::command]
@@ -41,20 +39,14 @@ pub fn update_dictionary_entry(
     if term.is_empty() {
         return Err("Term cannot be empty".into());
     }
-    state.db.update_dictionary_entry(
-        id,
-        term,
-        phonetic_code.as_deref(),
-        category.as_deref(),
-    )
+    state
+        .db
+        .update_dictionary_entry(id, term, phonetic_code.as_deref(), category.as_deref())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn delete_dictionary_entry(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn delete_dictionary_entry(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     state.db.delete_dictionary_entry(id)
 }
 

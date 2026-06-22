@@ -181,11 +181,7 @@ mod tests {
         mic_rate: u32,
         tap_rate: u32,
         engine_rate: u32,
-    ) -> (
-        ringbuf::HeapProd<f32>,
-        ringbuf::HeapProd<f32>,
-        MeetingMixer,
-    ) {
+    ) -> (ringbuf::HeapProd<f32>, ringbuf::HeapProd<f32>, MeetingMixer) {
         let (mic_prod, mic_cons) = HeapRb::<f32>::new(mic_rate as usize * 2).split();
         let (tap_prod, tap_cons) = HeapRb::<f32>::new(tap_rate as usize * 2).split();
         let mixer = MeetingMixer::new(mic_cons, mic_rate, 1, 1.0, tap_cons, tap_rate, engine_rate);
@@ -245,7 +241,10 @@ mod tests {
         mic.push_slice(&vec![0.1f32; 480]);
         mixer.tick();
 
-        assert!(mixer.tap_discarded() > 0, "excess tap lead should be dropped");
+        assert!(
+            mixer.tap_discarded() > 0,
+            "excess tap lead should be dropped"
+        );
         assert!(mixer.tap_fifo.len() <= MAX_TAP_LEAD_SAMPLES + FRAME_SAMPLES);
     }
 

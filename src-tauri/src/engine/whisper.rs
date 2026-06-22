@@ -188,6 +188,7 @@ impl WhisperEngine {
                 is_final: true,
                 language: detected_lang.clone().or_else(|| language.map(String::from)),
                 confidence: Some(1.0 - no_speech),
+                speaker: None,
             });
         }
 
@@ -216,9 +217,9 @@ impl TranscriptionEngine for WhisperEngine {
         info!(path = %bin_path.display(), "Loading Whisper model");
 
         let ctx = WhisperContext::new_with_params(
-            bin_path.to_str().ok_or_else(|| {
-                EngineError::LoadError("Invalid model path encoding".into())
-            })?,
+            bin_path
+                .to_str()
+                .ok_or_else(|| EngineError::LoadError("Invalid model path encoding".into()))?,
             WhisperContextParameters::default(),
         )
         .map_err(|e| EngineError::LoadError(format!("Whisper model load: {e}")))?;
@@ -338,7 +339,10 @@ mod tests {
     #[test]
     fn strip_special_tokens_removes_timing_tokens() {
         let input = "[_BEG_] Le cuisinier secoue les nouilles.[_TT_150]";
-        assert_eq!(strip_special_tokens(input), "Le cuisinier secoue les nouilles.");
+        assert_eq!(
+            strip_special_tokens(input),
+            "Le cuisinier secoue les nouilles."
+        );
     }
 
     #[test]

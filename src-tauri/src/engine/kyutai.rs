@@ -50,10 +50,7 @@ pub struct KyutaiConfig {
 }
 
 impl KyutaiConfig {
-    fn to_lm_config(
-        &self,
-        has_extra_heads: bool,
-    ) -> moshi::lm::Config {
+    fn to_lm_config(&self, has_extra_heads: bool) -> moshi::lm::Config {
         let transformer = moshi::transformer::Config {
             d_model: self.dim,
             num_heads: self.num_heads,
@@ -505,6 +502,7 @@ impl TranscriptionEngine for KyutaiEngine {
                                 is_final: true,
                                 language: None,
                                 confidence: None,
+                                speaker: None,
                             });
                         }
                     }

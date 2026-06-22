@@ -1,6 +1,6 @@
+use tauri::Manager;
 use tauri::State;
 use tauri::ipc::Channel;
-use tauri::Manager;
 use tracing::info;
 
 use crate::engine::{
@@ -67,18 +67,14 @@ pub fn get_model_status(
 /// Return the current state machine state.
 #[tauri::command]
 #[specta::specta]
-pub fn get_machine_state(
-    state: State<'_, AppState>,
-) -> Result<AppStateMachine, String> {
+pub fn get_machine_state(state: State<'_, AppState>) -> Result<AppStateMachine, String> {
     state.current_machine_state()
 }
 
 /// Recover from an error state.
 #[tauri::command]
 #[specta::specta]
-pub fn recover_state(
-    state: State<'_, AppState>,
-) -> Result<AppStateMachine, String> {
+pub fn recover_state(state: State<'_, AppState>) -> Result<AppStateMachine, String> {
     state.apply_transition(StateAction::Recover)
 }
 
@@ -136,11 +132,8 @@ pub fn download_model(
 
     // Clone what we need for the thread
     let channel_clone = channel.clone();
-    let app_handle_for_state: Option<tauri::AppHandle> = state
-        .app_handle
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone());
+    let app_handle_for_state: Option<tauri::AppHandle> =
+        state.app_handle.lock().ok().and_then(|guard| guard.clone());
 
     std::thread::Builder::new()
         .name("model-download".into())
@@ -170,9 +163,7 @@ pub fn download_model(
                     });
                 }
                 Err(e) => {
-                    apply(StateAction::Fail {
-                        message: e.clone(),
-                    });
+                    apply(StateAction::Fail { message: e.clone() });
                     let _ = channel_clone.send(models::DownloadProgress {
                         file: "error".into(),
                         downloaded_bytes: 0,

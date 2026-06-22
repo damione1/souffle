@@ -103,7 +103,9 @@ pub enum AudioMessage {
     /// Sent after the cpal stream is dropped and the resampler flushed —
     /// guaranteed to be the last message of a session, so the actor can
     /// drain deterministically instead of sleeping.
-    EndOfStream { session_id: u64 },
+    EndOfStream {
+        session_id: u64,
+    },
 }
 
 /// Info about an available audio input device, sent to frontend
@@ -222,9 +224,10 @@ impl AudioCapture {
                                 // app: catch it, end the session, and let the
                                 // engine actor recover via its AudioGone path
                                 // (the meeting is already incrementally saved).
-                                let ticked = std::panic::catch_unwind(
-                                    std::panic::AssertUnwindSafe(|| capture.meeting_tick()),
-                                );
+                                let ticked =
+                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        capture.meeting_tick()
+                                    }));
                                 if ticked.is_err() {
                                     tracing::error!(
                                         "Audio mixer panicked; ending session to keep the app alive"
@@ -344,13 +347,7 @@ impl AudioCapture {
         info!("Audio config: {sample_rate}Hz, {channels}ch");
 
         if capture_system_audio {
-            return self.start_meeting(
-                &device,
-                &config,
-                session_id,
-                target_sample_rate,
-                mic_gain,
-            );
+            return self.start_meeting(&device, &config, session_id, target_sample_rate, mic_gain);
         }
 
         let resampler = Arc::new(Mutex::new(Resampler::new(
@@ -491,19 +488,18 @@ impl AudioCapture {
             .map_err(|e| format!("Failed to start stream: {e}"))?;
 
         #[cfg(target_os = "macos")]
-        let (tap, tap_rate) =
-            match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
-                Ok(tap) => {
-                    let rate = tap.sample_rate;
-                    emit_system_audio_status(self.app.as_ref(), true, None);
-                    (Some(tap), rate)
-                }
-                Err(e) => {
-                    warn!("System audio capture unavailable, recording mic only: {e}");
-                    emit_system_audio_status(self.app.as_ref(), false, Some(e));
-                    (None, super::mixer::MIX_RATE)
-                }
-            };
+        let (tap, tap_rate) = match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
+            Ok(tap) => {
+                let rate = tap.sample_rate;
+                emit_system_audio_status(self.app.as_ref(), true, None);
+                (Some(tap), rate)
+            }
+            Err(e) => {
+                warn!("System audio capture unavailable, recording mic only: {e}");
+                emit_system_audio_status(self.app.as_ref(), false, Some(e));
+                (None, super::mixer::MIX_RATE)
+            }
+        };
         #[cfg(not(target_os = "macos"))]
         let tap_rate = {
             drop(tap_prod);
@@ -525,8 +521,7 @@ impl AudioCapture {
         // system-audio reference signal to cancel against.
         #[cfg(target_os = "macos")]
         let aec_active = {
-            let speakers =
-                tap.is_some() && super::output_route::output_is_builtin_speakers();
+            let speakers = tap.is_some() && super::output_route::output_is_builtin_speakers();
             if speakers {
                 info!("Built-in speakers detected — echo cancellation engaged");
                 mixer.set_aec(Some(super::aec::Aec::new(super::mixer::MIX_RATE)));
@@ -624,7 +619,9 @@ impl AudioCapture {
         {
             let dropped = self.dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
             if dropped == 1 || dropped.is_multiple_of(100) {
-                warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
+                warn!(
+                    "Audio buffer full, dropping samples ({dropped} chunks dropped this session)"
+                );
             }
         }
     }

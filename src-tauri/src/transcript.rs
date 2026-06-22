@@ -230,6 +230,7 @@ mod tests {
                 is_final: true,
                 language: None,
                 confidence: None,
+                speaker: None,
             }],
             summary: Some("A summary".to_string()),
             summary_is_stale: false,
@@ -301,8 +302,7 @@ mod tests {
     #[test]
     fn resolve_legacy_sessions_empty_creates_fallback() {
         let now = Utc::now();
-        let sessions =
-            resolve_legacy_recording_sessions(None, "test-id", now, Some(now), 10.0, 0);
+        let sessions = resolve_legacy_recording_sessions(None, "test-id", now, Some(now), 10.0, 0);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "test-id-session-1");
     }
@@ -311,8 +311,7 @@ mod tests {
     fn recording_session_completed_duration() {
         let start = Utc::now();
         let end = start + chrono::Duration::seconds(120);
-        let session =
-            MeetingRecordingSession::completed("s1".to_string(), start, end, 0, 10);
+        let session = MeetingRecordingSession::completed("s1".to_string(), start, end, 0, 10);
         assert!((session.duration_seconds - 120.0).abs() < 0.1);
     }
 

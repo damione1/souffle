@@ -41,7 +41,9 @@ pub fn save_meeting_notes(
     id: String,
     notes: Option<String>,
 ) -> Result<(), String> {
-    let notes = notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+    let notes = notes
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty());
 
     {
         use crate::lock_ext::MutexExt;
