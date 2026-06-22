@@ -94,6 +94,10 @@ pub struct AudioChunk {
     pub samples: Vec<f32>,
     /// When the chunk left the capture callback — used for lag tracking.
     pub captured_at: Instant,
+    /// Source of this audio in a diarized meeting (Me = mic, Them = system
+    /// audio). `None` for single-stream sessions (dictation, mixed meetings),
+    /// in which case the actor routes it to the sole engine.
+    pub speaker: Option<crate::engine::Speaker>,
 }
 
 /// Messages flowing from the capture thread to the engine actor.
@@ -412,7 +416,7 @@ impl AudioCapture {
                                 session_id,
                                 samples: resampled,
                                 captured_at: Instant::now(),
-                            }))
+                                speaker: None,                            }))
                             .is_err()
                         {
                             let dropped = dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -614,6 +618,7 @@ impl AudioCapture {
                 session_id: meeting.session_id,
                 samples,
                 captured_at: Instant::now(),
+                speaker: None,
             }))
             .is_err()
         {
@@ -677,6 +682,7 @@ impl AudioCapture {
                         session_id,
                         samples: tail,
                         captured_at: Instant::now(),
+                        speaker: None,
                     }));
                 }
                 let discarded = meeting.mixer.tap_discarded();
@@ -704,6 +710,7 @@ impl AudioCapture {
                         session_id,
                         samples: tail,
                         captured_at: Instant::now(),
+                        speaker: None,
                     }));
                 }
             }

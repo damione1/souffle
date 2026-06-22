@@ -884,6 +884,7 @@ mod tests {
             session_id,
             samples: vec![0.0f32; MIMI_FRAME_SIZE],
             captured_at: std::time::Instant::now(),
+            speaker: None,
         })
     }
 
