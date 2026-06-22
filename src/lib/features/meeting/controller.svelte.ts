@@ -294,23 +294,25 @@ function createMeetingControllerInstance() {
 
   async function summarizeMeeting() {
     if (!selectedModel || !meeting || !meeting.id) return;
+    const meetingId = meeting.id;
     isSummarizing = true;
     summaryStream = "";
     statusMessage = "";
 
     try {
-      await runMeetingSummary(meeting.id, selectedModel, (progress: SummarizeProgress) => {
+      // Stream tokens for live preview only. Completion is driven by the
+      // command resolving (it returns after the summary is saved), NOT by the
+      // streaming `done` flag — a dropped final chunk must not leave the UI
+      // stuck "Generating…".
+      await runMeetingSummary(meetingId, selectedModel, (progress: SummarizeProgress) => {
         summaryStream += progress.text;
-        if (progress.done) {
-          isSummarizing = false;
-          void getMeeting(meeting!.id).then((loadedMeeting) => {
-            meeting = loadedMeeting;
-            syncSelectedModel(meeting.summary_model);
-          });
-        }
       });
+      const loadedMeeting = await getMeeting(meetingId);
+      meeting = loadedMeeting;
+      syncSelectedModel(meeting.summary_model);
     } catch (e) {
       statusMessage = errorMessage(e);
+    } finally {
       isSummarizing = false;
     }
   }

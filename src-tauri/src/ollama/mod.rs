@@ -197,6 +197,26 @@ pub fn build_summarize_prompt(transcript_text: &str, notes: Option<&str>) -> Str
     prompt
 }
 
+/// Parse one NDJSON line from Ollama's stream, appending its token to
+/// `full_text` and forwarding progress. Invalid/partial UTF-8 or non-JSON
+/// lines are skipped (the byte buffer only hands us complete lines).
+fn handle_ndjson_line(line: &[u8], full_text: &mut String, on_chunk: &impl Fn(SummarizeProgress)) {
+    let Ok(text) = std::str::from_utf8(line) else {
+        return;
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
+    if let Ok(parsed) = serde_json::from_str::<GenerateChunk>(text) {
+        full_text.push_str(&parsed.response);
+        on_chunk(SummarizeProgress {
+            text: parsed.response,
+            done: parsed.done,
+        });
+    }
+}
+
 /// Stream a summary of the transcript from Ollama.
 /// Calls `on_chunk` for each streaming token.
 pub async fn summarize_stream(
@@ -240,26 +260,26 @@ pub async fn summarize_stream(
 
     let mut full_text = String::new();
     let mut stream = resp.bytes_stream();
+    // Buffer raw bytes and split on newlines ourselves: a network chunk can end
+    // mid-line (even mid-UTF-8-codepoint for accented French), so decoding each
+    // chunk independently would drop tokens — including the final `done` line,
+    // which would leave the UI stuck "Generating…".
+    let mut buf: Vec<u8> = Vec::new();
 
     use futures_util::StreamExt;
     while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| format!("Stream read: {e}"))?;
-        let text = String::from_utf8_lossy(&bytes);
+        buf.extend_from_slice(&bytes);
 
-        // Ollama sends newline-delimited JSON
-        for line in text.lines() {
-            if line.is_empty() {
-                continue;
-            }
-            if let Ok(parsed) = serde_json::from_str::<GenerateChunk>(line) {
-                full_text.push_str(&parsed.response);
-                on_chunk(SummarizeProgress {
-                    text: parsed.response,
-                    done: parsed.done,
-                });
-            }
+        // Drain every complete (newline-terminated) JSON line; keep the
+        // trailing partial line in `buf` for the next chunk.
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = buf.drain(..=pos).collect();
+            handle_ndjson_line(&line, &mut full_text, &on_chunk);
         }
     }
+    // Flush a final line that arrived without a trailing newline.
+    handle_ndjson_line(&buf, &mut full_text, &on_chunk);
 
     Ok(sanitize_summary(&full_text))
 }
