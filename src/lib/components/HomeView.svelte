@@ -44,6 +44,19 @@
     void meeting.onMeetingSelectionChange(app.currentMeetingId);
   });
 
+  // The meeting controller probes Ollama once on mount. If the user later
+  // starts Ollama and connects in Settings, re-probe when the sheet closes so
+  // the summary section reflects the new state instead of staying on
+  // "Connect Ollama in Settings".
+  let settingsWasOpen = false;
+  $effect(() => {
+    const open = app.settingsOpen;
+    if (settingsWasOpen && !open) {
+      void meeting.checkOllama();
+    }
+    settingsWasOpen = open;
+  });
+
   // Refresh the timeline whenever a recording ends or a detail closes.
   $effect(() => {
     if (recordingMode === "idle" && !showMeetingDetail) {
