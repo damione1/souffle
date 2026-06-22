@@ -50,7 +50,7 @@
     transcriptBlocks
       .map((block) =>
         block.type === "paragraph"
-          ? `[${block.timestamp}] ${block.text}`
+          ? `${block.speaker ? (block.speaker === "me" ? "Me" : "Them") + " " : ""}[${block.timestamp}] ${block.text}`
           : `--- ${block.endLabel} ---\n--- ${block.startLabel} ---`,
       )
       .join("\n\n"),
@@ -112,6 +112,13 @@
         {#each transcriptBlocks as block}
           {#if block.type === "paragraph"}
             <p class="mb-3 last:mb-0 leading-[1.65]">
+              {#if block.speaker}
+                <span
+                  class="mr-1 text-xs font-semibold"
+                  class:text-accent={block.speaker === "me"}
+                  class:text-text-primary={block.speaker === "them"}
+                >{block.speaker === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
+              {/if}
               <span class="text-text-muted text-xs mr-1 tabular-nums">[{block.timestamp}]</span>
               {block.text}
             </p>

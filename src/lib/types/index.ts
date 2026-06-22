@@ -19,6 +19,7 @@ export type {
   PermissionStatus,
   RecordingKind,
   ShortcutSettings,
+  Speaker,
   SummarizeProgress,
   Theme,
   HealthStatus,

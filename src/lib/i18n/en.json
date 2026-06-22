@@ -105,6 +105,10 @@
     "reset_to_original": "Reset to original",
     "segments_count": "{count} segments"
   },
+  "transcript": {
+    "me": "Me",
+    "them": "Them"
+  },
   "meeting_summary": {
     "title": "Summary",
     "recording_in_progress": "Recording in progress",
