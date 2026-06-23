@@ -234,10 +234,13 @@ fn start_pipeline_blocking(
     let capture_system_audio = mode == PipelineMode::Meeting
         && settings.capture_system_audio
         && crate::platform::system_audio_capture_supported();
-    // With system audio captured, transcribe the mic (Me) and system audio
-    // (Them) on separate engines so segments are speaker-labelled. Without a
-    // distinct system-audio leg there is nothing to separate.
-    let diarize = capture_system_audio;
+    // Speaker labelling (Me/Them) needs a distinct system-audio leg AND an
+    // engine that can transcribe two batched lanes. Only Kyutai can today; other
+    // engines record meetings as a single mixed stream with no labels. This must
+    // match the engine's own capability so capture and the actor agree on
+    // whether to split the audio.
+    let diarize =
+        capture_system_audio && settings.transcription_engine_id == crate::engine::KYUTAI_ENGINE_ID;
 
     let config = SessionConfig {
         pipeline_config: settings.pipeline_config(),
