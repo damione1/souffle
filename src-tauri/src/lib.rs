@@ -161,6 +161,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
 }
 
 pub fn run() {
+    // Must run before logging or the database open the data dir.
+    constants::migrate_legacy_data_dir();
     init_logging();
     install_panic_hook();
 

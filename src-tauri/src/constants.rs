@@ -20,13 +20,36 @@ pub const MIMI_FRAME_SIZE: usize = 1920;
 pub const MIMI_FRAMES_PER_SECOND: f64 = 12.5;
 
 /// Application bundle identifier
-pub const APP_IDENTIFIER: &str = "com.souffle.app";
+pub const APP_IDENTIFIER: &str = "com.souffle.desktop";
 
-/// Get the application data directory (e.g. ~/Library/Application Support/com.souffle.app)
+/// Former bundle identifier; the data directory is renamed from this to
+/// [`APP_IDENTIFIER`] at startup so existing meetings/settings/models survive
+/// the change. (The old `.app` suffix conflicted with the macOS bundle
+/// extension.)
+pub const LEGACY_APP_IDENTIFIER: &str = "com.souffle.app";
+
+/// Get the application data directory (e.g. ~/Library/Application Support/com.souffle.desktop)
 pub fn app_data_dir() -> std::path::PathBuf {
     dirs_next::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(APP_IDENTIFIER)
+}
+
+/// Rename the legacy data directory to the current one if it exists and the new
+/// one doesn't. Runs before anything opens the database or log files. Best
+/// effort: on failure the app simply starts fresh at the new path.
+pub fn migrate_legacy_data_dir() {
+    let Some(base) = dirs_next::data_dir() else {
+        return;
+    };
+    let old = base.join(LEGACY_APP_IDENTIFIER);
+    let new = base.join(APP_IDENTIFIER);
+    if old.exists()
+        && !new.exists()
+        && let Err(e) = std::fs::rename(&old, &new)
+    {
+        eprintln!("Failed to migrate data dir {old:?} -> {new:?}: {e}");
+    }
 }
 
 /// Default Ollama server URL
