@@ -7,7 +7,7 @@ use candle_core::{Device, Tensor};
 use tracing::{debug, info, trace};
 
 use super::{
-    AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
+    AudioInputRequirements, EngineError, Speaker, TranscriptionEngine, TranscriptionSegment,
     collapse_whitespace,
 };
 use crate::constants::{MIMI_FRAME_SIZE, MIMI_FRAMES_PER_SECOND, SAMPLE_RATE};
@@ -20,6 +20,19 @@ const VAD_PAUSE_THRESHOLD: f32 = 0.5;
 /// Safety margin (frames) on top of the ASR delay before trusting the VAD
 /// pause streak: semantic VAD can fire slightly before speech fully clears.
 const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
+
+/// Extract frame `f` (MIMI_FRAME_SIZE samples) from `buf`, zero-padding when the
+/// buffer is short or the frame is past its end. Used to align the two diarized
+/// lanes into equal-length batched steps.
+fn frame_at(buf: &[f32], f: usize) -> Vec<f32> {
+    let start = f * MIMI_FRAME_SIZE;
+    let mut frame = vec![0.0f32; MIMI_FRAME_SIZE];
+    if start < buf.len() {
+        let end = (start + MIMI_FRAME_SIZE).min(buf.len());
+        frame[..end - start].copy_from_slice(&buf[start..end]);
+    }
+    frame
+}
 
 /// Debug frame counter — reset per session for clean logging
 static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -114,6 +127,10 @@ struct LoadedModel {
 /// Streaming: feed 1920-sample (80ms @ 24kHz) chunks, get words back.
 pub struct KyutaiEngine {
     model: Option<LoadedModel>,
+    /// When true, the streaming state is built with batch size 2 so the mic (Me)
+    /// and system audio (Them) legs are transcribed as independent batch lanes
+    /// of one model. Takes effect on the next `reset_state`.
+    diarize: bool,
 }
 
 impl Default for KyutaiEngine {
@@ -124,7 +141,15 @@ impl Default for KyutaiEngine {
 
 impl KyutaiEngine {
     pub fn new() -> Self {
-        Self { model: None }
+        Self {
+            model: None,
+            diarize: false,
+        }
+    }
+
+    /// moshi batch size for the current mode: 2 lanes when diarizing, else 1.
+    fn batch_size(&self) -> usize {
+        if self.diarize { 2 } else { 1 }
     }
 
     fn select_device() -> Result<Device, EngineError> {
@@ -140,6 +165,7 @@ impl KyutaiEngine {
         device: &Device,
         model_path: &Path,
         config: &KyutaiConfig,
+        batch_size: usize,
     ) -> Result<moshi::asr::State, EngineError> {
         let mimi_path = model_path.join(&config.mimi_name);
         let audio_tokenizer = moshi::mimi::load(
@@ -166,7 +192,7 @@ impl KyutaiEngine {
 
         let asr_delay_in_tokens =
             (config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
-        moshi::asr::State::new(1, asr_delay_in_tokens, 0., audio_tokenizer, lm)
+        moshi::asr::State::new(batch_size, asr_delay_in_tokens, 0., audio_tokenizer, lm)
             .map_err(|e| EngineError::LoadError(format!("ASR state init: {e}")))
     }
 
@@ -175,8 +201,9 @@ impl KyutaiEngine {
         model_path: std::path::PathBuf,
         config: KyutaiConfig,
         text_tokenizer: sentencepiece::SentencePieceProcessor,
+        batch_size: usize,
     ) -> Result<LoadedModel, EngineError> {
-        let state = Self::build_state(&device, &model_path, &config)?;
+        let state = Self::build_state(&device, &model_path, &config, batch_size)?;
         Ok(LoadedModel {
             state,
             text_tokenizer,
@@ -228,6 +255,8 @@ impl KyutaiEngine {
             Self::synchronize_device(&loaded.device, "Metal sync before reset")?;
         }
 
+        // Captured before the rebuild closure moves the model fields.
+        let batch_size = self.batch_size();
         let old = self.model.take().ok_or(EngineError::NotInitialized)?;
         let LoadedModel {
             state: old_state,
@@ -245,7 +274,7 @@ impl KyutaiEngine {
 
         let rebuilt = with_autorelease_pool(move || -> Result<LoadedModel, EngineError> {
             let device = Self::select_device()?;
-            Self::build_loaded_model(device, model_path, config, text_tokenizer)
+            Self::build_loaded_model(device, model_path, config, text_tokenizer, batch_size)
         })?;
 
         self.model = Some(rebuilt);
@@ -277,8 +306,17 @@ impl TranscriptionEngine for KyutaiEngine {
             return Err(EngineError::ModelNotFound(model_file));
         }
 
+        // Initial load is always single-stream; diarization is enabled later via
+        // set_diarization + reset_state.
+        let batch_size = self.batch_size();
         let loaded = with_autorelease_pool(move || {
-            Self::build_loaded_model(device, model_path.to_path_buf(), config, text_tokenizer)
+            Self::build_loaded_model(
+                device,
+                model_path.to_path_buf(),
+                config,
+                text_tokenizer,
+                batch_size,
+            )
         })?;
 
         info!("Kyutai STT model fully loaded");
@@ -534,28 +572,136 @@ impl TranscriptionEngine for KyutaiEngine {
         // Words are emitted audio_delay after they are spoken. If the semantic
         // VAD has reported a pause for longer than that delay (plus margin),
         // every word has already cleared the pipeline and the silence suffix
-        // would only burn inference time at stop.
+        // would only burn inference time at stop. (Single-stream only — the
+        // diarized path doesn't track a shared pause streak.)
         let delay_frames =
             (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
-        if model.vad_pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES {
+        let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
+        let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
+        let diarize = self.diarize;
+        let pause_streak = model.vad_pause_streak;
+
+        if !diarize && pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES {
             info!(
-                streak = model.vad_pause_streak,
+                streak = pause_streak,
                 delay_frames, "VAD pause covers ASR delay, skipping silence flush"
             );
             return Ok(Vec::new());
         }
 
         // Feed silence suffix to push any remaining words out of the model's
-        // internal pipeline (audio_delay + 1 second of silence)
-        let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
-        let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
+        // internal pipeline (audio_delay + 1 second of silence). Both lanes get
+        // the same silence in diarized mode.
         let silence = vec![0.0f32; silence_samples];
-
-        self.transcribe(&silence, None)
+        if diarize {
+            self.transcribe_dual(&silence, &silence)
+        } else {
+            self.transcribe(&silence, None)
+        }
     }
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
         KyutaiEngine::reset_state(self)
+    }
+
+    fn supports_diarization(&self) -> bool {
+        true
+    }
+
+    fn set_diarization(&mut self, enabled: bool) {
+        self.diarize = enabled;
+    }
+
+    fn transcribe_dual(
+        &mut self,
+        me: &[f32],
+        them: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
+        let device = model.device.clone();
+        let mut segments = Vec::new();
+
+        // Feed the silence prefix to BOTH lanes before the first real audio so
+        // their timelines (and time_offset) stay identical.
+        let me_buf;
+        let them_buf;
+        let (me_in, them_in): (&[f32], &[f32]) = if model.prefix_pending {
+            model.prefix_pending = false;
+            let prefix_frames =
+                Self::prefix_frame_count(model.config.stt_config.audio_silence_prefix_seconds);
+            if prefix_frames > 0 {
+                model.time_offset_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
+                let pad = vec![0.0f32; prefix_frames * MIMI_FRAME_SIZE];
+                me_buf = [pad.as_slice(), me].concat();
+                them_buf = [pad.as_slice(), them].concat();
+                (&me_buf[..], &them_buf[..])
+            } else {
+                (me, them)
+            }
+        } else {
+            (me, them)
+        };
+
+        let time_offset = model.time_offset_seconds;
+        // Both lanes step together; cover whichever is longer (the mixer keeps
+        // them equal, but pad defensively).
+        let frame_count = me_in
+            .len()
+            .div_ceil(MIMI_FRAME_SIZE)
+            .max(them_in.len().div_ceil(MIMI_FRAME_SIZE));
+
+        for f in 0..frame_count {
+            let mut data = Vec::with_capacity(2 * MIMI_FRAME_SIZE);
+            data.extend_from_slice(&frame_at(me_in, f));
+            data.extend_from_slice(&frame_at(them_in, f));
+
+            let asr_msgs = with_autorelease_pool(|| {
+                // Row-major (2, 1, FRAME): row 0 = me (batch 0), row 1 = them.
+                let pcm_tensor = Tensor::new(data.as_slice(), &device)
+                    .and_then(|t| t.reshape((2, 1, MIMI_FRAME_SIZE)))
+                    .map_err(|e| EngineError::InferenceError(format!("Tensor creation: {e}")))?;
+                model
+                    .state
+                    .step_pcm(pcm_tensor, None, &().into(), |_, _, _| {})
+                    .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
+            })?;
+
+            FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+
+            for msg in &asr_msgs {
+                if let moshi::asr::AsrMsg::Word {
+                    tokens,
+                    start_time,
+                    batch_idx,
+                } = msg
+                {
+                    let text = model
+                        .text_tokenizer
+                        .decode_piece_ids(tokens)
+                        .unwrap_or_default();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let start_time = (*start_time - time_offset).max(0.0);
+                    let speaker = if *batch_idx == 0 {
+                        Speaker::Me
+                    } else {
+                        Speaker::Them
+                    };
+                    segments.push(TranscriptionSegment {
+                        text,
+                        start_time,
+                        end_time: start_time,
+                        is_final: true,
+                        language: None,
+                        confidence: None,
+                        speaker: Some(speaker),
+                    });
+                }
+            }
+        }
+
+        Ok(segments)
     }
 
     fn audio_requirements(&self) -> AudioInputRequirements {

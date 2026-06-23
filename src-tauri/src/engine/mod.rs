@@ -214,6 +214,32 @@ pub trait TranscriptionEngine {
     fn normalize_text(&self, text: &str) -> String {
         text.to_string()
     }
+
+    /// Whether this engine can transcribe two synchronized audio streams (mic +
+    /// system audio) and label each segment by speaker. Only streaming engines
+    /// that support a batch dimension (Kyutai/moshi) can; others run meetings as
+    /// a single mixed stream with no Me/Them labels.
+    fn supports_diarization(&self) -> bool {
+        false
+    }
+
+    /// Enable/disable diarized (two-stream) mode. Takes effect on the next
+    /// `reset_state` (which rebuilds the engine's streaming state with the right
+    /// batch size). No-op for engines that don't support diarization.
+    fn set_diarization(&mut self, _enabled: bool) {}
+
+    /// Transcribe one paired frame from both streams (mic = Me, system = Them),
+    /// returning segments already tagged with their speaker. Only valid after
+    /// `set_diarization(true)` + `reset_state` on an engine that supports it.
+    fn transcribe_dual(
+        &mut self,
+        _me: &[f32],
+        _them: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        Err(EngineError::InferenceError(
+            "diarization not supported by this engine".into(),
+        ))
+    }
 }
 
 /// Who produced a segment in a diarized meeting: the microphone is the local
