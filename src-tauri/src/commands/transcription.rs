@@ -391,6 +391,14 @@ pub async fn start_meeting_recording(
     if machine.is_recording() {
         return Err("Already recording".into());
     }
+    // The machine only flips to recording_meeting AFTER the (possibly slow)
+    // session launch, so the is_recording() check above races a second start.
+    // The accumulator is set at the very start of launch_meeting, so its
+    // presence is the reliable "a meeting is already starting" signal — without
+    // this, a concurrent start's failure path orphans the live accumulator.
+    if state.meeting_accumulator.acquire()?.is_some() {
+        return Err("A meeting is already starting or recording".into());
+    }
 
     let meeting_id = Uuid::new_v4().to_string();
     let accumulator = MeetingAccumulator {
@@ -436,6 +444,11 @@ pub async fn resume_meeting_recording(
     }
     if machine.is_recording() {
         return Err("Already recording".into());
+    }
+    // See start_meeting_recording: a live accumulator means a start is already
+    // in flight, so reject before launch can orphan it.
+    if state.meeting_accumulator.acquire()?.is_some() {
+        return Err("A meeting is already starting or recording".into());
     }
 
     let meeting = state.db.load_meeting(&meeting_id)?;
