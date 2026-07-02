@@ -3,10 +3,12 @@
   import { t } from "svelte-i18n";
   import type { MeetingTranscript } from "../../../types";
   import { formatDate, formatDuration } from "../../../utils";
+  import Spinner from "../../../components/ui/Spinner.svelte";
 
   let {
     meeting,
     isRecordingMeeting,
+    isStopping,
     systemAudioStatus,
     lockedByDictation,
     segmentCount,
@@ -19,6 +21,7 @@
   }: {
     meeting: MeetingTranscript;
     isRecordingMeeting: boolean;
+    isStopping: boolean;
     systemAudioStatus: import("../../../types").SystemAudioStatus | null;
     lockedByDictation: boolean;
     segmentCount: number;
@@ -110,9 +113,14 @@
 
   <div class="flex gap-2 shrink-0">
     {#if isRecordingMeeting}
-      <button onclick={onStopRecording} class="btn btn-danger">
-        <Square size={16} />
-        {$t("meeting_header.stop_recording")}
+      <button onclick={onStopRecording} disabled={isStopping} class="btn btn-danger gap-1.5">
+        {#if isStopping}
+          <Spinner />
+          {$t("home.stopping")}
+        {:else}
+          <Square size={16} />
+          {$t("meeting_header.stop_recording")}
+        {/if}
       </button>
     {:else}
       {#if canResumeRecording}

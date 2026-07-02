@@ -1,0 +1,6 @@
+# ggml (whisper.cpp) uses std::filesystem in ggml-backend-reg.cpp, which the
+# macOS SDK marks unavailable below 10.15. The cmake crate otherwise defaults
+# CMAKE_OSX_DEPLOYMENT_TARGET to 10.13, breaking the release build. Pin to 11.0
+# (aarch64 baseline) so build scripts and CMake inherit a valid target.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "11.0"

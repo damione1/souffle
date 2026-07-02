@@ -1,17 +1,147 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::State;
+use crossbeam_channel::Sender;
 use tauri::ipc::Channel;
-use tracing::info;
+use tauri::{Manager, State};
+use tauri_specta::Event;
+use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::app_events::MeetingFinalized;
 use crate::constants::STOP_REPLY_TIMEOUT_SECS;
+use crate::db::Database;
+use crate::engine::TranscriptionSegment;
 use crate::lock_ext::MutexExt;
-use crate::pipeline::{SegmentCallback, SessionConfig};
+use crate::pipeline::{EngineActorHandle, SegmentCallback, SessionConfig};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator};
 use crate::state_machine::StateAction;
 use crate::transcript::{MeetingRecordingSession, MeetingTranscript};
+
+/// Flush accumulated meeting segments to the DB once this many have piled up
+/// since the last flush. Segments are word-level, so this is a few seconds of
+/// speech — the upper bound on what a crash can lose.
+const MEETING_FLUSH_THRESHOLD: usize = 16;
+
+/// Build a header-only transcript (no segments) for `upsert_meeting_header`.
+/// `started_at` follows the first recording session on resume, else this
+/// session's start — matching `build_meeting_transcript`.
+fn meeting_header(acc: &MeetingAccumulator) -> MeetingTranscript {
+    let started_at = acc
+        .recording_sessions
+        .first()
+        .map(|s| s.started_at)
+        .unwrap_or(acc.session_started_at);
+    MeetingTranscript {
+        id: acc.id.clone(),
+        title: acc.title.clone(),
+        started_at,
+        ended_at: None,
+        duration_seconds: 0.0,
+        transcription_profile: acc.transcription_profile.clone(),
+        recording_sessions: acc.recording_sessions.clone(),
+        segments: Vec::new(),
+        summary: acc.summary.clone(),
+        summary_is_stale: acc.summary_is_stale,
+        summary_model: acc.summary_model.clone(),
+        summary_generated_at: acc.summary_generated_at,
+        edited_transcript: None,
+        notes: acc.notes.clone(),
+    }
+}
+
+/// The per-segment callback for meetings: stream to the frontend, accumulate in
+/// memory, and periodically flush a batch to the DB for crash durability. Runs
+/// on the engine-actor thread (not the realtime audio callback), so the batched
+/// DB write is acceptable. The accumulator lock is dropped before the write.
+fn build_meeting_on_segment(
+    channel: Channel<TranscriptionSegment>,
+    accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
+    db: Arc<Database>,
+) -> SegmentCallback {
+    Box::new(move |seg| {
+        let _ = channel.send(seg.clone());
+
+        let batch = {
+            let Ok(mut guard) = accumulator.lock() else {
+                return;
+            };
+            let Some(meeting) = guard.as_mut() else {
+                return;
+            };
+            meeting.new_segments.push(seg);
+            let unpersisted = meeting.new_segments.len() - meeting.persisted_new_count;
+            if unpersisted < MEETING_FLUSH_THRESHOLD {
+                None
+            } else {
+                let start = (meeting.existing_segments.len() + meeting.persisted_new_count) as i64;
+                let slice = meeting.new_segments[meeting.persisted_new_count..].to_vec();
+                meeting.persisted_new_count = meeting.new_segments.len();
+                Some((meeting.id.clone(), slice, start))
+            }
+        };
+
+        if let Some((id, segments, start)) = batch
+            && let Err(e) = db.append_segments(&id, &segments, start)
+        {
+            warn!("Incremental meeting segment flush failed: {e}");
+        }
+    })
+}
+
+/// Set up and launch a meeting recording (new or resumed). Persists the header
+/// up front, stores the accumulator, then starts the engine session off-thread.
+async fn launch_meeting(
+    state: &AppState,
+    accumulator: MeetingAccumulator,
+    channel: Channel<TranscriptionSegment>,
+) -> Result<u64, String> {
+    let session_id = next_audio_session_id(state)?;
+
+    // Persist the header before any segments so a crash leaves a recoverable
+    // row (ended_at IS NULL) and segment FK targets exist.
+    state
+        .db
+        .upsert_meeting_header(&meeting_header(&accumulator))?;
+
+    {
+        let mut acc = state.meeting_accumulator.acquire()?;
+        *acc = Some(accumulator);
+    }
+
+    let on_segment = build_meeting_on_segment(
+        channel,
+        Arc::clone(&state.meeting_accumulator),
+        Arc::clone(&state.db),
+    );
+
+    let actor = Arc::clone(&state.engine_actor);
+    let audio = state.audio_cmd_sender.clone();
+    let db = Arc::clone(&state.db);
+    let acc = Arc::clone(&state.meeting_accumulator);
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        start_pipeline_blocking(
+            &actor,
+            &audio,
+            &db,
+            session_id,
+            PipelineMode::Meeting,
+            on_segment,
+        )
+    })
+    .await
+    .map_err(|e| format!("Join start task: {e}"))?;
+
+    if let Err(error) = res {
+        if let Ok(mut acc) = acc.lock() {
+            *acc = None;
+        }
+        return Err(error);
+    }
+
+    Ok(session_id)
+}
 
 fn next_audio_session_id(state: &AppState) -> Result<u64, String> {
     let mut guard = state.next_audio_session_id.acquire()?;
@@ -25,36 +155,6 @@ fn current_active_profile(state: &AppState) -> Result<crate::engine::Transcripti
         .active_profile()
         .cloned()
         .ok_or_else(|| "No active transcription profile".to_string())
-}
-
-fn start_meeting_session(
-    state: &AppState,
-    accumulator: MeetingAccumulator,
-    channel: Channel<crate::engine::TranscriptionSegment>,
-) -> Result<(), String> {
-    {
-        let mut acc = state.meeting_accumulator.acquire()?;
-        *acc = Some(accumulator);
-    }
-
-    let channel_clone = channel.clone();
-    let acc_ref = Arc::clone(&state.meeting_accumulator);
-    let on_segment: SegmentCallback = Box::new(move |seg| {
-        let _ = channel_clone.send(seg.clone());
-        if let Ok(mut acc) = acc_ref.lock()
-            && let Some(ref mut meeting) = *acc
-        {
-            meeting.new_segments.push(seg);
-        }
-    });
-
-    if let Err(error) = start_pipeline(state, on_segment, PipelineMode::Meeting) {
-        let mut acc = state.meeting_accumulator.acquire()?;
-        *acc = None;
-        return Err(error);
-    }
-
-    Ok(())
 }
 
 /// Also used by the engine actor to salvage a meeting when its recording
@@ -113,77 +213,75 @@ enum PipelineMode {
     Meeting,
 }
 
-/// Shared logic for starting a recording session.
-/// Validates preconditions, starts the actor session (which drains stale
-/// audio, resets the engine, and builds filter chains), then begins audio capture.
-fn start_pipeline(
-    state: &AppState,
-    on_segment: SegmentCallback,
+/// Blocking core of starting a recording session, run via `spawn_blocking` so
+/// the long crossbeam reply wait (engine reset + filter-chain build) never
+/// blocks the Tauri command thread / window event loop. Preconditions and
+/// session-id allocation are done on the command thread before this runs.
+fn start_pipeline_blocking(
+    engine_actor: &EngineActorHandle,
+    audio_cmd_sender: &Sender<AudioCommand>,
+    db: &Database,
+    session_id: u64,
     mode: PipelineMode,
-) -> Result<u64, String> {
-    let machine = state.current_machine_state()?;
-    if !machine.is_model_ready() {
-        return Err("Model not loaded".into());
-    }
-    if machine.active_profile().is_none() {
-        return Err("No active transcription profile".into());
-    }
-    if machine.is_recording() {
-        return Err("Already recording".into());
-    }
-
-    let session_id = next_audio_session_id(state)?;
-
+    on_segment: SegmentCallback,
+) -> Result<(), String> {
     // Snapshot settings and dictionary; the actor builds filter chains on its
     // own thread to keep ONNX/Metal work off the command thread.
-    let settings = crate::settings::AppSettings::load(&state.db)?;
-    let config = SessionConfig {
-        pipeline_config: settings.pipeline_config(),
-        dictionary_entries: state.db.list_dictionary_entries()?,
-    };
+    let settings = crate::settings::AppSettings::load(db)?;
 
     // Meetings also capture system audio (the other participants) when the
     // setting is on and the OS supports Core Audio taps.
     let capture_system_audio = mode == PipelineMode::Meeting
         && settings.capture_system_audio
         && crate::platform::system_audio_capture_supported();
+    // Speaker labelling (Me/Them) needs a distinct system-audio leg AND an
+    // engine that can transcribe two batched lanes. Only Kyutai can today; other
+    // engines record meetings as a single mixed stream with no labels. This must
+    // match the engine's own capability so capture and the actor agree on
+    // whether to split the audio.
+    let diarize =
+        capture_system_audio && settings.transcription_engine_id == crate::engine::KYUTAI_ENGINE_ID;
+
+    let config = SessionConfig {
+        pipeline_config: settings.pipeline_config(),
+        dictionary_entries: db.list_dictionary_entries()?,
+        diarize,
+    };
 
     // The actor replies once the engine is reset and ready for audio.
-    let info = state
-        .engine_actor
-        .start_session(session_id, config, on_segment)?;
+    let info = engine_actor.start_session(session_id, config, on_segment)?;
 
-    state
-        .audio_cmd_sender
+    audio_cmd_sender
         .send(AudioCommand::Start {
             session_id,
             target_sample_rate: info.audio.sample_rate_hz,
             mic_gain: info.mic_gain,
             capture_system_audio,
+            diarize,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
-    Ok(session_id)
+    Ok(())
 }
 
-/// Shared logic for stopping a recording session.
+/// Blocking core of stopping a recording session, run via `spawn_blocking`.
 /// Stops audio capture (which emits an EndOfStream marker once its stream is
 /// dropped and the resampler flushed), then asks the actor to stop — the actor
 /// finishes when that marker arrives, so the drain is event-ordered, not timed.
-fn stop_pipeline(state: &AppState) -> Result<(), String> {
+fn stop_pipeline_blocking(
+    engine_actor: &EngineActorHandle,
+    audio_cmd_sender: &Sender<AudioCommand>,
+) -> Result<(), String> {
     // Audio thread drops the cpal stream, flushes the resampler tail, and
     // sends EndOfStream as the final message of this session.
-    state
-        .audio_cmd_sender
+    audio_cmd_sender
         .send(AudioCommand::Stop)
         .map_err(|e| format!("Audio stop: {e}"))?;
 
     // The actor drains everything up to EndOfStream and flushes the engine.
     // The timeout is last-resort safety; callers complete state transitions
     // even when this errors.
-    let summary = state
-        .engine_actor
-        .stop_session(Duration::from_secs(STOP_REPLY_TIMEOUT_SECS))?;
+    let summary = engine_actor.stop_session(Duration::from_secs(STOP_REPLY_TIMEOUT_SECS))?;
     if crate::debug::transcription_debug_enabled() {
         tracing::debug!(
             frames = summary.frames_processed,
@@ -196,22 +294,49 @@ fn stop_pipeline(state: &AppState) -> Result<(), String> {
 }
 
 /// Start streaming transcription.
+///
+/// `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
+/// blocking wait runs off-thread and the window never freezes.
 #[tauri::command]
 #[specta::specta]
-pub fn start_transcription(
+pub async fn start_transcription(
     state: State<'_, AppState>,
     channel: Channel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
     info!("Starting streaming transcription");
 
-    let channel_clone = channel.clone();
+    let machine = state.current_machine_state()?;
+    if !machine.is_model_ready() {
+        return Err("Model not loaded".into());
+    }
+    if machine.active_profile().is_none() {
+        return Err("No active transcription profile".into());
+    }
+    if machine.is_recording() {
+        return Err("Already recording".into());
+    }
+    let session_id = next_audio_session_id(&state)?;
+
     let on_segment: SegmentCallback = Box::new(move |seg| {
-        let _ = channel_clone.send(seg);
+        let _ = channel.send(seg);
     });
 
-    let session_id = start_pipeline(&state, on_segment, PipelineMode::Dictation)?;
+    let actor = Arc::clone(&state.engine_actor);
+    let audio = state.audio_cmd_sender.clone();
+    let db = Arc::clone(&state.db);
+    tauri::async_runtime::spawn_blocking(move || {
+        start_pipeline_blocking(
+            &actor,
+            &audio,
+            &db,
+            session_id,
+            PipelineMode::Dictation,
+            on_segment,
+        )
+    })
+    .await
+    .map_err(|e| format!("Join start task: {e}"))??;
 
-    // Transition state machine
     state.apply_transition(StateAction::StartDictation { session_id })?;
 
     info!("Streaming transcription active");
@@ -219,9 +344,13 @@ pub fn start_transcription(
 }
 
 /// Stop streaming transcription.
+///
+/// Awaits the drain so the frontend's assembled transcript (used for clipboard
+/// and dictation history) is complete before this resolves. The drain runs in
+/// `spawn_blocking`, so awaiting it does not freeze the window.
 #[tauri::command]
 #[specta::specta]
-pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
     if !state.current_machine_state()?.is_recording() {
         return Err("Not recording".into());
     }
@@ -229,10 +358,16 @@ pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
     // Transition to Stopping
     state.apply_transition(StateAction::StopRecording)?;
 
+    let actor = Arc::clone(&state.engine_actor);
+    let audio = state.audio_cmd_sender.clone();
     // Pipeline stop can fail (e.g. drain timeout) but we MUST complete the
     // state transition — otherwise the machine stays stuck in Stopping.
-    if let Err(e) = stop_pipeline(&state) {
-        tracing::warn!("Pipeline stop failed: {e}");
+    let stop_result =
+        tauri::async_runtime::spawn_blocking(move || stop_pipeline_blocking(&actor, &audio))
+            .await
+            .map_err(|e| format!("Join stop task: {e}"))?;
+    if let Err(e) = stop_result {
+        warn!("Pipeline stop failed: {e}");
     }
 
     // Transition to Ready even if pipeline stop failed
@@ -245,15 +380,30 @@ pub fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
 /// Start meeting recording with live transcription.
 #[tauri::command]
 #[specta::specta]
-pub fn start_meeting_recording(
+pub async fn start_meeting_recording(
     state: State<'_, AppState>,
     title: String,
     channel: Channel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
     info!(title = %title, "Starting meeting recording");
 
-    let meeting_id = Uuid::new_v4().to_string();
+    let machine = state.current_machine_state()?;
+    if !machine.is_model_ready() {
+        return Err("Model not loaded".into());
+    }
+    if machine.is_recording() {
+        return Err("Already recording".into());
+    }
+    // The machine only flips to recording_meeting AFTER the (possibly slow)
+    // session launch, so the is_recording() check above races a second start.
+    // The accumulator is set at the very start of launch_meeting, so its
+    // presence is the reliable "a meeting is already starting" signal — without
+    // this, a concurrent start's failure path orphans the live accumulator.
+    if state.meeting_accumulator.acquire()?.is_some() {
+        return Err("A meeting is already starting or recording".into());
+    }
 
+    let meeting_id = Uuid::new_v4().to_string();
     let accumulator = MeetingAccumulator {
         id: meeting_id.clone(),
         title,
@@ -267,12 +417,11 @@ pub fn start_meeting_recording(
         summary_model: None,
         summary_generated_at: None,
         notes: None,
+        persisted_new_count: 0,
     };
 
-    start_meeting_session(&state, accumulator, channel)?;
+    let session_id = launch_meeting(&state, accumulator, channel).await?;
 
-    // Get session_id from the pipeline (it was allocated inside start_pipeline)
-    let session_id = *state.next_audio_session_id.acquire()?;
     state.apply_transition(StateAction::StartMeeting {
         session_id,
         meeting_id,
@@ -285,12 +434,25 @@ pub fn start_meeting_recording(
 /// Resume recording on an existing meeting and append new transcript segments.
 #[tauri::command]
 #[specta::specta]
-pub fn resume_meeting_recording(
+pub async fn resume_meeting_recording(
     state: State<'_, AppState>,
     meeting_id: String,
     channel: Channel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
     info!(meeting_id = %meeting_id, "Resuming meeting recording");
+
+    let machine = state.current_machine_state()?;
+    if !machine.is_model_ready() {
+        return Err("Model not loaded".into());
+    }
+    if machine.is_recording() {
+        return Err("Already recording".into());
+    }
+    // See start_meeting_recording: a live accumulator means a start is already
+    // in flight, so reject before launch can orphan it.
+    if state.meeting_accumulator.acquire()?.is_some() {
+        return Err("A meeting is already starting or recording".into());
+    }
 
     let meeting = state.db.load_meeting(&meeting_id)?;
     let active_profile = current_active_profile(&state)?;
@@ -317,11 +479,11 @@ pub fn resume_meeting_recording(
         summary_model: meeting.summary_model,
         summary_generated_at: meeting.summary_generated_at,
         notes: meeting.notes,
+        persisted_new_count: 0,
     };
 
-    start_meeting_session(&state, accumulator, channel)?;
+    let session_id = launch_meeting(&state, accumulator, channel).await?;
 
-    let session_id = *state.next_audio_session_id.acquire()?;
     state.apply_transition(StateAction::StartMeeting {
         session_id,
         meeting_id: meeting_id.clone(),
@@ -332,46 +494,81 @@ pub fn resume_meeting_recording(
 }
 
 /// Stop meeting recording and save transcript.
+///
+/// Decoupled stop: transitions to Stopping, returns the (already-known) meeting
+/// id immediately, and drains + saves in the background. Segments were persisted
+/// incrementally during the meeting, so the detail view can render right away
+/// and reconcile when the `MeetingFinalized` event fires.
 #[tauri::command]
 #[specta::specta]
-pub fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, String> {
     let machine = state.current_machine_state()?;
     if !machine.is_recording() {
         return Err("Not recording".into());
     }
-    if !matches!(machine, crate::state_machine::AppStateMachine::RecordingMeeting { .. }) {
+    if !matches!(
+        machine,
+        crate::state_machine::AppStateMachine::RecordingMeeting { .. }
+    ) {
         return Err("Meeting recording is not active".into());
     }
 
-    // Transition to Stopping
+    // Peek the id (without taking the accumulator) so we can return it now.
+    let meeting_id = state
+        .meeting_accumulator
+        .acquire()?
+        .as_ref()
+        .map(|m| m.id.clone())
+        .ok_or("No meeting accumulator")?;
+
+    // Fetch the handle BEFORE transitioning: the background task needs it to
+    // complete the stop, so if it's somehow missing we must fail before leaving
+    // the machine stuck in Stopping.
+    let app = state.app_handle()?;
+
+    // Transition to Stopping immediately so the UI can show "Finalizing…".
     state.apply_transition(StateAction::StopRecording)?;
 
-    // stop_pipeline can fail (e.g. drain timeout) but we MUST complete the
-    // state transition regardless — otherwise the machine stays stuck in
-    // Stopping and the user can never recover without restarting.
-    let pipeline_err = stop_pipeline(&state).err();
+    // Finish off-thread: drain the engine, save the authoritative transcript,
+    // then complete the transition and notify the frontend.
+    let id_for_task = meeting_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
 
-    // Transition to Ready even if pipeline stop failed
-    state.apply_transition(StateAction::StopComplete)?;
+        let pipeline_err =
+            stop_pipeline_blocking(&state.engine_actor, &state.audio_cmd_sender).err();
 
-    let mut acc_guard = state.meeting_accumulator.acquire()?;
-    let meeting = acc_guard.take().ok_or("No meeting accumulator")?;
-    let transcript = build_meeting_transcript(meeting, chrono::Utc::now());
-    let id = transcript.id.clone();
+        // Authoritative full save from the in-memory accumulator (overwrites the
+        // incrementally-persisted rows with the complete, finalized transcript).
+        if let Ok(mut guard) = state.meeting_accumulator.lock()
+            && let Some(meeting) = guard.take()
+        {
+            let transcript = build_meeting_transcript(meeting, chrono::Utc::now());
+            if let Err(e) = state.db.save_meeting(&transcript) {
+                tracing::error!(id = %transcript.id, "Failed to save meeting: {e}");
+            } else {
+                info!(
+                    id = %transcript.id,
+                    duration = transcript.duration_seconds,
+                    sessions = transcript.recording_sessions.len(),
+                    "Meeting recording saved"
+                );
+            }
+        }
 
-    state.db.save_meeting(&transcript)?;
-    info!(
-        id = %id,
-        duration = transcript.duration_seconds,
-        sessions = transcript.recording_sessions.len(),
-        "Meeting recording saved"
-    );
+        // Always complete the transition, even if drain/save failed, so the
+        // machine never gets stuck in Stopping.
+        if let Err(e) = state.apply_transition(StateAction::StopComplete) {
+            warn!("Failed to complete stop transition: {e}");
+        }
+        if let Some(err) = pipeline_err {
+            warn!("Pipeline stop failed (meeting saved anyway): {err}");
+        }
 
-    if let Some(err) = pipeline_err {
-        tracing::warn!("Pipeline stop failed (meeting saved anyway): {err}");
-    }
+        let _ = MeetingFinalized { id: id_for_task }.emit(&app);
+    });
 
-    Ok(id)
+    Ok(meeting_id)
 }
 
 /// Copy text to clipboard and simulate Cmd+V paste
@@ -407,6 +604,7 @@ mod tests {
                     is_final: true,
                     language: None,
                     confidence: None,
+                    speaker: None,
                 }],
                 new_segments: vec![TranscriptionSegment {
                     text: "Appended".to_string(),
@@ -415,6 +613,7 @@ mod tests {
                     is_final: true,
                     language: None,
                     confidence: None,
+                    speaker: None,
                 }],
                 recording_sessions: vec![MeetingRecordingSession::completed(
                     "session-1".to_string(),
@@ -430,6 +629,7 @@ mod tests {
                 summary_model: Some("qwen".to_string()),
                 summary_generated_at: Some(first_end),
                 notes: None,
+                persisted_new_count: 0,
             },
             second_end,
         );
@@ -464,6 +664,7 @@ mod tests {
                 summary_model: Some("qwen".to_string()),
                 summary_generated_at: Some(started_at),
                 notes: None,
+                persisted_new_count: 0,
             },
             ended_at,
         );

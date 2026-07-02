@@ -105,6 +105,10 @@
     "reset_to_original": "Revenir à l'original",
     "segments_count": "{count} segments"
   },
+  "transcript": {
+    "me": "Moi",
+    "them": "Eux"
+  },
   "meeting_summary": {
     "title": "Résumé",
     "recording_in_progress": "Enregistrement en cours",
@@ -189,8 +193,26 @@
     "live_dictation": "Dictée",
     "live_meeting": "Meeting",
     "stop": "Stop",
+    "stopping": "Finalisation…",
     "listening": "À l'écoute…",
     "search_placeholder": "Rechercher dans tout…"
+  },
+  "permissions": {
+    "title": "Autoriser les permissions",
+    "subtitle": "Soufflé a besoin de quelques permissions macOS pour enregistrer et coller. Accordez-les maintenant pour éviter les interruptions.",
+    "mic_label": "Microphone",
+    "mic_desc": "Enregistrer votre voix pour la dictée et les meetings.",
+    "system_label": "Audio système",
+    "system_desc": "Capturer les autres participants pendant les meetings.",
+    "accessibility_label": "Accessibilité",
+    "accessibility_desc": "Coller les transcriptions automatiquement avec ⌘V.",
+    "grant": "Autoriser",
+    "open_settings": "Ouvrir Réglages",
+    "granted": "Accordé",
+    "not_supported": "Non pris en charge",
+    "checking": "Vérification…",
+    "continue": "Continuer",
+    "skip_hint": "Vous pourrez les accorder plus tard."
   },
   "timeline": {
     "today": "Aujourd'hui",

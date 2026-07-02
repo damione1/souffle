@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import Waveform from "../../components/Waveform.svelte";
+  import Spinner from "../../components/ui/Spinner.svelte";
   import MeetingNotesSection from "../meeting/components/MeetingNotesSection.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
@@ -30,7 +31,12 @@
     `${Math.floor(elapsedSeconds / 60)}:${`${elapsedSeconds % 60}`.padStart(2, "0")}`,
   );
 
+  const stopping = $derived(
+    mode === "dictation" ? transcription.isStopping : meeting.isStopping,
+  );
+
   function stop() {
+    if (stopping) return;
     if (mode === "dictation") {
       void transcription.toggleRecording();
     } else {
@@ -69,9 +75,14 @@
       <Waveform active variant="pill" />
     </div>
     <span class="shrink-0 text-sm tabular-nums text-text-muted">{elapsed}</span>
-    <button onclick={stop} class="btn btn-danger gap-1.5">
-      <Square size={14} aria-hidden="true" />
-      {$t("home.stop")}
+    <button onclick={stop} disabled={stopping} class="btn btn-danger gap-1.5">
+      {#if stopping}
+        <Spinner />
+        {$t("home.stopping")}
+      {:else}
+        <Square size={14} aria-hidden="true" />
+        {$t("home.stop")}
+      {/if}
     </button>
   </div>
 

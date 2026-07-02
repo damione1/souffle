@@ -1,7 +1,9 @@
 //! Mock transcription engine for testing pipeline behavior without GPU/hardware.
 #![cfg(test)]
 
-use super::{AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment};
+use super::{
+    AudioInputRequirements, EngineError, Speaker, TranscriptionEngine, TranscriptionSegment,
+};
 use std::collections::VecDeque;
 use std::path::Path;
 
@@ -96,5 +98,35 @@ impl TranscriptionEngine for MockEngine {
             channels: 1,
             chunk_size_samples: crate::constants::MIMI_FRAME_SIZE as u32,
         }
+    }
+
+    fn supports_diarization(&self) -> bool {
+        true
+    }
+
+    /// Emit a speaker-tagged segment for each lane that carries non-silent
+    /// audio, so tests can assert the diarized loop routes by speaker.
+    fn transcribe_dual(
+        &mut self,
+        me: &[f32],
+        them: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let tagged = |speaker: Speaker, text: &str| TranscriptionSegment {
+            text: text.to_string(),
+            start_time: 0.0,
+            end_time: 0.0,
+            is_final: true,
+            language: None,
+            confidence: None,
+            speaker: Some(speaker),
+        };
+        let mut segments = Vec::new();
+        if me.iter().any(|s| *s != 0.0) {
+            segments.push(tagged(Speaker::Me, "me-speaks"));
+        }
+        if them.iter().any(|s| *s != 0.0) {
+            segments.push(tagged(Speaker::Them, "them-speaks"));
+        }
+        Ok(segments)
     }
 }

@@ -1,6 +1,22 @@
 use serde::{Deserialize, Serialize};
 
-use crate::constants::{OLLAMA_DEFAULT_URL, OLLAMA_SUMMARIZE_PROMPT};
+use crate::constants::{OLLAMA_DEFAULT_URL, OLLAMA_MAP_PROMPT, OLLAMA_SUMMARIZE_PROMPT};
+
+/// Above this estimated transcript-token count we switch from a single pass to
+/// map-reduce. Single-pass on a 7B both risks Ollama's silent tail-truncation
+/// and suffers "lost in the middle" — chunking materially improves whole-
+/// meeting coverage (see research notes). ~6k tokens ≈ a 25-30 min meeting.
+const STUFF_TOKEN_LIMIT: usize = 6000;
+/// Context window for the single-pass / reduce stages. Comfortably fits ≤6k
+/// tokens of input plus the generated summary, and the KV cache cost (~3GB at
+/// 16k for a 7B) is fine on the target hardware.
+const REDUCE_NUM_CTX: u32 = 16384;
+/// Context window per map chunk — each chunk is well under this.
+const MAP_NUM_CTX: u32 = 8192;
+/// Target transcript words per map chunk (~2k tokens at 1.4 tokens/word) and
+/// the overlap carried between consecutive chunks to preserve boundary context.
+const CHUNK_WORDS: usize = 1400;
+const CHUNK_OVERLAP_WORDS: usize = 120;
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct OllamaModelDescriptor {
@@ -38,12 +54,46 @@ struct GenerateRequest {
 #[derive(Debug, Serialize)]
 struct GenerateOptions {
     temperature: f32,
+    /// Must be set explicitly on every request: Ollama's default context window
+    /// is small and version-dependent, and input beyond it is silently
+    /// truncated from the front — which made long meetings summarize as if only
+    /// the last few minutes happened.
+    num_ctx: u32,
 }
 
 #[derive(Debug, Deserialize)]
 struct GenerateChunk {
     response: String,
     done: bool,
+}
+
+/// Rough token estimate without a tokenizer. Transcripts (names, fillers,
+/// disfluencies) tokenize denser than prose, so use a conservative 1.4
+/// tokens/word rather than the 0.75-words/token prose average.
+fn estimate_tokens(text: &str) -> usize {
+    (text.split_whitespace().count() as f32 * 1.4).ceil() as usize
+}
+
+/// Split a transcript into overlapping word chunks for the map stage. Overlap
+/// preserves context across boundaries so a sentence cut in two is still
+/// summarized coherently in at least one chunk.
+fn chunk_transcript(text: &str) -> Vec<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() <= CHUNK_WORDS {
+        return vec![text.to_string()];
+    }
+    let step = CHUNK_WORDS.saturating_sub(CHUNK_OVERLAP_WORDS).max(1);
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < words.len() {
+        let end = (start + CHUNK_WORDS).min(words.len());
+        chunks.push(words[start..end].join(" "));
+        if end == words.len() {
+            break;
+        }
+        start += step;
+    }
+    chunks
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -197,8 +247,152 @@ pub fn build_summarize_prompt(transcript_text: &str, notes: Option<&str>) -> Str
     prompt
 }
 
+/// Parse one NDJSON line from Ollama's stream, appending its token to
+/// `full_text` and forwarding progress. Invalid/partial UTF-8 or non-JSON
+/// lines are skipped (the byte buffer only hands us complete lines).
+fn handle_ndjson_line(line: &[u8], full_text: &mut String, on_chunk: &impl Fn(SummarizeProgress)) {
+    let Ok(text) = std::str::from_utf8(line) else {
+        return;
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
+    if let Ok(parsed) = serde_json::from_str::<GenerateChunk>(text) {
+        full_text.push_str(&parsed.response);
+        on_chunk(SummarizeProgress {
+            text: parsed.response,
+            done: parsed.done,
+        });
+    }
+}
+
+/// Build the reduce-stage prompt: the ordered per-chunk summaries plus an
+/// explicit whole-meeting, equal-weight instruction (the chunk order is the
+/// meeting order, so the model must not over-weight the final chunk).
+fn build_reduce_prompt(part_summaries: &[String], notes: Option<&str>) -> String {
+    let mut joined = String::new();
+    for (i, part) in part_summaries.iter().enumerate() {
+        joined.push_str(&format!("=== Part {} ===\n{}\n\n", i + 1, part.trim()));
+    }
+    let mut prompt = format!(
+        "Below are ordered summaries of consecutive parts of ONE meeting \
+         (Part 1 = beginning, the last part = end). Merge them into a single \
+         summary that covers the whole meeting in order and gives equal weight \
+         to every part.\n\nPart summaries:\n---\n{joined}---"
+    );
+    if let Some(notes) = notes.map(str::trim).filter(|n| !n.is_empty()) {
+        prompt.push_str(&format!(
+            "\n\nUser notes (taken live during the meeting; treat them as \
+             authoritative context for the summary):\n---\n{notes}\n---"
+        ));
+    }
+    prompt
+}
+
+/// One non-streaming Ollama generation; returns the full response text.
+async fn generate_once(
+    client: &reqwest::Client,
+    url: &str,
+    model: &str,
+    system: &str,
+    prompt: String,
+    num_ctx: u32,
+    temperature: f32,
+) -> Result<String, String> {
+    let body = GenerateRequest {
+        model: model.to_string(),
+        prompt,
+        system: system.to_string(),
+        stream: false,
+        options: GenerateOptions {
+            temperature,
+            num_ctx,
+        },
+    };
+    let resp = client
+        .post(format!("{url}/api/generate"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Ollama request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Ollama error: {}", resp.status()));
+    }
+    let parsed = resp
+        .json::<GenerateChunk>()
+        .await
+        .map_err(|e| format!("Ollama response: {e}"))?;
+    Ok(parsed.response)
+}
+
+/// One streaming Ollama generation; forwards each token to `on_chunk` and
+/// returns the accumulated text.
+#[allow(clippy::too_many_arguments)]
+async fn generate_stream(
+    client: &reqwest::Client,
+    url: &str,
+    model: &str,
+    system: &str,
+    prompt: String,
+    num_ctx: u32,
+    temperature: f32,
+    on_chunk: &impl Fn(SummarizeProgress),
+) -> Result<String, String> {
+    let body = GenerateRequest {
+        model: model.to_string(),
+        prompt,
+        system: system.to_string(),
+        stream: true,
+        options: GenerateOptions {
+            temperature,
+            num_ctx,
+        },
+    };
+    let resp = client
+        .post(format!("{url}/api/generate"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Ollama request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Ollama error: {}", resp.status()));
+    }
+
+    let mut full_text = String::new();
+    let mut stream = resp.bytes_stream();
+    // Buffer raw bytes and split on newlines ourselves: a network chunk can end
+    // mid-line (even mid-UTF-8-codepoint for accented French), so decoding each
+    // chunk independently would drop tokens — including the final `done` line,
+    // which would leave the UI stuck "Generating…".
+    let mut buf: Vec<u8> = Vec::new();
+
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|e| format!("Stream read: {e}"))?;
+        buf.extend_from_slice(&bytes);
+
+        // Drain every complete (newline-terminated) JSON line; keep the
+        // trailing partial line in `buf` for the next chunk.
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = buf.drain(..=pos).collect();
+            handle_ndjson_line(&line, &mut full_text, on_chunk);
+        }
+    }
+    // Flush a final line that arrived without a trailing newline.
+    handle_ndjson_line(&buf, &mut full_text, on_chunk);
+
+    Ok(full_text)
+}
+
 /// Stream a summary of the transcript from Ollama.
-/// Calls `on_chunk` for each streaming token.
+///
+/// Short transcripts are summarized in a single pass. Long ones use map-reduce:
+/// each chunk is summarized independently ("map"), then the ordered chunk
+/// summaries are merged into the final structured summary ("reduce"). This
+/// avoids Ollama's silent tail-truncation and the recency bias that made long
+/// meetings summarize as if only the final minutes happened. Only the final
+/// pass streams to `on_chunk` (the map stage runs without live preview).
 pub async fn summarize_stream(
     transcript_text: &str,
     notes: Option<&str>,
@@ -219,56 +413,115 @@ pub async fn summarize_stream(
     let url = base_url.unwrap_or(OLLAMA_DEFAULT_URL);
     let client = reqwest::Client::new();
 
-    let body = GenerateRequest {
-        model: model.to_string(),
-        prompt: build_summarize_prompt(transcript_text, notes),
-        system: OLLAMA_SUMMARIZE_PROMPT.to_string(),
-        stream: true,
-        options: GenerateOptions { temperature: 0.0 },
-    };
-
-    let resp = client
-        .post(format!("{url}/api/generate"))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Ollama request: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Ollama error: {}", resp.status()));
+    // Short enough to fit comfortably in one context — summarize directly.
+    if estimate_tokens(transcript_text) <= STUFF_TOKEN_LIMIT {
+        let full = generate_stream(
+            &client,
+            url,
+            model,
+            OLLAMA_SUMMARIZE_PROMPT,
+            build_summarize_prompt(transcript_text, notes),
+            REDUCE_NUM_CTX,
+            0.2,
+            &on_chunk,
+        )
+        .await?;
+        return Ok(sanitize_summary(&full));
     }
 
-    let mut full_text = String::new();
-    let mut stream = resp.bytes_stream();
+    // Map: summarize each chunk independently, concurrently.
+    let chunks = chunk_transcript(transcript_text);
+    let n = chunks.len();
+    let maps = chunks.iter().enumerate().map(|(i, chunk)| {
+        let user = format!(
+            "Part {} of {}.\n\nTranscript excerpt:\n---\n{}\n---",
+            i + 1,
+            n,
+            chunk
+        );
+        generate_once(
+            &client,
+            url,
+            model,
+            OLLAMA_MAP_PROMPT,
+            user,
+            MAP_NUM_CTX,
+            0.2,
+        )
+    });
+    let part_summaries = futures_util::future::try_join_all(maps).await?;
 
-    use futures_util::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|e| format!("Stream read: {e}"))?;
-        let text = String::from_utf8_lossy(&bytes);
-
-        // Ollama sends newline-delimited JSON
-        for line in text.lines() {
-            if line.is_empty() {
-                continue;
-            }
-            if let Ok(parsed) = serde_json::from_str::<GenerateChunk>(line) {
-                full_text.push_str(&parsed.response);
-                on_chunk(SummarizeProgress {
-                    text: parsed.response,
-                    done: parsed.done,
-                });
-            }
-        }
-    }
-
-    Ok(sanitize_summary(&full_text))
+    // Reduce: merge the ordered part summaries into the final summary, streamed.
+    let full = generate_stream(
+        &client,
+        url,
+        model,
+        OLLAMA_SUMMARIZE_PROMPT,
+        build_reduce_prompt(&part_summaries, notes),
+        REDUCE_NUM_CTX,
+        0.3,
+        &on_chunk,
+    )
+    .await?;
+    Ok(sanitize_summary(&full))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_summarize_prompt, is_summary_capable_model, model_descriptors, sanitize_summary,
+        CHUNK_OVERLAP_WORDS, CHUNK_WORDS, build_reduce_prompt, build_summarize_prompt,
+        chunk_transcript, estimate_tokens, is_summary_capable_model, model_descriptors,
+        sanitize_summary,
     };
+
+    #[test]
+    fn estimate_tokens_scales_with_words() {
+        assert_eq!(estimate_tokens(""), 0);
+        // 10 words * 1.4 = 14
+        assert_eq!(estimate_tokens(&"word ".repeat(10)), 14);
+    }
+
+    #[test]
+    fn short_transcript_is_one_chunk() {
+        let text = "word ".repeat(CHUNK_WORDS);
+        assert_eq!(chunk_transcript(&text).len(), 1);
+    }
+
+    #[test]
+    fn long_transcript_chunks_with_overlap() {
+        let total = CHUNK_WORDS * 3;
+        let words: Vec<String> = (0..total).map(|i| i.to_string()).collect();
+        let chunks = chunk_transcript(&words.join(" "));
+        assert!(
+            chunks.len() >= 3,
+            "expected multiple chunks, got {}",
+            chunks.len()
+        );
+        // Consecutive chunks overlap: last words of chunk 0 reappear in chunk 1.
+        let step = CHUNK_WORDS - CHUNK_OVERLAP_WORDS;
+        // chunk 1 starts at word `step`; it must contain word `step` and the
+        // overlap word `step-1` from chunk 0 lives at the tail of chunk 0.
+        assert!(chunks[1].split_whitespace().next().unwrap() == step.to_string());
+        assert!(chunks[0].split_whitespace().any(|w| w == step.to_string()));
+    }
+
+    #[test]
+    fn reduce_prompt_orders_parts_and_demands_equal_weight() {
+        let prompt = build_reduce_prompt(&["alpha".into(), "omega".into()], None);
+        assert!(prompt.contains("Part 1"));
+        assert!(prompt.contains("Part 2"));
+        assert!(prompt.contains("alpha"));
+        assert!(prompt.contains("omega"));
+        assert!(prompt.contains("equal weight"));
+        assert!(prompt.find("alpha").unwrap() < prompt.find("omega").unwrap());
+    }
+
+    #[test]
+    fn reduce_prompt_appends_notes() {
+        let prompt = build_reduce_prompt(&["alpha".into()], Some("decision: ship"));
+        assert!(prompt.contains("User notes"));
+        assert!(prompt.contains("decision: ship"));
+    }
 
     #[test]
     fn prompt_without_notes_is_transcript_only() {

@@ -20,13 +20,36 @@ pub const MIMI_FRAME_SIZE: usize = 1920;
 pub const MIMI_FRAMES_PER_SECOND: f64 = 12.5;
 
 /// Application bundle identifier
-pub const APP_IDENTIFIER: &str = "com.souffle.app";
+pub const APP_IDENTIFIER: &str = "com.souffle.desktop";
 
-/// Get the application data directory (e.g. ~/Library/Application Support/com.souffle.app)
+/// Former bundle identifier; the data directory is renamed from this to
+/// [`APP_IDENTIFIER`] at startup so existing meetings/settings/models survive
+/// the change. (The old `.app` suffix conflicted with the macOS bundle
+/// extension.)
+pub const LEGACY_APP_IDENTIFIER: &str = "com.souffle.app";
+
+/// Get the application data directory (e.g. ~/Library/Application Support/com.souffle.desktop)
 pub fn app_data_dir() -> std::path::PathBuf {
     dirs_next::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(APP_IDENTIFIER)
+}
+
+/// Rename the legacy data directory to the current one if it exists and the new
+/// one doesn't. Runs before anything opens the database or log files. Best
+/// effort: on failure the app simply starts fresh at the new path.
+pub fn migrate_legacy_data_dir() {
+    let Some(base) = dirs_next::data_dir() else {
+        return;
+    };
+    let old = base.join(LEGACY_APP_IDENTIFIER);
+    let new = base.join(APP_IDENTIFIER);
+    if old.exists()
+        && !new.exists()
+        && let Err(e) = std::fs::rename(&old, &new)
+    {
+        eprintln!("Failed to migrate data dir {old:?} -> {new:?}: {e}");
+    }
 }
 
 /// Default Ollama server URL
@@ -42,6 +65,7 @@ Rules:
 - Do not turn greetings or a short introduction into a broader meeting narrative.
 - Do not greet, thank, apologize, or address the reader.
 - Do not add an introduction, conclusion, or commentary about the meeting quality.
+- Give equal weight to the beginning, middle, and end of the meeting; do not over-emphasize the final portion.
 - If the transcript is very short, output only the facts that are directly present.
 - If the transcript only contains greetings, attendance, or setup, say only that.
 - Keep the markdown section headings exactly as written below in English.
@@ -61,3 +85,32 @@ Rules:
 
 ## Topics
 - ...";
+
+/// System prompt for the per-chunk "map" stage when a transcript is too long to
+/// summarize in one pass. Each chunk is summarized independently, then the
+/// chunk summaries are combined by a final pass using OLLAMA_SUMMARIZE_PROMPT.
+/// Keeping this extraction-only (no fixed skeleton) lets the reduce stage own
+/// the final structure.
+pub const OLLAMA_MAP_PROMPT: &str = "\
+You are summarizing ONE part of a longer meeting transcript.
+Summarize ONLY what is in this excerpt. Do not speculate about other parts.
+
+Rules:
+- Use only information explicitly stated in this excerpt.
+- Do not greet, thank, or address the reader. No preamble.
+- Write bullets in the same language as the transcript.
+- Be concise: short, concrete bullets.
+
+Extract, using exactly these headings:
+
+Topics:
+- ...
+
+Decisions:
+- ... (or \"None\")
+
+Action Items:
+- ... (owner — task, if stated; or \"None\")
+
+Open Questions / Risks:
+- ... (or \"None\")";

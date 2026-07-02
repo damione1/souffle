@@ -30,6 +30,9 @@ pub struct MeetingMixer {
     mic_to_mix: Resampler,
     tap_to_mix: Resampler,
     to_engine: Resampler,
+    /// Second engine-rate resampler used only in diarized (split) mode, so the
+    /// system-audio leg has its own resampler state independent of the mic leg.
+    tap_to_engine: Resampler,
     mic_fifo: Vec<f32>,
     tap_fifo: Vec<f32>,
     scratch: Vec<f32>,
@@ -59,6 +62,7 @@ impl MeetingMixer {
             mic_to_mix: Resampler::new(mic_rate, mic_channels, MIX_RATE, mic_gain),
             tap_to_mix: Resampler::new(tap_rate, 1, MIX_RATE, 1.0),
             to_engine: Resampler::new(MIX_RATE, 1, engine_rate, 1.0),
+            tap_to_engine: Resampler::new(MIX_RATE, 1, engine_rate, 1.0),
             mic_fifo: Vec::new(),
             tap_fifo: Vec::new(),
             scratch: vec![0.0; 4096],
@@ -113,6 +117,49 @@ impl MeetingMixer {
         out
     }
 
+    /// Diarized counterpart of `tick`: instead of summing the two legs, return
+    /// them separately at the engine rate — `(me, them)` = (echo-cancelled mic,
+    /// system audio). Each leg has its own engine resampler so their stream
+    /// states don't interfere.
+    pub fn tick_split(&mut self) -> (Vec<f32>, Vec<f32>) {
+        self.ingest();
+
+        let (mut me, mut them) = (Vec::new(), Vec::new());
+        while self.mic_fifo.len() >= FRAME_SAMPLES {
+            let (mic, tap) = self.split_frame(FRAME_SAMPLES);
+            me.extend(self.to_engine.process(&mic));
+            them.extend(self.tap_to_engine.process(&tap));
+        }
+        (me, them)
+    }
+
+    /// Diarized counterpart of `flush`.
+    pub fn flush_split(&mut self) -> (Vec<f32>, Vec<f32>) {
+        let (mut me, mut them) = self.tick_split();
+
+        let mic_tail = self.mic_to_mix.flush();
+        self.mic_fifo.extend(mic_tail);
+        let tap_tail = self.tap_to_mix.flush();
+        self.tap_fifo.extend(tap_tail);
+
+        // Mic leg is the pacing clock; pair with tap for AEC where possible.
+        while !self.mic_fifo.is_empty() {
+            let n = self.mic_fifo.len().min(FRAME_SAMPLES);
+            let (mic, tap) = self.split_frame(n);
+            me.extend(self.to_engine.process(&mic));
+            them.extend(self.tap_to_engine.process(&tap));
+        }
+        // Remaining system audio with no mic to pair → straight to "them".
+        while !self.tap_fifo.is_empty() {
+            let n = self.tap_fifo.len().min(FRAME_SAMPLES);
+            let tap: Vec<f32> = self.tap_fifo.drain(..n).collect();
+            them.extend(self.tap_to_engine.process(&tap));
+        }
+        me.extend(self.to_engine.flush());
+        them.extend(self.tap_to_engine.flush());
+        (me, them)
+    }
+
     pub fn tap_discarded(&self) -> u64 {
         self.tap_discarded
     }
@@ -149,6 +196,17 @@ impl MeetingMixer {
     /// (speakers only), then sum the tap leg over them (zeros when the
     /// system is silent) and clamp.
     fn mix_frame(&mut self, n: usize) -> Vec<f32> {
+        let (mut mic, tap) = self.split_frame(n);
+        for (sample, tap) in mic.iter_mut().zip(&tap) {
+            *sample = (*sample + *tap).clamp(-1.0, 1.0);
+        }
+        mic
+    }
+
+    /// Drain one frame from each leg and echo-cancel the mic, but return the
+    /// two legs separately (mic, tap) rather than summed. `tap` is zero-padded
+    /// to `n` so the two are always the same length.
+    fn split_frame(&mut self, n: usize) -> (Vec<f32>, Vec<f32>) {
         let mut mic: Vec<f32> = self.mic_fifo.drain(..n).collect();
         let tap_n = n.min(self.tap_fifo.len());
         let mut tap: Vec<f32> = self.tap_fifo.drain(..tap_n).collect();
@@ -163,10 +221,7 @@ impl MeetingMixer {
             aec.process_capture(&mut mic);
         }
 
-        for (sample, tap) in mic.iter_mut().zip(&tap) {
-            *sample = (*sample + *tap).clamp(-1.0, 1.0);
-        }
-        mic
+        (mic, tap)
     }
 }
 
@@ -181,11 +236,7 @@ mod tests {
         mic_rate: u32,
         tap_rate: u32,
         engine_rate: u32,
-    ) -> (
-        ringbuf::HeapProd<f32>,
-        ringbuf::HeapProd<f32>,
-        MeetingMixer,
-    ) {
+    ) -> (ringbuf::HeapProd<f32>, ringbuf::HeapProd<f32>, MeetingMixer) {
         let (mic_prod, mic_cons) = HeapRb::<f32>::new(mic_rate as usize * 2).split();
         let (tap_prod, tap_cons) = HeapRb::<f32>::new(tap_rate as usize * 2).split();
         let mixer = MeetingMixer::new(mic_cons, mic_rate, 1, 1.0, tap_cons, tap_rate, engine_rate);
@@ -245,8 +296,37 @@ mod tests {
         mic.push_slice(&vec![0.1f32; 480]);
         mixer.tick();
 
-        assert!(mixer.tap_discarded() > 0, "excess tap lead should be dropped");
+        assert!(
+            mixer.tap_discarded() > 0,
+            "excess tap lead should be dropped"
+        );
         assert!(mixer.tap_fifo.len() <= MAX_TAP_LEAD_SAMPLES + FRAME_SAMPLES);
+    }
+
+    #[test]
+    fn split_keeps_sources_separate() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        mic.push_slice(&vec![0.1f32; 48_000]);
+        tap.push_slice(&vec![0.2f32; 48_000]);
+        let (mut me, mut them) = mixer.tick_split();
+        let (me_tail, them_tail) = mixer.flush_split();
+        me.extend(me_tail);
+        them.extend(them_tail);
+
+        // Each leg is ~1s at 16kHz and carries only its own source (not summed).
+        assert!((me.len() as i64 - 16_000).unsigned_abs() < 2_000);
+        assert!((them.len() as i64 - 16_000).unsigned_abs() < 2_000);
+        let me_mid = me[me.len() / 2];
+        let them_mid = them[them.len() / 2];
+        assert!(
+            (me_mid - 0.1).abs() < 0.05,
+            "me should be ~0.1, got {me_mid}"
+        );
+        assert!(
+            (them_mid - 0.2).abs() < 0.05,
+            "them should be ~0.2, got {them_mid}"
+        );
     }
 
     #[test]

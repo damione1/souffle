@@ -175,10 +175,7 @@ pub struct TranscriptionRuntimeStatus {
     pub model_dir: String,
 }
 
-pub fn transcription_runtime_phase(
-    downloaded: bool,
-    loaded: bool,
-) -> TranscriptionRuntimePhase {
+pub fn transcription_runtime_phase(downloaded: bool, loaded: bool) -> TranscriptionRuntimePhase {
     if loaded {
         TranscriptionRuntimePhase::Ready
     } else if downloaded {
@@ -217,6 +214,59 @@ pub trait TranscriptionEngine {
     fn normalize_text(&self, text: &str) -> String {
         text.to_string()
     }
+
+    /// Whether this engine can transcribe two synchronized audio streams (mic +
+    /// system audio) and label each segment by speaker. Only streaming engines
+    /// that support a batch dimension (Kyutai/moshi) can; others run meetings as
+    /// a single mixed stream with no Me/Them labels.
+    fn supports_diarization(&self) -> bool {
+        false
+    }
+
+    /// Enable/disable diarized (two-stream) mode. Takes effect on the next
+    /// `reset_state` (which rebuilds the engine's streaming state with the right
+    /// batch size). No-op for engines that don't support diarization.
+    fn set_diarization(&mut self, _enabled: bool) {}
+
+    /// Transcribe one paired frame from both streams (mic = Me, system = Them),
+    /// returning segments already tagged with their speaker. Only valid after
+    /// `set_diarization(true)` + `reset_state` on an engine that supports it.
+    fn transcribe_dual(
+        &mut self,
+        _me: &[f32],
+        _them: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        Err(EngineError::InferenceError(
+            "diarization not supported by this engine".into(),
+        ))
+    }
+}
+
+/// Who produced a segment in a diarized meeting: the microphone is the local
+/// user (Me), system audio is everyone else (Them). `None` = single-stream
+/// session (dictation, or a meeting recorded without diarization).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum Speaker {
+    Me,
+    Them,
+}
+
+impl Speaker {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Speaker::Me => "me",
+            Speaker::Them => "them",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Speaker> {
+        match s {
+            "me" => Some(Speaker::Me),
+            "them" => Some(Speaker::Them),
+            _ => None,
+        }
+    }
 }
 
 /// A piece of transcribed text with metadata
@@ -228,6 +278,9 @@ pub struct TranscriptionSegment {
     pub is_final: bool,
     pub language: Option<String>,
     pub confidence: Option<f32>,
+    /// Set by the pipeline for diarized meetings; `None` otherwise.
+    #[serde(default)]
+    pub speaker: Option<Speaker>,
 }
 
 /// Collapse runs of whitespace to single spaces and trim.
@@ -406,7 +459,9 @@ pub fn resolve_transcription_artifact(
         .ok_or_else(|| format!("No artifacts registered for '{}'", backend.id))
 }
 
-pub fn create_engine(profile: &TranscriptionProfile) -> Result<Box<dyn TranscriptionEngine>, String> {
+pub fn create_engine(
+    profile: &TranscriptionProfile,
+) -> Result<Box<dyn TranscriptionEngine>, String> {
     match (profile.engine_id.as_str(), profile.backend_id.as_str()) {
         (KYUTAI_ENGINE_ID, CANDLE_BACKEND_ID) => Ok(Box::new(kyutai::KyutaiEngine::new())),
         (WHISPER_ENGINE_ID, WHISPER_RS_BACKEND_ID) => Ok(Box::new(whisper::WhisperEngine::new())),
@@ -422,7 +477,8 @@ fn kyutai_1b_model_descriptor() -> TranscriptionModelDescriptor {
     TranscriptionModelDescriptor {
         id: KYUTAI_MODEL_ID.to_string(),
         label: "STT 1B FR/EN".to_string(),
-        description: "Fast Kyutai streaming model tuned for French and English dictation.".to_string(),
+        description: "Fast Kyutai streaming model tuned for French and English dictation."
+            .to_string(),
         download_size_bytes: Some(2_400_000_000),
         recommended_memory_bytes: Some(4_000_000_000),
         supported_languages: vec!["fr".to_string(), "en".to_string()],
@@ -444,7 +500,8 @@ fn kyutai_2_6b_model_descriptor() -> TranscriptionModelDescriptor {
     TranscriptionModelDescriptor {
         id: KYUTAI_MODEL_2_6B_ID.to_string(),
         label: "STT 2.6B EN".to_string(),
-        description: "Larger Kyutai streaming model optimized for English transcription quality.".to_string(),
+        description: "Larger Kyutai streaming model optimized for English transcription quality."
+            .to_string(),
         download_size_bytes: Some(5_620_000_000),
         recommended_memory_bytes: Some(10_000_000_000),
         supported_languages: vec!["en".to_string()],
@@ -511,8 +568,9 @@ fn whisper_turbo_model_descriptor() -> TranscriptionModelDescriptor {
     TranscriptionModelDescriptor {
         id: WHISPER_MODEL_TURBO_ID.to_string(),
         label: "Large V3 Turbo".to_string(),
-        description: "Fast multilingual Whisper model. Batch transcription with Metal acceleration."
-            .to_string(),
+        description:
+            "Fast multilingual Whisper model. Batch transcription with Metal acceleration."
+                .to_string(),
         download_size_bytes: Some(1_620_000_000),
         recommended_memory_bytes: Some(3_000_000_000),
         supported_languages: vec!["multilingual".to_string()],
@@ -718,8 +776,11 @@ mod tests {
 
     #[test]
     fn resolve_profile_unknown_backend() {
-        let r =
-            resolve_transcription_profile(Some(KYUTAI_ENGINE_ID), Some(KYUTAI_MODEL_ID), Some("mlx"));
+        let r = resolve_transcription_profile(
+            Some(KYUTAI_ENGINE_ID),
+            Some(KYUTAI_MODEL_ID),
+            Some("mlx"),
+        );
         assert!(r.is_err());
     }
 
@@ -783,8 +844,18 @@ mod tests {
         .unwrap();
         let artifact = resolve_transcription_artifact(&profile).unwrap();
         assert_eq!(artifact.file_format, "onnx");
-        assert!(artifact.required_files.iter().any(|f| f == "encoder-model.int8.onnx"));
-        assert!(artifact.required_files.iter().any(|f| f == "decoder_joint-model.int8.onnx"));
+        assert!(
+            artifact
+                .required_files
+                .iter()
+                .any(|f| f == "encoder-model.int8.onnx")
+        );
+        assert!(
+            artifact
+                .required_files
+                .iter()
+                .any(|f| f == "decoder_joint-model.int8.onnx")
+        );
         assert!(artifact.required_files.iter().any(|f| f == "vocab.txt"));
         // config.json must NOT be listed: it would trigger the Kyutai-specific
         // config-discovery path in the downloader.
@@ -862,10 +933,7 @@ mod tests {
         .unwrap();
         let artifact = resolve_transcription_artifact(&profile).unwrap();
         assert_eq!(artifact.file_format, "ggml");
-        assert!(artifact
-            .required_files
-            .iter()
-            .any(|f| f.ends_with(".bin")));
+        assert!(artifact.required_files.iter().any(|f| f.ends_with(".bin")));
     }
 
     #[test]
@@ -951,7 +1019,10 @@ mod tests {
         let engine = create_engine(&profile).unwrap();
         let reqs = engine.audio_requirements();
         assert_eq!(reqs.sample_rate_hz, 16_000);
-        assert_ne!(reqs.chunk_size_samples, crate::constants::MIMI_FRAME_SIZE as u32);
+        assert_ne!(
+            reqs.chunk_size_samples,
+            crate::constants::MIMI_FRAME_SIZE as u32
+        );
     }
 
     #[test]
@@ -960,6 +1031,9 @@ mod tests {
         let engine = create_engine(&profile).unwrap();
         let reqs = engine.audio_requirements();
         assert_eq!(reqs.sample_rate_hz, crate::constants::SAMPLE_RATE);
-        assert_eq!(reqs.chunk_size_samples, crate::constants::MIMI_FRAME_SIZE as u32);
+        assert_eq!(
+            reqs.chunk_size_samples,
+            crate::constants::MIMI_FRAME_SIZE as u32
+        );
     }
 }

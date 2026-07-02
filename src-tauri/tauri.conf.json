@@ -3,7 +3,7 @@
   "productName": "Soufflé",
   "mainBinaryName": "souffle",
   "version": "0.1.0",
-  "identifier": "com.souffle.app",
+  "identifier": "com.souffle.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

@@ -23,6 +23,10 @@ pub enum AudioCommand {
         /// Meeting mode: also capture system audio via a Core Audio tap
         /// and mix it with the microphone.
         capture_system_audio: bool,
+        /// Diarized meeting: emit the mic (Me) and system audio (Them) as two
+        /// source-tagged streams instead of one mixed stream, so each can be
+        /// transcribed by its own engine. Only meaningful with system audio.
+        diarize: bool,
     },
     Stop,
     SelectDevice(String),
@@ -46,6 +50,10 @@ pub struct MeetingAccumulator {
     pub summary_generated_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Notes the user types while the meeting records; persisted at stop.
     pub notes: Option<String>,
+    /// How many of `new_segments` have already been flushed to the DB by the
+    /// incremental persistence path. Lets a crash mid-meeting lose at most the
+    /// last unflushed batch instead of the whole session.
+    pub persisted_new_count: usize,
 }
 
 /// Shared application state, managed by Tauri.
@@ -54,7 +62,10 @@ pub struct MeetingAccumulator {
 /// both are driven via command channels.
 pub struct AppState {
     pub audio_cmd_sender: Sender<AudioCommand>,
-    pub engine_actor: EngineActorHandle,
+    /// Wrapped in Arc so async commands can clone a handle into a blocking
+    /// task (`spawn_blocking`) and keep the long crossbeam reply waits off the
+    /// Tauri command thread — otherwise they freeze the window event loop.
+    pub engine_actor: Arc<EngineActorHandle>,
     pub next_audio_session_id: Mutex<u64>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     pub db: Arc<Database>,
@@ -69,7 +80,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         audio_cmd_sender: Sender<AudioCommand>,
-        engine_actor: EngineActorHandle,
+        engine_actor: Arc<EngineActorHandle>,
         db: Arc<Database>,
         audio_rms: Arc<AtomicU32>,
     ) -> Self {
@@ -86,10 +97,7 @@ impl AppState {
     }
 
     /// Apply a state transition, update the machine, and emit a StateChanged event.
-    pub fn apply_transition(
-        &self,
-        action: StateAction,
-    ) -> Result<AppStateMachine, String> {
+    pub fn apply_transition(&self, action: StateAction) -> Result<AppStateMachine, String> {
         let mut machine = self.machine.acquire()?;
         let new_state = machine.clone().transition(action)?;
         debug!(
@@ -114,5 +122,15 @@ impl AppState {
     /// Get a clone of the current machine state.
     pub fn current_machine_state(&self) -> Result<AppStateMachine, String> {
         Ok(self.machine.acquire()?.clone())
+    }
+
+    /// Clone the stored AppHandle (set during setup). Used by async commands to
+    /// drive background finalization tasks that re-fetch `AppState` off-thread.
+    pub fn app_handle(&self) -> Result<AppHandle, String> {
+        self.app_handle
+            .acquire()?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "App handle not set".to_string())
     }
 }

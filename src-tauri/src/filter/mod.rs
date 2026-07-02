@@ -17,7 +17,6 @@ pub enum AudioFilterKind {
     SileroVad,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum TextFilterKind {

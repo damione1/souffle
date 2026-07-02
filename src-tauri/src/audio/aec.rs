@@ -17,6 +17,10 @@ pub struct Aec {
     /// 10ms at the configured sample rate.
     frame_len: usize,
     render_out: Vec<f32>,
+    /// Set if a sonora call ever panicked. Echo cancellation is a non-essential
+    /// enhancement, so once it misbehaves we stop calling it and let the mic
+    /// pass through uncancelled rather than risk taking down the session.
+    poisoned: bool,
 }
 
 impl Aec {
@@ -35,6 +39,7 @@ impl Aec {
             apm,
             frame_len,
             render_out: vec![0.0; frame_len],
+            poisoned: false,
         }
     }
 
@@ -42,22 +47,45 @@ impl Aec {
     /// speakers). Must be called before the capture frame of the same tick.
     pub fn process_render(&mut self, frame: &[f32]) {
         debug_assert_eq!(frame.len(), self.frame_len);
-        let _ = self
-            .apm
-            .process_render_f32(&[frame], &mut [&mut self.render_out]);
+        if self.poisoned {
+            return;
+        }
+        let apm = &mut self.apm;
+        let render_out = &mut self.render_out;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = apm.process_render_f32(&[frame], &mut [&mut render_out[..]]);
+        }));
+        if result.is_err() {
+            self.poison();
+        }
     }
 
     /// Remove the echo of previously-rendered audio from a 10ms mic frame,
     /// in place.
     pub fn process_capture(&mut self, frame: &mut [f32]) {
         debug_assert_eq!(frame.len(), self.frame_len);
+        if self.poisoned {
+            return;
+        }
         let mut out = vec![0.0; self.frame_len];
-        if self
-            .apm
-            .process_capture_f32(&[frame], &mut [&mut out])
-            .is_ok()
-        {
-            frame.copy_from_slice(&out);
+        let apm = &mut self.apm;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            apm.process_capture_f32(&[&frame[..]], &mut [&mut out[..]])
+                .is_ok()
+        }));
+        match result {
+            Ok(true) => frame.copy_from_slice(&out),
+            Ok(false) => {}
+            Err(_) => self.poison(),
+        }
+    }
+
+    fn poison(&mut self) {
+        if !self.poisoned {
+            self.poisoned = true;
+            tracing::error!(
+                "Echo cancellation panicked; disabling it for this session (mic passes through uncancelled)"
+            );
         }
     }
 }
@@ -90,7 +118,11 @@ mod tests {
             let mut mic: Vec<f32> = (0..frame)
                 .map(|i| {
                     let idx = start + i;
-                    if idx >= delay { tone[idx - delay] * 0.3 } else { 0.0 }
+                    if idx >= delay {
+                        tone[idx - delay] * 0.3
+                    } else {
+                        0.0
+                    }
                 })
                 .collect();
             aec.process_capture(&mut mic);

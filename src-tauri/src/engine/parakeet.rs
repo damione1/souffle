@@ -65,7 +65,12 @@ impl ParakeetEngine {
         }
 
         let result = model
-            .transcribe_samples(audio, PARAKEET_SAMPLE_RATE, 1, Some(TimestampMode::Sentences))
+            .transcribe_samples(
+                audio,
+                PARAKEET_SAMPLE_RATE,
+                1,
+                Some(TimestampMode::Sentences),
+            )
             .map_err(|e| EngineError::InferenceError(format!("Parakeet inference: {e}")))?;
 
         if crate::debug::transcription_debug_enabled() {
@@ -87,6 +92,7 @@ impl ParakeetEngine {
                 is_final: true,
                 language: None,
                 confidence: None,
+                speaker: None,
             })
             .collect();
 
@@ -99,6 +105,7 @@ impl ParakeetEngine {
                 is_final: true,
                 language: None,
                 confidence: None,
+                speaker: None,
             });
         }
 
@@ -255,6 +262,9 @@ mod tests {
             .to_lowercase();
         eprintln!("Parakeet transcription: {text:?}");
         assert!(text.contains("hello"), "expected 'hello' in: {text:?}");
-        assert!(text.contains("transcription"), "expected 'transcription' in: {text:?}");
+        assert!(
+            text.contains("transcription"),
+            "expected 'transcription' in: {text:?}"
+        );
     }
 }

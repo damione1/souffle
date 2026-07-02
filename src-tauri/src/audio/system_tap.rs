@@ -43,9 +43,9 @@ use objc2_core_audio::{
     AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID,
     AudioObjectPropertyAddress, CATapDescription, kAudioAggregateDeviceIsPrivateKey,
     kAudioAggregateDeviceNameKey, kAudioAggregateDeviceTapAutoStartKey,
-    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-    kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey, kAudioTapPropertyFormat,
+    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioObjectPropertyElementMain,
+    kAudioObjectPropertyScopeGlobal, kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey,
+    kAudioTapPropertyFormat,
 };
 use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp};
 use objc2_core_foundation::CFDictionary;
@@ -362,7 +362,9 @@ fn tap_stream_format(tap_id: AudioObjectID) -> Result<AudioStreamBasicDescriptio
 /// the tap drives the aggregate by itself, which keeps it independent of
 /// the default output device (no rebuild needed when it changes) and avoids
 /// IO contention with other streams of this process.
-fn aggregate_description(description: &CATapDescription) -> Retained<NSDictionary<NSString, AnyObject>> {
+fn aggregate_description(
+    description: &CATapDescription,
+) -> Retained<NSDictionary<NSString, AnyObject>> {
     let key = |k: &CStr| NSString::from_str(k.to_str().expect("ASCII key"));
     let aggregate_uid = NSString::from_str(&uuid::Uuid::new_v4().to_string());
     let tap_uid = unsafe { description.UUID().UUIDString() };

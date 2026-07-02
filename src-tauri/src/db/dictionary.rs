@@ -36,9 +36,7 @@ impl Database {
     ) -> Result<DictionaryEntry, String> {
         let conn = self.conn.acquire()?;
         let now = chrono::Utc::now().to_rfc3339();
-        let effective_phonetic = phonetic_code
-            .map(String::from)
-            .or_else(|| soundex(term));
+        let effective_phonetic = phonetic_code.map(String::from).or_else(|| soundex(term));
 
         conn.execute(
             "INSERT INTO dictionary (term, phonetic_code, category, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -64,9 +62,7 @@ impl Database {
         category: Option<&str>,
     ) -> Result<(), String> {
         let conn = self.conn.acquire()?;
-        let effective_phonetic = phonetic_code
-            .map(String::from)
-            .or_else(|| soundex(term));
+        let effective_phonetic = phonetic_code.map(String::from).or_else(|| soundex(term));
 
         let updated = conn
             .execute(
@@ -110,7 +106,9 @@ mod tests {
         let (db, _dir) = test_db();
 
         // Add
-        let entry = db.add_dictionary_entry("Kubernetes", None, Some("tech")).unwrap();
+        let entry = db
+            .add_dictionary_entry("Kubernetes", None, Some("tech"))
+            .unwrap();
         assert_eq!(entry.term, "Kubernetes");
         assert!(entry.phonetic_code.is_some());
         assert_eq!(entry.category.as_deref(), Some("tech"));
@@ -120,7 +118,8 @@ mod tests {
         assert_eq!(entries.len(), 1);
 
         // Update
-        db.update_dictionary_entry(entry.id, "K8s", None, Some("tech")).unwrap();
+        db.update_dictionary_entry(entry.id, "K8s", None, Some("tech"))
+            .unwrap();
         let entries = db.list_dictionary_entries().unwrap();
         assert_eq!(entries[0].term, "K8s");
 
@@ -159,7 +158,9 @@ mod tests {
     #[test]
     fn dictionary_explicit_phonetic_preserved() {
         let (db, _dir) = test_db();
-        let entry = db.add_dictionary_entry("Souffle", Some("CUSTOM"), None).unwrap();
+        let entry = db
+            .add_dictionary_entry("Souffle", Some("CUSTOM"), None)
+            .unwrap();
         assert_eq!(entry.phonetic_code.as_deref(), Some("CUSTOM"));
     }
 }

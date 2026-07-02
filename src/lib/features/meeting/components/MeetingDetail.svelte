@@ -48,6 +48,7 @@
     <MeetingHeaderSection
       meeting={controller.meeting}
       isRecordingMeeting={controller.isRecordingMeeting}
+      isStopping={controller.isStopping}
       systemAudioStatus={controller.app.systemAudioStatus}
       {lockedByDictation}
       segmentCount={displaySegments.length}

@@ -105,6 +105,10 @@
     "reset_to_original": "Reset to original",
     "segments_count": "{count} segments"
   },
+  "transcript": {
+    "me": "Me",
+    "them": "Them"
+  },
   "meeting_summary": {
     "title": "Summary",
     "recording_in_progress": "Recording in progress",
@@ -189,8 +193,26 @@
     "live_dictation": "Dictating",
     "live_meeting": "Meeting",
     "stop": "Stop",
+    "stopping": "Finishing…",
     "listening": "Listening…",
     "search_placeholder": "Search everything…"
+  },
+  "permissions": {
+    "title": "Grant permissions",
+    "subtitle": "Soufflé needs a few macOS permissions to record and paste. Grant them now to avoid interruptions later.",
+    "mic_label": "Microphone",
+    "mic_desc": "Record your voice for dictation and meetings.",
+    "system_label": "System audio",
+    "system_desc": "Capture other participants during meetings.",
+    "accessibility_label": "Accessibility",
+    "accessibility_desc": "Paste transcriptions automatically with ⌘V.",
+    "grant": "Grant",
+    "open_settings": "Open Settings",
+    "granted": "Granted",
+    "not_supported": "Not supported",
+    "checking": "Checking…",
+    "continue": "Continue",
+    "skip_hint": "You can grant these later when prompted."
   },
   "timeline": {
     "today": "Today",

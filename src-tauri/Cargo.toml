@@ -30,6 +30,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
+# default-features off drops the `tracing-log` bridge, which would call
+# log::set_logger and collide with tauri-plugin-log (one global log logger).
+# Our diagnostics all use `tracing` directly, so we don't need the bridge.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
+tracing-appender = "0.2"
 log = "0.4"
 crossbeam-channel = "0.5"
 cpal = "0.15"
@@ -91,4 +96,8 @@ strip = true
 lto = true
 codegen-units = 1
 opt-level = "s"
-panic = "abort"
+# Unwind (not abort) so a panic on a pipeline worker thread can be caught at
+# the thread/FFI boundary and recovered, instead of SIGABRT-ing the whole app.
+# Every C->Rust callback (cpal/tap) is wrapped in catch_unwind so no panic
+# unwinds across the FFI boundary (which would be UB).
+panic = "unwind"

@@ -24,6 +24,43 @@ function session(id: string, start: number, end: number): MeetingRecordingSessio
   };
 }
 
+function dseg(
+  text: string,
+  start: number,
+  speaker: 'me' | 'them',
+): TranscriptionSegment {
+  return { ...seg(text, start), speaker };
+}
+
+describe('groupIntoParagraphs diarization', () => {
+  it('breaks on speaker change and tags each paragraph', () => {
+    const result = groupIntoParagraphs(
+      [dseg('hi there', 0, 'me'), dseg('hello back', 2, 'them'), dseg('great', 4, 'me')],
+      1.5,
+    );
+    expect(result.map((p) => p.speaker)).toEqual(['me', 'them', 'me']);
+    expect(result[0].text).toBe('hi there');
+    expect(result[1].text).toBe('hello back');
+  });
+
+  it('orders interleaved speakers chronologically', () => {
+    // Them arrives in the array before Me but starts later.
+    const result = groupIntoParagraphs(
+      [dseg('second', 3, 'them'), dseg('first', 1, 'me')],
+      1.5,
+    );
+    expect(result[0].text).toBe('first');
+    expect(result[0].speaker).toBe('me');
+    expect(result[1].text).toBe('second');
+    expect(result[1].speaker).toBe('them');
+  });
+
+  it('leaves non-diarized segments untagged and unsorted', () => {
+    const result = groupIntoParagraphs([seg('a', 0), seg('b', 1)], 1.5);
+    expect(result[0].speaker == null).toBe(true);
+  });
+});
+
 describe('groupIntoParagraphs', () => {
   it('returns empty array for empty input', () => {
     expect(groupIntoParagraphs([], 1.5)).toEqual([]);

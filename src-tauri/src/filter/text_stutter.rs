@@ -28,9 +28,7 @@ impl TextFilter for StutterCollapseFilter {
             let word = words[i];
             // Count consecutive repetitions (case-insensitive)
             let mut count = 1;
-            while i + count < words.len()
-                && words[i + count].eq_ignore_ascii_case(word)
-            {
+            while i + count < words.len() && words[i + count].eq_ignore_ascii_case(word) {
                 count += 1;
             }
 

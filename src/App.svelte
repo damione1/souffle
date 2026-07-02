@@ -10,8 +10,10 @@
   import { recoverState } from "./lib/api/transcription";
   import { bootstrapAppState } from "./lib/bootstrap";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
+  import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
   import {
     notifyMeetingAborted,
+    notifyMeetingFinalized,
     notifyMeetingStopRequested,
   } from "./lib/features/meeting/controller.svelte";
   import {
@@ -33,6 +35,7 @@
 
   let unlistenSystemAudio: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
+  let unlistenMeetingFinalized: (() => void) | null = null;
 
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
@@ -42,6 +45,7 @@
     app.machineState.state === "error" ? app.machineState.data : null,
   );
   let isRecovering = $state(false);
+  let showPermissions = $state(false);
 
   async function recoverFromError() {
     isRecovering = true;
@@ -78,6 +82,14 @@
       }
       cleanupTranscription = (await transcription.mount()) ?? (() => {});
     })();
+
+    // First-run permissions walkthrough (mic, system audio, accessibility) so
+    // the user grants everything up front instead of hitting prompts piecemeal.
+    try {
+      showPermissions = localStorage.getItem("permissionsOnboarded") !== "1";
+    } catch {
+      showPermissions = false;
+    }
 
     events.navigate.listen((event) => {
       if (event.payload === "settings") {
@@ -125,6 +137,12 @@
       unlistenMeetingStop = fn;
     });
 
+    events.meetingFinalized.listen((event) => {
+      notifyMeetingFinalized(event.payload.id);
+    }).then((fn) => {
+      unlistenMeetingFinalized = fn;
+    });
+
     return () => {
       cleanupTranscription();
       unlistenNav?.();
@@ -133,6 +151,7 @@
       unlistenPipelineError?.();
       unlistenSystemAudio?.();
       unlistenMeetingStop?.();
+      unlistenMeetingFinalized?.();
     };
   });
 </script>
@@ -227,4 +246,8 @@
     <SettingsView />
   </Sheet>
 {/if}
+{/if}
+
+{#if showPermissions}
+  <PermissionsOnboarding onClose={() => (showPermissions = false)} />
 {/if}

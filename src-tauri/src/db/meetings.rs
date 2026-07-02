@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 
-use crate::engine::{TranscriptionProfile, TranscriptionSegment};
+use crate::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
 use crate::transcript::{MeetingListItem, MeetingRecordingSession, MeetingTranscript};
 
@@ -60,8 +60,8 @@ impl Database {
 
         for (i, seg) in meeting.segments.iter().enumerate() {
             tx.execute(
-                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     meeting.id,
                     seg.text,
@@ -71,6 +71,7 @@ impl Database {
                     seg.language,
                     seg.confidence,
                     i as i64,
+                    seg.speaker.map(Speaker::as_str),
                 ],
             )
             .map_err(|e| format!("Insert segment: {e}"))?;
@@ -99,6 +100,141 @@ impl Database {
 
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
+    }
+
+    /// Write only the `meetings` header row (no segments, no FTS), creating it
+    /// if absent or refreshing the header fields if it exists. Used at the start
+    /// of a recording so segment rows have a valid FK target and a crash leaves
+    /// a row with `ended_at IS NULL` for recovery to finalize.
+    ///
+    /// On resume (conflict) `ended_at` is reset to NULL and `edited_transcript`
+    /// is deliberately left untouched so a user's edits survive re-recording.
+    pub fn upsert_meeting_header(&self, meeting: &MeetingTranscript) -> Result<(), String> {
+        let conn = self.conn.acquire()?;
+        conn.execute(
+            "INSERT INTO meetings (
+                id, title, started_at, ended_at, duration_seconds,
+                transcription_profile, recording_sessions, summary,
+                summary_is_stale, summary_model, summary_generated_at,
+                edited_transcript, notes
+             ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10)
+             ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                started_at = excluded.started_at,
+                ended_at = NULL,
+                transcription_profile = excluded.transcription_profile,
+                recording_sessions = excluded.recording_sessions,
+                summary = excluded.summary,
+                summary_is_stale = excluded.summary_is_stale,
+                summary_model = excluded.summary_model,
+                summary_generated_at = excluded.summary_generated_at,
+                notes = excluded.notes",
+            params![
+                meeting.id,
+                meeting.title,
+                meeting.started_at.to_rfc3339(),
+                serde_json::to_string(&meeting.transcription_profile)
+                    .map_err(|e| format!("Serialize profile: {e}"))?,
+                serde_json::to_string(&meeting.recording_sessions)
+                    .map_err(|e| format!("Serialize recording sessions: {e}"))?,
+                meeting.summary,
+                i32::from(meeting.summary_is_stale),
+                meeting.summary_model,
+                meeting.summary_generated_at.map(|dt| dt.to_rfc3339()),
+                meeting.notes,
+            ],
+        )
+        .map_err(|e| format!("Upsert meeting header: {e}"))?;
+        Ok(())
+    }
+
+    /// Append a batch of segments to an existing meeting in one transaction,
+    /// numbering them `start_sort_order..`. Append-only (no DELETE) so it is safe
+    /// to call repeatedly during a live meeting for crash durability.
+    pub fn append_segments(
+        &self,
+        meeting_id: &str,
+        segments: &[TranscriptionSegment],
+        start_sort_order: i64,
+    ) -> Result<(), String> {
+        if segments.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+        for (i, seg) in segments.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    meeting_id,
+                    seg.text,
+                    seg.start_time,
+                    seg.end_time,
+                    seg.is_final as i32,
+                    seg.language,
+                    seg.confidence,
+                    start_sort_order + i as i64,
+                    seg.speaker.map(Speaker::as_str),
+                ],
+            )
+            .map_err(|e| format!("Append segment: {e}"))?;
+        }
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+        Ok(())
+    }
+
+    /// Finalize meetings left with `ended_at IS NULL` by a crash mid-recording.
+    /// Empty shells (a started meeting with no persisted segments) are deleted;
+    /// the rest get `ended_at`/`duration`/`recording_sessions` synthesized from
+    /// their persisted segments and are rewritten (which also rebuilds FTS).
+    /// Returns the number of meetings salvaged. Safe to call only at startup,
+    /// before any live recording can hold a legitimately-open meeting.
+    pub fn recover_unfinished_meetings(&self) -> Result<usize, String> {
+        let ids: Vec<String> = {
+            let conn = self.conn.acquire()?;
+            let mut stmt = conn
+                .prepare("SELECT id FROM meetings WHERE ended_at IS NULL")
+                .map_err(|e| format!("Prepare unfinished: {e}"))?;
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .map_err(|e| format!("Query unfinished: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Collect unfinished: {e}"))?
+        };
+
+        let mut recovered = 0;
+        for id in ids {
+            let mut meeting = self.load_meeting(&id)?;
+            if meeting.segments.is_empty() {
+                self.delete_meeting(&id)?;
+                continue;
+            }
+            let duration = meeting
+                .segments
+                .iter()
+                .map(|s| s.end_time)
+                .fold(0.0_f64, f64::max);
+            let ended_at =
+                meeting.started_at + chrono::Duration::milliseconds((duration * 1000.0) as i64);
+            meeting.duration_seconds = duration;
+            meeting.ended_at = Some(ended_at);
+            if meeting.recording_sessions.is_empty() {
+                meeting
+                    .recording_sessions
+                    .push(MeetingRecordingSession::completed(
+                        format!("{id}-recovered"),
+                        meeting.started_at,
+                        ended_at,
+                        0,
+                        meeting.segments.len() as u64,
+                    ));
+            }
+            self.save_meeting(&meeting)?;
+            recovered += 1;
+        }
+        Ok(recovered)
     }
 
     /// Load a full meeting with segments by ID.
@@ -149,7 +285,7 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT text, start_time, end_time, is_final, language, confidence
+                "SELECT text, start_time, end_time, is_final, language, confidence, speaker
                  FROM segments WHERE meeting_id = ?1 ORDER BY sort_order",
             )
             .map_err(|e| format!("Prepare: {e}"))?;
@@ -163,6 +299,10 @@ impl Database {
                     is_final: row.get::<_, i32>(3)? != 0,
                     language: row.get(4)?,
                     confidence: row.get(5)?,
+                    speaker: row
+                        .get::<_, Option<String>>(6)?
+                        .as_deref()
+                        .and_then(Speaker::parse),
                 })
             })
             .map_err(|e| format!("Query segments: {e}"))?
@@ -464,6 +604,96 @@ mod tests {
         assert!(!loaded.summary_is_stale);
         assert_eq!(loaded.summary_model.as_deref(), Some("qwen2.5"));
         assert!(loaded.summary_generated_at.is_some());
+    }
+
+    #[test]
+    fn append_segments_persists_incrementally() {
+        use crate::engine::TranscriptionSegment;
+        let (db, _dir) = test_db();
+        let mut header = sample_meeting("live");
+        header.segments.clear();
+        header.ended_at = None;
+        db.upsert_meeting_header(&header).unwrap();
+
+        let seg = |t: &str, i: f64| TranscriptionSegment {
+            text: t.to_string(),
+            start_time: i,
+            end_time: i + 1.0,
+            is_final: true,
+            language: None,
+            confidence: None,
+            speaker: None,
+        };
+
+        db.append_segments("live", &[seg("one", 0.0), seg("two", 1.0)], 0)
+            .unwrap();
+        db.append_segments("live", &[seg("three", 2.0)], 2).unwrap();
+
+        let loaded = db.load_meeting("live").unwrap();
+        assert_eq!(loaded.segments.len(), 3);
+        assert_eq!(loaded.segments[0].text, "one");
+        assert_eq!(loaded.segments[2].text, "three");
+        assert!(loaded.ended_at.is_none(), "still in progress");
+    }
+
+    #[test]
+    fn recover_unfinished_finalizes_and_prunes() {
+        use crate::engine::TranscriptionSegment;
+        let (db, _dir) = test_db();
+
+        // A meeting with live-appended segments but no ended_at (crash).
+        let mut crashed = sample_meeting("crashed");
+        crashed.segments.clear();
+        crashed.ended_at = None;
+        crashed.recording_sessions.clear();
+        db.upsert_meeting_header(&crashed).unwrap();
+        db.append_segments(
+            "crashed",
+            &[TranscriptionSegment {
+                text: "salvage me".to_string(),
+                start_time: 0.0,
+                end_time: 12.0,
+                is_final: true,
+                language: None,
+                confidence: None,
+                speaker: None,
+            }],
+            0,
+        )
+        .unwrap();
+
+        // An empty shell (started, no segments, crash) — should be pruned.
+        let mut empty = sample_meeting("empty");
+        empty.segments.clear();
+        empty.ended_at = None;
+        db.upsert_meeting_header(&empty).unwrap();
+
+        let recovered = db.recover_unfinished_meetings().unwrap();
+        assert_eq!(recovered, 1);
+
+        let salvaged = db.load_meeting("crashed").unwrap();
+        assert!(salvaged.ended_at.is_some());
+        assert_eq!(salvaged.duration_seconds, 12.0);
+        assert_eq!(salvaged.recording_sessions.len(), 1);
+        assert_eq!(salvaged.segments.len(), 1);
+
+        assert!(!db.meeting_exists("empty").unwrap(), "empty shell pruned");
+    }
+
+    #[test]
+    fn upsert_header_preserves_edited_transcript_on_resume() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        db.save_edited_transcript("m1", Some("my edits")).unwrap();
+
+        // Resume reuses upsert_meeting_header — edits must survive.
+        let mut header = sample_meeting("m1");
+        header.ended_at = None;
+        db.upsert_meeting_header(&header).unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.edited_transcript.as_deref(), Some("my edits"));
+        assert!(loaded.ended_at.is_none());
     }
 
     #[test]

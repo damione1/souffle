@@ -143,6 +143,13 @@ impl Database {
                     .map_err(|e| format!("Update schema version v6: {e}"))?;
             }
 
+            if current_version < 7 {
+                conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
+                    .map_err(|e| format!("Schema migration v7 (segment speaker): {e}"))?;
+                conn.execute("UPDATE schema_version SET version = 7", [])
+                    .map_err(|e| format!("Update schema version v7: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

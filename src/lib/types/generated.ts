@@ -65,6 +65,9 @@ async loadModel(selection: TranscriptionProfileSelection) : Promise<Result<null,
 },
 /**
  * Start streaming transcription.
+ * 
+ * `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
+ * blocking wait runs off-thread and the window never freezes.
  */
 async startTranscription(channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
     try {
@@ -76,6 +79,10 @@ async startTranscription(channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise
 },
 /**
  * Stop streaming transcription.
+ * 
+ * Awaits the drain so the frontend's assembled transcript (used for clipboard
+ * and dictation history) is complete before this resolves. The drain runs in
+ * `spawn_blocking`, so awaiting it does not freeze the window.
  */
 async stopTranscription() : Promise<Result<null, string>> {
     try {
@@ -153,6 +160,11 @@ async resumeMeetingRecording(meetingId: string, channel: TAURI_CHANNEL<Transcrip
 },
 /**
  * Stop meeting recording and save transcript.
+ * 
+ * Decoupled stop: transitions to Stopping, returns the (already-known) meeting
+ * id immediately, and drains + saves in the background. Segments were persisted
+ * incrementally during the meeting, so the detail view can render right away
+ * and reconcile when the `MeetingFinalized` event fires.
  */
 async stopMeetingRecording() : Promise<Result<string, string>> {
     try {
@@ -442,6 +454,30 @@ async clearDictionary() : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Cheap, non-prompting snapshot for the onboarding's initial render.
+ */
+async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_permission_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Trigger the native prompt (or open System Settings) for one permission.
+ * `kind` is "microphone" | "system_audio" | "accessibility". The probe opens
+ * a device, so it runs off the command thread.
+ */
+async requestPermission(kind: string) : Promise<Result<PermState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("request_permission", { kind }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -449,6 +485,7 @@ async clearDictionary() : Promise<Result<null, string>> {
 
 
 export const events = __makeEvents__<{
+meetingFinalized: MeetingFinalized,
 meetingStopRequested: MeetingStopRequested,
 navigate: Navigate,
 pipelineError: PipelineError,
@@ -459,6 +496,7 @@ stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
 transcriptionHealth: TranscriptionHealth
 }>({
+meetingFinalized: "meeting-finalized",
 meetingStopRequested: "meeting-stop-requested",
 navigate: "navigate",
 pipelineError: "pipeline-error",
@@ -515,6 +553,14 @@ export type HealthStatus = "healthy" |
  */
 "stalled"
 /**
+ * Emitted once a stopped meeting has been fully drained and saved in the
+ * background, so the detail view can refresh from the now-complete record.
+ * `stop_meeting_recording` returns before this work finishes (decoupled stop),
+ * so the UI shows the partially-persisted meeting immediately and reconciles
+ * when this arrives.
+ */
+export type MeetingFinalized = { id: string }
+/**
  * Lightweight item for listing meetings
  */
 export type MeetingListItem = { id: string; title: string; started_at: string; duration_seconds: number; has_summary: boolean; summary_is_stale: boolean }
@@ -538,6 +584,17 @@ export type ModelArtifactDescriptor = { id: string; label: string; description: 
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
 export type OllamaStatus = { available: boolean; base_url: string; models: OllamaModelDescriptor[] }
+export type PermState = "granted" | "denied" | 
+/**
+ * Not yet probed — the user hasn't triggered this one (probing would
+ * prompt, so we don't do it unsolicited at startup).
+ */
+"unknown" | 
+/**
+ * The OS doesn't support this capability (e.g. taps need macOS 14.4+).
+ */
+"unsupported"
+export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState }
 /**
  * Pipeline failure surfaced to the frontend instead of dying silently in logs.
  */
@@ -560,6 +617,12 @@ export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
+/**
+ * Who produced a segment in a diarized meeting: the microphone is the local
+ * user (Me), system audio is everyone else (Them). `None` = single-stream
+ * session (dictation, or a meeting recorded without diarization).
+ */
+export type Speaker = "me" | "them"
 export type StateChanged = AppStateMachine
 export type SummarizeProgress = { text: string; done: boolean }
 /**
@@ -601,7 +664,11 @@ export type TranscriptionRuntimeStatus = { profile: TranscriptionProfile; phase:
 /**
  * A piece of transcribed text with metadata
  */
-export type TranscriptionSegment = { text: string; start_time: number; end_time: number; is_final: boolean; language: string | null; confidence: number | null }
+export type TranscriptionSegment = { text: string; start_time: number; end_time: number; is_final: boolean; language: string | null; confidence: number | null; 
+/**
+ * Set by the pipeline for diarized meetings; `None` otherwise.
+ */
+speaker?: Speaker | null }
 
 /** tauri-specta globals **/
 

@@ -47,6 +47,7 @@ struct StartParams {
     target_sample_rate: u32,
     mic_gain: f32,
     capture_system_audio: bool,
+    diarize: bool,
 }
 
 /// Per-session state for meeting mode (mic + system audio).
@@ -61,6 +62,9 @@ struct MeetingState {
     tap: Option<super::system_tap::TapHandle>,
     /// Whether echo cancellation is currently engaged (speakers route).
     aec_active: bool,
+    /// Emit mic (Me) and system audio (Them) as two source-tagged streams
+    /// instead of one mixed stream.
+    diarize: bool,
     ticks: u32,
 }
 
@@ -94,6 +98,10 @@ pub struct AudioChunk {
     pub samples: Vec<f32>,
     /// When the chunk left the capture callback — used for lag tracking.
     pub captured_at: Instant,
+    /// Source of this audio in a diarized meeting (Me = mic, Them = system
+    /// audio). `None` for single-stream sessions (dictation, mixed meetings),
+    /// in which case the actor routes it to the sole engine.
+    pub speaker: Option<crate::engine::Speaker>,
 }
 
 /// Messages flowing from the capture thread to the engine actor.
@@ -103,7 +111,9 @@ pub enum AudioMessage {
     /// Sent after the cpal stream is dropped and the resampler flushed —
     /// guaranteed to be the last message of a session, so the actor can
     /// drain deterministically instead of sleeping.
-    EndOfStream { session_id: u64 },
+    EndOfStream {
+        session_id: u64,
+    },
 }
 
 /// Info about an available audio input device, sent to frontend
@@ -217,7 +227,22 @@ impl AudioCapture {
                         match cmd_rx.recv_timeout(timeout) {
                             Ok(cmd) => cmd,
                             Err(RecvTimeoutError::Timeout) => {
-                                capture.meeting_tick();
+                                // The mixer/resampler/AEC run here on raw audio.
+                                // A panic in any of them must not abort the whole
+                                // app: catch it, end the session, and let the
+                                // engine actor recover via its AudioGone path
+                                // (the meeting is already incrementally saved).
+                                let ticked =
+                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        capture.meeting_tick()
+                                    }));
+                                if ticked.is_err() {
+                                    tracing::error!(
+                                        "Audio mixer panicked; ending session to keep the app alive"
+                                    );
+                                    capture.abort_after_panic();
+                                    break;
+                                }
                                 if capture.last_mic_check.elapsed() >= MIC_CHECK_INTERVAL {
                                     capture.last_mic_check = Instant::now();
                                     capture.check_mic_health();
@@ -239,12 +264,14 @@ impl AudioCapture {
                             target_sample_rate,
                             mic_gain,
                             capture_system_audio,
+                            diarize,
                         } => {
                             if let Err(e) = capture.start(
                                 session_id,
                                 target_sample_rate,
                                 mic_gain,
                                 capture_system_audio,
+                                diarize,
                             ) {
                                 warn!("Failed to start audio capture: {e}");
                             }
@@ -298,6 +325,7 @@ impl AudioCapture {
         target_sample_rate: u32,
         mic_gain: f32,
         capture_system_audio: bool,
+        diarize: bool,
     ) -> Result<(), String> {
         // Ensure any previous callback stops emitting immediately, and tear
         // down any leftover meeting state (tap included).
@@ -312,6 +340,7 @@ impl AudioCapture {
             target_sample_rate,
             mic_gain,
             capture_system_audio,
+            diarize,
         });
         self.stream_failed
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -336,6 +365,7 @@ impl AudioCapture {
                 session_id,
                 target_sample_rate,
                 mic_gain,
+                diarize,
             );
         }
 
@@ -356,6 +386,10 @@ impl AudioCapture {
             error!("Audio stream error: {err}");
             stream_failed.store(true, std::sync::atomic::Ordering::Relaxed);
         };
+        // Second handle so a panic inside the realtime callback (e.g. the
+        // resampler) can flag the stream for rebuild instead of unwinding
+        // across the CoreAudio C boundary (which would be UB).
+        let stream_failed_cb = Arc::clone(&self.stream_failed);
 
         // Reset the first-chunk logging flag for each new recording session
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -369,6 +403,7 @@ impl AudioCapture {
                         return;
                     }
 
+                    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let resampled = match resampler.lock() {
                         Ok(mut r) => r.process(data),
                         Err(_) => return,
@@ -396,7 +431,7 @@ impl AudioCapture {
                                 session_id,
                                 samples: resampled,
                                 captured_at: Instant::now(),
-                            }))
+                                speaker: None,                            }))
                             .is_err()
                         {
                             let dropped = dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -404,6 +439,10 @@ impl AudioCapture {
                                 warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
                             }
                         }
+                    }
+                    }));
+                    if caught.is_err() {
+                        stream_failed_cb.store(true, Ordering::Relaxed);
                     }
                 },
                 err_fn,
@@ -431,6 +470,7 @@ impl AudioCapture {
         session_id: u64,
         target_sample_rate: u32,
         mic_gain: f32,
+        diarize: bool,
     ) -> Result<(), String> {
         let sample_rate = config.sample_rate.0;
         let channels = config.channels;
@@ -468,19 +508,18 @@ impl AudioCapture {
             .map_err(|e| format!("Failed to start stream: {e}"))?;
 
         #[cfg(target_os = "macos")]
-        let (tap, tap_rate) =
-            match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
-                Ok(tap) => {
-                    let rate = tap.sample_rate;
-                    emit_system_audio_status(self.app.as_ref(), true, None);
-                    (Some(tap), rate)
-                }
-                Err(e) => {
-                    warn!("System audio capture unavailable, recording mic only: {e}");
-                    emit_system_audio_status(self.app.as_ref(), false, Some(e));
-                    (None, super::mixer::MIX_RATE)
-                }
-            };
+        let (tap, tap_rate) = match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
+            Ok(tap) => {
+                let rate = tap.sample_rate;
+                emit_system_audio_status(self.app.as_ref(), true, None);
+                (Some(tap), rate)
+            }
+            Err(e) => {
+                warn!("System audio capture unavailable, recording mic only: {e}");
+                emit_system_audio_status(self.app.as_ref(), false, Some(e));
+                (None, super::mixer::MIX_RATE)
+            }
+        };
         #[cfg(not(target_os = "macos"))]
         let tap_rate = {
             drop(tap_prod);
@@ -502,8 +541,7 @@ impl AudioCapture {
         // system-audio reference signal to cancel against.
         #[cfg(target_os = "macos")]
         let aec_active = {
-            let speakers =
-                tap.is_some() && super::output_route::output_is_builtin_speakers();
+            let speakers = tap.is_some() && super::output_route::output_is_builtin_speakers();
             if speakers {
                 info!("Built-in speakers detected — echo cancellation engaged");
                 mixer.set_aec(Some(super::aec::Aec::new(super::mixer::MIX_RATE)));
@@ -521,6 +559,7 @@ impl AudioCapture {
             #[cfg(target_os = "macos")]
             tap,
             aec_active,
+            diarize,
             ticks: 0,
         });
 
@@ -564,6 +603,7 @@ impl AudioCapture {
             params.target_sample_rate,
             params.mic_gain,
             params.capture_system_audio,
+            params.diarize,
         ) {
             warn!("Capture rebuild failed (will retry): {e}");
         }
@@ -571,38 +611,96 @@ impl AudioCapture {
 
     /// Periodic mixer pump while a meeting session is active.
     fn meeting_tick(&mut self) {
-        let Some(meeting) = self.meeting.as_mut() else {
-            return;
+        // Do all mixer work inside this borrow, then release it before calling
+        // &self/&mut self helpers (sending, RMS) to satisfy the borrow checker.
+        let (session_id, diarize, mixed, me, them) = {
+            let Some(meeting) = self.meeting.as_mut() else {
+                return;
+            };
+            meeting.ticks += 1;
+            if meeting.ticks.is_multiple_of(ROUTE_CHECK_TICKS) {
+                meeting.check_output_route(self.app.as_ref());
+            }
+            if meeting.diarize {
+                let (me, them) = meeting.mixer.tick_split();
+                (meeting.session_id, true, Vec::new(), me, them)
+            } else {
+                let mixed = meeting.mixer.tick();
+                (meeting.session_id, false, mixed, Vec::new(), Vec::new())
+            }
         };
 
-        meeting.ticks += 1;
-        if meeting.ticks.is_multiple_of(ROUTE_CHECK_TICKS) {
-            meeting.check_output_route(self.app.as_ref());
+        use crate::engine::Speaker;
+        if diarize {
+            self.store_meeting_rms(&me, &them);
+            self.send_meeting_chunk(session_id, me, Some(Speaker::Me));
+            self.send_meeting_chunk(session_id, them, Some(Speaker::Them));
+        } else {
+            self.store_meeting_rms(&mixed, &[]);
+            self.send_meeting_chunk(session_id, mixed, None);
         }
+    }
 
-        let samples = meeting.mixer.tick();
+    /// Update the shared RMS level (waveform) from one or two legs combined.
+    fn store_meeting_rms(&self, a: &[f32], b: &[f32]) {
+        let n = a.len() + b.len();
+        if n == 0 {
+            return;
+        }
+        let sum_sq: f32 = a.iter().chain(b).map(|s| s * s).sum();
+        let rms = (sum_sq / n as f32).sqrt();
+        self.audio_rms
+            .store((rms * 8.0).min(1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    /// Forward one meeting chunk to the engine actor, tagged with its source.
+    fn send_meeting_chunk(
+        &self,
+        session_id: u64,
+        samples: Vec<f32>,
+        speaker: Option<crate::engine::Speaker>,
+    ) {
         if samples.is_empty() {
             return;
         }
-
-        let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
-        let rms = (sum_sq / samples.len() as f32).sqrt();
-        self.audio_rms
-            .store((rms * 8.0).min(1.0).to_bits(), Ordering::Relaxed);
-
         if self
             .audio_sender
             .try_send(AudioMessage::Chunk(AudioChunk {
-                session_id: meeting.session_id,
+                session_id,
                 samples,
                 captured_at: Instant::now(),
+                speaker,
             }))
             .is_err()
         {
             let dropped = self.dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
             if dropped == 1 || dropped.is_multiple_of(100) {
-                warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
+                warn!(
+                    "Audio buffer full, dropping samples ({dropped} chunks dropped this session)"
+                );
             }
+        }
+    }
+
+    /// Tear down the current session after a panic in the tick path, without
+    /// running any of the (possibly corrupt) flush paths. The audio thread then
+    /// exits; the engine actor observes the closed audio channel (AudioGone) and
+    /// recovers — salvaging the meeting accumulated so far and surfacing a
+    /// recoverable error — instead of the whole app aborting.
+    fn abort_after_panic(&mut self) {
+        self.active_session_id.store(0, Ordering::Release);
+        self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
+        self.active_params = None;
+        self.mic_device_name = None;
+        self.stream.take();
+        self.resampler.take();
+        #[cfg(target_os = "macos")]
+        if let Some(mut meeting) = self.meeting.take() {
+            meeting.tap.take();
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.meeting.take();
         }
     }
 
@@ -629,13 +727,13 @@ impl AudioCapture {
             meeting.tap.take();
 
             if session_id != 0 {
-                let tail = meeting.mixer.flush();
-                if !tail.is_empty() {
-                    let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
-                        session_id,
-                        samples: tail,
-                        captured_at: Instant::now(),
-                    }));
+                if meeting.diarize {
+                    let (me, them) = meeting.mixer.flush_split();
+                    self.send_meeting_chunk(session_id, me, Some(crate::engine::Speaker::Me));
+                    self.send_meeting_chunk(session_id, them, Some(crate::engine::Speaker::Them));
+                } else {
+                    let tail = meeting.mixer.flush();
+                    self.send_meeting_chunk(session_id, tail, None);
                 }
                 let discarded = meeting.mixer.tap_discarded();
                 if discarded > 0 {
@@ -662,6 +760,7 @@ impl AudioCapture {
                         session_id,
                         samples: tail,
                         captured_at: Instant::now(),
+                        speaker: None,
                     }));
                 }
             }

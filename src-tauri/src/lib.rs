@@ -12,6 +12,7 @@ pub mod lock_ext;
 pub mod models;
 pub mod ollama;
 pub mod ort_runtime;
+pub mod permissions;
 pub mod pill;
 pub mod pipeline;
 pub mod platform;
@@ -34,6 +35,69 @@ use tracing::info;
 
 /// Default shortcut strings
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";
+
+/// Hold the non-blocking writer's worker guard for the process lifetime; if it
+/// drops, file logging silently stops.
+static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+    std::sync::OnceLock::new();
+
+/// Initialize logging to a rolling file under the app data dir (and stderr for
+/// terminal runs). Without this, every `tracing` event — including the panic
+/// hook and the whole pipeline's debug trail — is discarded, making field
+/// crashes and stalls undiagnosable. Verbose pipeline `debug!` lines are gated
+/// behind the in-app "Detailed transcription logs" setting, so the default
+/// `souffle=debug` filter only surfaces them once the user turns that on.
+fn init_logging() {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    let filter = EnvFilter::try_from_env("SOUFFLE_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("souffle=debug,warn"));
+
+    // File layer is best-effort: if the log dir can't be created we still get
+    // stderr (useful for `cargo tauri dev`).
+    let log_dir = constants::app_data_dir().join("logs");
+    let file_layer = if std::fs::create_dir_all(&log_dir).is_ok() {
+        let (writer, guard) = tracing_appender::non_blocking(tracing_appender::rolling::daily(
+            &log_dir,
+            "souffle.log",
+        ));
+        let _ = LOG_GUARD.set(guard);
+        Some(fmt::layer().with_ansi(false).with_writer(writer))
+    } else {
+        None
+    };
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(file_layer)
+        .try_init();
+}
+
+/// Log every panic (thread, message, location) before it unwinds. The macOS
+/// crash report only says "abort() called" with no Rust context, so without
+/// this a pipeline-thread panic is undiagnosable. Chains to the default hook.
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("<unnamed>");
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown location>".to_string());
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_string());
+        tracing::error!(thread = name, location = %location, "PANIC: {message}");
+        default(info);
+    }));
+}
 
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
@@ -79,6 +143,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::update_dictionary_entry,
             commands::delete_dictionary_entry,
             commands::clear_dictionary,
+            commands::get_permission_status,
+            commands::request_permission,
         ])
         .events(collect_events![
             app_events::Navigate,
@@ -90,10 +156,16 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::PipelineError,
             app_events::SystemAudioStatus,
             app_events::MeetingStopRequested,
+            app_events::MeetingFinalized,
         ])
 }
 
 pub fn run() {
+    // Must run before logging or the database open the data dir.
+    constants::migrate_legacy_data_dir();
+    init_logging();
+    install_panic_hook();
+
     // Create the shared audio RMS level
     let audio_rms = Arc::new(std::sync::atomic::AtomicU32::new(0f32.to_bits()));
     // Chunks dropped by the capture callback — read by the actor for health reporting
@@ -116,7 +188,7 @@ pub fn run() {
         dropped_counter,
         Box::new(engine::create_engine),
     ) {
-        Ok(actor) => actor,
+        Ok(actor) => Arc::new(actor),
         Err(e) => {
             tracing::error!("Fatal: {e}");
             std::process::exit(1);
@@ -134,6 +206,17 @@ pub fn run() {
         }
     };
     debug::init_from_db(&database);
+
+    // Finalize any meeting left mid-recording by a previous crash, so the
+    // incrementally-persisted segments show up cleanly in history.
+    match database.recover_unfinished_meetings() {
+        Ok(0) => {}
+        Ok(n) => info!(
+            count = n,
+            "Recovered unfinished meetings from a previous run"
+        ),
+        Err(e) => tracing::warn!("Meeting recovery failed: {e}"),
+    }
 
     let specta = specta_builder();
 
