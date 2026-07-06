@@ -148,6 +148,7 @@ export const mockMeeting: MeetingTranscript = {
   summary_model: null,
   summary_generated_at: null,
   edited_transcript: null,
+  notes: null,
 };
 
 export const mockMeetingList: MeetingListItem[] = [
@@ -189,6 +190,7 @@ export const mockSettings: AppSettings = {
   filler_removal: true,
   stutter_collapse: false,
   dictionary_correction: true,
+  capture_system_audio: true,
 };
 
 export const mockShortcuts: ShortcutSettings = {

@@ -51,6 +51,7 @@ describe('app store', () => {
       filler_removal: true,
       stutter_collapse: false,
       dictionary_correction: true,
+      capture_system_audio: true,
     };
     state.settings = newSettings;
     expect(state.settings.theme).toBe('light');

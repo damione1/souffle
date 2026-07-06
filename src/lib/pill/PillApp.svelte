@@ -2,7 +2,8 @@
   import { Square } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import { commands, events } from "../api/generated";
+  import { events } from "../api/generated";
+  import { getMachineState } from "../api/transcription";
   import Waveform from "../components/Waveform.svelte";
   import type { AppStateMachine } from "../types";
 
@@ -33,7 +34,7 @@
   onMount(() => {
     document.body.classList.add("pill-body");
 
-    void commands.getMachineState().then((state) => {
+    void getMachineState().then((state) => {
       machineState = state;
     });
     void events.stateChanged.listen((event) => {

@@ -154,7 +154,6 @@ describe("transcription controller", () => {
 
     // Reset shared singleton app state between tests
     const app = getAppState();
-    app.currentView = "transcription";
     app.currentMeetingId = null;
     app.machineState = { state: "idle" };
     app.transcriptionRuntimePhase = "download_required";
@@ -178,6 +177,7 @@ describe("transcription controller", () => {
       filler_removal: true,
       stutter_collapse: false,
       dictionary_correction: true,
+      capture_system_audio: true,
     };
 
     Object.assign(navigator, {
