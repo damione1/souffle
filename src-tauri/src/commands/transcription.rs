@@ -17,7 +17,7 @@ use crate::lock_ext::MutexExt;
 use crate::pipeline::{EngineActorHandle, SegmentCallback, SessionConfig};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator};
 use crate::state_machine::StateAction;
-use crate::transcript::{MeetingRecordingSession, MeetingTranscript};
+use crate::transcript::MeetingTranscript;
 
 /// Flush accumulated meeting segments to the DB once this many have piled up
 /// since the last flush. Segments are word-level, so this is a few seconds of
@@ -26,7 +26,7 @@ const MEETING_FLUSH_THRESHOLD: usize = 16;
 
 /// Build a header-only transcript (no segments) for `upsert_meeting_header`.
 /// `started_at` follows the first recording session on resume, else this
-/// session's start — matching `build_meeting_transcript`.
+/// session's start — matching `MeetingAccumulator::into_transcript`.
 fn meeting_header(acc: &MeetingAccumulator) -> MeetingTranscript {
     let started_at = acc
         .recording_sessions
@@ -78,7 +78,12 @@ fn build_meeting_on_segment(
                 let start = (meeting.existing_segments.len() + meeting.persisted_new_count) as i64;
                 let slice = meeting.new_segments[meeting.persisted_new_count..].to_vec();
                 meeting.persisted_new_count = meeting.new_segments.len();
-                Some((meeting.id.clone(), slice, start, meeting.persisted_new_count))
+                Some((
+                    meeting.id.clone(),
+                    slice,
+                    start,
+                    meeting.persisted_new_count,
+                ))
             }
         };
 
@@ -177,56 +182,6 @@ fn current_active_profile(state: &AppState) -> Result<crate::engine::Transcripti
         .active_profile()
         .cloned()
         .ok_or_else(|| "No active transcription profile".to_string())
-}
-
-/// Also used by the engine actor to salvage a meeting when its recording
-/// session aborts mid-way.
-pub(crate) fn build_meeting_transcript(
-    meeting: MeetingAccumulator,
-    ended_at: chrono::DateTime<chrono::Utc>,
-) -> MeetingTranscript {
-    let mut segments = meeting.existing_segments;
-    let start_segment_index = segments.len() as u64;
-    let had_new_segments = !meeting.new_segments.is_empty();
-    let has_summary = meeting.summary.is_some();
-    segments.extend(meeting.new_segments);
-    let end_segment_index = segments.len() as u64;
-
-    let mut recording_sessions = meeting.recording_sessions;
-    recording_sessions.push(MeetingRecordingSession::completed(
-        Uuid::new_v4().to_string(),
-        meeting.session_started_at,
-        ended_at,
-        start_segment_index,
-        end_segment_index,
-    ));
-
-    let started_at = recording_sessions
-        .first()
-        .map(|session| session.started_at)
-        .unwrap_or(meeting.session_started_at);
-    let ended_at = recording_sessions.last().map(|session| session.ended_at);
-    let duration_seconds = recording_sessions
-        .iter()
-        .map(|session| session.duration_seconds)
-        .sum();
-
-    MeetingTranscript {
-        id: meeting.id,
-        title: meeting.title,
-        started_at,
-        ended_at,
-        duration_seconds,
-        transcription_profile: meeting.transcription_profile,
-        recording_sessions,
-        segments,
-        summary: meeting.summary,
-        summary_is_stale: meeting.summary_is_stale || (has_summary && had_new_segments),
-        summary_model: meeting.summary_model,
-        summary_generated_at: meeting.summary_generated_at,
-        edited_transcript: None,
-        notes: meeting.notes,
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -570,7 +525,7 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
             if let Ok(mut guard) = state.meeting_accumulator.lock()
                 && let Some(meeting) = guard.take()
             {
-                let transcript = build_meeting_transcript(meeting, chrono::Utc::now());
+                let transcript = meeting.into_transcript(chrono::Utc::now());
                 if let Err(e) = state.db.save_meeting(&transcript) {
                     tracing::error!(id = %transcript.id, "Failed to save meeting: {e}");
                 } else {
@@ -618,102 +573,13 @@ pub fn paste_text(text: String, delay_ms: u64) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, build_meeting_transcript};
+    use super::{MEETING_FLUSH_THRESHOLD, build_meeting_on_segment};
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
     use crate::state::MeetingAccumulator;
     use crate::test_helpers::fixtures::test_db;
-    use crate::transcript::MeetingRecordingSession;
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use std::sync::{Arc, Mutex};
     use tauri::ipc::Channel;
-
-    #[test]
-    fn build_meeting_transcript_appends_resumed_session_and_marks_summary_stale() {
-        let first_start = Utc::now();
-        let first_end = first_start + Duration::seconds(30);
-        let second_start = first_end + Duration::minutes(5);
-        let second_end = second_start + Duration::seconds(45);
-
-        let transcript = build_meeting_transcript(
-            MeetingAccumulator {
-                id: "meeting-1".to_string(),
-                title: "Roadmap".to_string(),
-                existing_segments: vec![TranscriptionSegment {
-                    text: "Existing".to_string(),
-                    start_time: 0.0,
-                    end_time: 1.0,
-                    is_final: true,
-                    language: None,
-                    confidence: None,
-                    speaker: None,
-                }],
-                new_segments: vec![TranscriptionSegment {
-                    text: "Appended".to_string(),
-                    start_time: 1.0,
-                    end_time: 2.0,
-                    is_final: true,
-                    language: None,
-                    confidence: None,
-                    speaker: None,
-                }],
-                recording_sessions: vec![MeetingRecordingSession::completed(
-                    "session-1".to_string(),
-                    first_start,
-                    first_end,
-                    0,
-                    1,
-                )],
-                session_started_at: second_start,
-                transcription_profile: default_transcription_profile(),
-                summary: Some("Old summary".to_string()),
-                summary_is_stale: false,
-                summary_model: Some("qwen".to_string()),
-                summary_generated_at: Some(first_end),
-                notes: None,
-                persisted_new_count: 0,
-            },
-            second_end,
-        );
-
-        assert_eq!(transcript.id, "meeting-1");
-        assert_eq!(transcript.recording_sessions.len(), 2);
-        assert_eq!(transcript.recording_sessions[1].start_segment_index, 1);
-        assert_eq!(transcript.recording_sessions[1].end_segment_index, 2);
-        assert_eq!(transcript.segments.len(), 2);
-        assert!(transcript.summary_is_stale);
-        assert_eq!(transcript.started_at, first_start);
-        assert_eq!(transcript.ended_at, Some(second_end));
-        assert_eq!(transcript.duration_seconds, 75.0);
-    }
-
-    #[test]
-    fn build_meeting_transcript_preserves_fresh_summary_when_no_new_segments_arrive() {
-        let started_at = Utc::now();
-        let ended_at = started_at + Duration::seconds(10);
-
-        let transcript = build_meeting_transcript(
-            MeetingAccumulator {
-                id: "meeting-2".to_string(),
-                title: "Silent Resume".to_string(),
-                existing_segments: Vec::new(),
-                new_segments: Vec::new(),
-                recording_sessions: Vec::new(),
-                session_started_at: started_at,
-                transcription_profile: default_transcription_profile(),
-                summary: Some("Still current".to_string()),
-                summary_is_stale: false,
-                summary_model: Some("qwen".to_string()),
-                summary_generated_at: Some(started_at),
-                notes: None,
-                persisted_new_count: 0,
-            },
-            ended_at,
-        );
-
-        assert_eq!(transcript.recording_sessions.len(), 1);
-        assert_eq!(transcript.duration_seconds, 10.0);
-        assert!(!transcript.summary_is_stale);
-    }
 
     #[test]
     fn build_meeting_on_segment_rolls_back_persisted_count_on_flush_failure() {

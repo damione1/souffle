@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use crossbeam_channel::Sender;
 use tauri::AppHandle;
 use tauri_specta::Event;
-use tracing::debug;
+use tracing::{debug, error, info, warn};
 
 use crate::app_events::StateChanged;
 use crate::db::Database;
@@ -12,7 +12,7 @@ use crate::engine::{TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
 use crate::pipeline::EngineActorHandle;
 use crate::state_machine::{AppStateMachine, StateAction};
-use crate::transcript::MeetingRecordingSession;
+use crate::transcript::{MeetingRecordingSession, MeetingTranscript};
 
 /// Commands sent to the audio thread
 pub enum AudioCommand {
@@ -54,6 +54,57 @@ pub struct MeetingAccumulator {
     /// incremental persistence path. Lets a crash mid-meeting lose at most the
     /// last unflushed batch instead of the whole session.
     pub persisted_new_count: usize,
+}
+
+impl MeetingAccumulator {
+    /// Build the persisted transcript for this accumulator, appending one
+    /// completed recording session ending at `ended_at`. Also used by the
+    /// engine actor (via `AppState::abort_active_session`) to salvage a
+    /// meeting when its recording session aborts mid-way.
+    pub fn into_transcript(self, ended_at: chrono::DateTime<chrono::Utc>) -> MeetingTranscript {
+        let mut segments = self.existing_segments;
+        let start_segment_index = segments.len() as u64;
+        let had_new_segments = !self.new_segments.is_empty();
+        let has_summary = self.summary.is_some();
+        segments.extend(self.new_segments);
+        let end_segment_index = segments.len() as u64;
+
+        let mut recording_sessions = self.recording_sessions;
+        recording_sessions.push(MeetingRecordingSession::completed(
+            uuid::Uuid::new_v4().to_string(),
+            self.session_started_at,
+            ended_at,
+            start_segment_index,
+            end_segment_index,
+        ));
+
+        let started_at = recording_sessions
+            .first()
+            .map(|session| session.started_at)
+            .unwrap_or(self.session_started_at);
+        let ended_at = recording_sessions.last().map(|session| session.ended_at);
+        let duration_seconds = recording_sessions
+            .iter()
+            .map(|session| session.duration_seconds)
+            .sum();
+
+        MeetingTranscript {
+            id: self.id,
+            title: self.title,
+            started_at,
+            ended_at,
+            duration_seconds,
+            transcription_profile: self.transcription_profile,
+            recording_sessions,
+            segments,
+            summary: self.summary,
+            summary_is_stale: self.summary_is_stale || (has_summary && had_new_segments),
+            summary_model: self.summary_model,
+            summary_generated_at: self.summary_generated_at,
+            edited_transcript: None,
+            notes: self.notes,
+        }
+    }
 }
 
 /// Shared application state, managed by Tauri.
@@ -132,5 +183,131 @@ impl AppState {
             .as_ref()
             .cloned()
             .ok_or_else(|| "App handle not set".to_string())
+    }
+
+    /// A session died mid-recording: stop audio capture, salvage any
+    /// in-progress meeting to the DB, and fail the state machine so the UI
+    /// leaves the recording state. Called by the engine actor after it emits
+    /// the PipelineError event (the pipeline layer owns that event; this is
+    /// the app-level cleanup that follows it).
+    pub fn abort_active_session(&self, message: String) {
+        let _ = self.audio_cmd_sender.send(AudioCommand::Stop);
+
+        // Salvage an in-progress meeting: stop_meeting_recording can no
+        // longer run once the machine is in Error, so the accumulated
+        // segments would otherwise be lost.
+        let accumulator = self
+            .meeting_accumulator
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+        if let Some(meeting) = accumulator {
+            let transcript = meeting.into_transcript(chrono::Utc::now());
+            match self.db.save_meeting(&transcript) {
+                Ok(()) => info!(
+                    id = %transcript.id,
+                    "Meeting salvaged to history after session abort"
+                ),
+                Err(e) => error!("Failed to salvage meeting after session abort: {e}"),
+            }
+        }
+
+        if let Err(e) = self.apply_transition(StateAction::Fail { message }) {
+            warn!("Failed to apply Fail transition after session abort: {e}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::default_transcription_profile;
+    use crate::transcript::MeetingRecordingSession;
+    use chrono::Duration;
+
+    #[test]
+    fn into_transcript_appends_resumed_session_and_marks_summary_stale() {
+        let first_start = chrono::Utc::now();
+        let first_end = first_start + Duration::seconds(30);
+        let second_start = first_end + Duration::minutes(5);
+        let second_end = second_start + Duration::seconds(45);
+
+        let accumulator = MeetingAccumulator {
+            id: "meeting-1".to_string(),
+            title: "Roadmap".to_string(),
+            existing_segments: vec![TranscriptionSegment {
+                text: "Existing".to_string(),
+                start_time: 0.0,
+                end_time: 1.0,
+                is_final: true,
+                language: None,
+                confidence: None,
+                speaker: None,
+            }],
+            new_segments: vec![TranscriptionSegment {
+                text: "Appended".to_string(),
+                start_time: 1.0,
+                end_time: 2.0,
+                is_final: true,
+                language: None,
+                confidence: None,
+                speaker: None,
+            }],
+            recording_sessions: vec![MeetingRecordingSession::completed(
+                "session-1".to_string(),
+                first_start,
+                first_end,
+                0,
+                1,
+            )],
+            session_started_at: second_start,
+            transcription_profile: default_transcription_profile(),
+            summary: Some("Old summary".to_string()),
+            summary_is_stale: false,
+            summary_model: Some("qwen".to_string()),
+            summary_generated_at: Some(first_end),
+            notes: None,
+            persisted_new_count: 0,
+        };
+
+        let transcript = accumulator.into_transcript(second_end);
+
+        assert_eq!(transcript.id, "meeting-1");
+        assert_eq!(transcript.recording_sessions.len(), 2);
+        assert_eq!(transcript.recording_sessions[1].start_segment_index, 1);
+        assert_eq!(transcript.recording_sessions[1].end_segment_index, 2);
+        assert_eq!(transcript.segments.len(), 2);
+        assert!(transcript.summary_is_stale);
+        assert_eq!(transcript.started_at, first_start);
+        assert_eq!(transcript.ended_at, Some(second_end));
+        assert_eq!(transcript.duration_seconds, 75.0);
+    }
+
+    #[test]
+    fn into_transcript_preserves_fresh_summary_when_no_new_segments_arrive() {
+        let started_at = chrono::Utc::now();
+        let ended_at = started_at + Duration::seconds(10);
+
+        let accumulator = MeetingAccumulator {
+            id: "meeting-2".to_string(),
+            title: "Silent Resume".to_string(),
+            existing_segments: Vec::new(),
+            new_segments: Vec::new(),
+            recording_sessions: Vec::new(),
+            session_started_at: started_at,
+            transcription_profile: default_transcription_profile(),
+            summary: Some("Still current".to_string()),
+            summary_is_stale: false,
+            summary_model: Some("qwen".to_string()),
+            summary_generated_at: Some(started_at),
+            notes: None,
+            persisted_new_count: 0,
+        };
+
+        let transcript = accumulator.into_transcript(ended_at);
+
+        assert_eq!(transcript.recording_sessions.len(), 1);
+        assert_eq!(transcript.duration_seconds, 10.0);
+        assert!(!transcript.summary_is_stale);
     }
 }
