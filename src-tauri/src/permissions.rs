@@ -30,6 +30,15 @@ pub struct PermissionStatus {
     pub accessibility: PermState,
 }
 
+/// Which capability to probe or prompt for via `request`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionKind {
+    Microphone,
+    SystemAudio,
+    Accessibility,
+}
+
 /// Cheap, non-prompting snapshot for the initial onboarding render. Microphone
 /// and system audio are left `Unknown` (probing them would prompt); the user
 /// triggers those explicitly via `request_permission`.
@@ -139,14 +148,15 @@ pub fn probe_microphone() -> PermState {
         return PermState::Denied;
     }
 
-    // Wait up to ~800ms for a callback. On first launch the prompt is showing
-    // during this window; if the user grants quickly we see data, otherwise we
-    // report Denied and they re-trigger after granting.
-    for _ in 0..16 {
+    // Wait up to 15s for a callback. On first launch the macOS TCC dialog is
+    // still on screen when this probe starts, so the window must outlast the
+    // time it takes the user to read it and click Allow/Deny. When permission
+    // was already granted the early exit as soon as data arrives keeps this fast.
+    for _ in 0..150 {
         if got.load(Ordering::Relaxed) {
             break;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(100));
     }
     drop(stream);
 
@@ -182,11 +192,11 @@ pub fn probe_system_audio() -> PermState {
 
 /// Trigger the native prompt (or open Settings) for one permission and return
 /// the resulting state.
-pub fn request(kind: &str) -> PermState {
+pub fn request(kind: PermissionKind) -> PermState {
     match kind {
-        "microphone" => probe_microphone(),
-        "system_audio" => probe_system_audio(),
-        "accessibility" => {
+        PermissionKind::Microphone => probe_microphone(),
+        PermissionKind::SystemAudio => probe_system_audio(),
+        PermissionKind::Accessibility => {
             open_accessibility_settings();
             if accessibility_granted() {
                 PermState::Granted
@@ -194,6 +204,5 @@ pub fn request(kind: &str) -> PermState {
                 PermState::Denied
             }
         }
-        _ => PermState::Unknown,
     }
 }

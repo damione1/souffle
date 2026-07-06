@@ -155,23 +155,23 @@ fn is_summary_capable_model(model: &str) -> bool {
     }
 
     let lower = model.to_ascii_lowercase();
-    let blocked_keywords = [
-        "whisper",
-        "stt",
-        "asr",
-        "speech",
-        "wav2vec",
-        "embed",
-        "embedding",
-        "minilm",
-        "bge",
-        "gte",
-        "e5",
-    ];
 
-    !blocked_keywords
+    // Long enough to be unambiguous as a substring anywhere in the name.
+    let blocked_substrings = ["whisper", "speech", "wav2vec", "embed", "minilm"];
+    if blocked_substrings
         .iter()
         .any(|keyword| lower.contains(keyword))
+    {
+        return false;
+    }
+
+    // Short keywords collide with unrelated model names as substrings (e.g.
+    // "e5" inside "faste5ish"), so only block them as whole tokens.
+    let blocked_tokens = ["stt", "asr", "e5", "bge", "gte"];
+    let tokens = lower.split(|c: char| !c.is_alphanumeric());
+    !tokens
+        .into_iter()
+        .any(|token| blocked_tokens.contains(&token))
 }
 
 fn summary_model_priority(model: &str) -> usize {
@@ -541,6 +541,19 @@ mod tests {
     fn rejects_speech_and_embedding_models_for_summary() {
         assert!(!is_summary_capable_model("karanchopda333/whisper:latest"));
         assert!(!is_summary_capable_model("nomic-embed-text:latest"));
+    }
+
+    #[test]
+    fn rejects_short_keyword_models_as_whole_tokens() {
+        assert!(!is_summary_capable_model("intfloat/e5-large"));
+        assert!(!is_summary_capable_model("kyutai-stt:1b"));
+    }
+
+    #[test]
+    fn accepts_models_where_short_keyword_is_only_a_substring() {
+        // "e5" and "gte" appear inside these names but not as a standalone token.
+        assert!(is_summary_capable_model("faste5ish:latest"));
+        assert!(is_summary_capable_model("vgte-model:latest"));
     }
 
     #[test]

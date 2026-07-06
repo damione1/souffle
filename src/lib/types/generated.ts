@@ -468,10 +468,9 @@ async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
 },
 /**
  * Trigger the native prompt (or open System Settings) for one permission.
- * `kind` is "microphone" | "system_audio" | "accessibility". The probe opens
- * a device, so it runs off the command thread.
+ * The probe opens a device, so it runs off the command thread.
  */
-async requestPermission(kind: string) : Promise<Result<PermState, string>> {
+async requestPermission(kind: PermissionKind) : Promise<Result<PermState, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("request_permission", { kind }) };
 } catch (e) {
@@ -594,6 +593,10 @@ export type PermState = "granted" | "denied" |
  * The OS doesn't support this capability (e.g. taps need macOS 14.4+).
  */
 "unsupported"
+/**
+ * Which capability to probe or prompt for via `request`.
+ */
+export type PermissionKind = "microphone" | "system_audio" | "accessibility"
 export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState }
 /**
  * Pipeline failure surfaced to the frontend instead of dying silently in logs.

@@ -16,6 +16,7 @@ export type {
   OllamaModelDescriptor,
   OllamaStatus,
   PermState,
+  PermissionKind,
   PermissionStatus,
   RecordingKind,
   ShortcutSettings,
