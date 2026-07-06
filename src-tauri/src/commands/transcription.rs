@@ -78,14 +78,27 @@ fn build_meeting_on_segment(
                 let start = (meeting.existing_segments.len() + meeting.persisted_new_count) as i64;
                 let slice = meeting.new_segments[meeting.persisted_new_count..].to_vec();
                 meeting.persisted_new_count = meeting.new_segments.len();
-                Some((meeting.id.clone(), slice, start))
+                Some((meeting.id.clone(), slice, start, meeting.persisted_new_count))
             }
         };
 
-        if let Some((id, segments, start)) = batch
+        if let Some((id, segments, start, advanced_to)) = batch
             && let Err(e) = db.append_segments(&id, &segments, start)
         {
             warn!("Incremental meeting segment flush failed: {e}");
+            // Roll the counter back so this batch is retried on the next flush
+            // instead of being permanently skipped, which would otherwise widen
+            // the crash-loss window beyond one batch. This callback runs only on
+            // the single engine-actor thread, so nothing else advances
+            // persisted_new_count between the write above and this re-lock; the
+            // equality check below only guards against the accumulator having
+            // been taken (and possibly replaced) by a concurrent stop.
+            if let Ok(mut guard) = accumulator.lock()
+                && let Some(meeting) = guard.as_mut()
+                && meeting.persisted_new_count == advanced_to
+            {
+                meeting.persisted_new_count -= segments.len();
+            }
         }
     })
 }
@@ -136,6 +149,15 @@ async fn launch_meeting(
     if let Err(error) = res {
         if let Ok(mut acc) = acc.lock() {
             *acc = None;
+        }
+        // The header row upserted above is now orphaned (ended_at IS NULL) with
+        // no recording in progress: recovery is safe to run here immediately,
+        // rather than waiting for the next app restart, because clearing the
+        // accumulator above guarantees no meeting is mid-recording. This either
+        // deletes an empty new-meeting shell or finalizes a resumed meeting from
+        // its already-persisted segments.
+        if let Err(e) = state.db.recover_unfinished_meetings() {
+            warn!("Meeting recovery after failed start failed: {e}");
         }
         return Err(error);
     }
@@ -535,29 +557,45 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
 
-        let pipeline_err =
-            stop_pipeline_blocking(&state.engine_actor, &state.audio_cmd_sender).err();
+        // Only the fallible drain+save is guarded: if it panics (e.g. an engine
+        // or DB driver bug), the transition and event emit below still must run
+        // so the machine never gets stuck in Stopping. Segments already flushed
+        // incrementally during the meeting are not lost even if this panics.
+        let drain_and_save = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let pipeline_err =
+                stop_pipeline_blocking(&state.engine_actor, &state.audio_cmd_sender).err();
 
-        // Authoritative full save from the in-memory accumulator (overwrites the
-        // incrementally-persisted rows with the complete, finalized transcript).
-        if let Ok(mut guard) = state.meeting_accumulator.lock()
-            && let Some(meeting) = guard.take()
-        {
-            let transcript = build_meeting_transcript(meeting, chrono::Utc::now());
-            if let Err(e) = state.db.save_meeting(&transcript) {
-                tracing::error!(id = %transcript.id, "Failed to save meeting: {e}");
-            } else {
-                info!(
-                    id = %transcript.id,
-                    duration = transcript.duration_seconds,
-                    sessions = transcript.recording_sessions.len(),
-                    "Meeting recording saved"
-                );
+            // Authoritative full save from the in-memory accumulator (overwrites the
+            // incrementally-persisted rows with the complete, finalized transcript).
+            if let Ok(mut guard) = state.meeting_accumulator.lock()
+                && let Some(meeting) = guard.take()
+            {
+                let transcript = build_meeting_transcript(meeting, chrono::Utc::now());
+                if let Err(e) = state.db.save_meeting(&transcript) {
+                    tracing::error!(id = %transcript.id, "Failed to save meeting: {e}");
+                } else {
+                    info!(
+                        id = %transcript.id,
+                        duration = transcript.duration_seconds,
+                        sessions = transcript.recording_sessions.len(),
+                        "Meeting recording saved"
+                    );
+                }
             }
-        }
 
-        // Always complete the transition, even if drain/save failed, so the
-        // machine never gets stuck in Stopping.
+            pipeline_err
+        }));
+
+        let pipeline_err = match drain_and_save {
+            Ok(pipeline_err) => pipeline_err,
+            Err(_) => {
+                tracing::error!("Meeting stop task panicked during drain/save");
+                None
+            }
+        };
+
+        // Always complete the transition, even if drain/save failed or panicked,
+        // so the machine never gets stuck in Stopping.
         if let Err(e) = state.apply_transition(StateAction::StopComplete) {
             warn!("Failed to complete stop transition: {e}");
         }
@@ -580,11 +618,14 @@ pub fn paste_text(text: String, delay_ms: u64) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::build_meeting_transcript;
+    use super::{MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, build_meeting_transcript};
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
     use crate::state::MeetingAccumulator;
+    use crate::test_helpers::fixtures::test_db;
     use crate::transcript::MeetingRecordingSession;
     use chrono::{Duration, Utc};
+    use std::sync::{Arc, Mutex};
+    use tauri::ipc::Channel;
 
     #[test]
     fn build_meeting_transcript_appends_resumed_session_and_marks_summary_stale() {
@@ -672,5 +713,53 @@ mod tests {
         assert_eq!(transcript.recording_sessions.len(), 1);
         assert_eq!(transcript.duration_seconds, 10.0);
         assert!(!transcript.summary_is_stale);
+    }
+
+    #[test]
+    fn build_meeting_on_segment_rolls_back_persisted_count_on_flush_failure() {
+        // No upsert_meeting_header call for this id: the meetings row does not
+        // exist, so append_segments fails on the segments.meeting_id foreign
+        // key, exercising the same failure the fix guards against.
+        let (db, _dir) = test_db();
+        let db = Arc::new(db);
+
+        let accumulator = Arc::new(Mutex::new(Some(MeetingAccumulator {
+            id: "missing-meeting".to_string(),
+            title: "Ghost".to_string(),
+            existing_segments: Vec::new(),
+            new_segments: Vec::new(),
+            recording_sessions: Vec::new(),
+            session_started_at: Utc::now(),
+            transcription_profile: default_transcription_profile(),
+            summary: None,
+            summary_is_stale: false,
+            summary_model: None,
+            summary_generated_at: None,
+            notes: None,
+            persisted_new_count: 0,
+        })));
+
+        let channel: Channel<TranscriptionSegment> = Channel::new(|_| Ok(()));
+        let on_segment = build_meeting_on_segment(channel, Arc::clone(&accumulator), db);
+
+        for i in 0..MEETING_FLUSH_THRESHOLD {
+            on_segment(TranscriptionSegment {
+                text: format!("segment {i}"),
+                start_time: i as f64,
+                end_time: i as f64 + 1.0,
+                is_final: true,
+                language: None,
+                confidence: None,
+                speaker: None,
+            });
+        }
+
+        let guard = accumulator.lock().unwrap();
+        let meeting = guard.as_ref().unwrap();
+        assert_eq!(meeting.new_segments.len(), MEETING_FLUSH_THRESHOLD);
+        assert_eq!(
+            meeting.persisted_new_count, 0,
+            "flush failed (FK violation) so the batch must be retried, not lost"
+        );
     }
 }
