@@ -460,4 +460,84 @@ describe("settings controller", () => {
     expect(ctrl.formatShortcut("Alt+K")).toBe("\u2325 K");
     expect(ctrl.formatShortcut("")).toBe("Not set");
   });
+
+  it("enabling calendar integration persists only when permission is granted", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "request_permission") {
+        expect(args).toEqual({ kind: "calendar" });
+        return Promise.resolve("granted");
+      }
+      if (cmd === "list_calendars") {
+        return Promise.resolve([{ id: "cal-1", title: "Work", source_title: "iCloud" }]);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    await ctrl.onCalendarEnabledChange({ target: { checked: true } } as unknown as Event);
+
+    expect(mockInvoke).toHaveBeenCalledWith("request_permission", { kind: "calendar" });
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+      settings: expect.objectContaining({ calendar_integration_enabled: true }),
+    }));
+    expect(ctrl.calendarPermission).toBe("granted");
+    expect(ctrl.calendars).toEqual([{ id: "cal-1", title: "Work", source_title: "iCloud" }]);
+  });
+
+  it("enabling calendar integration does not persist when permission is denied", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "request_permission") return Promise.resolve("denied");
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    const target = { checked: true };
+    await ctrl.onCalendarEnabledChange({ target } as unknown as Event);
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.objectContaining({
+      settings: expect.objectContaining({ calendar_integration_enabled: true }),
+    }));
+    expect(target.checked).toBe(false);
+    expect(ctrl.calendarPermission).toBe("denied");
+  });
+
+  it("toggleCalendarSelected materializes the full list, collapses back to empty, and keeps one", async () => {
+    const cals = [
+      { id: "cal-1", title: "Work", source_title: "iCloud" },
+      { id: "cal-2", title: "Perso", source_title: "Google" },
+    ];
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "request_permission") return Promise.resolve("granted");
+      if (cmd === "list_calendars") return Promise.resolve(cals);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    await ctrl.onCalendarEnabledChange({ target: { checked: true } } as unknown as Event);
+    const app = getAppState();
+
+    // Empty selection means all; unchecking cal-1 keeps only cal-2.
+    ctrl.toggleCalendarSelected("cal-1");
+    await vi.waitFor(() => {
+      expect(app.settings.calendar_selected_ids).toEqual(["cal-2"]);
+    });
+
+    // The last selected calendar cannot be removed.
+    ctrl.toggleCalendarSelected("cal-2");
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.anything());
+    });
+    expect(app.settings.calendar_selected_ids).toEqual(["cal-2"]);
+
+    // Re-checking cal-1 completes the set, which collapses back to "all".
+    ctrl.toggleCalendarSelected("cal-1");
+    await vi.waitFor(() => {
+      expect(app.settings.calendar_selected_ids).toEqual([]);
+    });
+  });
 });

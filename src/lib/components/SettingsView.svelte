@@ -4,6 +4,7 @@
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
   import AdvancedSettingsSection from "../features/settings/components/AdvancedSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
+  import CalendarSettingsSection from "../features/settings/components/CalendarSettingsSection.svelte";
   import DictionarySettingsSection from "../features/settings/components/DictionarySettingsSection.svelte";
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
@@ -76,6 +77,17 @@
     entries={controller.dictionaryEntries}
     onAdd={controller.handleAddDictionaryEntry}
     onDelete={controller.handleDeleteDictionaryEntry}
+  />
+
+  <CalendarSettingsSection
+    enabled={controller.app.settings.calendar_integration_enabled}
+    permission={controller.calendarPermission}
+    calendars={controller.calendars}
+    selectedIds={controller.app.settings.calendar_selected_ids}
+    reminderMinutes={controller.app.settings.calendar_reminder_minutes}
+    onEnabledChange={controller.onCalendarEnabledChange}
+    onToggleCalendar={controller.toggleCalendarSelected}
+    onReminderMinutesChange={controller.onCalendarReminderMinutesChange}
   />
 
   <AdvancedSettingsSection>
