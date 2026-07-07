@@ -10,6 +10,8 @@
 //! via `spawn_blocking` (they can block on TCC prompts or cross-process
 //! calendar queries).
 
+pub mod scheduler;
+
 use chrono::{DateTime, Duration as ChronoDuration, Local, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use specta::Type;

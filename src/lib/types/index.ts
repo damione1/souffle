@@ -28,6 +28,7 @@ export type {
   SummarizeProgress,
   Theme,
   TodayCalendar,
+  UpcomingMeeting,
   HealthStatus,
   PipelineError,
   SystemAudioStatus,

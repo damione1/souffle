@@ -36,6 +36,7 @@
   let unlistenSystemAudio: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
   let unlistenMeetingFinalized: (() => void) | null = null;
+  let unlistenUpcomingMeeting: (() => void) | null = null;
 
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
@@ -143,6 +144,12 @@
       unlistenMeetingFinalized = fn;
     });
 
+    events.upcomingMeeting.listen((event) => {
+      app.upcomingMeeting = event.payload;
+    }).then((fn) => {
+      unlistenUpcomingMeeting = fn;
+    });
+
     return () => {
       cleanupTranscription();
       unlistenNav?.();
@@ -152,6 +159,7 @@
       unlistenSystemAudio?.();
       unlistenMeetingStop?.();
       unlistenMeetingFinalized?.();
+      unlistenUpcomingMeeting?.();
     };
   });
 </script>

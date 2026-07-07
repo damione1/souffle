@@ -517,7 +517,8 @@ shortcutPttStop: ShortcutPttStop,
 shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
-transcriptionHealth: TranscriptionHealth
+transcriptionHealth: TranscriptionHealth,
+upcomingMeeting: UpcomingMeeting
 }>({
 meetingFinalized: "meeting-finalized",
 meetingStopRequested: "meeting-stop-requested",
@@ -528,7 +529,8 @@ shortcutPttStop: "shortcut-ptt-stop",
 shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
 systemAudioStatus: "system-audio-status",
-transcriptionHealth: "transcription-health"
+transcriptionHealth: "transcription-health",
+upcomingMeeting: "upcoming-meeting"
 })
 
 /** user-defined constants **/
@@ -755,6 +757,13 @@ export type TranscriptionSegment = { text: string; start_time: number; end_time:
  * Set by the pipeline for diarized meetings; `None` otherwise.
  */
 speaker?: Speaker | null }
+/**
+ * Emitted by the calendar reminder scheduler shortly before a calendar
+ * event starts, so the frontend can offer a one-click transcription start.
+ * A system notification is sent alongside; this event drives the in-app
+ * banner (notification clicks are not reliably delivered on macOS).
+ */
+export type UpcomingMeeting = { event: CalendarEvent; starts_in_seconds: number }
 
 /** tauri-specta globals **/
 

@@ -160,6 +160,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::SystemAudioStatus,
             app_events::MeetingStopRequested,
             app_events::MeetingFinalized,
+            app_events::UpcomingMeeting,
         ])
 }
 
@@ -275,6 +276,7 @@ pub fn run() {
             }
 
             tray::setup_tray(app.handle())?;
+            calendar::scheduler::spawn(app.handle().clone());
             info!("Souffle started");
             Ok(())
         })

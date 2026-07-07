@@ -90,3 +90,13 @@ pub struct SystemAudioStatus {
     /// Present when inactive because of an error (e.g. permission denied).
     pub reason: Option<String>,
 }
+
+/// Emitted by the calendar reminder scheduler shortly before a calendar
+/// event starts, so the frontend can offer a one-click transcription start.
+/// A system notification is sent alongside; this event drives the in-app
+/// banner (notification clicks are not reliably delivered on macOS).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct UpcomingMeeting {
+    pub event: crate::calendar::CalendarEvent,
+    pub starts_in_seconds: u32,
+}

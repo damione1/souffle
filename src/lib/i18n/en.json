@@ -243,6 +243,8 @@
     "next": "Next",
     "start_transcription": "Start transcription",
     "organizer": "organizer",
-    "you": "you"
+    "you": "you",
+    "starts_in_minutes": "Starts in {minutes} min",
+    "dismiss": "Dismiss"
   }
 }

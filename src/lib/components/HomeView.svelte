@@ -7,6 +7,7 @@
   import ActionHero from "../features/home/ActionHero.svelte";
   import LiveSessionCard from "../features/home/LiveSessionCard.svelte";
   import { createCalendarController } from "../features/calendar/controller.svelte";
+  import UpcomingMeetingBanner from "../features/calendar/components/UpcomingMeetingBanner.svelte";
   import MeetingDetail from "../features/meeting/components/MeetingDetail.svelte";
   import { createMeetingController } from "../features/meeting/controller.svelte";
   import { createTimelineController } from "../features/timeline/controller.svelte";
@@ -83,6 +84,21 @@
     {/if}
 
     {#if recordingMode === "idle"}
+      {#if app.upcomingMeeting}
+        <UpcomingMeetingBanner
+          reminder={app.upcomingMeeting}
+          canStart={modelReady}
+          onStart={() => {
+            const reminder = app.upcomingMeeting;
+            app.upcomingMeeting = null;
+            if (reminder) void calendar.startFromEvent(reminder.event);
+          }}
+          onDismiss={() => {
+            app.upcomingMeeting = null;
+          }}
+        />
+      {/if}
+
       <ActionHero
         {dictationShortcut}
         {modelReady}
