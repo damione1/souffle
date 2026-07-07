@@ -1,0 +1,111 @@
+name: Release
+
+# Builds the macOS installer on every version tag and attaches it to a GitHub Release.
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# macOS Apple Silicon only, single leg (aarch64-apple-darwin). Souffle has no
+# other target: Metal inference (candle, whisper.cpp) and Core Audio process
+# taps are Apple Silicon only, and the bundled resources/libonnxruntime.dylib
+# is an arm64 build. There is no Intel mac, Windows, Linux, or mobile leg.
+#
+# Signing + notarization are optional: the six APPLE_* secrets listed below
+# already exist in this repo. Without them the build still works, it just
+# ships unsigned.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Create the draft release exactly once, up front, and let the build job
+  # upload into it by id. This avoids a race where the job creates its own
+  # release draft on top of a concurrent one.
+  # ---------------------------------------------------------------------------
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const tag = process.env.GITHUB_REF_NAME;
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Soufflé ${tag}`,
+              body: [
+                'Download the .dmg below for Apple Silicon Macs.',
+                '',
+                'Requires macOS 13 or newer on Apple Silicon (M1 or newer).',
+              ].join('\n'),
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
+  # ---------------------------------------------------------------------------
+  # macOS (Apple Silicon): builds the signed/notarized .dmg and uploads it
+  # into the draft release created above.
+  # ---------------------------------------------------------------------------
+  desktop:
+    needs: create-release
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      # cmake builds the sentencepiece tokenizer; it's preinstalled on
+      # GitHub's macOS runner images, so no separate setup step is needed.
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Set app version from tag
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          export VERSION="${TAG#v}"
+          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p));c.version=process.env.VERSION;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');"
+          echo "Built version set to $VERSION"
+        # The installer version comes from tauri.conf.json. We overwrite it from
+        # the tag here so the tag is the single source of truth for the release.
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS signing + notarization (optional, leave unset to ship unsigned)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --target aarch64-apple-darwin

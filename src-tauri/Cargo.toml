@@ -3,6 +3,7 @@ name = "souffle"
 version = "0.1.0"
 description = "Local speech-to-text desktop application"
 authors = ["Damien Goehrig"]
+license = "MIT"
 edition = "2024"
 
 [lib]
