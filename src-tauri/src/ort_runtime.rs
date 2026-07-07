@@ -13,12 +13,16 @@ const ORT_DYLIB_FILENAME: &str = "libonnxruntime.dylib";
 
 /// Search for a bundled resource file in standard locations
 /// (next to the binary in dev, in the .app bundle when packaged).
+/// The ONNX Runtime dylib ships in Contents/Frameworks rather than
+/// Resources so the bundler code-signs it; notarization rejects unsigned
+/// Mach-O files anywhere in the bundle.
 pub fn resolve_resource(filename: &str) -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
         .map(|bin_dir| {
             vec![
+                bin_dir.join("../Frameworks").join(filename),
                 bin_dir.join("resources").join(filename),
                 bin_dir.join("../Resources/resources").join(filename),
                 PathBuf::from("resources").join(filename),
