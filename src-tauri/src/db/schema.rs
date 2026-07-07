@@ -4,8 +4,9 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 8: calendar_event_id + participants columns on meetings
-pub const SCHEMA_VERSION: i64 = 8;
+/// Schema version 9: dictionary.phonetic_code holds a pronunciation spelling;
+/// legacy auto-derived Soundex codes are cleared.
+pub const SCHEMA_VERSION: i64 = 9;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -344,6 +345,45 @@ pub fn migrate_text_search_to_v4(conn: &mut Connection) -> Result<(), String> {
     tx.commit()
         .map_err(|e| format!("Commit v4 migration: {e}"))?;
 
+    Ok(())
+}
+
+/// v9: `dictionary.phonetic_code` becomes a user-facing pronunciation
+/// spelling. Until now the app auto-filled it with the term's Soundex code;
+/// those derived values are cleared (kept only if a caller stored something
+/// other than the auto value). The Soundex is recomputed at filter build.
+pub fn migrate_dictionary_phonetics_to_v9(conn: &Connection) -> Result<(), String> {
+    let auto_derived: Vec<i64> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, term, phonetic_code FROM dictionary WHERE phonetic_code IS NOT NULL",
+            )
+            .map_err(|e| format!("Prepare v9 dictionary scan: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| format!("Query v9 dictionary scan: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Collect v9 dictionary scan: {e}"))?;
+        rows.into_iter()
+            .filter(|(_, term, code)| {
+                crate::filter::soundex::soundex(term).as_deref() == Some(code)
+            })
+            .map(|(id, _, _)| id)
+            .collect()
+    };
+    for id in auto_derived {
+        conn.execute(
+            "UPDATE dictionary SET phonetic_code = NULL WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("Clear auto phonetic code (id {id}): {e}"))?;
+    }
     Ok(())
 }
 

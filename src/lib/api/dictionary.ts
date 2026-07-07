@@ -7,19 +7,19 @@ export async function listDictionary(): Promise<DictionaryEntry[]> {
 
 export async function addDictionaryEntry(
   term: string,
-  phoneticCode: string | null,
+  pronunciation: string | null,
   category: string | null,
 ): Promise<DictionaryEntry> {
-  return unwrap(commands.addDictionaryEntry(term, phoneticCode, category));
+  return unwrap(commands.addDictionaryEntry(term, pronunciation, category));
 }
 
 export async function updateDictionaryEntry(
   id: number,
   term: string,
-  phoneticCode: string | null,
+  pronunciation: string | null,
   category: string | null,
 ): Promise<void> {
-  await unwrap(commands.updateDictionaryEntry(id, term, phoneticCode, category));
+  await unwrap(commands.updateDictionaryEntry(id, term, pronunciation, category));
 }
 
 export async function deleteDictionaryEntry(id: number): Promise<void> {

@@ -1,7 +1,6 @@
 use rusqlite::params;
 
 use crate::filter::DictionaryEntry;
-use crate::filter::soundex::soundex;
 use crate::lock_ext::MutexExt;
 
 use super::Database;
@@ -17,7 +16,7 @@ impl Database {
                 Ok(DictionaryEntry {
                     id: row.get(0)?,
                     term: row.get(1)?,
-                    phonetic_code: row.get(2)?,
+                    pronunciation: row.get(2)?,
                     category: row.get(3)?,
                     created_at: row.get(4)?,
                 })
@@ -28,19 +27,22 @@ impl Database {
         Ok(entries)
     }
 
+    /// The `phonetic_code` column stores the user's pronunciation spelling
+    /// (e.g. "vésix" for "V6") since schema v9; the Soundex code is derived
+    /// at filter-build time, never persisted.
     pub fn add_dictionary_entry(
         &self,
         term: &str,
-        phonetic_code: Option<&str>,
+        pronunciation: Option<&str>,
         category: Option<&str>,
     ) -> Result<DictionaryEntry, String> {
         let conn = self.conn.acquire()?;
         let now = chrono::Utc::now().to_rfc3339();
-        let effective_phonetic = phonetic_code.map(String::from).or_else(|| soundex(term));
+        let pronunciation = pronunciation.map(str::trim).filter(|p| !p.is_empty());
 
         conn.execute(
             "INSERT INTO dictionary (term, phonetic_code, category, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![term, effective_phonetic, category, now],
+            params![term, pronunciation, category, now],
         )
         .map_err(|e| format!("Insert dictionary entry: {e}"))?;
 
@@ -48,7 +50,7 @@ impl Database {
         Ok(DictionaryEntry {
             id,
             term: term.to_string(),
-            phonetic_code: effective_phonetic,
+            pronunciation: pronunciation.map(String::from),
             category: category.map(String::from),
             created_at: now,
         })
@@ -58,16 +60,16 @@ impl Database {
         &self,
         id: i64,
         term: &str,
-        phonetic_code: Option<&str>,
+        pronunciation: Option<&str>,
         category: Option<&str>,
     ) -> Result<(), String> {
         let conn = self.conn.acquire()?;
-        let effective_phonetic = phonetic_code.map(String::from).or_else(|| soundex(term));
+        let pronunciation = pronunciation.map(str::trim).filter(|p| !p.is_empty());
 
         let updated = conn
             .execute(
                 "UPDATE dictionary SET term = ?1, phonetic_code = ?2, category = ?3 WHERE id = ?4",
-                params![term, effective_phonetic, category, id],
+                params![term, pronunciation, category, id],
             )
             .map_err(|e| format!("Update dictionary entry: {e}"))?;
 
@@ -110,7 +112,7 @@ mod tests {
             .add_dictionary_entry("Kubernetes", None, Some("tech"))
             .unwrap();
         assert_eq!(entry.term, "Kubernetes");
-        assert!(entry.phonetic_code.is_some());
+        assert_eq!(entry.pronunciation, None);
         assert_eq!(entry.category.as_deref(), Some("tech"));
 
         // List
@@ -149,18 +151,19 @@ mod tests {
     }
 
     #[test]
-    fn dictionary_auto_soundex() {
+    fn dictionary_stores_no_pronunciation_by_default() {
         let (db, _dir) = test_db();
         let entry = db.add_dictionary_entry("Robert", None, None).unwrap();
-        assert_eq!(entry.phonetic_code.as_deref(), Some("R163"));
+        assert_eq!(entry.pronunciation, None);
     }
 
     #[test]
-    fn dictionary_explicit_phonetic_preserved() {
+    fn dictionary_pronunciation_stored_verbatim_and_blank_dropped() {
         let (db, _dir) = test_db();
-        let entry = db
-            .add_dictionary_entry("Souffle", Some("CUSTOM"), None)
-            .unwrap();
-        assert_eq!(entry.phonetic_code.as_deref(), Some("CUSTOM"));
+        let entry = db.add_dictionary_entry("V6", Some("vésix"), None).unwrap();
+        assert_eq!(entry.pronunciation.as_deref(), Some("vésix"));
+
+        let blank = db.add_dictionary_entry("K8s", Some("   "), None).unwrap();
+        assert_eq!(blank.pronunciation, None);
     }
 }

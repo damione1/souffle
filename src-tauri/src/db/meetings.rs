@@ -530,8 +530,9 @@ impl MeetingRow {
     /// NULL (pre-v8 rows) means no participants.
     fn participants(&self) -> Result<Vec<MeetingParticipant>, String> {
         match self.participants.as_deref() {
-            Some(raw) => serde_json::from_str(raw)
-                .map_err(|e| format!("Deserialize participants: {e}")),
+            Some(raw) => {
+                serde_json::from_str(raw).map_err(|e| format!("Deserialize participants: {e}"))
+            }
             None => Ok(Vec::new()),
         }
     }
@@ -543,7 +544,9 @@ fn serialize_participants(participants: &[MeetingParticipant]) -> Result<Option<
     if participants.is_empty() {
         return Ok(None);
     }
-    serde_json::to_string(participants).map(Some).map_err(|e| format!("Serialize participants: {e}"))
+    serde_json::to_string(participants)
+        .map(Some)
+        .map_err(|e| format!("Serialize participants: {e}"))
 }
 
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {

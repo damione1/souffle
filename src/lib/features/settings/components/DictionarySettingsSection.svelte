@@ -9,11 +9,12 @@
     onDelete,
   }: {
     entries: DictionaryEntry[];
-    onAdd: (term: string, phoneticCode: string | null, category: string | null) => void | Promise<void>;
+    onAdd: (term: string, pronunciation: string | null, category: string | null) => void | Promise<void>;
     onDelete: (id: number) => void | Promise<void>;
   } = $props();
 
   let newTerm = $state("");
+  let newPronunciation = $state("");
   let newCategory = $state("");
   let addError = $state("");
 
@@ -22,8 +23,9 @@
     if (!term) return;
     addError = "";
     try {
-      await onAdd(term, null, newCategory.trim() || null);
+      await onAdd(term, newPronunciation.trim() || null, newCategory.trim() || null);
       newTerm = "";
+      newPronunciation = "";
       newCategory = "";
     } catch (e) {
       addError = e instanceof Error ? e.message : String(e);
@@ -54,6 +56,18 @@
       />
     </div>
     <div class="flex flex-col gap-1">
+      <label for="dict-pronunciation" class="field-label">{$t("settings_dictionary.pronunciation")}</label>
+      <input
+        id="dict-pronunciation"
+        type="text"
+        bind:value={newPronunciation}
+        onkeydown={handleKeyDown}
+        placeholder={$t("settings_dictionary.pronunciation_placeholder")}
+        title={$t("settings_dictionary.pronunciation_desc")}
+        class="field-input w-32"
+      />
+    </div>
+    <div class="flex flex-col gap-1">
       <label for="dict-category" class="field-label">{$t("settings_dictionary.category")}</label>
       <input
         id="dict-category"
@@ -76,7 +90,9 @@
     <div class="flex flex-col gap-1 mt-1">
       {#each entries as entry (entry.id)}
         <div class="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-surface-secondary/50 text-sm">
-          <span class="flex-1 font-medium">{entry.term}</span>
+          <span class="flex-1 font-medium">
+            {entry.term}{#if entry.pronunciation}<span class="text-text-muted font-normal"> · {entry.pronunciation}</span>{/if}
+          </span>
           {#if entry.category}
             <span class="text-text-tertiary text-xs">{entry.category}</span>
           {/if}

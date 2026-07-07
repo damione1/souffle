@@ -115,9 +115,25 @@ fn build_meeting_on_segment(
 async fn launch_meeting(
     state: &AppState,
     accumulator: MeetingAccumulator,
+    event_description: Option<String>,
     channel: Channel<TranscriptionSegment>,
 ) -> Result<u64, String> {
     let session_id = next_audio_session_id(state)?;
+
+    // Session-scoped transcription hints: participant names plus distinctive
+    // jargon from the event title/description. Never persisted.
+    let participant_names: Vec<String> = accumulator
+        .participants
+        .iter()
+        .map(|p| p.name.clone())
+        .collect();
+    let session_terms = crate::filter::session_terms::derive_session_terms(
+        &participant_names,
+        &[
+            accumulator.title.as_str(),
+            event_description.as_deref().unwrap_or(""),
+        ],
+    );
 
     // Persist the header before any segments so a crash leaves a recoverable
     // row (ended_at IS NULL) and segment FK targets exist.
@@ -147,6 +163,7 @@ async fn launch_meeting(
             &db,
             session_id,
             PipelineMode::Meeting,
+            session_terms,
             on_segment,
         )
     })
@@ -202,6 +219,7 @@ fn start_pipeline_blocking(
     db: &Database,
     session_id: u64,
     mode: PipelineMode,
+    session_terms: Vec<String>,
     on_segment: SegmentCallback,
 ) -> Result<(), String> {
     // Snapshot settings and dictionary; the actor builds filter chains on its
@@ -224,6 +242,7 @@ fn start_pipeline_blocking(
     let config = SessionConfig {
         pipeline_config: settings.pipeline_config(),
         dictionary_entries: db.list_dictionary_entries()?,
+        session_terms,
         diarize,
     };
 
@@ -310,6 +329,7 @@ pub async fn start_transcription(
             &db,
             session_id,
             PipelineMode::Dictation,
+            Vec::new(),
             on_segment,
         )
     })
@@ -384,9 +404,13 @@ pub async fn start_meeting_recording(
     }
 
     let meeting_id = Uuid::new_v4().to_string();
-    let (calendar_event_id, participants) = match calendar {
-        Some(context) => (Some(context.event_id), context.participants),
-        None => (None, Vec::new()),
+    let (calendar_event_id, participants, event_description) = match calendar {
+        Some(context) => (
+            Some(context.event_id),
+            context.participants,
+            context.description,
+        ),
+        None => (None, Vec::new(), None),
     };
     let accumulator = MeetingAccumulator {
         id: meeting_id.clone(),
@@ -406,7 +430,7 @@ pub async fn start_meeting_recording(
         persisted_new_count: 0,
     };
 
-    let session_id = launch_meeting(&state, accumulator, channel).await?;
+    let session_id = launch_meeting(&state, accumulator, event_description, channel).await?;
 
     state.apply_transition(StateAction::StartMeeting {
         session_id,
@@ -470,7 +494,7 @@ pub async fn resume_meeting_recording(
         persisted_new_count: 0,
     };
 
-    let session_id = launch_meeting(&state, accumulator, channel).await?;
+    let session_id = launch_meeting(&state, accumulator, None, channel).await?;
 
     state.apply_transition(StateAction::StartMeeting {
         session_id,

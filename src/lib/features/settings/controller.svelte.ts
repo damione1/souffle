@@ -449,8 +449,8 @@ export function createSettingsController() {
     }
   }
 
-  async function handleAddDictionaryEntry(term: string, phoneticCode: string | null, category: string | null) {
-    const entry = await apiAddDictionaryEntry(term, phoneticCode, category);
+  async function handleAddDictionaryEntry(term: string, pronunciation: string | null, category: string | null) {
+    const entry = await apiAddDictionaryEntry(term, pronunciation, category);
     dictionaryEntries = [...dictionaryEntries, entry].sort((a, b) => a.term.localeCompare(b.term));
   }
 

@@ -423,17 +423,17 @@ async listDictionary() : Promise<Result<DictionaryEntry[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async addDictionaryEntry(term: string, phoneticCode: string | null, category: string | null) : Promise<Result<DictionaryEntry, string>> {
+async addDictionaryEntry(term: string, pronunciation: string | null, category: string | null) : Promise<Result<DictionaryEntry, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("add_dictionary_entry", { term, phoneticCode, category }) };
+    return { status: "ok", data: await TAURI_INVOKE("add_dictionary_entry", { term, pronunciation, category }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async updateDictionaryEntry(id: number, term: string, phoneticCode: string | null, category: string | null) : Promise<Result<null, string>> {
+async updateDictionaryEntry(id: number, term: string, pronunciation: string | null, category: string | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_dictionary_entry", { id, term, phoneticCode, category }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_dictionary_entry", { id, term, pronunciation, category }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -582,7 +582,12 @@ id: string; title: string; start: string; end: string; calendar_id: string; cale
 /**
  * The event URL — for video meetings this is usually the conference link.
  */
-url: string | null }
+url: string | null; 
+/**
+ * The invitation body (EKCalendarItem notes). Mined for session-scoped
+ * transcription hints when a meeting starts from this event.
+ */
+description: string | null }
 /**
  * One calendar as shown in the settings picker.
  */
@@ -595,7 +600,13 @@ source_title: string | null }
  * A dictation history entry
  */
 export type DictationEntry = { id: string; text: string; timestamp: string }
-export type DictionaryEntry = { id: number; term: string; phonetic_code: string | null; category: string | null; created_at: string }
+export type DictionaryEntry = { id: number; term: string; 
+/**
+ * How the term sounds when spoken, spelled out (e.g. "vésix" for "V6").
+ * Drives phonetic matching; when absent, the term's own Soundex is used
+ * (except for digit-bearing terms, whose Soundex is meaningless).
+ */
+pronunciation: string | null; category: string | null; created_at: string }
 /**
  * Download status reported to the frontend
  */
@@ -615,7 +626,12 @@ export type HealthStatus = "healthy" |
  * Calendar context passed by the frontend when starting a meeting from a
  * calendar event.
  */
-export type MeetingCalendarContext = { event_id: string; participants: MeetingParticipant[] }
+export type MeetingCalendarContext = { event_id: string; participants: MeetingParticipant[]; 
+/**
+ * Invitation body; mined for session-scoped transcription hints at
+ * start, not persisted.
+ */
+description?: string | null }
 /**
  * Emitted once a stopped meeting has been fully drained and saved in the
  * background, so the detail view can refresh from the now-complete record.

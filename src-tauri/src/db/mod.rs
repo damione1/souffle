@@ -160,6 +160,12 @@ impl Database {
                     .map_err(|e| format!("Update schema version v8: {e}"))?;
             }
 
+            if current_version < 9 {
+                schema::migrate_dictionary_phonetics_to_v9(&conn)?;
+                conn.execute("UPDATE schema_version SET version = 9", [])
+                    .map_err(|e| format!("Update schema version v9: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

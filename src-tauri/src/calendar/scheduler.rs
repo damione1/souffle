@@ -157,6 +157,7 @@ mod tests {
             participants: Vec::<MeetingParticipant>::new(),
             location: None,
             url: None,
+            description: None,
         }
     }
 
@@ -165,7 +166,10 @@ mod tests {
         let now = Utc::now();
         let fired = HashSet::new();
         let at_boundary = event("a", now + chrono::Duration::minutes(2));
-        let beyond = event("b", now + chrono::Duration::minutes(2) + chrono::Duration::seconds(1));
+        let beyond = event(
+            "b",
+            now + chrono::Duration::minutes(2) + chrono::Duration::seconds(1),
+        );
         let due = due_reminders(now, &[at_boundary, beyond], 2, &fired);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, "a");
@@ -196,8 +200,14 @@ mod tests {
     fn prune_drops_only_stale_keys() {
         let now = Utc::now();
         let mut fired = HashSet::new();
-        fired.insert(("old".to_string(), (now - chrono::Duration::days(2)).timestamp()));
-        fired.insert(("recent".to_string(), (now - chrono::Duration::hours(1)).timestamp()));
+        fired.insert((
+            "old".to_string(),
+            (now - chrono::Duration::days(2)).timestamp(),
+        ));
+        fired.insert((
+            "recent".to_string(),
+            (now - chrono::Duration::hours(1)).timestamp(),
+        ));
         prune_fired(&mut fired, now);
         assert_eq!(fired.len(), 1);
         assert!(fired.iter().any(|(id, _)| id == "recent"));
