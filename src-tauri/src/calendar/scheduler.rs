@@ -157,6 +157,7 @@ mod tests {
             participants: Vec::<MeetingParticipant>::new(),
             location: None,
             url: None,
+            description: None,
         }
     }
 

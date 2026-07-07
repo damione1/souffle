@@ -1,4 +1,5 @@
 mod audio_vad;
+pub mod session_terms;
 pub mod soundex;
 mod text_dictionary;
 mod text_filler;
@@ -150,6 +151,7 @@ pub fn build_audio_filters(config: &PipelineConfig, source_sample_rate: u32) -> 
 pub fn build_text_filters(
     config: &PipelineConfig,
     dictionary: Vec<DictionaryEntry>,
+    session_terms: &[String],
 ) -> TextFilterChain {
     let mut filters: Vec<Box<dyn TextFilter>> = Vec::new();
     if config.filler_removal_enabled {
@@ -158,8 +160,12 @@ pub fn build_text_filters(
     if config.stutter_collapse_enabled {
         filters.push(Box::new(text_stutter::StutterCollapseFilter::new()));
     }
-    if config.dictionary_correction_enabled && !dictionary.is_empty() {
-        filters.push(Box::new(text_dictionary::DictionaryFilter::new(dictionary)));
+    if config.dictionary_correction_enabled && (!dictionary.is_empty() || !session_terms.is_empty())
+    {
+        filters.push(Box::new(text_dictionary::DictionaryFilter::with_session_terms(
+            dictionary,
+            session_terms,
+        )));
     }
     // Whitespace normalization always runs last to clean up artifacts from previous filters
     filters.push(Box::new(text_whitespace::WhitespaceNormFilter));
@@ -232,7 +238,7 @@ mod tests {
             stutter_collapse_enabled: false,
             dictionary_correction_enabled: false,
         };
-        let chain = build_text_filters(&config, vec![]);
+        let chain = build_text_filters(&config, vec![], &[]);
         // Whitespace normalization should still clean up
         assert_eq!(chain.apply("  hello   world  "), "hello world");
     }

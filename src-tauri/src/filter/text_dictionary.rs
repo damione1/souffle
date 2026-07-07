@@ -11,6 +11,10 @@ const LEVENSHTEIN_THRESHOLD: f64 = 0.82; // similarity > 0.82 means distance < 0
 /// does far more harm than good.
 const MIN_WORD_LEN: usize = 3;
 
+/// Minimum similarity for a phonetic-only (session term) match, on top of
+/// Soundex equality.
+const SESSION_SIMILARITY_FLOOR: f64 = 0.5;
+
 pub struct DictionaryFilter {
     entries: Vec<DictionaryMatch>,
 }
@@ -19,6 +23,12 @@ struct DictionaryMatch {
     term: String,
     term_lower: String,
     phonetic_code: Option<String>,
+    /// Session-scoped terms (participant names, meeting jargon) were not
+    /// chosen by the user, so they only match through Soundex plus a
+    /// similarity floor — never through Levenshtein alone. This keeps
+    /// injected names like "Martin" from rewriting ordinary words such as
+    /// "matin" (similarity 0.83, above the fuzzy threshold).
+    phonetic_only: bool,
 }
 
 /// Phonetic code used for matching: the user-provided pronunciation wins;
@@ -36,7 +46,13 @@ fn derive_phonetic_code(term: &str, pronunciation: Option<&str>) -> Option<Strin
 
 impl DictionaryFilter {
     pub fn new(entries: Vec<DictionaryEntry>) -> Self {
-        let entries = entries
+        Self::with_session_terms(entries, &[])
+    }
+
+    /// `session_terms` are ephemeral additions for one recording session
+    /// (participant names, meeting jargon); they match phonetically only.
+    pub fn with_session_terms(entries: Vec<DictionaryEntry>, session_terms: &[String]) -> Self {
+        let mut matches: Vec<DictionaryMatch> = entries
             .into_iter()
             .map(|e| {
                 let term_lower = e.term.to_lowercase();
@@ -45,10 +61,24 @@ impl DictionaryFilter {
                     term: e.term,
                     term_lower,
                     phonetic_code,
+                    phonetic_only: false,
                 }
             })
             .collect();
-        Self { entries }
+        for term in session_terms {
+            let term_lower = term.to_lowercase();
+            // A user entry for the same term wins over the session variant.
+            if matches.iter().any(|m| m.term_lower == term_lower) {
+                continue;
+            }
+            matches.push(DictionaryMatch {
+                term: term.clone(),
+                term_lower,
+                phonetic_code: soundex(term),
+                phonetic_only: true,
+            });
+        }
+        Self { entries: matches }
     }
 
     fn find_replacement(&self, word: &str) -> Option<&str> {
@@ -75,8 +105,13 @@ impl DictionaryFilter {
                 _ => false,
             };
 
-            // Accept if either condition is met
-            if similarity >= LEVENSHTEIN_THRESHOLD || soundex_match {
+            let accepted = if entry.phonetic_only {
+                soundex_match && similarity >= SESSION_SIMILARITY_FLOOR
+            } else {
+                // Accept if either condition is met
+                similarity >= LEVENSHTEIN_THRESHOLD || soundex_match
+            };
+            if accepted {
                 let score = if soundex_match {
                     similarity + 0.1 // Boost soundex matches slightly
                 } else {
@@ -223,5 +258,34 @@ mod tests {
     fn blank_pronunciation_falls_back_to_term_soundex() {
         let f = DictionaryFilter::new(vec![entry_with_pronunciation("Damien", "  ")]);
         assert_eq!(f.apply("Hello Damian"), "Hello Damien");
+    }
+
+    #[test]
+    fn session_terms_correct_phonetic_misses_only() {
+        let f = DictionaryFilter::with_session_terms(vec![], &["Alice".to_string()]);
+        // Same Soundex (A420), similar spelling: corrected.
+        assert_eq!(f.apply("bonjour Alyce"), "bonjour Alice");
+        assert_eq!(f.apply("bonjour Alice"), "bonjour Alice");
+    }
+
+    #[test]
+    fn session_terms_never_match_through_levenshtein_alone() {
+        // "matin" vs "Martin": similarity 0.83 (above the fuzzy threshold)
+        // but different Soundex — a user entry would rewrite it, a session
+        // term must not.
+        let f = DictionaryFilter::with_session_terms(vec![], &["Martin".to_string()]);
+        assert_eq!(f.apply("le matin venu"), "le matin venu");
+
+        let user = DictionaryFilter::new(vec![entry("Martin")]);
+        assert_eq!(user.apply("le matin venu"), "le Martin venu");
+    }
+
+    #[test]
+    fn user_entry_wins_over_session_duplicate() {
+        let f = DictionaryFilter::with_session_terms(
+            vec![entry_with_pronunciation("V6", "vésix")],
+            &["v6".to_string()],
+        );
+        assert_eq!(f.apply("le vésix arrive"), "le V6 arrive");
     }
 }

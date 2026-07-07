@@ -582,7 +582,12 @@ id: string; title: string; start: string; end: string; calendar_id: string; cale
 /**
  * The event URL — for video meetings this is usually the conference link.
  */
-url: string | null }
+url: string | null; 
+/**
+ * The invitation body (EKCalendarItem notes). Mined for session-scoped
+ * transcription hints when a meeting starts from this event.
+ */
+description: string | null }
 /**
  * One calendar as shown in the settings picker.
  */
@@ -621,7 +626,12 @@ export type HealthStatus = "healthy" |
  * Calendar context passed by the frontend when starting a meeting from a
  * calendar event.
  */
-export type MeetingCalendarContext = { event_id: string; participants: MeetingParticipant[] }
+export type MeetingCalendarContext = { event_id: string; participants: MeetingParticipant[]; 
+/**
+ * Invitation body; mined for session-scoped transcription hints at
+ * start, not persisted.
+ */
+description?: string | null }
 /**
  * Emitted once a stopped meeting has been fully drained and saved in the
  * background, so the detail view can refresh from the now-complete record.

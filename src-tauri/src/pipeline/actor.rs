@@ -58,6 +58,9 @@ pub struct SessionSummary {
 pub struct SessionConfig {
     pub pipeline_config: PipelineConfig,
     pub dictionary_entries: Vec<DictionaryEntry>,
+    /// Ephemeral correction terms for this session only (participant names,
+    /// meeting jargon); never persisted to the user's dictionary.
+    pub session_terms: Vec<String>,
     /// Diarized meeting: run a second engine so the mic (Me) and system audio
     /// (Them) legs are transcribed separately and segments are speaker-tagged.
     pub diarize: bool,
@@ -445,7 +448,11 @@ impl EngineActor {
 
         // Filter chains are built on this thread so ONNX Runtime (Silero VAD)
         // initialization shares the thread with engine Metal work.
-        let text_filters = build_text_filters(&config.pipeline_config, config.dictionary_entries);
+        let text_filters = build_text_filters(
+            &config.pipeline_config,
+            config.dictionary_entries,
+            &config.session_terms,
+        );
 
         let mut health = SessionHealth::start(session_id, Arc::clone(&self.dropped_counter));
         let engine = self.engine.as_mut().expect("engine present: checked above");
@@ -1072,6 +1079,7 @@ mod tests {
         SessionConfig {
             pipeline_config: noop_filter_config(),
             dictionary_entries: vec![],
+            session_terms: vec![],
             diarize: false,
         }
     }
@@ -1165,6 +1173,7 @@ mod tests {
         let cfg = SessionConfig {
             pipeline_config: noop_filter_config(),
             dictionary_entries: vec![],
+            session_terms: vec![],
             diarize: true,
         };
         actor.start_session(1, cfg, cb).expect("start diarized");

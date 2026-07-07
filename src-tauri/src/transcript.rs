@@ -79,6 +79,10 @@ pub struct MeetingTranscript {
 pub struct MeetingCalendarContext {
     pub event_id: String,
     pub participants: Vec<MeetingParticipant>,
+    /// Invitation body; mined for session-scoped transcription hints at
+    /// start, not persisted.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Deserialize)]

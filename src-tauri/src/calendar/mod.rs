@@ -43,6 +43,9 @@ pub struct CalendarEvent {
     pub location: Option<String>,
     /// The event URL — for video meetings this is usually the conference link.
     pub url: Option<String>,
+    /// The invitation body (EKCalendarItem notes). Mined for session-scoped
+    /// transcription hints when a meeting starts from this event.
+    pub description: Option<String>,
 }
 
 /// Today's events plus the permission state, so the UI can render the
@@ -257,6 +260,9 @@ mod macos {
                 .filter(|l| !l.trim().is_empty()),
             url: unsafe { event.URL() }
                 .and_then(|u| u.absoluteString().map(|s| s.to_string())),
+            description: unsafe { event.notes() }
+                .map(|n| n.to_string())
+                .filter(|n| !n.trim().is_empty()),
         })
     }
 

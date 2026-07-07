@@ -39,6 +39,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     ],
     location: null,
     url: null,
+    description: null,
     ...overrides,
   };
 }
@@ -97,7 +98,7 @@ describe("calendar controller", () => {
 
     expect(mockStartRecording).toHaveBeenCalledWith({
       title: "Sprint Planning",
-      calendar: { event_id: "evt-1", participants: event.participants },
+      calendar: { event_id: "evt-1", participants: event.participants, description: null },
     });
   });
 

@@ -34,7 +34,11 @@ function createCalendarControllerInstance() {
     const meeting = createMeetingController();
     await meeting.startRecording({
       title: event.title,
-      calendar: { event_id: event.id, participants: event.participants },
+      calendar: {
+        event_id: event.id,
+        participants: event.participants,
+        description: event.description,
+      },
     });
   }
 

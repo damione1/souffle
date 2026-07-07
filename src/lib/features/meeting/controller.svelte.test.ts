@@ -255,6 +255,7 @@ describe("MeetingController", () => {
       participants: [
         { name: "Alice", email: "alice@corp.com", is_organizer: true, is_current_user: false },
       ],
+      description: null,
     };
 
     const ctrl = createMeetingController();
