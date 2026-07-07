@@ -28,44 +28,14 @@ All models run locally and are downloaded on first use from HuggingFace:
 
 Prebuilt installers are on the [**Releases**](https://github.com/damione1/souffle/releases/latest) page: a `.dmg` for Apple Silicon Macs, requiring macOS 13 or newer.
 
-## Getting started
+## Develop
 
-### Prerequisites
-
-- An Apple Silicon Mac
-- [Rust](https://rustup.rs/) toolchain
-- [Node.js](https://nodejs.org/) 18+
-- [cmake](https://cmake.org/) (`brew install cmake`), required to build the tokenizer
-- [Ollama](https://ollama.com/) (optional), for meeting summaries
-
-### Develop
+Requires an Apple Silicon Mac, [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) 18+, and [cmake](https://cmake.org/) (`brew install cmake`).
 
 ```bash
 npm install
 npm run tauri dev
 ```
-
-### Build
-
-```bash
-npm run tauri build
-```
-
-Tagged releases (`git tag vX.Y.Z && git push origin vX.Y.Z`) are built, signed, and notarized by CI.
-
-### Tests
-
-```bash
-# Rust tests
-cargo test --manifest-path src-tauri/Cargo.toml
-
-# Frontend tests
-npm test
-```
-
-## Tech stack
-
-[Tauri 2](https://tauri.app/) (Rust core) · [SvelteKit](https://kit.svelte.dev/) + [Svelte 5](https://svelte.dev/) · TypeScript. Inference runs via [Candle](https://github.com/huggingface/candle) (Metal), whisper.cpp, and ONNX Runtime.
 
 ## License
 
