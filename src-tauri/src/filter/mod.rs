@@ -162,10 +162,9 @@ pub fn build_text_filters(
     }
     if config.dictionary_correction_enabled && (!dictionary.is_empty() || !session_terms.is_empty())
     {
-        filters.push(Box::new(text_dictionary::DictionaryFilter::with_session_terms(
-            dictionary,
-            session_terms,
-        )));
+        filters.push(Box::new(
+            text_dictionary::DictionaryFilter::with_session_terms(dictionary, session_terms),
+        ));
     }
     // Whitespace normalization always runs last to clean up artifacts from previous filters
     filters.push(Box::new(text_whitespace::WhitespaceNormFilter));

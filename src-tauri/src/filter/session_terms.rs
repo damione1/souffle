@@ -45,7 +45,9 @@ pub fn derive_session_terms(names: &[String], free_texts: &[&str]) -> Vec<String
 
 fn is_name_token(token: &str) -> bool {
     token.chars().count() >= MIN_TOKEN_LEN
-        && token.chars().all(|c| c.is_alphabetic() || c == '-' || c == '\'')
+        && token
+            .chars()
+            .all(|c| c.is_alphabetic() || c == '-' || c == '\'')
 }
 
 /// Jargon detector for free text: CamelCase ("FluidNC") and acronyms

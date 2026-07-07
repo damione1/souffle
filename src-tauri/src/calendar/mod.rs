@@ -70,11 +70,12 @@ fn local_day_bounds(now: DateTime<Local>) -> (i64, i64) {
         chrono::LocalResult::Single(dt) => dt,
         chrono::LocalResult::Ambiguous(a, _) => a,
         // Skipped by a DST jump: shift forward an hour.
-        chrono::LocalResult::None => {
-            Local.from_utc_datetime(&(naive - ChronoDuration::hours(1)))
-        }
+        chrono::LocalResult::None => Local.from_utc_datetime(&(naive - ChronoDuration::hours(1))),
     };
-    (resolve(start_naive).timestamp(), resolve(end_naive).timestamp())
+    (
+        resolve(start_naive).timestamp(),
+        resolve(end_naive).timestamp(),
+    )
 }
 
 /// Strip a `mailto:` scheme from a participant URL, keeping only plausible
@@ -236,9 +237,9 @@ mod macos {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             let organizer_email = email_from_participant_url(&organizer_url);
-            let matched = participants.iter_mut().find(|p| {
-                p.email.is_some() && p.email == organizer_email
-            });
+            let matched = participants
+                .iter_mut()
+                .find(|p| p.email.is_some() && p.email == organizer_email);
             match matched {
                 Some(p) => p.is_organizer = true,
                 None => participants.insert(0, convert_participant(&organizer, true)),
@@ -258,8 +259,7 @@ mod macos {
             location: unsafe { event.location() }
                 .map(|l| l.to_string())
                 .filter(|l| !l.trim().is_empty()),
-            url: unsafe { event.URL() }
-                .and_then(|u| u.absoluteString().map(|s| s.to_string())),
+            url: unsafe { event.URL() }.and_then(|u| u.absoluteString().map(|s| s.to_string())),
             description: unsafe { event.notes() }
                 .map(|n| n.to_string())
                 .filter(|n| !n.trim().is_empty()),

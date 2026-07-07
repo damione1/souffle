@@ -45,10 +45,6 @@ fn derive_phonetic_code(term: &str, pronunciation: Option<&str>) -> Option<Strin
 }
 
 impl DictionaryFilter {
-    pub fn new(entries: Vec<DictionaryEntry>) -> Self {
-        Self::with_session_terms(entries, &[])
-    }
-
     /// `session_terms` are ephemeral additions for one recording session
     /// (participant names, meeting jargon); they match phonetically only.
     pub fn with_session_terms(entries: Vec<DictionaryEntry>, session_terms: &[String]) -> Self {
@@ -191,38 +187,38 @@ mod tests {
 
     #[test]
     fn corrects_close_misspelling() {
-        let f = DictionaryFilter::new(vec![entry("Kubernetes")]);
+        let f = DictionaryFilter::with_session_terms(vec![entry("Kubernetes")], &[]);
         assert_eq!(f.apply("Kubernetis"), "Kubernetes");
     }
 
     #[test]
     fn preserves_exact_match() {
-        let f = DictionaryFilter::new(vec![entry("Docker")]);
+        let f = DictionaryFilter::with_session_terms(vec![entry("Docker")], &[]);
         assert_eq!(f.apply("Docker is great"), "Docker is great");
     }
 
     #[test]
     fn soundex_match_for_proper_nouns() {
-        let f = DictionaryFilter::new(vec![entry("Damien")]);
+        let f = DictionaryFilter::with_session_terms(vec![entry("Damien")], &[]);
         // "Damian" has the same Soundex as "Damien" (D550)
         assert_eq!(f.apply("Hello Damian"), "Hello Damien");
     }
 
     #[test]
     fn preserves_unrelated_words() {
-        let f = DictionaryFilter::new(vec![entry("Kubernetes")]);
+        let f = DictionaryFilter::with_session_terms(vec![entry("Kubernetes")], &[]);
         assert_eq!(f.apply("the quick brown fox"), "the quick brown fox");
     }
 
     #[test]
     fn empty_dictionary_passthrough() {
-        let f = DictionaryFilter::new(vec![]);
+        let f = DictionaryFilter::with_session_terms(vec![], &[]);
         assert_eq!(f.apply("hello world"), "hello world");
     }
 
     #[test]
     fn empty_input() {
-        let f = DictionaryFilter::new(vec![entry("Test")]);
+        let f = DictionaryFilter::with_session_terms(vec![entry("Test")], &[]);
         assert_eq!(f.apply(""), "");
     }
 
@@ -230,23 +226,26 @@ mod tests {
     fn short_words_are_never_corrected() {
         // "va" collides with "V6" through alphabetic Soundex ("V000" both);
         // the 2-char guard must keep function words untouched.
-        let f = DictionaryFilter::new(vec![entry("V6")]);
+        let f = DictionaryFilter::with_session_terms(vec![entry("V6")], &[]);
         assert_eq!(f.apply("il va faire"), "il va faire");
 
-        let names = DictionaryFilter::new(vec![entry("Damien")]);
+        let names = DictionaryFilter::with_session_terms(vec![entry("Damien")], &[]);
         assert_eq!(names.apply("de la part"), "de la part");
     }
 
     #[test]
     fn digit_terms_get_no_auto_phonetic_matching() {
-        let f = DictionaryFilter::new(vec![entry("V6")]);
+        let f = DictionaryFilter::with_session_terms(vec![entry("V6")], &[]);
         // "vas" (3 chars, Soundex V000 too) must not become V6 either.
         assert_eq!(f.apply("tu vas bien"), "tu vas bien");
     }
 
     #[test]
     fn pronunciation_drives_phonetic_matching() {
-        let f = DictionaryFilter::new(vec![entry_with_pronunciation("V6", "vésix")]);
+        let f = DictionaryFilter::with_session_terms(
+            vec![entry_with_pronunciation("V6", "vésix")],
+            &[],
+        );
         assert_eq!(f.apply("le vésix arrive"), "le V6 arrive");
         assert_eq!(f.apply("le vesix arrive"), "le V6 arrive");
         // Unrelated words with a different Soundex stay untouched.
@@ -256,7 +255,10 @@ mod tests {
 
     #[test]
     fn blank_pronunciation_falls_back_to_term_soundex() {
-        let f = DictionaryFilter::new(vec![entry_with_pronunciation("Damien", "  ")]);
+        let f = DictionaryFilter::with_session_terms(
+            vec![entry_with_pronunciation("Damien", "  ")],
+            &[],
+        );
         assert_eq!(f.apply("Hello Damian"), "Hello Damien");
     }
 
@@ -276,7 +278,7 @@ mod tests {
         let f = DictionaryFilter::with_session_terms(vec![], &["Martin".to_string()]);
         assert_eq!(f.apply("le matin venu"), "le matin venu");
 
-        let user = DictionaryFilter::new(vec![entry("Martin")]);
+        let user = DictionaryFilter::with_session_terms(vec![entry("Martin")], &[]);
         assert_eq!(user.apply("le matin venu"), "le Martin venu");
     }
 

@@ -160,9 +160,7 @@ mod tests {
     #[test]
     fn dictionary_pronunciation_stored_verbatim_and_blank_dropped() {
         let (db, _dir) = test_db();
-        let entry = db
-            .add_dictionary_entry("V6", Some("vésix"), None)
-            .unwrap();
+        let entry = db.add_dictionary_entry("V6", Some("vésix"), None).unwrap();
         assert_eq!(entry.pronunciation.as_deref(), Some("vésix"));
 
         let blank = db.add_dictionary_entry("K8s", Some("   "), None).unwrap();

@@ -4,6 +4,7 @@
   import { t } from "svelte-i18n";
   import Waveform from "../../components/Waveform.svelte";
   import Spinner from "../../components/ui/Spinner.svelte";
+  import { groupIntoParagraphs } from "../../utils/paragraphs";
   import MeetingNotesSection from "../meeting/components/MeetingNotesSection.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
@@ -21,11 +22,16 @@
   let elapsedSeconds = $state(0);
   let transcriptEl: HTMLDivElement | undefined = $state();
 
-  const liveText = $derived(
-    mode === "dictation"
-      ? transcription.transcript
-      : meeting.liveMeetingSegments.map((segment) => segment.text).join(" "),
+  const liveText = $derived(mode === "dictation" ? transcription.transcript : "");
+
+  // Meetings render through the same paragraph grouping as the finished
+  // transcript, so diarized sessions show Me/Them live: segments are ordered
+  // by time and split on speaker changes instead of one undifferentiated blob.
+  const liveParagraphs = $derived(
+    mode === "meeting" ? groupIntoParagraphs(meeting.liveMeetingSegments, 1.5) : [],
   );
+
+  const hasLiveContent = $derived(mode === "dictation" ? Boolean(liveText) : liveParagraphs.length > 0);
 
   const elapsed = $derived(
     `${Math.floor(elapsedSeconds / 60)}:${`${elapsedSeconds % 60}`.padStart(2, "0")}`,
@@ -47,6 +53,7 @@
   // Keep the latest words in view as they stream in.
   $effect(() => {
     void liveText;
+    void liveParagraphs;
     if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
   });
 
@@ -91,10 +98,23 @@
       bind:this={transcriptEl}
       class="max-h-44 min-h-24 overflow-y-auto rounded-lg bg-surface-1/70 p-3 text-sm leading-relaxed text-text-secondary"
     >
-      {#if liveText}
+      {#if !hasLiveContent}
+        <span class="text-text-muted">{$t("home.listening")}</span>
+      {:else if mode === "dictation"}
         {liveText}
       {:else}
-        <span class="text-text-muted">{$t("home.listening")}</span>
+        {#each liveParagraphs as paragraph}
+          <p class="mb-2 last:mb-0">
+            {#if paragraph.speaker}
+              <span
+                class="mr-1 text-xs font-semibold"
+                class:text-accent={paragraph.speaker === "me"}
+                class:text-text-primary={paragraph.speaker === "them"}
+              >{paragraph.speaker === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
+            {/if}
+            {paragraph.text}
+          </p>
+        {/each}
       {/if}
     </div>
 

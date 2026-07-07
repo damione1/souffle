@@ -355,7 +355,9 @@ pub fn migrate_text_search_to_v4(conn: &mut Connection) -> Result<(), String> {
 pub fn migrate_dictionary_phonetics_to_v9(conn: &Connection) -> Result<(), String> {
     let auto_derived: Vec<i64> = {
         let mut stmt = conn
-            .prepare("SELECT id, term, phonetic_code FROM dictionary WHERE phonetic_code IS NOT NULL")
+            .prepare(
+                "SELECT id, term, phonetic_code FROM dictionary WHERE phonetic_code IS NOT NULL",
+            )
             .map_err(|e| format!("Prepare v9 dictionary scan: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
@@ -369,7 +371,9 @@ pub fn migrate_dictionary_phonetics_to_v9(conn: &Connection) -> Result<(), Strin
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect v9 dictionary scan: {e}"))?;
         rows.into_iter()
-            .filter(|(_, term, code)| crate::filter::soundex::soundex(term).as_deref() == Some(code))
+            .filter(|(_, term, code)| {
+                crate::filter::soundex::soundex(term).as_deref() == Some(code)
+            })
             .map(|(id, _, _)| id)
             .collect()
     };
