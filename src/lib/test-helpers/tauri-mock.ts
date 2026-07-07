@@ -79,7 +79,7 @@ export function createTranscriptionApiMock(
 export interface MeetingsApiMock {
   listMeetings: ReturnType<typeof vi.fn<() => Promise<MeetingListItem[]>>>;
   getMeeting: ReturnType<typeof vi.fn<(id: string) => Promise<MeetingTranscript>>>;
-  startMeetingRecording: ReturnType<typeof vi.fn<(title: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>>;
+  startMeetingRecording: ReturnType<typeof vi.fn<(title: string, calendar: unknown, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>>;
   resumeMeetingRecording: ReturnType<typeof vi.fn<(id: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>>;
   stopMeetingRecording: ReturnType<typeof vi.fn<() => Promise<string>>>;
   summarizeMeeting: ReturnType<typeof vi.fn<(id: string, model: string, onProgress: (p: unknown) => void) => Promise<void>>>;
@@ -92,7 +92,7 @@ export function createMeetingsApiMock(
   return {
     listMeetings: vi.fn<() => Promise<MeetingListItem[]>>().mockResolvedValue(mockMeetingList),
     getMeeting: vi.fn<(id: string) => Promise<MeetingTranscript>>().mockResolvedValue(mockMeeting),
-    startMeetingRecording: vi.fn<(title: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>().mockResolvedValue(undefined),
+    startMeetingRecording: vi.fn<(title: string, calendar: unknown, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>().mockResolvedValue(undefined),
     resumeMeetingRecording: vi.fn<(id: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>().mockResolvedValue(undefined),
     stopMeetingRecording: vi.fn<() => Promise<string>>().mockResolvedValue("meeting-001"),
     summarizeMeeting: vi.fn<(id: string, model: string, onProgress: (p: unknown) => void) => Promise<void>>().mockResolvedValue(undefined),

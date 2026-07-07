@@ -66,6 +66,19 @@ pub struct MeetingTranscript {
     /// Free-form notes the user typed during the meeting; fed into the
     /// summary prompt.
     pub notes: Option<String>,
+    /// Identifier of the calendar event this meeting was started from.
+    pub calendar_event_id: Option<String>,
+    /// Attendees captured from the calendar event; shown in the UI and fed
+    /// into the summary prompt.
+    pub participants: Vec<MeetingParticipant>,
+}
+
+/// Calendar context passed by the frontend when starting a meeting from a
+/// calendar event.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct MeetingCalendarContext {
+    pub event_id: String,
+    pub participants: Vec<MeetingParticipant>,
 }
 
 #[derive(Deserialize)]
@@ -91,6 +104,10 @@ struct MeetingTranscriptWire {
     edited_transcript: Option<String>,
     #[serde(default)]
     notes: Option<String>,
+    #[serde(default)]
+    calendar_event_id: Option<String>,
+    #[serde(default)]
+    participants: Vec<MeetingParticipant>,
 }
 
 impl<'de> Deserialize<'de> for MeetingTranscript {
@@ -128,6 +145,8 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             summary_generated_at: wire.summary_generated_at,
             edited_transcript: wire.edited_transcript,
             notes: wire.notes,
+            calendar_event_id: wire.calendar_event_id,
+            participants: wire.participants,
         })
     }
 }
@@ -249,6 +268,8 @@ mod tests {
             summary_generated_at: None,
             edited_transcript: None,
             notes: None,
+            calendar_event_id: None,
+            participants: Vec::new(),
         };
 
         let json = serde_json::to_string(&meeting).unwrap();
@@ -287,6 +308,8 @@ mod tests {
             summary_generated_at: None,
             edited_transcript: None,
             notes: None,
+            calendar_event_id: None,
+            participants: Vec::new(),
         };
 
         let item = MeetingListItem::from(&transcript);

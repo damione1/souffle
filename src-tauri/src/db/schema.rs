@@ -4,8 +4,8 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 5: dictionary table for custom term corrections
-pub const SCHEMA_VERSION: i64 = 7;
+/// Schema version 8: calendar_event_id + participants columns on meetings
+pub const SCHEMA_VERSION: i64 = 8;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -435,6 +435,9 @@ mod tests {
         assert_eq!(meeting.transcription_profile.engine_label, "Custom Engine");
         assert_eq!(meeting.recording_sessions.len(), 1);
         assert!(!meeting.summary_is_stale);
+        // v8 chain ran on the same open: pre-v8 rows read back cleanly.
+        assert_eq!(meeting.calendar_event_id, None);
+        assert!(meeting.participants.is_empty());
 
         let conn = db.conn.lock().unwrap();
         let columns: Vec<String> = {
@@ -447,5 +450,7 @@ mod tests {
         assert!(!columns.iter().any(|column| column == "engine"));
         assert!(columns.iter().any(|column| column == "recording_sessions"));
         assert!(columns.iter().any(|column| column == "summary_is_stale"));
+        assert!(columns.iter().any(|column| column == "calendar_event_id"));
+        assert!(columns.iter().any(|column| column == "participants"));
     }
 }

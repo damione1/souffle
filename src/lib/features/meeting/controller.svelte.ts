@@ -12,7 +12,7 @@ import {
 import { getOllamaStatus } from "../../api/ollama";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { MeetingCalendarContext, MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 
@@ -155,9 +155,13 @@ function createMeetingControllerInstance() {
     }
   }
 
-  async function startRecording() {
+  async function startRecording(options?: {
+    title?: string;
+    calendar?: MeetingCalendarContext;
+  }) {
     try {
-      const title = defaultMeetingTitle();
+      const title = options?.title?.trim() || defaultMeetingTitle();
+      const calendar = options?.calendar ?? null;
       liveMeetingSegments = [];
       statusMessage = "";
       summaryStream = "";
@@ -171,7 +175,7 @@ function createMeetingControllerInstance() {
         app.settings.transcription_backend_id,
       );
 
-      await startMeetingRecording(title, (segment) => {
+      await startMeetingRecording(title, calendar, (segment) => {
         if (!segment.is_final || !segment.text) return;
         liveMeetingSegments = [...liveMeetingSegments, segment];
       });
@@ -191,6 +195,8 @@ function createMeetingControllerInstance() {
         summary_generated_at: null,
         edited_transcript: null,
         notes: null,
+        calendar_event_id: calendar?.event_id ?? null,
+        participants: calendar?.participants ?? [],
       };
     } catch (e) {
       statusMessage = errorMessage(e);

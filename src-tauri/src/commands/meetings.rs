@@ -137,6 +137,7 @@ pub async fn summarize_meeting(
     let summary = crate::ollama::summarize_stream(
         &text,
         transcript.notes.as_deref(),
+        &transcript.participants,
         &model,
         Some(&settings.ollama_url),
         move |progress| {

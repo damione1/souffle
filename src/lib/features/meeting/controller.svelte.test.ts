@@ -130,6 +130,8 @@ function makeMeeting(overrides: Partial<MeetingTranscript> = {}): MeetingTranscr
     summary_generated_at: null,
     edited_transcript: null,
     notes: null,
+    calendar_event_id: null,
+    participants: [],
     ...overrides,
   };
 }

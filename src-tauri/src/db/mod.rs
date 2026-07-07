@@ -150,6 +150,16 @@ impl Database {
                     .map_err(|e| format!("Update schema version v7: {e}"))?;
             }
 
+            if current_version < 8 {
+                conn.execute("ALTER TABLE meetings ADD COLUMN calendar_event_id TEXT", [])
+                    .map_err(|e| format!("Schema migration v8 (calendar event id): {e}"))?;
+                // JSON array of MeetingParticipant
+                conn.execute("ALTER TABLE meetings ADD COLUMN participants TEXT", [])
+                    .map_err(|e| format!("Schema migration v8 (participants): {e}"))?;
+                conn.execute("UPDATE schema_version SET version = 8", [])
+                    .map_err(|e| format!("Update schema version v8: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

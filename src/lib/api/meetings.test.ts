@@ -49,13 +49,18 @@ describe('meetings API', () => {
     expect(result).toEqual(meeting);
   });
 
-  it('startMeetingRecording passes title and channel', async () => {
+  it('startMeetingRecording passes title, calendar context and channel', async () => {
     mockInvoke.mockResolvedValue(null);
     const onSegment = vi.fn();
 
-    await startMeetingRecording('Daily Standup', onSegment);
+    await startMeetingRecording('Daily Standup', null, onSegment);
 
-    expect(mockInvoke).toHaveBeenCalledWith('start_meeting_recording', expect.objectContaining({ title: 'Daily Standup' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith('start_meeting_recording', expect.objectContaining({ title: 'Daily Standup', calendar: null }), undefined);
+
+    const calendar = { event_id: 'evt-1', participants: [{ name: 'Alice', email: null, is_organizer: true, is_current_user: false }] };
+    await startMeetingRecording('Planning', calendar, onSegment);
+
+    expect(mockInvoke).toHaveBeenCalledWith('start_meeting_recording', expect.objectContaining({ title: 'Planning', calendar }), undefined);
   });
 
   it('resumeMeetingRecording passes id and channel', async () => {

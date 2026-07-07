@@ -139,9 +139,9 @@ async pasteText(text: string, delayMs: number) : Promise<Result<null, string>> {
 /**
  * Start meeting recording with live transcription.
  */
-async startMeetingRecording(title: string, channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
+async startMeetingRecording(title: string, calendar: MeetingCalendarContext | null, channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_meeting_recording", { title, channel }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_meeting_recording", { title, calendar, channel }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -610,6 +610,11 @@ export type HealthStatus = "healthy" |
  */
 "stalled"
 /**
+ * Calendar context passed by the frontend when starting a meeting from a
+ * calendar event.
+ */
+export type MeetingCalendarContext = { event_id: string; participants: MeetingParticipant[] }
+/**
  * Emitted once a stopped meeting has been fully drained and saved in the
  * background, so the detail view can refresh from the now-complete record.
  * `stop_meeting_recording` returns before this work finishes (decoupled stop),
@@ -642,7 +647,16 @@ export type MeetingTranscript = { id: string; title: string; started_at: string;
  * Free-form notes the user typed during the meeting; fed into the
  * summary prompt.
  */
-notes: string | null }
+notes: string | null; 
+/**
+ * Identifier of the calendar event this meeting was started from.
+ */
+calendar_event_id: string | null; 
+/**
+ * Attendees captured from the calendar event; shown in the UI and fed
+ * into the summary prompt.
+ */
+participants: MeetingParticipant[] }
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
