@@ -237,5 +237,12 @@
     "empty_msg": "Your dictations and meetings will appear here, newest first.",
     "no_matches_title": "No matches",
     "no_matches_msg": "Try different keywords — search covers every transcript."
+  },
+  "calendar": {
+    "now": "Now",
+    "next": "Next",
+    "start_transcription": "Start transcription",
+    "organizer": "organizer",
+    "you": "you"
   }
 }

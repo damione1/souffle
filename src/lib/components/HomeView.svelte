@@ -6,6 +6,7 @@
   import { formatShortcutLabel } from "../utils";
   import ActionHero from "../features/home/ActionHero.svelte";
   import LiveSessionCard from "../features/home/LiveSessionCard.svelte";
+  import { createCalendarController } from "../features/calendar/controller.svelte";
   import MeetingDetail from "../features/meeting/components/MeetingDetail.svelte";
   import { createMeetingController } from "../features/meeting/controller.svelte";
   import { createTimelineController } from "../features/timeline/controller.svelte";
@@ -18,6 +19,7 @@
   const timeline = createTimelineController();
   const transcription = createTranscriptionController();
   const meeting = createMeetingController();
+  const calendar = createCalendarController();
 
   let dictationShortcut = $state("");
 
@@ -33,6 +35,7 @@
   onMount(() => {
     void timeline.refresh();
     void meeting.mount();
+    void calendar.refresh();
     getShortcuts()
       .then((shortcuts) => {
         dictationShortcut = formatShortcutLabel(shortcuts.toggle);
@@ -53,6 +56,8 @@
     const open = app.settingsOpen;
     if (settingsWasOpen && !open) {
       void meeting.checkOllama();
+      // Calendar integration or selection may have changed in Settings.
+      void calendar.refresh();
     }
     settingsWasOpen = open;
   });
@@ -61,6 +66,7 @@
   $effect(() => {
     if (recordingMode === "idle" && !showMeetingDetail) {
       void timeline.refresh();
+      void calendar.refresh();
     }
   });
 </script>
@@ -97,8 +103,16 @@
       {#if timeline.statusMessage}
         <StatusBanner message={timeline.statusMessage} />
       {/if}
+      {#if calendar.statusMessage}
+        <StatusBanner message={calendar.statusMessage} variant="warning" />
+      {/if}
 
-      <TimelineSection controller={timeline} />
+      <TimelineSection
+        controller={timeline}
+        upcoming={calendar.events}
+        canStartEvent={modelReady}
+        onStartEvent={(event) => void calendar.startFromEvent(event)}
+      />
     {:else}
       <!-- During a live session, the session card is the only focus. -->
       <LiveSessionCard

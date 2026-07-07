@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type {
+  MeetingCalendarContext,
   MeetingTranscript,
   OllamaStatus,
   SummarizeProgress,
@@ -12,7 +13,11 @@ import type {
 const mockGetOllamaStatus = vi.fn<() => Promise<OllamaStatus>>();
 const mockGetTranscriptionCatalog = vi.fn<() => Promise<TranscriptionCatalog>>();
 const mockStartMeetingRecording = vi.fn<
-  (title: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>
+  (
+    title: string,
+    calendar: MeetingCalendarContext | null,
+    onSegment: (s: TranscriptionSegment) => void,
+  ) => Promise<void>
 >();
 const mockResumeMeetingRecording = vi.fn<
   (id: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>
@@ -28,7 +33,9 @@ const mockSummarizeMeeting = vi.fn<
 
 vi.mock("../../api/meetings", () => ({
   startMeetingRecording: (...a: unknown[]) =>
-    mockStartMeetingRecording(...(a as [string, (s: TranscriptionSegment) => void])),
+    mockStartMeetingRecording(
+      ...(a as [string, MeetingCalendarContext | null, (s: TranscriptionSegment) => void]),
+    ),
   resumeMeetingRecording: (...a: unknown[]) =>
     mockResumeMeetingRecording(...(a as [string, (s: TranscriptionSegment) => void])),
   stopMeetingRecording: (...a: unknown[]) => mockStopMeetingRecording(...(a as [])),
@@ -234,7 +241,32 @@ describe("MeetingController", () => {
 
     expect(mockStartMeetingRecording).toHaveBeenCalledOnce();
     expect(mockStartMeetingRecording.mock.calls[0][0]).toMatch(/^Meeting /);
+    expect(mockStartMeetingRecording.mock.calls[0][1]).toBeNull();
     expect(ctrl.meeting?.title).toMatch(/^Meeting /);
+  });
+
+  it("startRecording from a calendar event uses the event title and carries participants", async () => {
+    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockStartMeetingRecording.mockResolvedValue(undefined);
+
+    const calendar = {
+      event_id: "evt-1",
+      participants: [
+        { name: "Alice", email: "alice@corp.com", is_organizer: true, is_current_user: false },
+      ],
+    };
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    await ctrl.startRecording({ title: "Sprint Planning", calendar });
+
+    expect(mockStartMeetingRecording).toHaveBeenCalledOnce();
+    expect(mockStartMeetingRecording.mock.calls[0][0]).toBe("Sprint Planning");
+    expect(mockStartMeetingRecording.mock.calls[0][1]).toEqual(calendar);
+    expect(ctrl.meeting?.title).toBe("Sprint Planning");
+    expect(ctrl.meeting?.calendar_event_id).toBe("evt-1");
+    expect(ctrl.meeting?.participants).toEqual(calendar.participants);
   });
 
   it("stopRecording saves and loads meeting", async () => {

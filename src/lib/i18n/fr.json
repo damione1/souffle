@@ -237,5 +237,12 @@
     "empty_msg": "Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.",
     "no_matches_title": "Aucun résultat",
     "no_matches_msg": "Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions."
+  },
+  "calendar": {
+    "now": "En cours",
+    "next": "Suivant",
+    "start_transcription": "Démarrer la transcription",
+    "organizer": "organisateur",
+    "you": "vous"
   }
 }
