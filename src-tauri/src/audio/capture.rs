@@ -60,7 +60,7 @@ struct MeetingState {
     /// physical device, so output-device changes don't require a rebuild.
     #[cfg(target_os = "macos")]
     tap: Option<super::system_tap::TapHandle>,
-    /// Whether echo cancellation is currently engaged (speakers route).
+    /// Whether echo cancellation is currently engaged (speakers audible).
     aec_active: bool,
     /// Emit mic (Me) and system audio (Them) as two source-tagged streams
     /// instead of one mixed stream.
@@ -69,22 +69,23 @@ struct MeetingState {
 }
 
 impl MeetingState {
-    /// Engage/disengage echo cancellation when the default output switches
-    /// between built-in speakers and anything else (headphones, Bluetooth…).
+    /// Engage/disengage echo cancellation when whether speaker output can
+    /// leak into the mic changes: built-in speakers versus anything else
+    /// (headphones, Bluetooth), and muted or silent versus audible.
     #[cfg(target_os = "macos")]
     fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {
         use super::{aec, mixer, output_route};
 
-        let speakers = self.tap.is_some() && output_route::output_is_builtin_speakers();
-        if speakers != self.aec_active {
-            if speakers {
-                info!("Output switched to built-in speakers — echo cancellation engaged");
+        let can_leak = self.tap.is_some() && output_route::output_can_leak_into_mic();
+        if can_leak != self.aec_active {
+            if can_leak {
+                info!("Speakers audible, echo cancellation engaged");
                 self.mixer.set_aec(Some(aec::Aec::new(mixer::MIX_RATE)));
             } else {
-                info!("Output no longer on speakers — echo cancellation disengaged");
+                info!("Output muted or off speakers, echo cancellation disengaged");
                 self.mixer.set_aec(None);
             }
-            self.aec_active = speakers;
+            self.aec_active = can_leak;
         }
     }
 
@@ -537,16 +538,16 @@ impl AudioCapture {
         );
 
         // Echo cancellation only matters when system audio can leak from
-        // the speakers back into the mic — and only if we actually have the
+        // the speakers back into the mic, and only if we actually have the
         // system-audio reference signal to cancel against.
         #[cfg(target_os = "macos")]
         let aec_active = {
-            let speakers = tap.is_some() && super::output_route::output_is_builtin_speakers();
-            if speakers {
-                info!("Built-in speakers detected — echo cancellation engaged");
+            let can_leak = tap.is_some() && super::output_route::output_can_leak_into_mic();
+            if can_leak {
+                info!("Speakers audible, echo cancellation engaged");
                 mixer.set_aec(Some(super::aec::Aec::new(super::mixer::MIX_RATE)));
             }
-            speakers
+            can_leak
         };
         #[cfg(not(target_os = "macos"))]
         let aec_active = false;
