@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, Pencil, Square } from "@lucide/svelte";
+  import { ArrowLeft, Pencil, Square, Users } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import type { MeetingTranscript } from "../../../types";
   import { formatDate, formatDuration } from "../../../utils";
@@ -109,6 +109,18 @@
       <span class="pill pill-accent">{meeting.transcription_profile.engine_label}</span>
       <span class="pill pill-muted">{meeting.transcription_profile.model_label}</span>
     </div>
+    {#if meeting.participants.length > 0}
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <Users size={13} class="shrink-0 text-text-muted" aria-hidden="true" />
+        {#each meeting.participants as participant (participant.name + (participant.email ?? ""))}
+          <span class="pill pill-muted" title={participant.email ?? ""}>
+            {participant.name}{participant.is_organizer
+              ? ` (${$t("calendar.organizer")})`
+              : ""}{participant.is_current_user ? ` (${$t("calendar.you")})` : ""}
+          </span>
+        {/each}
+      </div>
+    {/if}
   </div>
 
   <div class="flex gap-2 shrink-0">

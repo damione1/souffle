@@ -139,9 +139,9 @@ async pasteText(text: string, delayMs: number) : Promise<Result<null, string>> {
 /**
  * Start meeting recording with live transcription.
  */
-async startMeetingRecording(title: string, channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
+async startMeetingRecording(title: string, calendar: MeetingCalendarContext | null, channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_meeting_recording", { title, channel }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_meeting_recording", { title, calendar, channel }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -477,6 +477,30 @@ async requestPermission(kind: PermissionKind) : Promise<Result<PermState, string
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Calendars available for the settings picker. Errors when access is not
+ * granted (the picker is only reachable once the permission flow succeeded).
+ */
+async listCalendars() : Promise<Result<CalendarInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_calendars") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Today's timed events for the home view. Missing permission is a state the
+ * UI renders, not an error, so it comes back inside the payload.
+ */
+async listTodaysCalendarEvents() : Promise<Result<TodayCalendar, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_todays_calendar_events") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -493,7 +517,8 @@ shortcutPttStop: ShortcutPttStop,
 shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
-transcriptionHealth: TranscriptionHealth
+transcriptionHealth: TranscriptionHealth,
+upcomingMeeting: UpcomingMeeting
 }>({
 meetingFinalized: "meeting-finalized",
 meetingStopRequested: "meeting-stop-requested",
@@ -504,7 +529,8 @@ shortcutPttStop: "shortcut-ptt-stop",
 shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
 systemAudioStatus: "system-audio-status",
-transcriptionHealth: "transcription-health"
+transcriptionHealth: "transcription-health",
+upcomingMeeting: "upcoming-meeting"
 })
 
 /** user-defined constants **/
@@ -518,7 +544,20 @@ export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; p
  * Meeting mode: capture system audio (other participants) alongside
  * the microphone via a Core Audio tap.
  */
-capture_system_audio: boolean }
+capture_system_audio: boolean; 
+/**
+ * Calendar integration is opt-in: it reads the user's calendar, so it
+ * stays off until explicitly enabled (which triggers the TCC prompt).
+ */
+calendar_integration_enabled: boolean; 
+/**
+ * Calendars shown in the today list; empty means all calendars.
+ */
+calendar_selected_ids: string[]; 
+/**
+ * How long before an event the "start transcription?" reminder fires.
+ */
+calendar_reminder_minutes: number }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
@@ -531,6 +570,27 @@ export type AppView = "home" | "settings"
  */
 export type AudioDeviceInfo = { name: string; is_default: boolean }
 export type AudioInputRequirements = { sample_rate_hz: number; channels: number; chunk_size_samples: number }
+/**
+ * One occurrence of a calendar event (recurring events arrive pre-expanded).
+ */
+export type CalendarEvent = { 
+/**
+ * EKEvent identifier — shared by all occurrences of a recurring event,
+ * so dedup keys must combine it with `start`.
+ */
+id: string; title: string; start: string; end: string; calendar_id: string; calendar_title: string; participants: MeetingParticipant[]; location: string | null; 
+/**
+ * The event URL — for video meetings this is usually the conference link.
+ */
+url: string | null }
+/**
+ * One calendar as shown in the settings picker.
+ */
+export type CalendarInfo = { id: string; title: string; 
+/**
+ * Account the calendar belongs to (e.g. "iCloud", "Google"), for grouping.
+ */
+source_title: string | null }
 /**
  * A dictation history entry
  */
@@ -552,6 +612,11 @@ export type HealthStatus = "healthy" |
  */
 "stalled"
 /**
+ * Calendar context passed by the frontend when starting a meeting from a
+ * calendar event.
+ */
+export type MeetingCalendarContext = { event_id: string; participants: MeetingParticipant[] }
+/**
  * Emitted once a stopped meeting has been fully drained and saved in the
  * background, so the detail view can refresh from the now-complete record.
  * `stop_meeting_recording` returns before this work finishes (decoupled stop),
@@ -563,6 +628,12 @@ export type MeetingFinalized = { id: string }
  * Lightweight item for listing meetings
  */
 export type MeetingListItem = { id: string; title: string; started_at: string; duration_seconds: number; has_summary: boolean; summary_is_stale: boolean }
+/**
+ * A calendar attendee captured when a meeting is started from a calendar
+ * event. Persisted with the meeting and fed into the summary prompt so the
+ * model can attribute statements to real names.
+ */
+export type MeetingParticipant = { name: string; email: string | null; is_organizer: boolean; is_current_user: boolean }
 export type MeetingRecordingSession = { id: string; started_at: string; ended_at: string; duration_seconds: number; start_segment_index: number; end_segment_index: number }
 /**
  * Emitted by the floating recording pill (or the tray) to ask the meeting
@@ -578,7 +649,16 @@ export type MeetingTranscript = { id: string; title: string; started_at: string;
  * Free-form notes the user typed during the meeting; fed into the
  * summary prompt.
  */
-notes: string | null }
+notes: string | null; 
+/**
+ * Identifier of the calendar event this meeting was started from.
+ */
+calendar_event_id: string | null; 
+/**
+ * Attendees captured from the calendar event; shown in the UI and fed
+ * into the summary prompt.
+ */
+participants: MeetingParticipant[] }
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
 export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
@@ -596,8 +676,8 @@ export type PermState = "granted" | "denied" |
 /**
  * Which capability to probe or prompt for via `request`.
  */
-export type PermissionKind = "microphone" | "system_audio" | "accessibility"
-export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState }
+export type PermissionKind = "microphone" | "system_audio" | "accessibility" | "calendar"
+export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState; calendar: PermState }
 /**
  * Pipeline failure surfaced to the frontend instead of dying silently in logs.
  */
@@ -639,6 +719,11 @@ export type SystemAudioStatus = { active: boolean;
  */
 reason: string | null }
 export type Theme = "dark" | "light" | "system"
+/**
+ * Today's events plus the permission state, so the UI can render the
+ * no-permission case without string-matching errors.
+ */
+export type TodayCalendar = { permission: PermState; events: CalendarEvent[] }
 export type TranscriptionCapabilities = { supports_streaming: boolean; supports_batch_transcription: boolean; supports_language_auto_detect: boolean; supports_word_timestamps: boolean; supports_partial_results: boolean }
 export type TranscriptionCatalog = { engines: TranscriptionEngineDescriptor[]; selected_engine_id: string; selected_model_id: string; selected_backend_id: string }
 export type TranscriptionEngineDescriptor = { id: string; label: string; description: string; models: TranscriptionModelDescriptor[] }
@@ -672,6 +757,13 @@ export type TranscriptionSegment = { text: string; start_time: number; end_time:
  * Set by the pipeline for diarized meetings; `None` otherwise.
  */
 speaker?: Speaker | null }
+/**
+ * Emitted by the calendar reminder scheduler shortly before a calendar
+ * event starts, so the frontend can offer a one-click transcription start.
+ * A system notification is sent alongside; this event drives the in-app
+ * banner (notification clicks are not reliably delivered on macOS).
+ */
+export type UpcomingMeeting = { event: CalendarEvent; starts_in_seconds: number }
 
 /** tauri-specta globals **/
 

@@ -63,6 +63,8 @@ pub mod fixtures {
             summary_generated_at: None,
             edited_transcript: None,
             notes: None,
+            calendar_event_id: None,
+            participants: Vec::new(),
         }
     }
 

@@ -12,7 +12,7 @@ use crate::engine::{TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
 use crate::pipeline::EngineActorHandle;
 use crate::state_machine::{AppStateMachine, StateAction};
-use crate::transcript::{MeetingRecordingSession, MeetingTranscript};
+use crate::transcript::{MeetingParticipant, MeetingRecordingSession, MeetingTranscript};
 
 /// Commands sent to the audio thread
 pub enum AudioCommand {
@@ -50,6 +50,10 @@ pub struct MeetingAccumulator {
     pub summary_generated_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Notes the user types while the meeting records; persisted at stop.
     pub notes: Option<String>,
+    /// Calendar event this meeting was started from, when any.
+    pub calendar_event_id: Option<String>,
+    /// Attendees captured from the calendar event.
+    pub participants: Vec<MeetingParticipant>,
     /// How many of `new_segments` have already been flushed to the DB by the
     /// incremental persistence path. Lets a crash mid-meeting lose at most the
     /// last unflushed batch instead of the whole session.
@@ -103,6 +107,8 @@ impl MeetingAccumulator {
             summary_generated_at: self.summary_generated_at,
             edited_transcript: None,
             notes: self.notes,
+            calendar_event_id: self.calendar_event_id,
+            participants: self.participants,
         }
     }
 }
@@ -267,6 +273,8 @@ mod tests {
             summary_model: Some("qwen".to_string()),
             summary_generated_at: Some(first_end),
             notes: None,
+            calendar_event_id: None,
+            participants: Vec::new(),
             persisted_new_count: 0,
         };
 
@@ -301,6 +309,8 @@ mod tests {
             summary_model: Some("qwen".to_string()),
             summary_generated_at: Some(started_at),
             notes: None,
+            calendar_event_id: None,
+            participants: Vec::new(),
             persisted_new_count: 0,
         };
 

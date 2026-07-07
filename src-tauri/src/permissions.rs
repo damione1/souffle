@@ -28,6 +28,7 @@ pub struct PermissionStatus {
     pub microphone: PermState,
     pub system_audio: PermState,
     pub accessibility: PermState,
+    pub calendar: PermState,
 }
 
 /// Which capability to probe or prompt for via `request`.
@@ -37,6 +38,7 @@ pub enum PermissionKind {
     Microphone,
     SystemAudio,
     Accessibility,
+    Calendar,
 }
 
 /// Cheap, non-prompting snapshot for the initial onboarding render. Microphone
@@ -55,6 +57,9 @@ pub fn snapshot() -> PermissionStatus {
         } else {
             PermState::Denied
         },
+        // EventKit has a real read-only status API, so the snapshot is truthful
+        // here (no probe needed).
+        calendar: crate::calendar::authorization_state(),
     }
 }
 
@@ -204,5 +209,6 @@ pub fn request(kind: PermissionKind) -> PermState {
                 PermState::Denied
             }
         }
+        PermissionKind::Calendar => crate::calendar::request_access(),
     }
 }

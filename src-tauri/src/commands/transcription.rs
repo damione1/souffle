@@ -17,7 +17,7 @@ use crate::lock_ext::MutexExt;
 use crate::pipeline::{EngineActorHandle, SegmentCallback, SessionConfig};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator};
 use crate::state_machine::StateAction;
-use crate::transcript::MeetingTranscript;
+use crate::transcript::{MeetingCalendarContext, MeetingTranscript};
 
 /// Flush accumulated meeting segments to the DB once this many have piled up
 /// since the last flush. Segments are word-level, so this is a few seconds of
@@ -48,6 +48,8 @@ fn meeting_header(acc: &MeetingAccumulator) -> MeetingTranscript {
         summary_generated_at: acc.summary_generated_at,
         edited_transcript: None,
         notes: acc.notes.clone(),
+        calendar_event_id: acc.calendar_event_id.clone(),
+        participants: acc.participants.clone(),
     }
 }
 
@@ -360,6 +362,7 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
 pub async fn start_meeting_recording(
     state: State<'_, AppState>,
     title: String,
+    calendar: Option<MeetingCalendarContext>,
     channel: Channel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
     info!(title = %title, "Starting meeting recording");
@@ -381,6 +384,10 @@ pub async fn start_meeting_recording(
     }
 
     let meeting_id = Uuid::new_v4().to_string();
+    let (calendar_event_id, participants) = match calendar {
+        Some(context) => (Some(context.event_id), context.participants),
+        None => (None, Vec::new()),
+    };
     let accumulator = MeetingAccumulator {
         id: meeting_id.clone(),
         title,
@@ -394,6 +401,8 @@ pub async fn start_meeting_recording(
         summary_model: None,
         summary_generated_at: None,
         notes: None,
+        calendar_event_id,
+        participants,
         persisted_new_count: 0,
     };
 
@@ -456,6 +465,8 @@ pub async fn resume_meeting_recording(
         summary_model: meeting.summary_model,
         summary_generated_at: meeting.summary_generated_at,
         notes: meeting.notes,
+        calendar_event_id: meeting.calendar_event_id,
+        participants: meeting.participants,
         persisted_new_count: 0,
     };
 
@@ -602,6 +613,8 @@ mod tests {
             summary_model: None,
             summary_generated_at: None,
             notes: None,
+            calendar_event_id: None,
+            participants: Vec::new(),
             persisted_new_count: 0,
         })));
 

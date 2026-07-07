@@ -5,6 +5,7 @@ import type {
   SystemAudioStatus,
   TranscriptionHealth,
   TranscriptionRuntimePhase,
+  UpcomingMeeting,
 } from "../types";
 import type { TranscriptionModelOperationState } from "../features/transcription/state";
 
@@ -31,6 +32,9 @@ let transcriptionHealth = $state<TranscriptionHealth | null>(null);
 
 // System-audio capture status for the current meeting session
 let systemAudioStatus = $state<SystemAudioStatus | null>(null);
+
+// Calendar reminder awaiting the user's decision (drives the home banner)
+let upcomingMeeting = $state<UpcomingMeeting | null>(null);
 
 // First-run onboarding (model not downloaded yet) — derived at bootstrap
 let showOnboarding = $state(false);
@@ -63,6 +67,9 @@ let settings = $state<AppSettings>({
   stutter_collapse: false,
   dictionary_correction: true,
   capture_system_audio: true,
+  calendar_integration_enabled: false,
+  calendar_selected_ids: [],
+  calendar_reminder_minutes: 2,
 });
 
 function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {
@@ -144,6 +151,8 @@ export function getAppState() {
 
     get systemAudioStatus() { return systemAudioStatus; },
     set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },
+    get upcomingMeeting() { return upcomingMeeting; },
+    set upcomingMeeting(u: UpcomingMeeting | null) { upcomingMeeting = u; },
 
     get showOnboarding() { return showOnboarding; },
     set showOnboarding(v: boolean) { showOnboarding = v; },

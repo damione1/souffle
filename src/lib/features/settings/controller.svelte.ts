@@ -14,12 +14,16 @@ import {
   addDictionaryEntry as apiAddDictionaryEntry,
   deleteDictionaryEntry as apiDeleteDictionaryEntry,
 } from "../../api/dictionary";
+import { listCalendars } from "../../api/calendar";
+import { requestPermission } from "../../api/permissions";
 import { setLocale } from "../../i18n";
 import { getAppState } from "../../stores/app.svelte";
 import type {
   AppSettings,
   AudioDeviceInfo,
+  CalendarInfo,
   DictionaryEntry,
+  PermState,
   OllamaModelDescriptor,
   ShortcutSettings,
   Theme,
@@ -57,6 +61,9 @@ export function createSettingsController() {
 
   let dictionaryEntries = $state<DictionaryEntry[]>([]);
 
+  let calendars = $state<CalendarInfo[]>([]);
+  let calendarPermission = $state<PermState>("unknown");
+
   let summaryModels = $derived(ollamaModels.filter((model) => model.can_summarize));
 
   async function mount() {
@@ -70,6 +77,7 @@ export function createSettingsController() {
       checkOllama(),
       loadCatalog(),
       loadDictionary(),
+      loadCalendars(),
     ]);
     await refreshRuntimeStatus();
   }
@@ -368,6 +376,71 @@ export function createSettingsController() {
     });
   }
 
+  /** Populate the calendar picker without prompting: only fetch calendars
+   * when the integration is on (which implies access was granted). */
+  async function loadCalendars() {
+    if (!app.settings.calendar_integration_enabled) return;
+    try {
+      calendars = await listCalendars();
+      calendarPermission = "granted";
+    } catch (e) {
+      calendars = [];
+      calendarPermission = "denied";
+      console.warn("Failed to load calendars:", e);
+    }
+  }
+
+  /** Enabling triggers the TCC prompt (or opens System Settings after a
+   * deny); the setting only persists as enabled when access is granted. */
+  async function onCalendarEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (!checked) {
+      await persistSettings((settings) => {
+        settings.calendar_integration_enabled = false;
+      });
+      return;
+    }
+    try {
+      calendarPermission = await requestPermission("calendar");
+    } catch (e) {
+      calendarPermission = "denied";
+      statusMessage = errorMessage(e);
+    }
+    if (calendarPermission !== "granted") {
+      (event.target as HTMLInputElement).checked = false;
+      return;
+    }
+    await persistSettings((settings) => {
+      settings.calendar_integration_enabled = true;
+    });
+    await loadCalendars();
+  }
+
+  /** Empty selection means "all calendars", so unchecking one while empty
+   * materializes the full list first. A full selection collapses back to
+   * empty, and the last checked calendar cannot be removed. */
+  function toggleCalendarSelected(id: string) {
+    const allIds = calendars.map((calendar) => calendar.id);
+    void persistSettings((settings) => {
+      const effective = settings.calendar_selected_ids.length === 0
+        ? allIds
+        : settings.calendar_selected_ids;
+      const next = effective.includes(id)
+        ? effective.filter((existing) => existing !== id)
+        : [...effective, id];
+      if (next.length === 0) return;
+      settings.calendar_selected_ids = next.length === allIds.length ? [] : next;
+    });
+  }
+
+  function onCalendarReminderMinutesChange(event: Event) {
+    const value = parseInt((event.target as HTMLInputElement).value, 10);
+    if (!Number.isFinite(value)) return;
+    void persistSettings((settings) => {
+      settings.calendar_reminder_minutes = value;
+    });
+  }
+
   async function loadDictionary() {
     try {
       dictionaryEntries = await listDictionary();
@@ -493,6 +566,11 @@ export function createSettingsController() {
     get recordingField() { return recordingField; },
     get shortcutError() { return shortcutError; },
     get dictionaryEntries() { return dictionaryEntries; },
+    get calendars() { return calendars; },
+    get calendarPermission() { return calendarPermission; },
+    onCalendarEnabledChange,
+    toggleCalendarSelected,
+    onCalendarReminderMinutesChange,
     mount,
     refreshRuntimeStatus,
     refreshDevices,

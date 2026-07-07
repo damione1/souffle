@@ -6,5 +6,9 @@
 	<string>Soufflé uses the microphone to transcribe your voice for dictation and meeting notes.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Soufflé captures system audio during meeting recordings to transcribe the other participants.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Soufflé reads your calendar to show today's meetings and start transcriptions from them.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Soufflé reads your calendar to show today's meetings and start transcriptions from them.</string>
 </dict>
 </plist>

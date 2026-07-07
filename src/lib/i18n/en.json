@@ -31,6 +31,17 @@
     "delete": "Delete",
     "empty": "No custom dictionary entries yet."
   },
+  "settings_calendar": {
+    "title": "Calendar",
+    "description": "Connect the macOS Calendar to see today's meetings and start transcriptions from them. Read-only: any account synced in Calendar.app (iCloud, Google, Outlook) works, nothing leaves your Mac.",
+    "enable_label": "Calendar integration",
+    "enable_desc": "Show today's meetings on the home screen and remind you before they start.",
+    "permission_denied": "Calendar access is denied. Allow Souffle under System Settings > Privacy & Security > Calendars, then toggle again.",
+    "calendars_label": "Calendars",
+    "all_calendars_hint": "All calendars are included; uncheck the ones to hide.",
+    "reminder_label": "Reminder lead time",
+    "reminder_desc": "Minutes before an event to suggest starting a transcription (1-30)."
+  },
   "settings_interface": {
     "title": "Interface",
     "theme": "Theme",
@@ -226,5 +237,14 @@
     "empty_msg": "Your dictations and meetings will appear here, newest first.",
     "no_matches_title": "No matches",
     "no_matches_msg": "Try different keywords — search covers every transcript."
+  },
+  "calendar": {
+    "now": "Now",
+    "next": "Next",
+    "start_transcription": "Start transcription",
+    "organizer": "organizer",
+    "you": "you",
+    "starts_in_minutes": "Starts in {minutes} min",
+    "dismiss": "Dismiss"
   }
 }

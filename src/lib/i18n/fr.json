@@ -31,6 +31,17 @@
     "delete": "Supprimer",
     "empty": "Aucune entrée dans le dictionnaire personnalisé."
   },
+  "settings_calendar": {
+    "title": "Calendrier",
+    "description": "Connectez le Calendrier macOS pour voir les réunions du jour et lancer des transcriptions. Lecture seule : tout compte synchronisé dans Calendrier (iCloud, Google, Outlook) fonctionne, rien ne quitte votre Mac.",
+    "enable_label": "Intégration du calendrier",
+    "enable_desc": "Affiche les réunions du jour sur l'écran d'accueil et vous les rappelle avant qu'elles commencent.",
+    "permission_denied": "L'accès au calendrier est refusé. Autorisez Soufflé dans Réglages Système > Confidentialité et sécurité > Calendriers, puis réactivez.",
+    "calendars_label": "Calendriers",
+    "all_calendars_hint": "Tous les calendriers sont inclus ; décochez ceux à masquer.",
+    "reminder_label": "Délai de rappel",
+    "reminder_desc": "Minutes avant un événement pour proposer de démarrer une transcription (1-30)."
+  },
   "settings_interface": {
     "title": "Interface",
     "theme": "Thème",
@@ -226,5 +237,14 @@
     "empty_msg": "Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.",
     "no_matches_title": "Aucun résultat",
     "no_matches_msg": "Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions."
+  },
+  "calendar": {
+    "now": "En cours",
+    "next": "Suivant",
+    "start_transcription": "Démarrer la transcription",
+    "organizer": "organisateur",
+    "you": "vous",
+    "starts_in_minutes": "Commence dans {minutes} min",
+    "dismiss": "Ignorer"
   }
 }

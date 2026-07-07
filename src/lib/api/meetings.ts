@@ -9,6 +9,7 @@ export async function saveMeetingNotes(id: string, notes: string | null): Promis
   await unwrap(commands.saveMeetingNotes(id, notes));
 }
 import type {
+  MeetingCalendarContext,
   MeetingListItem,
   MeetingTranscript,
   SearchResult,
@@ -26,11 +27,12 @@ export async function getMeeting(id: string): Promise<MeetingTranscript> {
 
 export async function startMeetingRecording(
   title: string,
+  calendar: MeetingCalendarContext | null,
   onSegment: (segment: TranscriptionSegment) => void,
 ): Promise<void> {
   const channel = new Channel<TranscriptionSegment>();
   channel.onmessage = onSegment;
-  await unwrap(commands.startMeetingRecording(title, channel));
+  await unwrap(commands.startMeetingRecording(title, calendar, channel));
 }
 
 export async function resumeMeetingRecording(

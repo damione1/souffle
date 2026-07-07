@@ -23,5 +23,8 @@
     <!-- Required for saving recordings and accessing user files -->
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
+    <!-- Calendar integration: list today's meetings and start transcriptions from them -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
 </dict>
 </plist>

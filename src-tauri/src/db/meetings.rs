@@ -3,7 +3,9 @@ use rusqlite::params;
 
 use crate::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
-use crate::transcript::{MeetingListItem, MeetingRecordingSession, MeetingTranscript};
+use crate::transcript::{
+    MeetingListItem, MeetingParticipant, MeetingRecordingSession, MeetingTranscript,
+};
 
 use super::Database;
 
@@ -30,8 +32,10 @@ impl Database {
                 summary_model,
                 summary_generated_at,
                 edited_transcript,
-                notes
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                notes,
+                calendar_event_id,
+                participants
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 meeting.id,
                 meeting.title,
@@ -48,6 +52,8 @@ impl Database {
                 meeting.summary_generated_at.map(|dt| dt.to_rfc3339()),
                 meeting.edited_transcript,
                 meeting.notes,
+                meeting.calendar_event_id,
+                serialize_participants(&meeting.participants)?,
             ],
         )
         .map_err(|e| format!("Insert meeting: {e}"))?;
@@ -116,8 +122,8 @@ impl Database {
                 id, title, started_at, ended_at, duration_seconds,
                 transcription_profile, recording_sessions, summary,
                 summary_is_stale, summary_model, summary_generated_at,
-                edited_transcript, notes
-             ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10)
+                edited_transcript, notes, calendar_event_id, participants
+             ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 started_at = excluded.started_at,
@@ -128,7 +134,9 @@ impl Database {
                 summary_is_stale = excluded.summary_is_stale,
                 summary_model = excluded.summary_model,
                 summary_generated_at = excluded.summary_generated_at,
-                notes = excluded.notes",
+                notes = excluded.notes,
+                calendar_event_id = excluded.calendar_event_id,
+                participants = excluded.participants",
             params![
                 meeting.id,
                 meeting.title,
@@ -142,6 +150,8 @@ impl Database {
                 meeting.summary_model,
                 meeting.summary_generated_at.map(|dt| dt.to_rfc3339()),
                 meeting.notes,
+                meeting.calendar_event_id,
+                serialize_participants(&meeting.participants)?,
             ],
         )
         .map_err(|e| format!("Upsert meeting header: {e}"))?;
@@ -258,7 +268,9 @@ impl Database {
                     summary_model,
                     summary_generated_at,
                     edited_transcript,
-                    notes
+                    notes,
+                    calendar_event_id,
+                    participants
                  FROM meetings
                  WHERE id = ?1",
                 params![id],
@@ -277,6 +289,8 @@ impl Database {
                         summary_generated_at: row.get(10)?,
                         edited_transcript: row.get(11)?,
                         notes: row.get(12)?,
+                        calendar_event_id: row.get(13)?,
+                        participants: row.get(14)?,
                     })
                 },
             )
@@ -312,6 +326,7 @@ impl Database {
             .map_err(|e| format!("Collect segments: {e}"))?;
         let transcription_profile = meeting.transcription_profile()?;
         let recording_sessions = meeting.recording_sessions()?;
+        let participants = meeting.participants()?;
         let started_at = parse_datetime(&meeting.started_at)?;
         let ended_at = meeting
             .ended_at
@@ -339,6 +354,8 @@ impl Database {
             summary_generated_at,
             edited_transcript: meeting.edited_transcript,
             notes: meeting.notes,
+            calendar_event_id: meeting.calendar_event_id,
+            participants,
         })
     }
 
@@ -495,6 +512,8 @@ struct MeetingRow {
     summary_generated_at: Option<String>,
     edited_transcript: Option<String>,
     notes: Option<String>,
+    calendar_event_id: Option<String>,
+    participants: Option<String>,
 }
 
 impl MeetingRow {
@@ -507,6 +526,24 @@ impl MeetingRow {
         serde_json::from_str(&self.recording_sessions)
             .map_err(|e| format!("Deserialize recording sessions: {e}"))
     }
+
+    /// NULL (pre-v8 rows) means no participants.
+    fn participants(&self) -> Result<Vec<MeetingParticipant>, String> {
+        match self.participants.as_deref() {
+            Some(raw) => serde_json::from_str(raw)
+                .map_err(|e| format!("Deserialize participants: {e}")),
+            None => Ok(Vec::new()),
+        }
+    }
+}
+
+/// Participants persist as a JSON array; an empty list stores NULL so pre-v8
+/// and participant-less rows look identical.
+fn serialize_participants(participants: &[MeetingParticipant]) -> Result<Option<String>, String> {
+    if participants.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(participants).map(Some).map_err(|e| format!("Serialize participants: {e}"))
 }
 
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
@@ -561,6 +598,33 @@ mod tests {
 
         db.save_meeting_notes("m1", None).unwrap();
         assert_eq!(db.load_meeting("m1").unwrap().notes, None);
+    }
+
+    #[test]
+    fn participants_round_trip_and_survive_resume() {
+        use crate::transcript::MeetingParticipant;
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.calendar_event_id = Some("evt-42".to_string());
+        meeting.participants = vec![MeetingParticipant {
+            name: "Alice Martin".to_string(),
+            email: Some("alice@corp.com".to_string()),
+            is_organizer: true,
+            is_current_user: false,
+        }];
+        db.save_meeting(&meeting).unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.calendar_event_id.as_deref(), Some("evt-42"));
+        assert_eq!(loaded.participants, meeting.participants);
+
+        // Resume path reuses upsert_meeting_header with the loaded meeting.
+        let mut header = loaded.clone();
+        header.ended_at = None;
+        db.upsert_meeting_header(&header).unwrap();
+        let resumed = db.load_meeting("m1").unwrap();
+        assert_eq!(resumed.participants, meeting.participants);
+        assert_eq!(resumed.calendar_event_id.as_deref(), Some("evt-42"));
     }
 
     #[test]
