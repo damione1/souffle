@@ -190,8 +190,10 @@ impl Database {
     /// Empty shells (a started meeting with no persisted segments) are deleted;
     /// the rest get `ended_at`/`duration`/`recording_sessions` synthesized from
     /// their persisted segments and are rewritten (which also rebuilds FTS).
-    /// Returns the number of meetings salvaged. Safe to call only at startup,
-    /// before any live recording can hold a legitimately-open meeting.
+    /// Returns the number of meetings salvaged. Safe to call whenever no
+    /// recording is live: at startup, and also from the failed-start path in
+    /// `launch_meeting`, since the accumulator guard there guarantees no other
+    /// meeting is mid-recording when it runs.
     pub fn recover_unfinished_meetings(&self) -> Result<usize, String> {
         let ids: Vec<String> = {
             let conn = self.conn.acquire()?;

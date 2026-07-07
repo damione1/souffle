@@ -190,6 +190,7 @@ function createMeetingControllerInstance() {
         summary_model: null,
         summary_generated_at: null,
         edited_transcript: null,
+        notes: null,
       };
     } catch (e) {
       statusMessage = errorMessage(e);

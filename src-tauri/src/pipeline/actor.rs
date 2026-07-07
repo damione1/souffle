@@ -18,7 +18,7 @@ use tauri_specta::Event;
 use tracing::{debug, error, info, warn};
 
 use crate::app_events::{PipelineError, PipelineErrorScope};
-use crate::audio::AudioMessage;
+use crate::audio::{AudioChunk, AudioMessage};
 use crate::engine::{
     AudioInputRequirements, Speaker, TranscriptionEngine, TranscriptionProfile,
     TranscriptionSegment,
@@ -345,11 +345,13 @@ impl EngineActor {
         info!("Engine actor shut down cleanly");
     }
 
-    /// A session died mid-recording: tell the audio thread to stop, surface
-    /// the error to the frontend, salvage any in-progress meeting, and fail
-    /// the state machine so the UI leaves the recording state. Without this,
-    /// the old pipeline died silently and the app looked like it "just
-    /// stopped transcribing".
+    /// A session died mid-recording: surface the error to the frontend, then
+    /// let `AppState` stop audio capture, salvage any in-progress meeting,
+    /// and fail the state machine so the UI leaves the recording state.
+    /// Without this, the old pipeline died silently and the app looked like
+    /// it "just stopped transcribing". The pipeline layer only owns emitting
+    /// the event here; the rest is app-level cleanup that doesn't belong on
+    /// this side of the actor/command boundary.
     fn handle_session_abort(&mut self, message: String) {
         if let Some(app) = &self.app {
             let _ = PipelineError {
@@ -358,38 +360,8 @@ impl EngineActor {
             }
             .emit(app);
 
-            let state = app.state::<crate::state::AppState>();
-            let _ = state
-                .audio_cmd_sender
-                .send(crate::state::AudioCommand::Stop);
-
-            // Salvage an in-progress meeting: stop_meeting_recording can no
-            // longer run once the machine is in Error, so the accumulated
-            // segments would otherwise be lost.
-            let accumulator = state
-                .meeting_accumulator
-                .lock()
-                .ok()
-                .and_then(|mut guard| guard.take());
-            if let Some(meeting) = accumulator {
-                let transcript = crate::commands::transcription::build_meeting_transcript(
-                    meeting,
-                    chrono::Utc::now(),
-                );
-                match state.db.save_meeting(&transcript) {
-                    Ok(()) => info!(
-                        id = %transcript.id,
-                        "Meeting salvaged to history after session abort"
-                    ),
-                    Err(e) => error!("Failed to salvage meeting after session abort: {e}"),
-                }
-            }
-
-            if let Err(e) =
-                state.apply_transition(crate::state_machine::StateAction::Fail { message })
-            {
-                warn!("Failed to apply Fail transition after session abort: {e}");
-            }
+            app.state::<crate::state::AppState>()
+                .abort_active_session(message);
         }
         // Drain whatever audio is still queued (including the EndOfStream the
         // audio thread sends on Stop) so nothing stale leaks into the next session.
@@ -478,38 +450,32 @@ impl EngineActor {
         let mut health = SessionHealth::start(session_id, Arc::clone(&self.dropped_counter));
         let engine = self.engine.as_mut().expect("engine present: checked above");
 
-        if diarize {
-            // Caller may now start audio capture.
-            let _ = reply.send(Ok(info));
-            // No Silero VAD in diarized mode: the two lanes must step together
-            // every frame to stay aligned in the batch, so we can't drop a
-            // silent frame from one side. Kyutai's own semantic VAD handles
-            // pauses.
-            active_diarized_loop(
-                &self.cmd_rx,
-                &self.audio_rx,
-                engine.as_mut(),
-                &on_segment,
-                session_id,
-                &text_filters,
-                &mut health,
-                self.app.as_ref(),
-            )
+        // No Silero VAD in diarized mode: the two lanes must step together
+        // every frame to stay aligned in the batch, so we can't drop a silent
+        // frame from one side. Kyutai's own semantic VAD handles pauses.
+        let mut mode: Box<dyn SessionMode> = if diarize {
+            Box::new(DiarizedMode::new())
         } else {
-            let mut audio_filters = build_audio_filters(&config.pipeline_config, sample_rate);
-            let _ = reply.send(Ok(info));
-            active_session_loop(
-                &self.cmd_rx,
-                &self.audio_rx,
-                engine.as_mut(),
-                &on_segment,
-                session_id,
-                &mut audio_filters,
-                &text_filters,
-                &mut health,
-                self.app.as_ref(),
-            )
-        }
+            Box::new(SingleMode::new(build_audio_filters(
+                &config.pipeline_config,
+                sample_rate,
+            )))
+        };
+
+        // Caller may now start audio capture.
+        let _ = reply.send(Ok(info));
+
+        run_session_loop(
+            &self.cmd_rx,
+            &self.audio_rx,
+            engine.as_mut(),
+            &on_segment,
+            session_id,
+            &text_filters,
+            &mut health,
+            self.app.as_ref(),
+            mode.as_mut(),
+        )
     }
 
     fn drain_audio_queue(&self) -> usize {
@@ -529,21 +495,242 @@ const EOS_WAIT: Duration = Duration::from_secs(5);
 /// (~2 seconds of audio at Kyutai's 80ms frames).
 const MAX_CONSECUTIVE_FRAME_ERRORS: u32 = 25;
 
-/// Process audio frames while the session is active.
+/// A session's audio buffering and engine-stepping strategy. The generic loop
+/// (`run_session_loop`) owns everything session-lifecycle-shaped (commands,
+/// stop sequencing, health, heartbeat, the error-streak abort); a mode only
+/// knows how to buffer chunks and turn a buffered frame into engine calls.
+trait SessionMode {
+    /// Buffer a chunk's samples (single buffer, or routed by `chunk.speaker`).
+    fn ingest(&mut self, chunk: AudioChunk);
+
+    /// True while a full engine frame can be drained from the buffer(s).
+    fn frame_ready(&self, chunk_size: usize) -> bool;
+
+    /// Drain one frame and run the engine on it. `Ok(None)` means the frame
+    /// was VAD-skipped (single mode only): frame/health counters still
+    /// advance, but the consecutive-error streak does not move. The caller
+    /// wraps this call in `catch_unwind`.
+    fn step(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+        chunk_size: usize,
+    ) -> Result<Option<Vec<TranscriptionSegment>>, String>;
+
+    /// Drain and transcribe one full frame unconditionally (no VAD gating):
+    /// used at session end, where every buffered frame must still reach the
+    /// engine even if VAD would otherwise have gated it.
+    fn finish_frame(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+        chunk_size: usize,
+    ) -> Result<Vec<TranscriptionSegment>, String>;
+
+    /// Feed whatever partial tail(s) remain (less than a full frame) through
+    /// the engine at session end.
+    fn finish_tail(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+    ) -> Result<Vec<TranscriptionSegment>, String>;
+
+    /// Emit the periodic heartbeat log line with mode-specific fields.
+    fn log_heartbeat(
+        &self,
+        session_id: u64,
+        frames_processed: u64,
+        segments_emitted: u64,
+        audio_backlog: usize,
+    );
+}
+
+/// Single mixed-stream session: one buffer gated by the configured audio
+/// filter chain (Silero VAD when enabled).
+struct SingleMode {
+    buffer: Vec<f32>,
+    audio_filters: AudioFilterChain,
+    vad_skipped: u64,
+}
+
+impl SingleMode {
+    fn new(audio_filters: AudioFilterChain) -> Self {
+        Self {
+            buffer: Vec::new(),
+            audio_filters,
+            vad_skipped: 0,
+        }
+    }
+}
+
+impl SessionMode for SingleMode {
+    fn ingest(&mut self, chunk: AudioChunk) {
+        self.buffer.extend_from_slice(&chunk.samples);
+    }
+
+    fn frame_ready(&self, chunk_size: usize) -> bool {
+        self.buffer.len() >= chunk_size
+    }
+
+    fn step(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+        chunk_size: usize,
+    ) -> Result<Option<Vec<TranscriptionSegment>>, String> {
+        let frame: Vec<f32> = self.buffer.drain(..chunk_size).collect();
+        if !self.audio_filters.process(&frame) {
+            self.vad_skipped += 1;
+            return Ok(None); // VAD says no speech — skip this frame
+        }
+        engine
+            .transcribe(&frame, None)
+            .map(Some)
+            .map_err(|e| e.to_string())
+    }
+
+    fn finish_frame(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+        chunk_size: usize,
+    ) -> Result<Vec<TranscriptionSegment>, String> {
+        let frame: Vec<f32> = self.buffer.drain(..chunk_size).collect();
+        catch_engine(|| engine.transcribe(&frame, None))
+    }
+
+    fn finish_tail(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+    ) -> Result<Vec<TranscriptionSegment>, String> {
+        if self.buffer.is_empty() {
+            return Ok(Vec::new());
+        }
+        let result = catch_engine(|| engine.transcribe(&self.buffer, None));
+        self.buffer.clear();
+        result
+    }
+
+    fn log_heartbeat(
+        &self,
+        session_id: u64,
+        frames_processed: u64,
+        segments_emitted: u64,
+        audio_backlog: usize,
+    ) {
+        info!(
+            session_id,
+            transcribed_frames = frames_processed,
+            vad_skipped = self.vad_skipped,
+            segments_emitted,
+            audio_backlog,
+            "Session heartbeat"
+        );
+    }
+}
+
+/// Diarized session: mic (Me) and system audio (Them) buffered separately and
+/// stepped together into one batched `transcribe_dual` call, so the two lanes
+/// stay frame-aligned. No Silero VAD: a silent frame can't be dropped from
+/// just one side without breaking that alignment (Kyutai's own semantic VAD
+/// handles pauses).
+struct DiarizedMode {
+    me_buf: Vec<f32>,
+    them_buf: Vec<f32>,
+}
+
+impl DiarizedMode {
+    fn new() -> Self {
+        Self {
+            me_buf: Vec::new(),
+            them_buf: Vec::new(),
+        }
+    }
+
+    /// Untagged audio (shouldn't happen in diarized mode) goes to the mic.
+    fn buf_for(&mut self, speaker: Option<Speaker>) -> &mut Vec<f32> {
+        match speaker {
+            Some(Speaker::Them) => &mut self.them_buf,
+            _ => &mut self.me_buf,
+        }
+    }
+}
+
+impl SessionMode for DiarizedMode {
+    fn ingest(&mut self, chunk: AudioChunk) {
+        self.buf_for(chunk.speaker)
+            .extend_from_slice(&chunk.samples);
+    }
+
+    fn frame_ready(&self, chunk_size: usize) -> bool {
+        self.me_buf.len() >= chunk_size && self.them_buf.len() >= chunk_size
+    }
+
+    fn step(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+        chunk_size: usize,
+    ) -> Result<Option<Vec<TranscriptionSegment>>, String> {
+        let me_frame: Vec<f32> = self.me_buf.drain(..chunk_size).collect();
+        let them_frame: Vec<f32> = self.them_buf.drain(..chunk_size).collect();
+        engine
+            .transcribe_dual(&me_frame, &them_frame)
+            .map(Some)
+            .map_err(|e| e.to_string())
+    }
+
+    fn finish_frame(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+        chunk_size: usize,
+    ) -> Result<Vec<TranscriptionSegment>, String> {
+        let me_frame: Vec<f32> = self.me_buf.drain(..chunk_size).collect();
+        let them_frame: Vec<f32> = self.them_buf.drain(..chunk_size).collect();
+        catch_engine(|| engine.transcribe_dual(&me_frame, &them_frame))
+    }
+
+    fn finish_tail(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+    ) -> Result<Vec<TranscriptionSegment>, String> {
+        if self.me_buf.is_empty() && self.them_buf.is_empty() {
+            return Ok(Vec::new());
+        }
+        // transcribe_dual zero-pads the shorter lane internally.
+        let me_tail = std::mem::take(&mut self.me_buf);
+        let them_tail = std::mem::take(&mut self.them_buf);
+        catch_engine(|| engine.transcribe_dual(&me_tail, &them_tail))
+    }
+
+    fn log_heartbeat(
+        &self,
+        session_id: u64,
+        frames_processed: u64,
+        segments_emitted: u64,
+        audio_backlog: usize,
+    ) {
+        info!(
+            session_id,
+            transcribed_frames = frames_processed,
+            segments_emitted,
+            audio_backlog,
+            "Diarized session heartbeat"
+        );
+    }
+}
+
+/// Process audio frames while the session is active. Owns command handling,
+/// health/heartbeat, the EOS-wait stop sequencing, and the consecutive-error
+/// abort logic; `mode` decides how audio is buffered and stepped through the
+/// engine (single stream + VAD, or paired diarized lanes).
 #[allow(clippy::too_many_arguments)]
-fn active_session_loop(
+fn run_session_loop(
     cmd_rx: &Receiver<EngineCommand>,
     audio_rx: &Receiver<AudioMessage>,
     engine: &mut dyn TranscriptionEngine,
     on_segment: &SegmentCallback,
     session_id: u64,
-    audio_filters: &mut AudioFilterChain,
     text_filters: &TextFilterChain,
     health: &mut SessionHealth,
     app: Option<&tauri::AppHandle>,
+    mode: &mut dyn SessionMode,
 ) -> SessionEnd {
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
-    let mut audio_buffer: Vec<f32> = Vec::new();
     let mut summary = SessionSummary::default();
     let mut eos_received = false;
     let mut consecutive_errors: u32 = 0;
@@ -554,7 +741,6 @@ fn active_session_loop(
     // emits nothing, or VAD gates everything) looks identical to "still
     // recording" from the UI. This heartbeat makes the failure mode legible in
     // the log without the verbose debug setting.
-    let mut vad_skipped: u64 = 0;
     let mut segments_emitted: u64 = 0;
     let mut last_heartbeat = Instant::now();
     const HEARTBEAT: Duration = Duration::from_secs(30);
@@ -569,13 +755,11 @@ fn active_session_loop(
 
         if last_heartbeat.elapsed() >= HEARTBEAT {
             last_heartbeat = Instant::now();
-            info!(
+            mode.log_heartbeat(
                 session_id,
-                transcribed_frames = summary.frames_processed,
-                vad_skipped,
+                summary.frames_processed,
                 segments_emitted,
-                audio_backlog = audio_rx.len(),
-                "Session heartbeat"
+                audio_rx.len(),
             );
         }
 
@@ -594,7 +778,7 @@ fn active_session_loop(
                         on_segment,
                         session_id,
                         text_filters,
-                        &mut audio_buffer,
+                        mode,
                         &mut summary,
                     );
                     return SessionEnd::Stopped(reply, summary);
@@ -633,7 +817,7 @@ fn active_session_loop(
                 on_segment,
                 session_id,
                 text_filters,
-                &mut audio_buffer,
+                mode,
                 &mut summary,
             );
             return SessionEnd::Stopped(reply, summary);
@@ -654,7 +838,7 @@ fn active_session_loop(
                         on_segment,
                         session_id,
                         text_filters,
-                        &mut audio_buffer,
+                        mode,
                         &mut summary,
                     );
                     return SessionEnd::Stopped(reply, summary);
@@ -676,30 +860,29 @@ fn active_session_loop(
                 }
 
                 health.note_chunk(chunk.captured_at);
-                audio_buffer.extend_from_slice(&chunk.samples);
+                mode.ingest(chunk);
 
                 // Process complete engine-sized frames
-                while audio_buffer.len() >= chunk_size {
-                    let frame: Vec<f32> = audio_buffer.drain(..chunk_size).collect();
-                    if !audio_filters.process(&frame) {
-                        summary.frames_processed += 1;
-                        vad_skipped += 1;
-                        health.note_frame();
-                        continue; // VAD says no speech — skip this frame
-                    }
+                while mode.frame_ready(chunk_size) {
                     // A panic in the engine (candle/whisper/Metal) must not
                     // abort the whole app: catch it and treat it like a frame
                     // error so the streak logic below can recover or abort the
                     // session cleanly.
-                    let transcribe_result: Result<Vec<TranscriptionSegment>, String> =
+                    let step_result: Result<Option<Vec<TranscriptionSegment>>, String> =
                         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            engine.transcribe(&frame, None)
+                            mode.step(engine, chunk_size)
                         })) {
-                            Ok(inner) => inner.map_err(|e| e.to_string()),
+                            Ok(inner) => inner,
                             Err(_) => Err("engine panicked during transcribe".to_string()),
                         };
-                    match transcribe_result {
-                        Ok(segments) => {
+                    match step_result {
+                        Ok(None) => {
+                            // VAD-skipped frame (single mode only).
+                            summary.frames_processed += 1;
+                            health.note_frame();
+                            continue;
+                        }
+                        Ok(Some(segments)) => {
                             consecutive_errors = 0;
                             for seg in segments {
                                 if crate::debug::transcription_debug_enabled() {
@@ -757,14 +940,16 @@ fn active_session_loop(
     }
 }
 
-/// Drain remaining audio, run it through the engine, and flush.
+/// Drain remaining audio, run every buffered frame through the engine (no VAD
+/// gating: everything already captured must reach the engine), feed the
+/// tail(s), and flush. Every stage's segments go through `emit_filtered`.
 fn finish_session(
     audio_rx: &Receiver<AudioMessage>,
     engine: &mut dyn TranscriptionEngine,
     on_segment: &SegmentCallback,
     session_id: u64,
     text_filters: &TextFilterChain,
-    audio_buffer: &mut Vec<f32>,
+    mode: &mut dyn SessionMode,
     summary: &mut SessionSummary,
 ) {
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
@@ -775,7 +960,7 @@ fn finish_session(
     while let Ok(msg) = audio_rx.try_recv() {
         match msg {
             AudioMessage::Chunk(chunk) if chunk.session_id == session_id => {
-                audio_buffer.extend_from_slice(&chunk.samples);
+                mode.ingest(chunk);
                 drained += 1;
             }
             AudioMessage::Chunk(_) => summary.skipped_chunks += 1,
@@ -786,10 +971,9 @@ fn finish_session(
         debug!("Drained {drained} remaining audio chunks on stop");
     }
 
-    // Process all buffered audio through the engine (frame by frame)
-    while audio_buffer.len() >= chunk_size {
-        let frame: Vec<f32> = audio_buffer.drain(..chunk_size).collect();
-        match catch_engine(|| engine.transcribe(&frame, None)) {
+    // Process all buffered audio through the engine (frame by frame).
+    while mode.frame_ready(chunk_size) {
+        match mode.finish_frame(engine, chunk_size) {
             Ok(segments) => {
                 for seg in segments {
                     if crate::debug::transcription_debug_enabled() {
@@ -805,17 +989,14 @@ fn finish_session(
         }
         summary.frames_processed += 1;
     }
-    // Process any remaining partial frame
-    if !audio_buffer.is_empty() {
-        match catch_engine(|| engine.transcribe(audio_buffer, None)) {
-            Ok(segments) => {
-                for seg in segments {
-                    emit_filtered(engine, text_filters, seg, on_segment);
-                }
+    // Process any remaining partial tail(s).
+    match mode.finish_tail(engine) {
+        Ok(segments) => {
+            for seg in segments {
+                emit_filtered(engine, text_filters, seg, on_segment);
             }
-            Err(e) => error!("Transcribe error on partial frame: {e}"),
         }
-        audio_buffer.clear();
+        Err(e) => error!("Transcribe error on partial frame: {e}"),
     }
 
     // Flush engine (e.g. feeds silence to extract remaining buffered tokens)
@@ -829,261 +1010,6 @@ fn finish_session(
             }
         }
         Err(e) => error!("Flush error: {e}"),
-    }
-}
-
-/// Append a chunk's samples to the buffer for its source (mic = Me, system =
-/// Them). Untagged audio (shouldn't happen in diarized mode) goes to the mic.
-fn route_chunk<'a>(
-    me_buf: &'a mut Vec<f32>,
-    them_buf: &'a mut Vec<f32>,
-    speaker: Option<Speaker>,
-) -> &'a mut Vec<f32> {
-    match speaker {
-        Some(Speaker::Them) => them_buf,
-        _ => me_buf,
-    }
-}
-
-/// Diarized session loop: one engine transcribes both sources as batch lanes
-/// (mic = Me, system audio = Them). Mirrors `active_session_loop`'s
-/// command/stop/health scaffolding, but pairs the two tagged streams frame by
-/// frame into `transcribe_dual`, which returns speaker-tagged segments. No
-/// Silero VAD: the lanes must step together to stay batch-aligned, so a silent
-/// frame can't be dropped from one side (Kyutai's own VAD handles pauses).
-#[allow(clippy::too_many_arguments)]
-fn active_diarized_loop(
-    cmd_rx: &Receiver<EngineCommand>,
-    audio_rx: &Receiver<AudioMessage>,
-    engine: &mut dyn TranscriptionEngine,
-    on_segment: &SegmentCallback,
-    session_id: u64,
-    text_filters: &TextFilterChain,
-    health: &mut SessionHealth,
-    app: Option<&tauri::AppHandle>,
-) -> SessionEnd {
-    let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
-    let mut me_buf: Vec<f32> = Vec::new();
-    let mut them_buf: Vec<f32> = Vec::new();
-    let mut summary = SessionSummary::default();
-    let mut eos_received = false;
-    let mut consecutive_errors: u32 = 0;
-    let mut pending_stop: Option<(Sender<Result<SessionSummary, String>>, Instant)> = None;
-    let mut segments_emitted: u64 = 0;
-    let mut last_heartbeat = Instant::now();
-    const HEARTBEAT: Duration = Duration::from_secs(30);
-
-    loop {
-        if let Some(snapshot) = health.tick(audio_rx.len())
-            && let Some(app) = app
-        {
-            let _ = snapshot.emit(app);
-        }
-
-        if last_heartbeat.elapsed() >= HEARTBEAT {
-            last_heartbeat = Instant::now();
-            info!(
-                session_id,
-                transcribed_frames = summary.frames_processed,
-                segments_emitted,
-                audio_backlog = audio_rx.len(),
-                "Diarized session heartbeat"
-            );
-        }
-
-        match cmd_rx.try_recv() {
-            Ok(EngineCommand::AttachApp(_)) => {}
-            Ok(EngineCommand::StopSession { reply }) => {
-                if eos_received {
-                    summary.dropped_chunks = health.dropped_chunks();
-                    finish_diarized(
-                        audio_rx,
-                        engine,
-                        &mut me_buf,
-                        &mut them_buf,
-                        on_segment,
-                        session_id,
-                        text_filters,
-                        &mut summary,
-                    );
-                    return SessionEnd::Stopped(reply, summary);
-                }
-                pending_stop = Some((reply, Instant::now()));
-            }
-            Ok(EngineCommand::Shutdown) => return SessionEnd::Shutdown,
-            Ok(EngineCommand::LoadModel { reply, .. }) => {
-                let _ = reply.send(Err("Recording session active".into()));
-            }
-            Ok(EngineCommand::UnloadModel { reply }) => {
-                let _ = reply.send(Err("Recording session active".into()));
-            }
-            Ok(EngineCommand::StartSession { reply, .. }) => {
-                let _ = reply.send(Err("Recording session active".into()));
-            }
-            Ok(EngineCommand::DebugTranscribe { reply, .. }) => {
-                let _ = reply.send(Err("Recording session active".into()));
-            }
-            Err(_) => {}
-        }
-
-        if let Some((_, requested_at)) = &pending_stop
-            && requested_at.elapsed() > EOS_WAIT
-        {
-            warn!("End-of-stream marker never arrived; finishing diarized session anyway");
-            let (reply, _) = pending_stop.take().expect("pending_stop checked above");
-            summary.dropped_chunks = health.dropped_chunks();
-            finish_diarized(
-                audio_rx,
-                engine,
-                &mut me_buf,
-                &mut them_buf,
-                on_segment,
-                session_id,
-                text_filters,
-                &mut summary,
-            );
-            return SessionEnd::Stopped(reply, summary);
-        }
-
-        match audio_rx.recv_timeout(Duration::from_millis(50)) {
-            Ok(AudioMessage::EndOfStream { session_id: eos_id }) => {
-                if eos_id != session_id {
-                    continue;
-                }
-                eos_received = true;
-                if let Some((reply, _)) = pending_stop.take() {
-                    summary.dropped_chunks = health.dropped_chunks();
-                    finish_diarized(
-                        audio_rx,
-                        engine,
-                        &mut me_buf,
-                        &mut them_buf,
-                        on_segment,
-                        session_id,
-                        text_filters,
-                        &mut summary,
-                    );
-                    return SessionEnd::Stopped(reply, summary);
-                }
-            }
-            Ok(AudioMessage::Chunk(chunk)) => {
-                if chunk.session_id != session_id {
-                    summary.skipped_chunks += 1;
-                    continue;
-                }
-                health.note_chunk(chunk.captured_at);
-                route_chunk(&mut me_buf, &mut them_buf, chunk.speaker)
-                    .extend_from_slice(&chunk.samples);
-
-                // Step both lanes together while each has a full frame.
-                while me_buf.len() >= chunk_size && them_buf.len() >= chunk_size {
-                    let me_frame: Vec<f32> = me_buf.drain(..chunk_size).collect();
-                    let them_frame: Vec<f32> = them_buf.drain(..chunk_size).collect();
-                    let result: Result<Vec<TranscriptionSegment>, String> =
-                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            engine.transcribe_dual(&me_frame, &them_frame)
-                        })) {
-                            Ok(inner) => inner.map_err(|e| e.to_string()),
-                            Err(_) => Err("engine panicked during transcribe".to_string()),
-                        };
-                    match result {
-                        Ok(segments) => {
-                            consecutive_errors = 0;
-                            for seg in segments {
-                                segments_emitted += 1;
-                                emit_filtered(engine, text_filters, seg, on_segment);
-                            }
-                        }
-                        Err(e) => {
-                            consecutive_errors += 1;
-                            error!("Diarized transcribe error (frame skipped): {e}");
-                            if consecutive_errors == 1
-                                && let Some(app) = app
-                            {
-                                let _ = PipelineError {
-                                    scope: PipelineErrorScope::Frame,
-                                    message: e.clone(),
-                                }
-                                .emit(app);
-                            }
-                            if consecutive_errors >= MAX_CONSECUTIVE_FRAME_ERRORS {
-                                if let Some((reply, _)) = pending_stop.take() {
-                                    let _ = reply.send(Err(format!("Session aborted: {e}")));
-                                }
-                                return SessionEnd::Aborted(format!(
-                                    "Transcription failed {MAX_CONSECUTIVE_FRAME_ERRORS} frames in a row: {e}"
-                                ));
-                            }
-                        }
-                    }
-                    summary.frames_processed += 1;
-                    health.note_frame();
-                }
-            }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                return SessionEnd::AudioGone;
-            }
-        }
-    }
-}
-
-/// Drain remaining audio, transcribe the paired tails, and flush the engine.
-#[allow(clippy::too_many_arguments)]
-fn finish_diarized(
-    audio_rx: &Receiver<AudioMessage>,
-    engine: &mut dyn TranscriptionEngine,
-    me_buf: &mut Vec<f32>,
-    them_buf: &mut Vec<f32>,
-    on_segment: &SegmentCallback,
-    session_id: u64,
-    text_filters: &TextFilterChain,
-    summary: &mut SessionSummary,
-) {
-    let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
-
-    while let Ok(msg) = audio_rx.try_recv() {
-        match msg {
-            AudioMessage::Chunk(chunk) if chunk.session_id == session_id => {
-                route_chunk(me_buf, them_buf, chunk.speaker).extend_from_slice(&chunk.samples);
-            }
-            AudioMessage::Chunk(_) => summary.skipped_chunks += 1,
-            AudioMessage::EndOfStream { .. } => {}
-        }
-    }
-
-    let emit_all = |engine: &mut dyn TranscriptionEngine, segments: Vec<TranscriptionSegment>| {
-        for seg in segments {
-            emit_filtered(engine, text_filters, seg, on_segment);
-        }
-    };
-
-    // Step the paired frames both lanes still hold.
-    while me_buf.len() >= chunk_size && them_buf.len() >= chunk_size {
-        let me_frame: Vec<f32> = me_buf.drain(..chunk_size).collect();
-        let them_frame: Vec<f32> = them_buf.drain(..chunk_size).collect();
-        match catch_engine(|| engine.transcribe_dual(&me_frame, &them_frame)) {
-            Ok(segments) => emit_all(engine, segments),
-            Err(e) => {
-                error!("Diarized transcribe error during drain: {e}");
-                break;
-            }
-        }
-        summary.frames_processed += 1;
-    }
-    // Any uneven tail: transcribe_dual zero-pads the shorter lane internally.
-    if !me_buf.is_empty() || !them_buf.is_empty() {
-        let me_tail = std::mem::take(me_buf);
-        let them_tail = std::mem::take(them_buf);
-        match catch_engine(|| engine.transcribe_dual(&me_tail, &them_tail)) {
-            Ok(segments) => emit_all(engine, segments),
-            Err(e) => error!("Diarized transcribe error on partial frame: {e}"),
-        }
-    }
-    // Flush returns batched, speaker-tagged segments in diarized mode.
-    match catch_engine(|| engine.flush()) {
-        Ok(segments) => emit_all(engine, segments),
-        Err(e) => error!("Diarized flush error: {e}"),
     }
 }
 

@@ -17,6 +17,20 @@ const MAP_NUM_CTX: u32 = 8192;
 /// the overlap carried between consecutive chunks to preserve boundary context.
 const CHUNK_WORDS: usize = 1400;
 const CHUNK_OVERLAP_WORDS: usize = 120;
+/// Map-stage concurrency cap: Ollama is a single local server backed by one
+/// GPU, so firing every chunk at once (a 2h meeting is ~13 chunks) queues
+/// requests behind each other anyway and thrashes VRAM. Two in flight keeps
+/// the queue short without serializing entirely.
+const MAP_CONCURRENCY: usize = 2;
+/// Lower bound on establishing a TCP connection to the local Ollama server;
+/// if it hasn't accepted the connection by then it's not coming up.
+const CONNECT_TIMEOUT_SECS: u64 = 5;
+/// Upper bound on the gap between received stream chunks, not on total
+/// request duration (long generations are legitimate). Every request below
+/// streams, so this is safe: a non-streaming response would otherwise
+/// deliver no bytes until generation finishes and could trip this timeout
+/// on a long generation.
+const READ_TIMEOUT_SECS: u64 = 120;
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct OllamaModelDescriptor {
@@ -141,23 +155,23 @@ fn is_summary_capable_model(model: &str) -> bool {
     }
 
     let lower = model.to_ascii_lowercase();
-    let blocked_keywords = [
-        "whisper",
-        "stt",
-        "asr",
-        "speech",
-        "wav2vec",
-        "embed",
-        "embedding",
-        "minilm",
-        "bge",
-        "gte",
-        "e5",
-    ];
 
-    !blocked_keywords
+    // Long enough to be unambiguous as a substring anywhere in the name.
+    let blocked_substrings = ["whisper", "speech", "wav2vec", "embed", "minilm"];
+    if blocked_substrings
         .iter()
         .any(|keyword| lower.contains(keyword))
+    {
+        return false;
+    }
+
+    // Short keywords collide with unrelated model names as substrings (e.g.
+    // "e5" inside "faste5ish"), so only block them as whole tokens.
+    let blocked_tokens = ["stt", "asr", "e5", "bge", "gte"];
+    let tokens = lower.split(|c: char| !c.is_alphanumeric());
+    !tokens
+        .into_iter()
+        .any(|token| blocked_tokens.contains(&token))
 }
 
 fn summary_model_priority(model: &str) -> usize {
@@ -290,44 +304,11 @@ fn build_reduce_prompt(part_summaries: &[String], notes: Option<&str>) -> String
     prompt
 }
 
-/// One non-streaming Ollama generation; returns the full response text.
-async fn generate_once(
-    client: &reqwest::Client,
-    url: &str,
-    model: &str,
-    system: &str,
-    prompt: String,
-    num_ctx: u32,
-    temperature: f32,
-) -> Result<String, String> {
-    let body = GenerateRequest {
-        model: model.to_string(),
-        prompt,
-        system: system.to_string(),
-        stream: false,
-        options: GenerateOptions {
-            temperature,
-            num_ctx,
-        },
-    };
-    let resp = client
-        .post(format!("{url}/api/generate"))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Ollama request: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("Ollama error: {}", resp.status()));
-    }
-    let parsed = resp
-        .json::<GenerateChunk>()
-        .await
-        .map_err(|e| format!("Ollama response: {e}"))?;
-    Ok(parsed.response)
-}
-
 /// One streaming Ollama generation; forwards each token to `on_chunk` and
-/// returns the accumulated text.
+/// returns the accumulated text. Every generation streams, including the map
+/// stage (which passes a no-op `on_chunk`), so that `read_timeout` on the
+/// client only ever bounds the gap between chunks, never total generation
+/// time.
 #[allow(clippy::too_many_arguments)]
 async fn generate_stream(
     client: &reqwest::Client,
@@ -411,7 +392,11 @@ pub async fn summarize_stream(
     }
 
     let url = base_url.unwrap_or(OLLAMA_DEFAULT_URL);
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
+        .read_timeout(std::time::Duration::from_secs(READ_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("Ollama client: {e}"))?;
 
     // Short enough to fit comfortably in one context — summarize directly.
     if estimate_tokens(transcript_text) <= STUFF_TOKEN_LIMIT {
@@ -429,27 +414,34 @@ pub async fn summarize_stream(
         return Ok(sanitize_summary(&full));
     }
 
-    // Map: summarize each chunk independently, concurrently.
+    // Map: summarize each chunk independently, bounded to MAP_CONCURRENCY at a
+    // time (see const doc) but with results collected in chunk order.
+    use futures_util::{StreamExt, TryStreamExt};
+    let no_op = |_: SummarizeProgress| {};
     let chunks = chunk_transcript(transcript_text);
     let n = chunks.len();
-    let maps = chunks.iter().enumerate().map(|(i, chunk)| {
-        let user = format!(
-            "Part {} of {}.\n\nTranscript excerpt:\n---\n{}\n---",
-            i + 1,
-            n,
-            chunk
-        );
-        generate_once(
-            &client,
-            url,
-            model,
-            OLLAMA_MAP_PROMPT,
-            user,
-            MAP_NUM_CTX,
-            0.2,
-        )
-    });
-    let part_summaries = futures_util::future::try_join_all(maps).await?;
+    let part_summaries: Vec<String> = futures_util::stream::iter(chunks.into_iter().enumerate())
+        .map(|(i, chunk)| {
+            let user = format!(
+                "Part {} of {}.\n\nTranscript excerpt:\n---\n{}\n---",
+                i + 1,
+                n,
+                chunk
+            );
+            generate_stream(
+                &client,
+                url,
+                model,
+                OLLAMA_MAP_PROMPT,
+                user,
+                MAP_NUM_CTX,
+                0.2,
+                &no_op,
+            )
+        })
+        .buffered(MAP_CONCURRENCY)
+        .try_collect()
+        .await?;
 
     // Reduce: merge the ordered part summaries into the final summary, streamed.
     let full = generate_stream(
@@ -549,6 +541,19 @@ mod tests {
     fn rejects_speech_and_embedding_models_for_summary() {
         assert!(!is_summary_capable_model("karanchopda333/whisper:latest"));
         assert!(!is_summary_capable_model("nomic-embed-text:latest"));
+    }
+
+    #[test]
+    fn rejects_short_keyword_models_as_whole_tokens() {
+        assert!(!is_summary_capable_model("intfloat/e5-large"));
+        assert!(!is_summary_capable_model("kyutai-stt:1b"));
+    }
+
+    #[test]
+    fn accepts_models_where_short_keyword_is_only_a_substring() {
+        // "e5" and "gte" appear inside these names but not as a standalone token.
+        assert!(is_summary_capable_model("faste5ish:latest"));
+        assert!(is_summary_capable_model("vgte-model:latest"));
     }
 
     #[test]

@@ -57,7 +57,6 @@ vi.mock("../../api/transcription", () => ({
 
 function createMockAppState() {
   return {
-    currentView: "meeting" as string,
     currentMeetingId: null as string | null,
     machineState: { state: "idle" } as import("../../types").AppStateMachine,
     isRecording: false,
@@ -65,6 +64,7 @@ function createMockAppState() {
     transcriptionRuntimePhase: "ready" as string,
     settings: {
       theme: "dark" as const,
+      locale: "",
       auto_paste: false,
       paste_delay_ms: 100,
       ollama_url: "http://localhost:11434",
@@ -74,6 +74,11 @@ function createMockAppState() {
       transcription_engine_id: "kyutai",
       transcription_model_id: "stt-1b-en_fr",
       transcription_backend_id: "candle",
+      vad_enabled: true,
+      filler_removal: true,
+      stutter_collapse: false,
+      dictionary_correction: true,
+      capture_system_audio: true,
     },
     selectedDevice: "",
     openMeeting: vi.fn(),
@@ -124,6 +129,7 @@ function makeMeeting(overrides: Partial<MeetingTranscript> = {}): MeetingTranscr
     summary_model: null,
     summary_generated_at: null,
     edited_transcript: null,
+    notes: null,
     ...overrides,
   };
 }

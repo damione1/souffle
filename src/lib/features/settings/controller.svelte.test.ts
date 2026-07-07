@@ -61,6 +61,7 @@ const defaultSettings: AppSettings = {
   filler_removal: true,
   stutter_collapse: false,
   dictionary_correction: true,
+  capture_system_audio: true,
 };
 
 const fakeDevices: AudioDeviceInfo[] = [
@@ -203,7 +204,6 @@ describe("settings controller", () => {
     mockListen.mockResolvedValue(vi.fn());
 
     const app = getAppState();
-    app.currentView = "transcription";
     app.currentMeetingId = null;
     app.selectedDevice = "";
     app.machineState = { state: "idle" };
