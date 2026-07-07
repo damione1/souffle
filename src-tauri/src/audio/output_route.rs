@@ -1,8 +1,12 @@
 //! Default-output-device introspection for system-audio capture.
 //!
 //! The system tap's aggregate device must reference the current default
-//! output device, and echo cancellation is only useful when that output is
-//! the built-in speakers (headphones physically can't leak into the mic).
+//! output device, and echo cancellation is only useful when that output can
+//! actually leak into the microphone: built-in speakers, not muted, and at
+//! an audible volume. The tap delivers audio pre-volume, so a muted or
+//! silenced speaker output still hands the canceller a full-level signal it
+//! will never hear echoed back, which makes an unconverged canceller
+//! suppress the mic instead.
 
 #![cfg(target_os = "macos")]
 
@@ -11,10 +15,11 @@ use std::ptr::NonNull;
 
 use objc2_core_audio::{
     AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
-    kAudioDevicePropertyDataSource, kAudioDevicePropertyDeviceUID,
-    kAudioDevicePropertyTransportType, kAudioDeviceTransportTypeBuiltIn,
-    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
-    kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
+    kAudioDevicePropertyDataSource, kAudioDevicePropertyDeviceUID, kAudioDevicePropertyMute,
+    kAudioDevicePropertyTransportType, kAudioDevicePropertyVolumeScalar,
+    kAudioDeviceTransportTypeBuiltIn, kAudioHardwarePropertyDefaultOutputDevice,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
 };
 use objc2_core_foundation::{CFRetained, CFString};
 
@@ -82,14 +87,19 @@ pub fn device_uid(device: AudioObjectID) -> Result<String, String> {
     Ok(uid.to_string())
 }
 
-/// Whether the default output routes to the built-in speakers — the only
-/// case where system audio can acoustically leak back into the microphone
-/// and echo cancellation is worth running.
-pub fn output_is_builtin_speakers() -> bool {
-    let Ok(device) = default_output_device() else {
-        return false;
-    };
+fn output_address(selector: u32) -> AudioObjectPropertyAddress {
+    AudioObjectPropertyAddress {
+        mSelector: selector,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain,
+    }
+}
 
+/// Whether the default output device routes to the built-in speakers rather
+/// than headphones or an external device. Built-in transport covers both
+/// the speakers and the headphone jack; the data source ('ispk' vs 'hdpn')
+/// tells them apart. If the device doesn't report one, assume speakers.
+fn output_is_builtin_speakers(device: AudioObjectID) -> bool {
     let mut transport: u32 = 0;
     if get_property(
         device,
@@ -102,17 +112,103 @@ pub fn output_is_builtin_speakers() -> bool {
         return false;
     }
 
-    // Built-in transport covers both the speakers and the headphone jack;
-    // the data source ('ispk' vs 'hdpn') tells them apart. If the device
-    // doesn't report one, assume speakers.
     let mut source: u32 = 0;
-    let address = AudioObjectPropertyAddress {
-        mSelector: kAudioDevicePropertyDataSource,
-        mScope: kAudioObjectPropertyScopeOutput,
-        mElement: kAudioObjectPropertyElementMain,
-    };
-    match get_property(device, address, &mut source) {
+    match get_property(
+        device,
+        output_address(kAudioDevicePropertyDataSource),
+        &mut source,
+    ) {
         Ok(()) => source == DATA_SOURCE_INTERNAL_SPEAKER,
         Err(_) => true,
+    }
+}
+
+/// Whether the default output device is muted. Treated as not muted if the
+/// property can't be read (not every device implements it).
+fn output_is_muted(device: AudioObjectID) -> bool {
+    let mut muted: u32 = 0;
+    match get_property(device, output_address(kAudioDevicePropertyMute), &mut muted) {
+        Ok(()) => muted != 0,
+        Err(_) => false,
+    }
+}
+
+/// The default output device's scalar volume (0.0 to 1.0). Falls back from
+/// the main element to channel 1, then assumes audible if neither can be
+/// read (some devices only expose per-channel volume, others none at all).
+fn output_volume(device: AudioObjectID) -> f32 {
+    let mut volume: f32 = 0.0;
+    if get_property(
+        device,
+        output_address(kAudioDevicePropertyVolumeScalar),
+        &mut volume,
+    )
+    .is_ok()
+    {
+        return volume;
+    }
+
+    let channel_one = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyVolumeScalar,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: 1,
+    };
+    match get_property(device, channel_one, &mut volume) {
+        Ok(()) => volume,
+        Err(_) => 1.0,
+    }
+}
+
+/// Minimum scalar volume treated as audible. Below this, the render signal
+/// reaching the speakers is effectively silence.
+const AUDIBLE_VOLUME_THRESHOLD: f32 = 0.01;
+
+/// Pure decision: can output audio acoustically leak back into the mic?
+/// Only true for unmuted, audible built-in speakers, headphones and
+/// external devices can't leak regardless of volume or mute state.
+fn can_leak(is_speakers: bool, muted: bool, volume: f32) -> bool {
+    is_speakers && !muted && volume > AUDIBLE_VOLUME_THRESHOLD
+}
+
+/// Whether the default output can acoustically leak into the microphone
+/// right now: built-in speakers, unmuted, and at an audible volume. This is
+/// the only case where echo cancellation does useful work; running it
+/// against a muted or silenced output starves the canceller of any real
+/// echo to converge on and it ends up suppressing the mic instead.
+pub fn output_can_leak_into_mic() -> bool {
+    let Ok(device) = default_output_device() else {
+        return false;
+    };
+
+    let is_speakers = output_is_builtin_speakers(device);
+    if !is_speakers {
+        return false;
+    }
+
+    can_leak(is_speakers, output_is_muted(device), output_volume(device))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::can_leak;
+
+    #[test]
+    fn speakers_unmuted_audible_can_leak() {
+        assert!(can_leak(true, false, 1.0));
+    }
+
+    #[test]
+    fn muted_speakers_cannot_leak() {
+        assert!(!can_leak(true, true, 1.0));
+    }
+
+    #[test]
+    fn zero_volume_speakers_cannot_leak() {
+        assert!(!can_leak(true, false, 0.0));
+    }
+
+    #[test]
+    fn headphones_cannot_leak() {
+        assert!(!can_leak(false, false, 1.0));
     }
 }
