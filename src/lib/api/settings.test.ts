@@ -38,7 +38,7 @@ describe('settings API', () => {
 
   it('saveSettings passes settings object', async () => {
     mockInvoke.mockResolvedValue(null);
-    const settings = { theme: 'light' as const, locale: '', auto_paste: true, paste_delay_ms: 200, ollama_url: 'http://localhost:11434', ollama_model: 'llama3', debug_transcription: false, audio_device: null, transcription_engine_id: 'kyutai', transcription_model_id: 'stt-1b', transcription_backend_id: 'candle', vad_enabled: true, filler_removal: true, stutter_collapse: false, dictionary_correction: true, capture_system_audio: true };
+    const settings = { theme: 'light' as const, locale: '', auto_paste: true, paste_delay_ms: 200, ollama_url: 'http://localhost:11434', ollama_model: 'llama3', debug_transcription: false, audio_device: null, transcription_engine_id: 'kyutai', transcription_model_id: 'stt-1b', transcription_backend_id: 'candle', vad_enabled: true, filler_removal: true, stutter_collapse: false, dictionary_correction: true, capture_system_audio: true, calendar_integration_enabled: false, calendar_selected_ids: [], calendar_reminder_minutes: 2 };
 
     await saveSettings(settings);
 

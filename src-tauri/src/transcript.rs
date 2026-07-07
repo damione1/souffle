@@ -7,6 +7,17 @@ use crate::engine::{
     resolve_transcription_profile,
 };
 
+/// A calendar attendee captured when a meeting is started from a calendar
+/// event. Persisted with the meeting and fed into the summary prompt so the
+/// model can attribute statements to real names.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
+pub struct MeetingParticipant {
+    pub name: String,
+    pub email: Option<String>,
+    pub is_organizer: bool,
+    pub is_current_user: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct MeetingRecordingSession {
     pub id: String,

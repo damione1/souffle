@@ -1,4 +1,5 @@
 mod audio;
+mod calendar;
 mod dictation;
 mod dictionary;
 mod meetings;
@@ -8,6 +9,7 @@ mod settings;
 pub(crate) mod transcription;
 
 pub use audio::*;
+pub use calendar::*;
 pub use dictation::*;
 pub use dictionary::*;
 pub use meetings::*;

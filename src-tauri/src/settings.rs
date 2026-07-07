@@ -22,6 +22,9 @@ const FILLER_REMOVAL_KEY: &str = "filler_removal";
 const STUTTER_COLLAPSE_KEY: &str = "stutter_collapse";
 const DICTIONARY_CORRECTION_KEY: &str = "dictionary_correction";
 const CAPTURE_SYSTEM_AUDIO_KEY: &str = "capture_system_audio";
+const CALENDAR_INTEGRATION_ENABLED_KEY: &str = "calendar_integration_enabled";
+const CALENDAR_SELECTED_IDS_KEY: &str = "calendar_selected_ids";
+const CALENDAR_REMINDER_MINUTES_KEY: &str = "calendar_reminder_minutes";
 const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
@@ -55,6 +58,13 @@ pub struct AppSettings {
     /// Meeting mode: capture system audio (other participants) alongside
     /// the microphone via a Core Audio tap.
     pub capture_system_audio: bool,
+    /// Calendar integration is opt-in: it reads the user's calendar, so it
+    /// stays off until explicitly enabled (which triggers the TCC prompt).
+    pub calendar_integration_enabled: bool,
+    /// Calendars shown in the today list; empty means all calendars.
+    pub calendar_selected_ids: Vec<String>,
+    /// How long before an event the "start transcription?" reminder fires.
+    pub calendar_reminder_minutes: u32,
 }
 
 impl Default for AppSettings {
@@ -76,6 +86,9 @@ impl Default for AppSettings {
             stutter_collapse: false,
             dictionary_correction: true,
             capture_system_audio: true,
+            calendar_integration_enabled: false,
+            calendar_selected_ids: Vec::new(),
+            calendar_reminder_minutes: 2,
         }
     }
 }
@@ -159,6 +172,21 @@ impl AppSettings {
         {
             settings.capture_system_audio = capture_system_audio;
         }
+        if let Some(calendar_integration_enabled) =
+            read_json_setting::<bool>(db, CALENDAR_INTEGRATION_ENABLED_KEY)?
+        {
+            settings.calendar_integration_enabled = calendar_integration_enabled;
+        }
+        if let Some(calendar_selected_ids) =
+            read_json_setting::<Vec<String>>(db, CALENDAR_SELECTED_IDS_KEY)?
+        {
+            settings.calendar_selected_ids = calendar_selected_ids;
+        }
+        if let Some(calendar_reminder_minutes) =
+            read_json_setting::<u32>(db, CALENDAR_REMINDER_MINUTES_KEY)?
+        {
+            settings.calendar_reminder_minutes = calendar_reminder_minutes;
+        }
 
         Ok(settings.sanitized())
     }
@@ -234,6 +262,20 @@ impl AppSettings {
             normalized.paste_delay_ms = Self::default().paste_delay_ms;
         }
 
+        normalized.calendar_selected_ids = {
+            let mut ids: Vec<String> = normalized
+                .calendar_selected_ids
+                .iter()
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty())
+                .collect();
+            ids.dedup();
+            ids
+        };
+        if !(1..=30).contains(&normalized.calendar_reminder_minutes) {
+            normalized.calendar_reminder_minutes = Self::default().calendar_reminder_minutes;
+        }
+
         normalized
     }
 
@@ -274,6 +316,21 @@ impl AppSettings {
             db,
             CAPTURE_SYSTEM_AUDIO_KEY,
             &normalized.capture_system_audio,
+        )?;
+        write_json_setting(
+            db,
+            CALENDAR_INTEGRATION_ENABLED_KEY,
+            &normalized.calendar_integration_enabled,
+        )?;
+        write_json_setting(
+            db,
+            CALENDAR_SELECTED_IDS_KEY,
+            &normalized.calendar_selected_ids,
+        )?;
+        write_json_setting(
+            db,
+            CALENDAR_REMINDER_MINUTES_KEY,
+            &normalized.calendar_reminder_minutes,
         )?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
@@ -396,6 +453,9 @@ mod tests {
             stutter_collapse: false,
             dictionary_correction: true,
             capture_system_audio: true,
+            calendar_integration_enabled: true,
+            calendar_selected_ids: vec!["cal-1".into(), "cal-2".into()],
+            calendar_reminder_minutes: 5,
         };
 
         settings.save(&db).expect("save settings");
@@ -495,6 +555,35 @@ mod tests {
         assert_eq!(clean.transcription_engine_id, "kyutai");
         assert_eq!(clean.transcription_model_id, "stt-1b-en_fr");
         assert_eq!(clean.transcription_backend_id, "candle");
+    }
+
+    #[test]
+    fn calendar_reminder_minutes_out_of_range_falls_back_to_default() {
+        let (db, _dir) = test_db();
+        db.set_setting("calendar_reminder_minutes", "0")
+            .expect("save minutes");
+        let settings = AppSettings::load(&db).expect("load settings");
+        assert_eq!(settings.calendar_reminder_minutes, 2);
+
+        db.set_setting("calendar_reminder_minutes", "31")
+            .expect("save minutes");
+        let settings = AppSettings::load(&db).expect("load settings");
+        assert_eq!(settings.calendar_reminder_minutes, 2);
+    }
+
+    #[test]
+    fn calendar_selected_ids_are_trimmed_and_deduped() {
+        let s = AppSettings {
+            calendar_selected_ids: vec![
+                " cal-1 ".into(),
+                "cal-1".into(),
+                "  ".into(),
+                "cal-2".into(),
+            ],
+            ..AppSettings::default()
+        };
+        let clean = s.sanitize_for_save().unwrap();
+        assert_eq!(clean.calendar_selected_ids, vec!["cal-1", "cal-2"]);
     }
 
     #[test]

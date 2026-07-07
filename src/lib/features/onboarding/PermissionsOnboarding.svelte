@@ -17,6 +17,7 @@
     microphone: "unknown",
     system_audio: "unknown",
     accessibility: "unknown",
+    calendar: "unknown",
   });
   let busy = $state<PermissionKind | null>(null);
   let error = $state("");

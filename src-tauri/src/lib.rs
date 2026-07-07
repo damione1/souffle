@@ -1,5 +1,6 @@
 pub mod app_events;
 pub mod audio;
+pub mod calendar;
 pub mod clipboard;
 pub mod commands;
 pub mod constants;
@@ -145,6 +146,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::clear_dictionary,
             commands::get_permission_status,
             commands::request_permission,
+            commands::list_calendars,
+            commands::list_todays_calendar_events,
         ])
         .events(collect_events![
             app_events::Navigate,

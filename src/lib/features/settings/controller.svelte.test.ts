@@ -62,7 +62,10 @@ const defaultSettings: AppSettings = {
   stutter_collapse: false,
   dictionary_correction: true,
   capture_system_audio: true,
-};
+  calendar_integration_enabled: false,
+  calendar_selected_ids: [],
+  calendar_reminder_minutes: 2,
+}
 
 const fakeDevices: AudioDeviceInfo[] = [
   { name: "Built-in Microphone", is_default: true },

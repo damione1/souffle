@@ -84,6 +84,8 @@ objc2-foundation = "0.3"
 objc2-core-foundation = "0.3"
 objc2-core-audio = "0.3"
 objc2-core-audio-types = "0.3"
+# Calendar integration (read-only EventKit access)
+objc2-event-kit = "0.3"
 ringbuf = "0.5"
 sonora = "0.1"
 block2 = "0.6"

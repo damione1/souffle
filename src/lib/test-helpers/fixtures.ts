@@ -191,7 +191,10 @@ export const mockSettings: AppSettings = {
   stutter_collapse: false,
   dictionary_correction: true,
   capture_system_audio: true,
-};
+  calendar_integration_enabled: false,
+  calendar_selected_ids: [],
+  calendar_reminder_minutes: 2,
+}
 
 export const mockShortcuts: ShortcutSettings = {
   toggle: "CommandOrControl+Shift+S",
