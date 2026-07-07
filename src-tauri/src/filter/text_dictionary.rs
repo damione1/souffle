@@ -6,6 +6,11 @@ use super::{DictionaryEntry, TextFilter, TextFilterKind};
 /// Maximum normalized Levenshtein distance for a fuzzy match.
 const LEVENSHTEIN_THRESHOLD: f64 = 0.82; // similarity > 0.82 means distance < 0.18
 
+/// Words shorter than this are never corrected: short function words ("va",
+/// "de", "on") collide with almost anything phonetically and correcting them
+/// does far more harm than good.
+const MIN_WORD_LEN: usize = 3;
+
 pub struct DictionaryFilter {
     entries: Vec<DictionaryMatch>,
 }
@@ -16,13 +21,26 @@ struct DictionaryMatch {
     phonetic_code: Option<String>,
 }
 
+/// Phonetic code used for matching: the user-provided pronunciation wins;
+/// otherwise the term's own Soundex, except for digit-bearing terms ("V6",
+/// "K8s") whose alphabetic Soundex would collide with unrelated short words.
+fn derive_phonetic_code(term: &str, pronunciation: Option<&str>) -> Option<String> {
+    if let Some(p) = pronunciation.map(str::trim).filter(|p| !p.is_empty()) {
+        return soundex(p);
+    }
+    if term.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    soundex(term)
+}
+
 impl DictionaryFilter {
     pub fn new(entries: Vec<DictionaryEntry>) -> Self {
         let entries = entries
             .into_iter()
             .map(|e| {
                 let term_lower = e.term.to_lowercase();
-                let phonetic_code = e.phonetic_code.or_else(|| soundex(&e.term));
+                let phonetic_code = derive_phonetic_code(&e.term, e.pronunciation.as_deref());
                 DictionaryMatch {
                     term: e.term,
                     term_lower,
@@ -34,6 +52,9 @@ impl DictionaryFilter {
     }
 
     fn find_replacement(&self, word: &str) -> Option<&str> {
+        if word.chars().count() < MIN_WORD_LEN {
+            return None;
+        }
         let word_lower = word.to_lowercase();
         let word_soundex = soundex(word);
 
@@ -120,9 +141,16 @@ mod tests {
         DictionaryEntry {
             id: 0,
             term: term.to_string(),
-            phonetic_code: None,
+            pronunciation: None,
             category: None,
             created_at: String::new(),
+        }
+    }
+
+    fn entry_with_pronunciation(term: &str, pronunciation: &str) -> DictionaryEntry {
+        DictionaryEntry {
+            pronunciation: Some(pronunciation.to_string()),
+            ..entry(term)
         }
     }
 
@@ -161,5 +189,39 @@ mod tests {
     fn empty_input() {
         let f = DictionaryFilter::new(vec![entry("Test")]);
         assert_eq!(f.apply(""), "");
+    }
+
+    #[test]
+    fn short_words_are_never_corrected() {
+        // "va" collides with "V6" through alphabetic Soundex ("V000" both);
+        // the 2-char guard must keep function words untouched.
+        let f = DictionaryFilter::new(vec![entry("V6")]);
+        assert_eq!(f.apply("il va faire"), "il va faire");
+
+        let names = DictionaryFilter::new(vec![entry("Damien")]);
+        assert_eq!(names.apply("de la part"), "de la part");
+    }
+
+    #[test]
+    fn digit_terms_get_no_auto_phonetic_matching() {
+        let f = DictionaryFilter::new(vec![entry("V6")]);
+        // "vas" (3 chars, Soundex V000 too) must not become V6 either.
+        assert_eq!(f.apply("tu vas bien"), "tu vas bien");
+    }
+
+    #[test]
+    fn pronunciation_drives_phonetic_matching() {
+        let f = DictionaryFilter::new(vec![entry_with_pronunciation("V6", "vésix")]);
+        assert_eq!(f.apply("le vésix arrive"), "le V6 arrive");
+        assert_eq!(f.apply("le vesix arrive"), "le V6 arrive");
+        // Unrelated words with a different Soundex stay untouched.
+        assert_eq!(f.apply("il va faire"), "il va faire");
+        assert_eq!(f.apply("tu vas bien"), "tu vas bien");
+    }
+
+    #[test]
+    fn blank_pronunciation_falls_back_to_term_soundex() {
+        let f = DictionaryFilter::new(vec![entry_with_pronunciation("Damien", "  ")]);
+        assert_eq!(f.apply("Hello Damian"), "Hello Damien");
     }
 }

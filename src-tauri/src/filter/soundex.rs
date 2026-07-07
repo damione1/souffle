@@ -1,12 +1,10 @@
 /// Standard American Soundex encoding.
 /// Returns a 4-character code: first letter + 3 digits.
 /// H and W are transparent — they don't separate identical codes.
+/// Accented Latin letters fold to their base letter (the app transcribes
+/// French) instead of being silently dropped.
 pub fn soundex(word: &str) -> Option<String> {
-    let chars: Vec<char> = word
-        .chars()
-        .filter(|c| c.is_ascii_alphabetic())
-        .map(|c| c.to_ascii_uppercase())
-        .collect();
+    let chars: Vec<char> = word.chars().filter_map(fold_to_ascii_upper).collect();
 
     let first = *chars.first()?;
     let mut code = String::with_capacity(4);
@@ -37,6 +35,20 @@ pub fn soundex(word: &str) -> Option<String> {
         code.push('0');
     }
     Some(code)
+}
+
+fn fold_to_ascii_upper(c: char) -> Option<char> {
+    let folded = match c {
+        'à' | 'â' | 'ä' | 'á' | 'À' | 'Â' | 'Ä' | 'Á' => 'A',
+        'é' | 'è' | 'ê' | 'ë' | 'É' | 'È' | 'Ê' | 'Ë' => 'E',
+        'î' | 'ï' | 'í' | 'Î' | 'Ï' | 'Í' => 'I',
+        'ô' | 'ö' | 'ó' | 'Ô' | 'Ö' | 'Ó' => 'O',
+        'ù' | 'û' | 'ü' | 'ú' | 'Ù' | 'Û' | 'Ü' | 'Ú' => 'U',
+        'ç' | 'Ç' => 'C',
+        c if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
+        _ => return None,
+    };
+    Some(folded)
 }
 
 fn letter_to_digit(ch: char) -> char {
@@ -79,5 +91,12 @@ mod tests {
     fn case_insensitive() {
         assert_eq!(soundex("smith"), soundex("SMITH"));
         assert_eq!(soundex("smith"), soundex("Smith"));
+    }
+
+    #[test]
+    fn accented_letters_fold_to_base() {
+        assert_eq!(soundex("vésix"), soundex("vesix"));
+        assert_eq!(soundex("François"), soundex("Francois"));
+        assert_eq!(soundex("Éric"), soundex("Eric"));
     }
 }

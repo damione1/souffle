@@ -29,7 +29,10 @@
     "category_placeholder": "e.g. tech",
     "add_entry": "Add entry",
     "delete": "Delete",
-    "empty": "No custom dictionary entries yet."
+    "empty": "No custom dictionary entries yet.",
+    "pronunciation": "Pronunciation",
+    "pronunciation_placeholder": "e.g. vaysix",
+    "pronunciation_desc": "How the term sounds when spoken, spelled out. Helps match terms like V6 said \"vaysix\"."
   },
   "settings_calendar": {
     "title": "Calendar",

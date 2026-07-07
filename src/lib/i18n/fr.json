@@ -29,7 +29,10 @@
     "category_placeholder": "ex. tech",
     "add_entry": "Ajouter une entrée",
     "delete": "Supprimer",
-    "empty": "Aucune entrée dans le dictionnaire personnalisé."
+    "empty": "Aucune entrée dans le dictionnaire personnalisé.",
+    "pronunciation": "Prononciation",
+    "pronunciation_placeholder": "ex. vésix",
+    "pronunciation_desc": "Comment le terme se prononce, écrit en toutes lettres. Aide à reconnaître des termes comme V6 dit « vésix »."
   },
   "settings_calendar": {
     "title": "Calendrier",

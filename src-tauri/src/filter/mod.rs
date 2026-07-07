@@ -104,7 +104,10 @@ pub struct PipelineConfig {
 pub struct DictionaryEntry {
     pub id: i64,
     pub term: String,
-    pub phonetic_code: Option<String>,
+    /// How the term sounds when spoken, spelled out (e.g. "vésix" for "V6").
+    /// Drives phonetic matching; when absent, the term's own Soundex is used
+    /// (except for digit-bearing terms, whose Soundex is meaningless).
+    pub pronunciation: Option<String>,
     pub category: Option<String>,
     pub created_at: String,
 }

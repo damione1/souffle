@@ -14,7 +14,7 @@ pub fn list_dictionary(state: State<'_, AppState>) -> Result<Vec<DictionaryEntry
 pub fn add_dictionary_entry(
     state: State<'_, AppState>,
     term: String,
-    phonetic_code: Option<String>,
+    pronunciation: Option<String>,
     category: Option<String>,
 ) -> Result<DictionaryEntry, String> {
     let term = term.trim();
@@ -23,7 +23,7 @@ pub fn add_dictionary_entry(
     }
     state
         .db
-        .add_dictionary_entry(term, phonetic_code.as_deref(), category.as_deref())
+        .add_dictionary_entry(term, pronunciation.as_deref(), category.as_deref())
 }
 
 #[tauri::command]
@@ -32,7 +32,7 @@ pub fn update_dictionary_entry(
     state: State<'_, AppState>,
     id: i64,
     term: String,
-    phonetic_code: Option<String>,
+    pronunciation: Option<String>,
     category: Option<String>,
 ) -> Result<(), String> {
     let term = term.trim();
@@ -41,7 +41,7 @@ pub fn update_dictionary_entry(
     }
     state
         .db
-        .update_dictionary_entry(id, term, phonetic_code.as_deref(), category.as_deref())
+        .update_dictionary_entry(id, term, pronunciation.as_deref(), category.as_deref())
 }
 
 #[tauri::command]
