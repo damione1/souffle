@@ -163,6 +163,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::MeetingStopRequested,
             app_events::MeetingFinalized,
             app_events::UpcomingMeeting,
+            app_events::MeetingIdle,
         ])
 }
 

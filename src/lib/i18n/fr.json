@@ -19,7 +19,18 @@
     "dictionary_correction": "Correction par dictionnaire",
     "dictionary_correction_desc": "Corrige les mots mal reconnus à l'aide de votre dictionnaire personnalisé.",
     "capture_system_audio": "Capture de l'audio système",
-    "capture_system_audio_desc": "Pendant les meetings, capture la sortie audio de l'ordinateur (Teams, Zoom…) en plus du micro. Aucune configuration requise."
+    "capture_system_audio_desc": "Pendant les meetings, capture la sortie audio de l'ordinateur (Teams, Zoom…) en plus du micro. Aucune configuration requise.",
+    "meeting_autostop": "Détecter la fin de réunion",
+    "meeting_autostop_desc": "Arrête l'enregistrement automatiquement quand personne n'a parlé depuis un moment.",
+    "meeting_autostop_minutes_label": "Arrêter après",
+    "meeting_autostop_5min": "5 minutes de silence",
+    "meeting_autostop_10min": "10 minutes de silence",
+    "meeting_autostop_15min": "15 minutes de silence",
+    "meeting_autostop_30min": "30 minutes de silence",
+    "meeting_max_duration_label": "Durée maximale de la réunion",
+    "meeting_max_duration_2h": "2 heures",
+    "meeting_max_duration_4h": "4 heures",
+    "meeting_max_duration_8h": "8 heures"
   },
   "settings_dictionary": {
     "title": "Dictionnaire personnalisé",
@@ -224,7 +235,10 @@
     "press": "Appuyez sur",
     "autopaste_hint": "Collé automatiquement dans votre dernière app à l’arrêt",
     "live_transcript": "Transcription en direct",
-    "system_audio_active": "Audio système actif"
+    "system_audio_active": "Audio système actif",
+    "idle_silence_banner": "Aucune parole détectée depuis {minutes} min. L'enregistrement va bientôt s'arrêter.",
+    "idle_stop_now": "Arrêter maintenant",
+    "idle_keep_recording": "Continuer l'enregistrement"
   },
   "permissions": {
     "title": "Autoriser les permissions",

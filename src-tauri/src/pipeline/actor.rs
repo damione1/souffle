@@ -14,10 +14,11 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use tauri::Manager;
+use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use tracing::{debug, error, info, warn};
 
-use crate::app_events::{PipelineError, PipelineErrorScope};
+use crate::app_events::{MeetingIdle, MeetingIdleReason, PipelineError, PipelineErrorScope};
 use crate::audio::{AudioChunk, AudioMessage};
 use crate::engine::{
     AudioInputRequirements, Speaker, TranscriptionEngine, TranscriptionProfile,
@@ -31,6 +32,7 @@ use crate::platform::with_autorelease_pool;
 
 use super::SegmentCallback;
 use super::health::SessionHealth;
+use super::idle::{MeetingIdleConfig, MeetingIdleMonitor};
 
 /// Creates engines ON the actor thread. Production uses `crate::engine::create_engine`;
 /// tests inject factories that produce mock engines.
@@ -64,6 +66,9 @@ pub struct SessionConfig {
     /// Diarized meeting: run a second engine so the mic (Me) and system audio
     /// (Them) legs are transcribed separately and segments are speaker-tagged.
     pub diarize: bool,
+    /// Meeting-only auto-stop detection (silence + max duration). `None` for
+    /// dictation sessions, where "meeting is over" doesn't apply.
+    pub idle_config: Option<MeetingIdleConfig>,
 }
 
 pub enum EngineCommand {
@@ -557,6 +562,9 @@ impl EngineActor {
         );
 
         let mut health = SessionHealth::start(session_id, Arc::clone(&self.dropped_counter));
+        let idle_monitor = config
+            .idle_config
+            .map(|idle_config| MeetingIdleMonitor::new(idle_config, Instant::now()));
         let engine = self.engine.as_mut().expect("engine present: checked above");
 
         // No Silero VAD in diarized mode: the two lanes must step together
@@ -585,6 +593,7 @@ impl EngineActor {
             self.app.as_ref(),
             mode.as_mut(),
             pending_unload_timeout,
+            idle_monitor,
         )
     }
 
@@ -840,6 +849,7 @@ fn run_session_loop(
     app: Option<&tauri::AppHandle>,
     mode: &mut dyn SessionMode,
     pending_unload_timeout: &mut Option<Option<Duration>>,
+    mut idle_monitor: Option<MeetingIdleMonitor>,
 ) -> SessionEnd {
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
     let mut summary = SessionSummary::default();
@@ -862,6 +872,22 @@ fn run_session_loop(
             && let Some(app) = app
         {
             let _ = snapshot.emit(app);
+        }
+
+        // Meeting-only: has the meeting probably ended (silence / max duration)?
+        if let Some(monitor) = idle_monitor.as_mut()
+            && let Some(signal) = monitor.tick(Instant::now())
+            && let Some(app) = app
+        {
+            let _ = MeetingIdle {
+                reason: signal.reason,
+                idle_seconds: signal.idle_seconds,
+                threshold_seconds: signal.threshold_seconds,
+            }
+            .emit(app);
+            if signal.first {
+                notify_meeting_idle(app, signal.reason);
+            }
         }
 
         if last_heartbeat.elapsed() >= HEARTBEAT {
@@ -1006,7 +1032,11 @@ fn run_session_loop(
                                     debug!("Segment: {:?} final={}", seg.text, seg.is_final);
                                 }
                                 segments_emitted += 1;
-                                emit_filtered(engine, text_filters, seg, on_segment);
+                                if emit_filtered(engine, text_filters, seg, on_segment)
+                                    && let Some(monitor) = idle_monitor.as_mut()
+                                {
+                                    monitor.note_segment(Instant::now());
+                                }
                             }
                         }
                         Err(e) => {
@@ -1142,19 +1172,59 @@ fn catch_engine<T, E: std::string::ToString>(
     }
 }
 
-/// Normalize engine-specific tokens, then apply text filter chain before emitting.
+/// Normalize engine-specific tokens, then apply text filter chain before
+/// emitting. Returns whether the filtered text was non-empty (i.e. an actual
+/// segment reached `on_segment`), which the meeting idle monitor uses as its
+/// speech-activity signal.
 fn emit_filtered(
     engine: &dyn TranscriptionEngine,
     text_filters: &TextFilterChain,
     mut segment: TranscriptionSegment,
     on_segment: &SegmentCallback,
-) {
+) -> bool {
     // Step 1: engine-specific normalization (strip [_TT_], ▁, etc.)
     segment.text = engine.normalize_text(&segment.text);
     // Step 2: shared text filter chain (filler, stutter, dictionary, whitespace)
     segment.text = text_filters.apply(&segment.text);
-    if !segment.text.is_empty() {
-        on_segment(segment);
+    if segment.text.is_empty() {
+        return false;
+    }
+    on_segment(segment);
+    true
+}
+
+/// System notification for the first crossing of an idle signal only;
+/// re-signals (throttled webview convergence) must not spam the OS.
+/// Informational only: no action buttons, matching the calendar reminder's
+/// notification (action buttons/click callbacks are unreliable on macOS).
+fn notify_meeting_idle(app: &tauri::AppHandle, reason: MeetingIdleReason) {
+    let db = &app.state::<crate::state::AppState>().db;
+    let locale = crate::settings::AppSettings::load(db)
+        .map(|settings| settings.locale)
+        .unwrap_or_default();
+    let french = locale.starts_with("fr");
+
+    let (title, body) = match reason {
+        MeetingIdleReason::Silence => (
+            if french { "Réunion probablement terminée" } else { "Meeting seems to be over" },
+            if french {
+                "Aucune parole détectée depuis un moment. L'enregistrement va bientôt s'arrêter."
+            } else {
+                "No speech detected for a while. Recording will stop soon."
+            },
+        ),
+        MeetingIdleReason::MaxDuration => (
+            if french { "Durée maximale atteinte" } else { "Maximum duration reached" },
+            if french {
+                "L'enregistrement de la réunion a atteint la durée maximale et va s'arrêter."
+            } else {
+                "The meeting recording hit its maximum duration and is stopping."
+            },
+        ),
+    };
+
+    if let Err(e) = app.notification().builder().title(title).body(body).show() {
+        warn!("Meeting idle notification failed: {e}");
     }
 }
 
@@ -1192,6 +1262,7 @@ mod tests {
             dictionary_entries: vec![],
             session_terms: vec![],
             diarize: false,
+            idle_config: None,
         }
     }
 
@@ -1286,6 +1357,7 @@ mod tests {
             dictionary_entries: vec![],
             session_terms: vec![],
             diarize: true,
+            idle_config: None,
         };
         actor.start_session(1, cfg, cb).expect("start diarized");
 
@@ -1636,5 +1708,73 @@ mod tests {
             0,
             "a disabled (0 minute) timeout must never unload the model"
         );
+    }
+
+    // Idle-monitor wiring: the monitor's own behavior (signal cadence, re-arm,
+    // max duration) is covered exhaustively in `pipeline::idle`'s unit tests,
+    // which run on bare `Instant`s with no thread involved. These tests only
+    // verify the actor accepts `idle_config` and runs a session to completion
+    // without panicking. There is no `AppHandle` in these tests (`AttachApp`
+    // is never sent), so the event-emission path can't be observed here.
+    #[test]
+    fn session_with_idle_config_runs_to_completion() {
+        let mock = MockEngine::new().with_transcribe_response(Ok(vec![seg("hello")]), 3);
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        let cfg = SessionConfig {
+            idle_config: Some(super::MeetingIdleConfig {
+                silence_threshold: Some(Duration::from_millis(50)),
+                max_duration: None,
+            }),
+            ..session_config()
+        };
+        let (collected, cb) = collecting_callback();
+        actor.start_session(1, cfg, cb).expect("start with idle config");
+
+        // Give the actor loop a few ticks past the silence threshold with no
+        // segments arriving, then confirm it is still alive and stops cleanly.
+        std::thread::sleep(Duration::from_millis(120));
+        for _ in 0..3 {
+            audio_tx.send(audio_chunk(1)).unwrap();
+        }
+        audio_tx.send(end_of_stream(1)).unwrap();
+
+        actor
+            .stop_session(Duration::from_secs(2))
+            .expect("stop session with idle config");
+        assert!(
+            collected.lock().unwrap().iter().any(|s| s.text == "hello"),
+            "session should keep transcribing normally alongside idle tracking"
+        );
+    }
+
+    #[test]
+    fn session_with_idle_config_and_active_speech_never_stalls() {
+        // A tiny max_duration alongside a segment stream: the actor must keep
+        // draining audio and stop normally even once max-duration has crossed.
+        let mock = MockEngine::new().with_transcribe_response(Ok(vec![seg("hi")]), 5);
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        let cfg = SessionConfig {
+            idle_config: Some(super::MeetingIdleConfig {
+                silence_threshold: None,
+                max_duration: Some(Duration::from_millis(10)),
+            }),
+            ..session_config()
+        };
+        let (collected, cb) = collecting_callback();
+        actor.start_session(1, cfg, cb).expect("start with idle config");
+
+        std::thread::sleep(Duration::from_millis(50));
+        for _ in 0..5 {
+            audio_tx.send(audio_chunk(1)).unwrap();
+        }
+        audio_tx.send(end_of_stream(1)).unwrap();
+
+        let summary = actor
+            .stop_session(Duration::from_secs(2))
+            .expect("stop session with max-duration idle config");
+        assert_eq!(summary.frames_processed, 5);
+        assert!(collected.lock().unwrap().iter().any(|s| s.text == "hi"));
     }
 }

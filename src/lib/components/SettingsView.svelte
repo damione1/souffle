@@ -111,6 +111,9 @@
       fillerRemoval={controller.app.settings.filler_removal}
       stutterCollapse={controller.app.settings.stutter_collapse}
       dictionaryCorrection={controller.app.settings.dictionary_correction}
+      meetingAutostopEnabled={controller.app.settings.meeting_autostop_enabled}
+      meetingAutostopMinutes={controller.app.settings.meeting_autostop_minutes}
+      meetingMaxDurationMinutes={controller.app.settings.meeting_max_duration_minutes}
       onDeviceChange={controller.onDeviceChange}
       onRefreshDevices={controller.refreshDevices}
       onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
@@ -118,6 +121,9 @@
       onFillerRemovalChange={controller.onFillerRemovalChange}
       onStutterCollapseChange={controller.onStutterCollapseChange}
       onDictionaryCorrectionChange={controller.onDictionaryCorrectionChange}
+      onMeetingAutostopEnabledChange={controller.onMeetingAutostopEnabledChange}
+      onMeetingAutostopMinutesChange={controller.onMeetingAutostopMinutesChange}
+      onMeetingMaxDurationMinutesChange={controller.onMeetingMaxDurationMinutesChange}
     />
 
     <IntelligenceSettingsSection

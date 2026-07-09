@@ -499,6 +499,7 @@ async listTodaysCalendarEvents() : Promise<Result<TodayCalendar, string>> {
 export const events = __makeEvents__<{
 audioLevel: AudioLevel,
 meetingFinalized: MeetingFinalized,
+meetingIdle: MeetingIdle,
 meetingStopRequested: MeetingStopRequested,
 navigate: Navigate,
 pipelineError: PipelineError,
@@ -512,6 +513,7 @@ upcomingMeeting: UpcomingMeeting
 }>({
 audioLevel: "audio-level",
 meetingFinalized: "meeting-finalized",
+meetingIdle: "meeting-idle",
 meetingStopRequested: "meeting-stop-requested",
 navigate: "navigate",
 pipelineError: "pipeline-error",
@@ -554,7 +556,22 @@ calendar_reminder_minutes: number;
  * reclaim RAM; 0 means never unload. The next recording reloads it
  * through the normal load flow.
  */
-model_unload_timeout_minutes: number }
+model_unload_timeout_minutes: number; 
+/**
+ * Detect a meeting that has probably ended (no speech for a while, or
+ * the max-duration failsafe) and offer/auto-stop. A session snapshots
+ * these settings at start; changes apply from the next meeting.
+ */
+meeting_autostop_enabled: boolean; 
+/**
+ * Silence duration (minutes) before the meeting is considered idle.
+ */
+meeting_autostop_minutes: number; 
+/**
+ * Hard failsafe: stop the meeting after this many minutes regardless of
+ * speech activity.
+ */
+meeting_max_duration_minutes: number }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
@@ -643,6 +660,22 @@ description?: string | null }
  * when this arrives.
  */
 export type MeetingFinalized = { id: string }
+/**
+ * A meeting recording session looks like it has ended: either speech has
+ * stopped for a while, or the session hit the max-duration failsafe. Drives
+ * the live-card banner; a system notification is also sent on the first
+ * occurrence (see `pipeline::idle::MeetingIdleSignal::first`).
+ */
+export type MeetingIdle = { reason: MeetingIdleReason; idle_seconds: number; threshold_seconds: number }
+export type MeetingIdleReason = 
+/**
+ * No transcript segment with text for the configured silence threshold.
+ */
+"silence" | 
+/**
+ * The session has run past the configured max-duration failsafe.
+ */
+"max_duration"
 /**
  * Lightweight item for listing meetings
  */

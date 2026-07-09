@@ -12,6 +12,8 @@ export type {
   DownloadStatus,
   ErrorRecovery,
   MeetingCalendarContext,
+  MeetingIdle,
+  MeetingIdleReason,
   MeetingListItem,
   MeetingParticipant,
   MeetingRecordingSession,

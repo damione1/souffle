@@ -12,7 +12,7 @@ import {
 import { getOllamaStatus } from "../../api/ollama";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { MeetingCalendarContext, MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { MeetingCalendarContext, MeetingIdle, MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -21,6 +21,10 @@ import { createLiveTranscript } from "./live-transcript.svelte";
 function defaultMeetingTitle(): string {
   return `Meeting ${new Date().toLocaleDateString()}`;
 }
+
+/** Extra silence tolerated after the banner first appears before auto-stop
+ * kicks in, on top of the configured silence threshold. */
+const SILENCE_AUTOSTOP_GRACE_SECONDS = 120;
 
 function createMeetingControllerInstance() {
   const app = getAppState();
@@ -40,6 +44,12 @@ function createMeetingControllerInstance() {
   let notesDraft = $state("");
   let notesSaveState = $state<"idle" | "pending" | "saved">("idle");
   let notesTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Meeting-idle ("meeting seems to be over") banner state.
+  let idleSignal = $state<MeetingIdle | null>(null);
+  // True once the user dismissed the current silence episode ("keep
+  // recording"); suppresses further banners until a segment re-arms it.
+  let idleDismissed = $state(false);
 
   let isRecordingMeeting = $derived(
     app.machineState.state === "recording_meeting"
@@ -154,6 +164,13 @@ function createMeetingControllerInstance() {
     }
   }
 
+  /** Speech activity (a new segment) or a fresh recording resets the idle
+   * banner and re-arms it for the next episode of silence. */
+  function clearIdleState() {
+    idleSignal = null;
+    idleDismissed = false;
+  }
+
   async function checkOllama() {
     try {
       const status = await getOllamaStatus();
@@ -190,6 +207,7 @@ function createMeetingControllerInstance() {
       meeting = null;
       notesDraft = "";
       notesSaveState = "idle";
+      clearIdleState();
       const transcriptionProfile = toSelectedTranscriptionProfile(
         transcriptionCatalog,
         app.settings.transcription_engine_id,
@@ -203,6 +221,7 @@ function createMeetingControllerInstance() {
         if (segment.is_final && !segment.text) return;
         liveTranscript.append(segment);
         if (segment.is_final && segment.text) liveMeetingSegments.push(segment);
+        clearIdleState();
       });
 
       meeting = {
@@ -240,11 +259,13 @@ function createMeetingControllerInstance() {
       liveMeetingSegments = [];
       statusMessage = "";
       summaryStream = "";
+      clearIdleState();
 
       await resumeMeetingRecording(meeting.id, (segment) => {
         if (segment.is_final && !segment.text) return;
         liveTranscript.append(segment);
         if (segment.is_final && segment.text) liveMeetingSegments.push(segment);
+        clearIdleState();
       });
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -256,6 +277,7 @@ function createMeetingControllerInstance() {
   async function stopRecording() {
     if (isStopping) return; // guard against double-stop
     stopRequested = true;
+    clearIdleState();
     try {
       // Unsaved notes must reach the accumulator before it is persisted.
       await flushNotes();
@@ -289,6 +311,7 @@ function createMeetingControllerInstance() {
     if (app.currentMeetingId !== id && meeting?.id !== id) return;
     liveTranscript.reset();
     liveMeetingSegments = [];
+    clearIdleState();
     void loadMeeting(id);
   }
 
@@ -299,8 +322,36 @@ function createMeetingControllerInstance() {
     liveMeetingSegments = [];
     meeting = null;
     app.currentMeetingId = null;
+    clearIdleState();
     statusMessage =
       "Recording was interrupted — the meeting recorded so far was saved to history.";
+  }
+
+  /** The backend detected the meeting has probably ended (silence or the
+   * max-duration failsafe). Ignored outside an active meeting recording. */
+  function handleMeetingIdle(payload: MeetingIdle) {
+    if (!isRecordingMeeting) return;
+
+    if (payload.reason === "max_duration") {
+      if (isStopping) return;
+      statusMessage = "Maximum meeting duration reached. Stopping the recording.";
+      void stopRecording();
+      return;
+    }
+
+    // Silence: suppressed once the user chose to keep recording, until
+    // speech resumes and re-arms it.
+    if (idleDismissed) return;
+    idleSignal = payload;
+    if (payload.idle_seconds >= payload.threshold_seconds + SILENCE_AUTOSTOP_GRACE_SECONDS) {
+      void stopRecording();
+    }
+  }
+
+  /** "Keep recording": suppress the banner until speech resumes. */
+  function dismissIdle() {
+    idleDismissed = true;
+    idleSignal = null;
   }
 
   /** Leave the detail view: clear the open meeting and return to the list. */
@@ -432,6 +483,8 @@ function createMeetingControllerInstance() {
     set editedTranscriptDraft(value: string) { editedTranscriptDraft = value; },
     get notesDraft() { return notesDraft; },
     get notesSaveState() { return notesSaveState; },
+    get idleSignal() { return idleSignal; },
+    get idleDismissed() { return idleDismissed; },
     onNotesChange,
     flushNotes,
     mount,
@@ -451,6 +504,8 @@ function createMeetingControllerInstance() {
     resetEditedTranscript,
     handleRecordingAborted,
     handleMeetingFinalized,
+    handleMeetingIdle,
+    dismissIdle,
   };
 }
 
@@ -472,6 +527,12 @@ export function notifyMeetingStopRequested() {
   if (instance?.isRecordingMeeting) {
     void instance.stopRecording();
   }
+}
+
+/** Called from the global MeetingIdle listener when the backend detects the
+ * meeting has probably ended (silence or the max-duration failsafe). */
+export function notifyMeetingIdle(payload: MeetingIdle) {
+  instance?.handleMeetingIdle(payload);
 }
 
 // Singleton: survives view mount/unmount cycles so liveMeetingSegments

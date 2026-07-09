@@ -2,10 +2,12 @@
 
 mod actor;
 mod health;
+mod idle;
 
 pub use actor::{
     EngineActorHandle, EngineCommand, EngineFactory, EngineInfo, SessionConfig, SessionSummary,
 };
+pub use idle::MeetingIdleConfig;
 
 use crate::engine::TranscriptionSegment;
 
