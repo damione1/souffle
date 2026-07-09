@@ -186,7 +186,7 @@
     "connect_ollama": "Connectez Ollama dans les Paramètres pour activer les résumés.",
     "no_summary_provider": "Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans les Paramètres.",
     "no_compatible_model": "Aucun modèle Ollama compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
-    "generate_hint": "Points clés et actions, générés localement avec Ollama",
+    "generate_hint": "Points clés et actions, générés sur l'appareil",
     "generate_cta": "Générer",
     "local_badge": "local"
   },

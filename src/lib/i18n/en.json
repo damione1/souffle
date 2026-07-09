@@ -186,7 +186,7 @@
     "connect_ollama": "Connect Ollama in Settings to enable summaries.",
     "no_summary_provider": "No summarization provider is available. Enable Apple Intelligence or connect Ollama in Settings.",
     "no_compatible_model": "No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries.",
-    "generate_hint": "Key points and action items, generated locally with Ollama",
+    "generate_hint": "Key points and action items, generated on device",
     "generate_cta": "Generate",
     "local_badge": "local"
   },

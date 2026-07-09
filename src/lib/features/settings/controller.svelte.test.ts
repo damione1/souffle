@@ -200,6 +200,7 @@ describe("settings controller", () => {
           ollama_url: "http://localhost:11434",
           ollama_available: false,
           apple_intelligence_available: false,
+          apple_intelligence_is_stub: true,
           models: [],
         });
       case "get_transcription_catalog":
@@ -303,6 +304,7 @@ describe("settings controller", () => {
             ollama_url: "http://localhost:11434",
             ollama_available: false,
             apple_intelligence_available: false,
+            apple_intelligence_is_stub: true,
             models: [],
           });
         case "get_transcription_catalog":

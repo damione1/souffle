@@ -216,6 +216,7 @@ export const mockSummaryProvidersStatus: SummaryProvidersStatus = {
   ollama_url: "http://localhost:11434",
   ollama_available: true,
   apple_intelligence_available: false,
+  apple_intelligence_is_stub: true,
   models: [
     { id: "llama3.2:latest", label: "Llama 3.2", provider: "ollama", can_summarize: true },
     { id: "mistral:latest", label: "Mistral", provider: "ollama", can_summarize: true },

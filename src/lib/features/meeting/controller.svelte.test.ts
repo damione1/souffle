@@ -173,6 +173,7 @@ function makeSummaryProvidersStatus(
     ollama_url: "http://localhost:11434",
     ollama_available: true,
     apple_intelligence_available: false,
+    apple_intelligence_is_stub: true,
     models: [
       { id: "llama3", label: "Llama 3", provider: "ollama", can_summarize: true },
       { id: "codellama", label: "Code Llama", provider: "ollama", can_summarize: false },
@@ -524,20 +525,41 @@ describe("MeetingController", () => {
     expect(mockResumeMeetingRecording.mock.calls[0][0]).toBe("meet-1");
   });
 
-  it("syncSelectedModel picks preferred, then settings, then first available", async () => {
+  it("syncSelectedModel picks preferred, then ollama settings, then first available", async () => {
     mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
 
     const ctrl = createMeetingController();
     await ctrl.mount();
 
-    // After mount with ollama available, selectedModel should be llama3
-    // (first can_summarize model since no preference set)
     expect(ctrl.selectedModel).toBe("llama3");
 
-    // If settings has a preferred model and it exists in the list
     mockApp.settings.ollama_model = "llama3";
     await ctrl.refreshSummaryProviders();
+    expect(ctrl.selectedModel).toBe("llama3");
+  });
+
+  it("syncSelectedModel prefers saved ollama_model over apple when both available", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(
+      makeSummaryProvidersStatus({
+        apple_intelligence_available: true,
+        models: [
+          {
+            id: "apple-intelligence",
+            label: "Apple Intelligence",
+            provider: "apple_intelligence",
+            can_summarize: true,
+          },
+          { id: "llama3", label: "Llama 3", provider: "ollama", can_summarize: true },
+        ],
+      }),
+    );
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockApp.settings.ollama_model = "llama3";
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+
     expect(ctrl.selectedModel).toBe("llama3");
   });
 

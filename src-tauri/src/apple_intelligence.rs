@@ -24,8 +24,23 @@ fn is_apple_intelligence_available() -> c_int {
     0
 }
 
+/// Whether this build linked the Apple Intelligence stub instead of FoundationModels.
+pub fn is_stub_linked() -> bool {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        cfg!(apple_intelligence_stub)
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        true
+    }
+}
+
 /// Whether Apple Intelligence is available on this device at runtime.
 pub fn check_apple_intelligence_availability() -> bool {
+    if is_stub_linked() {
+        return false;
+    }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         unsafe { is_apple_intelligence_available() == 1 }
@@ -91,10 +106,17 @@ pub fn process_text_with_system_prompt(
 
 #[cfg(test)]
 mod tests {
-    use super::check_apple_intelligence_availability;
+    use super::{check_apple_intelligence_availability, is_stub_linked};
 
     #[test]
     fn availability_check_does_not_panic() {
         let _available = check_apple_intelligence_availability();
+    }
+
+    #[test]
+    fn stub_build_never_reports_available() {
+        if is_stub_linked() {
+            assert!(!check_apple_intelligence_availability());
+        }
     }
 }

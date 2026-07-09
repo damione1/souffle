@@ -307,7 +307,7 @@ async checkSummaryProviders() : Promise<Result<SummaryProvidersStatus, string>> 
 }
 },
 /**
- * Summarize a meeting transcript using Ollama, streaming results back
+ * Summarize a meeting transcript using the selected provider, streaming results back.
  */
 async summarizeMeeting(id: string, model: string, channel: TAURI_CHANNEL<SummarizeProgress>) : Promise<Result<null, string>> {
     try {
@@ -907,7 +907,11 @@ export type StateChanged = AppStateMachine
 export type SummarizeProgress = { text: string; done: boolean }
 export type SummaryModelDescriptor = { id: string; label: string; provider: SummaryProviderKind; can_summarize: boolean }
 export type SummaryProviderKind = "ollama" | "apple_intelligence"
-export type SummaryProvidersStatus = { ollama_url: string; ollama_available: boolean; apple_intelligence_available: boolean; models: SummaryModelDescriptor[] }
+export type SummaryProvidersStatus = { ollama_url: string; ollama_available: boolean; apple_intelligence_available: boolean; 
+/**
+ * True when this build linked the Apple Intelligence stub (no FoundationModels).
+ */
+apple_intelligence_is_stub: boolean; models: SummaryModelDescriptor[] }
 /**
  * State of the system-audio capture leg of a meeting session, emitted when
  * the session starts and whenever the leg changes (e.g. tap rebuild after

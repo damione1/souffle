@@ -148,7 +148,7 @@ pub async fn check_summary_providers(
     Ok(crate::summary::check_providers(&settings.ollama_url).await)
 }
 
-/// Summarize a meeting transcript using Ollama, streaming results back
+/// Summarize a meeting transcript using the selected provider, streaming results back.
 #[tauri::command]
 #[specta::specta]
 pub async fn summarize_meeting(

@@ -116,11 +116,11 @@ function createMeetingControllerInstance() {
       selectedModel = preferredModel;
       return;
     }
-    if (selectedModel && summaryModels.some((model) => model.id === selectedModel)) return;
     if (app.settings.ollama_model && summaryModels.some((model) => model.id === app.settings.ollama_model)) {
       selectedModel = app.settings.ollama_model;
       return;
     }
+    if (selectedModel && summaryModels.some((model) => model.id === selectedModel)) return;
     selectedModel = summaryModels[0].id;
   }
 

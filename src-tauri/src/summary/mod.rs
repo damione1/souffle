@@ -2,6 +2,7 @@ mod apple;
 mod chunking;
 mod ollama;
 mod prompts;
+mod reduce;
 
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +42,8 @@ pub struct SummaryProvidersStatus {
     pub ollama_url: String,
     pub ollama_available: bool,
     pub apple_intelligence_available: bool,
+    /// True when this build linked the Apple Intelligence stub (no FoundationModels).
+    pub apple_intelligence_is_stub: bool,
     pub models: Vec<SummaryModelDescriptor>,
 }
 
@@ -86,6 +89,9 @@ fn apple_model_descriptor() -> SummaryModelDescriptor {
 }
 
 pub fn apple_intelligence_available() -> bool {
+    if apple_intelligence::is_stub_linked() {
+        return false;
+    }
     apple::validate_availability().is_ok()
 }
 
@@ -98,6 +104,7 @@ pub async fn check_providers(ollama_url: &str) -> SummaryProvidersStatus {
     };
 
     let (ollama_available, ollama_models) = ollama::check_available(Some(url)).await;
+    let apple_intelligence_is_stub = apple_intelligence::is_stub_linked();
     let apple_intelligence_available = apple_intelligence_available();
 
     let mut models = Vec::new();
@@ -117,12 +124,20 @@ pub async fn check_providers(ollama_url: &str) -> SummaryProvidersStatus {
         ollama_url: url.to_string(),
         ollama_available,
         apple_intelligence_available,
+        apple_intelligence_is_stub,
         models,
     }
 }
 
 fn resolve_provider(model: &str) -> Result<SummaryProviderKind, String> {
     if model.trim() == APPLE_INTELLIGENCE_MODEL_ID {
+        if apple_intelligence::is_stub_linked() {
+            return Err(
+                "Apple Intelligence is not included in this build (FoundationModels stub). \
+                 Install a build compiled with Xcode 26+ or use Ollama."
+                    .into(),
+            );
+        }
         apple::validate_availability()?;
         return Ok(SummaryProviderKind::AppleIntelligence);
     }
@@ -270,21 +285,98 @@ pub async fn summarize_stream(
         }
     }
 
-    let full = generate_with_provider(
+    let full = reduce_part_summaries(
         provider,
         model,
         ollama_url,
-        match provider {
-            SummaryProviderKind::Ollama => ollama::SUMMARIZE_SYSTEM_PROMPT,
-            SummaryProviderKind::AppleIntelligence => apple::SUMMARIZE_SYSTEM_PROMPT,
-        },
-        build_reduce_prompt(&part_summaries, notes, participants),
-        0.3,
-        ollama::REDUCE_CONTEXT,
+        &part_summaries,
+        notes,
+        participants,
+        config,
         &on_chunk,
     )
     .await?;
     Ok(sanitize_summary(&full))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn reduce_part_summaries(
+    provider: SummaryProviderKind,
+    model: &str,
+    ollama_url: &str,
+    part_summaries: &[String],
+    notes: Option<&str>,
+    participants: &[MeetingParticipant],
+    config: ChunkConfig,
+    on_chunk: &impl Fn(SummarizeProgress),
+) -> Result<String, String> {
+    let (system_prompt, num_ctx) = match provider {
+        SummaryProviderKind::Ollama => (ollama::SUMMARIZE_SYSTEM_PROMPT, ollama::REDUCE_CONTEXT),
+        SummaryProviderKind::AppleIntelligence => {
+            (apple::SUMMARIZE_SYSTEM_PROMPT, ollama::REDUCE_CONTEXT)
+        }
+    };
+
+    if provider == SummaryProviderKind::Ollama
+        || reduce::reduce_prompt_fits(part_summaries, notes, participants, config.reduce_token_limit)
+    {
+        return generate_with_provider(
+            provider,
+            model,
+            ollama_url,
+            system_prompt,
+            build_reduce_prompt(part_summaries, notes, participants),
+            0.3,
+            num_ctx,
+            on_chunk,
+        )
+        .await;
+    }
+
+    let mut current: Vec<String> = part_summaries.to_vec();
+    loop {
+        if reduce::reduce_prompt_fits(&current, notes, participants, config.reduce_token_limit) {
+            return generate_with_provider(
+                provider,
+                model,
+                ollama_url,
+                system_prompt,
+                build_reduce_prompt(&current, notes, participants),
+                0.3,
+                num_ctx,
+                on_chunk,
+            )
+            .await;
+        }
+
+        let batches = reduce::partition_for_reduce(&current, config.reduce_token_limit)?;
+        if batches.len() == 1 && batches[0].len() == current.len() {
+            let tokens = estimate_tokens(&build_reduce_prompt(&current, None, &[]));
+            return Err(format!(
+                "Meeting summary is too large for Apple Intelligence after batching \
+                 ({tokens} estimated tokens, limit {}). Use Ollama for very long meetings.",
+                config.reduce_token_limit
+            ));
+        }
+
+        let no_op = |_: SummarizeProgress| {};
+        let mut next = Vec::with_capacity(batches.len());
+        for batch in batches {
+            let merged = generate_with_provider(
+                provider,
+                model,
+                ollama_url,
+                system_prompt,
+                build_reduce_prompt(&batch, None, &[]),
+                0.2,
+                num_ctx,
+                &no_op,
+            )
+            .await?;
+            next.push(merged);
+        }
+        current = next;
+    }
 }
 
 #[cfg(test)]
@@ -342,9 +434,14 @@ mod tests {
     async fn check_providers_lists_apple_before_ollama_when_available() {
         let status = check_providers("http://127.0.0.1:1").await;
         assert!(!status.ollama_available);
+        assert_eq!(
+            status.apple_intelligence_is_stub,
+            crate::apple_intelligence::is_stub_linked()
+        );
         if status.apple_intelligence_available {
             assert_eq!(status.models[0].id, APPLE_INTELLIGENCE_MODEL_ID);
             assert_eq!(status.models[0].provider, SummaryProviderKind::AppleIntelligence);
+            assert!(!status.apple_intelligence_is_stub);
         }
     }
 }

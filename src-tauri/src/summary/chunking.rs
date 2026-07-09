@@ -6,6 +6,8 @@ pub fn estimate_tokens(text: &str) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkConfig {
     pub stuff_token_limit: usize,
+    /// Max estimated tokens for one reduce-stage user prompt (map summaries + framing).
+    pub reduce_token_limit: usize,
     pub chunk_words: usize,
     pub chunk_overlap_words: usize,
     pub map_concurrency: usize,
@@ -14,6 +16,7 @@ pub struct ChunkConfig {
 impl ChunkConfig {
     pub const OLLAMA: Self = Self {
         stuff_token_limit: 6000,
+        reduce_token_limit: 12_000,
         chunk_words: 1400,
         chunk_overlap_words: 120,
         map_concurrency: 2,
@@ -22,6 +25,8 @@ impl ChunkConfig {
     /// Foundation Models ship with a smaller context window than local Ollama.
     pub const APPLE_INTELLIGENCE: Self = Self {
         stuff_token_limit: 1500,
+        // ~4096 FM context minus system prompt and generation headroom.
+        reduce_token_limit: 3_200,
         chunk_words: 450,
         chunk_overlap_words: 40,
         map_concurrency: 1,

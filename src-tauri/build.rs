@@ -34,6 +34,8 @@ fn build_apple_intelligence_bridge() {
     println!("cargo:rerun-if-changed={REAL_SWIFT_FILE}");
     println!("cargo:rerun-if-changed={STUB_SWIFT_FILE}");
     println!("cargo:rerun-if-changed={BRIDGE_HEADER}");
+    println!("cargo::rustc-check-cfg=cfg(apple_intelligence_stub)");
+    println!("cargo::rustc-check-cfg=cfg(apple_intelligence_real)");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     let object_path = out_dir.join("apple_intelligence.o");
@@ -67,13 +69,19 @@ fn build_apple_intelligence_bridge() {
 
     let has_foundation_models = framework_path.exists() && !force_stub && !command_line_tools_only;
 
+    // Notarized releases with real Apple Intelligence require Xcode 26+ (FoundationModels
+    // in the macOS SDK). CI runners on macos-15 link the stub until the workflow moves to
+    // a runner image with that SDK; stub linkage is surfaced at runtime via is_stub_linked().
     let source_file = if has_foundation_models {
+        println!("cargo:rustc-cfg=apple_intelligence_real");
         println!("cargo:warning=Building with Apple Intelligence support.");
         REAL_SWIFT_FILE
     } else if framework_path.exists() {
+        println!("cargo:rustc-cfg=apple_intelligence_stub");
         println!("cargo:warning=Building Apple Intelligence with stubs.");
         STUB_SWIFT_FILE
     } else {
+        println!("cargo:rustc-cfg=apple_intelligence_stub");
         println!("cargo:warning=Apple Intelligence SDK not found. Building with stubs.");
         STUB_SWIFT_FILE
     };
