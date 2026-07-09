@@ -11,7 +11,10 @@
 use chrono::Utc;
 use souffle_lib::db::Database;
 use souffle_lib::engine::{TranscriptionProfile, TranscriptionSegment};
-use souffle_lib::transcript::{MeetingParticipant, MeetingRecordingSession, MeetingTranscript};
+use souffle_lib::transcript::{
+    MeetingParticipant, MeetingRecordingSession, MeetingTranscript, StructuredActionItem,
+    StructuredSummary,
+};
 use souffle_mcp::db::{IncludeSet, McpDb};
 use tempfile::TempDir;
 
@@ -57,6 +60,14 @@ fn build_meeting() -> MeetingTranscript {
         summary_is_stale: false,
         summary_model: Some("qwen2.5".to_string()),
         summary_generated_at: Some(ended_at),
+        structured_summary: Some(StructuredSummary {
+            decisions: vec!["Proceed with schema contract test".to_string()],
+            action_items: vec![StructuredActionItem {
+                text: "Keep MCP in sync".to_string(),
+                owner: Some("Alice Martin".to_string()),
+            }],
+            open_questions: vec!["Any drift?".to_string()],
+        }),
         edited_transcript: None,
         notes: Some("Remember to check the schema.".to_string()),
         calendar_event_id: Some("evt-contract".to_string()),
@@ -104,6 +115,12 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
         detail.summary.as_deref(),
         Some("A short summary of the contract test meeting.")
     );
+    let structured = detail.structured_summary.expect("structured summary");
+    assert_eq!(structured.decisions, vec!["Proceed with schema contract test"]);
+    assert_eq!(structured.action_items.len(), 1);
+    assert_eq!(structured.action_items[0].text, "Keep MCP in sync");
+    assert_eq!(structured.action_items[0].owner.as_deref(), Some("Alice Martin"));
+    assert_eq!(structured.open_questions, vec!["Any drift?"]);
     assert_eq!(detail.notes.as_deref(), Some("Remember to check the schema."));
     let metadata = detail.metadata.unwrap();
     assert_eq!(metadata.calendar_event_id.as_deref(), Some("evt-contract"));

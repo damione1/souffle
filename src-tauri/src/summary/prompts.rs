@@ -80,10 +80,43 @@ pub fn build_reduce_prompt(
     prompt
 }
 
+/// Build the user prompt for structured summary extraction from a prose summary.
+pub fn build_structured_extract_prompt(
+    prose_summary: &str,
+    notes: Option<&str>,
+    participants: &[MeetingParticipant],
+) -> String {
+    let mut prompt = format!(
+        "Extract structured meeting outcomes from the summary below. Return JSON only with \
+         keys: decisions (string array), action_items (array of {{text, owner}}), \
+         open_questions (string array). Use null for unknown owners.\n\nSummary:\n---\n\
+         {prose_summary}\n---"
+    );
+    if let Some(section) = format_participants(participants) {
+        prompt.push_str(&section);
+    }
+    if let Some(notes) = notes.map(str::trim).filter(|n| !n.is_empty()) {
+        prompt.push_str(&format!(
+            "\n\nUser notes (authoritative context):\n---\n{notes}\n---"
+        ));
+    }
+    prompt
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_reduce_prompt, build_summarize_prompt, format_participants};
+    use super::{build_reduce_prompt, build_structured_extract_prompt, build_summarize_prompt, format_participants};
     use crate::transcript::MeetingParticipant;
+
+    #[test]
+    fn structured_extract_prompt_requests_json_keys() {
+        let prompt = build_structured_extract_prompt("## Summary\n- hello", Some("ship it"), &[]);
+        assert!(prompt.contains("decisions"));
+        assert!(prompt.contains("action_items"));
+        assert!(prompt.contains("open_questions"));
+        assert!(prompt.contains("## Summary"));
+        assert!(prompt.contains("ship it"));
+    }
 
     #[test]
     fn reduce_prompt_orders_parts_and_demands_equal_weight() {

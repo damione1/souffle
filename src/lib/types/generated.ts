@@ -843,7 +843,7 @@ export type MeetingStopRequested = null
 /**
  * Full meeting transcript stored as JSON
  */
-export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; edited_transcript: string | null; 
+export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; structured_summary: StructuredSummary | null; edited_transcript: string | null; 
 /**
  * Free-form notes the user typed during the meeting; fed into the
  * summary prompt.
@@ -904,6 +904,14 @@ export type ShortcutToggle = null
  */
 export type Speaker = "me" | "them"
 export type StateChanged = AppStateMachine
+/**
+ * A single action item extracted from a meeting summary pass.
+ */
+export type StructuredActionItem = { text: string; owner: string | null }
+/**
+ * Typed structured summary: decisions, action items, open questions.
+ */
+export type StructuredSummary = { decisions?: string[]; action_items?: StructuredActionItem[]; open_questions?: string[] }
 export type SummarizeProgress = { text: string; done: boolean }
 export type SummaryModelDescriptor = { id: string; label: string; provider: SummaryProviderKind; can_summarize: boolean }
 export type SummaryProviderKind = "ollama" | "apple_intelligence"

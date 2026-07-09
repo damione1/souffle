@@ -4,6 +4,7 @@
   import MeetingHeaderSection from "./MeetingHeaderSection.svelte";
   import MeetingNotesSection from "./MeetingNotesSection.svelte";
   import MeetingSummarySection from "./MeetingSummarySection.svelte";
+  import MeetingStructuredSummarySection from "./MeetingStructuredSummarySection.svelte";
   import MeetingTranscriptSection from "./MeetingTranscriptSection.svelte";
   import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
@@ -98,6 +99,12 @@
       onSummarize={controller.summarizeMeeting}
       isSummarizing={controller.isSummarizing}
       summaryStream={controller.summaryStream}
+    />
+
+    <MeetingStructuredSummarySection
+      meeting={controller.meeting}
+      isRecordingMeeting={controller.isRecordingMeeting}
+      isSummarizing={controller.isSummarizing}
     />
 
     {#if !controller.isRecordingMeeting && controller.meeting.id}

@@ -5,6 +5,7 @@ use crate::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
 use crate::transcript::{
     MeetingListItem, MeetingParticipant, MeetingRecordingSession, MeetingTranscript,
+    StructuredSummary,
 };
 
 use super::Database;
@@ -34,8 +35,9 @@ impl Database {
                 edited_transcript,
                 notes,
                 calendar_event_id,
-                participants
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                participants,
+                structured_summary
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 meeting.id,
                 meeting.title,
@@ -54,6 +56,7 @@ impl Database {
                 meeting.notes,
                 meeting.calendar_event_id,
                 serialize_participants(&meeting.participants)?,
+                serialize_structured_summary(meeting.structured_summary.as_ref())?,
             ],
         )
         .map_err(|e| format!("Insert meeting: {e}"))?;
@@ -122,8 +125,9 @@ impl Database {
                 id, title, started_at, ended_at, duration_seconds,
                 transcription_profile, recording_sessions, summary,
                 summary_is_stale, summary_model, summary_generated_at,
-                edited_transcript, notes, calendar_event_id, participants
-             ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12)
+                edited_transcript, notes, calendar_event_id, participants,
+                structured_summary
+             ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 started_at = excluded.started_at,
@@ -136,7 +140,8 @@ impl Database {
                 summary_generated_at = excluded.summary_generated_at,
                 notes = excluded.notes,
                 calendar_event_id = excluded.calendar_event_id,
-                participants = excluded.participants",
+                participants = excluded.participants,
+                structured_summary = excluded.structured_summary",
             params![
                 meeting.id,
                 meeting.title,
@@ -152,6 +157,7 @@ impl Database {
                 meeting.notes,
                 meeting.calendar_event_id,
                 serialize_participants(&meeting.participants)?,
+                serialize_structured_summary(meeting.structured_summary.as_ref())?,
             ],
         )
         .map_err(|e| format!("Upsert meeting header: {e}"))?;
@@ -270,7 +276,8 @@ impl Database {
                     edited_transcript,
                     notes,
                     calendar_event_id,
-                    participants
+                    participants,
+                    structured_summary
                  FROM meetings
                  WHERE id = ?1",
                 params![id],
@@ -291,6 +298,7 @@ impl Database {
                         notes: row.get(12)?,
                         calendar_event_id: row.get(13)?,
                         participants: row.get(14)?,
+                        structured_summary: row.get(15)?,
                     })
                 },
             )
@@ -327,6 +335,7 @@ impl Database {
         let transcription_profile = meeting.transcription_profile()?;
         let recording_sessions = meeting.recording_sessions()?;
         let participants = meeting.participants()?;
+        let structured_summary = meeting.structured_summary()?;
         let started_at = parse_datetime(&meeting.started_at)?;
         let ended_at = meeting
             .ended_at
@@ -356,6 +365,7 @@ impl Database {
             notes: meeting.notes,
             calendar_event_id: meeting.calendar_event_id,
             participants,
+            structured_summary,
         })
     }
 
@@ -424,11 +434,12 @@ impl Database {
         Ok(())
     }
 
-    /// Update meeting summary fields and clear the stale flag.
+    /// Update meeting summary fields, structured summary, and clear the stale flag.
     pub fn update_meeting_summary(
         &self,
         id: &str,
         summary: &str,
+        structured_summary: Option<&StructuredSummary>,
         model: &str,
     ) -> Result<(), String> {
         let conn = self.conn.acquire()?;
@@ -436,9 +447,16 @@ impl Database {
 
         conn.execute(
             "UPDATE meetings
-             SET summary = ?1, summary_is_stale = 0, summary_model = ?2, summary_generated_at = ?3
-             WHERE id = ?4",
-            params![summary, model, now, id],
+             SET summary = ?1, summary_is_stale = 0, summary_model = ?2, summary_generated_at = ?3,
+                 structured_summary = ?4
+             WHERE id = ?5",
+            params![
+                summary,
+                model,
+                now,
+                serialize_structured_summary(structured_summary)?,
+                id
+            ],
         )
         .map_err(|e| format!("Update summary: {e}"))?;
 
@@ -540,6 +558,7 @@ struct MeetingRow {
     notes: Option<String>,
     calendar_event_id: Option<String>,
     participants: Option<String>,
+    structured_summary: Option<String>,
 }
 
 impl MeetingRow {
@@ -562,6 +581,15 @@ impl MeetingRow {
             None => Ok(Vec::new()),
         }
     }
+
+    fn structured_summary(&self) -> Result<Option<StructuredSummary>, String> {
+        match self.structured_summary.as_deref() {
+            Some(raw) => serde_json::from_str(raw)
+                .map(Some)
+                .map_err(|e| format!("Deserialize structured summary: {e}")),
+            None => Ok(None),
+        }
+    }
 }
 
 /// Participants persist as a JSON array; an empty list stores NULL so pre-v8
@@ -573,6 +601,17 @@ fn serialize_participants(participants: &[MeetingParticipant]) -> Result<Option<
     serde_json::to_string(participants)
         .map(Some)
         .map_err(|e| format!("Serialize participants: {e}"))
+}
+
+fn serialize_structured_summary(
+    structured_summary: Option<&StructuredSummary>,
+) -> Result<Option<String>, String> {
+    match structured_summary {
+        Some(value) => serde_json::to_string(value)
+            .map(Some)
+            .map_err(|e| format!("Serialize structured summary: {e}")),
+        None => Ok(None),
+    }
 }
 
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
@@ -627,6 +666,24 @@ mod tests {
 
         db.save_meeting_notes("m1", None).unwrap();
         assert_eq!(db.load_meeting("m1").unwrap().notes, None);
+    }
+
+    #[test]
+    fn structured_summary_round_trip() {
+        use crate::transcript::{StructuredActionItem, StructuredSummary};
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m-structured");
+        meeting.structured_summary = Some(StructuredSummary {
+            decisions: vec!["Ship the feature".to_string()],
+            action_items: vec![StructuredActionItem {
+                text: "Open PR".to_string(),
+                owner: Some("Damien".to_string()),
+            }],
+            open_questions: vec!["When is Xcode 26 on CI?".to_string()],
+        });
+        db.save_meeting(&meeting).unwrap();
+        let loaded = db.load_meeting("m-structured").unwrap();
+        assert_eq!(loaded.structured_summary, meeting.structured_summary);
     }
 
     #[test]
@@ -700,18 +757,53 @@ mod tests {
 
     #[test]
     fn update_summary() {
+        use crate::transcript::StructuredSummary;
         let (db, _dir) = test_db();
         let mut meeting = sample_meeting("m1");
         meeting.summary_is_stale = true;
         db.save_meeting(&meeting).unwrap();
-        db.update_meeting_summary("m1", "Summary text", "qwen2.5")
+        db.update_meeting_summary(
+            "m1",
+            "Summary text",
+            Some(&StructuredSummary {
+                decisions: vec!["Go".to_string()],
+                action_items: vec![],
+                open_questions: vec![],
+            }),
+            "qwen2.5",
+        )
+        .unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert!(!loaded.summary_is_stale);
+        assert_eq!(loaded.summary.as_deref(), Some("Summary text"));
+        assert_eq!(loaded.summary_model.as_deref(), Some("qwen2.5"));
+        assert!(loaded.summary_generated_at.is_some());
+        assert_eq!(loaded.structured_summary.unwrap().decisions, vec!["Go"]);
+    }
+
+    #[test]
+    fn update_summary_prose_only_clears_structured() {
+        use crate::transcript::StructuredSummary;
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        db.update_meeting_summary(
+            "m1",
+            "First pass",
+            Some(&StructuredSummary {
+                decisions: vec!["Old".to_string()],
+                action_items: vec![],
+                open_questions: vec![],
+            }),
+            "qwen2.5",
+        )
+        .unwrap();
+        db.update_meeting_summary("m1", "Prose only after extract fail", None, "qwen2.5")
             .unwrap();
 
         let loaded = db.load_meeting("m1").unwrap();
-        assert_eq!(loaded.summary.as_deref(), Some("Summary text"));
-        assert!(!loaded.summary_is_stale);
-        assert_eq!(loaded.summary_model.as_deref(), Some("qwen2.5"));
-        assert!(loaded.summary_generated_at.is_some());
+        assert_eq!(loaded.summary.as_deref(), Some("Prose only after extract fail"));
+        assert!(loaded.structured_summary.is_none());
     }
 
     #[test]

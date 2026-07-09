@@ -254,6 +254,47 @@ impl ServerHandler for SouffleMcpServer {
 }
 
 fn render_meeting_resource(meeting: &MeetingDetail) -> String {
+    let mut out = format!("# {}\n\n{}\n", meeting.title, meeting.started_at);
+
+    if let Some(summary) = meeting.summary.as_deref().filter(|s| !s.trim().is_empty()) {
+        out.push_str("\n## Summary\n\n");
+        out.push_str(summary);
+        out.push('\n');
+    }
+
+    if let Some(structured) = meeting.structured_summary.as_ref() {
+        if !structured.decisions.is_empty() {
+            out.push_str("\n## Decisions\n\n");
+            for decision in &structured.decisions {
+                out.push_str("- ");
+                out.push_str(decision);
+                out.push('\n');
+            }
+        }
+        if !structured.action_items.is_empty() {
+            out.push_str("\n## Action Items\n\n");
+            for item in &structured.action_items {
+                out.push_str("- ");
+                if let Some(owner) = item.owner.as_deref().filter(|o| !o.is_empty()) {
+                    out.push_str(owner);
+                    out.push_str(": ");
+                }
+                out.push_str(&item.text);
+                out.push('\n');
+            }
+        }
+        if !structured.open_questions.is_empty() {
+            out.push_str("\n## Open Questions\n\n");
+            for question in &structured.open_questions {
+                out.push_str("- ");
+                out.push_str(question);
+                out.push('\n');
+            }
+        }
+    }
+
     let transcript = meeting.transcript.as_deref().unwrap_or("(no transcript)");
-    format!("# {}\n\n{}\n\n{}", meeting.title, meeting.started_at, transcript)
+    out.push_str("\n## Transcript\n\n");
+    out.push_str(transcript);
+    out
 }
