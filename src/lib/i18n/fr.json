@@ -108,7 +108,19 @@
     "export_success": "Export terminé.",
     "reveal_title": "Dossier des données",
     "reveal_desc": "Ouvre le dossier où sont stockés la base de données, les journaux et les modèles.",
-    "reveal_button": "Afficher dans le Finder"
+    "reveal_button": "Afficher dans le Finder",
+    "mcp_title": "Connexion aux assistants IA",
+    "mcp_desc": "Permet à Claude Desktop, Claude Code ou d'autres clients MCP de lire vos transcriptions et résumés locaux. Tout reste sur ce Mac — aucun envoi vers le cloud.",
+    "mcp_binary": "Binaire sidecar",
+    "mcp_binary_missing": "Pas encore compilé. Lancez scripts/build-mcp-sidecar.sh avant le packaging, ou cargo build -p souffle-mcp en dev local.",
+    "mcp_claude_desktop": "Config Claude Desktop",
+    "mcp_claude_desktop_desc": "À coller dans claude_desktop_config.json sous mcpServers.",
+    "mcp_claude_code": "Claude Code",
+    "mcp_claude_code_desc": "À exécuter une fois dans un terminal pour enregistrer le serveur.",
+    "mcp_test": "Tester la connexion",
+    "mcp_testing": "Test en cours…",
+    "mcp_test_success": "Connecté — outils : {tools}",
+    "mcp_test_error": "Échec du test de connexion"
   },
   "settings_about": {
     "title": "À propos",

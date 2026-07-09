@@ -160,6 +160,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::export_archive,
             commands::get_data_stats,
             commands::reveal_data_dir,
+            commands::get_mcp_setup_info,
+            commands::test_mcp_connection,
         ])
         .events(collect_events![
             app_events::Navigate,

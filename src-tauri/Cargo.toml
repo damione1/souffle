@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "souffle-mcp"]
+
 [package]
 name = "souffle"
 version = "0.1.0"
@@ -98,6 +101,7 @@ dispatch2 = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
+souffle-mcp = { path = "souffle-mcp" }
 
 [profile.release]
 strip = true

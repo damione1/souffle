@@ -11,7 +11,7 @@ Object.defineProperty(window, '__TAURI_INTERNALS__', {
   writable: true,
 });
 
-import { getDataStats, exportArchive, revealDataDir } from './data';
+import { getDataStats, exportArchive, revealDataDir, getMcpSetupInfo, testMcpConnection } from './data';
 
 describe('data API', () => {
   beforeEach(() => {
@@ -52,5 +52,29 @@ describe('data API', () => {
     await revealDataDir();
 
     expect(mockInvoke).toHaveBeenCalledWith('reveal_data_dir', expect.any(Object), undefined);
+  });
+
+  it('getMcpSetupInfo returns the setup object', async () => {
+    const info = {
+      binary_path: '/tmp/souffle-mcp',
+      exists: true,
+      claude_desktop_snippet: '{"mcpServers":{"souffle":{"command":"/tmp/souffle-mcp"}}}',
+      claude_code_command: 'claude mcp add souffle /tmp/souffle-mcp',
+    };
+    mockInvoke.mockResolvedValue(info);
+
+    const result = await getMcpSetupInfo();
+
+    expect(mockInvoke).toHaveBeenCalledWith('get_mcp_setup_info', expect.any(Object), undefined);
+    expect(result).toEqual(info);
+  });
+
+  it('testMcpConnection returns discovered tool names', async () => {
+    mockInvoke.mockResolvedValue('list_meetings, get_meeting');
+
+    const result = await testMcpConnection();
+
+    expect(mockInvoke).toHaveBeenCalledWith('test_mcp_connection', expect.any(Object), undefined);
+    expect(result).toBe('list_meetings, get_meeting');
   });
 });

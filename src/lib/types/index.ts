@@ -17,6 +17,7 @@ export type {
   MeetingCalendarContext,
   MeetingIdle,
   MeetingIdleReason,
+  McpSetupInfo,
   MeetingListItem,
   MeetingParticipant,
   MeetingRecordingSession,
