@@ -4,6 +4,7 @@ import {
   exportMeetingFilename,
   exportMeetingToFile,
   getMeeting,
+  getMeetingAudio,
   renameMeeting as applyMeetingRename,
   resumeMeetingRecording,
   saveEditedTranscript,
@@ -16,10 +17,11 @@ import {
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { ExportFormat, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
+import { type AudioSeekTarget, resolveAudioSeekTarget } from "./audio-map";
 import { createLiveTranscript } from "./live-transcript.svelte";
 
 function defaultMeetingTitle(): string {
@@ -72,6 +74,14 @@ function createMeetingControllerInstance() {
 
   let meeting = $state<MeetingTranscript | null>(null);
   let isLoadingMeeting = $state(false);
+  // Recorded audio files for the open meeting (empty when recording was off,
+  // or nothing survived retention) — drives whether the player bar shows.
+  let audioSessions = $state<MeetingAudioSession[]>([]);
+  // A paragraph-click seek request for the player: `requestId` changes on
+  // every click (even to the same target) so an `$effect` watching it always
+  // fires, including re-clicking the same paragraph after manually pausing.
+  let seekTarget = $state<AudioSeekTarget | null>(null);
+  let seekRequestId = $state(0);
   // True from the moment Stop is clicked until the backend finishes draining +
   // saving (machine leaves "stopping"). Drives the Stop button's spinner and
   // guards against double-stop. `stopRequested` covers the brief gap before the
@@ -131,11 +141,24 @@ function createMeetingControllerInstance() {
       syncSelectedModel(meeting.summary_model);
       notesDraft = meeting.notes ?? "";
       notesSaveState = "idle";
+      // Best-effort: a missing/unreadable recordings directory should never
+      // block loading the meeting itself, the player bar just stays hidden.
+      audioSessions = await getMeetingAudio(id).catch(() => []);
     } catch (e) {
       statusMessage = errorMessage(e);
     } finally {
       isLoadingMeeting = false;
     }
+  }
+
+  /** A paragraph's timestamp was clicked: resolve it to a playable audio
+   * target (no-op if the paragraph isn't attributed to a recorded session,
+   * e.g. recording was off or the file didn't survive retention). */
+  function requestAudioSeek(recordingSessionIndex: number | null, startTime: number) {
+    const target = resolveAudioSeekTarget(recordingSessionIndex, startTime, audioSessions);
+    if (!target) return;
+    seekTarget = target;
+    seekRequestId += 1;
   }
 
   /** The meeting id to write notes against: the accumulator id while
@@ -330,6 +353,7 @@ function createMeetingControllerInstance() {
     liveTranscript.reset();
     liveMeetingSegments = [];
     meeting = null;
+    audioSessions = [];
     app.currentMeetingId = null;
     clearIdleState();
     statusMessage =
@@ -395,6 +419,8 @@ function createMeetingControllerInstance() {
   function closeMeeting() {
     void flushNotes();
     meeting = null;
+    audioSessions = [];
+    seekTarget = null;
     liveTranscript.reset();
     liveMeetingSegments = [];
     statusMessage = "";
@@ -541,6 +567,10 @@ function createMeetingControllerInstance() {
     get liveTranscript() { return liveTranscript; },
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
+    get audioSessions() { return audioSessions; },
+    get seekTarget() { return seekTarget; },
+    get seekRequestId() { return seekRequestId; },
+    requestAudioSeek,
     get isLoadingMeeting() { return isLoadingMeeting; },
     get isStopping() { return isStopping; },
     get canResumeRecording() { return canResumeRecording; },

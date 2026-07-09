@@ -1,8 +1,16 @@
 import type { MeetingRecordingSession, Speaker, TranscriptionSegment } from "../types";
 import { formatTimestamp } from "./format";
 
-export type Paragraph = { timestamp: string; text: string; speaker?: Speaker | null };
-export type TranscriptParagraphBlock = Paragraph & { type: "paragraph" };
+export type Paragraph = { timestamp: string; startTime: number; text: string; speaker?: Speaker | null };
+export type TranscriptParagraphBlock = Paragraph & {
+  type: "paragraph";
+  /** Position of this paragraph's recording session in `recordingSessions`
+   * (see `buildMeetingTranscriptBlocks`), or `null` when it can't be
+   * attributed to a known session (legacy data, or a gap not covered by any
+   * saved session). Used to map a paragraph to its playable audio file —
+   * see `features/meeting/audio-map.ts`. */
+  recordingSessionIndex: number | null;
+};
 export type TranscriptSessionBreakBlock = {
   type: "session-break";
   endLabel: string;
@@ -66,6 +74,7 @@ export function groupIntoParagraphsWithRanges(
   const ranges: ParagraphRange[] = [];
   let rangeStart = 0;
   let currentTimestamp = formatTimestamp(ordered[0].start_time);
+  let currentStartTime = ordered[0].start_time;
   let currentSpeaker: Speaker | null = ordered[0].speaker ?? null;
   let currentWords: string[] = [];
   let currentChars = 0;
@@ -76,12 +85,14 @@ export function groupIntoParagraphsWithRanges(
   const flush = (boundaryIndex: number, nextStart: number, nextSpeaker: Speaker | null) => {
     paragraphs.push({
       timestamp: currentTimestamp,
+      startTime: currentStartTime,
       text: currentWords.join(" "),
       speaker: currentSpeaker,
     });
     ranges.push({ start: rangeStart, end: boundaryIndex });
     rangeStart = boundaryIndex;
     currentTimestamp = formatTimestamp(nextStart);
+    currentStartTime = nextStart;
     currentSpeaker = nextSpeaker;
     currentWords = [];
     currentChars = 0;
@@ -129,6 +140,7 @@ export function groupIntoParagraphsWithRanges(
   if (currentWords.length > 0) {
     paragraphs.push({
       timestamp: currentTimestamp,
+      startTime: currentStartTime,
       text: currentWords.join(" "),
       speaker: currentSpeaker,
     });
@@ -150,9 +162,13 @@ export function groupIntoParagraphs(
   return groupIntoParagraphsWithRanges(segments, pauseThreshold).paragraphs;
 }
 
-function toParagraphBlocks(paragraphs: Paragraph[]): TranscriptParagraphBlock[] {
+function toParagraphBlocks(
+  paragraphs: Paragraph[],
+  recordingSessionIndex: number | null,
+): TranscriptParagraphBlock[] {
   return paragraphs.map((paragraph) => ({
     type: "paragraph",
+    recordingSessionIndex,
     ...paragraph,
   }));
 }
@@ -169,8 +185,13 @@ export function buildMeetingTranscriptBlocks(
 ): TranscriptBlock[] {
   if (segments.length === 0) return [];
 
-  const normalizedSavedSessions = [...recordingSessions]
-    .map((session) => ({
+  // `sessionIndex` keeps each session's position in the original (already
+  // chronological) `recordingSessions` array — that position is also the
+  // audio filename a recorder wrote for it (see `commands::get_meeting_audio`
+  // on the backend) — before sorting loses it.
+  const normalizedSavedSessions = recordingSessions
+    .map((session, sessionIndex) => ({
+      sessionIndex,
       start: Math.max(0, Number(session.start_segment_index)),
       end: Math.min(segments.length, Number(session.end_segment_index)),
     }))
@@ -183,7 +204,7 @@ export function buildMeetingTranscriptBlocks(
     && liveSessionStartIndex < segments.length;
 
   if (normalizedSavedSessions.length === 0 && !hasLiveSession) {
-    return toParagraphBlocks(groupIntoParagraphs(segments, pauseThreshold));
+    return toParagraphBlocks(groupIntoParagraphs(segments, pauseThreshold), null);
   }
 
   const blocks: TranscriptBlock[] = [];
@@ -192,6 +213,7 @@ export function buildMeetingTranscriptBlocks(
     sessionSegments: TranscriptionSegment[],
     isFirstSession: boolean,
     isLiveSession: boolean,
+    recordingSessionIndex: number | null,
   ) => {
     if (sessionSegments.length === 0) return;
 
@@ -203,7 +225,7 @@ export function buildMeetingTranscriptBlocks(
       });
     }
 
-    blocks.push(...toParagraphBlocks(groupIntoParagraphs(sessionSegments, pauseThreshold)));
+    blocks.push(...toParagraphBlocks(groupIntoParagraphs(sessionSegments, pauseThreshold), recordingSessionIndex));
   };
 
   let appendedAnySession = false;
@@ -212,23 +234,27 @@ export function buildMeetingTranscriptBlocks(
   for (const session of normalizedSavedSessions) {
     const start = Math.max(consumedUntil, session.start);
     if (start > consumedUntil) {
-      appendSession(segments.slice(consumedUntil, start), !appendedAnySession, false);
+      // Segments not covered by any known recording session (gap in the
+      // saved ranges) can't be attributed to an audio file.
+      appendSession(segments.slice(consumedUntil, start), !appendedAnySession, false, null);
       appendedAnySession = true;
     }
 
-    appendSession(segments.slice(start, session.end), !appendedAnySession, false);
+    appendSession(segments.slice(start, session.end), !appendedAnySession, false, session.sessionIndex);
     appendedAnySession = appendedAnySession || session.end > start;
     consumedUntil = Math.max(consumedUntil, session.end);
   }
 
   if (hasLiveSession && liveSessionStartIndex !== null) {
     const start = Math.max(consumedUntil, liveSessionStartIndex);
-    appendSession(segments.slice(start), !appendedAnySession, true);
+    // The in-progress session hasn't been saved yet, so it isn't in
+    // `recordingSessions` — its eventual position is the next index.
+    appendSession(segments.slice(start), !appendedAnySession, true, recordingSessions.length);
     return blocks;
   }
 
   if (consumedUntil < segments.length) {
-    appendSession(segments.slice(consumedUntil), !appendedAnySession, false);
+    appendSession(segments.slice(consumedUntil), !appendedAnySession, false, null);
   }
 
   return blocks;

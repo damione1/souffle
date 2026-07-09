@@ -172,7 +172,10 @@
       onLogLevelChange={controller.onLogLevelChange}
     />
 
-    <DataSettingsSection />
+    <DataSettingsSection
+      retention={controller.app.settings.meeting_audio_retention}
+      onRetentionChange={controller.onMeetingAudioRetentionChange}
+    />
 
     <section class="settings-group">
       <h3>{$t("settings_advanced.model_storage")}</h3>

@@ -51,7 +51,13 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* https://huggingface.co https://*.hf.co; img-src 'self' data:; font-src 'self'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* https://huggingface.co https://*.hf.co; img-src 'self' data:; font-src 'self'; media-src 'self' asset: http://asset.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/recordings/**"
+        ]
+      }
     },
     "macOSPrivateApi": true
   },

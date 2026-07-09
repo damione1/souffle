@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import type { createMeetingController } from "../controller.svelte";
+  import MeetingAudioPlayerSection from "./MeetingAudioPlayerSection.svelte";
   import MeetingHeaderSection from "./MeetingHeaderSection.svelte";
   import MeetingNotesSection from "./MeetingNotesSection.svelte";
   import MeetingSummarySection from "./MeetingSummarySection.svelte";
@@ -68,6 +69,14 @@
       onNotesChange={controller.onNotesChange}
     />
 
+    {#if controller.audioSessions.length > 0}
+      <MeetingAudioPlayerSection
+        audioSessions={controller.audioSessions}
+        seekTarget={controller.seekTarget}
+        seekRequestId={controller.seekRequestId}
+      />
+    {/if}
+
     <!-- Transcript is the hero: prominent card right under the notes. -->
     <MeetingTranscriptSection
       segments={displaySegments}
@@ -83,6 +92,7 @@
       onSaveAndSummarize={controller.saveTranscriptAndSummarize}
       onResetEdited={controller.resetEditedTranscript}
       onEditDraftChange={(value) => { controller.editedTranscriptDraft = value; }}
+      onParagraphClick={controller.audioSessions.length > 0 ? controller.requestAudioSeek : undefined}
     />
 
     <!-- AI summary, generated from notes + transcript. -->

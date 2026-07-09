@@ -207,6 +207,7 @@ export const mockSettings: AppSettings = {
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
+  meeting_audio_retention: "off",
   dictation_polish_enabled: false,
   dictation_polish_template_id: "email",
   dictation_polish_templates: [

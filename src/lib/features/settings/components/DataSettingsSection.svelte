@@ -13,8 +13,24 @@
     testMcpConnection,
   } from "../../../api/data";
   import { events } from "../../../api/generated";
-  import type { ArchiveExportProgress, DataStats, McpSetupInfo } from "../../../types";
+  import type { ArchiveExportProgress, DataStats, McpSetupInfo, MeetingAudioRetention } from "../../../types";
   import { errorMessage, formatBytes } from "../../../utils";
+
+  const retentionOptions: MeetingAudioRetention[] = ["off", "keep_7d", "keep_30d", "keep_forever"];
+  const retentionKeys: Record<MeetingAudioRetention, string> = {
+    off: "settings_data.retention_off",
+    keep_7d: "settings_data.retention_7d",
+    keep_30d: "settings_data.retention_30d",
+    keep_forever: "settings_data.retention_forever",
+  };
+
+  let {
+    retention,
+    onRetentionChange,
+  }: {
+    retention: MeetingAudioRetention;
+    onRetentionChange: (event: Event) => void | Promise<void>;
+  } = $props();
 
   let stats = $state<DataStats | null>(null);
   let mcpSetup = $state<McpSetupInfo | null>(null);
@@ -130,7 +146,26 @@
           },
         })}
       </p>
+      {#if stats.recordings_size_bytes > 0}
+        <p class="setting-desc">
+          {$t("settings_data.recordings_size", { values: { size: formatBytes(stats.recordings_size_bytes) } })}
+        </p>
+      {/if}
     {/if}
+
+    <SettingsField
+      label={$t("settings_data.retention_title")}
+      description={$t("settings_data.retention_desc")}
+      htmlFor="meeting-audio-retention"
+    >
+      {#snippet control()}
+        <select id="meeting-audio-retention" value={retention} onchange={onRetentionChange} class="field-select max-w-48">
+          {#each retentionOptions as option}
+            <option value={option}>{$t(retentionKeys[option])}</option>
+          {/each}
+        </select>
+      {/snippet}
+    </SettingsField>
 
     <SettingsField label={$t("settings_data.export_title")} description={$t("settings_data.export_desc")}>
       {#snippet control()}

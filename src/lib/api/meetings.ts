@@ -10,6 +10,7 @@ export async function saveMeetingNotes(id: string, notes: string | null): Promis
 }
 import type {
   ExportFormat,
+  MeetingAudioSession,
   MeetingCalendarContext,
   MeetingListItem,
   MeetingTranscript,
@@ -24,6 +25,12 @@ export async function listMeetings(): Promise<MeetingListItem[]> {
 
 export async function getMeeting(id: string): Promise<MeetingTranscript> {
   return unwrap(commands.getMeeting(id));
+}
+
+/** Recorded audio files for a meeting (empty if recording was off, or
+ * nothing survived retention). */
+export async function getMeetingAudio(meetingId: string): Promise<MeetingAudioSession[]> {
+  return unwrap(commands.getMeetingAudio(meetingId));
 }
 
 export async function startMeetingRecording(
