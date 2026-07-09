@@ -30,6 +30,7 @@ import {
   startTranscriptionModelLoad,
 } from "./runtime";
 import { getAppState } from "../../stores/app.svelte";
+import { mockSettings } from "../../test-helpers/fixtures";
 import type {
   TranscriptionCatalog,
   TranscriptionRuntimeStatus,
@@ -163,42 +164,7 @@ describe("transcription controller", () => {
     app.downloadCompletedFiles = 0;
     app.downloadTotalFiles = 0;
     app.selectedDevice = "";
-    app.settings = {
-      theme: "dark",
-      locale: "",
-      auto_paste: false,
-      paste_delay_ms: 100,
-      ollama_url: "http://localhost:11434",
-      ollama_model: "",
-      debug_transcription: false,
-      audio_device: null,
-      clamshell_audio_device: null,
-      transcription_engine_id: "kyutai",
-      transcription_model_id: "stt-1b-en_fr",
-      transcription_backend_id: "candle",
-      vad_enabled: true,
-      filler_removal: true,
-      stutter_collapse: false,
-      dictionary_correction: true,
-      capture_system_audio: true,
-      calendar_integration_enabled: false,
-      calendar_selected_ids: [],
-      calendar_reminder_minutes: 2,
-      calendar_autostart_enabled: true,
-      feedback_sounds_enabled: true,
-      feedback_sounds_volume: 70,
-      model_unload_timeout_minutes: 0,
-      meeting_autostop_enabled: true,
-      meeting_autostop_minutes: 10,
-      meeting_max_duration_minutes: 240,
-      dictation_polish_enabled: false,
-      dictation_polish_template_id: "email",
-      dictation_polish_templates: [
-        { id: "email", label: "Professional email", prompt: "Rewrite as email." },
-        { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
-        { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
-      ],
-    };
+    app.settings = { ...mockSettings };
 
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },

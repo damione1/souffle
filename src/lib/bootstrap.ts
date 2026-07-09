@@ -1,13 +1,18 @@
-import { getSettings, selectAudioDevice } from "./api/settings";
+import { getSettings, saveSettings, selectAudioDevice } from "./api/settings";
+import { getAppVersion } from "./api/diagnostics";
 import { getMachineState } from "./api/transcription";
 import { runStartupModelFlow } from "./features/transcription/runtime";
 import { setLocale } from "./i18n";
 import { getAppState } from "./stores/app.svelte";
 import { applyTheme } from "./utils/theme";
 
+export type BootstrapResult = {
+  whatsNew: { version: string; releaseNotes: string } | null;
+};
+
 export async function bootstrapAppState(
   app: ReturnType<typeof getAppState>,
-): Promise<void> {
+): Promise<BootstrapResult> {
   // Sync the backend state machine first: on a webview reload the backend
   // may be Ready/Recording/Error while the store defaults to idle.
   try {
@@ -32,4 +37,31 @@ export async function bootstrapAppState(
   // Zero-ceremony startup: auto-load the last-selected model, or show
   // first-run onboarding when no model is downloaded yet.
   await runStartupModelFlow(app);
+
+  const currentVersion = await getAppVersion();
+  const previousVersion = settings.last_seen_version.trim();
+
+  if (!previousVersion) {
+    // Brand-new install: record version silently, no What's New dialog.
+    if (settings.last_seen_version !== currentVersion) {
+      await saveSettings({ ...settings, last_seen_version: currentVersion });
+      app.settings = { ...app.settings, last_seen_version: currentVersion };
+    }
+    return { whatsNew: null };
+  }
+
+  if (previousVersion === currentVersion) {
+    return { whatsNew: null };
+  }
+
+  return {
+    whatsNew: {
+      version: currentVersion,
+      releaseNotes: whatsNewFallback(currentVersion),
+    },
+  };
+}
+
+export function whatsNewFallback(version: string): string {
+  return `Updated to v${version}.`;
 }

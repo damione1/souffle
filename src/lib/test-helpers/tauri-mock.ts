@@ -50,7 +50,7 @@ export interface TranscriptionApiMock {
   addDictationEntry: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>;
   deleteDictationEntry: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
   clearDictationHistory: ReturnType<typeof vi.fn<() => Promise<void>>>;
-  pasteText: ReturnType<typeof vi.fn<(text: string, delayMs: number) => Promise<void>>>;
+  pasteText: ReturnType<typeof vi.fn<(text: string, delayMs: number, method?: string) => Promise<void>>>;
 }
 
 export function createTranscriptionApiMock(
@@ -67,7 +67,7 @@ export function createTranscriptionApiMock(
     addDictationEntry: vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined),
     deleteDictationEntry: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
     clearDictationHistory: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    pasteText: vi.fn<(text: string, delayMs: number) => Promise<void>>().mockResolvedValue(undefined),
+    pasteText: vi.fn<(text: string, delayMs: number, method?: string) => Promise<void>>().mockResolvedValue(undefined),
     ...overrides,
   };
 }

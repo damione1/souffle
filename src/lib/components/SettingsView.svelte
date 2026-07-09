@@ -74,6 +74,7 @@
     locale={controller.app.settings.locale}
     autoPaste={controller.app.settings.auto_paste}
     pasteDelayMs={controller.app.settings.paste_delay_ms}
+    pasteMethod={controller.app.settings.paste_method}
     toggleShortcut={controller.toggleShortcut}
     pttShortcut={controller.pttShortcut}
     recordingField={controller.recordingField}
@@ -82,6 +83,7 @@
     onLocaleChange={controller.onLocaleChange}
     onAutoPasteChange={controller.onAutoPasteChange}
     onPasteDelayChange={controller.onPasteDelayChange}
+    onPasteMethodChange={controller.onPasteMethodChange}
     onStartRecording={controller.startRecording}
     onClearShortcut={controller.clearShortcut}
     formatShortcut={controller.formatShortcut}
@@ -165,7 +167,9 @@
 
     <DiagnosticsSettingsSection
       debugTranscription={controller.app.settings.debug_transcription}
+      logLevel={controller.app.settings.log_level}
       onDebugTranscriptionChange={controller.onDebugTranscriptionChange}
+      onLogLevelChange={controller.onLogLevelChange}
     />
 
     <DataSettingsSection />

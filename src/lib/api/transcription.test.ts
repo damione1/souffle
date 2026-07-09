@@ -129,11 +129,11 @@ describe('transcription API', () => {
     expect(mockInvoke).toHaveBeenCalledWith('clear_dictation_history', expect.any(Object), undefined);
   });
 
-  it('pasteText passes text and delay', async () => {
+  it('pasteText passes text, delay, and method', async () => {
     mockInvoke.mockResolvedValue(null);
 
-    await pasteText('hello world', 150);
+    await pasteText('hello world', 150, 'type');
 
-    expect(mockInvoke).toHaveBeenCalledWith('paste_text', expect.objectContaining({ text: 'hello world', delayMs: 150 }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith('paste_text', expect.objectContaining({ text: 'hello world', delayMs: 150, method: 'type' }), undefined);
   });
 });

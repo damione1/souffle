@@ -8,11 +8,13 @@ pub mod commands;
 pub mod constants;
 pub mod db;
 pub mod debug;
+pub mod diagnostics;
 pub mod engine;
 pub mod errors;
 pub mod export;
 pub mod filter;
 pub mod lock_ext;
+pub mod logging;
 pub mod models;
 pub mod apple_intelligence;
 pub mod summary;
@@ -28,6 +30,7 @@ pub mod state_machine;
 pub mod thread_qos;
 pub mod transcript;
 pub mod tray;
+pub mod update_check;
 
 #[cfg(test)]
 pub mod test_helpers;
@@ -44,44 +47,9 @@ use tracing::info;
 /// Default shortcut strings
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";
 
-/// Hold the non-blocking writer's worker guard for the process lifetime; if it
-/// drops, file logging silently stops.
-static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
-    std::sync::OnceLock::new();
-
-/// Initialize logging to a rolling file under the app data dir (and stderr for
-/// terminal runs). Without this, every `tracing` event — including the panic
-/// hook and the whole pipeline's debug trail — is discarded, making field
-/// crashes and stalls undiagnosable. Verbose pipeline `debug!` lines are gated
-/// behind the in-app "Detailed transcription logs" setting, so the default
-/// `souffle=debug` filter only surfaces them once the user turns that on.
+/// Initialize logging — delegates to `logging` module.
 fn init_logging() {
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::util::SubscriberInitExt;
-    use tracing_subscriber::{EnvFilter, fmt};
-
-    let filter = EnvFilter::try_from_env("SOUFFLE_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("souffle=debug,warn"));
-
-    // File layer is best-effort: if the log dir can't be created we still get
-    // stderr (useful for `cargo tauri dev`).
-    let log_dir = constants::app_data_dir().join("logs");
-    let file_layer = if std::fs::create_dir_all(&log_dir).is_ok() {
-        let (writer, guard) = tracing_appender::non_blocking(tracing_appender::rolling::daily(
-            &log_dir,
-            "souffle.log",
-        ));
-        let _ = LOG_GUARD.set(guard);
-        Some(fmt::layer().with_ansi(false).with_writer(writer))
-    } else {
-        None
-    };
-
-    let _ = tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt::layer().with_writer(std::io::stderr))
-        .with(file_layer)
-        .try_init();
+    logging::init(logging::LogLevel::Info);
 }
 
 /// Log every panic (thread, message, location) before it unwinds. The macOS
@@ -165,6 +133,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::reveal_data_dir,
             commands::get_mcp_setup_info,
             commands::test_mcp_connection,
+            commands::get_log_tail,
+            commands::get_diagnostics_bundle,
+            commands::get_diagnostics_text,
+            commands::check_for_updates,
+            commands::get_release_notes_for_version,
+            commands::get_app_version,
         ])
         .events(collect_events![
             app_events::Navigate,
@@ -314,6 +288,10 @@ pub fn run() {
 
             match settings::AppSettings::load(&state.db) {
                 Ok(app_settings) => {
+                    debug::set_transcription_debug(app_settings.debug_transcription);
+                    if let Err(e) = logging::set_level(app_settings.log_level) {
+                        tracing::warn!("Failed to apply log level: {e}");
+                    }
                     state
                         .engine_actor
                         .set_unload_timeout(app_settings.model_unload_timeout_minutes);

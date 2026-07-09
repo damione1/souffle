@@ -645,11 +645,15 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
     Ok(meeting_id)
 }
 
-/// Copy text to clipboard and simulate Cmd+V paste
+/// Insert dictation text into the active app (clipboard paste or simulated typing).
 #[tauri::command]
 #[specta::specta]
-pub fn paste_text(text: String, delay_ms: u64) -> Result<(), String> {
-    crate::clipboard::copy_and_paste(&text, delay_ms)
+pub fn paste_text(
+    text: String,
+    delay_ms: u64,
+    method: crate::settings::PasteMethod,
+) -> Result<(), String> {
+    crate::clipboard::paste_text(&text, delay_ms, method)
 }
 
 /// Called from the `NSWorkspace` will-sleep observer (installed in `power.rs`

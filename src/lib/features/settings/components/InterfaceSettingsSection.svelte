@@ -3,9 +3,10 @@
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import { SUPPORTED_LOCALES } from "../../../i18n";
-  import type { Theme } from "../../../types";
+  import type { PasteMethod, Theme } from "../../../types";
 
   const themeOptions: Theme[] = ["dark", "light", "system"];
+  const pasteMethods: PasteMethod[] = ["clipboard", "type"];
   const themeKeys: Record<Theme, string> = {
     dark: "settings_interface.theme_dark",
     light: "settings_interface.theme_light",
@@ -17,6 +18,7 @@
     locale,
     autoPaste,
     pasteDelayMs,
+    pasteMethod,
     toggleShortcut,
     pttShortcut,
     recordingField,
@@ -25,6 +27,7 @@
     onLocaleChange,
     onAutoPasteChange,
     onPasteDelayChange,
+    onPasteMethodChange,
     onStartRecording,
     onClearShortcut,
     formatShortcut,
@@ -33,6 +36,7 @@
     locale: string;
     autoPaste: boolean;
     pasteDelayMs: number;
+    pasteMethod: PasteMethod;
     toggleShortcut: string;
     pttShortcut: string;
     recordingField: "toggle" | "ptt" | null;
@@ -41,6 +45,7 @@
     onLocaleChange: (locale: string) => void;
     onAutoPasteChange: (event: Event) => void;
     onPasteDelayChange: (event: Event) => void;
+    onPasteMethodChange: (event: Event) => void;
     onStartRecording: (field: "toggle" | "ptt") => void;
     onClearShortcut: (field: "toggle" | "ptt") => void | Promise<void>;
     formatShortcut: (shortcut: string) => string;
@@ -99,6 +104,24 @@
   </SettingsField>
 
   {#if autoPaste}
+    <SettingsField
+      label={$t("settings_interface.paste_method")}
+      description={$t("settings_interface.paste_method_desc")}
+    >
+      {#snippet control()}
+        <select
+          value={pasteMethod}
+          onchange={onPasteMethodChange}
+          class="field-select max-w-56"
+          aria-label={$t("settings_interface.paste_method")}
+        >
+          {#each pasteMethods as method}
+            <option value={method}>{$t(`settings_interface.paste_method_${method}`)}</option>
+          {/each}
+        </select>
+      {/snippet}
+    </SettingsField>
+
     <SettingsField
       label={$t("settings_interface.paste_delay")}
       description={$t("settings_interface.paste_delay_desc")}

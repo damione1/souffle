@@ -8,10 +8,12 @@
   import { events } from "./lib/api/generated";
   import { saveSettings } from "./lib/api/settings";
   import { getTranscriptionCatalog, recoverState } from "./lib/api/transcription";
+  import { getReleaseNotesForVersion } from "./lib/api/diagnostics";
   import { bootstrapAppState } from "./lib/bootstrap";
   import { getSelectedTranscriptionModel } from "./lib/features/transcription/catalog";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
   import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
+  import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
   import {
     notifyMeetingAborted,
     notifyMeetingFinalized,
@@ -52,6 +54,7 @@
   );
   let isRecovering = $state(false);
   let showPermissions = $state(false);
+  let whatsNew = $state<{ version: string; releaseNotes: string } | null>(null);
   let modelLabel = $state("");
 
   const isLightTheme = $derived(
@@ -97,7 +100,16 @@
     let cleanupTranscription = () => {};
     (async () => {
       try {
-        await bootstrapAppState(app);
+        const result = await bootstrapAppState(app);
+        whatsNew = result.whatsNew;
+        if (result.whatsNew) {
+          const targetVersion = result.whatsNew.version;
+          void getReleaseNotesForVersion(targetVersion).then((notes) => {
+            if (notes && whatsNew?.version === targetVersion) {
+              whatsNew = { ...whatsNew, releaseNotes: notes };
+            }
+          });
+        }
       } catch {
         // First run, no settings yet.
       }
@@ -217,6 +229,14 @@
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   });
+  function dismissWhatsNew() {
+    const version = whatsNew?.version;
+    whatsNew = null;
+    if (!version) return;
+    const next = { ...app.settings, last_seen_version: version };
+    app.settings = next;
+    saveSettings(next).catch(() => {});
+  }
 </script>
 
 <svelte:window
@@ -352,4 +372,12 @@
 
 {#if showPermissions}
   <PermissionsOnboarding onClose={() => (showPermissions = false)} />
+{/if}
+
+{#if whatsNew}
+  <WhatsNewDialog
+    version={whatsNew.version}
+    releaseNotes={whatsNew.releaseNotes}
+    onDismiss={dismissWhatsNew}
+  />
 {/if}

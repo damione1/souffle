@@ -77,6 +77,10 @@
     "theme_system": "Système",
     "auto_paste": "Collage automatique après dictée",
     "auto_paste_desc": "Colle automatiquement la transcription à l'arrêt de l'enregistrement.",
+    "paste_method": "Méthode de collage",
+    "paste_method_desc": "Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).",
+    "paste_method_clipboard": "Presse-papiers (⌘V)",
+    "paste_method_type": "Frappe simulée",
     "paste_delay": "Délai de collage (ms)",
     "paste_delay_desc": "Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.",
     "toggle_recording": "Basculer l'enregistrement",
@@ -120,9 +124,21 @@
   },
   "settings_diagnostics": {
     "title": "Diagnostics",
+    "log_level": "Niveau de journal",
+    "log_level_desc": "Quantité de détails écrits dans le fichier journal.",
+    "log_level_error": "Erreur",
+    "log_level_warn": "Avertissement",
+    "log_level_info": "Info",
+    "log_level_debug": "Débogage",
+    "log_level_trace": "Trace",
     "debug_logs": "Journaux détaillés de transcription",
     "debug_logs_desc": "Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.",
-    "debug_logs_aria": "Journaux de débogage de transcription détaillés"
+    "debug_logs_aria": "Journaux de débogage de transcription détaillés",
+    "log_viewer": "Journal en direct",
+    "log_viewer_desc": "Fin du fichier journal actuel, actualisé toutes les quelques secondes.",
+    "log_empty": "Aucune entrée de journal pour l'instant.",
+    "copy_diagnostics": "Copier les diagnostics",
+    "copying": "Copie…"
   },
   "settings_data": {
     "title": "Données",
@@ -155,7 +171,18 @@
     "summaries": "Résumés",
     "not_configured": "Non configuré",
     "privacy": "Confidentialité",
-    "privacy_value": "Tout fonctionne localement."
+    "privacy_value": "Tout fonctionne localement.",
+    "updates": "Mises à jour",
+    "check_updates": "Vérifier les mises à jour",
+    "checking": "Vérification…",
+    "up_to_date": "Vous utilisez la dernière version.",
+    "update_available": "La version {version} est disponible.",
+    "download_update": "Télécharger sur GitHub"
+  },
+  "whats_new": {
+    "title": "Nouveautés",
+    "subtitle": "Soufflé a été mis à jour vers la v{version}.",
+    "got_it": "Compris"
   },
   "meeting_header": {
     "recording_badge": "Enregistrement",

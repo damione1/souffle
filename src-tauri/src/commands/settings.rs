@@ -25,6 +25,7 @@ pub fn save_settings(
     let settings = settings.sanitize_for_save()?;
     settings.save(&state.db)?;
     crate::debug::set_transcription_debug(settings.debug_transcription);
+    crate::logging::set_level(settings.log_level)?;
     state
         .engine_actor
         .set_unload_timeout(settings.model_unload_timeout_minutes);

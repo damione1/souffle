@@ -133,7 +133,11 @@ function createTranscriptionControllerInstance() {
         if (finalized.text) {
           if (fromShortcut && app.settings.auto_paste) {
             try {
-              await pasteText(finalized.text, app.settings.paste_delay_ms);
+              await pasteText(
+                finalized.text,
+                app.settings.paste_delay_ms,
+                app.settings.paste_method,
+              );
             } catch (e) {
               statusMessage = `Paste failed: ${errorMessage(e)}`;
             }

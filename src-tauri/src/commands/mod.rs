@@ -1,6 +1,7 @@
 mod audio;
 mod calendar;
 mod data;
+mod diagnostics;
 mod dictation;
 mod dictionary;
 mod mcp;
@@ -13,6 +14,7 @@ pub(crate) mod transcription;
 pub use audio::*;
 pub use calendar::*;
 pub use data::*;
+pub use diagnostics::*;
 pub use dictation::*;
 pub use dictionary::*;
 pub use mcp::*;
