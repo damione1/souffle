@@ -15,7 +15,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2.8.1
+      - uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: src-tauri -> target
 
@@ -26,4 +26,7 @@ jobs:
           cache: npm
 
       - run: npm ci
+      # Tauri's build script validates `externalBin` entries during `cargo test`,
+      # so the MCP sidecar must exist before type export (same as release builds).
+      - run: ./scripts/build-mcp-sidecar.sh
       - run: npm run check:generated-types
