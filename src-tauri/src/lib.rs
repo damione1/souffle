@@ -137,6 +137,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_diagnostics_bundle,
             commands::get_diagnostics_text,
             commands::check_for_updates,
+            commands::get_release_notes_for_version,
             commands::get_app_version,
         ])
         .events(collect_events![

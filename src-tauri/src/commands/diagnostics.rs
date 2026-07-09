@@ -47,3 +47,15 @@ pub async fn check_for_updates() -> Result<UpdateCheckResult, String> {
         .await
         .map_err(|e| format!("Update check task failed: {e}"))
 }
+
+/// Release notes for a specific installed version tag (What's New). Returns
+/// `None` when the tag is missing or the network request fails.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_release_notes_for_version(version: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::update_check::release_notes_for_version(&version)
+    })
+    .await
+    .map_err(|e| format!("Release notes task failed: {e}"))
+}

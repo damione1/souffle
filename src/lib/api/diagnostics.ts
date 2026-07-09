@@ -17,6 +17,14 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   return unwrap(commands.checkForUpdates());
 }
 
+export async function getReleaseNotesForVersion(
+  version: string,
+): Promise<string | null> {
+  const notes = await unwrap(commands.getReleaseNotesForVersion(version));
+  const trimmed = notes?.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function getAppVersion(): Promise<string> {
   return commands.getAppVersion();
 }

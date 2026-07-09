@@ -2,7 +2,6 @@
   import { ClipboardCopy } from "@lucide/svelte";
   import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import CopyButton from "../../../components/ui/CopyButton.svelte";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import { getDiagnosticsText, getLogTail } from "../../../api/diagnostics";
   import type { LogLevel } from "../../../types";

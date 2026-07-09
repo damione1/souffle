@@ -52,16 +52,25 @@ pub fn check_for_updates() -> UpdateCheckResult {
     }
 }
 
+/// Release notes for the installed version tag (What's New). Network failures
+/// return `None` so callers can keep a local fallback string.
+pub fn release_notes_for_version(version: &str) -> Option<String> {
+    let tag = version_tag_for_api(version);
+    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{tag}");
+    fetch_release(&url)
+        .ok()
+        .and_then(|release| release.body.filter(|b| !b.trim().is_empty()))
+}
+
 fn fetch_latest_release() -> Result<GitHubRelease, String> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(CHECK_TIMEOUT_SECS))
-        .user_agent(format!("souffle/{}", current_version()))
-        .build()
-        .map_err(|e| format!("HTTP client: {e}"))?;
+    fetch_release(&url)
+}
 
+fn fetch_release(url: &str) -> Result<GitHubRelease, String> {
+    let client = github_client()?;
     let response = client
-        .get(&url)
+        .get(url)
         .send()
         .map_err(|e| format!("GitHub request failed: {e}"))?;
 
@@ -72,6 +81,18 @@ fn fetch_latest_release() -> Result<GitHubRelease, String> {
     response
         .json::<GitHubRelease>()
         .map_err(|e| format!("Parse GitHub release: {e}"))
+}
+
+fn github_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(CHECK_TIMEOUT_SECS))
+        .user_agent(format!("souffle/{}", current_version()))
+        .build()
+        .map_err(|e| format!("HTTP client: {e}"))
+}
+
+fn version_tag_for_api(version: &str) -> String {
+    format!("v{}", normalize_version_tag(version))
 }
 
 fn normalize_version_tag(tag: &str) -> String {
@@ -106,5 +127,11 @@ mod tests {
     fn normalize_strips_v_prefix() {
         assert_eq!(normalize_version_tag("v0.1.0"), "0.1.0");
         assert_eq!(normalize_version_tag("0.1.0"), "0.1.0");
+    }
+
+    #[test]
+    fn version_tag_for_api_adds_v_prefix() {
+        assert_eq!(version_tag_for_api("0.1.1"), "v0.1.1");
+        assert_eq!(version_tag_for_api("v0.1.1"), "v0.1.1");
     }
 }

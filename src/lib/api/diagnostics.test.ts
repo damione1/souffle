@@ -15,6 +15,7 @@ import {
   getLogTail,
   getDiagnosticsText,
   checkForUpdates,
+  getReleaseNotesForVersion,
   getAppVersion,
 } from './diagnostics';
 
@@ -50,6 +51,23 @@ describe('diagnostics API', () => {
     const result = await checkForUpdates();
     expect(mockInvoke).toHaveBeenCalledWith('check_for_updates', expect.any(Object), undefined);
     expect(result).toEqual(payload);
+  });
+
+  it('getReleaseNotesForVersion returns trimmed notes', async () => {
+    mockInvoke.mockResolvedValue('  Release notes  ');
+    const result = await getReleaseNotesForVersion('0.1.1');
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'get_release_notes_for_version',
+      expect.objectContaining({ version: '0.1.1' }),
+      undefined,
+    );
+    expect(result).toBe('Release notes');
+  });
+
+  it('getReleaseNotesForVersion returns null for empty notes', async () => {
+    mockInvoke.mockResolvedValue('   ');
+    const result = await getReleaseNotesForVersion('0.1.1');
+    expect(result).toBeNull();
   });
 
   it('getAppVersion returns version string', async () => {

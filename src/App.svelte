@@ -8,6 +8,7 @@
   import { events } from "./lib/api/generated";
   import { saveSettings } from "./lib/api/settings";
   import { getTranscriptionCatalog, recoverState } from "./lib/api/transcription";
+  import { getReleaseNotesForVersion } from "./lib/api/diagnostics";
   import { bootstrapAppState } from "./lib/bootstrap";
   import { getSelectedTranscriptionModel } from "./lib/features/transcription/catalog";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
@@ -101,6 +102,14 @@
       try {
         const result = await bootstrapAppState(app);
         whatsNew = result.whatsNew;
+        if (result.whatsNew) {
+          const targetVersion = result.whatsNew.version;
+          void getReleaseNotesForVersion(targetVersion).then((notes) => {
+            if (notes && whatsNew?.version === targetVersion) {
+              whatsNew = { ...whatsNew, releaseNotes: notes };
+            }
+          });
+        }
       } catch {
         // First run, no settings yet.
       }

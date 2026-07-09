@@ -9,8 +9,6 @@ use crate::settings::PasteMethod;
 /// Insert text into the active application after `delay_ms`, using either
 /// clipboard+Cmd+V or simulated keystrokes (for apps that reject synthetic paste).
 pub fn paste_text(text: &str, delay_ms: u64, method: PasteMethod) -> Result<(), String> {
-    thread::sleep(Duration::from_millis(delay_ms));
-
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("Enigo init: {e}"))?;
 
     match method {
@@ -20,6 +18,8 @@ pub fn paste_text(text: &str, delay_ms: u64, method: PasteMethod) -> Result<(), 
             clipboard
                 .set_text(text)
                 .map_err(|e| format!("Clipboard set: {e}"))?;
+
+            thread::sleep(Duration::from_millis(delay_ms));
 
             enigo
                 .key(Key::Meta, Direction::Press)
@@ -32,6 +32,8 @@ pub fn paste_text(text: &str, delay_ms: u64, method: PasteMethod) -> Result<(), 
                 .map_err(|e| format!("Key release Meta: {e}"))?;
         }
         PasteMethod::Type => {
+            thread::sleep(Duration::from_millis(delay_ms));
+
             enigo
                 .text(text)
                 .map_err(|e| format!("Simulated typing: {e}"))?;

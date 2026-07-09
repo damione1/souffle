@@ -670,6 +670,18 @@ async checkForUpdates() : Promise<Result<UpdateCheckResult, string>> {
 }
 },
 /**
+ * Release notes for a specific installed version tag (What's New). Returns
+ * `None` when the tag is missing or the network request fails.
+ */
+async getReleaseNotesForVersion(version: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_release_notes_for_version", { version }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * App version string from the running binary.
  */
 async getAppVersion() : Promise<string> {

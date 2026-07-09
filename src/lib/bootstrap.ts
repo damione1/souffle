@@ -1,5 +1,5 @@
 import { getSettings, saveSettings, selectAudioDevice } from "./api/settings";
-import { checkForUpdates, getAppVersion } from "./api/diagnostics";
+import { getAppVersion } from "./api/diagnostics";
 import { getMachineState } from "./api/transcription";
 import { runStartupModelFlow } from "./features/transcription/runtime";
 import { setLocale } from "./i18n";
@@ -54,17 +54,14 @@ export async function bootstrapAppState(
     return { whatsNew: null };
   }
 
-  const update = await checkForUpdates();
-  const releaseNotes =
-    update.release_notes?.trim() ||
-    (update.latest_version
-      ? `Updated to v${currentVersion}.`
-      : `Updated to v${currentVersion}.`);
-
   return {
     whatsNew: {
       version: currentVersion,
-      releaseNotes,
+      releaseNotes: whatsNewFallback(currentVersion),
     },
   };
+}
+
+export function whatsNewFallback(version: string): string {
+  return `Updated to v${version}.`;
 }
