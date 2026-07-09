@@ -548,7 +548,13 @@ calendar_selected_ids: string[];
 /**
  * How long before an event the "start transcription?" reminder fires.
  */
-calendar_reminder_minutes: number }
+calendar_reminder_minutes: number; 
+/**
+ * Unload the transcription model after this many idle minutes to
+ * reclaim RAM; 0 means never unload. The next recording reloads it
+ * through the normal load flow.
+ */
+model_unload_timeout_minutes: number }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans

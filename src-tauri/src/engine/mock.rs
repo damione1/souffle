@@ -6,6 +6,8 @@ use super::{
 };
 use std::collections::VecDeque;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A configurable mock engine for testing.
 /// Push responses into `transcribe_responses` and `flush_responses` queues;
@@ -14,6 +16,10 @@ pub struct MockEngine {
     loaded: bool,
     pub transcribe_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
     pub flush_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
+    /// Shared with tests via `unload_count_handle()` (clone it before handing
+    /// the mock to the actor's factory, since the mock itself is moved), so
+    /// idle-unload behavior can be observed from outside the actor thread.
+    unload_count: Arc<AtomicUsize>,
 }
 
 impl Default for MockEngine {
@@ -28,7 +34,14 @@ impl MockEngine {
             loaded: false,
             transcribe_responses: VecDeque::new(),
             flush_responses: VecDeque::new(),
+            unload_count: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    /// Clone of the unload counter; call before the mock is moved into the
+    /// actor's factory closure.
+    pub fn unload_count_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.unload_count)
     }
 
     /// Convenience: pre-load N identical transcribe responses.
@@ -73,6 +86,7 @@ impl TranscriptionEngine for MockEngine {
 
     fn unload_model(&mut self) -> Result<(), EngineError> {
         self.loaded = false;
+        self.unload_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 

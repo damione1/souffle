@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use tauri::Manager;
 use tauri_specta::Event;
 use tracing::{debug, error, info, warn};
@@ -91,6 +91,8 @@ pub enum EngineCommand {
         samples: Vec<f32>,
         reply: Sender<Result<Vec<TranscriptionSegment>, String>>,
     },
+    /// Reconfigure the idle-unload timeout. `None` disables it. Fire-and-forget.
+    SetUnloadTimeout(Option<Duration>),
     Shutdown,
 }
 
@@ -122,6 +124,8 @@ impl EngineActorHandle {
                     engine: None,
                     app: None,
                     dropped_counter,
+                    unload_timeout: None,
+                    idle_since: None,
                 }
                 .run();
             })
@@ -176,6 +180,22 @@ impl EngineActorHandle {
 
     pub fn unload_model(&self) -> Result<(), String> {
         self.request(|reply| EngineCommand::UnloadModel { reply }, None)
+    }
+
+    /// Reconfigure the idle-unload timeout; `0` disables it. Fire-and-forget:
+    /// the actor picks it up on its next loop iteration.
+    pub fn set_unload_timeout(&self, minutes: u32) {
+        let duration = (minutes > 0).then(|| Duration::from_secs(u64::from(minutes) * 60));
+        let _ = self.cmd_tx.send(EngineCommand::SetUnloadTimeout(duration));
+    }
+
+    /// Test-only: set the idle-unload timeout directly as a `Duration`, so
+    /// tests don't have to wait out real minutes.
+    #[cfg(test)]
+    pub fn set_unload_timeout_for_test(&self, duration: Duration) {
+        let _ = self
+            .cmd_tx
+            .send(EngineCommand::SetUnloadTimeout(Some(duration)));
     }
 
     /// Start a transcription session. Replies once the engine state is reset
@@ -248,6 +268,12 @@ struct EngineActor {
     engine: Option<Box<dyn TranscriptionEngine>>,
     app: Option<tauri::AppHandle>,
     dropped_counter: Arc<AtomicU64>,
+    /// Idle-unload timeout; `None` means "never unload". Reconfigured via
+    /// `EngineCommand::SetUnloadTimeout`.
+    unload_timeout: Option<Duration>,
+    /// When the engine last became idle (loaded, no session active). `None`
+    /// while a session is running or no engine is loaded.
+    idle_since: Option<Instant>,
 }
 
 /// Outcome of an active session loop.
@@ -270,9 +296,32 @@ impl EngineActor {
         let mut session_count: u32 = 0;
 
         loop {
-            let Ok(cmd) = self.cmd_rx.recv() else {
-                warn!("Engine actor command channel disconnected, exiting");
-                break;
+            // While the engine is loaded, idle, and an unload timeout is
+            // configured, wait only until the deadline instead of blocking
+            // forever. Everything else (an active session, no engine, no
+            // timeout) keeps the original plain `recv()`.
+            let cmd = if let Some(deadline) = self.idle_deadline() {
+                let now = Instant::now();
+                if now >= deadline {
+                    self.handle_idle_timeout();
+                    continue;
+                }
+                match self.cmd_rx.recv_timeout(deadline - now) {
+                    Ok(cmd) => cmd,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        warn!("Engine actor command channel disconnected, exiting");
+                        break;
+                    }
+                }
+            } else {
+                match self.cmd_rx.recv() {
+                    Ok(cmd) => cmd,
+                    Err(_) => {
+                        warn!("Engine actor command channel disconnected, exiting");
+                        break;
+                    }
+                }
             };
 
             match cmd {
@@ -301,9 +350,23 @@ impl EngineActor {
                     info!(
                         "Inference session {session_count} starting (audio session {session_id})"
                     );
+                    self.idle_since = None;
+                    let mut pending_unload_timeout: Option<Option<Duration>> = None;
                     let end = with_autorelease_pool(|| {
-                        self.handle_session(session_id, config, on_segment, reply)
+                        self.handle_session(
+                            session_id,
+                            config,
+                            on_segment,
+                            reply,
+                            &mut pending_unload_timeout,
+                        )
                     });
+                    // A SetUnloadTimeout received mid-session was consumed by
+                    // the session loop's command drain; apply it now instead
+                    // of losing it.
+                    if let Some(duration) = pending_unload_timeout {
+                        self.unload_timeout = duration;
+                    }
                     match end {
                         SessionEnd::Stopped(done, summary) => {
                             let _ = done.send(Ok(summary));
@@ -329,6 +392,9 @@ impl EngineActor {
                             );
                         }
                     }
+                    if self.engine.is_some() {
+                        self.idle_since = Some(Instant::now());
+                    }
                 }
                 EngineCommand::StopSession { reply } => {
                     // Already idle — stop is idempotent.
@@ -337,6 +403,12 @@ impl EngineActor {
                 EngineCommand::DebugTranscribe { samples, reply } => {
                     let result = with_autorelease_pool(|| self.handle_debug_transcribe(&samples));
                     let _ = reply.send(result);
+                    if self.engine.is_some() {
+                        self.idle_since = Some(Instant::now());
+                    }
+                }
+                EngineCommand::SetUnloadTimeout(duration) => {
+                    self.unload_timeout = duration;
                 }
                 EngineCommand::Shutdown => break,
             }
@@ -379,6 +451,32 @@ impl EngineActor {
             }
             drop(engine);
         }
+        self.idle_since = None;
+    }
+
+    /// Deadline at which the currently loaded, idle model should be
+    /// unloaded, or `None` if no unload is scheduled: no engine loaded, no
+    /// timeout configured, or a session is active (which clears `idle_since`).
+    fn idle_deadline(&self) -> Option<Instant> {
+        self.engine.as_ref()?;
+        let timeout = self.unload_timeout?;
+        let idle_since = self.idle_since?;
+        Some(idle_since + timeout)
+    }
+
+    /// Unload the model after it has sat idle past the configured timeout,
+    /// and tell `AppState` so the state machine (and therefore the frontend)
+    /// reflects reality: the next recording start must reload through the
+    /// normal load flow instead of finding a silently-vanished engine.
+    fn handle_idle_timeout(&mut self) {
+        info!(
+            timeout = ?self.unload_timeout,
+            "Unloading idle transcription model to reclaim memory"
+        );
+        with_autorelease_pool(|| self.drop_engine());
+        if let Some(app) = &self.app {
+            app.state::<crate::state::AppState>().unload_idle_model();
+        }
     }
 
     fn handle_load(
@@ -397,6 +495,8 @@ impl EngineActor {
             mic_gain: engine.mic_gain(),
         };
         self.engine = Some(engine);
+        // No session is active right after a load: start the idle clock.
+        self.idle_since = Some(Instant::now());
         Ok(info)
     }
 
@@ -417,6 +517,7 @@ impl EngineActor {
         config: SessionConfig,
         on_segment: SegmentCallback,
         reply: Sender<Result<EngineInfo, String>>,
+        pending_unload_timeout: &mut Option<Option<Duration>>,
     ) -> SessionEnd {
         // Clear stale audio left over from previous sessions before resetting.
         let drained = self.drain_audio_queue();
@@ -483,6 +584,7 @@ impl EngineActor {
             &mut health,
             self.app.as_ref(),
             mode.as_mut(),
+            pending_unload_timeout,
         )
     }
 
@@ -737,6 +839,7 @@ fn run_session_loop(
     health: &mut SessionHealth,
     app: Option<&tauri::AppHandle>,
     mode: &mut dyn SessionMode,
+    pending_unload_timeout: &mut Option<Option<Duration>>,
 ) -> SessionEnd {
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
     let mut summary = SessionSummary::default();
@@ -807,6 +910,12 @@ fn run_session_loop(
             }
             Ok(EngineCommand::DebugTranscribe { reply, .. }) => {
                 let _ = reply.send(Err("Recording session active".into()));
+            }
+            // No reply channel to report "busy" on; remember the latest
+            // value and let the caller apply it once the session ends,
+            // rather than silently dropping the setting change.
+            Ok(EngineCommand::SetUnloadTimeout(duration)) => {
+                *pending_unload_timeout = Some(duration);
             }
             Err(_) => {}
         }
@@ -1052,8 +1161,9 @@ fn emit_filtered(
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use crossbeam_channel::{Sender, unbounded};
 
@@ -1458,5 +1568,73 @@ mod tests {
         actor
             .stop_session(Duration::from_secs(2))
             .expect("stop while idle should be idempotent");
+    }
+
+    /// Poll `cond` until it's true or `timeout` elapses, so idle-unload tests
+    /// don't rely on a single fixed sleep racing the actor thread.
+    fn wait_for(cond: impl Fn() -> bool, timeout: Duration) -> bool {
+        let start = Instant::now();
+        loop {
+            if cond() {
+                return true;
+            }
+            if start.elapsed() >= timeout {
+                return cond();
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn idle_timeout_unloads_engine_after_inactivity() {
+        let mock = MockEngine::new();
+        let unload_count = mock.unload_count_handle();
+        // spawn_with_mock's initial load_model call already starts the idle
+        // clock, so configuring a tiny timeout is enough to trigger unload.
+        let (actor, _audio_tx) = spawn_with_mock(mock);
+
+        actor.set_unload_timeout_for_test(Duration::from_millis(50));
+
+        assert!(
+            wait_for(|| unload_count.load(Ordering::SeqCst) >= 1, Duration::from_secs(2)),
+            "engine should unload once the idle timeout elapses"
+        );
+    }
+
+    #[test]
+    fn idle_timeout_set_during_session_applies_after_it_ends() {
+        let mock = MockEngine::new();
+        let unload_count = mock.unload_count_handle();
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect("start");
+        // Sent while a session is active: must not be dropped, only deferred.
+        actor.set_unload_timeout_for_test(Duration::from_millis(50));
+        audio_tx.send(end_of_stream(1)).unwrap();
+        actor.stop_session(Duration::from_secs(2)).expect("stop");
+
+        assert!(
+            wait_for(|| unload_count.load(Ordering::SeqCst) >= 1, Duration::from_secs(2)),
+            "timeout set mid-session must still apply once the session ends"
+        );
+    }
+
+    #[test]
+    fn unload_timeout_disabled_by_default_never_unloads() {
+        let mock = MockEngine::new();
+        let unload_count = mock.unload_count_handle();
+        let (actor, _audio_tx) = spawn_with_mock(mock);
+
+        // 0 minutes == disabled; explicit, matching the default setting.
+        actor.set_unload_timeout(0);
+
+        std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(
+            unload_count.load(Ordering::SeqCst),
+            0,
+            "a disabled (0 minute) timeout must never unload the model"
+        );
     }
 }

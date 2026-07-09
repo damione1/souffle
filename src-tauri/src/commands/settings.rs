@@ -25,6 +25,9 @@ pub fn save_settings(
     let settings = settings.sanitize_for_save()?;
     settings.save(&state.db)?;
     crate::debug::set_transcription_debug(settings.debug_transcription);
+    state
+        .engine_actor
+        .set_unload_timeout(settings.model_unload_timeout_minutes);
     // A locale change must relabel the tray menu immediately.
     if let Ok(machine) = state.current_machine_state() {
         crate::tray::sync(&app, &machine);

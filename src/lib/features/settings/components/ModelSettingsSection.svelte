@@ -1,10 +1,19 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import ProgressBar from "../../../components/ui/ProgressBar.svelte";
+  import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusChip from "../../../components/ui/StatusChip.svelte";
   import { listAvailableModelOptions } from "../../transcription/catalog";
   import type { TranscriptionModelOperationState } from "../../transcription/state";
   import type { TranscriptionCatalog, TranscriptionRuntimePhase } from "../../../types";
+
+  const unloadTimeoutOptions = [0, 5, 15, 60] as const;
+  const unloadTimeoutKeys: Record<(typeof unloadTimeoutOptions)[number], string> = {
+    0: "settings_model.unload_timeout_never",
+    5: "settings_model.unload_timeout_5min",
+    15: "settings_model.unload_timeout_15min",
+    60: "settings_model.unload_timeout_1hour",
+  };
 
   let {
     catalog,
@@ -15,7 +24,9 @@
     downloadedBytes,
     downloadTotalBytes,
     downloadFile,
+    unloadTimeoutMinutes,
     onSelectModel,
+    onUnloadTimeoutChange,
   }: {
     catalog: TranscriptionCatalog | null;
     selectedEngineId: string;
@@ -25,7 +36,9 @@
     downloadedBytes: number;
     downloadTotalBytes: number | null;
     downloadFile: string;
+    unloadTimeoutMinutes: number;
     onSelectModel: (key: string) => void | Promise<void>;
+    onUnloadTimeoutChange: (event: Event) => void;
   } = $props();
 
   const options = $derived(listAvailableModelOptions(catalog));
@@ -72,5 +85,24 @@
         />
       </div>
     {/if}
+
+    <SettingsField
+      label={$t("settings_model.unload_timeout_label")}
+      description={$t("settings_model.unload_timeout_desc")}
+      htmlFor="model-unload-timeout"
+    >
+      {#snippet control()}
+        <select
+          id="model-unload-timeout"
+          value={unloadTimeoutMinutes}
+          onchange={onUnloadTimeoutChange}
+          class="field-select max-w-48"
+        >
+          {#each unloadTimeoutOptions as minutes}
+            <option value={minutes}>{$t(unloadTimeoutKeys[minutes])}</option>
+          {/each}
+        </select>
+      {/snippet}
+    </SettingsField>
   </div>
 </section>

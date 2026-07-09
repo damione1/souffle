@@ -188,7 +188,13 @@
   "settings_model": {
     "title": "Modèle de transcription",
     "description": "Choisissez un modèle — il se télécharge et se charge automatiquement. Tout tourne sur ce Mac.",
-    "downloading": "Téléchargement…"
+    "downloading": "Téléchargement…",
+    "unload_timeout_label": "Décharger le modèle en cas d'inactivité",
+    "unload_timeout_desc": "Libère de la mémoire après une période sans transcription. Se recharge automatiquement au prochain enregistrement.",
+    "unload_timeout_never": "Jamais",
+    "unload_timeout_5min": "Après 5 minutes",
+    "unload_timeout_15min": "Après 15 minutes",
+    "unload_timeout_1hour": "Après 1 heure"
   },
   "settings_advanced": {
     "title": "Avancé",
