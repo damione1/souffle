@@ -84,7 +84,7 @@
     "description": "Nettoie optionnellement la dictée avec le même fournisseur de résumés (Ollama ou Apple Intelligence) avant le collage.",
     "enabled": "Polir la dictée avec l'IA",
     "enabled_desc": "Passe LLM après transcription pour corriger le ton, le format ou les fillers.",
-    "no_provider": "Aucun fournisseur de résumés disponible. Configurez Ollama ou activez Apple Intelligence ci-dessus.",
+    "no_provider": "Aucun fournisseur de résumés disponible. Configurez Ollama ou activez Apple Intelligence dans Avancé → Résumés.",
     "template": "Modèle de style",
     "template_email": "E-mail professionnel",
     "template_bullets": "Puces",

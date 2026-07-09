@@ -2,7 +2,9 @@ use tauri::State;
 
 use crate::settings::AppSettings;
 use crate::state::AppState;
-use crate::summary::{DictationPolishResult, check_providers, polish_dictation_text};
+use crate::summary::{
+    DictationPolishResult, check_providers, early_polish_dictation_result, polish_dictation_text,
+};
 
 /// List dictation history entries
 #[tauri::command]
@@ -45,11 +47,10 @@ pub async fn polish_dictation(
     text: String,
 ) -> Result<DictationPolishResult, String> {
     let settings = AppSettings::load(&state.db)?;
+    if let Some(result) = early_polish_dictation_result(&settings, &text) {
+        return Ok(result);
+    }
+
     let providers = check_providers(&settings.ollama_url).await;
-    Ok(polish_dictation_text(
-        &settings,
-        &text,
-        &providers.models,
-    )
-    .await)
+    Ok(polish_dictation_text(&settings, &text, &providers.models).await)
 }

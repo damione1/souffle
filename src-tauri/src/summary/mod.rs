@@ -16,7 +16,8 @@ pub use chunking::{ChunkConfig, chunk_transcript, estimate_tokens};
 pub use extract::{extract_structured_summary, parse_structured_summary_response};
 pub use polish::{
     DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
-    default_polish_templates, merge_polish_templates, polish_dictation_text,
+    default_polish_templates, early_polish_dictation_result, merge_polish_templates,
+    polish_dictation_text,
 };
 pub use prompts::{
     build_reduce_prompt, build_structured_extract_prompt, build_summarize_prompt,

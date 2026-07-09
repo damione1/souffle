@@ -82,6 +82,53 @@ pub fn resolve_active_template(settings: &AppSettings) -> Option<&DictationPolis
         .or_else(|| settings.dictation_polish_templates.first())
 }
 
+/// Returns immediately when polish is disabled or the stripped input is blank.
+/// Callers can skip provider probing when this returns `Some`.
+pub fn early_polish_dictation_result(
+    settings: &AppSettings,
+    raw_text: &str,
+) -> Option<DictationPolishResult> {
+    let stripped = strip_invisible_chars(raw_text);
+
+    if !settings.dictation_polish_enabled {
+        return Some(DictationPolishResult {
+            text: stripped.trim().to_string(),
+            skipped: true,
+            warning: None,
+        });
+    }
+
+    if is_blank_for_polish(&stripped) {
+        return Some(DictationPolishResult {
+            text: String::new(),
+            skipped: true,
+            warning: None,
+        });
+    }
+
+    None
+}
+
+/// User-edited template prompts fall back to shipped defaults when cleared.
+pub fn effective_template_prompt(template: &DictationPolishTemplate) -> Result<String, String> {
+    let trimmed = template.prompt.trim();
+    if !trimmed.is_empty() {
+        return Ok(trimmed.to_string());
+    }
+
+    if let Some(default) = default_polish_templates()
+        .iter()
+        .find(|candidate| candidate.id == template.id)
+    {
+        let fallback = default.prompt.trim();
+        if !fallback.is_empty() {
+            return Ok(fallback.to_string());
+        }
+    }
+
+    Err("Dictation polish prompt is empty".into())
+}
+
 /// Strip zero-width and other invisible characters that often leak from STT
 /// engines or paste targets, while keeping newlines and tabs.
 pub fn strip_invisible_chars(text: &str) -> String {
@@ -144,20 +191,8 @@ pub async fn polish_dictation_text(
 ) -> DictationPolishResult {
     let stripped = strip_invisible_chars(raw_text);
 
-    if !settings.dictation_polish_enabled {
-        return DictationPolishResult {
-            text: stripped.trim().to_string(),
-            skipped: true,
-            warning: None,
-        };
-    }
-
-    if is_blank_for_polish(&stripped) {
-        return DictationPolishResult {
-            text: String::new(),
-            skipped: true,
-            warning: None,
-        };
+    if let Some(result) = early_polish_dictation_result(settings, raw_text) {
+        return result;
     }
 
     let Some(template) = resolve_active_template(settings) else {
@@ -190,7 +225,18 @@ pub async fn polish_dictation_text(
         }
     };
 
-    let prompt = build_polish_user_prompt(&template.prompt, &stripped);
+    let template_prompt = match effective_template_prompt(template) {
+        Ok(prompt) => prompt,
+        Err(warning) => {
+            return DictationPolishResult {
+                text: stripped.trim().to_string(),
+                skipped: true,
+                warning: Some(warning),
+            };
+        }
+    };
+
+    let prompt = build_polish_user_prompt(&template_prompt, &stripped);
     let no_op = |_: SummarizeProgress| {};
     let raw = match generate_with_provider(
         provider,
@@ -233,10 +279,11 @@ pub async fn polish_dictation_text(
 mod tests {
     use super::{
         TEMPLATE_BULLETS, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS, build_polish_user_prompt,
-        default_polish_templates, is_blank_for_polish, merge_polish_templates,
-        parse_polish_response, strip_invisible_chars,
+        default_polish_templates, early_polish_dictation_result, effective_template_prompt,
+        is_blank_for_polish, merge_polish_templates, parse_polish_response,
+        strip_invisible_chars,
     };
-    use crate::settings::DictationPolishTemplate;
+    use crate::settings::{AppSettings, DictationPolishTemplate};
 
     #[test]
     fn strip_invisible_chars_removes_zero_width_but_keeps_newlines() {
@@ -305,5 +352,71 @@ mod tests {
         let prompt = build_polish_user_prompt("Make bullets", "hello world");
         assert!(prompt.contains("Make bullets"));
         assert!(prompt.contains("hello world"));
+    }
+
+    #[test]
+    fn early_polish_dictation_skips_when_disabled_without_providers() {
+        let settings = AppSettings {
+            dictation_polish_enabled: false,
+            ..AppSettings::default()
+        };
+
+        let result = early_polish_dictation_result(&settings, "hello world").unwrap();
+        assert!(result.skipped);
+        assert_eq!(result.text, "hello world");
+        assert!(result.warning.is_none());
+    }
+
+    #[test]
+    fn early_polish_dictation_skips_blank_without_providers() {
+        let settings = AppSettings {
+            dictation_polish_enabled: true,
+            ..AppSettings::default()
+        };
+
+        let result = early_polish_dictation_result(&settings, "   \u{200b}\n  ").unwrap();
+        assert!(result.skipped);
+        assert!(result.text.is_empty());
+        assert!(result.warning.is_none());
+    }
+
+    #[test]
+    fn early_polish_dictation_returns_none_when_polish_would_run() {
+        let settings = AppSettings {
+            dictation_polish_enabled: true,
+            ..AppSettings::default()
+        };
+
+        assert!(early_polish_dictation_result(&settings, "hello").is_none());
+    }
+
+    #[test]
+    fn effective_template_prompt_falls_back_to_default_when_cleared() {
+        let template = DictationPolishTemplate {
+            id: TEMPLATE_EMAIL.to_string(),
+            label: "Email".to_string(),
+            prompt: "   ".to_string(),
+        };
+
+        let prompt = effective_template_prompt(&template).unwrap();
+        assert_eq!(
+            prompt,
+            default_polish_templates()
+                .into_iter()
+                .find(|candidate| candidate.id == TEMPLATE_EMAIL)
+                .expect("default email template")
+                .prompt
+        );
+    }
+
+    #[test]
+    fn effective_template_prompt_rejects_empty_custom_and_default() {
+        let template = DictationPolishTemplate {
+            id: "custom".to_string(),
+            label: "Custom".to_string(),
+            prompt: "   ".to_string(),
+        };
+
+        assert!(effective_template_prompt(&template).is_err());
     }
 }

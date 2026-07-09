@@ -20,6 +20,11 @@ async function finalizeDictationText(rawText: string): Promise<{ text: string; w
     return { text: "" };
   }
 
+  const app = getAppState();
+  if (!app.settings.dictation_polish_enabled) {
+    return { text: trimmed };
+  }
+
   try {
     const { polishDictation } = await import("../../api/dictation");
     const result = await polishDictation(trimmed);

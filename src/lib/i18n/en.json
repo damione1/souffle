@@ -84,7 +84,7 @@
     "description": "Optionally clean up dictation with the same summarization provider (Ollama or Apple Intelligence) before paste.",
     "enabled": "Polish dictation with AI",
     "enabled_desc": "Run an LLM pass after transcription to fix tone, formatting, or fillers.",
-    "no_provider": "No summarization provider is available. Configure Ollama or enable Apple Intelligence above.",
+    "no_provider": "No summarization provider is available. Configure Ollama or enable Apple Intelligence in Advanced → Summarization.",
     "template": "Style template",
     "template_email": "Professional email",
     "template_bullets": "Bullet points",

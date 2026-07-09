@@ -257,6 +257,36 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
   });
 
+  it("toggleRecording stop skips polish IPC when polish disabled", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    expect(ctrl.app.settings.dictation_polish_enabled).toBe(false);
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    transcriptionChannel?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+  });
+
   it("toggleRecording stop clipboard only when not fromShortcut", async () => {
     const ctrl = createTranscriptionController();
     await ctrl.mount();
