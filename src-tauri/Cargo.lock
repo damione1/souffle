@@ -6098,6 +6098,7 @@ dependencies = [
  "futures-util",
  "hf-hub",
  "hound",
+ "libc",
  "log",
  "memmap2",
  "moshi",
