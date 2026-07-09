@@ -43,6 +43,7 @@ const DICTATION_POLISH_TEMPLATES_KEY: &str = "dictation_polish_templates";
 const LOG_LEVEL_KEY: &str = "log_level";
 const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
+const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +67,26 @@ pub enum Theme {
     Dark,
     Light,
     System,
+}
+
+/// How long recorded meeting audio is kept on disk before the startup sweep
+/// deletes it. Opt-in: recording itself only happens when this is not `Off`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingAudioRetention {
+    /// No recording at all; existing recordings from a previous, more
+    /// permissive setting are left alone (the user may re-enable).
+    #[default]
+    Off,
+    // Explicit renames: serde's snake_case heuristic and specta's TS-type
+    // heuristic disagree on letter/digit boundaries (serde emits "keep7d",
+    // specta types it as "keep_7d") — pin the wire value explicitly so both
+    // sides agree instead of relying on either deriving it the same way.
+    #[serde(rename = "keep_7d")]
+    Keep7d,
+    #[serde(rename = "keep_30d")]
+    Keep30d,
+    KeepForever,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
@@ -123,6 +144,9 @@ pub struct AppSettings {
     /// Hard failsafe: stop the meeting after this many minutes regardless of
     /// speech activity.
     pub meeting_max_duration_minutes: u32,
+    /// Opt-in recording of meeting audio to compressed files on disk, and
+    /// for how long they're kept. Off by default.
+    pub meeting_audio_retention: MeetingAudioRetention,
     /// Optional LLM post-processing applied to dictation before paste/history.
     pub dictation_polish_enabled: bool,
     /// Active polish template id (email, bullets, no_fillers).
@@ -172,6 +196,7 @@ impl Default for AppSettings {
             meeting_autostop_enabled: true,
             meeting_autostop_minutes: 10,
             meeting_max_duration_minutes: 240,
+            meeting_audio_retention: MeetingAudioRetention::default(),
             dictation_polish_enabled: false,
             dictation_polish_template_id: crate::summary::TEMPLATE_EMAIL.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -319,6 +344,11 @@ impl AppSettings {
             read_json_setting::<u32>(db, MEETING_MAX_DURATION_MINUTES_KEY)?
         {
             settings.meeting_max_duration_minutes = meeting_max_duration_minutes;
+        }
+        if let Some(meeting_audio_retention) =
+            read_json_setting::<MeetingAudioRetention>(db, MEETING_AUDIO_RETENTION_KEY)?
+        {
+            settings.meeting_audio_retention = meeting_audio_retention;
         }
         if let Some(dictation_polish_enabled) =
             read_json_setting::<bool>(db, DICTATION_POLISH_ENABLED_KEY)?
@@ -569,6 +599,11 @@ impl AppSettings {
         )?;
         write_json_setting(
             db,
+            MEETING_AUDIO_RETENTION_KEY,
+            &normalized.meeting_audio_retention,
+        )?;
+        write_json_setting(
+            db,
             DICTATION_POLISH_ENABLED_KEY,
             &normalized.dictation_polish_enabled,
         )?;
@@ -686,7 +721,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, PasteMethod, ShortcutSettings, Theme};
+    use super::{AppSettings, MeetingAudioRetention, PasteMethod, ShortcutSettings, Theme};
     use crate::logging::LogLevel;
     use crate::constants::OLLAMA_DEFAULT_URL;
     use crate::test_helpers::fixtures::test_db;
@@ -724,6 +759,7 @@ mod tests {
             meeting_autostop_enabled: false,
             meeting_autostop_minutes: 15,
             meeting_max_duration_minutes: 120,
+            meeting_audio_retention: MeetingAudioRetention::Keep30d,
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -1025,4 +1061,30 @@ mod tests {
         assert_eq!(shortcuts.toggle, "F6");
         assert_eq!(shortcuts.push_to_talk, "");
     }
+
+    /// `Keep7d`/`Keep30d` pin an explicit `#[serde(rename)]` because serde's
+    /// `snake_case` heuristic and specta's TS-type heuristic disagree at
+    /// letter/digit boundaries (serde alone would emit "keep7d", specta
+    /// would type it as "keep_7d") — this guards the wire value the
+    /// frontend actually depends on against a future regression.
+    #[test]
+    fn meeting_audio_retention_wire_format_is_stable() {
+        assert_eq!(
+            serde_json::to_string(&MeetingAudioRetention::Off).unwrap(),
+            "\"off\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MeetingAudioRetention::Keep7d).unwrap(),
+            "\"keep_7d\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MeetingAudioRetention::Keep30d).unwrap(),
+            "\"keep_30d\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MeetingAudioRetention::KeepForever).unwrap(),
+            "\"keep_forever\""
+        );
+    }
 }
+

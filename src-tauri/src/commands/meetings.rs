@@ -25,11 +25,53 @@ pub fn get_meeting(
     state.db.load_meeting(&id)
 }
 
-/// Delete a meeting by ID
+/// Delete a meeting by ID, including any recorded audio.
 #[tauri::command]
 #[specta::specta]
 pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.db.delete_meeting(&id)
+    state.db.delete_meeting(&id)?;
+
+    let recordings_dir = crate::audio::recorder::meeting_recordings_dir(&id);
+    if recordings_dir.exists()
+        && let Err(e) = std::fs::remove_dir_all(&recordings_dir)
+    {
+        tracing::warn!(meeting_id = %id, "Failed to delete meeting recordings: {e}");
+    }
+
+    Ok(())
+}
+
+/// List the recorded audio files for a meeting (empty if recording was never
+/// enabled, or none survived retention). Reads the filesystem directly —
+/// nothing here is persisted in the database.
+#[tauri::command]
+#[specta::specta]
+pub fn get_meeting_audio(
+    meeting_id: String,
+) -> Result<Vec<crate::transcript::MeetingAudioSession>, String> {
+    let dir = crate::audio::recorder::meeting_recordings_dir(&meeting_id);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+
+    let mut sessions: Vec<crate::transcript::MeetingAudioSession> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("ogg") {
+                return None;
+            }
+            let session_index = path.file_stem()?.to_str()?.parse::<usize>().ok()?;
+            Some(crate::transcript::MeetingAudioSession {
+                session_index,
+                path: path.to_string_lossy().to_string(),
+                duration_seconds: None,
+            })
+        })
+        .collect();
+
+    sessions.sort_by_key(|session| session.session_index);
+    Ok(sessions)
 }
 
 /// Save the user's live meeting notes. Targets the in-memory accumulator

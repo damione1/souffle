@@ -143,6 +143,14 @@ async fn launch_meeting(
         ],
     );
 
+    // This session's position in the meeting's recording_sessions — 0 for a
+    // new meeting, len() for a resume — is exactly the on-disk file index a
+    // recorder should write to, if recording is on.
+    let recording_target = RecordingTarget {
+        meeting_id: accumulator.id.clone(),
+        session_index: accumulator.recording_sessions.len(),
+    };
+
     // Persist the header before any segments so a crash leaves a recoverable
     // row (ended_at IS NULL) and segment FK targets exist.
     state
@@ -172,6 +180,7 @@ async fn launch_meeting(
             session_id,
             PipelineMode::Meeting,
             session_terms,
+            Some(recording_target),
             on_segment,
         )
     })
@@ -217,10 +226,21 @@ enum PipelineMode {
     Meeting,
 }
 
+/// Identifies where a meeting recording session's audio file belongs, if
+/// the retention setting turns out to be on. Resolved before the session
+/// starts (`launch_meeting` knows the meeting id and the session's position
+/// in `recording_sessions`); whether to actually record is decided inside
+/// `start_pipeline_blocking` once settings are loaded.
+struct RecordingTarget {
+    meeting_id: String,
+    session_index: usize,
+}
+
 /// Blocking core of starting a recording session, run via `spawn_blocking` so
 /// the long crossbeam reply wait (engine reset + filter-chain build) never
 /// blocks the Tauri command thread / window event loop. Preconditions and
 /// session-id allocation are done on the command thread before this runs.
+#[allow(clippy::too_many_arguments)]
 fn start_pipeline_blocking(
     engine_actor: &EngineActorHandle,
     audio_cmd_sender: &Sender<AudioCommand>,
@@ -228,6 +248,7 @@ fn start_pipeline_blocking(
     session_id: u64,
     mode: PipelineMode,
     session_terms: Vec<String>,
+    recording_target: Option<RecordingTarget>,
     on_segment: SegmentCallback,
 ) -> Result<(), String> {
     // Snapshot settings and dictionary; the actor builds filter chains on its
@@ -273,6 +294,18 @@ fn start_pipeline_blocking(
     // The actor replies once the engine is reset and ready for audio.
     let info = engine_actor.start_session(session_id, config, on_segment)?;
 
+    // Recording is opt-in and meeting-only; resolve the actual path only
+    // once the retention setting is known (a `RecordingTarget` just means
+    // "this session's audio would live here if recording is on").
+    let record_path = if mode == PipelineMode::Meeting
+        && settings.meeting_audio_retention != crate::settings::MeetingAudioRetention::Off
+    {
+        recording_target
+            .map(|target| crate::audio::recorder::session_path(&target.meeting_id, target.session_index))
+    } else {
+        None
+    };
+
     audio_cmd_sender
         .send(AudioCommand::Start {
             session_id,
@@ -280,6 +313,7 @@ fn start_pipeline_blocking(
             mic_gain: info.mic_gain,
             capture_system_audio,
             diarize,
+            record_path,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
@@ -354,6 +388,7 @@ pub async fn start_transcription(
             session_id,
             PipelineMode::Dictation,
             Vec::new(),
+            None,
             on_segment,
         )
     })

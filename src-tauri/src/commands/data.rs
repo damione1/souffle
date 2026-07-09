@@ -73,6 +73,7 @@ pub fn get_data_stats(state: State<'_, AppState>) -> Result<DataStats, String> {
         db_size_bytes,
         meeting_count: state.db.count_meetings()?,
         dictation_count: state.db.count_dictation_entries()?,
+        recordings_size_bytes: crate::audio::retention::recordings_size_bytes(),
     })
 }
 

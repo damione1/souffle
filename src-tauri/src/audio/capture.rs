@@ -3,12 +3,14 @@ use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use ringbuf::HeapRb;
 use ringbuf::traits::{Producer, Split};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 use super::mixer::MeetingMixer;
+use super::recorder::MeetingRecorder;
 use super::resampler::Resampler;
 use crate::state::AudioCommand;
 
@@ -216,6 +218,10 @@ struct StartParams {
     mic_gain: f32,
     capture_system_audio: bool,
     diarize: bool,
+    /// File to record mixed meeting audio to, if the retention setting is
+    /// not `off`. `None` for dictation sessions and for meetings recorded
+    /// with retention off.
+    record_path: Option<PathBuf>,
 }
 
 /// Per-session state for meeting mode (mic + system audio).
@@ -341,6 +347,11 @@ pub struct AudioCapture {
     dropped_counter: Arc<AtomicU64>,
     /// Active meeting-mode session (mic + system audio mixed on this thread).
     meeting: Option<MeetingState>,
+    /// Encodes meeting audio to disk when the retention setting is not off.
+    /// Lives outside `MeetingState` (not torn down/rebuilt with it) because
+    /// a mic rebuild mid-session must keep recording to the same file —
+    /// only a genuinely new `session_id` (or no `record_path`) replaces it.
+    recorder: Option<MeetingRecorder>,
     /// For emitting SystemAudioStatus events (set during app setup).
     app: Option<tauri::AppHandle>,
     /// Parameters of the running session, kept for mid-session rebuilds.
@@ -399,6 +410,7 @@ impl AudioCapture {
                     resampler: None,
                     dropped_counter,
                     meeting: None,
+                    recorder: None,
                     app: None,
                     active_params: None,
                     mic_device_name: None,
@@ -468,6 +480,7 @@ impl AudioCapture {
                             mic_gain,
                             capture_system_audio,
                             diarize,
+                            record_path,
                         } => {
                             if let Err(e) = capture.start(
                                 session_id,
@@ -475,6 +488,7 @@ impl AudioCapture {
                                 mic_gain,
                                 capture_system_audio,
                                 diarize,
+                                record_path,
                             ) {
                                 warn!("Failed to start audio capture: {e}");
                             }
@@ -557,6 +571,7 @@ impl AudioCapture {
             .ok_or_else(|| "No input device available".to_string())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn start(
         &mut self,
         session_id: u64,
@@ -564,12 +579,16 @@ impl AudioCapture {
         mic_gain: f32,
         capture_system_audio: bool,
         diarize: bool,
+        record_path: Option<PathBuf>,
     ) -> Result<(), String> {
         // Ensure any previous callback stops emitting immediately, and tear
-        // down any leftover meeting state (tap included).
+        // down any leftover meeting state (tap included). The recorder is
+        // NOT torn down here — see `sync_recorder` — so a mid-session mic
+        // rebuild (same session_id) keeps recording to the same file.
         self.active_session_id.store(0, Ordering::Release);
         self.stream.take();
         self.meeting.take();
+        self.sync_recorder(session_id, record_path.as_deref(), target_sample_rate);
 
         // Stored before any fallible step so a failed (re)build is retried
         // by the next mic health check instead of killing the session.
@@ -579,6 +598,7 @@ impl AudioCapture {
             mic_gain,
             capture_system_audio,
             diarize,
+            record_path,
         });
         self.stream_failed
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -696,6 +716,75 @@ impl AudioCapture {
 
         info!("Audio capture started on '{device_name}'");
         Ok(())
+    }
+
+    /// Reconcile `self.recorder` with what this `start()` call wants:
+    /// - Same `session_id` as the existing recorder: keep it — this is a
+    ///   mid-session capture rebuild (mic loss, device change), not a new
+    ///   recording session, so it must keep writing to the same file.
+    /// - Different session (or none yet) and a path was given: finalize any
+    ///   stale recorder and start a new one.
+    /// - No path (dictation, or retention off): finalize any stale recorder.
+    ///
+    /// A failure to start the recorder is logged and otherwise ignored —
+    /// recording is a best-effort opt-in feature, never a reason to fail the
+    /// audio session itself.
+    fn sync_recorder(&mut self, session_id: u64, record_path: Option<&std::path::Path>, sample_rate: u32) {
+        let same_session = self.recorder.as_ref().is_some_and(|r| r.session_id() == session_id);
+        match record_path {
+            Some(_) if same_session => {}
+            Some(path) => {
+                self.finish_recording();
+                match MeetingRecorder::start(path.to_path_buf(), sample_rate, session_id) {
+                    Ok(recorder) => self.recorder = Some(recorder),
+                    Err(e) => warn!("Failed to start meeting audio recorder: {e}"),
+                }
+            }
+            None => self.finish_recording(),
+        }
+    }
+
+    /// Finalize and drop the active recorder, if any, logging how many
+    /// chunks the realtime audio thread had to drop because the writer
+    /// thread couldn't keep up.
+    fn finish_recording(&mut self) {
+        if let Some(recorder) = self.recorder.take() {
+            let dropped = recorder.dropped_chunks();
+            if dropped > 0 {
+                warn!("Meeting recorder dropped {dropped} audio chunks this session");
+            }
+            // Drop joins the writer thread, flushing the encoder and closing
+            // the file — not on the realtime path, only at session end.
+        }
+    }
+
+    /// Feed one mono meeting-audio chunk to the active recorder, if any.
+    fn push_recording_mono(&self, samples: &[f32]) {
+        if let Some(recorder) = &self.recorder {
+            recorder.push(samples);
+        }
+    }
+
+    /// Feed one diarized meeting-audio tick to the active recorder, if any:
+    /// the two legs are summed with soft clipping into the single mixed
+    /// stream the recording represents (diarization only affects
+    /// transcription, not the recorded audio).
+    fn push_recording_diarized(&self, me: &[f32], them: &[f32]) {
+        let Some(recorder) = &self.recorder else {
+            return;
+        };
+        let n = me.len().max(them.len());
+        if n == 0 {
+            return;
+        }
+        let mixed: Vec<f32> = (0..n)
+            .map(|i| {
+                let a = me.get(i).copied().unwrap_or(0.0);
+                let b = them.get(i).copied().unwrap_or(0.0);
+                (a + b).clamp(-1.0, 1.0)
+            })
+            .collect();
+        recorder.push(&mixed);
     }
 
     /// Meeting mode: the cpal callback only pushes raw samples into a ring
@@ -851,6 +940,7 @@ impl AudioCapture {
             params.mic_gain,
             params.capture_system_audio,
             params.diarize,
+            params.record_path.clone(),
         ) {
             Ok(()) => {
                 self.mic_rebuild_failures = 0;
@@ -912,10 +1002,12 @@ impl AudioCapture {
 
         use crate::engine::Speaker;
         if diarize {
+            self.push_recording_diarized(&me, &them);
             self.store_meeting_rms(&me, &them);
             self.send_meeting_chunk(session_id, me, Some(Speaker::Me));
             self.send_meeting_chunk(session_id, them, Some(Speaker::Them));
         } else {
+            self.push_recording_mono(&mixed);
             self.store_meeting_rms(&mixed, &[]);
             self.send_meeting_chunk(session_id, mixed, None);
         }
@@ -1021,6 +1113,10 @@ impl AudioCapture {
         {
             self.meeting.take();
         }
+        // Best-effort close: no final flush from the (possibly corrupt)
+        // mixer, just whatever the recorder already buffered. A truncated
+        // but structurally valid Ogg file is acceptable here.
+        self.finish_recording();
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
     }
@@ -1073,10 +1169,12 @@ impl AudioCapture {
             if session_id != 0 {
                 if meeting.diarize {
                     let (me, them) = meeting.mixer.flush_split();
+                    self.push_recording_diarized(&me, &them);
                     self.send_meeting_chunk(session_id, me, Some(crate::engine::Speaker::Me));
                     self.send_meeting_chunk(session_id, them, Some(crate::engine::Speaker::Them));
                 } else {
                     let tail = meeting.mixer.flush();
+                    self.push_recording_mono(&tail);
                     self.send_meeting_chunk(session_id, tail, None);
                 }
                 let discarded = meeting.mixer.tap_discarded();
@@ -1085,12 +1183,14 @@ impl AudioCapture {
                 }
                 self.send_end_of_stream(session_id);
             }
+            self.finish_recording();
 
             if had_stream {
                 info!("Meeting audio capture stopped");
             }
             return;
         }
+        self.finish_recording();
 
         if session_id != 0 {
             // Flush the resampler's remaining partial chunk so the last

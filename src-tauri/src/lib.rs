@@ -97,6 +97,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::list_meetings,
             commands::get_meeting,
             commands::delete_meeting,
+            commands::get_meeting_audio,
             commands::rename_meeting,
             commands::save_meeting_notes,
             commands::save_edited_transcript,
@@ -298,6 +299,12 @@ pub fn run() {
                     let _ = state.audio_cmd_sender.send(state::AudioCommand::SetClamshellDevice(
                         app_settings.clamshell_audio_device,
                     ));
+                    // Directory walk over recordings/ can take a moment with
+                    // a large history; never block startup on it.
+                    let retention = app_settings.meeting_audio_retention;
+                    std::thread::spawn(move || {
+                        audio::retention::sweep_expired_recordings(retention, std::time::SystemTime::now());
+                    });
                 }
                 Err(e) => {
                     tracing::warn!("Failed to load settings on startup: {e}");

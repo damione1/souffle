@@ -21,7 +21,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png", "protocol-asset"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-fs = "2"
@@ -98,6 +98,14 @@ ringbuf = "0.5"
 sonora = "0.1"
 block2 = "0.6"
 dispatch2 = "0.3"
+
+# Meeting audio recording: Opus encoding (statically linked on macOS via
+# audiopus_sys — pkg-config finds a static libopus.a if present, otherwise
+# audiopus_sys builds vendored libopus via cmake, but either way the result
+# is statically linked, so no libopus.dylib ships in the bundle) into an Ogg
+# container.
+opus = "0.3"
+ogg = "0.9"
 
 [features]
 # Exposes the mock transcription engine (normally `#[cfg(test)]`-only) so the
