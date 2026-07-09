@@ -373,6 +373,17 @@ async clearDictationHistory() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Optional LLM polish pass for dictation text before paste/history.
+ */
+async polishDictation(text: string) : Promise<Result<DictationPolishResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("polish_dictation", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get the typed application settings.
  */
 async getSettings() : Promise<Result<AppSettings, string>> {
@@ -703,7 +714,19 @@ meeting_autostop_minutes: number;
  * Hard failsafe: stop the meeting after this many minutes regardless of
  * speech activity.
  */
-meeting_max_duration_minutes: number }
+meeting_max_duration_minutes: number; 
+/**
+ * Optional LLM post-processing applied to dictation before paste/history.
+ */
+dictation_polish_enabled: boolean; 
+/**
+ * Active polish template id (email, bullets, no_fillers).
+ */
+dictation_polish_template_id: string; 
+/**
+ * User-editable polish prompt templates.
+ */
+dictation_polish_templates: DictationPolishTemplate[] }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
@@ -765,6 +788,17 @@ export type DataStats = { db_size_bytes: number; meeting_count: number; dictatio
  * A dictation history entry
  */
 export type DictationEntry = { id: string; text: string; timestamp: string }
+export type DictationPolishResult = { text: string; 
+/**
+ * True when polish was skipped (disabled, blank input, or no provider).
+ */
+skipped: boolean; 
+/**
+ * Set when polish was attempted but failed; the returned text is the
+ * pre-polish input (after invisible-char stripping).
+ */
+warning: string | null }
+export type DictationPolishTemplate = { id: string; label: string; prompt: string }
 export type DictionaryEntry = { id: number; term: string; 
 /**
  * How the term sounds when spoken, spelled out (e.g. "vésix" for "V6").

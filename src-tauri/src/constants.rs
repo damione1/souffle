@@ -115,6 +115,17 @@ Action Items:
 Open Questions / Risks:
 - ... (or \"None\")";
 
+/// System prompt for dictation post-processing (polish) via Ollama.
+pub const OLLAMA_DICTATION_POLISH_PROMPT: &str = "\
+You post-process speech-to-text dictation according to the user's instructions.
+
+Rules:
+- Apply only the requested transformation to the transcript.
+- Preserve the original language unless explicitly asked to translate.
+- Do not greet, apologize, or add commentary about the task.
+- Return ONLY valid JSON with exactly one key: text (string).
+- No markdown, no code fences, no text before or after the JSON object.";
+
 /// System prompt for the structured extraction pass (decisions, action items,
 /// open questions) run after the prose summary is generated.
 pub const OLLAMA_STRUCTURED_EXTRACT_PROMPT: &str = "\

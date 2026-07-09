@@ -13,6 +13,26 @@ import { errorMessage } from "../../utils";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
 
+/** Finalize dictation text: invisible-char strip, optional LLM polish, skip-if-blank. */
+async function finalizeDictationText(rawText: string): Promise<{ text: string; warning?: string }> {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    return { text: "" };
+  }
+
+  try {
+    const { polishDictation } = await import("../../api/dictation");
+    const result = await polishDictation(trimmed);
+    return {
+      text: result.text.trim(),
+      warning: result.warning ?? undefined,
+    };
+  } catch (e) {
+    console.warn("Dictation polish failed:", e);
+    return { text: trimmed, warning: errorMessage(e) };
+  }
+}
+
 /** Persist a finished dictation and surface it in the timeline. */
 async function saveToHistory(text: string) {
   if (!text.trim()) return;
@@ -98,18 +118,23 @@ function createTranscriptionControllerInstance() {
       try {
         await stopStreamingTranscription();
 
-        await saveToHistory(transcript);
+        const finalized = await finalizeDictationText(transcript);
+        if (finalized.warning) {
+          statusMessage = finalized.warning;
+        }
 
-        if (transcript.trim()) {
+        await saveToHistory(finalized.text);
+
+        if (finalized.text) {
           if (fromShortcut && app.settings.auto_paste) {
             try {
-              await pasteText(transcript.trim(), app.settings.paste_delay_ms);
+              await pasteText(finalized.text, app.settings.paste_delay_ms);
             } catch (e) {
               statusMessage = `Paste failed: ${errorMessage(e)}`;
             }
           } else {
             try {
-              await navigator.clipboard.writeText(transcript.trim());
+              await navigator.clipboard.writeText(finalized.text);
             } catch {
               // Clipboard API may fail silently in some contexts
             }
@@ -170,8 +195,15 @@ function createTranscriptionControllerInstance() {
     isStartingRecording = false;
     isStopping = false;
     if (transcript.trim()) {
-      void saveToHistory(transcript);
-      statusMessage = "Recording was interrupted — the partial transcript was saved to history.";
+      void finalizeDictationText(transcript).then(({ text, warning }) => {
+        if (warning) statusMessage = warning;
+        if (text) {
+          void saveToHistory(text);
+          statusMessage = "Recording was interrupted — the partial transcript was saved to history.";
+        } else {
+          statusMessage = "Recording was interrupted.";
+        }
+      });
     } else {
       statusMessage = "Recording was interrupted.";
     }

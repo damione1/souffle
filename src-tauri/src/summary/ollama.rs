@@ -26,6 +26,8 @@ struct GenerateRequest {
     prompt: String,
     system: String,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<String>,
     options: GenerateOptions,
 }
 
@@ -150,12 +152,14 @@ pub async fn generate_stream(
     num_ctx: u32,
     temperature: f32,
     on_chunk: &impl Fn(super::SummarizeProgress),
+    json_format: bool,
 ) -> Result<String, String> {
     let body = GenerateRequest {
         model: model.to_string(),
         prompt,
         system: system.to_string(),
         stream: true,
+        format: json_format.then(|| "json".to_string()),
         options: GenerateOptions {
             temperature,
             num_ctx,
@@ -214,6 +218,7 @@ pub fn http_client() -> Result<reqwest::Client, String> {
 pub const MAP_SYSTEM_PROMPT: &str = OLLAMA_MAP_PROMPT;
 pub const SUMMARIZE_SYSTEM_PROMPT: &str = OLLAMA_SUMMARIZE_PROMPT;
 pub const STRUCTURED_EXTRACT_SYSTEM_PROMPT: &str = OLLAMA_STRUCTURED_EXTRACT_PROMPT;
+pub const DICTATION_POLISH_SYSTEM_PROMPT: &str = crate::constants::OLLAMA_DICTATION_POLISH_PROMPT;
 pub const REDUCE_CONTEXT: u32 = REDUCE_NUM_CTX;
 pub const MAP_CONTEXT: u32 = MAP_NUM_CTX;
 

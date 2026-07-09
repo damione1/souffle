@@ -9,6 +9,8 @@ export type {
   CalendarInfo,
   DataStats,
   DictationEntry,
+  DictationPolishResult,
+  DictationPolishTemplate,
   DictionaryEntry,
   DownloadProgress,
   DownloadStatus,

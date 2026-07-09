@@ -115,7 +115,7 @@ describe("transcription controller", () => {
     backend_id: "candle",
   };
 
-  function defaultInvoke(cmd: string, _args?: Record<string, unknown>) {
+  function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
     switch (cmd) {
       case "get_transcription_catalog":
         return Promise.resolve(fakeCatalog);
@@ -135,6 +135,8 @@ describe("transcription controller", () => {
         return Promise.resolve(null);
       case "paste_text":
         return Promise.resolve(null);
+      case "polish_dictation":
+        return Promise.resolve({ text: args?.text ?? "", skipped: true, warning: null });
       case "load_model":
         return Promise.resolve(null);
       case "download_model":
@@ -186,6 +188,13 @@ describe("transcription controller", () => {
       meeting_autostop_enabled: true,
       meeting_autostop_minutes: 10,
       meeting_max_duration_minutes: 240,
+      dictation_polish_enabled: false,
+      dictation_polish_template_id: "email",
+      dictation_polish_templates: [
+        { id: "email", label: "Professional email", prompt: "Rewrite as email." },
+        { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
+        { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
+      ],
     };
 
     Object.assign(navigator, {

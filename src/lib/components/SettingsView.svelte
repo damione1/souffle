@@ -10,6 +10,7 @@
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
+  import DictationPolishSettingsSection from "../features/settings/components/DictationPolishSettingsSection.svelte";
   import ModelSettingsSection from "../features/settings/components/ModelSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
@@ -83,6 +84,16 @@
     onStartRecording={controller.startRecording}
     onClearShortcut={controller.clearShortcut}
     formatShortcut={controller.formatShortcut}
+  />
+
+  <DictationPolishSettingsSection
+    enabled={controller.app.settings.dictation_polish_enabled}
+    templateId={controller.app.settings.dictation_polish_template_id}
+    templates={controller.app.settings.dictation_polish_templates}
+    providerAvailable={controller.summaryProviderAvailable}
+    onEnabledChange={controller.onDictationPolishEnabledChange}
+    onTemplateChange={controller.onDictationPolishTemplateChange}
+    onPromptChange={controller.onDictationPolishPromptChange}
   />
 
   <DictionarySettingsSection

@@ -138,6 +138,7 @@ pub async fn extract_structured_summary(
         0.1,
         super::ollama::REDUCE_CONTEXT,
         &no_op,
+        false,
     )
     .await?;
     parse_structured_summary_response(&raw)
