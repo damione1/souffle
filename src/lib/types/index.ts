@@ -37,6 +37,7 @@ export type {
   Theme,
   TodayCalendar,
   UpcomingMeeting,
+  CalendarMeetingNudgeKind,
   HealthStatus,
   PipelineError,
   SystemAudioStatus,

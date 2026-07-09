@@ -58,7 +58,16 @@
     "calendars_label": "Calendriers",
     "all_calendars_hint": "Tous les calendriers sont inclus ; décochez ceux à masquer.",
     "reminder_label": "Délai de rappel",
-    "reminder_desc": "Minutes avant un événement pour proposer de démarrer une transcription (1-30)."
+    "reminder_desc": "Minutes avant un événement pour proposer de démarrer une transcription (1-30).",
+    "autostart_label": "Suggérer au début de la réunion",
+    "autostart_desc": "Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement."
+  },
+  "settings_feedback_sounds": {
+    "title": "Sons de dictée",
+    "enabled": "Sons démarrage/arrêt",
+    "enabled_desc": "Joue de courts sons de confirmation au démarrage et à l'arrêt de la dictée.",
+    "volume": "Volume des sons",
+    "volume_desc": "Volume des signaux de démarrage et d'arrêt de la dictée (0-100)."
   },
   "settings_interface": {
     "title": "Interface",
@@ -334,6 +343,7 @@
     "organizer": "organisateur",
     "you": "vous",
     "starts_in_minutes": "Commence dans {minutes} min",
+    "started_system_audio": "Réunion commencée — audio système actif",
     "dismiss": "Ignorer"
   }
 }

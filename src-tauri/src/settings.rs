@@ -26,6 +26,9 @@ const CAPTURE_SYSTEM_AUDIO_KEY: &str = "capture_system_audio";
 const CALENDAR_INTEGRATION_ENABLED_KEY: &str = "calendar_integration_enabled";
 const CALENDAR_SELECTED_IDS_KEY: &str = "calendar_selected_ids";
 const CALENDAR_REMINDER_MINUTES_KEY: &str = "calendar_reminder_minutes";
+const CALENDAR_AUTOSTART_ENABLED_KEY: &str = "calendar_autostart_enabled";
+const FEEDBACK_SOUNDS_ENABLED_KEY: &str = "feedback_sounds_enabled";
+const FEEDBACK_SOUNDS_VOLUME_KEY: &str = "feedback_sounds_volume";
 const MODEL_UNLOAD_TIMEOUT_MINUTES_KEY: &str = "model_unload_timeout_minutes";
 const MEETING_AUTOSTOP_ENABLED_KEY: &str = "meeting_autostop_enabled";
 const MEETING_AUTOSTOP_MINUTES_KEY: &str = "meeting_autostop_minutes";
@@ -84,6 +87,13 @@ pub struct AppSettings {
     pub calendar_selected_ids: Vec<String>,
     /// How long before an event the "start transcription?" reminder fires.
     pub calendar_reminder_minutes: u32,
+    /// When a calendar event starts and system audio is active, suggest
+    /// starting a meeting transcription (nudge only, never auto-records).
+    pub calendar_autostart_enabled: bool,
+    /// Audible start/stop cues for dictation sessions.
+    pub feedback_sounds_enabled: bool,
+    /// Feedback sound volume (0-100).
+    pub feedback_sounds_volume: u32,
     /// Unload the transcription model after this many idle minutes to
     /// reclaim RAM; 0 means never unload. The next recording reloads it
     /// through the normal load flow.
@@ -135,6 +145,9 @@ impl Default for AppSettings {
             calendar_integration_enabled: false,
             calendar_selected_ids: Vec::new(),
             calendar_reminder_minutes: 2,
+            calendar_autostart_enabled: true,
+            feedback_sounds_enabled: true,
+            feedback_sounds_volume: 70,
             model_unload_timeout_minutes: 0,
             meeting_autostop_enabled: true,
             meeting_autostop_minutes: 10,
@@ -244,6 +257,21 @@ impl AppSettings {
             read_json_setting::<u32>(db, CALENDAR_REMINDER_MINUTES_KEY)?
         {
             settings.calendar_reminder_minutes = calendar_reminder_minutes;
+        }
+        if let Some(calendar_autostart_enabled) =
+            read_json_setting::<bool>(db, CALENDAR_AUTOSTART_ENABLED_KEY)?
+        {
+            settings.calendar_autostart_enabled = calendar_autostart_enabled;
+        }
+        if let Some(feedback_sounds_enabled) =
+            read_json_setting::<bool>(db, FEEDBACK_SOUNDS_ENABLED_KEY)?
+        {
+            settings.feedback_sounds_enabled = feedback_sounds_enabled;
+        }
+        if let Some(feedback_sounds_volume) =
+            read_json_setting::<u32>(db, FEEDBACK_SOUNDS_VOLUME_KEY)?
+        {
+            settings.feedback_sounds_volume = feedback_sounds_volume;
         }
         if let Some(model_unload_timeout_minutes) =
             read_json_setting::<u32>(db, MODEL_UNLOAD_TIMEOUT_MINUTES_KEY)?
@@ -374,6 +402,9 @@ impl AppSettings {
         if !(1..=30).contains(&normalized.calendar_reminder_minutes) {
             normalized.calendar_reminder_minutes = Self::default().calendar_reminder_minutes;
         }
+        if normalized.feedback_sounds_volume > 100 {
+            normalized.feedback_sounds_volume = Self::default().feedback_sounds_volume;
+        }
 
         if !ALLOWED_UNLOAD_TIMEOUT_MINUTES.contains(&normalized.model_unload_timeout_minutes) {
             normalized.model_unload_timeout_minutes = Self::default().model_unload_timeout_minutes;
@@ -468,6 +499,21 @@ impl AppSettings {
             db,
             CALENDAR_REMINDER_MINUTES_KEY,
             &normalized.calendar_reminder_minutes,
+        )?;
+        write_json_setting(
+            db,
+            CALENDAR_AUTOSTART_ENABLED_KEY,
+            &normalized.calendar_autostart_enabled,
+        )?;
+        write_json_setting(
+            db,
+            FEEDBACK_SOUNDS_ENABLED_KEY,
+            &normalized.feedback_sounds_enabled,
+        )?;
+        write_json_setting(
+            db,
+            FEEDBACK_SOUNDS_VOLUME_KEY,
+            &normalized.feedback_sounds_volume,
         )?;
         write_json_setting(
             db,
@@ -635,6 +681,9 @@ mod tests {
             calendar_integration_enabled: true,
             calendar_selected_ids: vec!["cal-1".into(), "cal-2".into()],
             calendar_reminder_minutes: 5,
+            calendar_autostart_enabled: true,
+            feedback_sounds_enabled: false,
+            feedback_sounds_volume: 40,
             model_unload_timeout_minutes: 15,
             meeting_autostop_enabled: false,
             meeting_autostop_minutes: 15,

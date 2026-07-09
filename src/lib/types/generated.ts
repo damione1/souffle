@@ -695,6 +695,19 @@ calendar_selected_ids: string[];
  */
 calendar_reminder_minutes: number; 
 /**
+ * When a calendar event starts and system audio is active, suggest
+ * starting a meeting transcription (nudge only, never auto-records).
+ */
+calendar_autostart_enabled: boolean; 
+/**
+ * Audible start/stop cues for dictation sessions.
+ */
+feedback_sounds_enabled: boolean; 
+/**
+ * Feedback sound volume (0-100).
+ */
+feedback_sounds_volume: number; 
+/**
  * Unload the transcription model after this many idle minutes to
  * reclaim RAM; 0 means never unload. The next recording reloads it
  * through the normal load flow.
@@ -780,6 +793,15 @@ export type CalendarInfo = { id: string; title: string;
  * Account the calendar belongs to (e.g. "iCloud", "Google"), for grouping.
  */
 source_title: string | null }
+export type CalendarMeetingNudgeKind = 
+/**
+ * Pre-event reminder inside the configured lead-time window.
+ */
+"reminder" | 
+/**
+ * At-event-time suggestion when system audio is active but no recording runs.
+ */
+"autostart"
 /**
  * Settings > Data stats line: database size and row counts.
  */
@@ -1017,7 +1039,7 @@ speaker?: Speaker | null }
  * A system notification is sent alongside; this event drives the in-app
  * banner (notification clicks are not reliably delivered on macOS).
  */
-export type UpcomingMeeting = { event: CalendarEvent; starts_in_seconds: number }
+export type UpcomingMeeting = { event: CalendarEvent; starts_in_seconds: number; kind?: CalendarMeetingNudgeKind }
 
 /** tauri-specta globals **/
 

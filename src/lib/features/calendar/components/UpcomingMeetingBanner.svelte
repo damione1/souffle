@@ -28,6 +28,7 @@
   });
 
   let minutesLabel = $derived(Math.max(1, Math.ceil(reminder.starts_in_seconds / 60)));
+  let isAutostart = $derived(reminder.kind === "autostart");
 </script>
 
 <div class="surface-card flex items-center gap-3 border border-accent/40 px-4 py-3">
@@ -37,7 +38,11 @@
   <div class="min-w-0 flex-1">
     <p class="truncate text-sm font-semibold">{reminder.event.title}</p>
     <p class="text-xs text-text-muted">
-      {$t("calendar.starts_in_minutes", { values: { minutes: minutesLabel } })}
+      {#if isAutostart}
+        {$t("calendar.started_system_audio")}
+      {:else}
+        {$t("calendar.starts_in_minutes", { values: { minutes: minutesLabel } })}
+      {/if}
     </p>
   </div>
   <button class="btn btn-primary gap-1.5 shrink-0" disabled={!canStart} onclick={onStart}>

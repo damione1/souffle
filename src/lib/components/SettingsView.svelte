@@ -11,6 +11,7 @@
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
   import DictationPolishSettingsSection from "../features/settings/components/DictationPolishSettingsSection.svelte";
+  import FeedbackSoundsSettingsSection from "../features/settings/components/FeedbackSoundsSettingsSection.svelte";
   import ModelSettingsSection from "../features/settings/components/ModelSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
@@ -96,6 +97,13 @@
     onPromptChange={controller.onDictationPolishPromptChange}
   />
 
+  <FeedbackSoundsSettingsSection
+    enabled={controller.app.settings.feedback_sounds_enabled}
+    volume={controller.app.settings.feedback_sounds_volume}
+    onEnabledChange={controller.onFeedbackSoundsEnabledChange}
+    onVolumeChange={controller.onFeedbackSoundsVolumeChange}
+  />
+
   <DictionarySettingsSection
     entries={controller.dictionaryEntries}
     onAdd={controller.handleAddDictionaryEntry}
@@ -108,9 +116,11 @@
     calendars={controller.calendars}
     selectedIds={controller.app.settings.calendar_selected_ids}
     reminderMinutes={controller.app.settings.calendar_reminder_minutes}
+    autostartEnabled={controller.app.settings.calendar_autostart_enabled}
     onEnabledChange={controller.onCalendarEnabledChange}
     onToggleCalendar={controller.toggleCalendarSelected}
     onReminderMinutesChange={controller.onCalendarReminderMinutesChange}
+    onAutostartEnabledChange={controller.onCalendarAutostartEnabledChange}
   />
 
   <AdvancedSettingsSection>

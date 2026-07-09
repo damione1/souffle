@@ -58,7 +58,16 @@
     "calendars_label": "Calendars",
     "all_calendars_hint": "All calendars are included; uncheck the ones to hide.",
     "reminder_label": "Reminder lead time",
-    "reminder_desc": "Minutes before an event to suggest starting a transcription (1-30)."
+    "reminder_desc": "Minutes before an event to suggest starting a transcription (1-30).",
+    "autostart_label": "Suggest when meeting starts",
+    "autostart_desc": "When a calendar event begins and system audio is active, offer to start recording."
+  },
+  "settings_feedback_sounds": {
+    "title": "Dictation sounds",
+    "enabled": "Start/stop sounds",
+    "enabled_desc": "Play short confirmation sounds when dictation starts and stops.",
+    "volume": "Sound volume",
+    "volume_desc": "Volume for dictation start and stop cues (0-100)."
   },
   "settings_interface": {
     "title": "Interface",
@@ -334,6 +343,7 @@
     "organizer": "organizer",
     "you": "you",
     "starts_in_minutes": "Starts in {minutes} min",
+    "started_system_audio": "Meeting started — system audio active",
     "dismiss": "Dismiss"
   }
 }

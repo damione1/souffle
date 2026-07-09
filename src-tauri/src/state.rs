@@ -7,6 +7,7 @@ use tauri_specta::Event;
 use tracing::{debug, error, info, warn};
 
 use crate::app_events::StateChanged;
+use crate::audio::system_activity::SystemAudioActivity;
 use crate::db::Database;
 use crate::engine::{TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
@@ -139,6 +140,8 @@ pub struct AppState {
     pub db: Arc<Database>,
     /// Latest audio RMS level (0.0-1.0), stored as f32 bits in AtomicU32
     pub audio_rms: Arc<AtomicU32>,
+    /// Passive system-audio activity timestamps for calendar auto-start nudges.
+    pub system_audio_activity: Arc<SystemAudioActivity>,
     /// Unified state machine — the source of truth for app lifecycle
     pub machine: Mutex<AppStateMachine>,
     /// Tauri app handle for emitting events (set during setup)
@@ -155,6 +158,7 @@ impl AppState {
         engine_actor: Arc<EngineActorHandle>,
         db: Arc<Database>,
         audio_rms: Arc<AtomicU32>,
+        system_audio_activity: Arc<SystemAudioActivity>,
     ) -> Self {
         Self {
             audio_cmd_sender,
@@ -163,6 +167,7 @@ impl AppState {
             meeting_accumulator: Arc::new(Mutex::new(None)),
             db,
             audio_rms,
+            system_audio_activity,
             machine: Mutex::new(AppStateMachine::Idle),
             app_handle: Mutex::new(None),
             sleep_paused_meeting_id: Mutex::new(None),
