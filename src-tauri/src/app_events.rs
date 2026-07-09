@@ -91,6 +91,14 @@ pub struct SystemAudioStatus {
     pub reason: Option<String>,
 }
 
+/// Current microphone/meeting input level (RMS, 0.0-1.0), pushed by the audio
+/// thread while a capture session is active so the waveform UI doesn't need
+/// to poll `get_audio_level` over IPC.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Event)]
+pub struct AudioLevel {
+    pub level: f32,
+}
+
 /// Emitted by the calendar reminder scheduler shortly before a calendar
 /// event starts, so the frontend can offer a one-click transcription start.
 /// A system notification is sent alongside; this event drives the in-app

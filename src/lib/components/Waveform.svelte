@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
+  import { events } from "../api/generated";
 
   let {
     active = false,
@@ -30,32 +30,25 @@
     bars.push(0.15 + Math.random() * 0.1);
   }
 
-  // Poll backend for audio RMS level when recording is active
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
-
+  // Reset to silence whenever this instance stops being the active recorder,
+  // so a stale level doesn't linger on the idle ambient animation.
   $effect(() => {
-    if (active) {
-      pollInterval = setInterval(async () => {
-        try {
-          audioLevel = await invoke<number>("get_audio_level");
-        } catch {
-          audioLevel = 0;
-        }
-      }, 50); // ~20Hz polling
-    } else {
-      if (pollInterval) clearInterval(pollInterval);
-      pollInterval = null;
-      audioLevel = 0;
-    }
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-    };
+    if (!active) audioLevel = 0;
   });
 
   onMount(() => {
     const ctx = canvas?.getContext("2d");
     if (!ctx || !canvas) return;
+
+    // The backend pushes AudioLevel while any capture session is active.
+    // Only apply it here when this instance is the one recording (the main
+    // window and the pill window can both mount a Waveform).
+    let unlistenAudioLevel: (() => void) | undefined;
+    events.audioLevel.listen((event) => {
+      if (active) audioLevel = event.payload.level;
+    }).then((fn) => {
+      unlistenAudioLevel = fn;
+    });
 
     // Resolve the themed accent color for the bars; refreshed periodically so
     // a theme toggle mid-session recolors the waveform.
@@ -66,7 +59,7 @@
       if (value) accent = value;
     }
     refreshAccent();
-    const accentTimer = setInterval(refreshAccent, 1000);
+    let accentTimer: ReturnType<typeof setInterval> | null = null;
 
     function draw() {
       if (!ctx || !canvas) return;
@@ -102,7 +95,34 @@
         ctx.globalAlpha = 1;
       }
 
+      // Stop rescheduling while the document is hidden instead of drawing
+      // into an invisible canvas 60 times a second.
+      if (document.hidden) {
+        animationId = 0;
+        return;
+      }
       animationId = requestAnimationFrame(draw);
+    }
+
+    function startLoops() {
+      if (accentTimer === null) accentTimer = setInterval(refreshAccent, 1000);
+      if (animationId === 0) draw();
+    }
+
+    function stopLoops() {
+      if (accentTimer !== null) {
+        clearInterval(accentTimer);
+        accentTimer = null;
+      }
+      if (animationId !== 0) {
+        cancelAnimationFrame(animationId);
+        animationId = 0;
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.hidden) stopLoops();
+      else startLoops();
     }
 
     function resize() {
@@ -117,12 +137,14 @@
 
     resize();
     window.addEventListener("resize", resize);
-    draw();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (!document.hidden) startLoops();
 
     return () => {
-      cancelAnimationFrame(animationId);
-      clearInterval(accentTimer);
+      stopLoops();
+      unlistenAudioLevel?.();
       window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   });
 </script>

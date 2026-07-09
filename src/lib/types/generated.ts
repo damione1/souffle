@@ -365,17 +365,6 @@ async getShortcuts() : Promise<Result<ShortcutSettings, string>> {
 }
 },
 /**
- * Get the current audio input level (RMS, 0.0–1.0) for waveform visualization
- */
-async getAudioLevel() : Promise<Result<number, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("get_audio_level") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Whether system-audio capture (Core Audio process taps) is available on this OS
  */
 async getSystemAudioSupport() : Promise<boolean> {
@@ -508,6 +497,7 @@ async listTodaysCalendarEvents() : Promise<Result<TodayCalendar, string>> {
 
 
 export const events = __makeEvents__<{
+audioLevel: AudioLevel,
 meetingFinalized: MeetingFinalized,
 meetingStopRequested: MeetingStopRequested,
 navigate: Navigate,
@@ -520,6 +510,7 @@ systemAudioStatus: SystemAudioStatus,
 transcriptionHealth: TranscriptionHealth,
 upcomingMeeting: UpcomingMeeting
 }>({
+audioLevel: "audio-level",
 meetingFinalized: "meeting-finalized",
 meetingStopRequested: "meeting-stop-requested",
 navigate: "navigate",
@@ -570,6 +561,12 @@ export type AppView = "home" | "settings"
  */
 export type AudioDeviceInfo = { name: string; is_default: boolean }
 export type AudioInputRequirements = { sample_rate_hz: number; channels: number; chunk_size_samples: number }
+/**
+ * Current microphone/meeting input level (RMS, 0.0-1.0), pushed by the audio
+ * thread while a capture session is active so the waveform UI doesn't need
+ * to poll `get_audio_level` over IPC.
+ */
+export type AudioLevel = { level: number }
 /**
  * One occurrence of a calendar event (recurring events arrive pre-expanded).
  */
