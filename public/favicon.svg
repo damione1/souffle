@@ -1,48 +1,37 @@
-<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Soufflé logo">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#3b74e8"/>
-      <stop offset="100%" stop-color="#234a9e"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#39240f"></stop>
+      <stop offset="1" stop-color="#160e06"></stop>
     </linearGradient>
-    <linearGradient id="souffle" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffd98a"/>
-      <stop offset="70%" stop-color="#f0b75a"/>
-      <stop offset="100%" stop-color="#d99a3e"/>
+    <linearGradient id="dome" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8d089"></stop>
+      <stop offset="0.55" stop-color="#eab255"></stop>
+      <stop offset="1" stop-color="#d9973f"></stop>
     </linearGradient>
     <linearGradient id="ramekin" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#dde6f5"/>
+      <stop offset="0" stop-color="#f2e7d1"></stop>
+      <stop offset="1" stop-color="#dccdb0"></stop>
     </linearGradient>
   </defs>
 
-  
-  <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <rect x="32" y="32" width="448" height="448" rx="116" fill="url(#bg)"></rect>
+  <rect x="32.5" y="32.5" width="447" height="447" rx="115.5" fill="none" stroke="#e9ae55" stroke-opacity="0.28" stroke-width="1.5"></rect>
 
-  <!-- steam rising as sound waves -->
-  <g fill="none" stroke="#ffffff" stroke-linecap="round">
-    <path d="M 392 360 C 376 320 408 296 392 256" stroke-width="34" opacity="0.55"/>
-    <path d="M 512 348 C 492 296 540 264 516 196" stroke-width="38" opacity="0.9"/>
-    <path d="M 632 360 C 616 320 648 296 632 256" stroke-width="34" opacity="0.55"/>
+  <g fill="none" stroke="#f3e7d0" stroke-width="13" stroke-linecap="round">
+    <path d="M206 158 C188 126 214 104 196 74" opacity="0.5"></path>
+    <path d="M256 150 C236 112 270 90 248 56" opacity="0.85"></path>
+    <path d="M306 158 C324 126 298 104 316 74" opacity="0.5"></path>
   </g>
 
-  <!-- soufflé dome puffing over the rim -->
-  <path d="M 332 560
-           C 326 470 392 412 512 412
-           C 632 412 698 470 692 560 Z" fill="url(#souffle)"/>
-  <!-- dome highlight -->
-  <path d="M 380 472 C 420 438 470 428 512 428" fill="none" stroke="#ffe9b8" stroke-width="26" stroke-linecap="round" opacity="0.8"/>
+  <path d="M150 302 C150 190 200 150 256 150 C312 150 362 190 362 302 Z" fill="url(#dome)"></path>
+  <path d="M193 236 C218 196 248 180 274 178" fill="none" stroke="#ffe6b4" stroke-width="15" stroke-linecap="round" opacity="0.65"></path>
 
-  <!-- ramekin: fluted cup -->
-  <path d="M 320 560 L 704 560 L 688 800
-           C 686 826 664 844 638 844 L 386 844
-           C 360 844 338 826 336 800 Z" fill="url(#ramekin)"/>
-  <!-- rim lip -->
-  <rect x="300" y="536" width="424" height="48" rx="24" fill="#ffffff"/>
-  <!-- flutes -->
-  <g stroke="#b9c8e4" stroke-width="14" stroke-linecap="round" opacity="0.75">
-    <line x1="404" y1="612" x2="398" y2="800"/>
-    <line x1="476" y1="612" x2="474" y2="808"/>
-    <line x1="548" y1="612" x2="550" y2="808"/>
-    <line x1="620" y1="612" x2="626" y2="800"/>
+  <path d="M156 322 L356 322 L336 432 C332 456 316 460 300 460 L212 460 C196 460 180 456 176 432 Z" fill="url(#ramekin)"></path>
+  <rect x="134" y="284" width="244" height="42" rx="21" fill="#fbf3e4"></rect>
+  <g stroke="#d3bc93" stroke-width="9" stroke-linecap="round">
+    <line x1="204" y1="336" x2="199" y2="448"></line>
+    <line x1="256" y1="336" x2="256" y2="452"></line>
+    <line x1="308" y1="336" x2="313" y2="448"></line>
   </g>
 </svg>

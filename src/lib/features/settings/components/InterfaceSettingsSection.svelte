@@ -47,8 +47,9 @@
   } = $props();
 </script>
 
-<section class="surface-card flex flex-col gap-3.5">
+<section class="settings-group">
   <h3>{$t("settings_interface.title")}</h3>
+  <div class="settings-rows">
 
   <SettingsField
     label={$t("settings_interface.language")}
@@ -161,4 +162,5 @@
   {#if shortcutError}
     <StatusBanner message={shortcutError} variant="danger" />
   {/if}
+  </div>
 </section>

@@ -56,24 +56,29 @@
   }
 </script>
 
+{#if !isRecordingMeeting}
+  <button
+    onclick={onBack}
+    class="btn btn-ghost -ml-1.5 gap-1.5 self-start px-2.5 py-1 text-[13px]"
+  >
+    <ArrowLeft size={16} aria-hidden="true" />
+    {$t("meeting_header.back_to_history")}
+  </button>
+{/if}
+
 <div class="flex items-start justify-between gap-4 flex-wrap">
-  <div class="flex flex-col gap-1">
+  <div class="flex flex-col gap-[9px]">
     {#if isRecordingMeeting}
-      <span class="pill pill-danger inline-flex items-center gap-1.5">
+      <span class="inline-flex items-center gap-2 self-start rounded-full bg-danger/13 px-[13px] py-1.5 text-[12.5px] font-semibold text-danger-soft outline-1 outline-danger/28">
         <span class="recording-dot"></span> {$t("meeting_header.recording_badge")}
         {#if systemAudioStatus}
           {#if systemAudioStatus.active}
-            <span class="pill pill-accent">{$t("meeting_header.system_audio_active")}</span>
+            <span class="font-normal text-text-muted">· {$t("meeting_header.system_audio_active")}</span>
           {:else}
-            <span class="pill pill-muted" title={systemAudioStatus.reason ?? ""}>{$t("meeting_header.system_audio_unavailable")}</span>
+            <span class="font-normal text-text-muted" title={systemAudioStatus.reason ?? ""}>· {$t("meeting_header.system_audio_unavailable")}</span>
           {/if}
         {/if}
       </span>
-    {:else}
-      <button onclick={onBack} class="btn btn-ghost py-1 px-0 text-sm gap-1 mb-1">
-        <ArrowLeft size={16} />
-        {$t("meeting_header.back_to_history")}
-      </button>
     {/if}
 
     {#if isEditingTitle}
@@ -82,38 +87,48 @@
         bind:value={titleDraft}
         onblur={commitTitle}
         onkeydown={onTitleKeydown}
-        class="field-input font-heading text-xl font-bold"
+        class="field-input font-heading text-[23px] font-bold"
         aria-label={$t("meeting_header.rename_aria")}
       />
     {:else}
       <button
         onclick={startTitleEdit}
-        class="group flex items-center gap-2 text-left cursor-text"
+        class="group flex items-center gap-[9px] text-left cursor-text"
         aria-label={$t("meeting_header.rename_aria")}
       >
-        <h2>{meeting.title}</h2>
+        <h1 class="text-[23px] font-bold text-text-primary">{meeting.title}</h1>
         <Pencil
-          size={14}
+          size={15}
           class="text-text-muted opacity-0 transition-opacity group-hover:opacity-100"
           aria-hidden="true"
         />
       </button>
     {/if}
-    <div class="flex items-center gap-2 flex-wrap">
+    <div class="flex items-center gap-[9px] flex-wrap text-[12.5px] text-text-muted">
       {#if !isRecordingMeeting}
-        <span class="text-sm text-text-muted">{formatDate(meeting.started_at)}</span>
-        <span class="pill">{formatDuration(meeting.duration_seconds)}</span>
+        <span>{formatDate(meeting.started_at)}</span>
+        <span class="text-text-faint">·</span>
+        <span>{formatDuration(meeting.duration_seconds)}</span>
+        <span class="text-text-faint">·</span>
       {/if}
-      <span class="text-sm text-text-muted">{$t("meeting_header.segments_count", { values: { count: segmentCount } })}</span>
-      <span class="pill pill-muted">{sessionCount} {sessionCount === 1 ? $t("meeting_header.session_singular") : $t("meeting_header.session_plural")}</span>
-      <span class="pill pill-accent">{meeting.transcription_profile.engine_label}</span>
-      <span class="pill pill-muted">{meeting.transcription_profile.model_label}</span>
+      <span>{$t("meeting_header.segments_count", { values: { count: segmentCount } })}</span>
+      {#if sessionCount > 1}
+        <span class="text-text-faint">·</span>
+        <span>{sessionCount} {$t("meeting_header.session_plural")}</span>
+      {/if}
+      <span
+        class="ml-0.5 rounded-full bg-secondary/10 px-2 py-0.5 text-[11px] text-secondary outline-1 outline-secondary/20"
+        title={meeting.transcription_profile.engine_label}
+      >{meeting.transcription_profile.model_label}</span>
     </div>
     {#if meeting.participants.length > 0}
-      <div class="flex items-center gap-1.5 flex-wrap">
+      <div class="mt-px flex items-center gap-[7px] flex-wrap">
         <Users size={13} class="shrink-0 text-text-muted" aria-hidden="true" />
         {#each meeting.participants as participant (participant.name + (participant.email ?? ""))}
-          <span class="pill pill-muted" title={participant.email ?? ""}>
+          <span
+            class="rounded-full bg-surface-2 px-[9px] py-[2.5px] text-[11.5px] text-text-tertiary outline-1 outline-ghost-border"
+            title={participant.email ?? ""}
+          >
             {participant.name}{participant.is_organizer
               ? ` (${$t("calendar.organizer")})`
               : ""}{participant.is_current_user ? ` (${$t("calendar.you")})` : ""}
@@ -125,12 +140,16 @@
 
   <div class="flex gap-2 shrink-0">
     {#if isRecordingMeeting}
-      <button onclick={onStopRecording} disabled={isStopping} class="btn btn-danger gap-1.5">
+      <button
+        onclick={onStopRecording}
+        disabled={isStopping}
+        class="inline-flex cursor-pointer items-center gap-2 rounded-[11px] bg-danger px-4 py-[9px] text-[13.5px] font-semibold text-on-danger transition-colors hover:bg-danger/90 disabled:cursor-default disabled:opacity-60"
+      >
         {#if isStopping}
           <Spinner />
           {$t("home.stopping")}
         {:else}
-          <Square size={16} />
+          <Square size={13} fill="currentColor" aria-hidden="true" />
           {$t("meeting_header.stop_recording")}
         {/if}
       </button>

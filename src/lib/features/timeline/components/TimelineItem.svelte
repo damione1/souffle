@@ -25,41 +25,41 @@
   let confirmingDelete = $state(false);
 </script>
 
-<div class="group border-b border-ghost-border last:border-b-0">
-  <div class="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface-2/60 rounded-lg">
+<div class="group">
+  <div class="flex items-center gap-3 rounded-[11px] px-3 py-[11px] transition-colors hover:bg-surface-2">
     <button onclick={onOpen} class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
       <span
-        class={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-          item.kind === "meeting" ? "bg-accent/15 text-accent" : "bg-surface-3 text-text-muted"
+        class={`flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] ${
+          item.kind === "meeting" ? "bg-accent/13 text-accent" : "bg-surface-2 text-text-muted"
         }`}
         aria-hidden="true"
       >
         {#if item.kind === "meeting"}
-          <Users size={14} />
+          <Users size={15} />
         {:else}
-          <FileText size={14} />
+          <FileText size={15} />
         {/if}
       </span>
 
       <span class="min-w-0 flex-1">
-        <span class="block truncate text-sm text-text-primary">{item.title}</span>
+        <span class="block truncate text-[13.5px] text-text-secondary">{item.title}</span>
       </span>
 
-      <span class="flex shrink-0 items-center gap-2 text-xs text-text-muted">
+      <span class="flex shrink-0 items-center gap-[11px] text-text-muted">
         {#if item.hasSummary}
           <span
-            class={item.summaryIsStale ? "text-warning" : "text-accent"}
+            class={`flex ${item.summaryIsStale ? "text-warning" : "text-accent"}`}
             title={item.summaryIsStale ? $t("timeline.summary_stale") : $t("timeline.summary_ready")}
           >
-            <Sparkles size={13} aria-hidden="true" />
+            <Sparkles size={14} fill="currentColor" aria-hidden="true" />
           </span>
         {/if}
         {#if item.durationSeconds !== null}
-          <span>{formatDuration(item.durationSeconds)}</span>
+          <span class="font-mono text-[11.5px]">{formatDuration(item.durationSeconds)}</span>
         {/if}
-        <span class="tabular-nums">{time}</span>
+        <span class="font-mono text-[11.5px]">{time}</span>
         {#if item.kind === "meeting"}
-          <ChevronRight size={14} class="text-text-muted/60" aria-hidden="true" />
+          <ChevronRight size={15} aria-hidden="true" />
         {/if}
       </span>
     </button>
@@ -71,7 +71,7 @@
       {#if confirmingDelete}
         <button
           onclick={() => { confirmingDelete = false; onRemove(); }}
-          class="rounded px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-500/15"
+          class="rounded-md px-1.5 py-0.5 text-xs text-danger-soft hover:bg-danger/15"
         >
           {$t("timeline.confirm_delete")}
         </button>
@@ -79,7 +79,7 @@
         <button
           onclick={() => (confirmingDelete = true)}
           onblur={() => (confirmingDelete = false)}
-          class="cursor-pointer rounded p-1 text-text-muted hover:bg-surface-3 hover:text-red-400"
+          class="cursor-pointer rounded-md p-1 text-text-muted hover:bg-surface-3 hover:text-danger-soft"
           aria-label={$t("timeline.delete")}
         >
           <Trash2 size={14} aria-hidden="true" />

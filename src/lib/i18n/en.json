@@ -1,7 +1,8 @@
 {
   "settings": {
     "title": "Settings",
-    "no_model_selected": "No transcription model selected"
+    "no_model_selected": "No transcription model selected",
+    "done": "Done"
   },
   "settings_audio": {
     "title": "Audio",
@@ -94,7 +95,7 @@
   },
   "meeting_header": {
     "recording_badge": "Recording",
-    "back_to_history": "Back to history",
+    "back_to_history": "History",
     "segments_count": "{count} segments",
     "session_singular": "session",
     "session_plural": "sessions",
@@ -124,7 +125,7 @@
     "them": "Them"
   },
   "meeting_summary": {
-    "title": "Summary",
+    "title": "AI Summary",
     "recording_in_progress": "Recording in progress",
     "can_regenerate": "You can regenerate the summary once the recording is stopped.",
     "summary_outdated": "Summary outdated",
@@ -136,7 +137,10 @@
     "regenerate_summary": "Re-generate Summary",
     "generate_summary": "Generate Summary",
     "connect_ollama": "Connect Ollama in Settings to enable summaries.",
-    "no_compatible_model": "No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries."
+    "no_compatible_model": "No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries.",
+    "generate_hint": "Key points and action items, generated locally with Ollama",
+    "generate_cta": "Generate",
+    "local_badge": "local"
   },
   "meeting_view": {
     "loading": "Loading meeting...",
@@ -149,7 +153,8 @@
     "copy": "Copy",
     "yes": "Yes",
     "are_you_sure": "Are you sure?",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "toggle_theme": "Toggle light / dark"
   },
   "pipeline": {
     "error": "Transcription error",
@@ -203,13 +208,17 @@
     "dictate": "Dictate",
     "dictate_hint": "Set a shortcut in Settings",
     "meeting": "Meeting",
-    "meeting_hint": "Record & transcribe in one click",
+    "meeting_hint": "Live transcript · captures system audio",
     "live_dictation": "Dictating",
-    "live_meeting": "Meeting",
+    "live_meeting": "Live meeting",
     "stop": "Stop",
     "stopping": "Finishing…",
     "listening": "Listening…",
-    "search_placeholder": "Search everything…"
+    "search_placeholder": "Search transcripts and meetings",
+    "press": "Press",
+    "autopaste_hint": "Auto-pastes into your last app when you stop",
+    "live_transcript": "Live transcript",
+    "system_audio_active": "System audio active"
   },
   "permissions": {
     "title": "Grant permissions",

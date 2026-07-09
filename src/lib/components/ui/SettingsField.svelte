@@ -17,7 +17,7 @@
 </script>
 
 <div class="flex items-center justify-between gap-4" class:opacity-50={disabled}>
-  <div>
+  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
     {#if htmlFor}
       <label for={htmlFor} class="setting-label">{label}</label>
     {:else}

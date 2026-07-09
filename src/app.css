@@ -1,73 +1,73 @@
 @import "tailwindcss";
 
-/* ─── Self-hosted fonts ─── */
+/* ─── Self-hosted variable fonts ─── */
 @font-face {
-  font-family: "Manrope";
+  font-family: "Space Grotesk";
   font-style: normal;
-  font-weight: 600 800;
+  font-weight: 300 700;
   font-display: swap;
-  src: url("/fonts/manrope-var.woff2") format("woff2");
+  src: url("/fonts/space-grotesk-var.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Inter";
+  font-family: "Hanken Grotesk";
   font-style: normal;
-  font-weight: 400;
+  font-weight: 400 600;
   font-display: swap;
-  src: url("/fonts/inter-400.woff2") format("woff2");
+  src: url("/fonts/hanken-grotesk-var.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Inter";
+  font-family: "JetBrains Mono";
   font-style: normal;
-  font-weight: 500;
+  font-weight: 400 500;
   font-display: swap;
-  src: url("/fonts/inter-500.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Inter";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("/fonts/inter-600.woff2") format("woff2");
+  src: url("/fonts/jetbrains-mono-var.woff2") format("woff2");
 }
 
 /* ─── Design tokens (Tailwind v4 @theme) ───
-   Two-accent warm palette: clay (primary) + sage (secondary), over warm
-   neutral surfaces. Default theme is the warm dark charcoal; `.light` is
-   the warm cream variant. */
+   Warm amber palette over baked, toasted surfaces. Default theme is the
+   dark roast; `.light` is the cream variant. Surfaces map to the design's
+   window/card/input/chip/chip2 scale, text to its t1–t5 ramp. */
 @theme {
-  --color-canvas: #17120e;
-  --color-surface-1: #1f1813;
-  --color-surface-2: #271f18;
-  --color-surface-3: #322820;
-  --color-surface-4: #3e3228;
+  --color-canvas: #16110c;
+  --color-surface-1: #1e1811; /* card */
+  --color-surface-2: #261e15; /* chip */
+  --color-surface-3: #33291d; /* chip2 */
+  --color-surface-4: #423525;
+  --color-input: #150f09;
 
-  /* Clay / terracotta — the single brand accent. */
-  --color-accent: #d9805f;
-  /* Sage — muted secondary, also the "ready/success" hue. */
-  --color-sage: #8ba577;
+  /* Amber gold — the single brand accent. */
+  --color-accent: #e9ae55;
+  --color-accent-hover: #f2be6e;
+  /* Toasted apricot — secondary hue for meetings / "Them" speaker. */
+  --color-secondary: #d98c6a;
 
-  --color-text-primary: #f3ece2;
-  --color-text-secondary: #bcae9d;
-  --color-text-muted: #8c7f6f;
+  --color-text-primary: #f1e9dd; /* t1 */
+  --color-text-secondary: #e6dccb; /* t2 — body / transcript text */
+  --color-text-tertiary: #c2b39a; /* t3 */
+  --color-text-muted: #857761; /* t4 */
+  --color-text-faint: #5e5344; /* t5 */
 
-  --color-success: #8ba577;
+  --color-success: #e9ae55;
   --color-warning: #e0a458;
-  --color-danger: #d6705f;
+  --color-danger: #f2685a;
+  --color-danger-soft: #f28a78;
+  --color-danger-strong: #8a5148;
+  --color-on-danger: #2a0e09;
 
-  --color-ghost-border: rgba(228, 212, 190, 0.1);
-  --color-glass-bg: rgba(39, 31, 24, 0.72);
+  --color-ghost-border: rgba(235, 210, 170, 0.09);
+  --color-glass-bg: rgba(30, 24, 17, 0.72);
 
   /* Cards lift with a soft warm shadow in light mode; none in dark. */
   --shadow-card: none;
 
-  --font-family-heading: "Manrope", system-ui, sans-serif;
-  --font-family-body: "Inter", system-ui, sans-serif;
+  --font-heading: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --radius-default: 0.875rem;
-  --radius-card: 1.25rem;
+  --radius-default: 0.625rem;
+  --radius-card: 1rem;
   --radius-pill: 9999px;
 }
 
@@ -75,7 +75,7 @@
 :root,
 .dark {
   color-scheme: dark;
-  font-family: var(--font-family-body);
+  font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.5;
   font-weight: 400;
@@ -87,22 +87,29 @@
 
 .light {
   color-scheme: light;
-  --color-canvas: #f1ebe0;
-  --color-surface-1: #fdfaf4;
-  --color-surface-2: #f8f1e6;
-  --color-surface-3: #efe6d7;
-  --color-surface-4: #e4d8c5;
-  --color-accent: #bd5d3d;
-  --color-sage: #6f8a5c;
-  --color-text-primary: #2b241d;
-  --color-text-secondary: #5f554a;
-  --color-text-muted: #968a78;
-  --color-success: #6f8a5c;
+  --color-canvas: #fdf6e8;
+  --color-surface-1: #fffaf0;
+  --color-surface-2: #efe0c1;
+  --color-surface-3: #e5d1a3;
+  --color-surface-4: #d8c08a;
+  --color-input: #f4e8cf;
+  --color-accent: #b5791f;
+  --color-accent-hover: #9c6714;
+  --color-secondary: #a85a2e;
+  --color-text-primary: #2c1c0c;
+  --color-text-secondary: #4a3620;
+  --color-text-tertiary: #6b5638;
+  --color-text-muted: #8c7454;
+  --color-text-faint: #ab9573;
+  --color-success: #b5791f;
   --color-warning: #c5893f;
-  --color-danger: #c25a47;
-  --color-ghost-border: rgba(62, 46, 30, 0.08);
-  --color-glass-bg: rgba(253, 250, 244, 0.72);
-  --shadow-card: 0 1px 2px rgba(60, 46, 30, 0.04), 0 10px 28px -16px rgba(60, 46, 30, 0.16);
+  --color-danger: #b8503c;
+  --color-danger-soft: #c97a63;
+  --color-danger-strong: #9c4a3a;
+  --color-on-danger: #fff8ef;
+  --color-ghost-border: rgba(150, 115, 70, 0.12);
+  --color-glass-bg: rgba(255, 250, 240, 0.72);
+  --shadow-card: 0 1px 2px rgba(90, 62, 30, 0.04), 0 10px 28px -16px rgba(90, 62, 30, 0.16);
 }
 
 body {
@@ -119,9 +126,9 @@ body.pill-body {
 }
 
 h1, h2, h3, h4 {
-  font-family: var(--font-family-heading);
+  font-family: var(--font-heading);
   margin: 0;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 
 button,
@@ -137,18 +144,19 @@ img {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
 }
 
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-surface-4);
+  background: var(--color-surface-3);
   border-radius: var(--radius-pill);
 }
 
@@ -163,11 +171,11 @@ img {
 
 /* ─── Surface card ─── */
 .surface-card {
-  background: color-mix(in srgb, var(--color-surface-1) 92%, transparent);
+  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
   border-radius: var(--radius-card);
   outline: 1px solid var(--color-ghost-border);
   box-shadow: var(--shadow-card);
-  padding: 1.25rem;
+  padding: 1.125rem 1.25rem;
 }
 
 /* ─── Buttons ─── */
@@ -199,33 +207,36 @@ img {
 }
 
 .btn-primary {
-  background: var(--color-accent);
-  color: #fff;
-  outline: none;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+  font-weight: 600;
+  outline: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
 .btn-primary:hover {
-  background: color-mix(in srgb, var(--color-accent) 85%, white);
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .btn-danger {
   background: var(--color-danger);
-  color: #fff;
+  color: var(--color-on-danger);
+  font-weight: 600;
   outline: none;
 }
 
 .btn-danger:hover {
-  background: color-mix(in srgb, var(--color-danger) 85%, white);
+  background: color-mix(in srgb, var(--color-danger) 88%, white);
 }
 
 .btn-ghost {
   background: transparent;
   outline: none;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
 }
 
 .btn-ghost:hover {
-  background: var(--color-surface-3);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
 }
 
 .btn-icon {
@@ -246,9 +257,9 @@ img {
 }
 
 .btn-active {
-  background: var(--color-accent) !important;
-  color: #fff !important;
-  outline: none !important;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent) !important;
+  color: var(--color-accent) !important;
+  outline: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent) !important;
 }
 
 /* ─── Pills / Badges ─── */
@@ -260,8 +271,8 @@ img {
   border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
-  background: var(--color-surface-3);
-  color: var(--color-text-secondary);
+  background: var(--color-surface-2);
+  color: var(--color-text-tertiary);
   outline: 1px solid var(--color-ghost-border);
 }
 
@@ -276,13 +287,21 @@ img {
 }
 
 .pill-danger {
-  color: var(--color-danger);
+  color: var(--color-danger-soft);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
   outline-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
 }
 
 .pill-accent {
   color: var(--color-accent);
-  outline-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  outline-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.pill-secondary {
+  color: var(--color-secondary);
+  background: color-mix(in srgb, var(--color-secondary) 10%, transparent);
+  outline-color: color-mix(in srgb, var(--color-secondary) 20%, transparent);
 }
 
 .pill-muted {
@@ -298,20 +317,24 @@ img {
   border-radius: var(--radius-default);
   border: none;
   outline: 1px solid var(--color-ghost-border);
-  background: var(--color-surface-1);
-  color: var(--color-text-primary);
+  background: var(--color-input);
+  color: var(--color-text-secondary);
   font-size: 0.875rem;
   min-height: 2.5rem;
 }
 
+.field-input::placeholder {
+  color: var(--color-text-muted);
+}
+
 .field-input:focus,
 .field-select:focus {
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
 .field-select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23857761' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   padding-right: 2rem;
@@ -323,22 +346,22 @@ img {
   border-radius: var(--radius-default);
   border: none;
   outline: 1px solid var(--color-ghost-border);
-  background: var(--color-surface-1);
-  color: var(--color-text-primary);
+  background: var(--color-input);
+  color: var(--color-text-secondary);
   font-size: 0.875rem;
   text-align: right;
 }
 
 .field-number:focus {
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
 .field-label {
   display: block;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.15em;
   color: var(--color-text-muted);
   margin-bottom: 0.375rem;
 }
@@ -346,11 +369,10 @@ img {
 /* ─── Switch / Toggle ─── */
 .switch {
   position: relative;
-  width: 44px;
+  width: 42px;
   height: 24px;
   border-radius: var(--radius-pill);
   border: none;
-  outline: 1px solid var(--color-ghost-border);
   background: var(--color-surface-3);
   appearance: none;
   cursor: pointer;
@@ -366,8 +388,8 @@ img {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--color-text-secondary);
-  transition: transform 150ms ease, background 150ms ease;
+  background: #fff;
+  transition: transform 150ms ease;
 }
 
 .switch:checked {
@@ -375,8 +397,7 @@ img {
 }
 
 .switch:checked::after {
-  transform: translateX(20px);
-  background: #fff;
+  transform: translateX(18px);
 }
 
 /* ─── Status ─── */
@@ -392,16 +413,60 @@ img {
   background: var(--color-success);
 }
 
+/* Ready dot with the design's soft gold glow. */
+.ready-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  flex-shrink: 0;
+}
+
+/* ─── Settings groups: uppercase label above a card of divided rows ─── */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6875rem;
+}
+
+.settings-group > h3 {
+  padding: 0 2px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.settings-rows {
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
+  border-radius: var(--radius-card);
+  outline: 1px solid var(--color-ghost-border);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.settings-rows > * {
+  padding: 0.9375rem 1.125rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-ghost-border) 60%, transparent);
+}
+
+.settings-rows > :first-child {
+  border-top: none;
+}
+
 /* ─── Settings field typography ─── */
 .setting-label {
   display: block;
-  font-size: 0.9375rem;
-  font-weight: 500;
-  color: var(--color-text-primary);
+  font-size: 0.84375rem;
+  color: var(--color-text-secondary);
 }
 
 .setting-desc {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   color: var(--color-text-muted);
 }
 
@@ -459,11 +524,12 @@ img {
   justify-content: center;
   padding: 0.375rem 0.75rem;
   min-height: 2rem;
-  border-radius: var(--radius-default);
+  border-radius: 0.5rem;
   border: none;
   outline: 1px solid var(--color-ghost-border);
-  background: var(--color-surface-3);
-  color: var(--color-text-secondary);
+  background: var(--color-input);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
@@ -471,13 +537,13 @@ img {
 }
 
 .shortcut-button:hover {
-  background: var(--color-surface-4);
+  background: var(--color-surface-2);
 }
 
 .shortcut-button.is-recording {
-  background: var(--color-accent);
-  color: #fff;
-  outline: none;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent);
+  outline: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 
 /* ─── Spinner ─── */
@@ -485,18 +551,18 @@ img {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-top-color: #fff;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
   animation: spin 0.7s linear infinite;
 }
 
 /* ─── Recording dot ─── */
 .recording-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--color-danger);
-  animation: blink 1.2s ease-in-out infinite;
+  animation: pulse-soft 1.2s ease-in-out infinite;
 }
 
 /* ─── Animations ─── */
@@ -506,7 +572,17 @@ img {
 
 @keyframes blink {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  50% { opacity: 0; }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
 
 @keyframes recordPulse {

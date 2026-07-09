@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Trash2 } from "@lucide/svelte";
   import { t } from "svelte-i18n";
 
   let {
@@ -35,8 +36,13 @@
 {:else}
   <button
     onclick={() => (confirming = true)}
-    class={`btn btn-ghost ${variant === "danger" ? "text-danger" : ""}`}
+    class={`btn btn-ghost gap-[7px] px-2.5 py-1.5 text-[12.5px] ${
+      variant === "danger" ? "!text-danger-strong hover:!bg-danger/10" : ""
+    }`}
   >
+    {#if variant === "danger"}
+      <Trash2 size={14} aria-hidden="true" />
+    {/if}
     {label}
   </button>
 {/if}

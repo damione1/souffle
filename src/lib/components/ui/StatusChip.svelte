@@ -8,11 +8,13 @@
     operationState,
     downloadedBytes = 0,
     downloadTotalBytes = null,
+    modelLabel = "",
   }: {
     phase: TranscriptionRuntimePhase;
     operationState: TranscriptionModelOperationState;
     downloadedBytes?: number;
     downloadTotalBytes?: number | null;
+    modelLabel?: string;
   } = $props();
 
   const percent = $derived(
@@ -30,18 +32,21 @@
 </script>
 
 <span
-  class="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs text-text-secondary"
+  class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-[11px] py-[5px] text-xs text-text-tertiary outline-1 outline-ghost-border"
   role="status"
 >
-  <span
-    class={`h-1.5 w-1.5 rounded-full ${
-      status.tone === "ready"
-        ? "bg-sage"
-        : status.tone === "busy"
-          ? "animate-pulse bg-accent"
-          : "bg-warning"
-    }`}
-    aria-hidden="true"
-  ></span>
+  {#if status.tone === "ready"}
+    <span class="ready-dot" aria-hidden="true"></span>
+  {:else}
+    <span
+      class={`h-[7px] w-[7px] rounded-full ${
+        status.tone === "busy" ? "animate-pulse bg-accent" : "bg-warning"
+      }`}
+      aria-hidden="true"
+    ></span>
+  {/if}
   {$t(status.key)}{status.key === "status_chip.downloading" && percent !== null ? ` ${percent}%` : ""}
+  {#if status.tone === "ready" && modelLabel}
+    <span class="font-mono text-[11px] text-text-muted">{modelLabel}</span>
+  {/if}
 </span>

@@ -33,35 +33,44 @@
   const busy = $derived(operationState !== "idle");
 </script>
 
-<section class="surface-card flex flex-col gap-3.5">
-  <div class="flex items-center justify-between gap-2">
-    <h3>{$t("settings_model.title")}</h3>
-    <StatusChip
-      phase={runtimePhase}
-      operationState={operationState}
-      {downloadedBytes}
-      {downloadTotalBytes}
-    />
+<section class="settings-group">
+  <h3>{$t("settings_model.title")}</h3>
+  <div class="settings-rows">
+    <div class="flex items-center justify-between gap-4">
+      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span class="setting-label">{$t("settings_model.title")}</span>
+        <span class="setting-desc">{$t("settings_model.description")}</span>
+      </div>
+      <StatusChip
+        phase={runtimePhase}
+        operationState={operationState}
+        {downloadedBytes}
+        {downloadTotalBytes}
+      />
+    </div>
+
+    <div>
+      <select
+        value={selectedKey}
+        disabled={busy}
+        onchange={(event) => void onSelectModel((event.currentTarget as HTMLSelectElement).value)}
+        class="field-select"
+        aria-label={$t("settings_model.title")}
+      >
+        {#each options as option}
+          <option value={option.key}>{option.label}</option>
+        {/each}
+      </select>
+    </div>
+
+    {#if operationState === "downloading"}
+      <div>
+        <ProgressBar
+          value={downloadedBytes}
+          max={downloadTotalBytes && downloadTotalBytes > 0 ? downloadTotalBytes : 100}
+          label={downloadFile || $t("settings_model.downloading")}
+        />
+      </div>
+    {/if}
   </div>
-  <p class="text-text-secondary text-sm">{$t("settings_model.description")}</p>
-
-  <select
-    value={selectedKey}
-    disabled={busy}
-    onchange={(event) => void onSelectModel((event.currentTarget as HTMLSelectElement).value)}
-    class="field-select"
-    aria-label={$t("settings_model.title")}
-  >
-    {#each options as option}
-      <option value={option.key}>{option.label}</option>
-    {/each}
-  </select>
-
-  {#if operationState === "downloading"}
-    <ProgressBar
-      value={downloadedBytes}
-      max={downloadTotalBytes && downloadTotalBytes > 0 ? downloadTotalBytes : 100}
-      label={downloadFile || $t("settings_model.downloading")}
-    />
-  {/if}
 </section>

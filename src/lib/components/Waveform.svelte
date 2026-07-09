@@ -57,6 +57,17 @@
     const ctx = canvas?.getContext("2d");
     if (!ctx || !canvas) return;
 
+    // Resolve the themed accent color for the bars; refreshed periodically so
+    // a theme toggle mid-session recolors the waveform.
+    let accent = "#e9ae55";
+    function refreshAccent() {
+      if (!canvas) return;
+      const value = getComputedStyle(canvas).getPropertyValue("--color-accent").trim();
+      if (value) accent = value;
+    }
+    refreshAccent();
+    const accentTimer = setInterval(refreshAccent, 1000);
+
     function draw() {
       if (!ctx || !canvas) return;
       const { width, height } = canvas;
@@ -83,12 +94,12 @@
         const x = offsetX + i * (BAR_WIDTH + BAR_GAP);
         const y = (height - barHeight) / 2;
 
-        ctx.fillStyle = active
-          ? `rgba(78, 142, 255, ${0.4 + bars[i] * 0.6})`
-          : `rgba(78, 142, 255, ${0.15 + bars[i] * 0.2})`;
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = active ? 0.4 + bars[i] * 0.6 : 0.15 + bars[i] * 0.2;
         ctx.beginPath();
         ctx.roundRect(x, y, BAR_WIDTH, barHeight, 1.5);
         ctx.fill();
+        ctx.globalAlpha = 1;
       }
 
       animationId = requestAnimationFrame(draw);
@@ -110,6 +121,7 @@
 
     return () => {
       cancelAnimationFrame(animationId);
+      clearInterval(accentTimer);
       window.removeEventListener("resize", resize);
     };
   });
