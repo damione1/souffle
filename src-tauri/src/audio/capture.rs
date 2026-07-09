@@ -30,14 +30,80 @@ const MEETING_TICK: Duration = Duration::from_millis(5);
 /// polling keeps everything on this thread instead of a listener callback.
 const ROUTE_CHECK_TICKS: u32 = 400;
 
-/// Wake-up cadence during dictation sessions — only needed for mic health
-/// checks, so much coarser than the meeting tick.
-const DICTATION_TICK: Duration = Duration::from_millis(500);
+/// Wake-up cadence during dictation sessions: fast enough to feed the
+/// AudioLevel stream for the waveform (the mic health check keeps its own
+/// coarser MIC_CHECK_INTERVAL gate, so it does not run this often).
+const DICTATION_TICK: Duration = LEVEL_EMIT_INTERVAL;
 
 /// How often an active session verifies its input device is still alive and
 /// still the system default (closing the laptop lid switches the default
 /// input to a headset or webcam mic — the stream must follow it).
 const MIC_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Ceiling on how often AudioLevel is pushed to the frontend. Meeting mode's
+/// 5ms tick would otherwise emit at ~200Hz; the dictation tick matches this
+/// interval so both modes stream levels at ~15Hz.
+const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(66);
+
+/// Gates AudioLevel emission to at most once per `LEVEL_EMIT_INTERVAL`.
+struct AudioLevelThrottle {
+    last_emit: Option<Instant>,
+}
+
+impl AudioLevelThrottle {
+    fn new() -> Self {
+        Self { last_emit: None }
+    }
+
+    /// Whether enough time has passed since the last emit to send another one.
+    /// Always true the first time (or after `reset`).
+    fn should_emit(&mut self, now: Instant) -> bool {
+        if let Some(last) = self.last_emit
+            && now.duration_since(last) < LEVEL_EMIT_INTERVAL
+        {
+            return false;
+        }
+        self.last_emit = Some(now);
+        true
+    }
+
+    /// Forget the last emit so the next session's first tick emits immediately
+    /// instead of waiting out the interval left over from a previous session.
+    fn reset(&mut self) {
+        self.last_emit = None;
+    }
+}
+
+#[cfg(test)]
+mod level_throttle_tests {
+    use super::*;
+
+    #[test]
+    fn emits_immediately_then_suppresses_within_interval() {
+        let mut throttle = AudioLevelThrottle::new();
+        let t0 = Instant::now();
+        assert!(throttle.should_emit(t0));
+        assert!(!throttle.should_emit(t0 + Duration::from_millis(30)));
+        assert!(!throttle.should_emit(t0 + Duration::from_millis(65)));
+    }
+
+    #[test]
+    fn emits_again_once_interval_elapses() {
+        let mut throttle = AudioLevelThrottle::new();
+        let t0 = Instant::now();
+        assert!(throttle.should_emit(t0));
+        assert!(throttle.should_emit(t0 + Duration::from_millis(66)));
+    }
+
+    #[test]
+    fn reset_allows_immediate_emit() {
+        let mut throttle = AudioLevelThrottle::new();
+        let t0 = Instant::now();
+        assert!(throttle.should_emit(t0));
+        throttle.reset();
+        assert!(throttle.should_emit(t0 + Duration::from_millis(1)));
+    }
+}
 
 /// Everything needed to rebuild the capture leg mid-session when the input
 /// device fails or the default input changes.
@@ -179,6 +245,8 @@ pub struct AudioCapture {
     /// disappeared); the next mic health check rebuilds the capture leg.
     stream_failed: Arc<std::sync::atomic::AtomicBool>,
     last_mic_check: Instant,
+    /// Throttles pushed AudioLevel events while a session is active.
+    level_throttle: AudioLevelThrottle,
 }
 
 impl AudioCapture {
@@ -212,6 +280,7 @@ impl AudioCapture {
                     mic_device_name: None,
                     stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     last_mic_check: Instant::now(),
+                    level_throttle: AudioLevelThrottle::new(),
                 };
 
                 // Block on commands while idle; during sessions, wake
@@ -248,6 +317,7 @@ impl AudioCapture {
                                     capture.last_mic_check = Instant::now();
                                     capture.check_mic_health();
                                 }
+                                capture.emit_throttled_audio_level();
                                 continue;
                             }
                             Err(RecvTimeoutError::Disconnected) => break,
@@ -642,6 +712,27 @@ impl AudioCapture {
         }
     }
 
+    /// Push the current RMS level to the frontend, respecting `level_throttle`.
+    /// Called from the active-session timeout branch, so it only ever runs
+    /// while a session is running.
+    fn emit_throttled_audio_level(&mut self) {
+        if !self.level_throttle.should_emit(Instant::now()) {
+            return;
+        }
+        let level = f32::from_bits(self.audio_rms.load(Ordering::Relaxed));
+        self.emit_audio_level(level);
+    }
+
+    /// Emit an AudioLevel event unconditionally (bypassing the throttle) —
+    /// used for the final zero-level emit when a session ends, so the
+    /// waveform decays instead of freezing on its last value.
+    fn emit_audio_level(&self, level: f32) {
+        use tauri_specta::Event;
+        if let Some(app) = &self.app {
+            let _ = crate::app_events::AudioLevel { level }.emit(app);
+        }
+    }
+
     /// Update the shared RMS level (waveform) from one or two legs combined.
     fn store_meeting_rms(&self, a: &[f32], b: &[f32]) {
         let n = a.len() + b.len();
@@ -703,6 +794,8 @@ impl AudioCapture {
         {
             self.meeting.take();
         }
+        self.emit_audio_level(0.0);
+        self.level_throttle.reset();
     }
 
     fn stop(&mut self) {
@@ -717,6 +810,8 @@ impl AudioCapture {
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
         self.active_params = None;
         self.mic_device_name = None;
+        self.emit_audio_level(0.0);
+        self.level_throttle.reset();
 
         // Dropping the stream is synchronous — after this, no callback runs.
         let had_stream = self.stream.take().is_some();

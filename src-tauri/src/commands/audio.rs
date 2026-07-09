@@ -20,15 +20,6 @@ pub fn select_audio_device(state: State<'_, AppState>, device_name: String) -> R
         .map_err(|e| format!("Failed to send device selection: {e}"))
 }
 
-/// Get the current audio input level (RMS, 0.0–1.0) for waveform visualization
-#[tauri::command]
-#[specta::specta]
-pub fn get_audio_level(state: State<'_, AppState>) -> Result<f32, String> {
-    Ok(f32::from_bits(
-        state.audio_rms.load(std::sync::atomic::Ordering::Relaxed),
-    ))
-}
-
 /// Whether system-audio capture (Core Audio process taps) is available on this OS
 #[tauri::command]
 #[specta::specta]
