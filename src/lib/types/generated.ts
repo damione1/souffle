@@ -133,11 +133,11 @@ async testTranscribeWav() : Promise<Result<string, string>> {
 }
 },
 /**
- * Copy text to clipboard and simulate Cmd+V paste
+ * Insert dictation text into the active app (clipboard paste or simulated typing).
  */
-async pasteText(text: string, delayMs: number) : Promise<Result<null, string>> {
+async pasteText(text: string, delayMs: number, method: PasteMethod) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("paste_text", { text, delayMs }) };
+    return { status: "ok", data: await TAURI_INVOKE("paste_text", { text, delayMs, method }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -623,6 +623,57 @@ async testMcpConnection() : Promise<Result<string, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Return the last N lines from the active rolling log file.
+ */
+async getLogTail(maxLines: number) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_log_tail", { maxLines }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Paths and runtime snapshot for the copy-diagnostics action.
+ */
+async getDiagnosticsBundle() : Promise<Result<DiagnosticsBundle, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_diagnostics_bundle") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Full diagnostics text (bundle + recent log tail) for clipboard copy.
+ */
+async getDiagnosticsText() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_diagnostics_text") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Check GitHub releases for a newer version. Network errors are returned in
+ * the result payload so the UI can show a soft failure.
+ */
+async checkForUpdates() : Promise<Result<UpdateCheckResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_for_updates") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * App version string from the running binary.
+ */
+async getAppVersion() : Promise<string> {
+    return await TAURI_INVOKE("get_app_version");
 }
 }
 
@@ -669,7 +720,15 @@ upcomingMeeting: "upcoming-meeting"
 
 /** user-defined types **/
 
-export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; 
+export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; 
+/**
+ * How dictation text is inserted: clipboard Cmd+V or simulated keystrokes.
+ */
+paste_method: PasteMethod; ollama_url: string; ollama_model: string; debug_transcription: boolean; 
+/**
+ * Global tracing verbosity for the `souffle` crate.
+ */
+log_level: LogLevel; audio_device: string | null; 
 /**
  * Preferred microphone while the lid is closed with an external display
  * attached (clamshell mode). `None` means just follow whatever macOS
@@ -739,7 +798,11 @@ dictation_polish_template_id: string;
 /**
  * User-editable polish prompt templates.
  */
-dictation_polish_templates: DictationPolishTemplate[] }
+dictation_polish_templates: DictationPolishTemplate[]; 
+/**
+ * App version the user has acknowledged (What's New / post-update dialog).
+ */
+last_seen_version: string }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
@@ -806,6 +869,7 @@ export type CalendarMeetingNudgeKind =
  * Settings > Data stats line: database size and row counts.
  */
 export type DataStats = { db_size_bytes: number; meeting_count: number; dictation_count: number }
+export type DiagnosticsBundle = { app_version: string; data_dir: string; log_dir: string; log_file: string | null; db_path: string; models_dir: string; machine_state: string; log_level: string; debug_transcription: boolean }
 /**
  * A dictation history entry
  */
@@ -844,6 +908,7 @@ export type HealthStatus = "healthy" |
  * No frame has been processed for several seconds while audio is queued.
  */
 "stalled"
+export type LogLevel = "error" | "warn" | "info" | "debug" | "trace"
 export type McpSetupInfo = { binary_path: string; exists: boolean; claude_desktop_snippet: string; claude_code_command: string }
 /**
  * Calendar context passed by the frontend when starting a meeting from a
@@ -916,6 +981,7 @@ calendar_event_id: string | null;
 participants: MeetingParticipant[] }
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
+export type PasteMethod = "clipboard" | "type"
 export type PermState = "granted" | "denied" | 
 /**
  * Not yet probed — the user hasn't triggered this one (probing would
@@ -1040,6 +1106,7 @@ speaker?: Speaker | null }
  * banner (notification clicks are not reliably delivered on macOS).
  */
 export type UpcomingMeeting = { event: CalendarEvent; starts_in_seconds: number; kind?: CalendarMeetingNudgeKind }
+export type UpdateCheckResult = { current_version: string; latest_version: string | null; update_available: boolean; release_notes: string | null; release_url: string | null; check_error: string | null }
 
 /** tauri-specta globals **/
 

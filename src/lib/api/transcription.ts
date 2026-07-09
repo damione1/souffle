@@ -4,6 +4,7 @@ import type {
   AppStateMachine,
   DictationEntry,
   DownloadProgress,
+  PasteMethod,
   TranscriptionCatalog,
   TranscriptionProfileSelection,
   TranscriptionRuntimeStatus,
@@ -65,8 +66,12 @@ export async function clearDictationHistory(): Promise<void> {
   await unwrap(commands.clearDictationHistory());
 }
 
-export async function pasteText(text: string, delayMs: number): Promise<void> {
-  await unwrap(commands.pasteText(text, delayMs));
+export async function pasteText(
+  text: string,
+  delayMs: number,
+  method: PasteMethod = "clipboard",
+): Promise<void> {
+  await unwrap(commands.pasteText(text, delayMs, method));
 }
 
 export async function getMachineState(): Promise<AppStateMachine> {

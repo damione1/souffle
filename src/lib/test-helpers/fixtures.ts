@@ -182,9 +182,11 @@ export const mockSettings: AppSettings = {
   locale: "",
   auto_paste: false,
   paste_delay_ms: 100,
+  paste_method: "clipboard",
   ollama_url: "http://localhost:11434",
   ollama_model: "",
   debug_transcription: false,
+  log_level: "info",
   audio_device: null,
   clamshell_audio_device: null,
   transcription_engine_id: "kyutai",
@@ -212,6 +214,7 @@ export const mockSettings: AppSettings = {
     { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
   ],
+  last_seen_version: "",
 }
 
 export const mockShortcuts: ShortcutSettings = {

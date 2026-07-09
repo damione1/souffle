@@ -20,6 +20,7 @@ import {
   listAudioDevices,
   selectAudioDevice,
 } from './settings';
+import { mockSettings } from '../test-helpers/fixtures';
 
 describe('settings API', () => {
   beforeEach(() => {
@@ -27,18 +28,17 @@ describe('settings API', () => {
   });
 
   it('getSettings returns settings object', async () => {
-    const settings = { theme: 'dark', locale: '', auto_paste: false, paste_delay_ms: 100, ollama_url: '', ollama_model: '', debug_transcription: false, audio_device: null, transcription_engine_id: 'kyutai', transcription_model_id: 'stt-1b', transcription_backend_id: 'candle' };
-    mockInvoke.mockResolvedValue(settings);
+    mockInvoke.mockResolvedValue(mockSettings);
 
     const result = await getSettings();
 
     expect(mockInvoke).toHaveBeenCalledWith('get_settings', expect.any(Object), undefined);
-    expect(result).toEqual(settings);
+    expect(result).toEqual(mockSettings);
   });
 
   it('saveSettings passes settings object', async () => {
     mockInvoke.mockResolvedValue(null);
-    const settings = { theme: 'light' as const, locale: '', auto_paste: true, paste_delay_ms: 200, ollama_url: 'http://localhost:11434', ollama_model: 'llama3', debug_transcription: false, audio_device: null, clamshell_audio_device: null, transcription_engine_id: 'kyutai', transcription_model_id: 'stt-1b', transcription_backend_id: 'candle', vad_enabled: true, filler_removal: true, stutter_collapse: false, dictionary_correction: true, capture_system_audio: true, calendar_integration_enabled: false, calendar_selected_ids: [], calendar_reminder_minutes: 2, calendar_autostart_enabled: true, feedback_sounds_enabled: true, feedback_sounds_volume: 70, model_unload_timeout_minutes: 0, meeting_autostop_enabled: true, meeting_autostop_minutes: 10, meeting_max_duration_minutes: 240, dictation_polish_enabled: false, dictation_polish_template_id: 'email', dictation_polish_templates: [{ id: 'email', label: 'Email', prompt: 'Rewrite.' }] };
+    const settings = { ...mockSettings, theme: 'light' as const, auto_paste: true, paste_delay_ms: 200, ollama_model: 'llama3' };
 
     await saveSettings(settings);
 

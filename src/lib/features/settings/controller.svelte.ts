@@ -368,10 +368,24 @@ export function createSettingsController() {
     });
   }
 
+  function onPasteMethodChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value as import("../../types").PasteMethod;
+    void persistSettings((settings) => {
+      settings.paste_method = value;
+    });
+  }
+
   function onDebugTranscriptionChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
       settings.debug_transcription = checked;
+    });
+  }
+
+  function onLogLevelChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value as import("../../types").LogLevel;
+    void persistSettings((settings) => {
+      settings.log_level = value;
     });
   }
 
@@ -691,7 +705,9 @@ export function createSettingsController() {
     onDictationPolishTemplateChange,
     onDictationPolishPromptChange,
     onPasteDelayChange,
+    onPasteMethodChange,
     onDebugTranscriptionChange,
+    onLogLevelChange,
     onOllamaUrlChange,
     onOllamaModelChange,
     get systemAudioSupported() { return systemAudioSupported; },

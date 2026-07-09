@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getAppState } from './app.svelte';
+import { mockSettings } from '../test-helpers/fixtures';
 
 describe('app store', () => {
   it('has correct initial state defaults', () => {
@@ -36,38 +37,17 @@ describe('app store', () => {
   it('settings setter updates correctly', () => {
     const state = getAppState();
     const newSettings = {
+      ...mockSettings,
       theme: 'light' as const,
       locale: 'fr',
       auto_paste: true,
       paste_delay_ms: 200,
-      ollama_url: 'http://localhost:11434',
       ollama_model: 'llama3',
       debug_transcription: true,
       audio_device: 'mic-1',
-      clamshell_audio_device: null,
       transcription_engine_id: 'whisper',
       transcription_model_id: 'whisper-base',
       transcription_backend_id: 'candle',
-      vad_enabled: true,
-      filler_removal: true,
-      stutter_collapse: false,
-      dictionary_correction: true,
-      capture_system_audio: true,
-      calendar_integration_enabled: false,
-      calendar_selected_ids: [],
-      calendar_reminder_minutes: 2,
-      calendar_autostart_enabled: true,
-      feedback_sounds_enabled: true,
-      feedback_sounds_volume: 70,
-      model_unload_timeout_minutes: 0,
-      meeting_autostop_enabled: true,
-      meeting_autostop_minutes: 10,
-      meeting_max_duration_minutes: 240,
-      dictation_polish_enabled: false,
-      dictation_polish_template_id: "email",
-      dictation_polish_templates: [
-        { id: "email", label: "Professional email", prompt: "Rewrite as email." },
-      ],
     };
     state.settings = newSettings;
     expect(state.settings.theme).toBe('light');

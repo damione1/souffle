@@ -77,6 +77,10 @@
     "theme_system": "System",
     "auto_paste": "Auto-paste after dictation",
     "auto_paste_desc": "Automatically pastes the transcript when you stop recording.",
+    "paste_method": "Paste method",
+    "paste_method_desc": "Use simulated typing if an app rejects synthetic ⌘V (terminals, secure fields).",
+    "paste_method_clipboard": "Clipboard (⌘V)",
+    "paste_method_type": "Simulated typing",
     "paste_delay": "Paste delay (ms)",
     "paste_delay_desc": "Wait time before pasting. Increase if the text lands in the wrong app.",
     "toggle_recording": "Toggle recording",
@@ -120,9 +124,21 @@
   },
   "settings_diagnostics": {
     "title": "Diagnostics",
+    "log_level": "Log level",
+    "log_level_desc": "How much detail Soufflé writes to the log file.",
+    "log_level_error": "Error",
+    "log_level_warn": "Warning",
+    "log_level_info": "Info",
+    "log_level_debug": "Debug",
+    "log_level_trace": "Trace",
     "debug_logs": "Detailed transcription logs",
     "debug_logs_desc": "Log extra details about speech recognition for troubleshooting.",
-    "debug_logs_aria": "Verbose transcription debug logs"
+    "debug_logs_aria": "Verbose transcription debug logs",
+    "log_viewer": "Live log",
+    "log_viewer_desc": "Tail of the current log file, refreshed every few seconds.",
+    "log_empty": "No log output yet.",
+    "copy_diagnostics": "Copy diagnostics",
+    "copying": "Copying…"
   },
   "settings_data": {
     "title": "Data",
@@ -155,7 +171,18 @@
     "summaries": "Summaries",
     "not_configured": "Not configured",
     "privacy": "Privacy",
-    "privacy_value": "Everything runs locally."
+    "privacy_value": "Everything runs locally.",
+    "updates": "Updates",
+    "check_updates": "Check for updates",
+    "checking": "Checking…",
+    "up_to_date": "You're on the latest release.",
+    "update_available": "Version {version} is available.",
+    "download_update": "Download on GitHub"
+  },
+  "whats_new": {
+    "title": "What's New",
+    "subtitle": "Soufflé was updated to v{version}.",
+    "got_it": "Got it"
   },
   "meeting_header": {
     "recording_badge": "Recording",
