@@ -153,6 +153,27 @@ export async function runStartupModelFlow(app: AppState): Promise<void> {
   }
 }
 
+// Indirection so TypeScript re-reads the getter after the `await` below
+// instead of reusing the "load_required" narrowing from the earlier check.
+function currentPhase(app: AppState): AppState["transcriptionRuntimePhase"] {
+  return app.transcriptionRuntimePhase;
+}
+
+/** Load the model on demand if it's sitting in "load_required" (e.g. after
+ * an idle-timeout unload), then report whether it's ready to record. A
+ * no-op success when already ready, and a no-op failure when nothing is
+ * downloaded yet (the caller should send the user to onboarding instead). */
+export async function ensureModelLoaded(
+  app: AppState,
+  catalog: TranscriptionCatalog | null,
+  setStatusMessage: (message: string) => void,
+): Promise<boolean> {
+  if (currentPhase(app) === "ready") return true;
+  if (currentPhase(app) !== "load_required") return false;
+  await startTranscriptionModelLoad(app, catalog, setStatusMessage);
+  return currentPhase(app) === "ready";
+}
+
 export async function startTranscriptionModelLoad(
   app: AppState,
   catalog: TranscriptionCatalog | null,

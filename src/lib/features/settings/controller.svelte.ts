@@ -376,6 +376,14 @@ export function createSettingsController() {
     });
   }
 
+  function onModelUnloadTimeoutChange(event: Event) {
+    const value = parseInt((event.target as HTMLSelectElement).value, 10);
+    if (!Number.isFinite(value)) return;
+    void persistSettings((settings) => {
+      settings.model_unload_timeout_minutes = value;
+    });
+  }
+
   /** Populate the calendar picker without prompting: only fetch calendars
    * when the integration is on (which implies access was granted). */
   async function loadCalendars() {
@@ -587,6 +595,7 @@ export function createSettingsController() {
     onOllamaModelChange,
     get systemAudioSupported() { return systemAudioSupported; },
     onCaptureSystemAudioChange,
+    onModelUnloadTimeoutChange,
     onVadEnabledChange,
     onFillerRemovalChange,
     onStutterCollapseChange,

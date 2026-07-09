@@ -65,6 +65,7 @@ const defaultSettings: AppSettings = {
   calendar_integration_enabled: false,
   calendar_selected_ids: [],
   calendar_reminder_minutes: 2,
+  model_unload_timeout_minutes: 0,
 }
 
 const fakeDevices: AudioDeviceInfo[] = [

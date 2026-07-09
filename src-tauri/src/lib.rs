@@ -277,6 +277,17 @@ pub fn run() {
                 tracing::warn!("Failed to register shortcuts on startup: {e}");
             }
 
+            match settings::AppSettings::load(&state.db) {
+                Ok(app_settings) => {
+                    state
+                        .engine_actor
+                        .set_unload_timeout(app_settings.model_unload_timeout_minutes);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load settings on startup: {e}");
+                }
+            }
+
             tray::setup_tray(app.handle())?;
             calendar::scheduler::spawn(app.handle().clone());
             info!("Souffle started");

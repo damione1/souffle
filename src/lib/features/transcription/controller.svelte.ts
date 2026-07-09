@@ -11,7 +11,7 @@ import { createTimelineController } from "../timeline/controller.svelte";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { formatSelectedTranscriptionLabel } from "./catalog";
-import { refreshTranscriptionRuntimeStatus } from "./runtime";
+import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
 
 /** Persist a finished dictation and surface it in the timeline. */
 async function saveToHistory(text: string) {
@@ -123,11 +123,20 @@ function createTranscriptionControllerInstance() {
       return;
     }
 
-    if (app.transcriptionRuntimePhase !== "ready") {
-      statusMessage = app.transcriptionRuntimePhase === "download_required"
-        ? "Download and load the model before starting dictation."
-        : "Load the model before starting dictation.";
+    if (app.transcriptionRuntimePhase === "download_required") {
+      statusMessage = "Download and load the model before starting dictation.";
       return;
+    }
+    if (app.transcriptionRuntimePhase !== "ready") {
+      // Model was unloaded (e.g. the idle timeout freed it); reload through
+      // the normal load flow before recording instead of leaving the user
+      // stuck with a disabled button.
+      statusMessage = "";
+      const ready = await ensureModelLoaded(app, catalog, (message) => { statusMessage = message; });
+      if (!ready) {
+        if (!statusMessage) statusMessage = "Load the model before starting dictation.";
+        return;
+      }
     }
 
     transcript = "";

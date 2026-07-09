@@ -15,6 +15,7 @@ import { getAppState } from "../../stores/app.svelte";
 import type { MeetingCalendarContext, MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
+import { ensureModelLoaded } from "../transcription/runtime";
 import { createLiveTranscript } from "./live-transcript.svelte";
 
 function defaultMeetingTitle(): string {
@@ -61,12 +62,15 @@ function createMeetingControllerInstance() {
   // machine reports "stopping".
   let stopRequested = $state(false);
   let isStopping = $derived(stopRequested || app.machineState.state === "stopping");
+  // "load_required" stays resumable: resumeRecording reloads the model on
+  // demand, same as a fresh start after an idle unload.
   let canResumeRecording = $derived(
     Boolean(meeting?.id)
     && !isRecordingMeeting
     && !isLoadingMeeting
     && !isSummarizing
-    && app.transcriptionRuntimePhase === "ready",
+    && (app.transcriptionRuntimePhase === "ready"
+      || app.transcriptionRuntimePhase === "load_required"),
   );
 
   async function mount() {
@@ -166,6 +170,16 @@ function createMeetingControllerInstance() {
     title?: string;
     calendar?: MeetingCalendarContext;
   }) {
+    if (app.transcriptionRuntimePhase !== "ready") {
+      // Model may have been unloaded by the idle timeout; reload through the
+      // normal load flow before recording rather than failing on start.
+      statusMessage = "";
+      const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { statusMessage = message; });
+      if (!ready) {
+        if (!statusMessage) statusMessage = "Load the model before starting a meeting.";
+        return;
+      }
+    }
     try {
       const title = options?.title?.trim() || defaultMeetingTitle();
       const calendar = options?.calendar ?? null;
@@ -220,6 +234,8 @@ function createMeetingControllerInstance() {
     if (!meeting || !meeting.id) return;
 
     try {
+      const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { statusMessage = message; });
+      if (!ready) return;
       liveTranscript.reset();
       liveMeetingSegments = [];
       statusMessage = "";

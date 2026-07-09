@@ -25,6 +25,7 @@ const CAPTURE_SYSTEM_AUDIO_KEY: &str = "capture_system_audio";
 const CALENDAR_INTEGRATION_ENABLED_KEY: &str = "calendar_integration_enabled";
 const CALENDAR_SELECTED_IDS_KEY: &str = "calendar_selected_ids";
 const CALENDAR_REMINDER_MINUTES_KEY: &str = "calendar_reminder_minutes";
+const MODEL_UNLOAD_TIMEOUT_MINUTES_KEY: &str = "model_unload_timeout_minutes";
 const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
@@ -65,7 +66,15 @@ pub struct AppSettings {
     pub calendar_selected_ids: Vec<String>,
     /// How long before an event the "start transcription?" reminder fires.
     pub calendar_reminder_minutes: u32,
+    /// Unload the transcription model after this many idle minutes to
+    /// reclaim RAM; 0 means never unload. The next recording reloads it
+    /// through the normal load flow.
+    pub model_unload_timeout_minutes: u32,
 }
+
+/// Allowed values for `model_unload_timeout_minutes`: 0 (never) plus the
+/// options offered in the settings UI.
+const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -89,6 +98,7 @@ impl Default for AppSettings {
             calendar_integration_enabled: false,
             calendar_selected_ids: Vec::new(),
             calendar_reminder_minutes: 2,
+            model_unload_timeout_minutes: 0,
         }
     }
 }
@@ -187,6 +197,11 @@ impl AppSettings {
         {
             settings.calendar_reminder_minutes = calendar_reminder_minutes;
         }
+        if let Some(model_unload_timeout_minutes) =
+            read_json_setting::<u32>(db, MODEL_UNLOAD_TIMEOUT_MINUTES_KEY)?
+        {
+            settings.model_unload_timeout_minutes = model_unload_timeout_minutes;
+        }
 
         Ok(settings.sanitized())
     }
@@ -276,6 +291,10 @@ impl AppSettings {
             normalized.calendar_reminder_minutes = Self::default().calendar_reminder_minutes;
         }
 
+        if !ALLOWED_UNLOAD_TIMEOUT_MINUTES.contains(&normalized.model_unload_timeout_minutes) {
+            normalized.model_unload_timeout_minutes = Self::default().model_unload_timeout_minutes;
+        }
+
         normalized
     }
 
@@ -331,6 +350,11 @@ impl AppSettings {
             db,
             CALENDAR_REMINDER_MINUTES_KEY,
             &normalized.calendar_reminder_minutes,
+        )?;
+        write_json_setting(
+            db,
+            MODEL_UNLOAD_TIMEOUT_MINUTES_KEY,
+            &normalized.model_unload_timeout_minutes,
         )?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
@@ -456,6 +480,7 @@ mod tests {
             calendar_integration_enabled: true,
             calendar_selected_ids: vec!["cal-1".into(), "cal-2".into()],
             calendar_reminder_minutes: 5,
+            model_unload_timeout_minutes: 15,
         };
 
         settings.save(&db).expect("save settings");
@@ -569,6 +594,24 @@ mod tests {
             .expect("save minutes");
         let settings = AppSettings::load(&db).expect("load settings");
         assert_eq!(settings.calendar_reminder_minutes, 2);
+    }
+
+    #[test]
+    fn model_unload_timeout_minutes_rejects_unlisted_values() {
+        let (db, _dir) = test_db();
+        db.set_setting("model_unload_timeout_minutes", "7")
+            .expect("save minutes");
+        let settings = AppSettings::load(&db).expect("load settings");
+        assert_eq!(settings.model_unload_timeout_minutes, 0);
+
+        for minutes in [0, 5, 15, 60] {
+            let s = AppSettings {
+                model_unload_timeout_minutes: minutes,
+                ..AppSettings::default()
+            };
+            let clean = s.sanitize_for_save().unwrap();
+            assert_eq!(clean.model_unload_timeout_minutes, minutes);
+        }
     }
 
     #[test]

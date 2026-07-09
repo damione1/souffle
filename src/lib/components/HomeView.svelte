@@ -31,7 +31,10 @@
     recordingMode === "idle"
       && (Boolean(meeting.meeting) || meeting.isLoadingMeeting || Boolean(app.currentMeetingId)),
   );
-  const modelReady = $derived(app.transcriptionRuntimePhase === "ready");
+  // "load_required" (e.g. after the idle-unload timeout freed the model)
+  // still allows starting: the start flow reloads it on demand. Only
+  // "download_required" (nothing on disk yet) truly blocks starting.
+  const modelReady = $derived(app.transcriptionRuntimePhase !== "download_required");
 
   onMount(() => {
     void timeline.refresh();

@@ -188,7 +188,13 @@
   "settings_model": {
     "title": "Transcription model",
     "description": "Pick a model — it downloads and loads automatically. Everything runs on this Mac.",
-    "downloading": "Downloading…"
+    "downloading": "Downloading…",
+    "unload_timeout_label": "Unload model when idle",
+    "unload_timeout_desc": "Frees memory after a period of no transcription activity. Reloads automatically the next time you start recording.",
+    "unload_timeout_never": "Never",
+    "unload_timeout_5min": "After 5 minutes",
+    "unload_timeout_15min": "After 15 minutes",
+    "unload_timeout_1hour": "After 1 hour"
   },
   "settings_advanced": {
     "title": "Advanced",

@@ -191,6 +191,21 @@ impl AppState {
             .ok_or_else(|| "App handle not set".to_string())
     }
 
+    /// The engine actor unloaded an idle model to reclaim memory. Mirrors the
+    /// Unload/UnloadComplete pair already used when swapping models, so the
+    /// state machine (and therefore the frontend) never disagrees with the
+    /// actor about whether a model is actually loaded. A no-op (logged) if
+    /// the machine isn't in `Ready` (e.g. a recording start raced the timer).
+    pub fn unload_idle_model(&self) {
+        if let Err(e) = self.apply_transition(StateAction::Unload { next_profile: None }) {
+            warn!("Idle model unload: failed to start transition: {e}");
+            return;
+        }
+        if let Err(e) = self.apply_transition(StateAction::UnloadComplete) {
+            warn!("Idle model unload: failed to complete transition: {e}");
+        }
+    }
+
     /// A session died mid-recording: stop audio capture, salvage any
     /// in-progress meeting to the DB, and fail the state machine so the UI
     /// leaves the recording state. Called by the engine actor after it emits
