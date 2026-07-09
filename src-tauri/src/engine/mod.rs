@@ -2,7 +2,7 @@ pub mod kyutai;
 pub mod parakeet;
 pub mod whisper;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod mock;
 
 use std::path::{Path, PathBuf};

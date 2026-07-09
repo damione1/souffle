@@ -1,5 +1,5 @@
 //! Mock transcription engine for testing pipeline behavior without GPU/hardware.
-#![cfg(test)]
+#![cfg(any(test, feature = "test-support"))]
 
 use super::{
     AudioInputRequirements, EngineError, Speaker, TranscriptionEngine, TranscriptionSegment,

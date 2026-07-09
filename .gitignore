@@ -29,3 +29,8 @@ src-tauri/binaries/
 
 # Generated placeholder icon (replace with real icon)
 app-icon.png
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/

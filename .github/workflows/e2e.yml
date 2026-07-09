@@ -1,0 +1,26 @@
+name: E2E
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  playwright:
+    # Frontend-only smoke suite (IPC is stubbed, see tests/e2e/tauri-stub.ts):
+    # no Rust build needed, so a Linux runner is fine and cheaper than macOS.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - uses: actions/setup-node@v6.1.0
+        with:
+          node-version: 24
+          check-latest: true
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
