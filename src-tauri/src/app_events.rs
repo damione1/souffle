@@ -128,3 +128,11 @@ pub struct MeetingIdle {
     pub idle_seconds: u64,
     pub threshold_seconds: u64,
 }
+
+/// The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
+/// The frontend calls `take_sleep_paused_meeting` on receiving this (and again
+/// on webview visibility change, in case the webview itself was suspended
+/// when this fired) to see whether a meeting was paused by sleep and, if so,
+/// offer to resume it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct SystemWokeUp;

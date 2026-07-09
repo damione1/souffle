@@ -48,6 +48,12 @@ export async function stopMeetingRecording(): Promise<string> {
   return unwrap(commands.stopMeetingRecording());
 }
 
+/** The meeting id paused by the system-sleep handler, if any (and clears
+ * it). Called on wake so the frontend can offer/auto-start a resume. */
+export async function takeSleepPausedMeeting(): Promise<string | null> {
+  return commands.takeSleepPausedMeeting();
+}
+
 export async function summarizeMeeting(
   id: string,
   model: string,

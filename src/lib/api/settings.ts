@@ -28,3 +28,7 @@ export async function selectAudioDevice(deviceName: string): Promise<void> {
 export async function getSystemAudioSupport(): Promise<boolean> {
   return commands.getSystemAudioSupport();
 }
+
+export async function isLaptop(): Promise<boolean> {
+  return commands.isLaptop();
+}

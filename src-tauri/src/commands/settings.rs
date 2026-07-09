@@ -28,6 +28,9 @@ pub fn save_settings(
     state
         .engine_actor
         .set_unload_timeout(settings.model_unload_timeout_minutes);
+    let _ = state.audio_cmd_sender.send(crate::state::AudioCommand::SetClamshellDevice(
+        settings.clamshell_audio_device.clone(),
+    ));
     // A locale change must relabel the tray menu immediately.
     if let Ok(machine) = state.current_machine_state() {
         crate::tray::sync(&app, &machine);

@@ -18,6 +18,7 @@ pub mod permissions;
 pub mod pill;
 pub mod pipeline;
 pub mod platform;
+pub mod power;
 pub mod settings;
 pub mod state;
 pub mod state_machine;
@@ -114,11 +115,13 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::stop_transcription,
             commands::list_audio_devices,
             commands::select_audio_device,
+            commands::is_laptop,
             commands::test_transcribe_wav,
             commands::paste_text,
             commands::start_meeting_recording,
             commands::resume_meeting_recording,
             commands::stop_meeting_recording,
+            commands::take_sleep_paused_meeting,
             commands::list_meetings,
             commands::get_meeting,
             commands::delete_meeting,
@@ -164,6 +167,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::MeetingFinalized,
             app_events::UpcomingMeeting,
             app_events::MeetingIdle,
+            app_events::SystemWokeUp,
         ])
 }
 
@@ -283,11 +287,25 @@ pub fn run() {
                     state
                         .engine_actor
                         .set_unload_timeout(app_settings.model_unload_timeout_minutes);
+                    let _ = state.audio_cmd_sender.send(state::AudioCommand::SetClamshellDevice(
+                        app_settings.clamshell_audio_device,
+                    ));
                 }
                 Err(e) => {
                     tracing::warn!("Failed to load settings on startup: {e}");
                 }
             }
+
+            // Sleep pauses an active recording cleanly instead of leaving
+            // CoreAudio IO dead mid-session; wake tells the frontend to offer
+            // a resume. Registered here (main thread, required by NSWorkspace)
+            // rather than in AudioCapture::spawn's dedicated thread.
+            let will_sleep_app = app.handle().clone();
+            let did_wake_app = app.handle().clone();
+            power::install_sleep_observers(
+                move || commands::handle_system_will_sleep(&will_sleep_app),
+                move || commands::handle_system_did_wake(&did_wake_app),
+            );
 
             tray::setup_tray(app.handle())?;
             calendar::scheduler::spawn(app.handle().clone());

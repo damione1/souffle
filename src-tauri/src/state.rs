@@ -30,6 +30,11 @@ pub enum AudioCommand {
     },
     Stop,
     SelectDevice(String),
+    /// Configure (or clear) the preferred microphone to use while the lid is
+    /// closed with an external display attached (clamshell mode). Sent at
+    /// startup and whenever the setting changes; `None` means "just follow
+    /// the system default", the previous behavior.
+    SetClamshellDevice(Option<String>),
     /// Give the audio thread an AppHandle so meeting mode can emit
     /// SystemAudioStatus events.
     AttachApp(AppHandle),
@@ -132,6 +137,10 @@ pub struct AppState {
     pub machine: Mutex<AppStateMachine>,
     /// Tauri app handle for emitting events (set during setup)
     pub app_handle: Mutex<Option<AppHandle>>,
+    /// Set when a meeting recording is stopped by the system-sleep handler
+    /// (as opposed to a user-initiated stop), so the frontend can offer to
+    /// resume it after wake. Cleared by `take_sleep_paused_meeting`.
+    pub sleep_paused_meeting_id: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -150,6 +159,7 @@ impl AppState {
             audio_rms,
             machine: Mutex::new(AppStateMachine::Idle),
             app_handle: Mutex::new(None),
+            sleep_paused_meeting_id: Mutex::new(None),
         }
     }
 
@@ -236,6 +246,24 @@ impl AppState {
         if let Err(e) = self.apply_transition(StateAction::Fail { message }) {
             warn!("Failed to apply Fail transition after session abort: {e}");
         }
+    }
+
+    /// Remember that a meeting recording was stopped by the system-sleep
+    /// handler, so the frontend can offer to resume it once the system wakes.
+    pub fn set_sleep_paused_meeting(&self, meeting_id: String) {
+        if let Ok(mut guard) = self.sleep_paused_meeting_id.lock() {
+            *guard = Some(meeting_id);
+        }
+    }
+
+    /// Return and clear the meeting id paused by sleep, if any. Clearing on
+    /// read means a resume attempt (successful or not) never re-offers the
+    /// same meeting on a later wake.
+    pub fn take_sleep_paused_meeting(&self) -> Option<String> {
+        self.sleep_paused_meeting_id
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
     }
 }
 

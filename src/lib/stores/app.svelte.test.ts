@@ -44,6 +44,7 @@ describe('app store', () => {
       ollama_model: 'llama3',
       debug_transcription: true,
       audio_device: 'mic-1',
+      clamshell_audio_device: null,
       transcription_engine_id: 'whisper',
       transcription_model_id: 'whisper-base',
       transcription_backend_id: 'candle',

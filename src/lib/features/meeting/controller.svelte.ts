@@ -8,6 +8,7 @@ import {
   startMeetingRecording,
   stopMeetingRecording,
   summarizeMeeting as runMeetingSummary,
+  takeSleepPausedMeeting,
 } from "../../api/meetings";
 import { getOllamaStatus } from "../../api/ollama";
 import { getTranscriptionCatalog } from "../../api/transcription";
@@ -354,6 +355,34 @@ function createMeetingControllerInstance() {
     idleSignal = null;
   }
 
+  /** The system woke from sleep (or the webview visibility turned to
+   * visible, as a belt-and-braces recheck in case the wake event fired while
+   * the webview was suspended). Ask the backend whether a meeting was
+   * stopped by sleep and, if so, reload it and auto-resume recording through
+   * the normal resume flow. Idempotent: `take_sleep_paused_meeting` clears
+   * its state on read, so a second call (event + visibilitychange both
+   * firing) is a harmless no-op. */
+  async function resumeAfterSystemWake() {
+    let meetingId: string | null;
+    try {
+      meetingId = await takeSleepPausedMeeting();
+    } catch (e) {
+      statusMessage = errorMessage(e);
+      return;
+    }
+    if (!meetingId || isRecordingMeeting) return;
+
+    await loadMeeting(meetingId);
+    if (!meeting || meeting.id !== meetingId) return; // load failed; loadMeeting already reported it
+
+    // resumeRecording reports its own failure via statusMessage and leaves
+    // the meeting loaded (canResumeRecording) so the user can retry by hand.
+    await resumeRecording();
+    if (!statusMessage) {
+      statusMessage = "Recording resumed after sleep.";
+    }
+  }
+
   /** Leave the detail view: clear the open meeting and return to the list. */
   function closeMeeting() {
     void flushNotes();
@@ -506,6 +535,7 @@ function createMeetingControllerInstance() {
     handleMeetingFinalized,
     handleMeetingIdle,
     dismissIdle,
+    resumeAfterSystemWake,
   };
 }
 
@@ -533,6 +563,14 @@ export function notifyMeetingStopRequested() {
  * meeting has probably ended (silence or the max-duration failsafe). */
 export function notifyMeetingIdle(payload: MeetingIdle) {
   instance?.handleMeetingIdle(payload);
+}
+
+/** Called from the global SystemWokeUp listener and from the webview
+ * visibilitychange handler: check for (and offer/auto-start) a meeting
+ * that sleep paused. Creates the controller if it doesn't exist yet, since
+ * wake can happen before the meeting view has ever mounted. */
+export function notifySystemWokeUp() {
+  void createMeetingController().resumeAfterSystemWake();
 }
 
 // Singleton: survives view mount/unmount cycles so liveMeetingSegments

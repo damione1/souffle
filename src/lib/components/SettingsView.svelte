@@ -107,6 +107,8 @@
       selectedDevice={controller.app.selectedDevice}
       captureSystemAudio={controller.app.settings.capture_system_audio}
       systemAudioSupported={controller.systemAudioSupported}
+      isLaptop={controller.isLaptop}
+      clamshellAudioDevice={controller.app.settings.clamshell_audio_device}
       vadEnabled={controller.app.settings.vad_enabled}
       fillerRemoval={controller.app.settings.filler_removal}
       stutterCollapse={controller.app.settings.stutter_collapse}
@@ -117,6 +119,7 @@
       onDeviceChange={controller.onDeviceChange}
       onRefreshDevices={controller.refreshDevices}
       onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
+      onClamshellDeviceChange={controller.onClamshellDeviceChange}
       onVadEnabledChange={controller.onVadEnabledChange}
       onFillerRemovalChange={controller.onFillerRemovalChange}
       onStutterCollapseChange={controller.onStutterCollapseChange}

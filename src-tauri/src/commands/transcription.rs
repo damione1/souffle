@@ -4,19 +4,19 @@ use std::time::Duration;
 
 use crossbeam_channel::Sender;
 use tauri::ipc::Channel;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_specta::Event;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::app_events::MeetingFinalized;
+use crate::app_events::{MeetingFinalized, SystemWokeUp};
 use crate::constants::STOP_REPLY_TIMEOUT_SECS;
 use crate::db::Database;
 use crate::engine::TranscriptionSegment;
 use crate::lock_ext::MutexExt;
 use crate::pipeline::{EngineActorHandle, SegmentCallback, SessionConfig};
 use crate::state::{AppState, AudioCommand, MeetingAccumulator};
-use crate::state_machine::StateAction;
+use crate::state_machine::{AppStateMachine, StateAction};
 use crate::transcript::{MeetingCalendarContext, MeetingTranscript};
 
 /// Flush accumulated meeting segments to the DB once this many have piled up
@@ -118,6 +118,12 @@ async fn launch_meeting(
     event_description: Option<String>,
     channel: Channel<TranscriptionSegment>,
 ) -> Result<u64, String> {
+    // Any recording starting now (whether the user resumed by hand or
+    // started something new) makes a stale sleep-paused bookkeeping entry
+    // meaningless — clear it so a later wake never misreports an
+    // already-handled meeting as needing a resume prompt.
+    let _ = state.take_sleep_paused_meeting();
+
     let session_id = next_audio_session_id(state)?;
 
     // Session-scoped transcription hints: participant names plus distinctive
@@ -620,6 +626,71 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
 #[specta::specta]
 pub fn paste_text(text: String, delay_ms: u64) -> Result<(), String> {
     crate::clipboard::copy_and_paste(&text, delay_ms)
+}
+
+/// Called from the `NSWorkspace` will-sleep observer (installed in `power.rs`
+/// during setup) on the main thread. If a meeting recording is active, stop
+/// it through the exact same path a user-initiated stop takes — segments are
+/// already persisted incrementally, so the background drain+save loses
+/// nothing — and remember its id so the frontend can offer to resume after
+/// wake. A dictation session is just stopped the normal way too; it's
+/// ephemeral, and the existing stop path already saves the partial
+/// transcript to history.
+///
+/// Must not block: the drain runs in a spawned task, not inline, since this
+/// fires from the AppKit notification callback on the main thread.
+pub fn handle_system_will_sleep(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Ok(machine) = state.current_machine_state() else {
+        return;
+    };
+    if !machine.is_recording() {
+        return;
+    }
+
+    let meeting_id = match &machine {
+        AppStateMachine::RecordingMeeting { meeting_id, .. } => Some(meeting_id.clone()),
+        _ => None,
+    };
+    if let Some(id) = &meeting_id {
+        state.set_sleep_paused_meeting(id.clone());
+    }
+
+    info!("System will sleep: stopping the active recording session");
+    let app = app.clone();
+    let is_meeting = meeting_id.is_some();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        // `Stopping` also satisfies `is_recording()`, so a sleep landing
+        // right as a user-initiated stop is already in flight harmlessly
+        // no-ops here (the command below rejects a non-matching state).
+        let result = if is_meeting {
+            stop_meeting_recording(state).await.map(|_| ())
+        } else {
+            stop_transcription(state).await
+        };
+        if let Err(e) = result {
+            warn!("Sleep-triggered stop failed: {e}");
+        }
+    });
+}
+
+/// Called from the `NSWorkspace` did-wake observer on the main thread.
+/// Just notifies the frontend — resuming a paused meeting needs a frontend
+/// segment channel, so the backend cannot resume on its own.
+pub fn handle_system_did_wake(app: &AppHandle) {
+    info!("System woke up");
+    let _ = SystemWokeUp.emit(app);
+}
+
+/// Return and clear the meeting id paused by the system-sleep handler, if
+/// any. The frontend calls this on `SystemWokeUp` (and again on webview
+/// visibility change, belt and braces) to decide whether to offer/auto-start
+/// a resume.
+#[tauri::command]
+#[specta::specta]
+pub fn take_sleep_paused_meeting(state: State<'_, AppState>) -> Option<String> {
+    state.take_sleep_paused_meeting()
 }
 
 #[cfg(test)]

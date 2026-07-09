@@ -115,6 +115,13 @@ async selectAudioDevice(deviceName: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Whether this Mac has a battery (i.e. is a laptop). Gates the
+ * clamshell-microphone setting in the UI — meaningless on a desktop Mac.
+ */
+async isLaptop() : Promise<boolean> {
+    return await TAURI_INVOKE("is_laptop");
+},
+/**
  * Debug: feed the debug WAV through the engine to test model in isolation.
  */
 async testTranscribeWav() : Promise<Result<string, string>> {
@@ -173,6 +180,15 @@ async stopMeetingRecording() : Promise<Result<string, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Return and clear the meeting id paused by the system-sleep handler, if
+ * any. The frontend calls this on `SystemWokeUp` (and again on webview
+ * visibility change, belt and braces) to decide whether to offer/auto-start
+ * a resume.
+ */
+async takeSleepPausedMeeting() : Promise<string | null> {
+    return await TAURI_INVOKE("take_sleep_paused_meeting");
 },
 /**
  * List all saved meetings
@@ -508,6 +524,7 @@ shortcutPttStop: ShortcutPttStop,
 shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
+systemWokeUp: SystemWokeUp,
 transcriptionHealth: TranscriptionHealth,
 upcomingMeeting: UpcomingMeeting
 }>({
@@ -522,6 +539,7 @@ shortcutPttStop: "shortcut-ptt-stop",
 shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
 systemAudioStatus: "system-audio-status",
+systemWokeUp: "system-woke-up",
 transcriptionHealth: "transcription-health",
 upcomingMeeting: "upcoming-meeting"
 })
@@ -532,7 +550,13 @@ upcomingMeeting: "upcoming-meeting"
 
 /** user-defined types **/
 
-export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean; 
+export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; ollama_url: string; ollama_model: string; debug_transcription: boolean; audio_device: string | null; 
+/**
+ * Preferred microphone while the lid is closed with an external display
+ * attached (clamshell mode). `None` means just follow whatever macOS
+ * reports as the default input, the previous behavior.
+ */
+clamshell_audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean; 
 /**
  * Meeting mode: capture system audio (other participants) alongside
  * the microphone via a Core Audio tap.
@@ -770,6 +794,14 @@ export type SystemAudioStatus = { active: boolean;
  * Present when inactive because of an error (e.g. permission denied).
  */
 reason: string | null }
+/**
+ * The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
+ * The frontend calls `take_sleep_paused_meeting` on receiving this (and again
+ * on webview visibility change, in case the webview itself was suspended
+ * when this fired) to see whether a meeting was paused by sleep and, if so,
+ * offer to resume it.
+ */
+export type SystemWokeUp = null
 export type Theme = "dark" | "light" | "system"
 /**
  * Today's events plus the permission state, so the UI can render the
