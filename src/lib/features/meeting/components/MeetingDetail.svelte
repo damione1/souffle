@@ -51,10 +51,12 @@
       segmentCount={displaySegments.length}
       sessionCount={sessionCount}
       canResumeRecording={controller.canResumeRecording}
+      isExporting={controller.isExporting}
       onBack={() => controller.closeMeeting()}
       onRename={(title) => void controller.renameMeeting(title)}
       onResumeRecording={controller.resumeRecording}
       onStopRecording={controller.stopRecording}
+      onExport={(format) => controller.exportMeeting(format)}
     />
 
     <!-- Notes are the focus: what the user wrote, front and center. -->

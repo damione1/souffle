@@ -32,6 +32,13 @@ const mockSaveMeetingNotes = vi.fn<(id: string, notes: string | null) => Promise
 const mockSummarizeMeeting = vi.fn<
   (id: string, model: string, onProgress: (p: SummarizeProgress) => void) => Promise<void>
 >();
+const mockExportMeetingFilename = vi.fn<
+  (id: string, format: import("../../types").ExportFormat) => Promise<string>
+>();
+const mockExportMeetingToFile = vi.fn<
+  (id: string, format: import("../../types").ExportFormat, path: string) => Promise<void>
+>();
+const mockShowSaveDialog = vi.fn<(opts: unknown) => Promise<string | null>>();
 
 vi.mock("../../api/meetings", () => ({
   startMeetingRecording: (...a: unknown[]) =>
@@ -52,6 +59,14 @@ vi.mock("../../api/meetings", () => ({
     mockSummarizeMeeting(
       ...(a as [string, string, (p: SummarizeProgress) => void]),
     ),
+  exportMeetingFilename: (...a: unknown[]) =>
+    mockExportMeetingFilename(...(a as [string, import("../../types").ExportFormat])),
+  exportMeetingToFile: (...a: unknown[]) =>
+    mockExportMeetingToFile(...(a as [string, import("../../types").ExportFormat, string])),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  save: (...a: unknown[]) => mockShowSaveDialog(...(a as [unknown])),
 }));
 
 vi.mock("../../api/ollama", () => ({
@@ -356,6 +371,92 @@ describe("MeetingController", () => {
     expect(mockDeleteMeeting).toHaveBeenCalledWith("meet-1");
     expect(ctrl.meeting).toBeNull();
     expect(mockApp.currentMeetingId).toBeNull();
+  });
+
+  it("exportMeeting looks up the filename, opens the save dialog, and writes the file", async () => {
+    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockGetMeeting.mockResolvedValue(makeMeeting());
+    mockExportMeetingFilename.mockResolvedValue("2026-07-09-standup.md");
+    mockShowSaveDialog.mockResolvedValue("/Users/damien/Downloads/2026-07-09-standup.md");
+    mockExportMeetingToFile.mockResolvedValue(undefined);
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    await ctrl.onMeetingSelectionChange("meet-1");
+
+    await ctrl.exportMeeting("markdown");
+
+    expect(mockExportMeetingFilename).toHaveBeenCalledWith("meet-1", "markdown");
+    expect(mockShowSaveDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: "2026-07-09-standup.md",
+        filters: [{ name: "MD", extensions: ["md"] }],
+      }),
+    );
+    expect(mockExportMeetingToFile).toHaveBeenCalledWith(
+      "meet-1",
+      "markdown",
+      "/Users/damien/Downloads/2026-07-09-standup.md",
+    );
+    expect(ctrl.isExporting).toBe(false);
+  });
+
+  it("exportMeeting does not write a file when the save dialog is cancelled", async () => {
+    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockGetMeeting.mockResolvedValue(makeMeeting());
+    mockExportMeetingFilename.mockResolvedValue("2026-07-09-standup.srt");
+    mockShowSaveDialog.mockResolvedValue(null);
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    await ctrl.onMeetingSelectionChange("meet-1");
+
+    await ctrl.exportMeeting("srt");
+
+    expect(mockShowSaveDialog).toHaveBeenCalledOnce();
+    expect(mockExportMeetingToFile).not.toHaveBeenCalled();
+  });
+
+  it("exportMeeting surfaces backend errors via statusMessage", async () => {
+    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockGetMeeting.mockResolvedValue(makeMeeting());
+    mockExportMeetingFilename.mockRejectedValue(new Error("meeting not found"));
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    await ctrl.onMeetingSelectionChange("meet-1");
+
+    await ctrl.exportMeeting("json");
+
+    expect(ctrl.statusMessage).toContain("meeting not found");
+    expect(mockShowSaveDialog).not.toHaveBeenCalled();
+    expect(ctrl.isExporting).toBe(false);
+  });
+
+  it("exportMeeting is a no-op while the meeting is recording", async () => {
+    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockStartMeetingRecording.mockResolvedValue(undefined);
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    await ctrl.startRecording();
+    mockApp.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: makeMeeting().transcription_profile,
+        session_id: 1,
+        meeting_id: "live-1",
+      },
+    } as import("../../types").AppStateMachine;
+
+    await ctrl.exportMeeting("vtt");
+
+    expect(mockExportMeetingFilename).not.toHaveBeenCalled();
+    expect(mockShowSaveDialog).not.toHaveBeenCalled();
   });
 
   it("notes autosave debounces and targets the live accumulator id", async () => {

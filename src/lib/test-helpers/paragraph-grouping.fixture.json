@@ -1,0 +1,199 @@
+{
+  "_note": "Twin fixture at src-tauri/tests/fixtures/paragraph_grouping.json. Keep both in sync: this proves export.rs's Rust port of groupIntoParagraphs (this module) matches the TS reference implementation.",
+  "pause_threshold": 1.5,
+  "cases": [
+    {
+      "name": "plain",
+      "segments": [
+        {
+          "text": "hello",
+          "start_time": 0,
+          "end_time": 0.3,
+          "speaker": null
+        },
+        {
+          "text": "there",
+          "start_time": 0.35,
+          "end_time": 0.6,
+          "speaker": null
+        },
+        {
+          "text": "friend",
+          "start_time": 0.65,
+          "end_time": 0.9,
+          "speaker": null
+        }
+      ],
+      "expected": [
+        {
+          "timestamp": "0:00",
+          "text": "hello there friend",
+          "speaker": null
+        }
+      ]
+    },
+    {
+      "name": "punctuated",
+      "segments": [
+        {
+          "text": "Hello everyone.",
+          "start_time": 0,
+          "end_time": 1,
+          "speaker": null
+        },
+        {
+          "text": "Welcome to the meeting.",
+          "start_time": 1.2,
+          "end_time": 2.5,
+          "speaker": null
+        },
+        {
+          "text": "Let's get started.",
+          "start_time": 5,
+          "end_time": 6,
+          "speaker": null
+        },
+        {
+          "text": "Any questions?",
+          "start_time": 6.3,
+          "end_time": 7,
+          "speaker": null
+        }
+      ],
+      "expected": [
+        {
+          "timestamp": "0:00",
+          "text": "Hello everyone. Welcome to the meeting.",
+          "speaker": null
+        },
+        {
+          "timestamp": "0:05",
+          "text": "Let's get started. Any questions?",
+          "speaker": null
+        }
+      ]
+    },
+    {
+      "name": "diarized_interleaved",
+      "segments": [
+        {
+          "text": "I'm good thanks.",
+          "start_time": 2,
+          "end_time": 3,
+          "speaker": "them"
+        },
+        {
+          "text": "Hi Bob, how are you?",
+          "start_time": 0,
+          "end_time": 1.5,
+          "speaker": "me"
+        },
+        {
+          "text": "Great to hear.",
+          "start_time": 3.5,
+          "end_time": 4.5,
+          "speaker": "me"
+        }
+      ],
+      "expected": [
+        {
+          "timestamp": "0:00",
+          "text": "Hi Bob, how are you?",
+          "speaker": "me"
+        },
+        {
+          "timestamp": "0:02",
+          "text": "I'm good thanks.",
+          "speaker": "them"
+        },
+        {
+          "timestamp": "0:03",
+          "text": "Great to hear.",
+          "speaker": "me"
+        }
+      ]
+    },
+    {
+      "name": "unpunctuated_long",
+      "segments": [
+        {
+          "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "start_time": 0,
+          "end_time": 5,
+          "speaker": null
+        },
+        {
+          "text": "bbbbb",
+          "start_time": 5.5,
+          "end_time": 6,
+          "speaker": null
+        },
+        {
+          "text": "ccccc",
+          "start_time": 6.2,
+          "end_time": 6.5,
+          "speaker": null
+        }
+      ],
+      "expected": [
+        {
+          "timestamp": "0:00",
+          "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "speaker": null
+        },
+        {
+          "timestamp": "0:05",
+          "text": "bbbbb ccccc",
+          "speaker": null
+        }
+      ]
+    },
+    {
+      "name": "sentence_count_cap",
+      "segments": [
+        {
+          "text": "One.",
+          "start_time": 0,
+          "end_time": 0.5,
+          "speaker": null
+        },
+        {
+          "text": "Two.",
+          "start_time": 0.6,
+          "end_time": 1,
+          "speaker": null
+        },
+        {
+          "text": "Three.",
+          "start_time": 1.1,
+          "end_time": 1.5,
+          "speaker": null
+        },
+        {
+          "text": "Four.",
+          "start_time": 1.6,
+          "end_time": 2,
+          "speaker": null
+        },
+        {
+          "text": "Five.",
+          "start_time": 2.1,
+          "end_time": 2.5,
+          "speaker": null
+        }
+      ],
+      "expected": [
+        {
+          "timestamp": "0:00",
+          "text": "One. Two. Three. Four.",
+          "speaker": null
+        },
+        {
+          "timestamp": "0:02",
+          "text": "Five.",
+          "speaker": null
+        }
+      ]
+    }
+  ]
+}

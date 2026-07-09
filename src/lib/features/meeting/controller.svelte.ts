@@ -1,5 +1,8 @@
+import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
 import {
   deleteMeeting as removeMeeting,
+  exportMeetingFilename,
+  exportMeetingToFile,
   getMeeting,
   renameMeeting as applyMeetingRename,
   resumeMeetingRecording,
@@ -13,7 +16,7 @@ import {
 import { getOllamaStatus } from "../../api/ollama";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { MeetingCalendarContext, MeetingIdle, MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { ExportFormat, MeetingCalendarContext, MeetingIdle, MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -40,6 +43,7 @@ function createMeetingControllerInstance() {
 
   let isEditingTranscript = $state(false);
   let editedTranscriptDraft = $state("");
+  let isExporting = $state(false);
 
   const NOTES_DEBOUNCE_MS = 800;
   let notesDraft = $state("");
@@ -491,6 +495,33 @@ function createMeetingControllerInstance() {
     }
   }
 
+  /**
+   * Export the current meeting to a file the user picks via the native save
+   * dialog. The suggested filename (and its extension) come from the
+   * backend (`export_meeting_filename`) so the slugify/date-formatting rules
+   * live in exactly one place; the dialog plugin only needs the extension
+   * for its filter, which we read back off that filename.
+   */
+  async function exportMeeting(format: ExportFormat) {
+    if (!meeting || !meeting.id || isRecordingMeeting) return;
+    isExporting = true;
+    statusMessage = "";
+    try {
+      const filename = await exportMeetingFilename(meeting.id, format);
+      const extension = filename.split(".").pop() ?? format;
+      const path = await showSaveDialog({
+        defaultPath: filename,
+        filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
+      });
+      if (!path) return; // user cancelled the dialog
+      await exportMeetingToFile(meeting.id, format, path);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    } finally {
+      isExporting = false;
+    }
+  }
+
   return {
     get app() { return app; },
     get statusMessage() { return statusMessage; },
@@ -508,6 +539,7 @@ function createMeetingControllerInstance() {
     get isStopping() { return isStopping; },
     get canResumeRecording() { return canResumeRecording; },
     get isEditingTranscript() { return isEditingTranscript; },
+    get isExporting() { return isExporting; },
     get editedTranscriptDraft() { return editedTranscriptDraft; },
     set editedTranscriptDraft(value: string) { editedTranscriptDraft = value; },
     get notesDraft() { return notesDraft; },
@@ -526,6 +558,7 @@ function createMeetingControllerInstance() {
     renameMeeting,
     summarizeMeeting,
     deleteMeeting,
+    exportMeeting,
     startEditingTranscript,
     cancelEditingTranscript,
     saveTranscriptEdit,

@@ -22,6 +22,9 @@ import {
   deleteMeeting,
   searchText,
   saveEditedTranscript,
+  exportMeetingFilename,
+  exportMeetingPreview,
+  exportMeetingToFile,
 } from './meetings';
 
 describe('meetings API', () => {
@@ -130,5 +133,31 @@ describe('meetings API', () => {
     await saveEditedTranscript('meeting-1', null);
 
     expect(mockInvoke).toHaveBeenCalledWith('save_edited_transcript', expect.objectContaining({ id: 'meeting-1', editedTranscript: null }), undefined);
+  });
+
+  it('exportMeetingFilename passes id and format, returns the suggested name', async () => {
+    mockInvoke.mockResolvedValue('2026-07-09-weekly-sync.md');
+
+    const result = await exportMeetingFilename('meeting-1', 'markdown');
+
+    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_filename', expect.objectContaining({ id: 'meeting-1', format: 'markdown' }), undefined);
+    expect(result).toBe('2026-07-09-weekly-sync.md');
+  });
+
+  it('exportMeetingPreview passes id and format, returns rendered text', async () => {
+    mockInvoke.mockResolvedValue('# Weekly Sync\n');
+
+    const result = await exportMeetingPreview('meeting-1', 'srt');
+
+    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_preview', expect.objectContaining({ id: 'meeting-1', format: 'srt' }), undefined);
+    expect(result).toBe('# Weekly Sync\n');
+  });
+
+  it('exportMeetingToFile passes id, format and path', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await exportMeetingToFile('meeting-1', 'vtt', '/tmp/export.vtt');
+
+    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_to_file', expect.objectContaining({ id: 'meeting-1', format: 'vtt', path: '/tmp/export.vtt' }), undefined);
   });
 });

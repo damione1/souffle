@@ -260,6 +260,42 @@ async saveEditedTranscript(id: string, editedTranscript: string | null) : Promis
 }
 },
 /**
+ * Render a meeting export without writing to disk. Used by tests and, if
+ * ever needed, a clipboard-copy affordance.
+ */
+async exportMeetingPreview(id: string, format: ExportFormat) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_meeting_preview", { id, format }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Suggested filename for a meeting export (e.g. `2026-07-09-weekly-sync.md`),
+ * used as the save dialog's default path.
+ */
+async exportMeetingFilename(id: string, format: ExportFormat) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_meeting_filename", { id, format }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Render a meeting export and write it to `path`. The save dialog itself
+ * (picking `path`) runs frontend-side via the dialog plugin.
+ */
+async exportMeetingToFile(id: string, format: ExportFormat, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_meeting_to_file", { id, format, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Check if Ollama is available and list models
  */
 async checkOllama() : Promise<Result<OllamaStatus, string>> {
@@ -657,6 +693,7 @@ pronunciation: string | null; category: string | null; created_at: string }
 export type DownloadProgress = { file: string; downloaded_bytes: number; total_bytes: number | null; completed_files: number; total_files: number; status: DownloadStatus }
 export type DownloadStatus = "starting" | "downloading" | "complete" | { error: string }
 export type ErrorRecovery = "retry_from_idle" | { retry_from_downloaded: { profile: TranscriptionProfile } } | { retry_from_ready: { profile: TranscriptionProfile } }
+export type ExportFormat = "markdown" | "json" | "srt" | "vtt"
 export type HealthStatus = "healthy" | 
 /**
  * Inference is behind real-time, or audio chunks were dropped.

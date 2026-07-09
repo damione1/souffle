@@ -9,6 +9,7 @@ export async function saveMeetingNotes(id: string, notes: string | null): Promis
   await unwrap(commands.saveMeetingNotes(id, notes));
 }
 import type {
+  ExportFormat,
   MeetingCalendarContext,
   MeetingListItem,
   MeetingTranscript,
@@ -74,4 +75,19 @@ export async function searchText(query: string, limit?: number): Promise<SearchR
 
 export async function saveEditedTranscript(id: string, editedTranscript: string | null): Promise<void> {
   await unwrap(commands.saveEditedTranscript(id, editedTranscript));
+}
+
+/** Suggested filename for a meeting export (e.g. "2026-07-09-weekly-sync.md"). */
+export async function exportMeetingFilename(id: string, format: ExportFormat): Promise<string> {
+  return unwrap(commands.exportMeetingFilename(id, format));
+}
+
+/** Render a meeting export without writing to disk. */
+export async function exportMeetingPreview(id: string, format: ExportFormat): Promise<string> {
+  return unwrap(commands.exportMeetingPreview(id, format));
+}
+
+/** Render a meeting export and write it to `path`. */
+export async function exportMeetingToFile(id: string, format: ExportFormat, path: string): Promise<void> {
+  await unwrap(commands.exportMeetingToFile(id, format, path));
 }

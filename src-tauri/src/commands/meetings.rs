@@ -2,6 +2,7 @@ use tauri::State;
 use tauri::ipc::Channel;
 
 use crate::db::search::SearchResult;
+use crate::export::{self, ExportFormat};
 use crate::settings::AppSettings;
 use crate::state::AppState;
 
@@ -94,6 +95,47 @@ pub fn save_edited_transcript(
     state
         .db
         .save_edited_transcript(&id, edited_transcript.as_deref())
+}
+
+/// Render a meeting export without writing to disk. Used by tests and, if
+/// ever needed, a clipboard-copy affordance.
+#[tauri::command]
+#[specta::specta]
+pub fn export_meeting_preview(
+    state: State<'_, AppState>,
+    id: String,
+    format: ExportFormat,
+) -> Result<String, String> {
+    let meeting = state.db.load_meeting(&id)?;
+    export::render_meeting(&meeting, format)
+}
+
+/// Suggested filename for a meeting export (e.g. `2026-07-09-weekly-sync.md`),
+/// used as the save dialog's default path.
+#[tauri::command]
+#[specta::specta]
+pub fn export_meeting_filename(
+    state: State<'_, AppState>,
+    id: String,
+    format: ExportFormat,
+) -> Result<String, String> {
+    let meeting = state.db.load_meeting(&id)?;
+    Ok(export::export_default_filename(&meeting, format))
+}
+
+/// Render a meeting export and write it to `path`. The save dialog itself
+/// (picking `path`) runs frontend-side via the dialog plugin.
+#[tauri::command]
+#[specta::specta]
+pub fn export_meeting_to_file(
+    state: State<'_, AppState>,
+    id: String,
+    format: ExportFormat,
+    path: String,
+) -> Result<(), String> {
+    let meeting = state.db.load_meeting(&id)?;
+    let rendered = export::render_meeting(&meeting, format)?;
+    std::fs::write(&path, rendered).map_err(|e| format!("Write export file: {e}"))
 }
 
 /// Check if Ollama is available and list models
