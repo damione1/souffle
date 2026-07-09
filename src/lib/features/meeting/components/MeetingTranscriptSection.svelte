@@ -19,6 +19,7 @@
     onSaveAndSummarize,
     onResetEdited,
     onEditDraftChange,
+    onParagraphClick,
   }: {
     segments: TranscriptionSegment[];
     recordingSessions: MeetingRecordingSession[];
@@ -33,6 +34,9 @@
     onSaveAndSummarize?: () => void | Promise<void>;
     onResetEdited?: () => void | Promise<void>;
     onEditDraftChange?: (value: string) => void;
+    /** A paragraph's timestamp was clicked; seeks the audio player if that
+     * paragraph maps to a recorded session (no-op otherwise). */
+    onParagraphClick?: (recordingSessionIndex: number | null, startTime: number) => void;
   } = $props();
 
   type TranscriptPhase = "has_content" | "recording_empty" | "empty";
@@ -129,7 +133,16 @@
                     class:text-secondary={block.speaker === "them"}
                   >{block.speaker === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
                 {/if}
-                <span class="font-mono text-[10.5px] text-text-faint">{block.timestamp}</span>
+                {#if onParagraphClick}
+                  <button
+                    type="button"
+                    class="font-mono text-[10.5px] text-text-faint hover:text-accent hover:underline"
+                    onclick={() => onParagraphClick?.(block.recordingSessionIndex, block.startTime)}
+                    aria-label={$t("meeting_audio.seek_to", { values: { timestamp: block.timestamp } })}
+                  >{block.timestamp}</button>
+                {:else}
+                  <span class="font-mono text-[10.5px] text-text-faint">{block.timestamp}</span>
+                {/if}
               </div>
               <p class="m-0 text-sm leading-[1.7] text-text-secondary">{block.text}</p>
             </div>

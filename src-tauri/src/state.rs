@@ -28,6 +28,10 @@ pub enum AudioCommand {
         /// source-tagged streams instead of one mixed stream, so each can be
         /// transcribed by its own engine. Only meaningful with system audio.
         diarize: bool,
+        /// Where to record this meeting's mixed audio, if the retention
+        /// setting is not off. `None` for dictation and for meetings
+        /// recorded with retention off.
+        record_path: Option<std::path::PathBuf>,
     },
     Stop,
     SelectDevice(String),

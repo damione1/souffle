@@ -12,12 +12,14 @@ use serde::{Deserialize, Serialize};
 use crate::db::Database;
 use crate::export::{self, ExportFormat};
 
-/// Settings > Data stats line: database size and row counts.
+/// Settings > Data stats line: database size, row counts, and recorded
+/// meeting audio size.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DataStats {
     pub db_size_bytes: u64,
     pub meeting_count: u32,
     pub dictation_count: u32,
+    pub recordings_size_bytes: u64,
 }
 
 /// `manifest.json` written at the root of every archive.

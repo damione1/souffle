@@ -213,11 +213,24 @@ async getMeeting(id: string) : Promise<Result<MeetingTranscript, string>> {
 }
 },
 /**
- * Delete a meeting by ID
+ * Delete a meeting by ID, including any recorded audio.
  */
 async deleteMeeting(id: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_meeting", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List the recorded audio files for a meeting (empty if recording was never
+ * enabled, or none survived retention). Reads the filesystem directly —
+ * nothing here is persisted in the database.
+ */
+async getMeetingAudio(meetingId: string) : Promise<Result<MeetingAudioSession[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_audio", { meetingId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -800,6 +813,11 @@ meeting_autostop_minutes: number;
  */
 meeting_max_duration_minutes: number; 
 /**
+ * Opt-in recording of meeting audio to compressed files on disk, and
+ * for how long they're kept. Off by default.
+ */
+meeting_audio_retention: MeetingAudioRetention; 
+/**
  * Optional LLM post-processing applied to dictation before paste/history.
  */
 dictation_polish_enabled: boolean; 
@@ -878,9 +896,10 @@ export type CalendarMeetingNudgeKind =
  */
 "autostart"
 /**
- * Settings > Data stats line: database size and row counts.
+ * Settings > Data stats line: database size, row counts, and recorded
+ * meeting audio size.
  */
-export type DataStats = { db_size_bytes: number; meeting_count: number; dictation_count: number }
+export type DataStats = { db_size_bytes: number; meeting_count: number; dictation_count: number; recordings_size_bytes: number }
 export type DiagnosticsBundle = { app_version: string; data_dir: string; log_dir: string; log_file: string | null; db_path: string; models_dir: string; machine_state: string; log_level: string; debug_transcription: boolean }
 /**
  * A dictation history entry
@@ -922,6 +941,33 @@ export type HealthStatus = "healthy" |
 "stalled"
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace"
 export type McpSetupInfo = { binary_path: string; exists: boolean; claude_desktop_snippet: string; claude_code_command: string }
+/**
+ * How long recorded meeting audio is kept on disk before the startup sweep
+ * deletes it. Opt-in: recording itself only happens when this is not `Off`.
+ */
+export type MeetingAudioRetention = 
+/**
+ * No recording at all; existing recordings from a previous, more
+ * permissive setting are left alone (the user may re-enable).
+ */
+"off" | "keep_7d" | "keep_30d" | "keep_forever"
+/**
+ * One recorded audio file for a meeting, as seen on disk — not persisted
+ * itself, `get_meeting_audio` derives this by listing the meeting's
+ * recordings directory. `session_index` matches the corresponding
+ * `MeetingRecordingSession`'s position in `recording_sessions`.
+ */
+export type MeetingAudioSession = { session_index: number; 
+/**
+ * Absolute filesystem path; the frontend turns this into a playable URL
+ * via Tauri's asset protocol (`convertFileSrc`).
+ */
+path: string; 
+/**
+ * Not computed here (would require decoding the file) — left `None`;
+ * the frontend reads it from the `<audio>` element once loaded.
+ */
+duration_seconds: number | null }
 /**
  * Calendar context passed by the frontend when starting a meeting from a
  * calendar event.

@@ -65,6 +65,21 @@ impl MeetingRecordingSession {
     }
 }
 
+/// One recorded audio file for a meeting, as seen on disk — not persisted
+/// itself, `get_meeting_audio` derives this by listing the meeting's
+/// recordings directory. `session_index` matches the corresponding
+/// `MeetingRecordingSession`'s position in `recording_sessions`.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct MeetingAudioSession {
+    pub session_index: usize,
+    /// Absolute filesystem path; the frontend turns this into a playable URL
+    /// via Tauri's asset protocol (`convertFileSrc`).
+    pub path: String,
+    /// Not computed here (would require decoding the file) — left `None`;
+    /// the frontend reads it from the `<audio>` element once loaded.
+    pub duration_seconds: Option<f64>,
+}
+
 /// Full meeting transcript stored as JSON
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct MeetingTranscript {

@@ -18,6 +18,8 @@ export type {
   ErrorRecovery,
   ExportFormat,
   LogLevel,
+  MeetingAudioRetention,
+  MeetingAudioSession,
   MeetingCalendarContext,
   MeetingIdle,
   MeetingIdleReason,

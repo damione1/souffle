@@ -143,6 +143,13 @@
   "settings_data": {
     "title": "Données",
     "stats": "{size} sur le disque · {meetings} réunions · {dictations} dictées",
+    "recordings_size": "{size} d'audio de réunion enregistré",
+    "retention_title": "Enregistrement audio des réunions",
+    "retention_desc": "Enregistre l'audio de chaque réunion, sous forme compressée, pour pouvoir le réécouter. Désactivé par défaut ; un changement s'applique à la prochaine réunion, pas à celle en cours.",
+    "retention_off": "Désactivé",
+    "retention_7d": "Conserver 7 jours",
+    "retention_30d": "Conserver 30 jours",
+    "retention_forever": "Conserver indéfiniment",
     "export_title": "Exporter toutes les données",
     "export_desc": "Enregistre chaque réunion, chaque dictée et un manifeste dans un dossier de votre choix.",
     "export_button": "Exporter…",
@@ -219,6 +226,12 @@
   "transcript": {
     "me": "Moi",
     "them": "Eux"
+  },
+  "meeting_audio": {
+    "play": "Lecture",
+    "pause": "Pause",
+    "scrubber": "Position de lecture",
+    "seek_to": "Lire depuis {timestamp}"
   },
   "meeting_summary": {
     "title": "Résumé IA",

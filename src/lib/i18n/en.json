@@ -143,6 +143,13 @@
   "settings_data": {
     "title": "Data",
     "stats": "{size} on disk · {meetings} meetings · {dictations} dictations",
+    "recordings_size": "{size} of recorded meeting audio",
+    "retention_title": "Meeting audio recording",
+    "retention_desc": "Save a compressed recording of each meeting's audio for playback. Off by default; a change takes effect on the next meeting, not the one in progress.",
+    "retention_off": "Off",
+    "retention_7d": "Keep 7 days",
+    "retention_30d": "Keep 30 days",
+    "retention_forever": "Keep forever",
     "export_title": "Export all data",
     "export_desc": "Save every meeting, dictation entry, and a manifest into a folder you choose.",
     "export_button": "Export…",
@@ -219,6 +226,12 @@
   "transcript": {
     "me": "Me",
     "them": "Them"
+  },
+  "meeting_audio": {
+    "play": "Play",
+    "pause": "Pause",
+    "scrubber": "Seek",
+    "seek_to": "Play from {timestamp}"
   },
   "meeting_summary": {
     "title": "AI Summary",
