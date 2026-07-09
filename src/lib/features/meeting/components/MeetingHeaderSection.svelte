@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { ArrowLeft, Pencil, Square, Users } from "@lucide/svelte";
+  import { ArrowLeft, ChevronDown, Download, Pencil, Square, Users } from "@lucide/svelte";
   import { t } from "svelte-i18n";
-  import type { MeetingTranscript } from "../../../types";
+  import type { ExportFormat, MeetingTranscript } from "../../../types";
   import { formatDate, formatDuration } from "../../../utils";
   import Spinner from "../../../components/ui/Spinner.svelte";
 
@@ -14,10 +14,12 @@
     segmentCount,
     sessionCount,
     canResumeRecording,
+    isExporting,
     onBack,
     onRename,
     onResumeRecording,
     onStopRecording,
+    onExport,
   }: {
     meeting: MeetingTranscript;
     isRecordingMeeting: boolean;
@@ -27,15 +29,30 @@
     segmentCount: number;
     sessionCount: number;
     canResumeRecording: boolean;
+    isExporting: boolean;
     onBack: () => void;
     onRename: (title: string) => void;
     onResumeRecording: () => void | Promise<void>;
     onStopRecording: () => void | Promise<void>;
+    onExport: (format: ExportFormat) => void | Promise<void>;
   } = $props();
 
   let isEditingTitle = $state(false);
   let titleDraft = $state("");
   let titleInput: HTMLInputElement | undefined = $state();
+  let showExportMenu = $state(false);
+
+  const EXPORT_FORMATS: { format: ExportFormat; labelKey: string }[] = [
+    { format: "markdown", labelKey: "meeting_header.export_markdown" },
+    { format: "json", labelKey: "meeting_header.export_json" },
+    { format: "srt", labelKey: "meeting_header.export_srt" },
+    { format: "vtt", labelKey: "meeting_header.export_vtt" },
+  ];
+
+  function pickExport(format: ExportFormat) {
+    showExportMenu = false;
+    onExport(format);
+  }
 
   function startTitleEdit() {
     titleDraft = meeting.title;
@@ -159,6 +176,41 @@
           {$t("meeting_header.resume_recording")}
         </button>
       {/if}
+      <div class="relative">
+        <button
+          onclick={() => (showExportMenu = !showExportMenu)}
+          disabled={isExporting}
+          class="btn btn-ghost gap-1.5 px-2.5 py-1.5 text-[12.5px]"
+          aria-haspopup="true"
+          aria-expanded={showExportMenu}
+        >
+          {#if isExporting}
+            <Spinner />
+          {:else}
+            <Download size={14} aria-hidden="true" />
+          {/if}
+          {$t("meeting_header.export")}
+          <ChevronDown size={13} aria-hidden="true" />
+        </button>
+        {#if showExportMenu}
+          <button
+            type="button"
+            class="fixed inset-0 z-10 cursor-default"
+            aria-label={$t("ui.cancel")}
+            onclick={() => (showExportMenu = false)}
+          ></button>
+          <div class="absolute right-0 z-20 mt-1.5 w-44 rounded-[11px] bg-surface-1 p-1.5 shadow-lg outline-1 outline-ghost-border">
+            {#each EXPORT_FORMATS as { format, labelKey } (format)}
+              <button
+                onclick={() => pickExport(format)}
+                class="block w-full cursor-pointer rounded-[8px] px-2.5 py-1.5 text-left text-[12.5px] text-text-primary transition-colors hover:bg-surface-2"
+              >
+                {$t(labelKey)}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/if}
   </div>
 </div>

@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@lucide/svelte": "^1.7.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "svelte-i18n": "^4.0.1"
   }
 }

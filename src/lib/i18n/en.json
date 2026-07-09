@@ -118,7 +118,12 @@
     "locked_by_dictation": "Stop the dictation before recording a meeting.",
     "system_audio_active": "System audio",
     "system_audio_unavailable": "Mic only",
-    "rename_aria": "Rename meeting"
+    "rename_aria": "Rename meeting",
+    "export": "Export",
+    "export_markdown": "Markdown (.md)",
+    "export_json": "JSON (.json)",
+    "export_srt": "Subtitles (.srt)",
+    "export_vtt": "Subtitles (.vtt)"
   },
   "meeting_transcript": {
     "title": "Transcript",

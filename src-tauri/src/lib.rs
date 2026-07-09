@@ -9,6 +9,7 @@ pub mod db;
 pub mod debug;
 pub mod engine;
 pub mod errors;
+pub mod export;
 pub mod filter;
 pub mod lock_ext;
 pub mod models;
@@ -128,6 +129,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::rename_meeting,
             commands::save_meeting_notes,
             commands::save_edited_transcript,
+            commands::export_meeting_preview,
+            commands::export_meeting_filename,
+            commands::export_meeting_to_file,
             commands::check_ollama,
             commands::summarize_meeting,
             commands::search_text,
@@ -243,6 +247,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .target(tauri_plugin_log::Target::new(

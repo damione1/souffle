@@ -118,7 +118,12 @@
     "locked_by_dictation": "Arrêtez la dictée avant d'enregistrer une réunion.",
     "system_audio_active": "Audio système",
     "system_audio_unavailable": "Micro seul",
-    "rename_aria": "Renommer le meeting"
+    "rename_aria": "Renommer le meeting",
+    "export": "Exporter",
+    "export_markdown": "Markdown (.md)",
+    "export_json": "JSON (.json)",
+    "export_srt": "Sous-titres (.srt)",
+    "export_vtt": "Sous-titres (.vtt)"
   },
   "meeting_transcript": {
     "title": "Transcription",

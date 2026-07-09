@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildMeetingTranscriptBlocks, groupIntoParagraphs, groupIntoParagraphsWithRanges } from './paragraphs';
-import type { MeetingRecordingSession, TranscriptionSegment } from '../types';
+import type { MeetingRecordingSession, Speaker, TranscriptionSegment } from '../types';
+import paragraphGroupingFixture from '../test-helpers/paragraph-grouping.fixture.json';
 
 function seg(text: string, start: number, end?: number): TranscriptionSegment {
   return {
@@ -279,4 +280,32 @@ describe('buildMeetingTranscriptBlocks', () => {
       startLabel: 'Resumed recording in progress',
     });
   });
+});
+
+// Cross-language fixture shared with the Rust port in src-tauri/src/export.rs
+// (tests/fixtures/paragraph_grouping.json). Both implementations must group
+// the same segment streams into the same paragraphs — this is the frozen
+// contract; if groupIntoParagraphs' behavior changes on purpose, regenerate
+// and update both copies of the fixture together.
+describe('groupIntoParagraphs cross-language fixture parity', () => {
+  const { pause_threshold, cases } = paragraphGroupingFixture;
+
+  for (const testCase of cases) {
+    it(`matches the frozen fixture for "${testCase.name}"`, () => {
+      const segments: TranscriptionSegment[] = testCase.segments.map((s) => ({
+        text: s.text,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        is_final: true,
+        language: null,
+        confidence: null,
+        speaker: (s.speaker ?? undefined) as Speaker | undefined,
+      }));
+
+      const result = groupIntoParagraphs(segments, pause_threshold);
+
+      expect(result.map((p) => ({ timestamp: p.timestamp, text: p.text, speaker: p.speaker ?? null })))
+        .toEqual(testCase.expected);
+    });
+  }
 });
