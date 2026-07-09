@@ -384,6 +384,29 @@ export function createSettingsController() {
     });
   }
 
+  function onMeetingAutostopEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.meeting_autostop_enabled = checked;
+    });
+  }
+
+  function onMeetingAutostopMinutesChange(event: Event) {
+    const value = parseInt((event.target as HTMLSelectElement).value, 10);
+    if (!Number.isFinite(value)) return;
+    void persistSettings((settings) => {
+      settings.meeting_autostop_minutes = value;
+    });
+  }
+
+  function onMeetingMaxDurationMinutesChange(event: Event) {
+    const value = parseInt((event.target as HTMLSelectElement).value, 10);
+    if (!Number.isFinite(value)) return;
+    void persistSettings((settings) => {
+      settings.meeting_max_duration_minutes = value;
+    });
+  }
+
   /** Populate the calendar picker without prompting: only fetch calendars
    * when the integration is on (which implies access was granted). */
   async function loadCalendars() {
@@ -596,6 +619,9 @@ export function createSettingsController() {
     get systemAudioSupported() { return systemAudioSupported; },
     onCaptureSystemAudioChange,
     onModelUnloadTimeoutChange,
+    onMeetingAutostopEnabledChange,
+    onMeetingAutostopMinutesChange,
+    onMeetingMaxDurationMinutesChange,
     onVadEnabledChange,
     onFillerRemovalChange,
     onStutterCollapseChange,

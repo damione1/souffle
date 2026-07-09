@@ -239,11 +239,27 @@ fn start_pipeline_blocking(
     let diarize =
         capture_system_audio && settings.transcription_engine_id == crate::engine::KYUTAI_ENGINE_ID;
 
+    // Auto-stop detection only applies to meetings: dictation sessions are
+    // short and user-driven, so "meeting is over" doesn't apply. This is a
+    // session-start snapshot; a setting changed mid-meeting only takes effect
+    // on the next meeting.
+    let idle_config = (mode == PipelineMode::Meeting && settings.meeting_autostop_enabled).then(
+        || crate::pipeline::MeetingIdleConfig {
+            silence_threshold: Some(Duration::from_secs(u64::from(
+                settings.meeting_autostop_minutes * 60,
+            ))),
+            max_duration: Some(Duration::from_secs(u64::from(
+                settings.meeting_max_duration_minutes * 60,
+            ))),
+        },
+    );
+
     let config = SessionConfig {
         pipeline_config: settings.pipeline_config(),
         dictionary_entries: db.list_dictionary_entries()?,
         session_terms,
         diarize,
+        idle_config,
     };
 
     // The actor replies once the engine is reset and ready for audio.

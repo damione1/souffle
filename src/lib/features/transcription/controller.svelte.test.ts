@@ -182,6 +182,9 @@ describe("transcription controller", () => {
       calendar_selected_ids: [],
       calendar_reminder_minutes: 2,
       model_unload_timeout_minutes: 0,
+      meeting_autostop_enabled: true,
+      meeting_autostop_minutes: 10,
+      meeting_max_duration_minutes: 240,
     };
 
     Object.assign(navigator, {

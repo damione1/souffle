@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type {
   MeetingCalendarContext,
+  MeetingIdle,
   MeetingTranscript,
   OllamaStatus,
   SummarizeProgress,
@@ -110,7 +111,9 @@ vi.mock("../transcription/catalog", () => ({
   }),
 }));
 
-const { createMeetingController, resetMeetingControllerForTest } = await import("./controller.svelte");
+const { createMeetingController, resetMeetingControllerForTest, notifyMeetingIdle } = await import(
+  "./controller.svelte"
+);
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -427,5 +430,132 @@ describe("MeetingController", () => {
     mockApp.settings.ollama_model = "llama3";
     await ctrl.checkOllama();
     expect(ctrl.selectedModel).toBe("llama3");
+  });
+
+  describe("notifyMeetingIdle", () => {
+    function setRecordingMeeting() {
+      mockApp.machineState = {
+        state: "recording_meeting",
+        data: {
+          profile: makeMeeting().transcription_profile,
+          session_id: 1,
+          meeting_id: "live-1",
+        },
+      } as import("../../types").AppStateMachine;
+    }
+
+    function idle(overrides: Partial<MeetingIdle> = {}): MeetingIdle {
+      return { reason: "silence", idle_seconds: 60, threshold_seconds: 600, ...overrides };
+    }
+
+    async function mountedController() {
+      mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+      mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+      return ctrl;
+    }
+
+    it("is ignored entirely when not recording a meeting", async () => {
+      const ctrl = await mountedController();
+      notifyMeetingIdle(idle());
+      expect(ctrl.idleSignal).toBeNull();
+      expect(mockStopMeetingRecording).not.toHaveBeenCalled();
+    });
+
+    it("max_duration sets a status message and stops immediately", async () => {
+      mockStopMeetingRecording.mockResolvedValue("meet-1");
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      const ctrl = await mountedController();
+      setRecordingMeeting();
+
+      notifyMeetingIdle(idle({ reason: "max_duration", idle_seconds: 14400, threshold_seconds: 14400 }));
+      await vi.waitFor(() => expect(mockStopMeetingRecording).toHaveBeenCalledOnce());
+
+      expect(ctrl.statusMessage).toMatch(/maximum meeting duration/i);
+    });
+
+    it("max_duration does not double-stop while already stopping", async () => {
+      mockStopMeetingRecording.mockImplementation(() => new Promise(() => {})); // never resolves
+      const ctrl = await mountedController();
+      setRecordingMeeting();
+
+      notifyMeetingIdle(idle({ reason: "max_duration" }));
+      notifyMeetingIdle(idle({ reason: "max_duration" }));
+      await Promise.resolve();
+
+      expect(mockStopMeetingRecording).toHaveBeenCalledOnce();
+    });
+
+    it("silence sets idleSignal without stopping before the grace period", async () => {
+      const ctrl = await mountedController();
+      setRecordingMeeting();
+
+      notifyMeetingIdle(idle({ reason: "silence", idle_seconds: 601, threshold_seconds: 600 }));
+
+      expect(ctrl.idleSignal).toEqual(idle({ reason: "silence", idle_seconds: 601, threshold_seconds: 600 }));
+      expect(mockStopMeetingRecording).not.toHaveBeenCalled();
+    });
+
+    it("silence auto-stops once idle_seconds reaches threshold + 120s grace", async () => {
+      mockStopMeetingRecording.mockResolvedValue("meet-1");
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      const ctrl = await mountedController();
+      setRecordingMeeting();
+
+      // Still under the grace window: banner shows, no stop yet.
+      notifyMeetingIdle(idle({ reason: "silence", idle_seconds: 719, threshold_seconds: 600 }));
+      expect(mockStopMeetingRecording).not.toHaveBeenCalled();
+      expect(ctrl.idleSignal).not.toBeNull();
+
+      // Crosses threshold + 120s: auto-stop fires.
+      notifyMeetingIdle(idle({ reason: "silence", idle_seconds: 720, threshold_seconds: 600 }));
+      await vi.waitFor(() => expect(mockStopMeetingRecording).toHaveBeenCalledOnce());
+    });
+
+    it("dismissIdle suppresses further silence banners until a segment re-arms it", async () => {
+      const ctrl = await mountedController();
+      setRecordingMeeting();
+
+      notifyMeetingIdle(idle({ reason: "silence", idle_seconds: 601, threshold_seconds: 600 }));
+      expect(ctrl.idleSignal).not.toBeNull();
+
+      ctrl.dismissIdle();
+      expect(ctrl.idleSignal).toBeNull();
+
+      // Still silent: dismissed state suppresses the banner from reappearing.
+      notifyMeetingIdle(idle({ reason: "silence", idle_seconds: 631, threshold_seconds: 600 }));
+      expect(ctrl.idleSignal).toBeNull();
+      expect(mockStopMeetingRecording).not.toHaveBeenCalled();
+    });
+
+    it("a new transcript segment clears idleSignal and re-arms after dismissal", async () => {
+      let onSegmentCallback: ((segment: TranscriptionSegment) => void) | undefined;
+      mockStartMeetingRecording.mockImplementation(async (_title, _calendar, onSegment) => {
+        onSegmentCallback = onSegment;
+      });
+
+      const ctrl = await mountedController();
+      await ctrl.startRecording();
+      setRecordingMeeting();
+
+      notifyMeetingIdle(idle({ reason: "silence", idle_seconds: 601, threshold_seconds: 600 }));
+      expect(ctrl.idleSignal).not.toBeNull();
+      ctrl.dismissIdle();
+
+      // Speech resumes: a final segment with text clears the banner and re-arms.
+      onSegmentCallback?.({
+        text: "we're back",
+        start_time: 0,
+        end_time: 1,
+        is_final: true,
+        language: null,
+        confidence: null,
+        speaker: null,
+      });
+
+      notifyMeetingIdle(idle({ reason: "silence", idle_seconds: 601, threshold_seconds: 600 }));
+      expect(ctrl.idleSignal).not.toBeNull();
+    });
   });
 });

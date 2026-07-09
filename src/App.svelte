@@ -15,6 +15,7 @@
   import {
     notifyMeetingAborted,
     notifyMeetingFinalized,
+    notifyMeetingIdle,
     notifyMeetingStopRequested,
   } from "./lib/features/meeting/controller.svelte";
   import {
@@ -38,6 +39,7 @@
   let unlistenMeetingStop: (() => void) | null = null;
   let unlistenMeetingFinalized: (() => void) | null = null;
   let unlistenUpcomingMeeting: (() => void) | null = null;
+  let unlistenMeetingIdle: (() => void) | null = null;
 
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
@@ -176,6 +178,12 @@
       unlistenUpcomingMeeting = fn;
     });
 
+    events.meetingIdle.listen((event) => {
+      notifyMeetingIdle(event.payload);
+    }).then((fn) => {
+      unlistenMeetingIdle = fn;
+    });
+
     return () => {
       cleanupTranscription();
       unlistenNav?.();
@@ -186,6 +194,7 @@
       unlistenMeetingStop?.();
       unlistenMeetingFinalized?.();
       unlistenUpcomingMeeting?.();
+      unlistenMeetingIdle?.();
     };
   });
 </script>

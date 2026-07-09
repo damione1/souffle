@@ -108,3 +108,23 @@ pub struct UpcomingMeeting {
     pub event: crate::calendar::CalendarEvent,
     pub starts_in_seconds: u32,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingIdleReason {
+    /// No transcript segment with text for the configured silence threshold.
+    Silence,
+    /// The session has run past the configured max-duration failsafe.
+    MaxDuration,
+}
+
+/// A meeting recording session looks like it has ended: either speech has
+/// stopped for a while, or the session hit the max-duration failsafe. Drives
+/// the live-card banner; a system notification is also sent on the first
+/// occurrence (see `pipeline::idle::MeetingIdleSignal::first`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Event)]
+pub struct MeetingIdle {
+    pub reason: MeetingIdleReason,
+    pub idle_seconds: u64,
+    pub threshold_seconds: u64,
+}
