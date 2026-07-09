@@ -149,8 +149,8 @@ pub struct DictationSummary {
     pub timestamp: String,
 }
 
-/// Raw `segments` row, ordered by `sort_order`, used to render a transcript
-/// when there is no `edited_transcript` override.
+/// Raw `segments` row from SQLite; diarized meetings are re-sorted by time
+/// before rendering (see `time_ordered_segments`).
 struct SegmentRow {
     text: String,
     start_time: f64,
@@ -371,17 +371,19 @@ impl McpDb {
             )
             .map_err(McpDbError::Query)?;
 
-        stmt.query_map(params![meeting_id], |row| {
-            Ok(SegmentRow {
-                text: row.get(0)?,
-                start_time: row.get(1)?,
-                end_time: row.get(2)?,
-                speaker: row.get(3)?,
+        let segments = stmt
+            .query_map(params![meeting_id], |row| {
+                Ok(SegmentRow {
+                    text: row.get(0)?,
+                    start_time: row.get(1)?,
+                    end_time: row.get(2)?,
+                    speaker: row.get(3)?,
+                })
             })
-        })
-        .map_err(McpDbError::Query)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(McpDbError::Query)
+            .map_err(McpDbError::Query)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(McpDbError::Query)?;
+        Ok(time_ordered_segments(segments))
     }
 
     pub fn search_meetings(
@@ -456,6 +458,22 @@ fn map_meeting_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MeetingRow> {
         calendar_event_id: row.get(10)?,
         participants: row.get(11)?,
     })
+}
+
+/// Diarized meetings interleave Me/Them segments by processing frame in
+/// storage order, not strictly by time — mirror export's
+/// `time_ordered_segments` so MCP transcript text reads as a conversation.
+fn time_ordered_segments(mut segments: Vec<SegmentRow>) -> Vec<SegmentRow> {
+    let diarized = segments.iter().any(|s| s.speaker.is_some());
+    if diarized {
+        segments.sort_by(|a, b| {
+            a.start_time
+                .partial_cmp(&b.start_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.speaker.cmp(&b.speaker))
+        });
+    }
+    segments
 }
 
 fn query_meeting_rows(
@@ -700,6 +718,32 @@ mod tests {
         assert_eq!(items[0].participants, vec!["Alice".to_string()]);
         assert!(items[0].has_summary);
         assert!(items[0].has_notes);
+    }
+
+    #[test]
+    fn get_meeting_orders_interleaved_diarized_segments_by_start_time() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("Second line", 5.0, 6.0, Some("them")),
+                ("First line", 1.0, 2.0, Some("me")),
+                ("Third line", 8.0, 9.0, Some("me")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db.get_meeting("m1", IncludeSet::all()).unwrap().transcript.unwrap();
+        let me_pos = transcript.find("Me: First line").expect("me segment");
+        let them_pos = transcript.find("Them: Second line").expect("them segment");
+        let me2_pos = transcript.find("Me: Third line").expect("me segment 2");
+        assert!(me_pos < them_pos);
+        assert!(them_pos < me2_pos);
     }
 
     #[test]

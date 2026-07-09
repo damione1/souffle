@@ -17,6 +17,15 @@ const MCP_BINARY_NAME: &str = "souffle-mcp";
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Shell-escape a path for pasting into zsh/bash (e.g. `claude mcp add souffle …`).
+/// Bundled installs live under `Soufflé.app` — unquoted paths break copy-paste.
+fn shell_escape_path(path: &str) -> String {
+    if path.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", path.replace('\'', "'\\''"))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct McpSetupInfo {
     pub binary_path: String,
@@ -72,9 +81,11 @@ pub fn get_mcp_setup_info() -> Result<McpSetupInfo, String> {
     }))
     .map_err(|e| format!("Build Claude Desktop snippet: {e}"))?;
 
+    let escaped_path = shell_escape_path(&path_str);
+
     Ok(McpSetupInfo {
         exists,
-        claude_code_command: format!("claude mcp add souffle {path_str}"),
+        claude_code_command: format!("claude mcp add souffle {escaped_path}"),
         binary_path: path_str,
         claude_desktop_snippet,
     })
@@ -83,7 +94,8 @@ pub fn get_mcp_setup_info() -> Result<McpSetupInfo, String> {
 /// Spawn the sidecar, perform an MCP `initialize` handshake and `tools/list`
 /// call over stdio, and return the discovered tool names joined by ", ".
 /// Used by the Settings UI's "Test connection" button as a quick smoke test
-/// that the binary actually speaks MCP.
+/// that the binary actually speaks MCP. `tools/list` alone is intentional:
+/// it proves stdio JSON-RPC works without needing a populated database.
 #[tauri::command]
 #[specta::specta]
 pub fn test_mcp_connection() -> Result<String, String> {
@@ -205,8 +217,22 @@ mod tests {
         assert!(info.claude_desktop_snippet.contains("souffle"));
         assert_eq!(
             info.claude_code_command,
-            format!("claude mcp add souffle {}", info.binary_path)
+            format!("claude mcp add souffle {}", shell_escape_path(&info.binary_path))
         );
+    }
+
+    #[test]
+    fn shell_escape_path_quotes_accented_app_bundle_paths() {
+        let path = "/Applications/Soufflé.app/Contents/MacOS/souffle-mcp";
+        assert_eq!(
+            shell_escape_path(path),
+            "'/Applications/Soufflé.app/Contents/MacOS/souffle-mcp'"
+        );
+    }
+
+    #[test]
+    fn shell_escape_path_escapes_embedded_single_quotes() {
+        assert_eq!(shell_escape_path("it's"), "'it'\\''s'");
     }
 
     #[test]
