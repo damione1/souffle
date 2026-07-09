@@ -114,6 +114,7 @@ impl EngineActorHandle {
         let handle = std::thread::Builder::new()
             .name("engine-actor".into())
             .spawn(move || {
+                crate::thread_qos::set_current_thread_qos(crate::thread_qos::ThreadQos::UserInitiated);
                 EngineActor {
                     cmd_rx,
                     audio_rx,

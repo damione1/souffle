@@ -20,6 +20,7 @@ pub mod platform;
 pub mod settings;
 pub mod state;
 pub mod state_machine;
+pub mod thread_qos;
 pub mod transcript;
 pub mod tray;
 

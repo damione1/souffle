@@ -266,6 +266,7 @@ impl AudioCapture {
         std::thread::Builder::new()
             .name("audio-capture".into())
             .spawn(move || {
+                crate::thread_qos::set_current_thread_qos(crate::thread_qos::ThreadQos::UserInteractive);
                 let mut capture = AudioCapture {
                     stream: None,
                     audio_sender: audio_tx,
