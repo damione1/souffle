@@ -15,6 +15,7 @@
     "notification:default",
     "fs:default",
     "dialog:allow-save",
+    "dialog:allow-open",
     "log:default"
   ]
 }

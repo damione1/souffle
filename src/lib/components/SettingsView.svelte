@@ -5,6 +5,7 @@
   import AdvancedSettingsSection from "../features/settings/components/AdvancedSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
   import CalendarSettingsSection from "../features/settings/components/CalendarSettingsSection.svelte";
+  import DataSettingsSection from "../features/settings/components/DataSettingsSection.svelte";
   import DictionarySettingsSection from "../features/settings/components/DictionarySettingsSection.svelte";
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
@@ -144,6 +145,8 @@
       debugTranscription={controller.app.settings.debug_transcription}
       onDebugTranscriptionChange={controller.onDebugTranscriptionChange}
     />
+
+    <DataSettingsSection />
 
     <section class="settings-group">
       <h3>{$t("settings_advanced.model_storage")}</h3>

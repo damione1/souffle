@@ -98,6 +98,18 @@
     "debug_logs_desc": "Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.",
     "debug_logs_aria": "Journaux de débogage de transcription détaillés"
   },
+  "settings_data": {
+    "title": "Données",
+    "stats": "{size} sur le disque · {meetings} réunions · {dictations} dictées",
+    "export_title": "Exporter toutes les données",
+    "export_desc": "Enregistre chaque réunion, chaque dictée et un manifeste dans un dossier de votre choix.",
+    "export_button": "Exporter…",
+    "exporting": "Export en cours…",
+    "export_success": "Export terminé.",
+    "reveal_title": "Dossier des données",
+    "reveal_desc": "Ouvre le dossier où sont stockés la base de données, les journaux et les modèles.",
+    "reveal_button": "Afficher dans le Finder"
+  },
   "settings_about": {
     "title": "À propos",
     "version": "Version",

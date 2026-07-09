@@ -493,6 +493,35 @@ impl Database {
             .map_err(|e| format!("Query: {e}"))?;
         Ok(count > 0)
     }
+
+    /// Total number of meetings, for the Settings > Data stats line.
+    pub fn count_meetings(&self) -> Result<u32, String> {
+        let conn = self.conn.acquire()?;
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM meetings", [], |row| row.get(0))
+            .map_err(|e| format!("Count meetings: {e}"))?;
+        Ok(count.max(0) as u32)
+    }
+
+    /// Test-only: insert a `meetings` row with an unparseable
+    /// `transcription_profile`, so `load_meeting` fails on it. Lets the
+    /// archive export tests exercise the "skip one bad meeting, keep going"
+    /// path without a hand-rolled fake `Database`.
+    #[cfg(test)]
+    pub fn insert_corrupt_meeting_for_test(&self, id: &str, started_at: &str) -> Result<(), String> {
+        let conn = self.conn.acquire()?;
+        conn.execute(
+            "INSERT INTO meetings (
+                id, title, started_at, ended_at, duration_seconds,
+                transcription_profile, recording_sessions, summary,
+                summary_is_stale, summary_model, summary_generated_at,
+                edited_transcript, notes, calendar_event_id, participants
+             ) VALUES (?1, 'Corrupt Meeting', ?2, NULL, 0, 'not-json', '[]', NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL)",
+            params![id, started_at],
+        )
+        .map_err(|e| format!("Insert corrupt meeting: {e}"))?;
+        Ok(())
+    }
 }
 
 struct MeetingRow {
@@ -644,6 +673,19 @@ mod tests {
             list.iter()
                 .any(|item| item.id == "m2" && item.summary_is_stale)
         );
+    }
+
+    #[test]
+    fn count_reflects_saved_meetings() {
+        let (db, _dir) = test_db();
+        assert_eq!(db.count_meetings().unwrap(), 0);
+
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        db.save_meeting(&sample_meeting("m2")).unwrap();
+        assert_eq!(db.count_meetings().unwrap(), 2);
+
+        db.delete_meeting("m1").unwrap();
+        assert_eq!(db.count_meetings().unwrap(), 1);
     }
 
     #[test]

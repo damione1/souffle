@@ -73,6 +73,17 @@ impl Database {
         Ok(())
     }
 
+    /// Total number of dictation entries, for the Settings > Data stats line.
+    pub fn count_dictation_entries(&self) -> Result<u32, String> {
+        let conn = self.conn.acquire()?;
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM dictation_entries", [], |row| {
+                row.get(0)
+            })
+            .map_err(|e| format!("Count dictation entries: {e}"))?;
+        Ok(count.max(0) as u32)
+    }
+
     /// Clear all dictation history.
     pub fn clear_dictation_entries(&self) -> Result<(), String> {
         let conn = self.conn.acquire()?;
@@ -133,6 +144,21 @@ mod tests {
         db.clear_dictation_entries().unwrap();
         let entries = db.list_dictation_entries(50).unwrap();
         assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn count_reflects_entries() {
+        let (db, _dir) = test_db();
+        assert_eq!(db.count_dictation_entries().unwrap(), 0);
+
+        db.add_dictation_entry("d1", "Hello", "2024-01-01T00:00:00Z")
+            .unwrap();
+        db.add_dictation_entry("d2", "World", "2024-01-01T00:01:00Z")
+            .unwrap();
+        assert_eq!(db.count_dictation_entries().unwrap(), 2);
+
+        db.delete_dictation_entry("d1").unwrap();
+        assert_eq!(db.count_dictation_entries().unwrap(), 1);
     }
 
     #[test]

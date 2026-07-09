@@ -1,4 +1,5 @@
 pub mod app_events;
+pub mod archive;
 pub mod audio;
 pub mod calendar;
 pub mod cli;
@@ -156,6 +157,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::request_permission,
             commands::list_calendars,
             commands::list_todays_calendar_events,
+            commands::export_archive,
+            commands::get_data_stats,
+            commands::reveal_data_dir,
         ])
         .events(collect_events![
             app_events::Navigate,
@@ -172,6 +176,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::UpcomingMeeting,
             app_events::MeetingIdle,
             app_events::SystemWokeUp,
+            app_events::ArchiveExportProgress,
         ])
 }
 

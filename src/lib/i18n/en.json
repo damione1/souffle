@@ -98,6 +98,18 @@
     "debug_logs_desc": "Log extra details about speech recognition for troubleshooting.",
     "debug_logs_aria": "Verbose transcription debug logs"
   },
+  "settings_data": {
+    "title": "Data",
+    "stats": "{size} on disk · {meetings} meetings · {dictations} dictations",
+    "export_title": "Export all data",
+    "export_desc": "Save every meeting, dictation entry, and a manifest into a folder you choose.",
+    "export_button": "Export…",
+    "exporting": "Exporting…",
+    "export_success": "Export complete.",
+    "reveal_title": "Data folder",
+    "reveal_desc": "Open the folder where the database, logs, and models are stored.",
+    "reveal_button": "Reveal in Finder"
+  },
   "settings_about": {
     "title": "About",
     "version": "Version",

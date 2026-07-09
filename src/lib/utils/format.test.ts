@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTimestamp, formatDuration, formatDate } from './format';
+import { formatTimestamp, formatDuration, formatDate, formatBytes } from './format';
 
 describe('formatTimestamp', () => {
   it('formats zero seconds', () => {
@@ -38,5 +38,28 @@ describe('formatDate', () => {
     const result = formatDate('2024-01-15T10:30:00Z');
     // Just verify it returns a non-empty string (locale-dependent)
     expect(result.length).toBeGreaterThan(0);
+  });
+});
+
+describe('formatBytes', () => {
+  it('formats sub-kilobyte sizes in bytes', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(512)).toBe('512 B');
+  });
+
+  it('formats kilobytes without decimals above 10', () => {
+    expect(formatBytes(482 * 1024)).toBe('482 KB');
+  });
+
+  it('formats sub-10 unit values with one decimal', () => {
+    expect(formatBytes(1.5 * 1024 * 1024)).toBe('1.5 MB');
+  });
+
+  it('formats gigabytes', () => {
+    expect(formatBytes(1.3 * 1024 * 1024 * 1024)).toBe('1.3 GB');
+  });
+
+  it('caps at terabytes for very large values', () => {
+    expect(formatBytes(2048 * 1024 * 1024 * 1024 * 1024)).toBe('2048 TB');
   });
 });
