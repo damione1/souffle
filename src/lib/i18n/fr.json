@@ -190,6 +190,13 @@
     "generate_cta": "Générer",
     "local_badge": "local"
   },
+  "meeting_structured": {
+    "title": "Résultats",
+    "decisions": "Décisions",
+    "action_items": "Actions",
+    "open_questions": "Questions ouvertes",
+    "owner": "Responsable : {owner}"
+  },
   "meeting_view": {
     "loading": "Chargement de la réunion...",
     "delete_meeting": "Supprimer la réunion",

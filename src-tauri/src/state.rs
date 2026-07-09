@@ -53,6 +53,7 @@ pub struct MeetingAccumulator {
     pub summary_is_stale: bool,
     pub summary_model: Option<String>,
     pub summary_generated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub structured_summary: Option<crate::transcript::StructuredSummary>,
     /// Notes the user types while the meeting records; persisted at stop.
     pub notes: Option<String>,
     /// Calendar event this meeting was started from, when any.
@@ -110,6 +111,11 @@ impl MeetingAccumulator {
             summary_is_stale: self.summary_is_stale || (has_summary && had_new_segments),
             summary_model: self.summary_model,
             summary_generated_at: self.summary_generated_at,
+            structured_summary: if had_new_segments {
+                None
+            } else {
+                self.structured_summary
+            },
             edited_transcript: None,
             notes: self.notes,
             calendar_event_id: self.calendar_event_id,
@@ -315,6 +321,11 @@ mod tests {
             summary_is_stale: false,
             summary_model: Some("qwen".to_string()),
             summary_generated_at: Some(first_end),
+            structured_summary: Some(crate::transcript::StructuredSummary {
+                decisions: vec!["Old decision".to_string()],
+                action_items: vec![],
+                open_questions: vec![],
+            }),
             notes: None,
             calendar_event_id: None,
             participants: Vec::new(),
@@ -329,6 +340,7 @@ mod tests {
         assert_eq!(transcript.recording_sessions[1].end_segment_index, 2);
         assert_eq!(transcript.segments.len(), 2);
         assert!(transcript.summary_is_stale);
+        assert!(transcript.structured_summary.is_none());
         assert_eq!(transcript.started_at, first_start);
         assert_eq!(transcript.ended_at, Some(second_end));
         assert_eq!(transcript.duration_seconds, 75.0);
@@ -351,6 +363,7 @@ mod tests {
             summary_is_stale: false,
             summary_model: Some("qwen".to_string()),
             summary_generated_at: Some(started_at),
+            structured_summary: None,
             notes: None,
             calendar_event_id: None,
             participants: Vec::new(),

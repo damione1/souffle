@@ -18,6 +18,24 @@ pub struct MeetingParticipant {
     pub is_current_user: bool,
 }
 
+/// A single action item extracted from a meeting summary pass.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
+pub struct StructuredActionItem {
+    pub text: String,
+    pub owner: Option<String>,
+}
+
+/// Typed structured summary: decisions, action items, open questions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type, Default)]
+pub struct StructuredSummary {
+    #[serde(default)]
+    pub decisions: Vec<String>,
+    #[serde(default)]
+    pub action_items: Vec<StructuredActionItem>,
+    #[serde(default)]
+    pub open_questions: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct MeetingRecordingSession {
     pub id: String,
@@ -62,6 +80,7 @@ pub struct MeetingTranscript {
     pub summary_is_stale: bool,
     pub summary_model: Option<String>,
     pub summary_generated_at: Option<DateTime<Utc>>,
+    pub structured_summary: Option<StructuredSummary>,
     pub edited_transcript: Option<String>,
     /// Free-form notes the user typed during the meeting; fed into the
     /// summary prompt.
@@ -105,6 +124,8 @@ struct MeetingTranscriptWire {
     summary_model: Option<String>,
     summary_generated_at: Option<DateTime<Utc>>,
     #[serde(default)]
+    structured_summary: Option<StructuredSummary>,
+    #[serde(default)]
     edited_transcript: Option<String>,
     #[serde(default)]
     notes: Option<String>,
@@ -147,6 +168,7 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             summary_is_stale: wire.summary_is_stale.unwrap_or(false),
             summary_model: wire.summary_model,
             summary_generated_at: wire.summary_generated_at,
+            structured_summary: wire.structured_summary,
             edited_transcript: wire.edited_transcript,
             notes: wire.notes,
             calendar_event_id: wire.calendar_event_id,
@@ -270,6 +292,7 @@ mod tests {
             summary_is_stale: false,
             summary_model: Some("test-model".to_string()),
             summary_generated_at: None,
+            structured_summary: None,
             edited_transcript: None,
             notes: None,
             calendar_event_id: None,
@@ -310,6 +333,7 @@ mod tests {
             summary_is_stale: true,
             summary_model: None,
             summary_generated_at: None,
+            structured_summary: None,
             edited_transcript: None,
             notes: None,
             calendar_event_id: None,

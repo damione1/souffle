@@ -5,7 +5,7 @@ use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
 /// Schema version 10: unused embeddings table dropped.
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -393,6 +393,15 @@ pub fn migrate_drop_embeddings_to_v10(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Drop embeddings table and index: {e}"))?;
 
+    Ok(())
+}
+
+pub fn migrate_add_structured_summary_to_v11(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "ALTER TABLE meetings ADD COLUMN structured_summary TEXT",
+        [],
+    )
+    .map_err(|e| format!("Add structured_summary column: {e}"))?;
     Ok(())
 }
 

@@ -188,7 +188,16 @@ pub async fn summarize_meeting(
     )
     .await?;
 
-    db.update_meeting_summary(&id, &summary, &model)?;
+    let structured = crate::summary::extract_structured_summary(
+        &summary,
+        transcript.notes.as_deref(),
+        &transcript.participants,
+        &model,
+        Some(&settings.ollama_url),
+    )
+    .await?;
+
+    db.update_meeting_summary(&id, &summary, Some(&structured), &model)?;
 
     Ok(())
 }

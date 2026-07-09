@@ -190,6 +190,13 @@
     "generate_cta": "Generate",
     "local_badge": "local"
   },
+  "meeting_structured": {
+    "title": "Outcomes",
+    "decisions": "Decisions",
+    "action_items": "Action items",
+    "open_questions": "Open questions",
+    "owner": "Owner: {owner}"
+  },
   "meeting_view": {
     "loading": "Loading meeting...",
     "delete_meeting": "Delete meeting",

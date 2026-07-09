@@ -61,6 +61,7 @@ pub mod fixtures {
             summary_is_stale: false,
             summary_model: None,
             summary_generated_at: None,
+            structured_summary: None,
             edited_transcript: None,
             notes: None,
             calendar_event_id: None,

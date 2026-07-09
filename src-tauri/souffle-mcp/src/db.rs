@@ -101,6 +101,22 @@ pub struct ParticipantInfo {
     pub is_organizer: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct StructuredActionItem {
+    pub text: String,
+    pub owner: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct StructuredSummary {
+    #[serde(default)]
+    pub decisions: Vec<String>,
+    #[serde(default)]
+    pub action_items: Vec<StructuredActionItem>,
+    #[serde(default)]
+    pub open_questions: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct MeetingSummary {
     pub id: String,
@@ -130,6 +146,7 @@ pub struct MeetingDetail {
     pub duration_seconds: f64,
     pub transcript: Option<String>,
     pub summary: Option<String>,
+    pub structured_summary: Option<StructuredSummary>,
     pub notes: Option<String>,
     pub metadata: Option<MeetingMetadata>,
 }
@@ -167,6 +184,7 @@ struct MeetingRow {
     summary: Option<String>,
     summary_model: Option<String>,
     summary_generated_at: Option<String>,
+    structured_summary: Option<String>,
     edited_transcript: Option<String>,
     notes: Option<String>,
     calendar_event_id: Option<String>,
@@ -179,7 +197,7 @@ impl MeetingRow {
     fn participants(&self) -> Vec<ParticipantInfo> {
         self.participants
             .as_deref()
-            .and_then(|raw| serde_json::from_str::<Vec<ParticipantInfo>>(raw).ok())
+            .and_then(|raw| serde_json::from_str(raw).ok())
             .unwrap_or_default()
     }
 
@@ -188,6 +206,12 @@ impl MeetingRow {
             .into_iter()
             .map(|p| p.name)
             .collect()
+    }
+
+    fn structured_summary(&self) -> Option<StructuredSummary> {
+        self.structured_summary
+            .as_deref()
+            .and_then(|raw| serde_json::from_str(raw).ok())
     }
 }
 
@@ -235,6 +259,7 @@ impl McpDb {
                 .prepare(
                     "SELECT m.id, m.title, m.started_at, m.ended_at, m.duration_seconds,
                             m.summary, m.summary_model, m.summary_generated_at,
+                            m.structured_summary,
                             m.edited_transcript, m.notes, m.calendar_event_id, m.participants
                      FROM meetings m
                      WHERE m.id IN (
@@ -253,6 +278,7 @@ impl McpDb {
                 .prepare(
                     "SELECT m.id, m.title, m.started_at, m.ended_at, m.duration_seconds,
                             m.summary, m.summary_model, m.summary_generated_at,
+                            m.structured_summary,
                             m.edited_transcript, m.notes, m.calendar_event_id, m.participants
                      FROM meetings m
                      WHERE (?1 IS NULL OR julianday(m.started_at) >= julianday(?1))
@@ -283,7 +309,7 @@ impl McpDb {
             .conn()?
             .query_row(
                 "SELECT id, title, started_at, ended_at, duration_seconds,
-                        summary, summary_model, summary_generated_at,
+                        summary, summary_model, summary_generated_at, structured_summary,
                         edited_transcript, notes, calendar_event_id, participants
                  FROM meetings WHERE id = ?1",
                 params![id],
@@ -336,6 +362,11 @@ impl McpDb {
         };
 
         let summary = if include.summary { row.summary.clone() } else { None };
+        let structured_summary = if include.summary {
+            row.structured_summary()
+        } else {
+            None
+        };
         let notes = if include.notes { row.notes.clone() } else { None };
         let metadata = if include.metadata {
             Some(MeetingMetadata {
@@ -357,6 +388,7 @@ impl McpDb {
             duration_seconds: row.duration_seconds,
             transcript,
             summary,
+            structured_summary,
             notes,
             metadata,
         })
@@ -453,10 +485,11 @@ fn map_meeting_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MeetingRow> {
         summary: row.get(5)?,
         summary_model: row.get(6)?,
         summary_generated_at: row.get(7)?,
-        edited_transcript: row.get(8)?,
-        notes: row.get(9)?,
-        calendar_event_id: row.get(10)?,
-        participants: row.get(11)?,
+        structured_summary: row.get(8)?,
+        edited_transcript: row.get(9)?,
+        notes: row.get(10)?,
+        calendar_event_id: row.get(11)?,
+        participants: row.get(12)?,
     })
 }
 
@@ -569,6 +602,7 @@ mod tests {
                 summary_is_stale INTEGER NOT NULL DEFAULT 0,
                 summary_model TEXT,
                 summary_generated_at TEXT,
+                structured_summary TEXT,
                 edited_transcript TEXT,
                 notes TEXT,
                 calendar_event_id TEXT,

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use crate::engine::{Speaker, TranscriptionSegment};
-use crate::transcript::MeetingTranscript;
+use crate::transcript::{MeetingTranscript, StructuredSummary};
 
 /// Minimum on-screen duration given to a subtitle cue whose segment has a
 /// zero or inverted end time, so SRT/VTT players never render a cue with
@@ -166,6 +166,10 @@ fn render_markdown(meeting: &MeetingTranscript) -> String {
         out.push('\n');
     }
 
+    if let Some(structured) = meeting.structured_summary.as_ref() {
+        render_structured_markdown(&mut out, structured);
+    }
+
     out.push_str("\n## Transcript\n\n");
     match non_empty(meeting.edited_transcript.as_deref()) {
         Some(edited) => out.push_str(edited),
@@ -189,6 +193,52 @@ fn render_markdown(meeting: &MeetingTranscript) -> String {
 
 fn non_empty(text: Option<&str>) -> Option<&str> {
     text.map(str::trim).filter(|t| !t.is_empty())
+}
+
+fn render_structured_markdown(out: &mut String, structured: &StructuredSummary) {
+    let has_decisions = !structured.decisions.is_empty();
+    let has_actions = !structured.action_items.is_empty();
+    let has_questions = !structured.open_questions.is_empty();
+    if !has_decisions && !has_actions && !has_questions {
+        return;
+    }
+
+    out.push_str("\n## Structured Summary\n\n");
+
+    if has_decisions {
+        out.push_str("### Decisions\n\n");
+        for decision in &structured.decisions {
+            out.push_str("- ");
+            out.push_str(decision);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    if has_actions {
+        out.push_str("### Action Items\n\n");
+        for item in &structured.action_items {
+            out.push_str("- ");
+            if let Some(owner) = non_empty(item.owner.as_deref()) {
+                out.push_str("**");
+                out.push_str(owner);
+                out.push_str("**: ");
+            }
+            out.push_str(&item.text);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    if has_questions {
+        out.push_str("### Open Questions\n\n");
+        for question in &structured.open_questions {
+            out.push_str("- ");
+            out.push_str(question);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
 }
 
 fn render_paragraph_markdown(p: &paragraphs::Paragraph) -> String {
@@ -495,6 +545,7 @@ mod paragraphs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcript::StructuredActionItem;
     use crate::test_helpers::fixtures::{sample_meeting, sample_segment};
 
     fn diarized_segment(
@@ -638,6 +689,35 @@ mod tests {
         let meeting = sample_meeting("m1");
         let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
         assert!(!rendered.contains("**Participants:**"));
+    }
+
+    #[test]
+    fn markdown_includes_structured_summary_sections() {
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("Prose summary".to_string());
+        meeting.structured_summary = Some(StructuredSummary {
+            decisions: vec!["Ship Friday".to_string()],
+            action_items: vec![StructuredActionItem {
+                text: "Open PR".to_string(),
+                owner: Some("Alice".to_string()),
+            }],
+            open_questions: vec!["Budget approved?".to_string()],
+        });
+        let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
+        assert!(rendered.contains("## Structured Summary"));
+        assert!(rendered.contains("### Decisions"));
+        assert!(rendered.contains("- Ship Friday"));
+        assert!(rendered.contains("**Alice**: Open PR"));
+        assert!(rendered.contains("### Open Questions"));
+        assert!(rendered.contains("- Budget approved?"));
+    }
+
+    #[test]
+    fn markdown_omits_structured_summary_when_empty() {
+        let mut meeting = sample_meeting("m1");
+        meeting.structured_summary = Some(StructuredSummary::default());
+        let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
+        assert!(!rendered.contains("## Structured Summary"));
     }
 
     #[test]

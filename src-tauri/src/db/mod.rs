@@ -172,6 +172,12 @@ impl Database {
                     .map_err(|e| format!("Update schema version v10: {e}"))?;
             }
 
+            if current_version < 11 {
+                schema::migrate_add_structured_summary_to_v11(&conn)?;
+                conn.execute("UPDATE schema_version SET version = 11", [])
+                    .map_err(|e| format!("Update schema version v11: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

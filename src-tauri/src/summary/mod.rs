@@ -1,5 +1,6 @@
 mod apple;
 mod chunking;
+mod extract;
 mod ollama;
 mod prompts;
 mod reduce;
@@ -11,7 +12,11 @@ use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::transcript::MeetingParticipant;
 
 pub use chunking::{ChunkConfig, chunk_transcript, estimate_tokens};
-pub use prompts::{build_reduce_prompt, build_summarize_prompt, format_participants};
+pub use extract::{extract_structured_summary, parse_structured_summary_response};
+pub use prompts::{
+    build_reduce_prompt, build_structured_extract_prompt, build_summarize_prompt,
+    format_participants,
+};
 
 pub const APPLE_INTELLIGENCE_MODEL_ID: &str = "apple-intelligence";
 const APPLE_INTELLIGENCE_MODEL_LABEL: &str = "Apple Intelligence";
@@ -129,7 +134,7 @@ pub async fn check_providers(ollama_url: &str) -> SummaryProvidersStatus {
     }
 }
 
-fn resolve_provider(model: &str) -> Result<SummaryProviderKind, String> {
+pub(crate) fn resolve_provider(model: &str) -> Result<SummaryProviderKind, String> {
     if model.trim() == APPLE_INTELLIGENCE_MODEL_ID {
         if apple_intelligence::is_stub_linked() {
             return Err(
@@ -153,7 +158,7 @@ fn chunk_config(provider: SummaryProviderKind) -> ChunkConfig {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn generate_with_provider(
+pub(crate) async fn generate_with_provider(
     provider: SummaryProviderKind,
     ollama_model: &str,
     ollama_url: &str,

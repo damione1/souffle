@@ -245,6 +245,7 @@ function createMeetingControllerInstance() {
         summary_is_stale: false,
         summary_model: null,
         summary_generated_at: null,
+        structured_summary: null,
         edited_transcript: null,
         notes: null,
         calendar_event_id: calendar?.event_id ?? null,

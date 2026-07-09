@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::constants::{OLLAMA_DEFAULT_URL, OLLAMA_MAP_PROMPT, OLLAMA_SUMMARIZE_PROMPT};
+use crate::constants::{
+    OLLAMA_DEFAULT_URL, OLLAMA_MAP_PROMPT, OLLAMA_STRUCTURED_EXTRACT_PROMPT,
+    OLLAMA_SUMMARIZE_PROMPT,
+};
 
 const REDUCE_NUM_CTX: u32 = 16384;
 const MAP_NUM_CTX: u32 = 8192;
@@ -210,6 +213,7 @@ pub fn http_client() -> Result<reqwest::Client, String> {
 
 pub const MAP_SYSTEM_PROMPT: &str = OLLAMA_MAP_PROMPT;
 pub const SUMMARIZE_SYSTEM_PROMPT: &str = OLLAMA_SUMMARIZE_PROMPT;
+pub const STRUCTURED_EXTRACT_SYSTEM_PROMPT: &str = OLLAMA_STRUCTURED_EXTRACT_PROMPT;
 pub const REDUCE_CONTEXT: u32 = REDUCE_NUM_CTX;
 pub const MAP_CONTEXT: u32 = MAP_NUM_CTX;
 

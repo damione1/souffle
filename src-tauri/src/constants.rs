@@ -114,3 +114,17 @@ Action Items:
 
 Open Questions / Risks:
 - ... (or \"None\")";
+
+/// System prompt for the structured extraction pass (decisions, action items,
+/// open questions) run after the prose summary is generated.
+pub const OLLAMA_STRUCTURED_EXTRACT_PROMPT: &str = "\
+You extract structured meeting outcomes from a prose meeting summary.
+
+Rules:
+- Use only information explicitly stated in the summary or user notes.
+- Never invent decisions, owners, deadlines, or questions.
+- Return ONLY valid JSON. No markdown, no commentary, no code fences.
+- Use exactly these keys: decisions, action_items, open_questions.
+- decisions and open_questions are string arrays.
+- action_items is an array of objects with text (string) and owner (string or null).
+- Use null for unknown owners. Use empty arrays when a category has no items.";
