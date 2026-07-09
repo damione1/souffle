@@ -6,6 +6,7 @@ use crate::db::Database;
 use crate::engine::{
     CANDLE_BACKEND_ID, KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, resolve_transcription_profile,
 };
+use crate::logging::LogLevel;
 
 const THEME_KEY: &str = "theme";
 const AUTO_PASTE_KEY: &str = "auto_paste";
@@ -39,6 +40,17 @@ const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
 const DICTATION_POLISH_ENABLED_KEY: &str = "dictation_polish_enabled";
 const DICTATION_POLISH_TEMPLATE_ID_KEY: &str = "dictation_polish_template_id";
 const DICTATION_POLISH_TEMPLATES_KEY: &str = "dictation_polish_templates";
+const LOG_LEVEL_KEY: &str = "log_level";
+const PASTE_METHOD_KEY: &str = "paste_method";
+const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PasteMethod {
+    #[default]
+    Clipboard,
+    Type,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 pub struct DictationPolishTemplate {
@@ -62,9 +74,13 @@ pub struct AppSettings {
     pub locale: String,
     pub auto_paste: bool,
     pub paste_delay_ms: u64,
+    /// How dictation text is inserted: clipboard Cmd+V or simulated keystrokes.
+    pub paste_method: PasteMethod,
     pub ollama_url: String,
     pub ollama_model: String,
     pub debug_transcription: bool,
+    /// Global tracing verbosity for the `souffle` crate.
+    pub log_level: LogLevel,
     pub audio_device: Option<String>,
     /// Preferred microphone while the lid is closed with an external display
     /// attached (clamshell mode). `None` means just follow whatever macOS
@@ -113,6 +129,8 @@ pub struct AppSettings {
     pub dictation_polish_template_id: String,
     /// User-editable polish prompt templates.
     pub dictation_polish_templates: Vec<DictationPolishTemplate>,
+    /// App version the user has acknowledged (What's New / post-update dialog).
+    pub last_seen_version: String,
 }
 
 /// Allowed values for `model_unload_timeout_minutes`: 0 (never) plus the
@@ -129,9 +147,11 @@ impl Default for AppSettings {
             locale: String::new(),
             auto_paste: false,
             paste_delay_ms: 100,
+            paste_method: PasteMethod::default(),
             ollama_url: OLLAMA_DEFAULT_URL.to_string(),
             ollama_model: String::new(),
             debug_transcription: false,
+            log_level: LogLevel::default(),
             audio_device: None,
             clamshell_audio_device: None,
             transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
@@ -155,6 +175,7 @@ impl Default for AppSettings {
             dictation_polish_enabled: false,
             dictation_polish_template_id: crate::summary::TEMPLATE_EMAIL.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
+            last_seen_version: String::new(),
         }
     }
 }
@@ -191,6 +212,9 @@ impl AppSettings {
         if let Some(paste_delay_ms) = read_json_setting::<u64>(db, PASTE_DELAY_MS_KEY)? {
             settings.paste_delay_ms = paste_delay_ms;
         }
+        if let Some(paste_method) = read_json_setting::<PasteMethod>(db, PASTE_METHOD_KEY)? {
+            settings.paste_method = paste_method;
+        }
         if let Some(ollama_url) = read_json_setting::<String>(db, OLLAMA_URL_KEY)?
             && !ollama_url.trim().is_empty()
         {
@@ -201,6 +225,9 @@ impl AppSettings {
         }
         if let Some(debug_transcription) = read_json_setting::<bool>(db, DEBUG_TRANSCRIPTION_KEY)? {
             settings.debug_transcription = debug_transcription;
+        }
+        if let Some(log_level) = read_json_setting::<LogLevel>(db, LOG_LEVEL_KEY)? {
+            settings.log_level = log_level;
         }
         if let Some(audio_device) = read_json_setting::<String>(db, AUDIO_DEVICE_KEY)? {
             settings.audio_device = Some(audio_device);
@@ -308,6 +335,9 @@ impl AppSettings {
         {
             settings.dictation_polish_templates =
                 crate::summary::merge_polish_templates(dictation_polish_templates);
+        }
+        if let Some(last_seen_version) = read_json_setting::<String>(db, LAST_SEEN_VERSION_KEY)? {
+            settings.last_seen_version = last_seen_version;
         }
 
         Ok(settings.sanitized())
@@ -454,6 +484,7 @@ impl AppSettings {
         write_json_setting(db, LOCALE_KEY, &normalized.locale)?;
         write_json_setting(db, AUTO_PASTE_KEY, &normalized.auto_paste)?;
         write_json_setting(db, PASTE_DELAY_MS_KEY, &normalized.paste_delay_ms)?;
+        write_json_setting(db, PASTE_METHOD_KEY, &normalized.paste_method)?;
         write_json_setting(db, OLLAMA_URL_KEY, &normalized.ollama_url)?;
         write_json_setting(db, OLLAMA_MODEL_KEY, &normalized.ollama_model)?;
         write_json_setting(
@@ -472,6 +503,7 @@ impl AppSettings {
             &normalized.transcription_backend_id,
         )?;
         write_json_setting(db, DEBUG_TRANSCRIPTION_KEY, &normalized.debug_transcription)?;
+        write_json_setting(db, LOG_LEVEL_KEY, &normalized.log_level)?;
         write_json_setting(db, VAD_ENABLED_KEY, &normalized.vad_enabled)?;
         write_json_setting(db, FILLER_REMOVAL_KEY, &normalized.filler_removal)?;
         write_json_setting(db, STUTTER_COLLAPSE_KEY, &normalized.stutter_collapse)?;
@@ -550,6 +582,7 @@ impl AppSettings {
             DICTATION_POLISH_TEMPLATES_KEY,
             &normalized.dictation_polish_templates,
         )?;
+        write_json_setting(db, LAST_SEEN_VERSION_KEY, &normalized.last_seen_version)?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
             write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
@@ -653,7 +686,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, ShortcutSettings, Theme};
+    use super::{AppSettings, PasteMethod, ShortcutSettings, Theme};
+    use crate::logging::LogLevel;
     use crate::constants::OLLAMA_DEFAULT_URL;
     use crate::test_helpers::fixtures::test_db;
 
@@ -665,9 +699,11 @@ mod tests {
             locale: "fr".into(),
             auto_paste: true,
             paste_delay_ms: 250,
+            paste_method: PasteMethod::Type,
             ollama_url: "http://example.test:11434".into(),
             ollama_model: "qwen2.5".into(),
             debug_transcription: true,
+            log_level: LogLevel::Debug,
             audio_device: Some("BlackHole".into()),
             clamshell_audio_device: Some("USB Mic".into()),
             transcription_engine_id: "kyutai".into(),
@@ -691,6 +727,7 @@ mod tests {
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
+            last_seen_version: "0.0.9".into(),
         };
 
         settings.save(&db).expect("save settings");
