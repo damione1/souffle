@@ -1,6 +1,7 @@
 pub mod app_events;
 pub mod audio;
 pub mod calendar;
+pub mod cli;
 pub mod clipboard;
 pub mod commands;
 pub mod constants;
