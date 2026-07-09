@@ -99,9 +99,22 @@ sonora = "0.1"
 block2 = "0.6"
 dispatch2 = "0.3"
 
+[features]
+# Exposes the mock transcription engine (normally `#[cfg(test)]`-only) so the
+# `tests/` integration binaries — which link the lib as a normal, non-`cfg(test)`
+# dependency — can use it too. Enabled automatically for `cargo test` via the
+# self dev-dependency below. Must not gate anything that itself needs a
+# dev-dependency (e.g. `tempfile`): dev-dependencies aren't available when the
+# lib is built as a dependency, even via this self-reference.
+test-support = []
+
 [dev-dependencies]
 tempfile = "3"
 souffle-mcp = { path = "souffle-mcp" }
+souffle = { path = ".", features = ["test-support"] }
+# MockRuntime + mock_builder for driving Tauri commands in integration tests
+# without a real webview.
+tauri = { version = "2", features = ["test"] }
 
 [profile.release]
 strip = true

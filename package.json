@@ -12,9 +12,11 @@
     "generate:types": "cargo test export_typescript_bindings --manifest-path src-tauri/Cargo.toml -- --nocapture",
     "check:generated-types": "npm run generate:types && git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts",
     "tauri": "tauri",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
     "@tailwindcss/vite": "^4.0.0",
     "@tauri-apps/api": "^2.0.0",
