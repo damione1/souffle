@@ -4,9 +4,8 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 9: dictionary.phonetic_code holds a pronunciation spelling;
-/// legacy auto-derived Soundex codes are cleared.
-pub const SCHEMA_VERSION: i64 = 9;
+/// Schema version 10: unused embeddings table dropped.
+pub const SCHEMA_VERSION: i64 = 10;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -387,6 +386,16 @@ pub fn migrate_dictionary_phonetics_to_v9(conn: &Connection) -> Result<(), Strin
     Ok(())
 }
 
+pub fn migrate_drop_embeddings_to_v10(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS embeddings;
+         DROP INDEX IF EXISTS idx_embeddings_meeting;",
+    )
+    .map_err(|e| format!("Drop embeddings table and index: {e}"))?;
+
+    Ok(())
+}
+
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
@@ -424,6 +433,131 @@ mod tests {
         let _db1 = Database::open(&db_path).unwrap();
         let db2 = Database::open(&db_path).unwrap();
         db2.get_all_settings().unwrap();
+    }
+
+    #[test]
+    fn fresh_db_no_embeddings_table() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='embeddings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !table_exists,
+            "Fresh database should not have embeddings table in schema v10"
+        );
+
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name='idx_embeddings_meeting'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !index_exists,
+            "Fresh database should not have idx_embeddings_meeting index in schema v10"
+        );
+    }
+
+    #[test]
+    fn v9_embeddings_migrate_to_v10_schema() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        // Minimal v9-era fixture: only the tables the v10 step touches, plus a
+        // v3-shaped meetings table to mirror a real v9 database.
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute_batch(CREATE_SEGMENTS).unwrap();
+        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(CREATE_SETTINGS).unwrap();
+        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(CREATE_EMBEDDINGS).unwrap();
+        conn.execute_batch(CREATE_EMBEDDINGS_INDEX).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (9)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, ended_at, duration_seconds, transcription_profile, recording_sessions, summary, summary_is_stale, summary_model, summary_generated_at, edited_transcript)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                "test-meeting",
+                "Test Meeting",
+                "2026-03-01T10:00:00Z",
+                "2026-03-01T10:10:00Z",
+                600.0,
+                r#"{"engine_id":"parakeet","engine_label":"Parakeet","model_id":"parakeet-tdt-0.6b-v2","model_label":"Parakeet TDT 0.6B v2","backend_id":"ort","backend_label":"ONNX Runtime"}"#,
+                "[]",
+                None::<String>,
+                0,
+                None::<String>,
+                None::<String>,
+                None::<String>,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO embeddings (meeting_id, chunk_text, embedding, model_name, dimensions, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                "test-meeting",
+                "Sample chunk",
+                vec![0u8; 512],
+                "test-model",
+                512,
+                "2026-03-01T10:00:00Z",
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = Database::open(&db_path).unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='embeddings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !table_exists,
+            "v9 database with embeddings should have table dropped after v10 migration"
+        );
+
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name='idx_embeddings_meeting'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !index_exists,
+            "v9 database should have idx_embeddings_meeting dropped after v10 migration"
+        );
+
+        let meeting_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='meetings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            meeting_exists,
+            "meetings table should still exist after v10 migration"
+        );
     }
 
     #[test]
