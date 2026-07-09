@@ -103,7 +103,7 @@ fn run_probe_loop(
 
     let mut scratch = vec![0.0f32; 4096];
     loop {
-        if stop_rx.try_recv().is_ok() {
+        if probe_stop_requested(&stop_rx) {
             break;
         }
         let mut n = cons.pop_slice(&mut scratch);
@@ -123,6 +123,14 @@ fn rms(samples: &[f32]) -> f32 {
     }
     let sum: f32 = samples.iter().map(|s| s * s).sum();
     (sum / samples.len() as f32).sqrt()
+}
+
+/// Returns true when the probe worker should exit: explicit stop or handle drop.
+fn probe_stop_requested(stop_rx: &std::sync::mpsc::Receiver<()>) -> bool {
+    match stop_rx.try_recv() {
+        Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => true,
+        Err(std::sync::mpsc::TryRecvError::Empty) => false,
+    }
 }
 
 #[cfg(test)]
@@ -146,5 +154,40 @@ mod tests {
         assert!(!activity.is_recently_active(ACTIVITY_RECENCY));
         activity.mark_active();
         assert!(activity.is_recently_active(ACTIVITY_RECENCY));
+    }
+
+    fn run_probe_stop_loop(stop_rx: std::sync::mpsc::Receiver<()>) {
+        loop {
+            if probe_stop_requested(&stop_rx) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn probe_stop_not_requested_while_channel_open_and_empty() {
+        let (_stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        assert!(!probe_stop_requested(&stop_rx));
+    }
+
+    #[test]
+    fn probe_loop_exits_when_stop_sender_dropped() {
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || run_probe_stop_loop(stop_rx));
+        drop(stop_tx);
+        handle
+            .join()
+            .expect("probe thread should exit after stop sender dropped");
+    }
+
+    #[test]
+    fn probe_loop_exits_on_explicit_stop_signal() {
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || run_probe_stop_loop(stop_rx));
+        stop_tx.send(()).expect("stop signal");
+        handle
+            .join()
+            .expect("probe thread should exit after stop signal");
     }
 }
