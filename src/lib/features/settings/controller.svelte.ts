@@ -520,6 +520,28 @@ export function createSettingsController() {
     });
   }
 
+  function onCalendarAutostartEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.calendar_autostart_enabled = checked;
+    });
+  }
+
+  function onFeedbackSoundsEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.feedback_sounds_enabled = checked;
+    });
+  }
+
+  function onFeedbackSoundsVolumeChange(event: Event) {
+    const value = parseInt((event.target as HTMLInputElement).value, 10);
+    if (!Number.isFinite(value)) return;
+    void persistSettings((settings) => {
+      settings.feedback_sounds_volume = Math.min(100, Math.max(0, value));
+    });
+  }
+
   async function loadDictionary() {
     try {
       dictionaryEntries = await listDictionary();
@@ -652,6 +674,9 @@ export function createSettingsController() {
     onCalendarEnabledChange,
     toggleCalendarSelected,
     onCalendarReminderMinutesChange,
+    onCalendarAutostartEnabledChange,
+    onFeedbackSoundsEnabledChange,
+    onFeedbackSoundsVolumeChange,
     mount,
     refreshRuntimeStatus,
     refreshDevices,

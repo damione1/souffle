@@ -99,6 +99,16 @@ pub struct AudioLevel {
     pub level: f32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CalendarMeetingNudgeKind {
+    /// Pre-event reminder inside the configured lead-time window.
+    #[default]
+    Reminder,
+    /// At-event-time suggestion when system audio is active but no recording runs.
+    Autostart,
+}
+
 /// Emitted by the calendar reminder scheduler shortly before a calendar
 /// event starts, so the frontend can offer a one-click transcription start.
 /// A system notification is sent alongside; this event drives the in-app
@@ -107,6 +117,8 @@ pub struct AudioLevel {
 pub struct UpcomingMeeting {
     pub event: crate::calendar::CalendarEvent,
     pub starts_in_seconds: u32,
+    #[serde(default)]
+    pub kind: CalendarMeetingNudgeKind,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]

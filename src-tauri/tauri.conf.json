@@ -62,7 +62,9 @@
       "binaries/souffle-mcp"
     ],
     "resources": {
-      "resources/silero_vad_v4.onnx": "resources/silero_vad_v4.onnx"
+      "resources/silero_vad_v4.onnx": "resources/silero_vad_v4.onnx",
+      "resources/sounds/dictation_start.wav": "resources/sounds/dictation_start.wav",
+      "resources/sounds/dictation_stop.wav": "resources/sounds/dictation_stop.wav"
     },
     "icon": [
       "icons/32x32.png",

@@ -10,18 +10,22 @@
     calendars,
     selectedIds,
     reminderMinutes,
+    autostartEnabled,
     onEnabledChange,
     onToggleCalendar,
     onReminderMinutesChange,
+    onAutostartEnabledChange,
   }: {
     enabled: boolean;
     permission: PermState;
     calendars: CalendarInfo[];
     selectedIds: string[];
     reminderMinutes: number;
+    autostartEnabled: boolean;
     onEnabledChange: (event: Event) => void | Promise<void>;
     onToggleCalendar: (id: string) => void;
     onReminderMinutesChange: (event: Event) => void;
+    onAutostartEnabledChange: (event: Event) => void;
   } = $props();
 
   let grouped = $derived.by(() => {
@@ -53,6 +57,21 @@
   {/if}
 
   {#if enabled && permission === "granted"}
+    <SettingsField
+      label={$t("settings_calendar.autostart_label")}
+      description={$t("settings_calendar.autostart_desc")}
+    >
+      {#snippet control()}
+        <input
+          type="checkbox"
+          checked={autostartEnabled}
+          onchange={onAutostartEnabledChange}
+          class="switch"
+          aria-label={$t("settings_calendar.autostart_label")}
+        />
+      {/snippet}
+    </SettingsField>
+
     <SettingsField
       label={$t("settings_calendar.reminder_label")}
       description={$t("settings_calendar.reminder_desc")}

@@ -15,6 +15,7 @@ use crate::db::Database;
 use crate::engine::TranscriptionSegment;
 use crate::lock_ext::MutexExt;
 use crate::pipeline::{EngineActorHandle, SegmentCallback, SessionConfig};
+use crate::settings::AppSettings;
 use crate::state::{AppState, AudioCommand, MeetingAccumulator};
 use crate::state_machine::{AppStateMachine, StateAction};
 use crate::transcript::{MeetingCalendarContext, MeetingTranscript};
@@ -361,6 +362,13 @@ pub async fn start_transcription(
 
     state.apply_transition(StateAction::StartDictation { session_id })?;
 
+    if let Ok(settings) = AppSettings::load(&state.db) {
+        crate::audio::feedback::play_dictation_feedback(
+            &settings,
+            crate::audio::feedback::DictationFeedbackKind::Start,
+        );
+    }
+
     info!("Streaming transcription active");
     Ok(())
 }
@@ -373,6 +381,10 @@ pub async fn start_transcription(
 #[tauri::command]
 #[specta::specta]
 pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
+    let was_dictation = matches!(
+        state.current_machine_state()?,
+        AppStateMachine::RecordingDictation { .. }
+    );
     if !state.current_machine_state()?.is_recording() {
         return Err("Not recording".into());
     }
@@ -394,6 +406,15 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
 
     // Transition to Ready even if pipeline stop failed
     state.apply_transition(StateAction::StopComplete)?;
+
+    if was_dictation
+        && let Ok(settings) = AppSettings::load(&state.db)
+    {
+        crate::audio::feedback::play_dictation_feedback(
+            &settings,
+            crate::audio::feedback::DictationFeedbackKind::Stop,
+        );
+    }
 
     info!("Streaming transcription stopped");
     Ok(())

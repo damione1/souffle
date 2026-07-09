@@ -184,6 +184,9 @@ describe("transcription controller", () => {
       calendar_integration_enabled: false,
       calendar_selected_ids: [],
       calendar_reminder_minutes: 2,
+      calendar_autostart_enabled: true,
+      feedback_sounds_enabled: true,
+      feedback_sounds_volume: 70,
       model_unload_timeout_minutes: 0,
       meeting_autostop_enabled: true,
       meeting_autostop_minutes: 10,
@@ -273,7 +276,7 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording();
     simulateRecordingStarted(ctrl.app);
-    transcriptionChannel?.onmessage?.({
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
       text: "hello world",
       is_final: true,
       start_ms: 0,
