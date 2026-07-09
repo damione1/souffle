@@ -4,7 +4,7 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 10: unused embeddings table dropped.
+/// Schema version 11: meetings.structured_summary JSON column.
 pub const SCHEMA_VERSION: i64 = 11;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
@@ -566,6 +566,38 @@ mod tests {
         assert!(
             meeting_exists,
             "meetings table should still exist after v10 migration"
+        );
+    }
+
+    #[test]
+    fn v10_migrate_to_v11_adds_structured_summary_column() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute_batch(CREATE_SEGMENTS).unwrap();
+        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(CREATE_SETTINGS).unwrap();
+        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (10)", [])
+            .unwrap();
+        drop(conn);
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(meetings)").unwrap();
+            stmt.query_map([], |row| row.get(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            columns.iter().any(|column| column == "structured_summary"),
+            "v11 migration should add structured_summary column"
         );
     }
 

@@ -783,6 +783,30 @@ mod tests {
     }
 
     #[test]
+    fn update_summary_prose_only_clears_structured() {
+        use crate::transcript::StructuredSummary;
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        db.update_meeting_summary(
+            "m1",
+            "First pass",
+            Some(&StructuredSummary {
+                decisions: vec!["Old".to_string()],
+                action_items: vec![],
+                open_questions: vec![],
+            }),
+            "qwen2.5",
+        )
+        .unwrap();
+        db.update_meeting_summary("m1", "Prose only after extract fail", None, "qwen2.5")
+            .unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.summary.as_deref(), Some("Prose only after extract fail"));
+        assert!(loaded.structured_summary.is_none());
+    }
+
+    #[test]
     fn append_segments_persists_incrementally() {
         use crate::engine::TranscriptionSegment;
         let (db, _dir) = test_db();

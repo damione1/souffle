@@ -28,7 +28,7 @@
   );
 </script>
 
-{#if hasContent && !isSummarizing}
+{#if hasContent && !isSummarizing && !isRecordingMeeting}
   <section class="surface-card flex flex-col gap-3.5" style="animation: rise-in 220ms ease;">
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <h3 class="flex items-center gap-2 text-sm font-semibold text-text-primary">

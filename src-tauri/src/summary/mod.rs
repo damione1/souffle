@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::apple_intelligence;
 use crate::constants::OLLAMA_DEFAULT_URL;
-use crate::transcript::MeetingParticipant;
+use crate::transcript::{MeetingParticipant, StructuredSummary};
 
 pub use chunking::{ChunkConfig, chunk_transcript, estimate_tokens};
 pub use extract::{extract_structured_summary, parse_structured_summary_response};
@@ -20,6 +20,17 @@ pub use prompts::{
 
 pub const APPLE_INTELLIGENCE_MODEL_ID: &str = "apple-intelligence";
 const APPLE_INTELLIGENCE_MODEL_LABEL: &str = "Apple Intelligence";
+
+/// Prose summary is always persisted; structured extraction is best-effort.
+/// On extract/parse failure, callers should save prose with no structured data.
+pub fn structured_extract_for_persist(
+    result: Result<StructuredSummary, String>,
+) -> (Option<StructuredSummary>, Option<String>) {
+    match result {
+        Ok(structured) => (Some(structured), None),
+        Err(err) => (None, Some(err)),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SummarizeProgress {
@@ -388,8 +399,33 @@ async fn reduce_part_summaries(
 mod tests {
     use super::{
         APPLE_INTELLIGENCE_MODEL_ID, SummaryProviderKind, check_providers, resolve_provider,
-        sanitize_summary,
+        sanitize_summary, structured_extract_for_persist,
     };
+    use crate::transcript::StructuredSummary;
+
+    #[test]
+    fn structured_extract_for_persist_ok() {
+        let structured = StructuredSummary {
+            decisions: vec!["Ship".to_string()],
+            action_items: vec![],
+            open_questions: vec![],
+        };
+        let (persisted, warning) =
+            structured_extract_for_persist(Ok(structured.clone()));
+        assert_eq!(persisted, Some(structured));
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn structured_extract_for_persist_err_falls_back_to_prose_only() {
+        let (persisted, warning) =
+            structured_extract_for_persist(Err("Parse structured summary JSON: eof".into()));
+        assert!(persisted.is_none());
+        assert_eq!(
+            warning.as_deref(),
+            Some("Parse structured summary JSON: eof")
+        );
+    }
 
     #[test]
     fn sanitize_summary_strips_intro_before_structured_summary() {

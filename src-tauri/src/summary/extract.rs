@@ -80,20 +80,29 @@ fn wire_to_structured_summary(wire: StructuredSummaryWire) -> StructuredSummary 
     }
 }
 
-/// Strip optional markdown code fences and isolate the JSON object payload.
+/// Strip optional markdown code fences, then isolate the outermost `{`…`}` slice.
 pub fn extract_json_payload(raw: &str) -> &str {
     let trimmed = raw.trim();
-    if let Some(rest) = trimmed.strip_prefix("```") {
+    let unfenced = if let Some(rest) = trimmed.strip_prefix("```") {
         let body = rest
             .strip_prefix("json")
             .or_else(|| rest.strip_prefix("JSON"))
             .unwrap_or(rest);
         if let Some(end) = body.rfind("```") {
-            return body[..end].trim();
+            body[..end].trim()
+        } else {
+            body.trim()
         }
-        return body.trim();
+    } else {
+        trimmed
+    };
+
+    if let (Some(start), Some(end)) = (unfenced.find('{'), unfenced.rfind('}'))
+        && start <= end
+    {
+        return &unfenced[start..=end];
     }
-    trimmed
+    unfenced
 }
 
 pub fn parse_structured_summary_response(raw: &str) -> Result<StructuredSummary, String> {
@@ -174,5 +183,22 @@ mod tests {
     #[test]
     fn extract_json_payload_without_fence() {
         assert_eq!(extract_json_payload("  {\"a\":1}  "), "{\"a\":1}");
+    }
+
+    #[test]
+    fn extract_json_payload_slices_outer_braces_from_chatty_prefix() {
+        assert_eq!(
+            extract_json_payload("Here is the JSON:\n{\"decisions\":[],\"action_items\":[],\"open_questions\":[]}"),
+            "{\"decisions\":[],\"action_items\":[],\"open_questions\":[]}"
+        );
+    }
+
+    #[test]
+    fn parse_structured_summary_accepts_chatty_wrapped_json() {
+        let parsed = parse_structured_summary_response(
+            "Sure! {\"decisions\":[\"A\"],\"action_items\":[],\"open_questions\":[]}",
+        )
+        .unwrap();
+        assert_eq!(parsed.decisions, vec!["A"]);
     }
 }

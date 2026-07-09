@@ -188,16 +188,22 @@ pub async fn summarize_meeting(
     )
     .await?;
 
-    let structured = crate::summary::extract_structured_summary(
+    let structured_result = crate::summary::extract_structured_summary(
         &summary,
         transcript.notes.as_deref(),
         &transcript.participants,
         &model,
         Some(&settings.ollama_url),
     )
-    .await?;
+    .await;
 
-    db.update_meeting_summary(&id, &summary, Some(&structured), &model)?;
+    let (structured, extract_warning) =
+        crate::summary::structured_extract_for_persist(structured_result);
+    if let Some(warning) = extract_warning {
+        tracing::warn!("Structured summary extract failed, saving prose only: {warning}");
+    }
+
+    db.update_meeting_summary(&id, &summary, structured.as_ref(), &model)?;
 
     Ok(())
 }
