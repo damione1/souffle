@@ -10,10 +10,21 @@ A private, local speech-to-text app for macOS. Everything runs on-device: no clo
 
 ## What it does
 
-- **Dictation**, with auto-paste into whatever app you were using and a global shortcut to start it from anywhere.
-- **Meeting transcription**, with a live transcript and system-audio capture that separates Me from Them.
-- **Meeting summaries**, generated from your transcripts by a local Ollama model.
+### Transcribe
+- **Dictation**, with auto-paste into whatever app you were using and a global shortcut to start it from anywhere. Apps that reject synthetic paste (terminals, secure fields) can receive simulated keystrokes instead. Optional start/stop sounds confirm the shortcut landed.
+- **Meeting transcription**, with a live transcript and system-audio capture that separates Me from Them. Optional audio recording keeps the meeting sound as compact Opus files with a retention policy, replayable with click-to-seek from the transcript.
+- **Hands-off recording lifecycle**: the app offers to start when a calendar meeting begins, detects when the meeting seems over and stops on its own after warning you, survives lid-close and system sleep by pausing and resuming, and recovers or salvages the session if the engine stalls or the microphone disappears.
+
+### Understand
+- **Meeting summaries**, generated on-device by Ollama or Apple Intelligence (no setup when Apple Intelligence is available).
+- **Structured outcomes**: decisions, action items with owners, and open questions extracted alongside the summary.
+- **Dictation polish** (optional): a local LLM pass cleans up dictated text with editable prompt templates before pasting.
 - **Full-text search** across every transcript and dictation entry.
+
+### Own your data
+- **Export any meeting** as Markdown, JSON, or SRT/VTT subtitles, or the **whole archive** as a plain folder of Markdown and JSON.
+- **MCP server**: the bundled `souffle-mcp` sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. Read-only, fully local, works even when the app is closed. Setup snippets live in Settings > Data.
+- **Headless CLI**: `souffle --transcribe-file audio.wav --json` transcribes a file without launching the app, and `--repeat N` doubles as a benchmark harness.
 
 ## Speech models
 
