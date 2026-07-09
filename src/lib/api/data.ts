@@ -1,5 +1,5 @@
 import { commands, unwrap } from "./generated";
-import type { DataStats } from "../types";
+import type { DataStats, McpSetupInfo } from "../types";
 
 /** Database size on disk plus meeting/dictation counts. */
 export async function getDataStats(): Promise<DataStats> {
@@ -16,4 +16,14 @@ export async function exportArchive(destDir: string): Promise<void> {
 /** Reveal the app's data directory (database, logs, models) in Finder. */
 export async function revealDataDir(): Promise<void> {
   await unwrap(commands.revealDataDir());
+}
+
+/** Sidecar path plus copy/paste snippets for MCP client setup. */
+export async function getMcpSetupInfo(): Promise<McpSetupInfo> {
+  return unwrap(commands.getMcpSetupInfo());
+}
+
+/** Spawn the sidecar and verify it speaks MCP over stdio. */
+export async function testMcpConnection(): Promise<string> {
+  return unwrap(commands.testMcpConnection());
 }

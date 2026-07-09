@@ -108,7 +108,19 @@
     "export_success": "Export complete.",
     "reveal_title": "Data folder",
     "reveal_desc": "Open the folder where the database, logs, and models are stored.",
-    "reveal_button": "Reveal in Finder"
+    "reveal_button": "Reveal in Finder",
+    "mcp_title": "Connect to AI assistants",
+    "mcp_desc": "Let Claude Desktop, Claude Code, or other MCP clients read your local transcripts and summaries. Everything stays on this Mac — no cloud upload.",
+    "mcp_binary": "Sidecar binary",
+    "mcp_binary_missing": "Not built yet. Run scripts/build-mcp-sidecar.sh before packaging, or cargo build -p souffle-mcp for local dev.",
+    "mcp_claude_desktop": "Claude Desktop config",
+    "mcp_claude_desktop_desc": "Paste into claude_desktop_config.json under mcpServers.",
+    "mcp_claude_code": "Claude Code",
+    "mcp_claude_code_desc": "Run once in a terminal to register the server.",
+    "mcp_test": "Test connection",
+    "mcp_testing": "Testing…",
+    "mcp_test_success": "Connected — tools: {tools}",
+    "mcp_test_error": "Connection test failed"
   },
   "settings_about": {
     "title": "About",

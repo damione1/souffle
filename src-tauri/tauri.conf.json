@@ -7,7 +7,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && ./scripts/build-mcp-sidecar.sh",
     "frontendDist": "../dist"
   },
   "app": {
@@ -58,6 +58,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "binaries/souffle-mcp"
+    ],
     "resources": {
       "resources/silero_vad_v4.onnx": "resources/silero_vad_v4.onnx"
     },

@@ -584,6 +584,33 @@ async revealDataDir() : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Resolve the sidecar path and build the copy/paste snippets for Settings >
+ * Data. Never fails: an absent binary is a valid (if inactionable) state
+ * the UI shows, not an error.
+ */
+async getMcpSetupInfo() : Promise<Result<McpSetupInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_mcp_setup_info") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Spawn the sidecar, perform an MCP `initialize` handshake and `tools/list`
+ * call over stdio, and return the discovered tool names joined by ", ".
+ * Used by the Settings UI's "Test connection" button as a quick smoke test
+ * that the binary actually speaks MCP.
+ */
+async testMcpConnection() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("test_mcp_connection") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -760,6 +787,7 @@ export type HealthStatus = "healthy" |
  * No frame has been processed for several seconds while audio is queued.
  */
 "stalled"
+export type McpSetupInfo = { binary_path: string; exists: boolean; claude_desktop_snippet: string; claude_code_command: string }
 /**
  * Calendar context passed by the frontend when starting a meeting from a
  * calendar event.

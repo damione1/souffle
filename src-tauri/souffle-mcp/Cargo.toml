@@ -1,0 +1,32 @@
+[package]
+name = "souffle-mcp"
+version = "0.1.0"
+description = "Standalone MCP stdio server exposing Souffle meeting transcripts, summaries, and dictation history to AI assistants"
+authors = ["Damien Goehrig"]
+license = "MIT"
+edition = "2024"
+
+[lib]
+name = "souffle_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "souffle-mcp"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "2.2.0", features = ["server", "macros", "transport-io", "schemars"] }
+schemars = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs-next = "2"
+thiserror = "2"
+
+# Read-only sidecar into the same SQLite file the app writes; bundled-full
+# matches the main crate's rusqlite build (FTS5 is required for search).
+rusqlite = { version = "0.33", features = ["bundled-full"] }
+
+[dev-dependencies]
+tempfile = "3"
