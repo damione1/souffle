@@ -1,10 +1,9 @@
 <script lang="ts">
   import { ClipboardCheck, Square } from "@lucide/svelte";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
   import Waveform from "../../components/Waveform.svelte";
   import Spinner from "../../components/ui/Spinner.svelte";
-  import { groupIntoParagraphs } from "../../utils/paragraphs";
   import MeetingNotesSection from "../meeting/components/MeetingNotesSection.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
@@ -19,6 +18,12 @@
     meeting: ReturnType<typeof createMeetingController>;
   } = $props();
 
+  /** Only the most recent paragraphs stay in the DOM; older ones are still in
+   * `meeting.liveTranscript.committed` but are never rendered live. */
+  const LIVE_PARAGRAPH_WINDOW = 30;
+  /** Auto-scroll only kicks in when already within this many px of the bottom. */
+  const NEAR_BOTTOM_PX = 40;
+
   let elapsedSeconds = $state(0);
   let transcriptEl: HTMLDivElement | undefined = $state();
 
@@ -27,11 +32,20 @@
   // Meetings render through the same paragraph grouping as the finished
   // transcript, so diarized sessions show Me/Them live: segments are ordered
   // by time and split on speaker changes instead of one undifferentiated blob.
+  // `committed` only grows by push and can hold hours of history, so slice it
+  // to the window first: slicing the last N elements is O(N), not O(meeting
+  // length), which keeps this derived cheap on every incoming segment.
   const liveParagraphs = $derived(
-    mode === "meeting" ? groupIntoParagraphs(meeting.liveMeetingSegments, 1.5) : [],
+    mode === "meeting"
+      ? [...meeting.liveTranscript.committed.slice(-LIVE_PARAGRAPH_WINDOW), ...meeting.liveTranscript.tail]
+        .slice(-LIVE_PARAGRAPH_WINDOW)
+      : [],
   );
+  const liveTentative = $derived(mode === "meeting" ? meeting.liveTranscript.tentative : "");
 
-  const hasLiveContent = $derived(mode === "dictation" ? Boolean(liveText) : liveParagraphs.length > 0);
+  const hasLiveContent = $derived(
+    mode === "dictation" ? Boolean(liveText) : liveParagraphs.length > 0 || Boolean(liveTentative),
+  );
 
   const elapsed = $derived(
     `${Math.floor(elapsedSeconds / 60)}:${`${elapsedSeconds % 60}`.padStart(2, "0")}`,
@@ -52,11 +66,33 @@
     }
   }
 
-  // Keep the latest words in view as they stream in.
+  // Track whether the user is (still) parked near the bottom, independent of
+  // content changes, so a burst of new segments never fights a manual scroll
+  // up to read earlier text.
+  let isNearBottom = true;
+  let scrollRafId: number | null = null;
+
+  function handleScroll() {
+    const el = transcriptEl;
+    if (!el) return;
+    isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+  }
+
+  function scheduleAutoscroll() {
+    if (!isNearBottom || scrollRafId !== null) return;
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = null;
+      if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    });
+  }
+
+  // Keep the latest words in view as they stream in, coalesced to one scroll
+  // per frame instead of one per segment.
   $effect(() => {
     void liveText;
     void liveParagraphs;
-    if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    void liveTentative;
+    scheduleAutoscroll();
   });
 
   onMount(() => {
@@ -64,6 +100,10 @@
       elapsedSeconds += 1;
     }, 1000);
     return () => clearInterval(timer);
+  });
+
+  onDestroy(() => {
+    if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
   });
 </script>
 
@@ -125,12 +165,13 @@
       </div>
       <div
         bind:this={transcriptEl}
+        onscroll={handleScroll}
         class="flex max-h-[250px] flex-1 flex-col gap-4 overflow-y-auto pr-1.5"
       >
         {#if !hasLiveContent}
           <span class="text-sm text-text-muted">{$t("home.listening")}</span>
         {:else}
-          {#each liveParagraphs as paragraph}
+          {#each liveParagraphs as paragraph, i (paragraph.id)}
             <div class="flex flex-col gap-[3px]" style="animation: rise-in 240ms ease;">
               <div class="flex items-center gap-2">
                 {#if paragraph.speaker}
@@ -142,9 +183,17 @@
                 {/if}
                 <span class="font-mono text-[10.5px] text-text-faint">{paragraph.timestamp}</span>
               </div>
-              <p class="m-0 text-[15px] leading-[1.75] text-text-secondary">{paragraph.text}</p>
+              <p class="m-0 text-[15px] leading-[1.75] text-text-secondary">
+                {paragraph.text}
+                {#if i === liveParagraphs.length - 1 && liveTentative}
+                  <span class="opacity-50">{paragraph.text ? " " : ""}{liveTentative}</span>
+                {/if}
+              </p>
             </div>
           {/each}
+          {#if liveParagraphs.length === 0 && liveTentative}
+            <p class="m-0 text-[15px] leading-[1.75] text-text-secondary opacity-50">{liveTentative}</p>
+          {/if}
         {/if}
       </div>
     </div>

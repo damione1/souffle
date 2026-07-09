@@ -24,8 +24,16 @@ function countSentenceEnds(text: string): number {
   return (text.match(/[.!?…]+(?=["»”')\]]*(\s|$))/g) ?? []).length;
 }
 
+/** Half-open index range `[start, end)` into the ordered segment array that a
+ * paragraph was built from. */
+export type ParagraphRange = { start: number; end: number };
+
 /**
- * Group segments into flowing paragraphs with a leading timestamp.
+ * Group segments into flowing paragraphs with a leading timestamp, also
+ * returning the source index range (into the returned `ordered` array) each
+ * paragraph consumed. Callers that need incremental/streaming regrouping use
+ * the ranges to know which segments a completed paragraph consumed, without
+ * duplicating the break rules below.
  *
  * Paragraphs only break at sentence boundaries, triggered by any of:
  * - a pause ≥ `pauseThreshold` seconds before the next segment
@@ -38,11 +46,11 @@ function countSentenceEnds(text: string): number {
  * Parakeet emit sentence/window segments. Negative gaps (legacy data with
  * window-relative timestamps) never trigger a pause break.
  */
-export function groupIntoParagraphs(
+export function groupIntoParagraphsWithRanges(
   segments: TranscriptionSegment[],
   pauseThreshold: number,
-): Paragraph[] {
-  if (segments.length === 0) return [];
+): { paragraphs: Paragraph[]; ranges: ParagraphRange[]; ordered: TranscriptionSegment[] } {
+  if (segments.length === 0) return { paragraphs: [], ranges: [], ordered: segments };
 
   // Diarized meetings tag each segment with a speaker. Mic (Me) and system
   // audio (Them) are transcribed independently, so order by time to read as a
@@ -55,6 +63,8 @@ export function groupIntoParagraphs(
     : segments;
 
   const paragraphs: Paragraph[] = [];
+  const ranges: ParagraphRange[] = [];
+  let rangeStart = 0;
   let currentTimestamp = formatTimestamp(ordered[0].start_time);
   let currentSpeaker: Speaker | null = ordered[0].speaker ?? null;
   let currentWords: string[] = [];
@@ -63,12 +73,14 @@ export function groupIntoParagraphs(
   let endsSentence = false;
   let lastEnd = ordered[0].start_time;
 
-  const flush = (nextStart: number, nextSpeaker: Speaker | null) => {
+  const flush = (boundaryIndex: number, nextStart: number, nextSpeaker: Speaker | null) => {
     paragraphs.push({
       timestamp: currentTimestamp,
       text: currentWords.join(" "),
       speaker: currentSpeaker,
     });
+    ranges.push({ start: rangeStart, end: boundaryIndex });
+    rangeStart = boundaryIndex;
     currentTimestamp = formatTimestamp(nextStart);
     currentSpeaker = nextSpeaker;
     currentWords = [];
@@ -77,15 +89,19 @@ export function groupIntoParagraphs(
     endsSentence = false;
   };
 
-  for (const seg of ordered) {
+  for (let i = 0; i < ordered.length; i++) {
+    const seg = ordered[i];
     const text = seg.text.trim();
+    // An empty segment carries no text but still occupies an index; it stays
+    // part of whichever paragraph range is currently open (or the next one,
+    // if none has started yet), since ranges are tracked by index, not text.
     if (!text) continue;
     const speaker = seg.speaker ?? null;
 
     if (currentWords.length > 0) {
       // A speaker change always starts a new paragraph (even mid-sentence).
       if (diarized && speaker !== currentSpeaker) {
-        flush(seg.start_time, speaker);
+        flush(i, seg.start_time, speaker);
       } else {
         const gap = seg.start_time - lastEnd;
         const breakAtSentence =
@@ -96,7 +112,7 @@ export function groupIntoParagraphs(
         const breakHard = currentChars >= HARD_MAX_CHARS;
 
         if (breakAtSentence || breakHard) {
-          flush(seg.start_time, speaker);
+          flush(i, seg.start_time, speaker);
         }
       }
     } else {
@@ -116,9 +132,22 @@ export function groupIntoParagraphs(
       text: currentWords.join(" "),
       speaker: currentSpeaker,
     });
+    ranges.push({ start: rangeStart, end: ordered.length });
   }
 
-  return paragraphs;
+  return { paragraphs, ranges, ordered };
+}
+
+/**
+ * Group segments into flowing paragraphs with a leading timestamp. See
+ * `groupIntoParagraphsWithRanges` for the break rules; this is a thin
+ * wrapper that drops the ranges for callers that only need the paragraphs.
+ */
+export function groupIntoParagraphs(
+  segments: TranscriptionSegment[],
+  pauseThreshold: number,
+): Paragraph[] {
+  return groupIntoParagraphsWithRanges(segments, pauseThreshold).paragraphs;
 }
 
 function toParagraphBlocks(paragraphs: Paragraph[]): TranscriptParagraphBlock[] {
