@@ -70,6 +70,13 @@ const defaultSettings: AppSettings = {
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
+  dictation_polish_enabled: false,
+  dictation_polish_template_id: "email",
+  dictation_polish_templates: [
+    { id: "email", label: "Professional email", prompt: "Rewrite as email." },
+    { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
+    { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
+  ],
 }
 
 const fakeDevices: AudioDeviceInfo[] = [

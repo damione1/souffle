@@ -33,6 +33,16 @@ const MEETING_MAX_DURATION_MINUTES_KEY: &str = "meeting_max_duration_minutes";
 const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
+const DICTATION_POLISH_ENABLED_KEY: &str = "dictation_polish_enabled";
+const DICTATION_POLISH_TEMPLATE_ID_KEY: &str = "dictation_polish_template_id";
+const DICTATION_POLISH_TEMPLATES_KEY: &str = "dictation_polish_templates";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
+pub struct DictationPolishTemplate {
+    pub id: String,
+    pub label: String,
+    pub prompt: String,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
 #[serde(rename_all = "lowercase")]
@@ -87,6 +97,12 @@ pub struct AppSettings {
     /// Hard failsafe: stop the meeting after this many minutes regardless of
     /// speech activity.
     pub meeting_max_duration_minutes: u32,
+    /// Optional LLM post-processing applied to dictation before paste/history.
+    pub dictation_polish_enabled: bool,
+    /// Active polish template id (email, bullets, no_fillers).
+    pub dictation_polish_template_id: String,
+    /// User-editable polish prompt templates.
+    pub dictation_polish_templates: Vec<DictationPolishTemplate>,
 }
 
 /// Allowed values for `model_unload_timeout_minutes`: 0 (never) plus the
@@ -123,6 +139,9 @@ impl Default for AppSettings {
             meeting_autostop_enabled: true,
             meeting_autostop_minutes: 10,
             meeting_max_duration_minutes: 240,
+            dictation_polish_enabled: false,
+            dictation_polish_template_id: crate::summary::TEMPLATE_EMAIL.to_string(),
+            dictation_polish_templates: crate::summary::default_polish_templates(),
         }
     }
 }
@@ -246,6 +265,22 @@ impl AppSettings {
         {
             settings.meeting_max_duration_minutes = meeting_max_duration_minutes;
         }
+        if let Some(dictation_polish_enabled) =
+            read_json_setting::<bool>(db, DICTATION_POLISH_ENABLED_KEY)?
+        {
+            settings.dictation_polish_enabled = dictation_polish_enabled;
+        }
+        if let Some(dictation_polish_template_id) =
+            read_json_setting::<String>(db, DICTATION_POLISH_TEMPLATE_ID_KEY)?
+        {
+            settings.dictation_polish_template_id = dictation_polish_template_id;
+        }
+        if let Some(dictation_polish_templates) =
+            read_json_setting::<Vec<DictationPolishTemplate>>(db, DICTATION_POLISH_TEMPLATES_KEY)?
+        {
+            settings.dictation_polish_templates =
+                crate::summary::merge_polish_templates(dictation_polish_templates);
+        }
 
         Ok(settings.sanitized())
     }
@@ -351,6 +386,33 @@ impl AppSettings {
             normalized.meeting_max_duration_minutes = Self::default().meeting_max_duration_minutes;
         }
 
+        normalized.dictation_polish_template_id = normalized
+            .dictation_polish_template_id
+            .trim()
+            .to_string();
+        if normalized.dictation_polish_templates.is_empty() {
+            normalized.dictation_polish_templates = crate::summary::default_polish_templates();
+        } else {
+            normalized.dictation_polish_templates =
+                crate::summary::merge_polish_templates(normalized.dictation_polish_templates.clone());
+        }
+        if !normalized
+            .dictation_polish_templates
+            .iter()
+            .any(|template| template.id == normalized.dictation_polish_template_id)
+        {
+            normalized.dictation_polish_template_id = normalized
+                .dictation_polish_templates
+                .first()
+                .map(|template| template.id.clone())
+                .unwrap_or_else(|| crate::summary::TEMPLATE_EMAIL.to_string());
+        }
+        for template in &mut normalized.dictation_polish_templates {
+            template.id = template.id.trim().to_string();
+            template.label = template.label.trim().to_string();
+            template.prompt = template.prompt.trim().to_string();
+        }
+
         normalized
     }
 
@@ -426,6 +488,21 @@ impl AppSettings {
             db,
             MEETING_MAX_DURATION_MINUTES_KEY,
             &normalized.meeting_max_duration_minutes,
+        )?;
+        write_json_setting(
+            db,
+            DICTATION_POLISH_ENABLED_KEY,
+            &normalized.dictation_polish_enabled,
+        )?;
+        write_json_setting(
+            db,
+            DICTATION_POLISH_TEMPLATE_ID_KEY,
+            &normalized.dictation_polish_template_id,
+        )?;
+        write_json_setting(
+            db,
+            DICTATION_POLISH_TEMPLATES_KEY,
+            &normalized.dictation_polish_templates,
         )?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
@@ -562,6 +639,9 @@ mod tests {
             meeting_autostop_enabled: false,
             meeting_autostop_minutes: 15,
             meeting_max_duration_minutes: 120,
+            dictation_polish_enabled: true,
+            dictation_polish_template_id: "email".into(),
+            dictation_polish_templates: crate::summary::default_polish_templates(),
         };
 
         settings.save(&db).expect("save settings");
@@ -806,6 +886,36 @@ mod tests {
         s.save(&db).unwrap();
         let loaded = ShortcutSettings::load(&db).unwrap();
         assert_eq!(s, loaded);
+    }
+
+    #[test]
+    fn dictation_polish_settings_round_trip() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            dictation_polish_enabled: true,
+            dictation_polish_template_id: "bullets".into(),
+            dictation_polish_templates: vec![super::DictationPolishTemplate {
+                id: "email".into(),
+                label: "Email".into(),
+                prompt: "Custom email prompt".into(),
+            }],
+            ..AppSettings::default()
+        };
+
+        settings.save(&db).expect("save settings");
+        let loaded = AppSettings::load(&db).expect("load settings");
+
+        assert!(loaded.dictation_polish_enabled);
+        assert_eq!(loaded.dictation_polish_template_id, "bullets");
+        assert_eq!(loaded.dictation_polish_templates.len(), 3);
+        assert_eq!(
+            loaded
+                .dictation_polish_templates
+                .iter()
+                .find(|template| template.id == "email")
+                .map(|template| template.prompt.as_str()),
+            Some("Custom email prompt")
+        );
     }
 
     #[test]

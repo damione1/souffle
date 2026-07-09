@@ -1,6 +1,10 @@
 use tauri::State;
 
+use crate::settings::AppSettings;
 use crate::state::AppState;
+use crate::summary::{
+    DictationPolishResult, check_providers, early_polish_dictation_result, polish_dictation_text,
+};
 
 /// List dictation history entries
 #[tauri::command]
@@ -33,4 +37,20 @@ pub fn delete_dictation_entry(state: State<'_, AppState>, id: String) -> Result<
 #[specta::specta]
 pub fn clear_dictation_history(state: State<'_, AppState>) -> Result<(), String> {
     state.db.clear_dictation_entries()
+}
+
+/// Optional LLM polish pass for dictation text before paste/history.
+#[tauri::command]
+#[specta::specta]
+pub async fn polish_dictation(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<DictationPolishResult, String> {
+    let settings = AppSettings::load(&state.db)?;
+    if let Some(result) = early_polish_dictation_result(&settings, &text) {
+        return Ok(result);
+    }
+
+    let providers = check_providers(&settings.ollama_url).await;
+    Ok(polish_dictation_text(&settings, &text, &providers.models).await)
 }

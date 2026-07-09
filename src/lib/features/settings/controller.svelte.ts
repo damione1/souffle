@@ -335,6 +335,32 @@ export function createSettingsController() {
     });
   }
 
+  function onDictationPolishEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.dictation_polish_enabled = checked;
+    });
+  }
+
+  function onDictationPolishTemplateChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value;
+    void persistSettings((settings) => {
+      settings.dictation_polish_template_id = value;
+    });
+  }
+
+  function onDictationPolishPromptChange(event: Event) {
+    const value = (event.target as HTMLTextAreaElement).value;
+    const templateId = app.settings.dictation_polish_template_id;
+    void persistSettings((settings) => {
+      settings.dictation_polish_templates = settings.dictation_polish_templates.map((template) =>
+        template.id === templateId ? { ...template, prompt: value } : template,
+      );
+    });
+  }
+
+  let summaryProviderAvailable = $derived(ollamaAvailable || appleIntelligenceAvailable);
+
   function onPasteDelayChange(event: Event) {
     const value = parseInt((event.target as HTMLInputElement).value, 10);
     void persistSettings((settings) => {
@@ -603,6 +629,7 @@ export function createSettingsController() {
     get app() { return app; },
     get audioDevices() { return audioDevices; },
     get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },
+    get summaryProviderAvailable() { return summaryProviderAvailable; },
     get ollamaAvailable() { return ollamaAvailable; },
     get ollamaModels() { return ollamaModels; },
     get summaryModels() { return summaryModels; },
@@ -635,6 +662,9 @@ export function createSettingsController() {
     onThemeChange,
     onLocaleChange,
     onAutoPasteChange,
+    onDictationPolishEnabledChange,
+    onDictationPolishTemplateChange,
+    onDictationPolishPromptChange,
     onPasteDelayChange,
     onDebugTranscriptionChange,
     onOllamaUrlChange,

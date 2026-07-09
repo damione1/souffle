@@ -2,6 +2,7 @@ mod apple;
 mod chunking;
 mod extract;
 mod ollama;
+mod polish;
 mod prompts;
 mod reduce;
 
@@ -13,6 +14,11 @@ use crate::transcript::{MeetingParticipant, StructuredSummary};
 
 pub use chunking::{ChunkConfig, chunk_transcript, estimate_tokens};
 pub use extract::{extract_structured_summary, parse_structured_summary_response};
+pub use polish::{
+    DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
+    default_polish_templates, early_polish_dictation_result, merge_polish_templates,
+    polish_dictation_text,
+};
 pub use prompts::{
     build_reduce_prompt, build_structured_extract_prompt, build_summarize_prompt,
     format_participants,
@@ -168,6 +174,20 @@ fn chunk_config(provider: SummaryProviderKind) -> ChunkConfig {
     }
 }
 
+pub fn pick_summary_model(
+    settings: &crate::settings::AppSettings,
+    models: &[SummaryModelDescriptor],
+) -> Option<String> {
+    if models.is_empty() {
+        return None;
+    }
+    let preferred = settings.ollama_model.trim();
+    if !preferred.is_empty() && models.iter().any(|model| model.id == preferred) {
+        return Some(preferred.to_string());
+    }
+    models.first().map(|model| model.id.clone())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn generate_with_provider(
     provider: SummaryProviderKind,
@@ -178,6 +198,7 @@ pub(crate) async fn generate_with_provider(
     temperature: f32,
     num_ctx: u32,
     on_chunk: &impl Fn(SummarizeProgress),
+    json_format: bool,
 ) -> Result<String, String> {
     match provider {
         SummaryProviderKind::Ollama => {
@@ -191,6 +212,7 @@ pub(crate) async fn generate_with_provider(
                 num_ctx,
                 temperature,
                 on_chunk,
+                json_format,
             )
             .await
         }
@@ -243,6 +265,7 @@ pub async fn summarize_stream(
             0.2,
             ollama::REDUCE_CONTEXT,
             &on_chunk,
+            false,
         )
         .await?;
         return Ok(sanitize_summary(&full));
@@ -273,6 +296,7 @@ pub async fn summarize_stream(
                     ollama::MAP_CONTEXT,
                     0.2,
                     &no_op,
+                    false,
                 )
             })
             .buffered(config.map_concurrency)
@@ -295,6 +319,7 @@ pub async fn summarize_stream(
                 0.2,
                 ollama::MAP_CONTEXT,
                 &no_op,
+                false,
             )
             .await?;
             part_summaries.push(part);
@@ -345,6 +370,7 @@ async fn reduce_part_summaries(
             0.3,
             num_ctx,
             on_chunk,
+            false,
         )
         .await;
     }
@@ -361,6 +387,7 @@ async fn reduce_part_summaries(
                 0.3,
                 num_ctx,
                 on_chunk,
+                false,
             )
             .await;
         }
@@ -387,6 +414,7 @@ async fn reduce_part_summaries(
                 0.2,
                 num_ctx,
                 &no_op,
+                false,
             )
             .await?;
             next.push(merged);
