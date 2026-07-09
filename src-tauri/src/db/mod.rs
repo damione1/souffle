@@ -166,6 +166,12 @@ impl Database {
                     .map_err(|e| format!("Update schema version v9: {e}"))?;
             }
 
+            if current_version < 10 {
+                schema::migrate_drop_embeddings_to_v10(&conn)?;
+                conn.execute("UPDATE schema_version SET version = 10", [])
+                    .map_err(|e| format!("Update schema version v10: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

@@ -418,9 +418,6 @@ impl Database {
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
-        conn.execute("DELETE FROM embeddings WHERE meeting_id = ?1", params![id])
-            .map_err(|e| format!("Delete embeddings: {e}"))?;
-
         conn.execute("DELETE FROM meetings WHERE id = ?1", params![id])
             .map_err(|e| format!("Delete meeting: {e}"))?;
 
