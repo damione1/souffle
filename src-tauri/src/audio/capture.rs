@@ -45,6 +45,108 @@ const MIC_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 /// interval so both modes stream levels at ~15Hz.
 const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(66);
 
+/// Consecutive rebuild failures after which a dictation session (mic is the
+/// only source) gives up and ends itself, rather than retrying forever
+/// while the UI still claims to be recording. ~10s at the `MIC_CHECK_INTERVAL`
+/// cadence.
+const DICTATION_ABORT_AFTER_FAILURES: u32 = 5;
+
+/// Decision for one mic-loss episode in `check_mic_health`, given how many
+/// rebuilds have failed in a row, whether the session has another audio
+/// source to fall back on, and whether this episode already warned once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MicLossAction {
+    /// Nothing to surface yet; keep retrying at the normal cadence.
+    KeepRetrying,
+    /// Surface a one-time, non-fatal warning: the mic is gone but another
+    /// source (system audio) is still capturing.
+    WarnOnce,
+    /// No other source exists; give up and end the session.
+    Abort,
+}
+
+/// Pure decision function backing `check_mic_health`'s mic-loss ladder, kept
+/// free of any capture state so it can be unit-tested directly.
+fn decide_mic_loss(
+    consecutive_failures: u32,
+    has_other_source: bool,
+    already_warned_this_episode: bool,
+) -> MicLossAction {
+    if consecutive_failures == 0 {
+        return MicLossAction::KeepRetrying;
+    }
+    if has_other_source {
+        if already_warned_this_episode {
+            MicLossAction::KeepRetrying
+        } else {
+            MicLossAction::WarnOnce
+        }
+    } else if consecutive_failures >= DICTATION_ABORT_AFTER_FAILURES {
+        MicLossAction::Abort
+    } else {
+        MicLossAction::KeepRetrying
+    }
+}
+
+#[cfg(test)]
+mod mic_loss_tests {
+    use super::*;
+
+    #[test]
+    fn keeps_retrying_with_no_failures_yet() {
+        assert_eq!(
+            decide_mic_loss(0, false, false),
+            MicLossAction::KeepRetrying
+        );
+        assert_eq!(decide_mic_loss(0, true, false), MicLossAction::KeepRetrying);
+    }
+
+    #[test]
+    fn dictation_keeps_retrying_below_threshold() {
+        for n in 1..DICTATION_ABORT_AFTER_FAILURES {
+            assert_eq!(
+                decide_mic_loss(n, false, false),
+                MicLossAction::KeepRetrying,
+                "failure {n} should not abort yet"
+            );
+        }
+    }
+
+    #[test]
+    fn dictation_aborts_at_threshold() {
+        assert_eq!(
+            decide_mic_loss(DICTATION_ABORT_AFTER_FAILURES, false, false),
+            MicLossAction::Abort
+        );
+        assert_eq!(
+            decide_mic_loss(DICTATION_ABORT_AFTER_FAILURES + 3, false, false),
+            MicLossAction::Abort
+        );
+    }
+
+    #[test]
+    fn meeting_never_aborts_even_well_past_threshold() {
+        assert_eq!(
+            decide_mic_loss(DICTATION_ABORT_AFTER_FAILURES + 50, true, true),
+            MicLossAction::KeepRetrying
+        );
+    }
+
+    #[test]
+    fn meeting_warns_once_then_keeps_retrying_quietly() {
+        assert_eq!(decide_mic_loss(1, true, false), MicLossAction::WarnOnce);
+        assert_eq!(decide_mic_loss(2, true, true), MicLossAction::KeepRetrying);
+        assert_eq!(decide_mic_loss(9, true, true), MicLossAction::KeepRetrying);
+    }
+
+    #[test]
+    fn meeting_rearms_after_episode_flag_clears() {
+        // A caller resets `already_warned_this_episode` to false once a
+        // rebuild succeeds; the next loss episode should warn again.
+        assert_eq!(decide_mic_loss(1, true, false), MicLossAction::WarnOnce);
+    }
+}
+
 /// Gates AudioLevel emission to at most once per `LEVEL_EMIT_INTERVAL`.
 struct AudioLevelThrottle {
     last_emit: Option<Instant>,
@@ -251,15 +353,31 @@ pub struct AudioCapture {
     last_mic_check: Instant,
     /// Throttles pushed AudioLevel events while a session is active.
     level_throttle: AudioLevelThrottle,
+    /// Consecutive failed capture rebuilds since the last success (reset to
+    /// 0 on success). Drives the mic-loss ladder in `check_mic_health`.
+    mic_rebuild_failures: u32,
+    /// Whether the current mic-loss episode already surfaced its one-time
+    /// warning (meeting mode only); re-armed on the next successful rebuild.
+    mic_loss_warned: bool,
+    /// Shared with the engine actor. Set right before this thread exits
+    /// after giving up on an unrecoverable microphone, so the actor's
+    /// AudioGone handler can surface a mic-specific message instead of its
+    /// generic fallback.
+    audio_gone_reason: Arc<Mutex<Option<String>>>,
 }
 
 impl AudioCapture {
     /// Spawn the audio thread. Returns channels for commanding it and receiving audio.
     /// `dropped_counter` is incremented for every chunk lost to a full channel;
     /// the engine actor resets and reads it for health reporting.
+    /// `audio_gone_reason` is shared with the engine actor: this thread sets
+    /// it right before an unrecoverable failure ends the whole capture
+    /// thread, so the actor's `AudioGone` handler can surface a specific
+    /// message instead of its generic fallback.
     pub fn spawn(
         audio_rms: Arc<AtomicU32>,
         dropped_counter: Arc<AtomicU64>,
+        audio_gone_reason: Arc<Mutex<Option<String>>>,
     ) -> Result<(Sender<AudioCommand>, Receiver<AudioMessage>), String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
         // Bounded channel: many small chunks per second from cpal; inference (Kyutai/Metal)
@@ -287,6 +405,9 @@ impl AudioCapture {
                     stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     last_mic_check: Instant::now(),
                     level_throttle: AudioLevelThrottle::new(),
+                    mic_rebuild_failures: 0,
+                    mic_loss_warned: false,
+                    audio_gone_reason,
                 };
 
                 // Block on commands while idle; during sessions, wake
@@ -321,7 +442,12 @@ impl AudioCapture {
                                 }
                                 if capture.last_mic_check.elapsed() >= MIC_CHECK_INTERVAL {
                                     capture.last_mic_check = Instant::now();
-                                    capture.check_mic_health();
+                                    if capture.check_mic_health() {
+                                        tracing::error!(
+                                            "Microphone unrecoverable; ending session to keep the app alive"
+                                        );
+                                        break;
+                                    }
                                 }
                                 capture.emit_throttled_audio_level();
                                 continue;
@@ -683,9 +809,16 @@ impl AudioCapture {
     /// device changed (lid closed, headset plugged in…). The session keeps
     /// its id, so the engine actor sees one continuous stream; at most a
     /// couple of seconds of audio are lost.
-    fn check_mic_health(&mut self) {
+    ///
+    /// Returns `true` if the microphone is unrecoverable and has no other
+    /// audio source to fall back on (dictation): the session has already
+    /// been ended and the caller must break its run loop so the whole
+    /// thread exits. Returns `false` in every other case, including a
+    /// meeting session that lost its mic but keeps retrying while the
+    /// system-audio leg still captures the other participants.
+    fn check_mic_health(&mut self) -> bool {
         let Some(params) = self.active_params.clone() else {
-            return;
+            return false;
         };
 
         let failed = self
@@ -705,21 +838,54 @@ impl AudioCapture {
             && self.find_device().ok().and_then(|d| d.name().ok()) != self.mic_device_name;
 
         if !failed && !default_changed {
-            return;
+            return false;
         }
 
         info!(
             "Input device {} — rebuilding audio capture",
             if failed { "failed" } else { "changed" }
         );
-        if let Err(e) = self.start(
+        match self.start(
             params.session_id,
             params.target_sample_rate,
             params.mic_gain,
             params.capture_system_audio,
             params.diarize,
         ) {
-            warn!("Capture rebuild failed (will retry): {e}");
+            Ok(()) => {
+                self.mic_rebuild_failures = 0;
+                self.mic_loss_warned = false;
+                false
+            }
+            Err(e) => {
+                self.mic_rebuild_failures += 1;
+                warn!(
+                    "Capture rebuild failed ({} in a row): {e}",
+                    self.mic_rebuild_failures
+                );
+                match decide_mic_loss(
+                    self.mic_rebuild_failures,
+                    params.capture_system_audio,
+                    self.mic_loss_warned,
+                ) {
+                    MicLossAction::KeepRetrying => false,
+                    MicLossAction::WarnOnce => {
+                        self.mic_loss_warned = true;
+                        self.emit_pipeline_warning(
+                            "Microphone lost; still recording system audio.".to_string(),
+                        );
+                        false
+                    }
+                    MicLossAction::Abort => {
+                        warn!(
+                            "Microphone unrecoverable after {} attempts; ending session",
+                            self.mic_rebuild_failures
+                        );
+                        self.abort_after_mic_loss();
+                        true
+                    }
+                }
+            }
         }
     }
 
@@ -776,6 +942,21 @@ impl AudioCapture {
         }
     }
 
+    /// Surface a non-fatal pipeline problem: the session keeps running.
+    /// Reuses the `Frame` scope (a transient, non-fatal problem the user
+    /// should see) rather than adding a dedicated warning scope — the
+    /// frontend only ever displays `message` and doesn't branch on `scope`.
+    fn emit_pipeline_warning(&self, message: String) {
+        use tauri_specta::Event;
+        if let Some(app) = &self.app {
+            let _ = crate::app_events::PipelineError {
+                scope: crate::app_events::PipelineErrorScope::Frame,
+                message,
+            }
+            .emit(app);
+        }
+    }
+
     /// Update the shared RMS level (waveform) from one or two legs combined.
     fn store_meeting_rms(&self, a: &[f32], b: &[f32]) {
         let n = a.len() + b.len();
@@ -817,12 +998,15 @@ impl AudioCapture {
         }
     }
 
-    /// Tear down the current session after a panic in the tick path, without
-    /// running any of the (possibly corrupt) flush paths. The audio thread then
-    /// exits; the engine actor observes the closed audio channel (AudioGone) and
-    /// recovers — salvaging the meeting accumulated so far and surfacing a
-    /// recoverable error — instead of the whole app aborting.
-    fn abort_after_panic(&mut self) {
+    /// Tear down all session state after a fatal, unrecoverable capture
+    /// failure, without running any of the (possibly corrupt) flush paths.
+    /// Shared by the panic recovery path and the terminal mic-loss path:
+    /// both end with the caller breaking the audio thread's run loop, so
+    /// the thread exits and the engine actor observes the closed audio
+    /// channel (AudioGone) and recovers — salvaging the meeting accumulated
+    /// so far and surfacing a recoverable error — instead of the whole app
+    /// aborting.
+    fn teardown_session_state(&mut self) {
         self.active_session_id.store(0, Ordering::Release);
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
         self.active_params = None;
@@ -839,6 +1023,27 @@ impl AudioCapture {
         }
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
+    }
+
+    fn abort_after_panic(&mut self) {
+        self.teardown_session_state();
+    }
+
+    /// Ends a dictation session whose microphone could not be rebuilt after
+    /// repeated attempts and has no other audio source to fall back on.
+    /// Records the reason for the engine actor's `AudioGone` handler before
+    /// tearing down — see `teardown_session_state` for why exiting this
+    /// thread is what lets the actor salvage and fail the session, exactly
+    /// like a panic abort.
+    fn abort_after_mic_loss(&mut self) {
+        if let Ok(mut reason) = self.audio_gone_reason.lock() {
+            *reason = Some(
+                "The microphone was lost and could not be reconnected; \
+                 the recording so far was saved."
+                    .to_string(),
+            );
+        }
+        self.teardown_session_state();
     }
 
     fn stop(&mut self) {
