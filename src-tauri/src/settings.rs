@@ -14,6 +14,7 @@ const OLLAMA_URL_KEY: &str = "ollama_url";
 const OLLAMA_MODEL_KEY: &str = "ollama_model";
 const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
 const AUDIO_DEVICE_KEY: &str = "audio_device";
+const CLAMSHELL_AUDIO_DEVICE_KEY: &str = "clamshell_audio_device";
 const TRANSCRIPTION_ENGINE_ID_KEY: &str = "transcription_engine_id";
 const TRANSCRIPTION_MODEL_ID_KEY: &str = "transcription_model_id";
 const TRANSCRIPTION_BACKEND_ID_KEY: &str = "transcription_backend_id";
@@ -52,6 +53,10 @@ pub struct AppSettings {
     pub ollama_model: String,
     pub debug_transcription: bool,
     pub audio_device: Option<String>,
+    /// Preferred microphone while the lid is closed with an external display
+    /// attached (clamshell mode). `None` means just follow whatever macOS
+    /// reports as the default input, the previous behavior.
+    pub clamshell_audio_device: Option<String>,
     pub transcription_engine_id: String,
     pub transcription_model_id: String,
     pub transcription_backend_id: String,
@@ -102,6 +107,7 @@ impl Default for AppSettings {
             ollama_model: String::new(),
             debug_transcription: false,
             audio_device: None,
+            clamshell_audio_device: None,
             transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
             transcription_model_id: KYUTAI_MODEL_ID.to_string(),
             transcription_backend_id: CANDLE_BACKEND_ID.to_string(),
@@ -166,6 +172,11 @@ impl AppSettings {
         }
         if let Some(audio_device) = read_json_setting::<String>(db, AUDIO_DEVICE_KEY)? {
             settings.audio_device = Some(audio_device);
+        }
+        if let Some(clamshell_audio_device) =
+            read_json_setting::<String>(db, CLAMSHELL_AUDIO_DEVICE_KEY)?
+        {
+            settings.clamshell_audio_device = Some(clamshell_audio_device);
         }
         if let Some(transcription_engine_id) =
             read_json_setting::<String>(db, TRANSCRIPTION_ENGINE_ID_KEY)?
@@ -273,6 +284,11 @@ impl AppSettings {
             normalized.transcription_backend_id.trim().to_string();
         normalized.audio_device = normalized
             .audio_device
+            .as_ref()
+            .map(|device| device.trim().to_string())
+            .filter(|device| !device.is_empty());
+        normalized.clamshell_audio_device = normalized
+            .clamshell_audio_device
             .as_ref()
             .map(|device| device.trim().to_string())
             .filter(|device| !device.is_empty());
@@ -418,6 +434,12 @@ impl AppSettings {
             db.delete_setting(AUDIO_DEVICE_KEY)?;
         }
 
+        if let Some(clamshell_audio_device) = normalized.clamshell_audio_device.as_ref() {
+            write_json_setting(db, CLAMSHELL_AUDIO_DEVICE_KEY, clamshell_audio_device)?;
+        } else {
+            db.delete_setting(CLAMSHELL_AUDIO_DEVICE_KEY)?;
+        }
+
         Ok(())
     }
 }
@@ -524,6 +546,7 @@ mod tests {
             ollama_model: "qwen2.5".into(),
             debug_transcription: true,
             audio_device: Some("BlackHole".into()),
+            clamshell_audio_device: Some("USB Mic".into()),
             transcription_engine_id: "kyutai".into(),
             transcription_model_id: "stt-1b-en_fr".into(),
             transcription_backend_id: "candle".into(),
@@ -557,6 +580,22 @@ mod tests {
         settings.save(&db).expect("save settings");
 
         assert_eq!(db.get_setting("audio_device").expect("get setting"), None);
+    }
+
+    #[test]
+    fn blank_clamshell_audio_device_is_removed_on_save() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            clamshell_audio_device: Some("   ".into()),
+            ..AppSettings::default()
+        };
+
+        settings.save(&db).expect("save settings");
+
+        assert_eq!(
+            db.get_setting("clamshell_audio_device").expect("get setting"),
+            None
+        );
     }
 
     #[test]

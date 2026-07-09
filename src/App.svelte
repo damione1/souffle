@@ -17,6 +17,7 @@
     notifyMeetingFinalized,
     notifyMeetingIdle,
     notifyMeetingStopRequested,
+    notifySystemWokeUp,
   } from "./lib/features/meeting/controller.svelte";
   import {
     createTranscriptionController,
@@ -40,6 +41,7 @@
   let unlistenMeetingFinalized: (() => void) | null = null;
   let unlistenUpcomingMeeting: (() => void) | null = null;
   let unlistenMeetingIdle: (() => void) | null = null;
+  let unlistenSystemWokeUp: (() => void) | null = null;
 
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
@@ -184,6 +186,22 @@
       unlistenMeetingIdle = fn;
     });
 
+    events.systemWokeUp.listen(() => {
+      notifySystemWokeUp();
+    }).then((fn) => {
+      unlistenSystemWokeUp = fn;
+    });
+
+    // Belt and braces: the webview itself may have been suspended when the
+    // backend's wake event fired (and so missed it), but visibility always
+    // flips to visible when the window comes back, so recheck here too.
+    // `take_sleep_paused_meeting` is idempotent (clears on read), so a
+    // redundant call from both paths is harmless.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") notifySystemWokeUp();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     return () => {
       cleanupTranscription();
       unlistenNav?.();
@@ -195,6 +213,8 @@
       unlistenMeetingFinalized?.();
       unlistenUpcomingMeeting?.();
       unlistenMeetingIdle?.();
+      unlistenSystemWokeUp?.();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   });
 </script>

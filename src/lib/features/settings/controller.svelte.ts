@@ -4,6 +4,7 @@ import {
   getSettings,
   getShortcuts,
   getSystemAudioSupport,
+  isLaptop as checkIsLaptop,
   listAudioDevices,
   saveSettings,
   saveShortcuts as persistShortcutSettings,
@@ -49,6 +50,9 @@ export function createSettingsController() {
 
   let audioDevices = $state<AudioDeviceInfo[]>([]);
   let systemAudioSupported = $state(false);
+  // Gates the "microphone when lid is closed" picker: meaningless on a
+  // desktop Mac, so it's hidden entirely rather than shown disabled.
+  let isLaptop = $state(false);
   let ollamaAvailable = $state(false);
   let ollamaModels = $state<OllamaModelDescriptor[]>([]);
   let statusMessage = $state("");
@@ -71,6 +75,9 @@ export function createSettingsController() {
     getSystemAudioSupport()
       .then((supported) => { systemAudioSupported = supported; })
       .catch(() => { systemAudioSupported = false; });
+    checkIsLaptop()
+      .then((laptop) => { isLaptop = laptop; })
+      .catch(() => { isLaptop = false; });
     await Promise.all([
       loadShortcuts(),
       refreshDevices(),
@@ -181,6 +188,16 @@ export function createSettingsController() {
     } catch (e) {
       statusMessage = errorMessage(e);
     }
+  }
+
+  /** Empty option value means "follow system default" (the previous,
+   * only behavior) — persisted as `null`, matching the backend contract. */
+  function onClamshellDeviceChange(event: Event) {
+    const target = event.target as HTMLSelectElement;
+    const value = target.value || null;
+    void persistSettings((settings) => {
+      settings.clamshell_audio_device = value;
+    });
   }
 
   async function checkOllama() {
@@ -617,7 +634,9 @@ export function createSettingsController() {
     onOllamaUrlChange,
     onOllamaModelChange,
     get systemAudioSupported() { return systemAudioSupported; },
+    get isLaptop() { return isLaptop; },
     onCaptureSystemAudioChange,
+    onClamshellDeviceChange,
     onModelUnloadTimeoutChange,
     onMeetingAutostopEnabledChange,
     onMeetingAutostopMinutesChange,

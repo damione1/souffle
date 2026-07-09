@@ -59,6 +59,7 @@ let settings = $state<AppSettings>({
   ollama_model: "",
   debug_transcription: false,
   audio_device: null,
+  clamshell_audio_device: null,
   transcription_engine_id: "",
   transcription_model_id: "",
   transcription_backend_id: "",

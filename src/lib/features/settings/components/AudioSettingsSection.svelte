@@ -24,6 +24,8 @@
     selectedDevice,
     captureSystemAudio,
     systemAudioSupported,
+    isLaptop,
+    clamshellAudioDevice,
     vadEnabled,
     fillerRemoval,
     stutterCollapse,
@@ -34,6 +36,7 @@
     onDeviceChange,
     onRefreshDevices,
     onCaptureSystemAudioChange,
+    onClamshellDeviceChange,
     onVadEnabledChange,
     onFillerRemovalChange,
     onStutterCollapseChange,
@@ -46,6 +49,8 @@
     selectedDevice: string;
     captureSystemAudio: boolean;
     systemAudioSupported: boolean;
+    isLaptop: boolean;
+    clamshellAudioDevice: string | null;
     vadEnabled: boolean;
     fillerRemoval: boolean;
     stutterCollapse: boolean;
@@ -56,6 +61,7 @@
     onDeviceChange: (event: Event) => void | Promise<void>;
     onRefreshDevices: () => void | Promise<void>;
     onCaptureSystemAudioChange: (event: Event) => void | Promise<void>;
+    onClamshellDeviceChange: (event: Event) => void | Promise<void>;
     onVadEnabledChange: (event: Event) => void | Promise<void>;
     onFillerRemovalChange: (event: Event) => void | Promise<void>;
     onStutterCollapseChange: (event: Event) => void | Promise<void>;
@@ -87,6 +93,28 @@
       </button>
     </div>
   </div>
+
+  {#if isLaptop}
+    <SettingsField
+      label={$t("settings_audio.clamshell_device")}
+      description={$t("settings_audio.clamshell_device_desc")}
+      htmlFor="clamshell-device"
+    >
+      {#snippet control()}
+        <select
+          id="clamshell-device"
+          value={clamshellAudioDevice ?? ""}
+          onchange={onClamshellDeviceChange}
+          class="field-select max-w-52"
+        >
+          <option value="">{$t("settings_audio.clamshell_device_follow_default")}</option>
+          {#each audioDevices as device}
+            <option value={device.name}>{device.name}</option>
+          {/each}
+        </select>
+      {/snippet}
+    </SettingsField>
+  {/if}
 
   {#if systemAudioSupported}
     <SettingsField

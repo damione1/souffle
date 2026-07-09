@@ -27,6 +27,14 @@ pub fn get_system_audio_support() -> bool {
     crate::platform::system_audio_capture_supported()
 }
 
+/// Whether this Mac has a battery (i.e. is a laptop). Gates the
+/// clamshell-microphone setting in the UI — meaningless on a desktop Mac.
+#[tauri::command]
+#[specta::specta]
+pub fn is_laptop() -> bool {
+    crate::power::is_laptop()
+}
+
 /// Debug: record system audio for `seconds` and write it to a WAV file.
 /// Returns the file path. Exercises the tap end-to-end (TCC prompt included).
 #[tauri::command]

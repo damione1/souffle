@@ -24,6 +24,7 @@ const mockResumeMeetingRecording = vi.fn<
   (id: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>
 >();
 const mockStopMeetingRecording = vi.fn<() => Promise<string>>();
+const mockTakeSleepPausedMeeting = vi.fn<() => Promise<string | null>>();
 const mockGetMeeting = vi.fn<(id: string) => Promise<MeetingTranscript>>();
 const mockDeleteMeeting = vi.fn<(id: string) => Promise<void>>();
 const mockRenameMeeting = vi.fn<(id: string, title: string) => Promise<void>>();
@@ -40,6 +41,7 @@ vi.mock("../../api/meetings", () => ({
   resumeMeetingRecording: (...a: unknown[]) =>
     mockResumeMeetingRecording(...(a as [string, (s: TranscriptionSegment) => void])),
   stopMeetingRecording: (...a: unknown[]) => mockStopMeetingRecording(...(a as [])),
+  takeSleepPausedMeeting: (...a: unknown[]) => mockTakeSleepPausedMeeting(...(a as [])),
   getMeeting: (...a: unknown[]) => mockGetMeeting(...(a as [string])),
   deleteMeeting: (...a: unknown[]) => mockDeleteMeeting(...(a as [string])),
   renameMeeting: (...a: unknown[]) => mockRenameMeeting(...(a as [string, string])),
@@ -111,9 +113,12 @@ vi.mock("../transcription/catalog", () => ({
   }),
 }));
 
-const { createMeetingController, resetMeetingControllerForTest, notifyMeetingIdle } = await import(
-  "./controller.svelte"
-);
+const {
+  createMeetingController,
+  resetMeetingControllerForTest,
+  notifyMeetingIdle,
+  notifySystemWokeUp,
+} = await import("./controller.svelte");
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -556,6 +561,54 @@ describe("MeetingController", () => {
 
       notifyMeetingIdle(idle({ reason: "silence", idle_seconds: 601, threshold_seconds: 600 }));
       expect(ctrl.idleSignal).not.toBeNull();
+    });
+  });
+
+  describe("notifySystemWokeUp", () => {
+    it("loads and auto-resumes the meeting sleep paused, when one exists", async () => {
+      mockTakeSleepPausedMeeting.mockResolvedValue("meet-1");
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      mockResumeMeetingRecording.mockResolvedValue(undefined);
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+
+      notifySystemWokeUp();
+      await vi.waitFor(() => expect(mockResumeMeetingRecording).toHaveBeenCalledOnce());
+
+      expect(mockTakeSleepPausedMeeting).toHaveBeenCalledOnce();
+      expect(mockGetMeeting).toHaveBeenCalledWith("meet-1");
+      expect(mockResumeMeetingRecording.mock.calls[0][0]).toBe("meet-1");
+      expect(ctrl.statusMessage).toMatch(/resumed after sleep/i);
+    });
+
+    it("does nothing when no meeting was paused by sleep", async () => {
+      mockTakeSleepPausedMeeting.mockResolvedValue(null);
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+
+      notifySystemWokeUp();
+      await vi.waitFor(() => expect(mockTakeSleepPausedMeeting).toHaveBeenCalledOnce());
+
+      expect(mockGetMeeting).not.toHaveBeenCalled();
+      expect(mockResumeMeetingRecording).not.toHaveBeenCalled();
+      expect(ctrl.meeting).toBeNull();
+    });
+
+    it("leaves the meeting loaded (not resumed) and surfaces the error when resume fails", async () => {
+      mockTakeSleepPausedMeeting.mockResolvedValue("meet-1");
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      mockResumeMeetingRecording.mockRejectedValue(new Error("model unload failed"));
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+
+      notifySystemWokeUp();
+      await vi.waitFor(() => expect(mockResumeMeetingRecording).toHaveBeenCalledOnce());
+
+      expect(ctrl.meeting?.id).toBe("meet-1");
+      expect(ctrl.statusMessage).toMatch(/model unload failed/i);
     });
   });
 });

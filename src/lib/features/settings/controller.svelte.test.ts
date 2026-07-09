@@ -54,6 +54,7 @@ const defaultSettings: AppSettings = {
   ollama_model: "",
   debug_transcription: false,
   audio_device: null,
+  clamshell_audio_device: null,
   transcription_engine_id: "kyutai",
   transcription_model_id: "stt-1b-en_fr",
   transcription_backend_id: "candle",
