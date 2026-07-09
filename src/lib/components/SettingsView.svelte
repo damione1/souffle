@@ -36,9 +36,18 @@
   });
 </script>
 
-<svelte:window onkeydown={controller.handleKeyDown} />
+<svelte:window
+  onkeydown={(event) => {
+    controller.handleKeyDown(event);
+    // Escape closes the settings screen unless it just cancelled a
+    // shortcut-recording session (handleKeyDown preventDefaults those).
+    if (!event.defaultPrevented && event.key === "Escape") {
+      controller.app.settingsOpen = false;
+    }
+  }}
+/>
 
-<div class="flex flex-col gap-4">
+<div class="flex flex-col gap-[22px]">
   {#if controller.statusMessage}
     <StatusBanner message={controller.statusMessage} />
   {/if}
@@ -125,17 +134,19 @@
       onDebugTranscriptionChange={controller.onDebugTranscriptionChange}
     />
 
-    <section class="surface-card flex flex-col gap-2">
+    <section class="settings-group">
       <h3>{$t("settings_advanced.model_storage")}</h3>
-      <p class="text-text-secondary text-sm">{$t("settings_advanced.model_storage_desc")}</p>
-      <div>
-        <ConfirmAction
-          label={$t("settings_advanced.delete_model")}
-          confirmLabel={$t("settings_advanced.delete_model_confirm")}
-          confirmMessage={$t("settings_advanced.delete_model_msg")}
-          variant="danger"
-          onConfirm={controller.handleDeleteModel}
-        />
+      <div class="settings-rows">
+        <div class="flex items-center justify-between gap-4">
+          <span class="setting-desc min-w-0 flex-1">{$t("settings_advanced.model_storage_desc")}</span>
+          <ConfirmAction
+            label={$t("settings_advanced.delete_model")}
+            confirmLabel={$t("settings_advanced.delete_model_confirm")}
+            confirmMessage={$t("settings_advanced.delete_model_msg")}
+            variant="danger"
+            onConfirm={controller.handleDeleteModel}
+          />
+        </div>
       </div>
     </section>
   </AdvancedSettingsSection>

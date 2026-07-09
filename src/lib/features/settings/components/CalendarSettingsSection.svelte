@@ -36,10 +36,9 @@
   });
 </script>
 
-<section class="surface-card flex flex-col gap-3.5">
+<section class="settings-group">
   <h3>{$t("settings_calendar.title")}</h3>
-  <p class="text-text-secondary text-sm">{$t("settings_calendar.description")}</p>
-
+  <div class="settings-rows">
   <SettingsField
     label={$t("settings_calendar.enable_label")}
     description={$t("settings_calendar.enable_desc")}
@@ -74,15 +73,15 @@
 
     {#if calendars.length > 0}
       <div class="flex flex-col gap-1.5">
-        <span class="field-label">{$t("settings_calendar.calendars_label")}</span>
-        <p class="text-text-muted text-xs">{$t("settings_calendar.all_calendars_hint")}</p>
+        <span class="setting-label">{$t("settings_calendar.calendars_label")}</span>
+        <p class="setting-desc m-0">{$t("settings_calendar.all_calendars_hint")}</p>
         {#each grouped as [source, group] (source)}
-          <div class="flex flex-col gap-1">
+          <div class="mt-1 flex flex-col gap-1">
             {#if source}
-              <span class="text-text-muted text-xs uppercase tracking-wide">{source}</span>
+              <span class="text-text-muted text-[10.5px] font-semibold uppercase tracking-[0.06em]">{source}</span>
             {/if}
             {#each group as calendar (calendar.id)}
-              <label class="flex gap-2 items-center text-sm">
+              <label class="flex gap-2 items-center text-sm text-text-secondary">
                 <input
                   type="checkbox"
                   checked={selectedIds.length === 0 || selectedIds.includes(calendar.id)}
@@ -96,4 +95,5 @@
       </div>
     {/if}
   {/if}
+  </div>
 </section>

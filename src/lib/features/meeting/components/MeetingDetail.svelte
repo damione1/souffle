@@ -1,12 +1,10 @@
 <script lang="ts">
-  import { FileText } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import type { createMeetingController } from "../controller.svelte";
   import MeetingHeaderSection from "./MeetingHeaderSection.svelte";
   import MeetingNotesSection from "./MeetingNotesSection.svelte";
   import MeetingSummarySection from "./MeetingSummarySection.svelte";
   import MeetingTranscriptSection from "./MeetingTranscriptSection.svelte";
-  import Accordion from "../../../components/ui/Accordion.svelte";
   import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
@@ -31,10 +29,9 @@
       : null,
   );
 
-  let transcriptOpen = $state(false);
 </script>
 
-<div class="flex flex-col gap-4">
+<div class="flex flex-col gap-[18px]">
   {#if controller.statusMessage}
     <StatusBanner message={controller.statusMessage} variant="warning" />
   {/if}
@@ -68,6 +65,23 @@
       onNotesChange={controller.onNotesChange}
     />
 
+    <!-- Transcript is the hero: prominent card right under the notes. -->
+    <MeetingTranscriptSection
+      segments={displaySegments}
+      recordingSessions={controller.meeting.recording_sessions}
+      liveSessionStartIndex={liveSessionStartIndex}
+      isRecordingMeeting={controller.isRecordingMeeting}
+      hasEditedTranscript={controller.meeting.edited_transcript != null}
+      isEditing={controller.isEditingTranscript}
+      editedTranscriptDraft={controller.editedTranscriptDraft}
+      onStartEdit={controller.startEditingTranscript}
+      onCancelEdit={controller.cancelEditingTranscript}
+      onSaveEdit={controller.saveTranscriptEdit}
+      onSaveAndSummarize={controller.saveTranscriptAndSummarize}
+      onResetEdited={controller.resetEditedTranscript}
+      onEditDraftChange={(value) => { controller.editedTranscriptDraft = value; }}
+    />
+
     <!-- AI summary, generated from notes + transcript. -->
     <MeetingSummarySection
       meeting={controller.meeting}
@@ -83,31 +97,6 @@
       isSummarizing={controller.isSummarizing}
       summaryStream={controller.summaryStream}
     />
-
-    <!-- Raw transcript is secondary: tucked into a collapsible panel. -->
-    <Accordion title={$t("meeting_transcript.title")} bind:open={transcriptOpen}>
-      {#snippet trailing()}
-        <span class="inline-flex items-center gap-1.5 text-xs text-text-muted">
-          <FileText size={13} aria-hidden="true" />
-          {$t("meeting_transcript.segments_count", { values: { count: displaySegments.length } })}
-        </span>
-      {/snippet}
-      <MeetingTranscriptSection
-        segments={displaySegments}
-        recordingSessions={controller.meeting.recording_sessions}
-        liveSessionStartIndex={liveSessionStartIndex}
-        isRecordingMeeting={controller.isRecordingMeeting}
-        hasEditedTranscript={controller.meeting.edited_transcript != null}
-        isEditing={controller.isEditingTranscript}
-        editedTranscriptDraft={controller.editedTranscriptDraft}
-        onStartEdit={controller.startEditingTranscript}
-        onCancelEdit={controller.cancelEditingTranscript}
-        onSaveEdit={controller.saveTranscriptEdit}
-        onSaveAndSummarize={controller.saveTranscriptAndSummarize}
-        onResetEdited={controller.resetEditedTranscript}
-        onEditDraftChange={(value) => { controller.editedTranscriptDraft = value; }}
-      />
-    </Accordion>
 
     {#if !controller.isRecordingMeeting && controller.meeting.id}
       <div class="flex items-center gap-2 pt-1">

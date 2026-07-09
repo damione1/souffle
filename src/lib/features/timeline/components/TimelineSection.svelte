@@ -62,49 +62,49 @@
   }
 </script>
 
-<div class="flex flex-col gap-5">
+<div class="flex flex-col gap-[26px]">
   {#if upcoming.length > 0}
-    <section class="flex flex-col gap-1.5">
-      <h4 class="px-3 text-[0.6875rem] font-semibold uppercase tracking-widest text-text-muted">
+    <section class="flex flex-col gap-2.5">
+      <h4 class="px-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-text-muted">
         {$t("timeline.upcoming_today")}
       </h4>
-      <div class="surface-card flex flex-col gap-1 p-1.5">
+      <div class="surface-card flex flex-col gap-0.5 !p-1.5">
         {#each upcoming as event (occurrenceKey(event))}
           {@const phase = eventPhase(event)}
           <div
-            class="flex items-center gap-3 rounded-lg px-3 py-2.5 {phase === 'past'
+            class="flex items-center gap-3 rounded-[11px] px-3 py-[11px] transition-colors hover:bg-surface-2 {phase === 'past'
               ? 'opacity-50'
-              : ''} {phase === 'now' ? 'bg-accent/10' : ''}"
+              : ''} {phase === 'now' ? 'bg-accent/7' : ''}"
           >
-            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sage/15 text-sage" aria-hidden="true">
-              <CalendarClock size={14} />
+            <span class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-secondary/12 text-secondary" aria-hidden="true">
+              <CalendarClock size={15} />
             </span>
-            <span class="min-w-0 flex-1 truncate text-sm">
-              {event.title}
+            <span class="flex min-w-0 flex-1 items-center gap-[9px]">
+              <span class="truncate text-[13.5px] text-text-primary">{event.title}</span>
               {#if phase === "now"}
-                <span class="pill pill-accent ml-1.5">{$t("calendar.now")}</span>
+                <span class="shrink-0 rounded-full bg-accent/13 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-accent">{$t("calendar.now")}</span>
               {:else if phase === "next"}
-                <span class="pill pill-muted ml-1.5">{$t("calendar.next")}</span>
+                <span class="shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-text-muted">{$t("calendar.next")}</span>
               {/if}
             </span>
             {#if event.participants.length > 0}
-              <span class="flex shrink-0 items-center gap-1 text-xs text-text-muted" title={event.participants.map((p) => p.name).join(", ")}>
-                <Users size={12} aria-hidden="true" />
+              <span class="flex shrink-0 items-center gap-[5px] text-xs text-text-muted" title={event.participants.map((p) => p.name).join(", ")}>
+                <Users size={13} aria-hidden="true" />
                 {event.participants.length}
               </span>
             {/if}
-            <span class="shrink-0 text-xs tabular-nums text-text-muted">
+            <span class="shrink-0 font-mono text-[11.5px] text-text-muted">
               {timeLabel(event.start)}–{timeLabel(event.end)}
             </span>
             {#if onStartEvent && phase !== "past"}
               <button
-                class="btn btn-icon shrink-0"
+                class="flex h-[30px] w-[30px] shrink-0 cursor-pointer items-center justify-center rounded-[9px] bg-accent/10 text-accent outline-1 outline-accent/25 transition-colors hover:bg-accent/20 disabled:cursor-default disabled:opacity-50"
                 disabled={!canStartEvent}
                 onclick={() => onStartEvent(event)}
                 aria-label={$t("calendar.start_transcription")}
                 title={$t("calendar.start_transcription")}
               >
-                <Play size={14} />
+                <Play size={13} fill="currentColor" />
               </button>
             {/if}
           </div>
@@ -125,11 +125,11 @@
     />
   {:else}
     {#each controller.groups as group (group.day)}
-      <section class="flex flex-col gap-1.5">
-        <h4 class="px-3 text-[0.6875rem] font-semibold uppercase tracking-widest text-text-muted">
+      <section class="flex flex-col gap-2.5">
+        <h4 class="px-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-text-muted">
           {dayLabel(group.day)}
         </h4>
-        <div class="surface-card flex flex-col p-1.5">
+        <div class="surface-card flex flex-col gap-0.5 !p-1.5">
           {#each group.items as item (item.kind + item.id)}
             <TimelineItem
               {item}

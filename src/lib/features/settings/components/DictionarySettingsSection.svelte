@@ -39,9 +39,11 @@
   }
 </script>
 
-<section class="surface-card flex flex-col gap-3.5">
+<section class="settings-group">
   <h3>{$t("settings_dictionary.title")}</h3>
-  <p class="text-text-secondary text-sm">{$t("settings_dictionary.description")}</p>
+  <div class="settings-rows">
+  <div class="flex flex-col gap-3">
+  <p class="setting-desc m-0">{$t("settings_dictionary.description")}</p>
 
   <div class="flex gap-1.5 items-end">
     <div class="flex flex-col gap-1 flex-1">
@@ -83,26 +85,28 @@
     </button>
   </div>
   {#if addError}
-    <p class="text-red-400 text-xs">{addError}</p>
+    <p class="text-danger-soft text-xs">{addError}</p>
   {/if}
+  </div>
 
   {#if entries.length > 0}
-    <div class="flex flex-col gap-1 mt-1">
+    <div class="flex flex-col gap-1">
       {#each entries as entry (entry.id)}
-        <div class="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-surface-secondary/50 text-sm">
+        <div class="flex items-center gap-2 rounded-[9px] bg-surface-2/60 px-2.5 py-1.5 text-sm text-text-secondary">
           <span class="flex-1 font-medium">
             {entry.term}{#if entry.pronunciation}<span class="text-text-muted font-normal"> · {entry.pronunciation}</span>{/if}
           </span>
           {#if entry.category}
-            <span class="text-text-tertiary text-xs">{entry.category}</span>
+            <span class="text-text-muted text-xs">{entry.category}</span>
           {/if}
-          <button onclick={() => onDelete(entry.id)} class="btn btn-icon btn-ghost text-text-tertiary hover:text-red-400" aria-label={`${$t("settings_dictionary.delete")} ${entry.term}`}>
+          <button onclick={() => onDelete(entry.id)} class="btn btn-icon btn-ghost !min-h-0 !min-w-0 !p-1 text-text-muted hover:!text-danger-soft" aria-label={`${$t("settings_dictionary.delete")} ${entry.term}`}>
             <Trash2 size={14} />
           </button>
         </div>
       {/each}
     </div>
   {:else}
-    <p class="text-text-tertiary text-xs italic">{$t("settings_dictionary.empty")}</p>
+    <p class="text-text-muted text-xs italic">{$t("settings_dictionary.empty")}</p>
   {/if}
+  </div>
 </section>

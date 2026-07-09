@@ -39,14 +39,16 @@
   } = $props();
 </script>
 
-<section class="surface-card flex flex-col gap-3.5">
+<section class="settings-group">
   <h3>{$t("settings_audio.title")}</h3>
-  <p class="text-text-secondary text-sm">{$t("settings_audio.description")}</p>
-
-  <div class="flex flex-col gap-1.5">
-    <label for="input-device" class="field-label">{$t("settings_audio.input_device")}</label>
-    <div class="flex gap-1.5 items-center">
-      <select id="input-device" value={selectedDevice} onchange={onDeviceChange} class="field-select">
+  <div class="settings-rows">
+  <div class="flex items-center justify-between gap-4">
+    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+      <label for="input-device" class="setting-label">{$t("settings_audio.input_device")}</label>
+      <span class="setting-desc">{$t("settings_audio.description")}</span>
+    </div>
+    <div class="flex shrink-0 gap-1.5 items-center">
+      <select id="input-device" value={selectedDevice} onchange={onDeviceChange} class="field-select max-w-52">
         {#each audioDevices as device}
           <option value={device.name}>
             {device.name}{device.is_default ? ` ${$t("settings_audio.device_default_suffix")}` : ""}
@@ -105,4 +107,5 @@
       <input type="checkbox" checked={dictionaryCorrection} onchange={onDictionaryCorrectionChange} class="switch" aria-label={$t("settings_audio.dictionary_correction")} />
     {/snippet}
   </SettingsField>
+  </div>
 </section>

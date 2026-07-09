@@ -1,14 +1,15 @@
 <script lang="ts">
-  import { Settings as SettingsIcon } from "@lucide/svelte";
+  import { ArrowLeft, Moon, SlidersHorizontal, Sun } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import HomeView from "./lib/components/HomeView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
-  import Sheet from "./lib/components/ui/Sheet.svelte";
   import StatusChip from "./lib/components/ui/StatusChip.svelte";
   import { events } from "./lib/api/generated";
-  import { recoverState } from "./lib/api/transcription";
+  import { saveSettings } from "./lib/api/settings";
+  import { getTranscriptionCatalog, recoverState } from "./lib/api/transcription";
   import { bootstrapAppState } from "./lib/bootstrap";
+  import { getSelectedTranscriptionModel } from "./lib/features/transcription/catalog";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
   import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
   import {
@@ -21,7 +22,7 @@
     notifyDictationAborted,
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
-  import { errorMessage } from "./lib/utils";
+  import { applyTheme, errorMessage } from "./lib/utils";
 
   const app = getAppState();
   // Mounted app-level so the global dictation shortcut works whatever view
@@ -47,6 +48,21 @@
   );
   let isRecovering = $state(false);
   let showPermissions = $state(false);
+  let modelLabel = $state("");
+
+  const isLightTheme = $derived(
+    app.settings.theme === "light" ||
+      (app.settings.theme === "system" &&
+        typeof window !== "undefined" &&
+        !window.matchMedia("(prefers-color-scheme: dark)").matches),
+  );
+
+  function toggleTheme() {
+    const next = isLightTheme ? "dark" : "light";
+    app.settings.theme = next;
+    applyTheme(next);
+    saveSettings($state.snapshot(app.settings)).catch(() => {});
+  }
 
   async function recoverFromError() {
     isRecovering = true;
@@ -82,6 +98,16 @@
         // First run, no settings yet.
       }
       cleanupTranscription = (await transcription.mount()) ?? (() => {});
+      try {
+        const catalog = await getTranscriptionCatalog();
+        modelLabel = getSelectedTranscriptionModel(
+          catalog,
+          app.settings.transcription_engine_id,
+          app.settings.transcription_model_id,
+        )?.label ?? "";
+      } catch {
+        // Header chip simply omits the model name.
+      }
     })();
 
     // First-run permissions walkthrough (mic, system audio, accessibility) so
@@ -179,42 +205,86 @@
 <div class="flex h-screen flex-col overflow-hidden">
   <header
     data-tauri-drag-region
-    class="flex shrink-0 items-center gap-3 px-5 pt-3 pb-2 pl-[88px]"
+    class="flex h-[52px] shrink-0 items-center gap-3 border-b border-ghost-border bg-white/[0.015] px-[18px] pl-[88px]"
   >
-    <img src="/favicon.svg" alt="" class="h-6 w-6 rounded-md" aria-hidden="true" data-tauri-drag-region />
-    <span class="font-heading text-sm font-bold tracking-tight" data-tauri-drag-region>Soufflé</span>
+    <div class="flex items-center gap-[9px]" data-tauri-drag-region>
+      <img
+        src="/favicon.svg"
+        alt=""
+        class="h-[25px] w-[25px] rounded-[7px]"
+        aria-hidden="true"
+        data-tauri-drag-region
+      />
+      <span class="font-heading text-[14.5px] font-semibold" data-tauri-drag-region>Soufflé</span>
+    </div>
     <span class="flex-1" data-tauri-drag-region></span>
-    <StatusChip
-      phase={app.transcriptionRuntimePhase}
-      operationState={app.transcriptionModelOperationState}
-      downloadedBytes={app.downloadedBytes}
-      downloadTotalBytes={app.downloadTotalBytes}
-    />
+    {#if app.recordingMode !== "idle"}
+      <span
+        class="inline-flex items-center gap-[7px] rounded-full bg-danger/14 px-[11px] py-[5px] text-xs font-semibold text-danger-soft outline-1 outline-danger/30"
+      >
+        <span class="recording-dot"></span>
+        {$t("meeting_header.recording_badge")}
+      </span>
+    {:else}
+      <StatusChip
+        phase={app.transcriptionRuntimePhase}
+        operationState={app.transcriptionModelOperationState}
+        downloadedBytes={app.downloadedBytes}
+        downloadTotalBytes={app.downloadTotalBytes}
+        {modelLabel}
+      />
+    {/if}
     <button
-      onclick={() => (app.settingsOpen = true)}
-      class="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+      onclick={toggleTheme}
+      class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[9px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+      aria-label={$t("ui.toggle_theme")}
+      title={$t("ui.toggle_theme")}
+    >
+      {#if isLightTheme}
+        <Moon size={16} aria-hidden="true" />
+      {:else}
+        <Sun size={17} aria-hidden="true" />
+      {/if}
+    </button>
+    <button
+      onclick={() => (app.settingsOpen = !app.settingsOpen)}
+      class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[9px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
       aria-label={$t("settings.title")}
       title="⌘,"
     >
-      <SettingsIcon size={17} aria-hidden="true" />
+      <SlidersHorizontal size={18} aria-hidden="true" />
     </button>
   </header>
 
   <div class="flex flex-1 flex-col min-w-0 overflow-hidden">
-    <main class="flex-1 overflow-y-auto px-6 pb-6 pt-2">
-      <HomeView />
+    <main class="flex-1 overflow-y-auto px-7 pb-[34px] pt-[26px]">
+      {#if app.settingsOpen}
+        <div class="mx-auto flex w-full max-w-[720px] flex-col gap-[22px]">
+          <button
+            onclick={() => (app.settingsOpen = false)}
+            class="btn btn-ghost -ml-1.5 gap-1.5 self-start px-2.5 py-1 text-[13px]"
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+            {$t("settings.done")}
+          </button>
+          <h1 class="text-[23px] font-bold">{$t("settings.title")}</h1>
+          <SettingsView />
+        </div>
+      {:else}
+        <HomeView />
+      {/if}
     </main>
 
     {#if machineError}
       <div
-        class="flex items-center justify-between gap-3 border-t border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400"
+        class="flex items-center justify-between gap-3 border-t border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger-soft"
         role="alert"
       >
         <span class="truncate">
           {$t("pipeline.error")}: {machineError.message}
         </span>
         <button
-          class="shrink-0 rounded border border-red-500/40 px-2 py-0.5 text-xs hover:bg-red-500/20 disabled:opacity-50"
+          class="shrink-0 rounded-md border border-danger/40 px-2 py-0.5 text-xs hover:bg-danger/20 disabled:opacity-50"
           disabled={isRecovering}
           onclick={recoverFromError}
         >
@@ -223,14 +293,14 @@
       </div>
     {:else if app.pipelineError}
       <div
-        class="flex items-center justify-between gap-3 border-t border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400"
+        class="flex items-center justify-between gap-3 border-t border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger-soft"
         role="alert"
       >
         <span class="truncate">
           {$t("pipeline.error")}: {app.pipelineError.message}
         </span>
         <button
-          class="shrink-0 rounded px-2 py-0.5 text-xs hover:bg-red-500/20"
+          class="shrink-0 rounded-md px-2 py-0.5 text-xs hover:bg-danger/20"
           onclick={() => (app.pipelineError = null)}
         >
           {$t("pipeline.dismiss")}
@@ -238,7 +308,7 @@
       </div>
     {:else if healthDegraded}
       <div
-        class="border-t border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-400"
+        class="border-t border-warning/30 bg-warning/10 px-4 py-2 text-sm text-warning"
         role="status"
       >
         {app.transcriptionHealth?.status === "stalled"
@@ -249,11 +319,6 @@
   </div>
 </div>
 
-{#if app.settingsOpen}
-  <Sheet title={$t("settings.title")} onClose={() => (app.settingsOpen = false)}>
-    <SettingsView />
-  </Sheet>
-{/if}
 {/if}
 
 {#if showPermissions}

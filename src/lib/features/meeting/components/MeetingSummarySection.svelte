@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { Clock3, WandSparkles } from "@lucide/svelte";
+  import { Clock3, Sparkles, WandSparkles } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import CopyButton from "../../../components/ui/CopyButton.svelte";
-  import EmptyState from "../../../components/ui/EmptyState.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { MeetingTranscript, OllamaModelDescriptor, TranscriptionSegment } from "../../../types";
@@ -64,91 +63,114 @@
     if (isRecordingMeeting) return "recording";
     return "empty";
   });
+
+  const canGenerate = $derived(
+    !isRecordingMeeting && segments.length > 0 && ollamaAvailable && summaryModels.length > 0,
+  );
 </script>
 
-<section class="surface-card flex flex-col gap-3">
-  <div class="flex items-center justify-between gap-4 flex-wrap">
-    <h3>{$t("meeting_summary.title")}</h3>
-    {#if meeting.summary}
-      <CopyButton text={meeting.summary} />
-    {/if}
-  </div>
+{#if summaryPhase === "empty" && canGenerate && !isSummarizing}
+  <!-- Collapsed CTA until a summary exists, per the design. -->
+  <button
+    onclick={onSummarize}
+    class="surface-card flex cursor-pointer items-center gap-[13px] !px-[18px] !py-[15px] text-left text-text-primary transition-[outline-color,transform] duration-150 hover:outline-accent/40 active:scale-[0.99]"
+  >
+    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-accent/12 text-accent">
+      <WandSparkles size={17} aria-hidden="true" />
+    </span>
+    <span class="flex flex-1 flex-col gap-0.5">
+      <span class="text-sm font-semibold">{$t("meeting_summary.generate_summary")}</span>
+      <span class="text-xs text-text-muted">{$t("meeting_summary.generate_hint")}</span>
+    </span>
+    <span class="shrink-0 rounded-[9px] bg-accent/12 px-3.5 py-[7px] text-[12.5px] font-semibold text-accent">
+      {$t("meeting_summary.generate_cta")}
+    </span>
+  </button>
+{:else}
+  <section class="surface-card flex flex-col gap-3.5" style="animation: rise-in 220ms ease;">
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <h3 class="flex items-center gap-2 text-sm font-semibold text-text-primary">
+        <Sparkles size={15} fill="currentColor" class="text-accent" aria-hidden="true" />
+        {$t("meeting_summary.title")}
+      </h3>
+      <div class="flex items-center gap-2.5">
+        {#if generatedWithLabel}
+          <span class="font-mono text-[11px] text-text-muted">
+            {generatedWithLabel} · {$t("meeting_summary.local_badge")}
+          </span>
+        {/if}
+        {#if meeting.summary}
+          <CopyButton text={meeting.summary} />
+        {/if}
+      </div>
+    </div>
 
-  {#if keyPoints.length > 0}
-    <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-      {#each keyPoints as point, index}
-        <div class="flex gap-3 p-3.5 bg-surface-2 rounded-default outline-1 outline-ghost-border items-start">
-          <span class="flex items-center justify-center w-6 h-6 rounded-full bg-accent/15 text-accent text-xs font-bold shrink-0">{index + 1}</span>
-          <p class="m-0 text-sm text-text-secondary leading-normal">{point.replace(/^[-•*\d.)]+\s*/, "").trim()}</p>
+    {#if keyPoints.length > 0}
+      <div class="grid grid-cols-2 gap-2.5 max-[640px]:grid-cols-1">
+        {#each keyPoints as point, index}
+          <div class="flex items-start gap-[11px] rounded-xl bg-input px-3.5 py-[13px] outline-1 outline-ghost-border">
+            <span class="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[7px] bg-accent/14 font-mono text-[11px] font-medium text-accent">{index + 1}</span>
+            <p class="m-0 text-[12.5px] leading-[1.55] text-text-tertiary">{point.replace(/^[-•*\d.)]+\s*/, "").trim()}</p>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if summaryPhase === "summary_recording"}
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="pill pill-warning">{$t("meeting_summary.recording_in_progress")}</span>
+        <span class="text-sm text-text-muted">{$t("meeting_summary.can_regenerate")}</span>
+      </div>
+    {:else if summaryPhase === "summary_stale"}
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="pill pill-warning">{$t("meeting_summary.summary_outdated")}</span>
+        <span class="text-sm text-text-muted">{$t("meeting_summary.new_audio_added")}</span>
+      </div>
+    {/if}
+
+    {#if summaryPhase === "summary_recording" || summaryPhase === "summary_stale" || summaryPhase === "summary_current"}
+      <div class="min-h-[100px] max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-xl bg-input p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-ghost-border">{meeting.summary}</div>
+    {:else if summaryPhase === "recording"}
+      <div class="flex items-center gap-2.5 py-2 text-sm text-text-muted">
+        <Clock3 size={16} aria-hidden="true" />
+        {$t("meeting_summary.stop_to_generate")}
+      </div>
+    {/if}
+
+    {#if isSummarizing}
+      <div class="min-h-[80px] overflow-y-auto whitespace-pre-wrap rounded-xl bg-input p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-ghost-border">{summaryStream}<span class="text-accent" style="animation: blink 1s step-end infinite;">|</span></div>
+    {/if}
+
+    {#if !isRecordingMeeting && segments.length > 0}
+      {#if ollamaAvailable && summaryModels.length > 0}
+        <div class="flex gap-2 items-center">
+          <select
+            value={selectedModel}
+            disabled={isSummarizing}
+            onchange={(event) => onSelectModel((event.currentTarget as HTMLSelectElement).value)}
+            class="field-select"
+          >
+            {#each summaryModels as model}
+              <option value={model.id}>{model.label}</option>
+            {/each}
+          </select>
+          <button onclick={onSummarize} disabled={isSummarizing} class="btn btn-primary whitespace-nowrap">
+            {#if isSummarizing}
+              <Spinner />
+              {$t("meeting_summary.generating")}
+            {:else}
+              {meeting.summary ? $t("meeting_summary.regenerate_summary") : $t("meeting_summary.generate_summary")}
+            {/if}
+          </button>
         </div>
-      {/each}
-    </div>
-  {/if}
-
-  {#if summaryPhase === "summary_recording"}
-    <div class="flex items-center gap-2 flex-wrap">
-      <span class="pill pill-warning">{$t("meeting_summary.recording_in_progress")}</span>
-      <span class="text-sm text-text-muted">{$t("meeting_summary.can_regenerate")}</span>
-    </div>
-  {:else if summaryPhase === "summary_stale"}
-    <div class="flex items-center gap-2 flex-wrap">
-      <span class="pill pill-warning">{$t("meeting_summary.summary_outdated")}</span>
-      <span class="text-sm text-text-muted">{$t("meeting_summary.new_audio_added")}</span>
-    </div>
-  {/if}
-
-  {#if summaryPhase === "summary_recording" || summaryPhase === "summary_stale" || summaryPhase === "summary_current"}
-    <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-[100px] max-h-[360px] overflow-y-auto text-sm leading-relaxed">{meeting.summary}</div>
-    {#if generatedWithLabel}
-      <span class="pill pill-muted self-start">{$t("meeting_summary.generated_with", { values: { model: generatedWithLabel } })}</span>
+      {:else if !ollamaAvailable}
+        <div class="flex items-center gap-2 py-2">
+          <span class="status-dot"></span>
+          <span class="text-sm text-text-muted">{$t("meeting_summary.connect_ollama")}</span>
+        </div>
+      {:else}
+        <StatusBanner message={$t("meeting_summary.no_compatible_model")} />
+      {/if}
     {/if}
-  {:else if summaryPhase === "recording"}
-    <EmptyState message={$t("meeting_summary.stop_to_generate")}>
-      {#snippet icon()}
-        <Clock3 size={32} strokeWidth={1.5} />
-      {/snippet}
-    </EmptyState>
-  {:else}
-    <EmptyState message={$t("meeting_summary.no_summary_yet")}>
-      {#snippet icon()}
-        <WandSparkles size={32} strokeWidth={1.5} />
-      {/snippet}
-    </EmptyState>
-  {/if}
-
-  {#if isSummarizing}
-    <div class="p-3 bg-surface-1 rounded-default outline-1 outline-ghost-border text-text-secondary whitespace-pre-wrap min-h-[80px] overflow-y-auto text-sm leading-relaxed">{summaryStream}<span class="text-text-muted animate-pulse">|</span></div>
-  {/if}
-
-  {#if !isRecordingMeeting && segments.length > 0}
-    {#if ollamaAvailable && summaryModels.length > 0}
-      <div class="flex gap-2 items-center">
-        <select
-          value={selectedModel}
-          disabled={isSummarizing}
-          onchange={(event) => onSelectModel((event.currentTarget as HTMLSelectElement).value)}
-          class="field-select"
-        >
-          {#each summaryModels as model}
-            <option value={model.id}>{model.label}</option>
-          {/each}
-        </select>
-        <button onclick={onSummarize} disabled={isSummarizing} class="btn btn-primary">
-          {#if isSummarizing}
-            <Spinner />
-            {$t("meeting_summary.generating")}
-          {:else}
-            {meeting.summary ? $t("meeting_summary.regenerate_summary") : $t("meeting_summary.generate_summary")}
-          {/if}
-        </button>
-      </div>
-    {:else if !ollamaAvailable}
-      <div class="flex items-center gap-2 py-2">
-        <span class="status-dot"></span>
-        <span class="text-sm text-text-muted">{$t("meeting_summary.connect_ollama")}</span>
-      </div>
-    {:else}
-      <StatusBanner message={$t("meeting_summary.no_compatible_model")} />
-    {/if}
-  {/if}
-</section>
+  </section>
+{/if}

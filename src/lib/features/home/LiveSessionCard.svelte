@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Square } from "@lucide/svelte";
+  import { ClipboardCheck, Square } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import Waveform from "../../components/Waveform.svelte";
@@ -41,6 +41,8 @@
     mode === "dictation" ? transcription.isStopping : meeting.isStopping,
   );
 
+  const systemAudioActive = $derived(Boolean(meeting.app.systemAudioStatus?.active));
+
   function stop() {
     if (stopping) return;
     if (mode === "dictation") {
@@ -65,65 +67,92 @@
   });
 </script>
 
-<section class="surface-card flex flex-col gap-4 outline-red-500/25">
-  <div class="flex items-center gap-3">
-    <span class="pill pill-danger inline-flex items-center gap-1.5">
-      <span class="recording-dot"></span>
+<div class="flex flex-col gap-[18px]">
+  <div class="flex items-center gap-3.5">
+    <span
+      class="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-danger/13 px-[13px] py-1.5 text-[12.5px] font-semibold text-danger-soft outline-1 outline-danger/28"
+    >
+      <span class="h-2 w-2 rounded-full bg-danger" style="animation: pulse-soft 1.2s ease-in-out infinite;"></span>
       {mode === "meeting" ? $t("home.live_meeting") : $t("home.live_dictation")}
     </span>
-    {#if mode === "meeting" && meeting.app.systemAudioStatus}
-      <span class="pill pill-muted" title={meeting.app.systemAudioStatus.reason ?? ""}>
-        {meeting.app.systemAudioStatus.active
-          ? $t("meeting_header.system_audio_active")
-          : $t("meeting_header.system_audio_unavailable")}
-      </span>
-    {/if}
     <div class="min-w-0 flex-1">
       <Waveform active variant="pill" />
     </div>
-    <span class="shrink-0 text-sm tabular-nums text-text-muted">{elapsed}</span>
-    <button onclick={stop} disabled={stopping} class="btn btn-danger gap-1.5">
+    <span class="shrink-0 font-mono text-sm text-text-tertiary">{elapsed}</span>
+    <button
+      onclick={stop}
+      disabled={stopping}
+      class="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-[11px] bg-danger px-4 py-[9px] text-[13.5px] font-semibold text-on-danger transition-colors hover:bg-danger/90 disabled:cursor-default disabled:opacity-60"
+    >
       {#if stopping}
         <Spinner />
         {$t("home.stopping")}
       {:else}
-        <Square size={14} aria-hidden="true" />
+        <Square size={13} fill="currentColor" aria-hidden="true" />
         {$t("home.stop")}
       {/if}
     </button>
   </div>
 
-  <div class={`grid gap-3 ${mode === "meeting" ? "grid-cols-2 max-[700px]:grid-cols-1" : ""}`}>
-    <div
-      bind:this={transcriptEl}
-      class="max-h-44 min-h-24 overflow-y-auto rounded-lg bg-surface-1/70 p-3 text-sm leading-relaxed text-text-secondary"
-    >
-      {#if !hasLiveContent}
-        <span class="text-text-muted">{$t("home.listening")}</span>
-      {:else if mode === "dictation"}
-        {liveText}
-      {:else}
-        {#each liveParagraphs as paragraph}
-          <p class="mb-2 last:mb-0">
-            {#if paragraph.speaker}
-              <span
-                class="mr-1 text-xs font-semibold"
-                class:text-accent={paragraph.speaker === "me"}
-                class:text-text-primary={paragraph.speaker === "them"}
-              >{paragraph.speaker === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
-            {/if}
-            {paragraph.text}
-          </p>
-        {/each}
+  {#if mode === "dictation"}
+    <!-- Dictation hero: the words are the whole surface. -->
+    <div class="flex min-h-[340px] flex-col rounded-[18px] bg-surface-1 p-[30px] px-8 outline-1 outline-ghost-border">
+      <p class="m-0 text-[19px] font-normal leading-[1.85] text-text-secondary">
+        {liveText}<span
+          class="ml-0.5 inline-block h-5 w-0.5 bg-accent align-[-3px]"
+          style="animation: blink 1s step-end infinite;"
+        ></span>
+      </p>
+      <div class="flex-1"></div>
+      {#if meeting.app.settings.auto_paste}
+        <div class="flex items-center gap-[9px] border-t border-ghost-border pt-5 text-[12.5px] text-text-muted">
+          <ClipboardCheck size={15} class="shrink-0 text-accent" aria-hidden="true" />
+          {$t("home.autopaste_hint")}
+        </div>
       {/if}
     </div>
+  {:else}
+    <!-- Meeting hero: live transcript front and center. -->
+    <div class="flex min-h-[300px] flex-col gap-[18px] rounded-[18px] bg-surface-1 px-6 py-[22px] outline-1 outline-ghost-border">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-text-primary">{$t("home.live_transcript")}</h3>
+        <span class="inline-flex items-center gap-1.5 text-[11.5px] text-text-muted">
+          <span class={`h-1.5 w-1.5 rounded-full ${systemAudioActive ? "bg-accent" : "bg-surface-4"}`}></span>
+          {systemAudioActive
+            ? $t("home.system_audio_active")
+            : $t("meeting_header.system_audio_unavailable")}
+        </span>
+      </div>
+      <div
+        bind:this={transcriptEl}
+        class="flex max-h-[250px] flex-1 flex-col gap-4 overflow-y-auto pr-1.5"
+      >
+        {#if !hasLiveContent}
+          <span class="text-sm text-text-muted">{$t("home.listening")}</span>
+        {:else}
+          {#each liveParagraphs as paragraph}
+            <div class="flex flex-col gap-[3px]" style="animation: rise-in 240ms ease;">
+              <div class="flex items-center gap-2">
+                {#if paragraph.speaker}
+                  <span
+                    class="text-[11.5px] font-semibold"
+                    class:text-accent={paragraph.speaker === "me"}
+                    class:text-secondary={paragraph.speaker === "them"}
+                  >{paragraph.speaker === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
+                {/if}
+                <span class="font-mono text-[10.5px] text-text-faint">{paragraph.timestamp}</span>
+              </div>
+              <p class="m-0 text-[15px] leading-[1.75] text-text-secondary">{paragraph.text}</p>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    </div>
 
-    {#if mode === "meeting"}
-      <MeetingNotesSection
-        notes={meeting.notesDraft}
-        saveState={meeting.notesSaveState}
-        onNotesChange={meeting.onNotesChange}
-      />
-    {/if}
-  </div>
-</section>
+    <MeetingNotesSection
+      notes={meeting.notesDraft}
+      saveState={meeting.notesSaveState}
+      onNotesChange={meeting.onNotesChange}
+    />
+  {/if}
+</div>

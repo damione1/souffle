@@ -11,9 +11,9 @@
   } = $props();
 </script>
 
-<section class="surface-card flex flex-col gap-3.5">
+<section class="settings-group">
   <h3>{$t("settings_diagnostics.title")}</h3>
-
+  <div class="settings-rows">
   <SettingsField
     label={$t("settings_diagnostics.debug_logs")}
     description={$t("settings_diagnostics.debug_logs_desc")}
@@ -28,4 +28,5 @@
       />
     {/snippet}
   </SettingsField>
+  </div>
 </section>

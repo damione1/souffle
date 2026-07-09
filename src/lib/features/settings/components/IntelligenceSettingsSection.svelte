@@ -25,10 +25,9 @@
   } = $props();
 </script>
 
-<section class="surface-card flex flex-col gap-3.5">
+<section class="settings-group">
   <h3>{$t("settings_intelligence.title")}</h3>
-  <p class="text-text-secondary text-sm">{$t("settings_intelligence.description")}</p>
-
+  <div class="settings-rows">
   <SettingsField
     label={$t("settings_intelligence.ollama_url")}
     description={$t("settings_intelligence.ollama_url_desc")}
@@ -53,13 +52,13 @@
   </SettingsField>
 
   {#if ollamaAvailable && summaryModels.length > 0}
-    <div class="flex flex-col gap-1.5">
-      <label for="summary-model" class="field-label">{$t("settings_intelligence.summary_model")}</label>
+    <div class="flex items-center justify-between gap-4">
+      <label for="summary-model" class="setting-label shrink-0">{$t("settings_intelligence.summary_model")}</label>
       <select
         id="summary-model"
         value={selectedOllamaModel || summaryModels[0].id}
         onchange={onOllamaModelChange}
-        class="field-select"
+        class="field-select max-w-64"
       >
         {#each summaryModels as model}
           <option value={model.id}>{model.label}</option>
@@ -69,4 +68,5 @@
   {:else if ollamaAvailable && ollamaModels.length > 0}
     <StatusBanner message={$t("settings_intelligence.no_compatible_model")} />
   {/if}
+  </div>
 </section>

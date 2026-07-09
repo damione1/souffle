@@ -1,7 +1,8 @@
 {
   "settings": {
     "title": "Paramètres",
-    "no_model_selected": "Aucun modèle de transcription sélectionné"
+    "no_model_selected": "Aucun modèle de transcription sélectionné",
+    "done": "Terminé"
   },
   "settings_audio": {
     "title": "Audio",
@@ -94,7 +95,7 @@
   },
   "meeting_header": {
     "recording_badge": "Enregistrement",
-    "back_to_history": "Retour à l'historique",
+    "back_to_history": "Historique",
     "segments_count": "{count} segments",
     "session_singular": "session",
     "session_plural": "sessions",
@@ -124,7 +125,7 @@
     "them": "Eux"
   },
   "meeting_summary": {
-    "title": "Résumé",
+    "title": "Résumé IA",
     "recording_in_progress": "Enregistrement en cours",
     "can_regenerate": "Vous pourrez régénérer le résumé une fois l'enregistrement arrêté.",
     "summary_outdated": "Résumé obsolète",
@@ -136,7 +137,10 @@
     "regenerate_summary": "Régénérer le résumé",
     "generate_summary": "Générer le résumé",
     "connect_ollama": "Connectez Ollama dans les Paramètres pour activer les résumés.",
-    "no_compatible_model": "Aucun modèle Ollama compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés."
+    "no_compatible_model": "Aucun modèle Ollama compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
+    "generate_hint": "Points clés et actions, générés localement avec Ollama",
+    "generate_cta": "Générer",
+    "local_badge": "local"
   },
   "meeting_view": {
     "loading": "Chargement de la réunion...",
@@ -149,7 +153,8 @@
     "copy": "Copier",
     "yes": "Oui",
     "are_you_sure": "Êtes-vous sûr ?",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "toggle_theme": "Basculer clair / sombre"
   },
   "pipeline": {
     "error": "Erreur de transcription",
@@ -203,13 +208,17 @@
     "dictate": "Dicter",
     "dictate_hint": "Définissez un raccourci dans les réglages",
     "meeting": "Meeting",
-    "meeting_hint": "Enregistrer et transcrire en un clic",
+    "meeting_hint": "Transcription en direct · capture l’audio système",
     "live_dictation": "Dictée",
-    "live_meeting": "Meeting",
+    "live_meeting": "Réunion en direct",
     "stop": "Stop",
     "stopping": "Finalisation…",
     "listening": "À l'écoute…",
-    "search_placeholder": "Rechercher dans tout…"
+    "search_placeholder": "Rechercher transcriptions et réunions",
+    "press": "Appuyez sur",
+    "autopaste_hint": "Collé automatiquement dans votre dernière app à l’arrêt",
+    "live_transcript": "Transcription en direct",
+    "system_audio_active": "Audio système actif"
   },
   "permissions": {
     "title": "Autoriser les permissions",
