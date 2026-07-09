@@ -129,6 +129,20 @@ pub struct MeetingIdle {
     pub threshold_seconds: u64,
 }
 
+/// Progress for a full data archive export (`commands::data::export_archive`),
+/// which runs on a background thread so the command itself returns
+/// immediately. Emitted once per meeting processed, plus a final event with
+/// `finished: true`. `error` carries a fatal, whole-archive failure (e.g. the
+/// destination became unwritable); a single bad meeting is not fatal, it is
+/// only reflected in the written manifest's `errors` count.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct ArchiveExportProgress {
+    pub done: u32,
+    pub total: u32,
+    pub finished: bool,
+    pub error: Option<String>,
+}
+
 /// The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
 /// The frontend calls `take_sleep_paused_meeting` on receiving this (and again
 /// on webview visibility change, in case the webview itself was suspended

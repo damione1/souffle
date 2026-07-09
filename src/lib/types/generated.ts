@@ -542,6 +542,48 @@ async listTodaysCalendarEvents() : Promise<Result<TodayCalendar, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Kick off a full data archive export in a fresh `souffle-export-*` folder
+ * under `dest_dir`. Returns as soon as the destination is validated; the
+ * actual export runs on a background thread and reports progress through
+ * `ArchiveExportProgress` events, since walking every meeting can take a
+ * while for a large history.
+ */
+async exportArchive(destDir: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_archive", { destDir }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Database size on disk plus meeting/dictation counts, for the Settings >
+ * Data stats line.
+ */
+async getDataStats() : Promise<Result<DataStats, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_data_stats") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reveal the app's data directory in Finder. Uses the `open` CLI (already
+ * the pattern for macOS-only shell-outs in this codebase, see
+ * `permissions::open_accessibility_settings` and `calendar::mod`) rather
+ * than pulling in the Tauri opener plugin, since this app only ships for
+ * macOS and `open` is always available there.
+ */
+async revealDataDir() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reveal_data_dir") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -549,6 +591,7 @@ async listTodaysCalendarEvents() : Promise<Result<TodayCalendar, string>> {
 
 
 export const events = __makeEvents__<{
+archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
@@ -564,6 +607,7 @@ systemWokeUp: SystemWokeUp,
 transcriptionHealth: TranscriptionHealth,
 upcomingMeeting: UpcomingMeeting
 }>({
+archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
@@ -640,6 +684,15 @@ meeting_max_duration_minutes: number }
 export type AppStateMachine = { state: "idle" } | { state: "downloading"; data: { profile: TranscriptionProfile } } | { state: "downloaded"; data: { profile: TranscriptionProfile } } | { state: "loading"; data: { profile: TranscriptionProfile } } | { state: "ready"; data: { profile: TranscriptionProfile } } | { state: "recording_dictation"; data: { profile: TranscriptionProfile; session_id: number } } | { state: "recording_meeting"; data: { profile: TranscriptionProfile; session_id: number; meeting_id: string } } | { state: "stopping"; data: { profile: TranscriptionProfile; was_recording: RecordingKind } } | { state: "unloading"; data: { profile: TranscriptionProfile; next_profile: TranscriptionProfile | null } } | { state: "error"; data: { message: string; recovery: ErrorRecovery } }
 export type AppView = "home" | "settings"
 /**
+ * Progress for a full data archive export (`commands::data::export_archive`),
+ * which runs on a background thread so the command itself returns
+ * immediately. Emitted once per meeting processed, plus a final event with
+ * `finished: true`. `error` carries a fatal, whole-archive failure (e.g. the
+ * destination became unwritable); a single bad meeting is not fatal, it is
+ * only reflected in the written manifest's `errors` count.
+ */
+export type ArchiveExportProgress = { done: number; total: number; finished: boolean; error: string | null }
+/**
  * Info about an available audio input device, sent to frontend
  */
 export type AudioDeviceInfo = { name: string; is_default: boolean }
@@ -676,6 +729,10 @@ export type CalendarInfo = { id: string; title: string;
  * Account the calendar belongs to (e.g. "iCloud", "Google"), for grouping.
  */
 source_title: string | null }
+/**
+ * Settings > Data stats line: database size and row counts.
+ */
+export type DataStats = { db_size_bytes: number; meeting_count: number; dictation_count: number }
 /**
  * A dictation history entry
  */

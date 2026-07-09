@@ -1,6 +1,14 @@
 //! Renders a `MeetingTranscript` into Markdown, JSON, SRT, or VTT text for
 //! the single-meeting export feature. Pure string rendering: no I/O here,
 //! `commands::meetings` handles the file dialog / filesystem write.
+//!
+//! Also hosts the small filesystem-naming helpers (`archive_folder_name`,
+//! `unique_dir`) shared by the full-archive export in `crate::archive`, since
+//! they follow the same date+slug naming convention as [`export_default_filename`].
+
+use std::path::{Path, PathBuf};
+
+use chrono::{DateTime, Utc};
 
 use crate::engine::{Speaker, TranscriptionSegment};
 use crate::transcript::MeetingTranscript;
@@ -37,8 +45,9 @@ pub fn export_extension(format: ExportFormat) -> &'static str {
 /// Lowercase, alphanumeric-only slug: everything else collapses to a single
 /// hyphen, and leading/trailing hyphens are trimmed. Falls back to
 /// `"meeting"` when nothing alphanumeric survives (empty title, emoji-only
-/// title, etc).
-fn slugify(input: &str) -> String {
+/// title, etc). `pub(crate)` so `crate::archive` can build the same
+/// `date-slug` folder names it uses for per-meeting export filenames.
+pub(crate) fn slugify(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut last_was_separator = false;
     for ch in input.to_lowercase().chars() {
@@ -63,6 +72,32 @@ pub fn export_default_filename(meeting: &MeetingTranscript, format: ExportFormat
     let date = meeting.started_at.format("%Y-%m-%d");
     let slug = slugify(&meeting.title);
     format!("{date}-{slug}.{}", export_extension(format))
+}
+
+/// Base folder name for a full data archive, e.g. `souffle-export-2026-07-09`.
+/// Callers that need a name guaranteed not to collide with an existing
+/// directory should pass this into [`unique_dir`].
+pub fn archive_folder_name(now: DateTime<Utc>) -> String {
+    format!("souffle-export-{}", now.format("%Y-%m-%d"))
+}
+
+/// `parent/base`, or `parent/base-2`, `parent/base-3`, ... if that path
+/// already exists on disk. Probes the filesystem rather than tracking names
+/// in memory, so it also works for disambiguating sibling directories
+/// created earlier in the same run (e.g. two meetings sharing a date+title).
+pub fn unique_dir(parent: &Path, base: &str) -> PathBuf {
+    let candidate = parent.join(base);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let mut suffix = 2;
+    loop {
+        let candidate = parent.join(format!("{base}-{suffix}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        suffix += 1;
+    }
 }
 
 /// Render a meeting into the requested export format.
@@ -529,6 +564,52 @@ mod tests {
         assert_eq!(export_extension(ExportFormat::Json), "json");
         assert_eq!(export_extension(ExportFormat::Srt), "srt");
         assert_eq!(export_extension(ExportFormat::Vtt), "vtt");
+    }
+
+    // ── archive folder naming ───────────────────────────────────────────
+
+    #[test]
+    fn archive_folder_name_formats_date() {
+        let now: chrono::DateTime<chrono::Utc> = "2026-07-09T14:32:00Z".parse().unwrap();
+        assert_eq!(archive_folder_name(now), "souffle-export-2026-07-09");
+    }
+
+    #[test]
+    fn unique_dir_returns_base_when_free() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = unique_dir(dir.path(), "souffle-export-2026-07-09");
+        assert_eq!(result, dir.path().join("souffle-export-2026-07-09"));
+    }
+
+    #[test]
+    fn unique_dir_appends_suffix_on_collision() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("souffle-export-2026-07-09")).unwrap();
+
+        let result = unique_dir(dir.path(), "souffle-export-2026-07-09");
+        assert_eq!(result, dir.path().join("souffle-export-2026-07-09-2"));
+    }
+
+    #[test]
+    fn unique_dir_probes_past_multiple_collisions() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("weekly-sync")).unwrap();
+        std::fs::create_dir(dir.path().join("weekly-sync-2")).unwrap();
+        std::fs::create_dir(dir.path().join("weekly-sync-3")).unwrap();
+
+        let result = unique_dir(dir.path(), "weekly-sync");
+        assert_eq!(result, dir.path().join("weekly-sync-4"));
+    }
+
+    #[test]
+    fn unique_dir_treats_files_as_occupied_too() {
+        // A file (not just a directory) at the candidate path also counts as
+        // a collision, since creating a directory there would fail either way.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("weekly-sync"), b"not a dir").unwrap();
+
+        let result = unique_dir(dir.path(), "weekly-sync");
+        assert_eq!(result, dir.path().join("weekly-sync-2"));
     }
 
     // ── markdown ─────────────────────────────────────────────────────────
