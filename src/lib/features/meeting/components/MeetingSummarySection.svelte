@@ -4,13 +4,13 @@
   import CopyButton from "../../../components/ui/CopyButton.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
-  import type { MeetingTranscript, OllamaModelDescriptor, TranscriptionSegment } from "../../../types";
+  import type { MeetingTranscript, SummaryModelDescriptor, TranscriptionSegment } from "../../../types";
 
   let {
     meeting,
     isRecordingMeeting,
     segments,
-    ollamaAvailable,
+    summaryAvailable,
     summaryModels,
     selectedModel,
     onSelectModel,
@@ -21,8 +21,8 @@
     meeting: MeetingTranscript;
     isRecordingMeeting: boolean;
     segments: TranscriptionSegment[];
-    ollamaAvailable: boolean;
-    summaryModels: OllamaModelDescriptor[];
+    summaryAvailable: boolean;
+    summaryModels: SummaryModelDescriptor[];
     selectedModel: string;
     onSelectModel: (modelId: string) => void;
     onSummarize: () => void | Promise<void>;
@@ -65,7 +65,7 @@
   });
 
   const canGenerate = $derived(
-    !isRecordingMeeting && segments.length > 0 && ollamaAvailable && summaryModels.length > 0,
+    !isRecordingMeeting && segments.length > 0 && summaryAvailable && summaryModels.length > 0,
   );
 </script>
 
@@ -142,7 +142,7 @@
     {/if}
 
     {#if !isRecordingMeeting && segments.length > 0}
-      {#if ollamaAvailable && summaryModels.length > 0}
+      {#if summaryAvailable && summaryModels.length > 0}
         <div class="flex gap-2 items-center">
           <select
             value={selectedModel}
@@ -163,13 +163,11 @@
             {/if}
           </button>
         </div>
-      {:else if !ollamaAvailable}
+      {:else}
         <div class="flex items-center gap-2 py-2">
           <span class="status-dot"></span>
-          <span class="text-sm text-text-muted">{$t("meeting_summary.connect_ollama")}</span>
+          <span class="text-sm text-text-muted">{$t("meeting_summary.no_summary_provider")}</span>
         </div>
-      {:else}
-        <StatusBanner message={$t("meeting_summary.no_compatible_model")} />
       {/if}
     {/if}
   </section>

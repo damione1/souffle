@@ -133,12 +133,13 @@
     <IntelligenceSettingsSection
       ollamaUrl={controller.app.settings.ollama_url}
       ollamaAvailable={controller.ollamaAvailable}
+      appleIntelligenceAvailable={controller.appleIntelligenceAvailable}
       ollamaModels={controller.ollamaModels}
       summaryModels={controller.summaryModels}
       selectedOllamaModel={controller.app.settings.ollama_model}
       onOllamaUrlChange={controller.onOllamaUrlChange}
       onOllamaModelChange={controller.onOllamaModelChange}
-      onRetryOllama={controller.checkOllama}
+      onRetrySummaryProviders={controller.refreshSummaryProviders}
     />
 
     <DiagnosticsSettingsSection

@@ -296,11 +296,11 @@ async exportMeetingToFile(id: string, format: ExportFormat, path: string) : Prom
 }
 },
 /**
- * Check if Ollama is available and list models
+ * List available summary providers and models (Ollama + Apple Intelligence).
  */
-async checkOllama() : Promise<Result<OllamaStatus, string>> {
+async checkSummaryProviders() : Promise<Result<SummaryProvidersStatus, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("check_ollama") };
+    return { status: "ok", data: await TAURI_INVOKE("check_summary_providers") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -602,7 +602,8 @@ async getMcpSetupInfo() : Promise<Result<McpSetupInfo, string>> {
  * Spawn the sidecar, perform an MCP `initialize` handshake and `tools/list`
  * call over stdio, and return the discovered tool names joined by ", ".
  * Used by the Settings UI's "Test connection" button as a quick smoke test
- * that the binary actually speaks MCP.
+ * that the binary actually speaks MCP. `tools/list` alone is intentional:
+ * it proves stdio JSON-RPC works without needing a populated database.
  */
 async testMcpConnection() : Promise<Result<string, string>> {
     try {
@@ -859,8 +860,6 @@ calendar_event_id: string | null;
 participants: MeetingParticipant[] }
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
-export type OllamaModelDescriptor = { id: string; label: string; can_summarize: boolean }
-export type OllamaStatus = { available: boolean; base_url: string; models: OllamaModelDescriptor[] }
 export type PermState = "granted" | "denied" | 
 /**
  * Not yet probed — the user hasn't triggered this one (probing would
@@ -906,6 +905,9 @@ export type ShortcutToggle = null
 export type Speaker = "me" | "them"
 export type StateChanged = AppStateMachine
 export type SummarizeProgress = { text: string; done: boolean }
+export type SummaryModelDescriptor = { id: string; label: string; provider: SummaryProviderKind; can_summarize: boolean }
+export type SummaryProviderKind = "ollama" | "apple_intelligence"
+export type SummaryProvidersStatus = { ollama_url: string; ollama_available: boolean; apple_intelligence_available: boolean; models: SummaryModelDescriptor[] }
 /**
  * State of the system-audio capture leg of a meeting session, emitted when
  * the session starts and whenever the leg changes (e.g. tap rebuild after

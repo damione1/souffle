@@ -89,7 +89,7 @@
       meeting={controller.meeting}
       isRecordingMeeting={controller.isRecordingMeeting}
       segments={displaySegments}
-      ollamaAvailable={controller.ollamaAvailable}
+      summaryAvailable={controller.summaryAvailable}
       summaryModels={controller.summaryModels}
       selectedModel={controller.selectedModel}
       onSelectModel={(modelId) => {

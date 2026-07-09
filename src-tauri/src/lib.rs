@@ -14,7 +14,8 @@ pub mod export;
 pub mod filter;
 pub mod lock_ext;
 pub mod models;
-pub mod ollama;
+pub mod apple_intelligence;
+pub mod summary;
 pub mod ort_runtime;
 pub mod permissions;
 pub mod pill;
@@ -133,7 +134,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::export_meeting_preview,
             commands::export_meeting_filename,
             commands::export_meeting_to_file,
-            commands::check_ollama,
+            commands::check_summary_providers,
             commands::summarize_meeting,
             commands::search_text,
             commands::list_dictation_entries,

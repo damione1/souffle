@@ -13,10 +13,10 @@ import {
   summarizeMeeting as runMeetingSummary,
   takeSleepPausedMeeting,
 } from "../../api/meetings";
-import { getOllamaStatus } from "../../api/ollama";
+import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { ExportFormat, MeetingCalendarContext, MeetingIdle, MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { ExportFormat, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -35,7 +35,8 @@ function createMeetingControllerInstance() {
 
   let statusMessage = $state("");
   let ollamaAvailable = $state(false);
-  let summaryModels = $state<OllamaModelDescriptor[]>([]);
+  let appleIntelligenceAvailable = $state(false);
+  let summaryModels = $state<SummaryModelDescriptor[]>([]);
   let selectedModel = $state("");
   let isSummarizing = $state(false);
   let summaryStream = $state("");
@@ -89,7 +90,7 @@ function createMeetingControllerInstance() {
   );
 
   async function mount() {
-    await Promise.all([checkOllama(), loadTranscriptionCatalog()]);
+    await Promise.all([refreshSummaryProviders(), loadTranscriptionCatalog()]);
   }
 
   async function loadTranscriptionCatalog() {
@@ -176,14 +177,16 @@ function createMeetingControllerInstance() {
     idleDismissed = false;
   }
 
-  async function checkOllama() {
+  async function refreshSummaryProviders() {
     try {
-      const status = await getOllamaStatus();
-      ollamaAvailable = status.available;
+      const status = await getSummaryProvidersStatus();
+      ollamaAvailable = status.ollama_available;
+      appleIntelligenceAvailable = status.apple_intelligence_available;
       summaryModels = status.models.filter((model) => model.can_summarize);
       syncSelectedModel(meeting?.summary_model);
     } catch {
       ollamaAvailable = false;
+      appleIntelligenceAvailable = false;
       summaryModels = [];
     }
   }
@@ -526,6 +529,8 @@ function createMeetingControllerInstance() {
     get app() { return app; },
     get statusMessage() { return statusMessage; },
     get ollamaAvailable() { return ollamaAvailable; },
+    get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },
+    get summaryAvailable() { return summaryModels.length > 0; },
     get summaryModels() { return summaryModels; },
     get selectedModel() { return selectedModel; },
     set selectedModel(modelId: string) { selectedModel = modelId; },
@@ -550,7 +555,7 @@ function createMeetingControllerInstance() {
     flushNotes,
     mount,
     onMeetingSelectionChange,
-    checkOllama,
+    refreshSummaryProviders,
     startRecording,
     resumeRecording,
     stopRecording,

@@ -3,7 +3,7 @@ import type {
   MeetingCalendarContext,
   MeetingIdle,
   MeetingTranscript,
-  OllamaStatus,
+  SummaryProvidersStatus,
   SummarizeProgress,
   TranscriptionCatalog,
   TranscriptionSegment,
@@ -11,7 +11,7 @@ import type {
 
 // ── API mocks ────────────────────────────────────────────────────────
 
-const mockGetOllamaStatus = vi.fn<() => Promise<OllamaStatus>>();
+const mockGetSummaryProvidersStatus = vi.fn<() => Promise<SummaryProvidersStatus>>();
 const mockGetTranscriptionCatalog = vi.fn<() => Promise<TranscriptionCatalog>>();
 const mockStartMeetingRecording = vi.fn<
   (
@@ -69,8 +69,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: (...a: unknown[]) => mockShowSaveDialog(...(a as [unknown])),
 }));
 
-vi.mock("../../api/ollama", () => ({
-  getOllamaStatus: (...a: unknown[]) => mockGetOllamaStatus(...(a as [])),
+vi.mock("../../api/summary", () => ({
+  getSummaryProvidersStatus: (...a: unknown[]) => mockGetSummaryProvidersStatus(...(a as [])),
 }));
 
 vi.mock("../../api/transcription", () => ({
@@ -166,13 +166,16 @@ function makeMeeting(overrides: Partial<MeetingTranscript> = {}): MeetingTranscr
   };
 }
 
-function makeOllamaStatus(overrides: Partial<OllamaStatus> = {}): OllamaStatus {
+function makeSummaryProvidersStatus(
+  overrides: Partial<SummaryProvidersStatus> = {},
+): SummaryProvidersStatus {
   return {
-    available: true,
-    base_url: "http://localhost:11434",
+    ollama_url: "http://localhost:11434",
+    ollama_available: true,
+    apple_intelligence_available: false,
     models: [
-      { id: "llama3", label: "Llama 3", can_summarize: true },
-      { id: "codellama", label: "Code Llama", can_summarize: false },
+      { id: "llama3", label: "Llama 3", provider: "ollama", can_summarize: true },
+      { id: "codellama", label: "Code Llama", provider: "ollama", can_summarize: false },
     ],
     ...overrides,
   };
@@ -239,13 +242,13 @@ describe("MeetingController", () => {
   });
 
   it("mount checks ollama and loads transcription catalog", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
 
     const ctrl = createMeetingController();
     await ctrl.mount();
 
-    expect(mockGetOllamaStatus).toHaveBeenCalledOnce();
+    expect(mockGetSummaryProvidersStatus).toHaveBeenCalledOnce();
     expect(mockGetTranscriptionCatalog).toHaveBeenCalledOnce();
     expect(ctrl.ollamaAvailable).toBe(true);
     // Only models with can_summarize are kept
@@ -254,7 +257,7 @@ describe("MeetingController", () => {
   });
 
   it("startRecording starts with a dated default title", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockStartMeetingRecording.mockResolvedValue(undefined);
 
@@ -269,7 +272,7 @@ describe("MeetingController", () => {
   });
 
   it("startRecording from a calendar event uses the event title and carries participants", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockStartMeetingRecording.mockResolvedValue(undefined);
 
@@ -294,7 +297,7 @@ describe("MeetingController", () => {
   });
 
   it("stopRecording saves and loads meeting", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockStartMeetingRecording.mockResolvedValue(undefined);
     mockStopMeetingRecording.mockResolvedValue("meet-1");
@@ -312,7 +315,7 @@ describe("MeetingController", () => {
   });
 
   it("summarize streams progress text", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
 
     // summarizeMeeting calls the onProgress callback with chunks
@@ -341,8 +344,8 @@ describe("MeetingController", () => {
   });
 
   it("summarize without selected model is noop", async () => {
-    mockGetOllamaStatus.mockResolvedValue(
-      makeOllamaStatus({ available: false, models: [] }),
+    mockGetSummaryProvidersStatus.mockResolvedValue(
+      makeSummaryProvidersStatus({ ollama_available: false, models: [] }),
     );
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
 
@@ -357,7 +360,7 @@ describe("MeetingController", () => {
   });
 
   it("deleteMeeting clears state and returns to the list", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
     mockDeleteMeeting.mockResolvedValue(undefined);
@@ -374,7 +377,7 @@ describe("MeetingController", () => {
   });
 
   it("exportMeeting looks up the filename, opens the save dialog, and writes the file", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
     mockExportMeetingFilename.mockResolvedValue("2026-07-09-standup.md");
@@ -403,7 +406,7 @@ describe("MeetingController", () => {
   });
 
   it("exportMeeting does not write a file when the save dialog is cancelled", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
     mockExportMeetingFilename.mockResolvedValue("2026-07-09-standup.srt");
@@ -420,7 +423,7 @@ describe("MeetingController", () => {
   });
 
   it("exportMeeting surfaces backend errors via statusMessage", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
     mockExportMeetingFilename.mockRejectedValue(new Error("meeting not found"));
@@ -437,7 +440,7 @@ describe("MeetingController", () => {
   });
 
   it("exportMeeting is a no-op while the meeting is recording", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockStartMeetingRecording.mockResolvedValue(undefined);
 
@@ -462,7 +465,7 @@ describe("MeetingController", () => {
   it("notes autosave debounces and targets the live accumulator id", async () => {
     vi.useFakeTimers();
     try {
-      mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+      mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
       mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
       mockStartMeetingRecording.mockResolvedValue(undefined);
       mockSaveMeetingNotes.mockResolvedValue(undefined);
@@ -493,7 +496,7 @@ describe("MeetingController", () => {
   });
 
   it("canResumeRecording is true when meeting loaded and not recording", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
 
@@ -506,7 +509,7 @@ describe("MeetingController", () => {
   });
 
   it("resumeRecording reuses existing meeting", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
     mockResumeMeetingRecording.mockResolvedValue(undefined);
@@ -522,7 +525,7 @@ describe("MeetingController", () => {
   });
 
   it("syncSelectedModel picks preferred, then settings, then first available", async () => {
-    mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
 
     const ctrl = createMeetingController();
@@ -534,7 +537,7 @@ describe("MeetingController", () => {
 
     // If settings has a preferred model and it exists in the list
     mockApp.settings.ollama_model = "llama3";
-    await ctrl.checkOllama();
+    await ctrl.refreshSummaryProviders();
     expect(ctrl.selectedModel).toBe("llama3");
   });
 
@@ -555,7 +558,7 @@ describe("MeetingController", () => {
     }
 
     async function mountedController() {
-      mockGetOllamaStatus.mockResolvedValue(makeOllamaStatus());
+      mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
       mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
       const ctrl = createMeetingController();
       await ctrl.mount();

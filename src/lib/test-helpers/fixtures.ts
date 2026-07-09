@@ -3,7 +3,7 @@ import type {
   DictationEntry,
   MeetingListItem,
   MeetingTranscript,
-  OllamaStatus,
+  SummaryProvidersStatus,
   ShortcutSettings,
   TranscriptionCatalog,
   TranscriptionRuntimeStatus,
@@ -209,15 +209,16 @@ export const mockShortcuts: ShortcutSettings = {
 };
 
 // ---------------------------------------------------------------------------
-// Ollama
+// Summary providers
 // ---------------------------------------------------------------------------
 
-export const mockOllamaStatus: OllamaStatus = {
-  available: true,
-  base_url: "http://localhost:11434",
+export const mockSummaryProvidersStatus: SummaryProvidersStatus = {
+  ollama_url: "http://localhost:11434",
+  ollama_available: true,
+  apple_intelligence_available: false,
   models: [
-    { id: "llama3.2:latest", label: "Llama 3.2", can_summarize: true },
-    { id: "mistral:latest", label: "Mistral", can_summarize: true },
+    { id: "llama3.2:latest", label: "Llama 3.2", provider: "ollama", can_summarize: true },
+    { id: "mistral:latest", label: "Mistral", provider: "ollama", can_summarize: true },
   ],
 };
 

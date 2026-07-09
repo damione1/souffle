@@ -59,7 +59,7 @@
   $effect(() => {
     const open = app.settingsOpen;
     if (settingsWasOpen && !open) {
-      void meeting.checkOllama();
+      void meeting.refreshSummaryProviders();
       // Calendar integration or selection may have changed in Settings.
       void calendar.refresh();
     }

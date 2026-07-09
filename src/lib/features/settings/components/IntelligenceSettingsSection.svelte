@@ -2,32 +2,50 @@
   import { t } from "svelte-i18n";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
-  import type { OllamaModelDescriptor } from "../../../types";
+  import type { SummaryModelDescriptor } from "../../../types";
 
   let {
     ollamaUrl,
     ollamaAvailable,
+    appleIntelligenceAvailable,
     ollamaModels,
     summaryModels,
     selectedOllamaModel,
     onOllamaUrlChange,
     onOllamaModelChange,
-    onRetryOllama,
+    onRetrySummaryProviders,
   }: {
     ollamaUrl: string;
     ollamaAvailable: boolean;
-    ollamaModels: OllamaModelDescriptor[];
-    summaryModels: OllamaModelDescriptor[];
+    appleIntelligenceAvailable: boolean;
+    ollamaModels: SummaryModelDescriptor[];
+    summaryModels: SummaryModelDescriptor[];
     selectedOllamaModel: string;
     onOllamaUrlChange: (event: Event) => void;
     onOllamaModelChange: (event: Event) => void;
-    onRetryOllama: () => void | Promise<void>;
+    onRetrySummaryProviders: () => void | Promise<void>;
   } = $props();
 </script>
 
 <section class="settings-group">
   <h3>{$t("settings_intelligence.title")}</h3>
   <div class="settings-rows">
+  <SettingsField
+    label={$t("settings_intelligence.apple_intelligence")}
+    description={$t("settings_intelligence.apple_intelligence_desc")}
+  >
+    {#snippet control()}
+      <div class="flex gap-2 items-center">
+        <span class="status-dot" class:is-online={appleIntelligenceAvailable}></span>
+        <span class="text-sm text-text-muted">
+          {appleIntelligenceAvailable
+            ? $t("settings_intelligence.apple_available")
+            : $t("settings_intelligence.apple_not_available")}
+        </span>
+      </div>
+    {/snippet}
+  </SettingsField>
+
   <SettingsField
     label={$t("settings_intelligence.ollama_url")}
     description={$t("settings_intelligence.ollama_url_desc")}
@@ -46,7 +64,7 @@
       <div class="flex gap-2 items-center">
         <span class="status-dot" class:is-online={ollamaAvailable}></span>
         <span class="text-sm text-text-muted">{ollamaAvailable ? $t("settings_intelligence.connected") : $t("settings_intelligence.not_available")}</span>
-        <button onclick={onRetryOllama} class="btn">{$t("settings_intelligence.retry")}</button>
+        <button onclick={onRetrySummaryProviders} class="btn">{$t("settings_intelligence.retry")}</button>
       </div>
     {/snippet}
   </SettingsField>
