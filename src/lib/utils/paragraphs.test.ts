@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildMeetingTranscriptBlocks, groupIntoParagraphs } from './paragraphs';
+import { buildMeetingTranscriptBlocks, groupIntoParagraphs, groupIntoParagraphsWithRanges } from './paragraphs';
 import type { MeetingRecordingSession, TranscriptionSegment } from '../types';
 
 function seg(text: string, start: number, end?: number): TranscriptionSegment {
@@ -161,6 +161,75 @@ describe('groupIntoParagraphs', () => {
     ];
     const result = groupIntoParagraphs(segments, 1.5);
     expect(result).toHaveLength(1);
+  });
+});
+
+describe('groupIntoParagraphsWithRanges', () => {
+  function checkRangesReconstructParagraphs(segments: TranscriptionSegment[], pauseThreshold: number) {
+    const { paragraphs, ranges, ordered } = groupIntoParagraphsWithRanges(segments, pauseThreshold);
+    const batch = groupIntoParagraphs(segments, pauseThreshold);
+    expect(paragraphs).toEqual(batch);
+    expect(ranges).toHaveLength(paragraphs.length);
+
+    // Ranges form a contiguous, non-overlapping, ascending partition.
+    let expectedStart = 0;
+    for (const range of ranges) {
+      expect(range.start).toBe(expectedStart);
+      expect(range.end).toBeGreaterThan(range.start);
+      expectedStart = range.end;
+    }
+
+    // Reconstructing each paragraph's text from its range (skipping empty
+    // segments, same as the grouping rules) must reproduce the paragraph.
+    for (let i = 0; i < ranges.length; i++) {
+      const { start, end } = ranges[i];
+      const reconstructedText = ordered
+        .slice(start, end)
+        .map((s) => s.text.trim())
+        .filter((t) => t.length > 0)
+        .join(' ');
+      expect(reconstructedText).toBe(paragraphs[i].text);
+    }
+  }
+
+  it('covers a plain in-order stream with contiguous ranges', () => {
+    const segments = [
+      seg('Hello world.', 0),
+      seg('New paragraph after a pause.', 2.0),
+      seg('And more.', 2.5),
+    ];
+    checkRangesReconstructParagraphs(segments, 1.5);
+  });
+
+  it('covers a diarized, interleaved stream with contiguous ranges', () => {
+    const segments = [
+      dseg('second', 3, 'them'),
+      dseg('first', 1, 'me'),
+      dseg('third', 5, 'them'),
+    ];
+    checkRangesReconstructParagraphs(segments, 1.5);
+  });
+
+  it('keeps an empty-text segment inside the range of the paragraph being built', () => {
+    const segments = [
+      seg('Hello', 0),
+      seg('', 0.3), // empty text, mid-paragraph
+      seg('world.', 0.6),
+    ];
+    const { paragraphs, ranges, ordered } = groupIntoParagraphsWithRanges(segments, 1.5);
+    expect(paragraphs).toHaveLength(1);
+    expect(paragraphs[0].text).toBe('Hello world.');
+    expect(ranges).toEqual([{ start: 0, end: 3 }]);
+    expect(ordered).toHaveLength(3);
+  });
+
+  it('returns empty ranges for empty input', () => {
+    expect(groupIntoParagraphsWithRanges([], 1.5)).toEqual({ paragraphs: [], ranges: [], ordered: [] });
+  });
+
+  it('matches groupIntoParagraphs output for a long unpunctuated stream', () => {
+    const segments = Array.from({ length: 300 }, (_, i) => seg(`word${i}`, i * 0.1));
+    checkRangesReconstructParagraphs(segments, 1.5);
   });
 });
 

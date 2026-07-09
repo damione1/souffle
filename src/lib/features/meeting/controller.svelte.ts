@@ -15,6 +15,7 @@ import { getAppState } from "../../stores/app.svelte";
 import type { MeetingCalendarContext, MeetingTranscript, OllamaModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
+import { createLiveTranscript } from "./live-transcript.svelte";
 
 function defaultMeetingTitle(): string {
   return `Meeting ${new Date().toLocaleDateString()}`;
@@ -44,6 +45,12 @@ function createMeetingControllerInstance() {
     || (app.machineState.state === "stopping"
         && typeof app.machineState.data?.was_recording === "object"),
   );
+  // Incremental grouper for the compact live view (LiveSessionCard): bounded
+  // work per segment instead of re-grouping the whole meeting each time.
+  const liveTranscript = createLiveTranscript(1.5);
+  // Raw finalized segments, still needed by the meeting detail view's full
+  // transcript section (buildMeetingTranscriptBlocks operates on segments,
+  // not paragraphs). Mutated via push, not clone-per-segment.
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
 
   let meeting = $state<MeetingTranscript | null>(null);
@@ -162,6 +169,7 @@ function createMeetingControllerInstance() {
     try {
       const title = options?.title?.trim() || defaultMeetingTitle();
       const calendar = options?.calendar ?? null;
+      liveTranscript.reset();
       liveMeetingSegments = [];
       statusMessage = "";
       summaryStream = "";
@@ -176,8 +184,11 @@ function createMeetingControllerInstance() {
       );
 
       await startMeetingRecording(title, calendar, (segment) => {
-        if (!segment.is_final || !segment.text) return;
-        liveMeetingSegments = [...liveMeetingSegments, segment];
+        // Only skip empty finals; non-final (tentative) segments still flow
+        // through so the live view can show them as a faded suffix.
+        if (segment.is_final && !segment.text) return;
+        liveTranscript.append(segment);
+        if (segment.is_final && segment.text) liveMeetingSegments.push(segment);
       });
 
       meeting = {
@@ -200,6 +211,7 @@ function createMeetingControllerInstance() {
       };
     } catch (e) {
       statusMessage = errorMessage(e);
+      liveTranscript.reset();
       liveMeetingSegments = [];
     }
   }
@@ -208,16 +220,19 @@ function createMeetingControllerInstance() {
     if (!meeting || !meeting.id) return;
 
     try {
+      liveTranscript.reset();
       liveMeetingSegments = [];
       statusMessage = "";
       summaryStream = "";
 
       await resumeMeetingRecording(meeting.id, (segment) => {
-        if (!segment.is_final || !segment.text) return;
-        liveMeetingSegments = [...liveMeetingSegments, segment];
+        if (segment.is_final && !segment.text) return;
+        liveTranscript.append(segment);
+        if (segment.is_final && segment.text) liveMeetingSegments.push(segment);
       });
     } catch (e) {
       statusMessage = errorMessage(e);
+      liveTranscript.reset();
       liveMeetingSegments = [];
     }
   }
@@ -256,6 +271,7 @@ function createMeetingControllerInstance() {
    * buffer. No-op if the user already navigated elsewhere. */
   function handleMeetingFinalized(id: string) {
     if (app.currentMeetingId !== id && meeting?.id !== id) return;
+    liveTranscript.reset();
     liveMeetingSegments = [];
     void loadMeeting(id);
   }
@@ -263,6 +279,7 @@ function createMeetingControllerInstance() {
   /** The backend aborted the recording session (machine went to Error).
    * The backend salvages the accumulated meeting to history before failing. */
   function handleRecordingAborted() {
+    liveTranscript.reset();
     liveMeetingSegments = [];
     meeting = null;
     app.currentMeetingId = null;
@@ -274,6 +291,7 @@ function createMeetingControllerInstance() {
   function closeMeeting() {
     void flushNotes();
     meeting = null;
+    liveTranscript.reset();
     liveMeetingSegments = [];
     statusMessage = "";
     summaryStream = "";
@@ -387,6 +405,7 @@ function createMeetingControllerInstance() {
     get isSummarizing() { return isSummarizing; },
     get summaryStream() { return summaryStream; },
     get isRecordingMeeting() { return isRecordingMeeting; },
+    get liveTranscript() { return liveTranscript; },
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
     get isLoadingMeeting() { return isLoadingMeeting; },
