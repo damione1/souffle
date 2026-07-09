@@ -2,5 +2,11 @@
 # macOS SDK marks unavailable below 10.15. The cmake crate otherwise defaults
 # CMAKE_OSX_DEPLOYMENT_TARGET to 10.13, breaking the release build. Pin to 11.0
 # (aarch64 baseline) so build scripts and CMake inherit a valid target.
+#
+# CMake 4 removed compatibility with cmake_minimum_required < 3.5, which the
+# vendored libopus build inside audiopus_sys still declares. This opts back
+# into the old policy floor so the static libopus build keeps working on
+# runners and dev machines with CMake 4.x.
 [env]
 MACOSX_DEPLOYMENT_TARGET = "11.0"
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
