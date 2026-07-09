@@ -31,7 +31,7 @@ use crate::filter::{
 use crate::platform::with_autorelease_pool;
 
 use super::SegmentCallback;
-use super::health::SessionHealth;
+use super::health::{SessionHealth, StallAction, StallRecovery};
 use super::idle::{MeetingIdleConfig, MeetingIdleMonitor};
 
 /// Creates engines ON the actor thread. Production uses `crate::engine::create_engine`;
@@ -111,9 +111,14 @@ pub struct EngineActorHandle {
 impl EngineActorHandle {
     /// Spawn the actor thread. It owns the audio receiver and (eventually) the engine.
     /// `dropped_counter` is shared with the audio capture callback for health reporting.
+    /// `audio_gone_reason` is shared with the audio capture thread: when the
+    /// audio channel disconnects, the actor takes whatever reason capture
+    /// left there (e.g. an unrecoverable mic loss) instead of assuming a
+    /// generic failure.
     pub fn spawn(
         audio_rx: Receiver<AudioMessage>,
         dropped_counter: Arc<AtomicU64>,
+        audio_gone_reason: Arc<Mutex<Option<String>>>,
         factory: EngineFactory,
     ) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EngineCommand>();
@@ -129,6 +134,7 @@ impl EngineActorHandle {
                     engine: None,
                     app: None,
                     dropped_counter,
+                    audio_gone_reason,
                     unload_timeout: None,
                     idle_since: None,
                 }
@@ -273,6 +279,12 @@ struct EngineActor {
     engine: Option<Box<dyn TranscriptionEngine>>,
     app: Option<tauri::AppHandle>,
     dropped_counter: Arc<AtomicU64>,
+    /// Reason the audio capture thread set right before it exits after an
+    /// unrecoverable failure (e.g. mic loss with no other source). Read
+    /// (and cleared) when the audio channel disconnects; falls back to a
+    /// generic message when empty (audio thread panicked or exited for some
+    /// other reason).
+    audio_gone_reason: Arc<Mutex<Option<String>>>,
     /// Idle-unload timeout; `None` means "never unload". Reconfigured via
     /// `EngineCommand::SetUnloadTimeout`.
     unload_timeout: Option<Duration>,
@@ -392,9 +404,19 @@ impl EngineActor {
                             // recoverable error so the user can retry — same path
                             // as a session abort. The actor stays alive.
                             error!("Audio channel disconnected mid-session; recovering");
-                            self.handle_session_abort(
-                                "Audio capture stopped unexpectedly".to_string(),
-                            );
+                            // The capture thread leaves a specific reason here
+                            // before it exits deliberately (e.g. unrecoverable
+                            // mic loss); fall back to a generic message when
+                            // it's empty (a genuine panic or unexpected exit).
+                            let reason = self
+                                .audio_gone_reason
+                                .lock()
+                                .ok()
+                                .and_then(|mut guard| guard.take())
+                                .unwrap_or_else(|| {
+                                    "Audio capture stopped unexpectedly".to_string()
+                                });
+                            self.handle_session_abort(reason);
                         }
                     }
                     if self.engine.is_some() {
@@ -855,6 +877,11 @@ fn run_session_loop(
     let mut summary = SessionSummary::default();
     let mut eos_received = false;
     let mut consecutive_errors: u32 = 0;
+    // Drives the stall recovery ladder (in-place reset, then give up) from
+    // continuous stalled health snapshots. See `StallRecovery` for the
+    // known limitation: an engine call that blocks forever never returns
+    // control here, so this only covers "loop alive, no frames" stalls.
+    let mut stall_recovery = StallRecovery::new();
     // Stop request waiting for this session's EndOfStream marker.
     let mut pending_stop: Option<(Sender<Result<SessionSummary, String>>, Instant)> = None;
 
@@ -867,11 +894,41 @@ fn run_session_loop(
     const HEARTBEAT: Duration = Duration::from_secs(30);
 
     loop {
-        // Periodic health snapshot to the frontend
-        if let Some(snapshot) = health.tick(audio_rx.len())
-            && let Some(app) = app
-        {
-            let _ = snapshot.emit(app);
+        // Periodic health snapshot to the frontend, and to the stall
+        // recovery ladder.
+        if let Some(snapshot) = health.tick(audio_rx.len()) {
+            let action = stall_recovery.on_snapshot(snapshot.status, Instant::now());
+            if let Some(app) = app {
+                let _ = snapshot.emit(app);
+            }
+            match action {
+                Some(StallAction::Reset) => {
+                    warn!(
+                        "Session {session_id} stalled for 30s with no frames processed; \
+                         attempting in-place engine reset"
+                    );
+                    // Match the panic protection already used for engine
+                    // calls in this loop (mode.step / catch_engine below): a
+                    // broken engine must not take the actor thread down
+                    // while we try to recover it.
+                    match catch_engine(|| engine.reset_state()) {
+                        Ok(()) => info!("Session {session_id}: stall recovery reset succeeded"),
+                        Err(e) => {
+                            warn!("Session {session_id}: stall recovery reset failed: {e}")
+                        }
+                    }
+                }
+                Some(StallAction::Abort) => {
+                    let message = "The transcription engine stopped responding; \
+                                    the recording so far was saved."
+                        .to_string();
+                    if let Some((reply, _)) = pending_stop.take() {
+                        let _ = reply.send(Err(message.clone()));
+                    }
+                    return SessionEnd::Aborted(message);
+                }
+                None => {}
+            }
         }
 
         // Meeting-only: has the meeting probably ended (silence / max duration)?
@@ -1301,6 +1358,7 @@ mod tests {
         let actor = EngineActorHandle::spawn(
             audio_rx,
             Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
             Box::new(move |_profile| {
                 cell.lock()
                     .unwrap()
@@ -1587,6 +1645,7 @@ mod tests {
         let actor = EngineActorHandle::spawn(
             audio_rx,
             Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
             Box::new(|_| Err("no engine in this test".into())),
         )
         .expect("spawn");

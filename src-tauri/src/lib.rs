@@ -181,22 +181,30 @@ pub fn run() {
     let audio_rms = Arc::new(std::sync::atomic::AtomicU32::new(0f32.to_bits()));
     // Chunks dropped by the capture callback — read by the actor for health reporting
     let dropped_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // Reason the capture thread sets right before it exits after an
+    // unrecoverable failure (e.g. mic loss with no other source); read by
+    // the actor's AudioGone handler.
+    let audio_gone_reason = Arc::new(std::sync::Mutex::new(None));
 
     // Spawn the audio thread before Tauri starts (cpal Stream is !Send on macOS)
-    let (cmd_tx, audio_rx) =
-        match AudioCapture::spawn(Arc::clone(&audio_rms), Arc::clone(&dropped_counter)) {
-            Ok(channels) => channels,
-            Err(e) => {
-                tracing::error!("Fatal: {e}");
-                std::process::exit(1);
-            }
-        };
+    let (cmd_tx, audio_rx) = match AudioCapture::spawn(
+        Arc::clone(&audio_rms),
+        Arc::clone(&dropped_counter),
+        Arc::clone(&audio_gone_reason),
+    ) {
+        Ok(channels) => channels,
+        Err(e) => {
+            tracing::error!("Fatal: {e}");
+            std::process::exit(1);
+        }
+    };
 
     // Spawn the engine actor — the single thread that owns the transcription
     // engine and consumes captured audio.
     let engine_actor = match pipeline::EngineActorHandle::spawn(
         audio_rx,
         dropped_counter,
+        audio_gone_reason,
         Box::new(engine::create_engine),
     ) {
         Ok(actor) => Arc::new(actor),
