@@ -8,6 +8,11 @@ name: Release
 # taps are Apple Silicon only, and the bundled resources/libonnxruntime.dylib
 # is an arm64 build. There is no Intel mac, Windows, Linux, or mobile leg.
 #
+# Apple Intelligence: release builds on macos-15 link the FoundationModels stub
+# (Xcode 26 SDK required for the real bridge). Stub linkage sets
+# apple_intelligence_is_stub=true so Settings never advertises AI as available.
+# Bump the runner to a macOS image with Xcode 26 when GitHub ships one.
+#
 # Signing + notarization are optional: the six APPLE_* secrets listed below
 # already exist in this repo. Without them the build still works, it just
 # ships unsigned.

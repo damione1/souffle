@@ -138,24 +138,24 @@ pub fn export_meeting_to_file(
     std::fs::write(&path, rendered).map_err(|e| format!("Write export file: {e}"))
 }
 
-/// Check if Ollama is available and list models
+/// List available summary providers and models (Ollama + Apple Intelligence).
 #[tauri::command]
 #[specta::specta]
-pub async fn check_ollama(
+pub async fn check_summary_providers(
     state: State<'_, AppState>,
-) -> Result<crate::ollama::OllamaStatus, String> {
+) -> Result<crate::summary::SummaryProvidersStatus, String> {
     let settings = AppSettings::load(&state.db)?;
-    Ok(crate::ollama::check_available(Some(&settings.ollama_url)).await)
+    Ok(crate::summary::check_providers(&settings.ollama_url).await)
 }
 
-/// Summarize a meeting transcript using Ollama, streaming results back
+/// Summarize a meeting transcript using the selected provider, streaming results back.
 #[tauri::command]
 #[specta::specta]
 pub async fn summarize_meeting(
     state: State<'_, AppState>,
     id: String,
     model: String,
-    channel: Channel<crate::ollama::SummarizeProgress>,
+    channel: Channel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
     let transcript = state.db.load_meeting(&id)?;
     let settings = AppSettings::load(&state.db)?;
@@ -176,7 +176,7 @@ pub async fn summarize_meeting(
 
     let channel_clone = channel.clone();
     let db = state.db.clone();
-    let summary = crate::ollama::summarize_stream(
+    let summary = crate::summary::summarize_stream(
         &text,
         transcript.notes.as_deref(),
         &transcript.participants,

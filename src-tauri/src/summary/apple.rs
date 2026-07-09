@@ -1,0 +1,13 @@
+use crate::apple_intelligence;
+use crate::constants::{OLLAMA_MAP_PROMPT, OLLAMA_SUMMARIZE_PROMPT};
+
+pub const MAP_SYSTEM_PROMPT: &str = OLLAMA_MAP_PROMPT;
+pub const SUMMARIZE_SYSTEM_PROMPT: &str = OLLAMA_SUMMARIZE_PROMPT;
+
+pub fn validate_availability() -> Result<(), String> {
+    if apple_intelligence::check_apple_intelligence_availability() {
+        Ok(())
+    } else {
+        Err("Apple Intelligence is not available on this device.".into())
+    }
+}

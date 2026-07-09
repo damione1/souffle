@@ -5,7 +5,7 @@
  *   vi.mock('$lib/api/transcription', () => createTranscriptionApiMock());
  *   vi.mock('$lib/api/meetings',      () => createMeetingsApiMock());
  *   vi.mock('$lib/api/settings',      () => createSettingsApiMock());
- *   vi.mock('$lib/api/ollama',        () => createOllamaApiMock());
+ *   vi.mock('$lib/api/summary',      () => createSummaryApiMock());
  *
  * Pass `overrides` to replace individual default return values.
  */
@@ -17,7 +17,7 @@ import type {
   DictationEntry,
   MeetingListItem,
   MeetingTranscript,
-  OllamaStatus,
+  SummaryProvidersStatus,
   ShortcutSettings,
   TranscriptionCatalog,
   TranscriptionRuntimeStatus,
@@ -28,7 +28,7 @@ import {
   mockDictationEntry,
   mockMeeting,
   mockMeetingList,
-  mockOllamaStatus,
+  mockSummaryProvidersStatus,
   mockRuntimeStatus,
   mockSegment,
   mockSettings,
@@ -132,18 +132,18 @@ export function createSettingsApiMock(
 }
 
 // ---------------------------------------------------------------------------
-// src/lib/api/ollama.ts
+// src/lib/api/summary.ts
 // ---------------------------------------------------------------------------
 
-export interface OllamaApiMock {
-  getOllamaStatus: ReturnType<typeof vi.fn<() => Promise<OllamaStatus>>>;
+export interface SummaryApiMock {
+  getSummaryProvidersStatus: ReturnType<typeof vi.fn<() => Promise<SummaryProvidersStatus>>>;
 }
 
-export function createOllamaApiMock(
-  overrides?: Partial<OllamaApiMock>,
-): OllamaApiMock {
+export function createSummaryApiMock(
+  overrides?: Partial<SummaryApiMock>,
+): SummaryApiMock {
   return {
-    getOllamaStatus: vi.fn<() => Promise<OllamaStatus>>().mockResolvedValue(mockOllamaStatus),
+    getSummaryProvidersStatus: vi.fn<() => Promise<SummaryProvidersStatus>>().mockResolvedValue(mockSummaryProvidersStatus),
     ...overrides,
   };
 }

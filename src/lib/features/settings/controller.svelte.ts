@@ -1,4 +1,4 @@
-import { getOllamaStatus } from "../../api/ollama";
+import { getSummaryProvidersStatus } from "../../api/summary";
 import { deleteModel, getTranscriptionCatalog } from "../../api/transcription";
 import {
   getSettings,
@@ -25,7 +25,7 @@ import type {
   CalendarInfo,
   DictionaryEntry,
   PermState,
-  OllamaModelDescriptor,
+  SummaryModelDescriptor,
   ShortcutSettings,
   Theme,
   TranscriptionCatalog,
@@ -54,7 +54,8 @@ export function createSettingsController() {
   // desktop Mac, so it's hidden entirely rather than shown disabled.
   let isLaptop = $state(false);
   let ollamaAvailable = $state(false);
-  let ollamaModels = $state<OllamaModelDescriptor[]>([]);
+  let appleIntelligenceAvailable = $state(false);
+  let ollamaModels = $state<SummaryModelDescriptor[]>([]);
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
 
@@ -68,7 +69,7 @@ export function createSettingsController() {
   let calendars = $state<CalendarInfo[]>([]);
   let calendarPermission = $state<PermState>("unknown");
 
-  let summaryModels = $derived(ollamaModels.filter((model) => model.can_summarize));
+  let summaryModels = $derived(ollamaModels.filter((model) => model.can_summarize && model.provider === "ollama"));
 
   async function mount() {
     await syncSettings();
@@ -81,7 +82,7 @@ export function createSettingsController() {
     await Promise.all([
       loadShortcuts(),
       refreshDevices(),
-      checkOllama(),
+      refreshSummaryProviders(),
       loadCatalog(),
       loadDictionary(),
       loadCalendars(),
@@ -200,14 +201,17 @@ export function createSettingsController() {
     });
   }
 
-  async function checkOllama() {
+  async function refreshSummaryProviders() {
     try {
-      const status = await getOllamaStatus();
-      const availableSummaryModels = status.models.filter((model) => model.can_summarize);
-      ollamaAvailable = status.available;
-      ollamaModels = status.models;
+      const status = await getSummaryProvidersStatus();
+      ollamaAvailable = status.ollama_available;
+      appleIntelligenceAvailable = status.apple_intelligence_available;
+      ollamaModels = status.models.filter((model) => model.provider === "ollama");
 
-      if (status.available && availableSummaryModels.length === 0 && status.models.length > 0) {
+      const availableSummaryModels = status.models.filter(
+        (model) => model.can_summarize && model.provider === "ollama",
+      );
+      if (status.ollama_available && availableSummaryModels.length === 0 && ollamaModels.length > 0) {
         statusMessage = "No text-generation Ollama model found. Install a chat model (qwen, llama, mistral, etc.).";
         return;
       }
@@ -224,6 +228,7 @@ export function createSettingsController() {
       }
     } catch {
       ollamaAvailable = false;
+      appleIntelligenceAvailable = false;
       ollamaModels = [];
     }
   }
@@ -597,6 +602,7 @@ export function createSettingsController() {
   return {
     get app() { return app; },
     get audioDevices() { return audioDevices; },
+    get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },
     get ollamaAvailable() { return ollamaAvailable; },
     get ollamaModels() { return ollamaModels; },
     get summaryModels() { return summaryModels; },
@@ -623,7 +629,7 @@ export function createSettingsController() {
     refreshRuntimeStatus,
     refreshDevices,
     onDeviceChange,
-    checkOllama,
+    refreshSummaryProviders,
     selectModelOption,
     handleDeleteModel,
     onThemeChange,

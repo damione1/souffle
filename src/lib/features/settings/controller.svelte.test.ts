@@ -195,8 +195,14 @@ describe("settings controller", () => {
         return Promise.resolve(fakeDevices);
       case "select_audio_device":
         return Promise.resolve(null);
-      case "check_ollama":
-        return Promise.resolve({ available: false, base_url: "http://localhost:11434", models: [] });
+      case "check_summary_providers":
+        return Promise.resolve({
+          ollama_url: "http://localhost:11434",
+          ollama_available: false,
+          apple_intelligence_available: false,
+          apple_intelligence_is_stub: true,
+          models: [],
+        });
       case "get_transcription_catalog":
         return Promise.resolve(fakeCatalog);
       case "get_model_status":
@@ -229,7 +235,7 @@ describe("settings controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("get_settings");
     expect(mockInvoke).toHaveBeenCalledWith("get_shortcuts");
     expect(mockInvoke).toHaveBeenCalledWith("list_audio_devices");
-    expect(mockInvoke).toHaveBeenCalledWith("check_ollama");
+    expect(mockInvoke).toHaveBeenCalledWith("check_summary_providers");
     expect(mockInvoke).toHaveBeenCalledWith("get_transcription_catalog");
     expect(mockInvoke).toHaveBeenCalledWith("get_model_status", {
       selection: {
@@ -293,8 +299,14 @@ describe("settings controller", () => {
           return Promise.resolve(fakeDevices);
         case "select_audio_device":
           return Promise.resolve(null);
-        case "check_ollama":
-          return Promise.resolve({ available: false, base_url: "http://localhost:11434", models: [] });
+        case "check_summary_providers":
+          return Promise.resolve({
+            ollama_url: "http://localhost:11434",
+            ollama_available: false,
+            apple_intelligence_available: false,
+            apple_intelligence_is_stub: true,
+            models: [],
+          });
         case "get_transcription_catalog":
           return Promise.resolve({
             ...fakeCatalog,

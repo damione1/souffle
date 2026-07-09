@@ -81,7 +81,11 @@
   },
   "settings_intelligence": {
     "title": "Résumés",
-    "description": "Souffle utilise un serveur Ollama local pour générer les résumés de réunions.",
+    "description": "Les résumés utilisent Apple Intelligence sur les Mac compatibles, ou un serveur Ollama local.",
+    "apple_intelligence": "Apple Intelligence",
+    "apple_intelligence_desc": "Résumés on-device sur Apple Silicon avec macOS 26+ et Apple Intelligence activé.",
+    "apple_available": "Disponible",
+    "apple_not_available": "Non disponible sur ce Mac",
     "ollama_url": "URL Ollama",
     "ollama_url_desc": "Adresse de votre serveur Ollama local.",
     "connection_status": "État de la connexion",
@@ -180,8 +184,9 @@
     "regenerate_summary": "Régénérer le résumé",
     "generate_summary": "Générer le résumé",
     "connect_ollama": "Connectez Ollama dans les Paramètres pour activer les résumés.",
+    "no_summary_provider": "Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans les Paramètres.",
     "no_compatible_model": "Aucun modèle Ollama compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
-    "generate_hint": "Points clés et actions, générés localement avec Ollama",
+    "generate_hint": "Points clés et actions, générés sur l'appareil",
     "generate_cta": "Générer",
     "local_badge": "local"
   },
