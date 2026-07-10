@@ -544,6 +544,21 @@ async requestPermission(kind: PermissionKind) : Promise<Result<PermState, string
 }
 },
 /**
+ * Clear a stale Accessibility TCC entry and re-prompt. Updating the app by
+ * overwriting the .app bundle in place can leave System Settings showing
+ * Souffle as granted while `AXIsProcessTrusted` still returns false, because
+ * the TCC entry is keyed to the previous code-signing identity. Runs off
+ * the command thread since it shells out and may block on the prompt.
+ */
+async repairAccessibilityPermission() : Promise<Result<PermState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("repair_accessibility_permission") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Calendars available for the settings picker. Errors when access is not
  * granted (the picker is only reachable once the permission flow succeeded).
  */

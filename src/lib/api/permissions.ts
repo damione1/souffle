@@ -10,3 +10,7 @@ export async function getPermissionStatus(): Promise<PermissionStatus> {
 export async function requestPermission(kind: PermissionKind): Promise<PermState> {
   return unwrap(commands.requestPermission(kind));
 }
+
+export async function repairAccessibilityPermission(): Promise<PermState> {
+  return unwrap(commands.repairAccessibilityPermission());
+}

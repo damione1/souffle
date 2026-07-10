@@ -6414,7 +6414,7 @@ dependencies = [
 
 [[package]]
 name = "souffle"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "arboard",
  "block2 0.6.2",

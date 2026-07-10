@@ -430,6 +430,62 @@ mod paragraphs {
         count
     }
 
+    /// Cluster time-sorted diarized segments into per-speaker turns, then
+    /// emit them ordered by each turn's start time (turn segments stay
+    /// contiguous and chronological internally). A segment joins its
+    /// speaker's currently open turn if the gap since that turn's last
+    /// segment is under `pause_threshold`; otherwise that speaker's turn
+    /// closes and a new one opens. Port of `clusterIntoTurns` in
+    /// `src/lib/utils/paragraphs.ts`; only `Speaker::Me`/`Speaker::Them`
+    /// exist so two plain slots stand in for the TS `Map`.
+    fn cluster_into_turns<'a>(
+        sorted: Vec<&'a TranscriptionSegment>,
+        pause_threshold: f64,
+    ) -> Vec<&'a TranscriptionSegment> {
+        struct Turn<'a> {
+            start: f64,
+            last_end: f64,
+            segments: Vec<&'a TranscriptionSegment>,
+        }
+
+        let mut open_me: Option<usize> = None;
+        let mut open_them: Option<usize> = None;
+        let mut turns: Vec<Turn<'a>> = Vec::new();
+
+        for seg in sorted {
+            let end = if seg.end_time != 0.0 { seg.end_time } else { seg.start_time };
+            match seg.speaker {
+                None => {
+                    turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg] });
+                }
+                Some(speaker) => {
+                    let open_idx = match speaker {
+                        Speaker::Me => open_me,
+                        Speaker::Them => open_them,
+                    };
+                    let joins = match open_idx {
+                        Some(idx) => seg.start_time - turns[idx].last_end < pause_threshold,
+                        None => false,
+                    };
+                    if let Some(idx) = open_idx.filter(|_| joins) {
+                        turns[idx].segments.push(seg);
+                        turns[idx].last_end = turns[idx].last_end.max(end);
+                    } else {
+                        turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg] });
+                        let new_idx = turns.len() - 1;
+                        match speaker {
+                            Speaker::Me => open_me = Some(new_idx),
+                            Speaker::Them => open_them = Some(new_idx),
+                        }
+                    }
+                }
+            }
+        }
+
+        turns.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+        turns.into_iter().flat_map(|t| t.segments).collect()
+    }
+
     fn flush_paragraph(
         paragraphs: &mut Vec<Paragraph>,
         timestamp: &str,
@@ -447,7 +503,7 @@ mod paragraphs {
     /// Group segments into flowing paragraphs with a leading timestamp. See
     /// `groupIntoParagraphs` in `src/lib/utils/paragraphs.ts` for the
     /// authoritative rule set (pause threshold, sentence/char caps, diarized
-    /// sort-and-break-on-speaker-change): this is a line-for-line port,
+    /// sort-then-cluster-into-turns): this is a line-for-line port,
     /// including its quirk of seeding the first paragraph's timestamp from
     /// `ordered[0]` even if that segment's text turns out to be empty.
     pub fn group_into_paragraphs(
@@ -459,7 +515,12 @@ mod paragraphs {
         }
 
         let diarized = segments.iter().any(|s| s.speaker.is_some());
-        let ordered = super::time_ordered_segments(segments);
+        let time_ordered = super::time_ordered_segments(segments);
+        let ordered = if diarized {
+            cluster_into_turns(time_ordered, pause_threshold)
+        } else {
+            time_ordered
+        };
 
         let mut paragraphs: Vec<Paragraph> = Vec::new();
         let mut current_timestamp = format_timestamp(ordered[0].start_time);

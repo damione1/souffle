@@ -127,6 +127,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::clear_dictionary,
             commands::get_permission_status,
             commands::request_permission,
+            commands::repair_accessibility_permission,
             commands::list_calendars,
             commands::list_todays_calendar_events,
             commands::export_archive,

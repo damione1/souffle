@@ -16,3 +16,16 @@ pub async fn request_permission(kind: PermissionKind) -> Result<PermState, Strin
         .await
         .map_err(|e| format!("Permission probe failed: {e}"))
 }
+
+/// Clear a stale Accessibility TCC entry and re-prompt. Updating the app by
+/// overwriting the .app bundle in place can leave System Settings showing
+/// Souffle as granted while `AXIsProcessTrusted` still returns false, because
+/// the TCC entry is keyed to the previous code-signing identity. Runs off
+/// the command thread since it shells out and may block on the prompt.
+#[tauri::command]
+#[specta::specta]
+pub async fn repair_accessibility_permission() -> Result<PermState, String> {
+    tauri::async_runtime::spawn_blocking(permissions::repair_accessibility)
+        .await
+        .map_err(|e| format!("Accessibility repair failed: {e}"))
+}

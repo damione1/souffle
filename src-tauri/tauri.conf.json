@@ -2,7 +2,6 @@
   "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui/main/tauri.conf.json",
   "productName": "Soufflé",
   "mainBinaryName": "souffle",
-  "version": "0.1.0",
   "identifier": "com.souffle.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",

@@ -361,7 +361,12 @@
     "not_supported": "Non pris en charge",
     "checking": "Vérification…",
     "continue": "Continuer",
-    "skip_hint": "Vous pourrez les accorder plus tard."
+    "skip_hint": "Vous pourrez les accorder plus tard.",
+    "accessibility_stale_hint": "Déjà coché dans Réglages mais toujours refusé ? macOS peut conserver une entrée obsolète après une mise à jour. Essayez Réparer, ou retirez Souffle avec le bouton moins puis rajoutez-le.",
+    "repair": "Réparer la permission",
+    "settings_title": "Permissions",
+    "settings_desc": "Revérifier ou réparer les permissions macOS si le collage ou l'enregistrement cesse de fonctionner après une mise à jour.",
+    "review": "Vérifier les permissions"
   },
   "timeline": {
     "today": "Aujourd'hui",

@@ -5,6 +5,7 @@
   import Spinner from "../../components/ui/Spinner.svelte";
   import {
     getPermissionStatus,
+    repairAccessibilityPermission,
     requestPermission,
     type PermissionKind,
   } from "../../api/permissions";
@@ -21,6 +22,7 @@
   });
   let busy = $state<PermissionKind | null>(null);
   let error = $state("");
+  let repairing = $state(false);
 
   type Row = {
     kind: PermissionKind;
@@ -79,6 +81,19 @@
     }
   }
 
+  async function repairAccessibility() {
+    repairing = true;
+    error = "";
+    try {
+      const next = await repairAccessibilityPermission();
+      status = { ...status, accessibility: next };
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      repairing = false;
+    }
+  }
+
   function finish() {
     try {
       localStorage.setItem("permissionsOnboarded", "1");
@@ -121,33 +136,53 @@
     <div class="flex flex-col gap-2">
       {#each rows as row (row.kind)}
         {@const s = stateOf(row.kind)}
-        <div class="flex items-center gap-3 rounded-lg bg-surface-1/70 p-3">
-          <row.icon size={20} class="shrink-0 text-text-muted" aria-hidden="true" />
-          <div class="min-w-0 flex-1">
-            <div class="text-sm font-medium text-text-primary">{row.label}</div>
-            <div class="text-xs text-text-muted">{row.desc}</div>
+        <div class="flex flex-col gap-2 rounded-lg bg-surface-1/70 p-3">
+          <div class="flex items-center gap-3">
+            <row.icon size={20} class="shrink-0 text-text-muted" aria-hidden="true" />
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-medium text-text-primary">{row.label}</div>
+              <div class="text-xs text-text-muted">{row.desc}</div>
+            </div>
+
+            {#if s === "granted"}
+              <span class="pill pill-accent inline-flex items-center gap-1">
+                <Check size={13} aria-hidden="true" />
+                {$t("permissions.granted")}
+              </span>
+            {:else if s === "unsupported"}
+              <span class="pill pill-muted">{$t("permissions.not_supported")}</span>
+            {:else}
+              <button
+                class="btn btn-primary shrink-0 gap-1.5"
+                disabled={busy !== null}
+                onclick={() => grant(row.kind)}
+              >
+                {#if busy === row.kind}
+                  <Spinner />
+                  {$t("permissions.checking")}
+                {:else}
+                  {row.action}
+                {/if}
+              </button>
+            {/if}
           </div>
 
-          {#if s === "granted"}
-            <span class="pill pill-accent inline-flex items-center gap-1">
-              <Check size={13} aria-hidden="true" />
-              {$t("permissions.granted")}
-            </span>
-          {:else if s === "unsupported"}
-            <span class="pill pill-muted">{$t("permissions.not_supported")}</span>
-          {:else}
-            <button
-              class="btn btn-primary shrink-0 gap-1.5"
-              disabled={busy !== null}
-              onclick={() => grant(row.kind)}
-            >
-              {#if busy === row.kind}
-                <Spinner />
-                {$t("permissions.checking")}
-              {:else}
-                {row.action}
-              {/if}
-            </button>
+          {#if row.kind === "accessibility" && s === "denied"}
+            <div class="flex items-center justify-between gap-3 pl-8">
+              <p class="text-xs text-text-muted">{$t("permissions.accessibility_stale_hint")}</p>
+              <button
+                class="btn btn-ghost shrink-0 gap-1.5"
+                disabled={repairing || busy !== null}
+                onclick={repairAccessibility}
+              >
+                {#if repairing}
+                  <Spinner />
+                  {$t("permissions.checking")}
+                {:else}
+                  {$t("permissions.repair")}
+                {/if}
+              </button>
+            </div>
           {/if}
         </div>
       {/each}

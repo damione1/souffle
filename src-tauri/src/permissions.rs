@@ -93,6 +93,54 @@ fn open_accessibility_settings() {
 #[cfg(not(target_os = "macos"))]
 fn open_accessibility_settings() {}
 
+/// `AXIsProcessTrustedWithOptions`, with the option to have macOS pop the
+/// native "would like to control this computer" prompt if not yet trusted.
+/// Used by `repair_accessibility` to force the TCC database to (re)create
+/// the entry keyed to the current binary's code signature, after
+/// `tccutil reset` has cleared out a stale one.
+#[cfg(target_os = "macos")]
+fn accessibility_trusted_with_prompt(prompt: bool) -> bool {
+    use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString};
+    use std::ffi::c_void;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+        static kAXTrustedCheckOptionPrompt: *const CFString;
+    }
+
+    unsafe {
+        let key: &CFString = &*kAXTrustedCheckOptionPrompt;
+        let value: &CFBoolean = CFBoolean::new(prompt);
+        let options: CFRetained<CFDictionary<CFString, CFBoolean>> =
+            CFDictionary::from_slices(&[key], &[value]);
+        AXIsProcessTrustedWithOptions(CFRetained::as_ptr(&options).as_ptr().cast())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn accessibility_trusted_with_prompt(_prompt: bool) -> bool {
+    true
+}
+
+/// The Accessibility TCC entry is keyed to the app's code-signing identity.
+/// Overwriting the .app bundle in place (e.g. an in-place update) or
+/// reinstalling a differently-signed build can leave a stale entry that
+/// still shows as "checked" in System Settings but no longer matches, so
+/// `AXIsProcessTrusted` keeps returning false. Resetting the TCC entry and
+/// re-prompting lets macOS create a fresh, correctly-keyed one.
+pub fn repair_accessibility() -> PermState {
+    let _ = std::process::Command::new("tccutil")
+        .args(["reset", "Accessibility", "com.souffle.desktop"])
+        .output();
+
+    if accessibility_trusted_with_prompt(true) {
+        PermState::Granted
+    } else {
+        PermState::Denied
+    }
+}
+
 // --- Microphone (probe: triggers the TCC prompt + detects delivery) ---
 
 fn no_op_stream_error(_e: cpal::StreamError) {}
@@ -210,5 +258,18 @@ pub fn request(kind: PermissionKind) -> PermState {
             }
         }
         PermissionKind::Calendar => crate::calendar::request_access(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The onboarding UI matches on this exact string (`s === "denied"`), so
+    /// a rename here would silently break the repair-permission affordance.
+    #[test]
+    fn perm_state_denied_serializes_snake_case() {
+        let json = serde_json::to_string(&PermState::Denied).unwrap();
+        assert_eq!(json, "\"denied\"");
     }
 }
