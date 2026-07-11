@@ -21,9 +21,10 @@ const TOP_MARGIN: f64 = 40.0;
 /// 5-10Hz cap so it reads as "live" without flooding the pill's IPC channel.
 pub const LIVE_TEXT_MIN_INTERVAL: Duration = Duration::from_millis(120);
 
-/// Tail length (characters) sent to the pill: enough for a compact 2-3 line
-/// preview without shipping the whole running dictation on every update.
-pub const LIVE_TEXT_MAX_CHARS: usize = 240;
+/// Tail length (characters) sent to the pill: enough to fill the expanded
+/// live-text preview (3-4 lines at the wider width) without shipping the
+/// whole running dictation on every update.
+pub const LIVE_TEXT_MAX_CHARS: usize = 360;
 
 /// Frontend-driven hold on pill visibility, independent of the state
 /// machine (set/cleared via the `pill_hold` / `pill_release` commands).
@@ -120,7 +121,12 @@ pub fn live_text_tail(text: &str, max_chars: usize) -> String {
     text.chars().skip(total - max_chars).collect()
 }
 
-fn position_top_center(pill: &tauri::WebviewWindow) -> tauri::Result<()> {
+/// Recenters the pill horizontally below the menu bar. `pub(crate)` so the
+/// `pill_recenter` command can call it after the frontend resizes the window
+/// for a state change (e.g. compact <-> expanded live-text). `setSize` keeps
+/// the window's top-left corner fixed, so a width change alone would
+/// otherwise drift the pill off-center.
+pub(crate) fn position_top_center(pill: &tauri::WebviewWindow) -> tauri::Result<()> {
     let Some(monitor) = pill.primary_monitor()? else {
         return Ok(());
     };

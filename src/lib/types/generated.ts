@@ -428,6 +428,20 @@ async pillRelease() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Recenter the pill window below the menu bar. `setSize` keeps the window's
+ * top-left corner fixed, so the frontend calls this after resizing (e.g.
+ * switching between the compact and expanded live-text layouts) to keep the
+ * pill horizontally centered instead of drifting sideways.
+ */
+async pillRecenter() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pill_recenter") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get the typed application settings.
  */
 async getSettings() : Promise<Result<AppSettings, string>> {

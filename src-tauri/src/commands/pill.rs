@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::app_events::PillHoldKind;
 use crate::state::AppState;
@@ -26,4 +26,18 @@ pub fn pill_release(state: State<'_, AppState>) -> Result<(), String> {
     crate::pill::clear_hold(&app);
     crate::pill::sync(&app, &state.current_machine_state()?);
     Ok(())
+}
+
+/// Recenter the pill window below the menu bar. `setSize` keeps the window's
+/// top-left corner fixed, so the frontend calls this after resizing (e.g.
+/// switching between the compact and expanded live-text layouts) to keep the
+/// pill horizontally centered instead of drifting sideways.
+#[tauri::command]
+#[specta::specta]
+pub fn pill_recenter(state: State<'_, AppState>) -> Result<(), String> {
+    let app = state.app_handle()?;
+    let Some(pill) = app.get_webview_window("pill") else {
+        return Ok(());
+    };
+    crate::pill::position_top_center(&pill).map_err(|e| e.to_string())
 }
