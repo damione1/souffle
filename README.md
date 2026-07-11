@@ -26,6 +26,16 @@ A private, local speech-to-text app for macOS. Everything runs on-device: no clo
 - **MCP server**: the bundled `souffle-mcp` sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. Read-only, fully local, works even when the app is closed. Setup snippets live in Settings > Data.
 - **Headless CLI**: `souffle --transcribe-file audio.wav --json` transcribes a file without launching the app, and `--repeat N` doubles as a benchmark harness.
 
+  The `souffle` binary ships inside the app bundle and is not added to your `PATH`, so it is not a global command. Invoke it by full path, or symlink it once:
+
+  ```bash
+  # Run directly
+  "/Applications/Soufflé.app/Contents/MacOS/souffle" --list-engines
+
+  # Or expose it as a `souffle` command
+  ln -s "/Applications/Soufflé.app/Contents/MacOS/souffle" /usr/local/bin/souffle
+  ```
+
 ## Speech models
 
 All models run locally and are downloaded on first use from HuggingFace:
