@@ -9,6 +9,11 @@ public func isAppleIntelligenceAvailable() -> Int32 {
     0
 }
 
+@_cdecl("apple_intelligence_unavailable_reason")
+public func appleIntelligenceUnavailableReason() -> UnsafeMutablePointer<CChar>? {
+    strdup("stub")
+}
+
 @_cdecl("process_text_with_system_prompt_apple")
 public func processTextWithSystemPrompt(
     _ systemPrompt: UnsafePointer<CChar>,

@@ -11,6 +11,7 @@ pub struct AppleLLMResponse {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 unsafe extern "C" {
     fn is_apple_intelligence_available() -> c_int;
+    fn apple_intelligence_unavailable_reason() -> *mut c_char;
     fn process_text_with_system_prompt_apple(
         system_prompt: *const c_char,
         user_content: *const c_char,
@@ -48,6 +49,28 @@ pub fn check_apple_intelligence_availability() -> bool {
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
         false
+    }
+}
+
+/// Reason Apple Intelligence is unavailable on this device, or `None` when available.
+///
+/// On non-macOS/non-Apple-Silicon builds this always reports `"unsupported_platform"`.
+pub fn unavailable_reason() -> Option<String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let reason_ptr = unsafe { apple_intelligence_unavailable_reason() };
+        if reason_ptr.is_null() {
+            return None;
+        }
+        let reason = unsafe { CStr::from_ptr(reason_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { libc::free(reason_ptr.cast()) };
+        Some(reason)
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        Some("unsupported_platform".to_string())
     }
 }
 
@@ -106,7 +129,7 @@ pub fn process_text_with_system_prompt(
 
 #[cfg(test)]
 mod tests {
-    use super::{check_apple_intelligence_availability, is_stub_linked};
+    use super::{check_apple_intelligence_availability, is_stub_linked, unavailable_reason};
 
     #[test]
     fn availability_check_does_not_panic() {
@@ -117,6 +140,16 @@ mod tests {
     fn stub_build_never_reports_available() {
         if is_stub_linked() {
             assert!(!check_apple_intelligence_availability());
+        }
+    }
+
+    #[test]
+    fn unavailable_reason_is_coherent_with_availability() {
+        let available = check_apple_intelligence_availability();
+        let reason = unavailable_reason();
+        assert_eq!(available, reason.is_none());
+        if is_stub_linked() {
+            assert_eq!(reason.as_deref(), Some("stub"));
         }
     }
 }

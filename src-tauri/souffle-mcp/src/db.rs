@@ -519,6 +519,21 @@ fn query_meeting_rows(
         .map_err(McpDbError::Query)
 }
 
+/// Sentence-ending punctuation, allowing closing quotes/brackets after it.
+/// Simplified mirror of the TS `SENTENCE_END` regex
+/// (`/[.!?…]["»”')\]]*\s*$/`), only used here to decide when an interrupted
+/// turn (see `cluster_into_turns`) should close.
+fn ends_sentence(text: &str) -> bool {
+    const CLOSING_CHARS: [char; 6] = ['"', '\u{00bb}', '\u{201d}', '\'', ')', ']'];
+    const SENTENCE_END_CHARS: [char; 4] = ['.', '!', '?', '\u{2026}'];
+
+    let mut chars: Vec<char> = text.trim_end().chars().collect();
+    while matches!(chars.last(), Some(c) if CLOSING_CHARS.contains(c)) {
+        chars.pop();
+    }
+    matches!(chars.last(), Some(c) if SENTENCE_END_CHARS.contains(c))
+}
+
 /// Cluster time-ordered segments into per-speaker turns, then emit them
 /// ordered by each turn's start time (turn segments stay contiguous and
 /// chronological internally). A segment joins its speaker's currently open
@@ -528,12 +543,23 @@ fn query_meeting_rows(
 /// `src/lib/utils/paragraphs.ts`, kept a stand-in rather than a faithful
 /// port: same idea (during crosstalk, keep each speaker's words together
 /// instead of breaking on every interleaved segment), no sentence/length
-/// heuristics.
+/// heuristics beyond the interruption rule below.
+///
+/// Without a pause, a monologue would otherwise absorb everything
+/// indefinitely, so a second speaker's interjection would render far below
+/// the point in the monologue it actually responded to. To keep
+/// interjections anchored near their moment: opening a new turn marks every
+/// other speaker's currently open turn as interrupted. An interrupted turn
+/// still keeps absorbing segments, but closes as soon as one of them ends a
+/// sentence, so the speaker's next segment opens a fresh turn that sorts
+/// after the interjection. A turn that never hits a sentence end (no
+/// punctuation) still only closes on pause, same as before.
 fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
     struct Turn<'a> {
         start: f64,
         last_end: f64,
         segments: Vec<&'a SegmentRow>,
+        interrupted: bool,
     }
 
     let mut open: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
@@ -542,7 +568,7 @@ fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
     for seg in segments {
         let end = seg.end_time.max(seg.start_time);
         let Some(speaker) = seg.speaker.as_deref() else {
-            turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg] });
+            turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
             continue;
         };
 
@@ -554,9 +580,20 @@ fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
             let idx = open[speaker];
             turns[idx].segments.push(seg);
             turns[idx].last_end = turns[idx].last_end.max(end);
+            if turns[idx].interrupted && ends_sentence(seg.text.trim()) {
+                // First sentence end at or after the interruption: close now
+                // so the speaker's next segment starts a fresh, later-sorting
+                // turn.
+                open.remove(speaker);
+            }
         } else {
-            turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg] });
+            turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
             open.insert(speaker, turns.len() - 1);
+            for (&other_speaker, &idx) in open.iter() {
+                if other_speaker != speaker {
+                    turns[idx].interrupted = true;
+                }
+            }
         }
     }
 
@@ -887,6 +924,67 @@ mod tests {
         assert_eq!(
             transcript,
             "Me: hello how are you\n\nThem: hi good thanks"
+        );
+    }
+
+    #[test]
+    fn get_meeting_closes_an_interrupted_monologue_at_the_following_sentence_end() {
+        // Me monologues without a pause; Them interjects mid-monologue. Me's
+        // turn must not absorb everything: it closes at the first sentence
+        // end after the interjection, so Them's interjection lands between
+        // Me's two turns instead of trailing behind the whole monologue.
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("Let me explain the whole plan", 0.0, 0.5, Some("me")),
+                ("in detail because it's", 0.6, 1.1, Some("me")),
+                ("wait", 1.2, 1.7, Some("them")),
+                ("complicated.", 1.8, 2.3, Some("me")),
+                ("So let's start now", 3.0, 3.5, Some("me")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db.get_meeting("m1", IncludeSet::all()).unwrap().transcript.unwrap();
+        assert_eq!(
+            transcript,
+            "Me: Let me explain the whole plan in detail because it's complicated.\n\nThem: wait\n\nMe: So let's start now"
+        );
+    }
+
+    #[test]
+    fn get_meeting_ignores_a_sentence_end_before_the_interruption() {
+        // An earlier sentence end, spoken before Them interjects, must not
+        // retroactively split the turn: only the sentence end that comes
+        // after the interjection closes it.
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("First point.", 0.0, 0.5, Some("me")),
+                ("Second part continues", 0.6, 1.1, Some("me")),
+                ("quick question", 1.2, 1.7, Some("them")),
+                ("and concludes.", 1.8, 2.3, Some("me")),
+                ("New topic starts", 3.0, 3.5, Some("me")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db.get_meeting("m1", IncludeSet::all()).unwrap().transcript.unwrap();
+        assert_eq!(
+            transcript,
+            "Me: First point. Second part continues and concludes.\n\nThem: quick question\n\nMe: New topic starts"
         );
     }
 

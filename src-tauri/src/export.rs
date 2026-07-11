@@ -438,6 +438,18 @@ mod paragraphs {
     /// closes and a new one opens. Port of `clusterIntoTurns` in
     /// `src/lib/utils/paragraphs.ts`; only `Speaker::Me`/`Speaker::Them`
     /// exist so two plain slots stand in for the TS `Map`.
+    ///
+    /// Without a pause, a monologue would otherwise absorb everything
+    /// indefinitely, so a second speaker's interjection would render far
+    /// below the point in the monologue it actually responded to. To keep
+    /// interjections anchored near their moment: opening a new turn marks
+    /// every other speaker's currently open turn as interrupted. An
+    /// interrupted turn still keeps absorbing segments (crosstalk should
+    /// stay readable), but closes as soon as one of them ends a sentence, so
+    /// the speaker's next segment opens a fresh turn that sorts after the
+    /// interjection instead of the interjection trailing behind an
+    /// ever-growing paragraph. A turn that never hits a sentence end (no
+    /// punctuation) still only closes on pause, same as before.
     fn cluster_into_turns<'a>(
         sorted: Vec<&'a TranscriptionSegment>,
         pause_threshold: f64,
@@ -446,6 +458,7 @@ mod paragraphs {
             start: f64,
             last_end: f64,
             segments: Vec<&'a TranscriptionSegment>,
+            interrupted: bool,
         }
 
         let mut open_me: Option<usize> = None;
@@ -456,7 +469,7 @@ mod paragraphs {
             let end = if seg.end_time != 0.0 { seg.end_time } else { seg.start_time };
             match seg.speaker {
                 None => {
-                    turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg] });
+                    turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
                 }
                 Some(speaker) => {
                     let open_idx = match speaker {
@@ -470,12 +483,27 @@ mod paragraphs {
                     if let Some(idx) = open_idx.filter(|_| joins) {
                         turns[idx].segments.push(seg);
                         turns[idx].last_end = turns[idx].last_end.max(end);
+                        if turns[idx].interrupted && ends_sentence(seg.text.trim()) {
+                            // First sentence end at or after the
+                            // interruption: close now so the speaker's next
+                            // segment starts a fresh, later-sorting turn.
+                            match speaker {
+                                Speaker::Me => open_me = None,
+                                Speaker::Them => open_them = None,
+                            }
+                        }
                     } else {
-                        turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg] });
+                        turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
                         let new_idx = turns.len() - 1;
                         match speaker {
                             Speaker::Me => open_me = Some(new_idx),
                             Speaker::Them => open_them = Some(new_idx),
+                        }
+                        if let Some(idx) = open_me.filter(|_| speaker != Speaker::Me) {
+                            turns[idx].interrupted = true;
+                        }
+                        if let Some(idx) = open_them.filter(|_| speaker != Speaker::Them) {
+                            turns[idx].interrupted = true;
                         }
                     }
                 }
@@ -990,6 +1018,83 @@ mod tests {
              00:00:08.000 --> 00:00:09.000\n\
              Me: Third line\n";
         assert_eq!(rendered, expected);
+    }
+
+    // ── turn interruption (crosstalk vs. monologue) ─────────────────────
+
+    #[test]
+    fn interrupted_turn_closes_at_the_following_sentence_end() {
+        // Me monologues without a pause; Them interjects mid-monologue. Me's
+        // turn must not absorb everything: it closes at the first sentence
+        // end after the interjection, so Them's turn sorts in between Me's
+        // two turns instead of trailing behind the whole monologue.
+        let segments = vec![
+            diarized_segment("Let me explain the whole plan", 0.0, 0.5, Speaker::Me),
+            diarized_segment("in detail because it's", 0.6, 1.1, Speaker::Me),
+            diarized_segment("wait", 1.2, 1.7, Speaker::Them),
+            diarized_segment("complicated.", 1.8, 2.3, Speaker::Me),
+            diarized_segment("So let's start now", 3.0, 3.5, Speaker::Me),
+        ];
+        let result = paragraphs::group_into_paragraphs(&segments, 1.5);
+        let texts: Vec<(Option<Speaker>, &str)> =
+            result.iter().map(|p| (p.speaker, p.text.as_str())).collect();
+        assert_eq!(
+            texts,
+            vec![
+                (Some(Speaker::Me), "Let me explain the whole plan in detail because it's complicated."),
+                (Some(Speaker::Them), "wait"),
+                (Some(Speaker::Me), "So let's start now"),
+            ]
+        );
+    }
+
+    #[test]
+    fn interrupted_turn_ignores_a_sentence_end_before_the_interruption() {
+        // Me already finished a sentence before Them interjects; that
+        // earlier sentence end must not retroactively split the turn, only
+        // the one that comes after the interjection does.
+        let segments = vec![
+            diarized_segment("First point.", 0.0, 0.5, Speaker::Me),
+            diarized_segment("Second part continues", 0.6, 1.1, Speaker::Me),
+            diarized_segment("quick question", 1.2, 1.7, Speaker::Them),
+            diarized_segment("and concludes.", 1.8, 2.3, Speaker::Me),
+            diarized_segment("New topic starts", 3.0, 3.5, Speaker::Me),
+        ];
+        let result = paragraphs::group_into_paragraphs(&segments, 1.5);
+        let texts: Vec<(Option<Speaker>, &str)> =
+            result.iter().map(|p| (p.speaker, p.text.as_str())).collect();
+        assert_eq!(
+            texts,
+            vec![
+                (Some(Speaker::Me), "First point. Second part continues and concludes."),
+                (Some(Speaker::Them), "quick question"),
+                (Some(Speaker::Me), "New topic starts"),
+            ]
+        );
+    }
+
+    #[test]
+    fn unpunctuated_monologue_absorbing_an_interjection_is_unchanged() {
+        // Me never produces sentence-final punctuation, so the interrupted
+        // flag never finds a sentence end to close on: behavior is
+        // unchanged, the turn keeps growing until a real pause.
+        let segments = vec![
+            diarized_segment("so basically", 0.0, 0.5, Speaker::Me),
+            diarized_segment("we were thinking", 0.6, 1.1, Speaker::Me),
+            diarized_segment("right", 1.2, 1.7, Speaker::Them),
+            diarized_segment("about moving the launch date", 1.8, 2.3, Speaker::Me),
+            diarized_segment("to next quarter", 2.4, 2.9, Speaker::Me),
+        ];
+        let result = paragraphs::group_into_paragraphs(&segments, 1.5);
+        let texts: Vec<(Option<Speaker>, &str)> =
+            result.iter().map(|p| (p.speaker, p.text.as_str())).collect();
+        assert_eq!(
+            texts,
+            vec![
+                (Some(Speaker::Me), "so basically we were thinking about moving the launch date to next quarter"),
+                (Some(Speaker::Them), "right"),
+            ]
+        );
     }
 
     // ── cross-language paragraph fixture ────────────────────────────────

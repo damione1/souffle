@@ -1114,7 +1114,11 @@ export type SummaryProvidersStatus = { ollama_url: string; ollama_available: boo
 /**
  * True when this build linked the Apple Intelligence stub (no FoundationModels).
  */
-apple_intelligence_is_stub: boolean; models: SummaryModelDescriptor[] }
+apple_intelligence_is_stub: boolean; 
+/**
+ * Machine-readable reason Apple Intelligence is unavailable, `None` when available.
+ */
+apple_intelligence_unavailable_reason: string | null; models: SummaryModelDescriptor[] }
 /**
  * State of the system-audio capture leg of a meeting session, emitted when
  * the session starts and whenever the leg changes (e.g. tap rebuild after

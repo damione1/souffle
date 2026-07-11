@@ -49,9 +49,20 @@ export type ParagraphRange = { start: number; end: number };
  * speaker's contiguous phrase) even while both are talking over each other,
  * so the paragraph loop below breaks on turn boundaries instead of on every
  * single word.
+ *
+ * Without a pause, a monologue would otherwise absorb everything indefinitely,
+ * so a second speaker's interjection would render far below the point in the
+ * monologue it actually responded to. To keep interjections anchored near
+ * their moment: opening a new turn marks every other speaker's currently open
+ * turn as interrupted. An interrupted turn still keeps absorbing segments
+ * (crosstalk should stay readable), but closes as soon as one of them ends a
+ * sentence, so the speaker's next segment opens a fresh turn that sorts after
+ * the interjection instead of the interjection trailing behind an
+ * ever-growing paragraph. A turn that never hits a sentence end (no
+ * punctuation) still only closes on pause, same as before.
  */
 function clusterIntoTurns(sorted: TranscriptionSegment[], pauseThreshold: number): TranscriptionSegment[] {
-  type Turn = { start: number; lastEnd: number; segments: TranscriptionSegment[] };
+  type Turn = { start: number; lastEnd: number; segments: TranscriptionSegment[]; interrupted: boolean };
   const openTurns = new Map<Speaker, Turn>();
   const turns: Turn[] = [];
 
@@ -60,17 +71,25 @@ function clusterIntoTurns(sorted: TranscriptionSegment[], pauseThreshold: number
     if (speaker == null) {
       // Non-diarized segment inside an otherwise-diarized stream (shouldn't
       // normally happen): keep it as its own single-segment turn in place.
-      turns.push({ start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg] });
+      turns.push({ start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg], interrupted: false });
       continue;
     }
     const open = openTurns.get(speaker);
     if (open && seg.start_time - open.lastEnd < pauseThreshold) {
       open.segments.push(seg);
       open.lastEnd = Math.max(open.lastEnd, seg.end_time || seg.start_time);
+      if (open.interrupted && SENTENCE_END.test(seg.text.trim())) {
+        // First sentence end at or after the interruption: close now so the
+        // speaker's next segment starts a fresh, later-sorting turn.
+        openTurns.delete(speaker);
+      }
     } else {
-      const turn: Turn = { start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg] };
+      const turn: Turn = { start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg], interrupted: false };
       turns.push(turn);
       openTurns.set(speaker, turn);
+      for (const [otherSpeaker, otherTurn] of openTurns) {
+        if (otherSpeaker !== speaker) otherTurn.interrupted = true;
+      }
     }
   }
 

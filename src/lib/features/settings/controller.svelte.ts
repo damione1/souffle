@@ -55,6 +55,7 @@ export function createSettingsController() {
   let isLaptop = $state(false);
   let ollamaAvailable = $state(false);
   let appleIntelligenceAvailable = $state(false);
+  let appleIntelligenceUnavailableReason = $state<string | null>(null);
   let ollamaModels = $state<SummaryModelDescriptor[]>([]);
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
@@ -206,6 +207,7 @@ export function createSettingsController() {
       const status = await getSummaryProvidersStatus();
       ollamaAvailable = status.ollama_available;
       appleIntelligenceAvailable = status.apple_intelligence_available;
+      appleIntelligenceUnavailableReason = status.apple_intelligence_unavailable_reason;
       ollamaModels = status.models.filter((model) => model.provider === "ollama");
 
       const availableSummaryModels = status.models.filter(
@@ -229,6 +231,7 @@ export function createSettingsController() {
     } catch {
       ollamaAvailable = false;
       appleIntelligenceAvailable = false;
+      appleIntelligenceUnavailableReason = null;
       ollamaModels = [];
     }
   }
@@ -672,6 +675,7 @@ export function createSettingsController() {
     get app() { return app; },
     get audioDevices() { return audioDevices; },
     get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },
+    get appleIntelligenceUnavailableReason() { return appleIntelligenceUnavailableReason; },
     get summaryProviderAvailable() { return summaryProviderAvailable; },
     get ollamaAvailable() { return ollamaAvailable; },
     get ollamaModels() { return ollamaModels; },
