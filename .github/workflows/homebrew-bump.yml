@@ -1,0 +1,57 @@
+name: Bump Homebrew Cask
+
+# When a GitHub Release is published, recompute the .dmg sha256 and push the new
+# version into the damione1/homebrew-tap cask. Requires a HOMEBREW_TAP_TOKEN
+# secret: a fine-grained PAT with Contents:write on damione1/homebrew-tap
+# (GITHUB_TOKEN cannot push to another repo).
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute version and sha256
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG#v}"
+          ASSET="Souffle_${VERSION}_aarch64.dmg"
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "$ASSET" --dir .
+          SHA=$(shasum -a 256 "$ASSET" | cut -d' ' -f1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap
+        uses: actions/checkout@v5
+        with:
+          repository: damione1/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update cask
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          SHA: ${{ steps.meta.outputs.sha256 }}
+        run: |
+          CASK="tap/Casks/souffle.rb"
+          sed -i -E "s/^  version \".*\"/  version \"${VERSION}\"/" "$CASK"
+          sed -i -E "s/^  sha256 \".*\"/  sha256 \"${SHA}\"/" "$CASK"
+          git -C tap diff --exit-code && echo "No change" && exit 0 || true
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/souffle.rb
+          git commit -m "souffle ${{ steps.meta.outputs.version }}"
+          git push
