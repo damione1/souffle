@@ -215,6 +215,12 @@ export const mockSettings: AppSettings = {
     { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
   ],
+  default_summary_template_id: "default",
+  summary_templates: [
+    { id: "default", name: "Default", prompt: "Default summary prompt." },
+    { id: "detailed_minutes", name: "Detailed minutes", prompt: "Detailed prompt." },
+    { id: "brief_overview", name: "Brief overview", prompt: "Brief prompt." },
+  ],
   last_seen_version: "",
 }
 

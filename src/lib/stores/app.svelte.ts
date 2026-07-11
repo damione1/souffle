@@ -88,6 +88,12 @@ let settings = $state<AppSettings>({
     { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
   ],
+  default_summary_template_id: "default",
+  summary_templates: [
+    { id: "default", name: "Default", prompt: "" },
+    { id: "detailed_minutes", name: "Detailed minutes", prompt: "" },
+    { id: "brief_overview", name: "Brief overview", prompt: "" },
+  ],
   last_seen_version: "",
 });
 

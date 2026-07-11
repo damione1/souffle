@@ -31,7 +31,12 @@ const mockDeleteMeeting = vi.fn<(id: string) => Promise<void>>();
 const mockRenameMeeting = vi.fn<(id: string, title: string) => Promise<void>>();
 const mockSaveMeetingNotes = vi.fn<(id: string, notes: string | null) => Promise<void>>();
 const mockSummarizeMeeting = vi.fn<
-  (id: string, model: string, onProgress: (p: SummarizeProgress) => void) => Promise<void>
+  (
+    id: string,
+    model: string,
+    templateId: string | null,
+    onProgress: (p: SummarizeProgress) => void,
+  ) => Promise<void>
 >();
 const mockExportMeetingFilename = vi.fn<
   (id: string, format: import("../../types").ExportFormat) => Promise<string>
@@ -58,7 +63,7 @@ vi.mock("../../api/meetings", () => ({
   saveEditedTranscript: vi.fn(),
   summarizeMeeting: (...a: unknown[]) =>
     mockSummarizeMeeting(
-      ...(a as [string, string, (p: SummarizeProgress) => void]),
+      ...(a as [string, string, string | null, (p: SummarizeProgress) => void]),
     ),
   exportMeetingFilename: (...a: unknown[]) =>
     mockExportMeetingFilename(...(a as [string, import("../../types").ExportFormat])),
@@ -305,15 +310,19 @@ describe("MeetingController", () => {
     mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
 
-    // summarizeMeeting calls the onProgress callback with chunks
-    mockSummarizeMeeting.mockImplementation(async (_id, _model, onProgress) => {
-      onProgress({ text: "Summary ", done: false });
-      onProgress({ text: "complete.", done: false });
+    // summarizeMeeting calls the onProgress callback with chunks, including
+    // non-text stage markers (map/combine/extract) that must not corrupt the
+    // accumulated stream text.
+    mockSummarizeMeeting.mockImplementation(async (_id, _model, _templateId, onProgress) => {
+      onProgress({ text: "", done: false, stage: "map", current: 1, total: 2 });
+      onProgress({ text: "", done: false, stage: "combine", current: null, total: null });
+      onProgress({ text: "Summary ", done: false, stage: "final", current: null, total: null });
+      onProgress({ text: "complete.", done: false, stage: "final", current: null, total: null });
       // Final chunk with done=true triggers meeting reload
       mockGetMeeting.mockResolvedValue(
         makeMeeting({ summary: "Summary complete.", summary_model: "llama3" }),
       );
-      onProgress({ text: "", done: true });
+      onProgress({ text: "", done: true, stage: "final", current: null, total: null });
     });
 
     const ctrl = createMeetingController();
@@ -326,8 +335,80 @@ describe("MeetingController", () => {
 
     await ctrl.summarizeMeeting();
 
-    expect(mockSummarizeMeeting).toHaveBeenCalledWith("meet-1", "llama3", expect.any(Function));
+    expect(mockSummarizeMeeting).toHaveBeenCalledWith(
+      "meet-1",
+      "llama3",
+      "default",
+      expect.any(Function),
+    );
     expect(ctrl.summaryStream).toBe("Summary complete.");
+    // Stage resets once generation finishes.
+    expect(ctrl.summaryStage).toBeNull();
+  });
+
+  it("summarize passes the user-picked template id, defaulting to settings", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockSummarizeMeeting.mockResolvedValue(undefined);
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    mockGetMeeting.mockResolvedValue(makeMeeting());
+    await ctrl.onMeetingSelectionChange("meet-1");
+    ctrl.selectedModel = "llama3";
+
+    // Preselected to the default template from settings.
+    expect(ctrl.selectedTemplateId).toBe("default");
+
+    ctrl.selectedTemplateId = "brief_overview";
+    await ctrl.summarizeMeeting();
+    expect(mockSummarizeMeeting).toHaveBeenLastCalledWith(
+      "meet-1",
+      "llama3",
+      "brief_overview",
+      expect.any(Function),
+    );
+
+    // A stale pick (template no longer exists) falls back to the default.
+    ctrl.selectedTemplateId = "deleted-template";
+    await ctrl.summarizeMeeting();
+    expect(mockSummarizeMeeting).toHaveBeenLastCalledWith(
+      "meet-1",
+      "llama3",
+      "default",
+      expect.any(Function),
+    );
+  });
+
+  it("summarize reports live stage progress while running", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+
+    const observedStages: Array<{ stage: string | null; current: number | null; total: number | null }> = [];
+    mockSummarizeMeeting.mockImplementation(async (_id, _model, _templateId, onProgress) => {
+      onProgress({ text: "", done: false, stage: "map", current: 1, total: 3 });
+      observedStages.push({ stage: ctrl.summaryStage, current: ctrl.summaryStageCurrent, total: ctrl.summaryStageTotal });
+      onProgress({ text: "", done: false, stage: "combine", current: null, total: 3 });
+      observedStages.push({ stage: ctrl.summaryStage, current: ctrl.summaryStageCurrent, total: ctrl.summaryStageTotal });
+      onProgress({ text: "", done: false, stage: "extract", current: null, total: null });
+      observedStages.push({ stage: ctrl.summaryStage, current: ctrl.summaryStageCurrent, total: ctrl.summaryStageTotal });
+      mockGetMeeting.mockResolvedValue(makeMeeting({ summary: "done", summary_model: "llama3" }));
+    });
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    mockGetMeeting.mockResolvedValue(makeMeeting());
+    await ctrl.onMeetingSelectionChange("meet-1");
+    ctrl.selectedModel = "llama3";
+
+    await ctrl.summarizeMeeting();
+
+    expect(observedStages).toEqual([
+      { stage: "map", current: 1, total: 3 },
+      { stage: "combine", current: null, total: 3 },
+      { stage: "extract", current: null, total: null },
+    ]);
+    expect(ctrl.summaryStage).toBeNull();
   });
 
   it("summarize without selected model is noop", async () => {

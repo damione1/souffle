@@ -112,6 +112,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::delete_dictation_entry,
             commands::clear_dictation_history,
             commands::polish_dictation,
+            commands::pill_hold,
+            commands::pill_release,
             commands::get_settings,
             commands::save_settings,
             commands::save_shortcuts,
@@ -158,6 +160,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::MeetingIdle,
             app_events::SystemWokeUp,
             app_events::ArchiveExportProgress,
+            app_events::PillHoldChanged,
+            app_events::DictationLiveText,
         ])
 }
 
@@ -322,6 +326,13 @@ pub fn run() {
                 move || commands::handle_system_will_sleep(&will_sleep_app),
                 move || commands::handle_system_did_wake(&did_wake_app),
             );
+
+            // Diagnostic device-change logging for the Bluetooth headset /
+            // input-priority work. No natural long-lived owner here, so the
+            // handle is deliberately leaked to keep the listeners alive for
+            // the app's lifetime, same as the sleep observer tokens above.
+            #[cfg(target_os = "macos")]
+            std::mem::forget(audio::device_watch::start());
 
             tray::setup_tray(app.handle())?;
             calendar::scheduler::spawn(app.handle().clone());

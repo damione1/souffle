@@ -349,6 +349,51 @@ fn stop_pipeline_blocking(
     Ok(())
 }
 
+/// Running accumulation for the pill's live-text preview: the cumulative
+/// final-segment text (mirrors the frontend's own transcript join logic) and
+/// when it was last emitted, for throttling.
+#[derive(Default)]
+struct DictationLiveTextState {
+    accumulated: String,
+    last_emit: Option<std::time::Instant>,
+}
+
+/// The per-segment callback for dictation: forward every segment to the main
+/// window's channel as before, and additionally accumulate final segments'
+/// text to emit a throttled `DictationLiveText` sample to the (separate)
+/// pill webview. Meetings do not go through this path — their own
+/// `build_meeting_on_segment` never touches live text.
+fn build_dictation_on_segment(
+    app: AppHandle,
+    channel: Channel<crate::engine::TranscriptionSegment>,
+) -> SegmentCallback {
+    let live_text = Mutex::new(DictationLiveTextState::default());
+    Box::new(move |seg| {
+        let is_final = seg.is_final;
+        let text = seg.text.clone();
+        let _ = channel.send(seg);
+
+        if !is_final {
+            return;
+        }
+        let Ok(mut state) = live_text.lock() else {
+            return;
+        };
+        if !state.accumulated.is_empty() && !state.accumulated.ends_with(' ') && !text.starts_with(' ') {
+            state.accumulated.push(' ');
+        }
+        state.accumulated.push_str(&text);
+
+        let now = std::time::Instant::now();
+        if crate::pill::should_emit_live_text(state.last_emit, now, crate::pill::LIVE_TEXT_MIN_INTERVAL) {
+            state.last_emit = Some(now);
+            let tail = crate::pill::live_text_tail(&state.accumulated, crate::pill::LIVE_TEXT_MAX_CHARS);
+            drop(state);
+            let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
+        }
+    })
+}
+
 /// Start streaming transcription.
 ///
 /// `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
@@ -373,9 +418,14 @@ pub async fn start_transcription(
     }
     let session_id = next_audio_session_id(&state)?;
 
-    let on_segment: SegmentCallback = Box::new(move |seg| {
-        let _ = channel.send(seg);
-    });
+    let on_segment: SegmentCallback = match state.app_handle() {
+        Ok(app) => build_dictation_on_segment(app, channel),
+        // No AppHandle (should not happen once the app is running): keep
+        // forwarding segments to the main window even without live text.
+        Err(_) => Box::new(move |seg| {
+            let _ = channel.send(seg);
+        }),
+    };
 
     let actor = Arc::clone(&state.engine_actor);
     let audio = state.audio_cmd_sender.clone();
@@ -441,6 +491,15 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
 
     // Transition to Ready even if pipeline stop failed
     state.apply_transition(StateAction::StopComplete)?;
+
+    // Clear the pill's live-text preview now that the session is over — the
+    // dictation on_segment closure (and its accumulated text) is dropped
+    // with the session, so nothing else will do this.
+    if was_dictation
+        && let Ok(app) = state.app_handle()
+    {
+        let _ = crate::app_events::DictationLiveText { text: String::new() }.emit(&app);
+    }
 
     if was_dictation
         && let Ok(settings) = AppSettings::load(&state.db)

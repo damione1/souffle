@@ -258,7 +258,29 @@
     "no_compatible_model": "Aucun modèle Ollama compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
     "generate_hint": "Points clés et actions, générés sur l'appareil",
     "generate_cta": "Générer",
-    "local_badge": "local"
+    "local_badge": "local",
+    "stage_map": "Résumé de la partie {current} sur {total}",
+    "stage_combine": "Fusion des parties...",
+    "stage_combine_progress": "Fusion de la partie {current} sur {total}...",
+    "stage_extract": "Extraction des résultats...",
+    "template": "Modèle de résumé"
+  },
+  "summary_templates": {
+    "title": "Modèles de résumé",
+    "description": "Personnalisez la rédaction des résumés de réunion. Le modèle par défaut est utilisé pour les résumés automatiques et présélectionné lors d'une génération manuelle.",
+    "default": "Modèle par défaut",
+    "edit": "Modifier le modèle",
+    "name": "Nom",
+    "prompt": "Instructions du prompt",
+    "prompt_desc": "Instructions envoyées au modèle pour la passe finale du résumé.",
+    "prompt_desc_builtin": "Instructions envoyées au modèle pour la passe finale du résumé. Videz le texte pour restaurer le prompt d'origine.",
+    "new_name": "Nom du nouveau modèle",
+    "new_name_placeholder": "ex. Débrief client",
+    "add": "Ajouter un modèle",
+    "delete": "Supprimer",
+    "template_default": "Par défaut",
+    "template_detailed_minutes": "Compte rendu détaillé",
+    "template_brief_overview": "Aperçu bref"
   },
   "meeting_structured": {
     "title": "Résultats",
@@ -333,7 +355,8 @@
   "pill": {
     "dictation": "Dictée",
     "meeting": "Meeting",
-    "stop": "Arrêter l'enregistrement"
+    "stop": "Arrêter l'enregistrement",
+    "polishing": "Reformulation…"
   },
   "home": {
     "dictate": "Dicter",

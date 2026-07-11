@@ -55,65 +55,75 @@ pub fn migrate_legacy_data_dir() {
 /// Default Ollama server URL
 pub const OLLAMA_DEFAULT_URL: &str = "http://localhost:11434";
 
-/// System prompt for meeting summarization via Ollama
+/// System prompt for the FINAL summarization pass via Ollama (either the whole
+/// transcript in one shot, or the fully merged map-reduce notes). This is the
+/// only pass allowed to emit the user-facing markdown structure: it must run
+/// exactly once per summary, never per chunk or per intermediate reduce round,
+/// or its headings repeat once concatenated with sibling groups.
+/// Decisions/action items/open questions are extracted separately by
+/// OLLAMA_STRUCTURED_EXTRACT_PROMPT and rendered in their own UI section, so
+/// this prose pass stays a narrative recap and does not duplicate them.
 pub const OLLAMA_SUMMARIZE_PROMPT: &str = "\
-You summarize meeting transcripts into a factual, extractive outline.
+You summarize a meeting transcript (or notes already extracted from one) into a short, factual narrative recap.
 
 Rules:
-- Use only information explicitly stated in the transcript.
-- Never infer project names, decisions, action items, deadlines, owners, next steps, or meeting outcomes.
+- Use only information explicitly stated in the input.
+- Never infer project names, decisions, action items, deadlines, owners, next steps, or meeting outcomes beyond what is stated.
 - Do not turn greetings or a short introduction into a broader meeting narrative.
 - Do not greet, thank, apologize, or address the reader.
 - Do not add an introduction, conclusion, or commentary about the meeting quality.
 - Give equal weight to the beginning, middle, and end of the meeting; do not over-emphasize the final portion.
-- If the transcript is very short, output only the facts that are directly present.
-- If the transcript only contains greetings, attendance, or setup, say only that.
+- If the input is very short, output only the facts that are directly present.
+- If the input only contains greetings, attendance, or setup, say only that.
 - Keep the markdown section headings exactly as written below in English.
-- Write the content of each bullet in the same language as the transcript.
-- If a section has no content in the transcript, write a short \"none stated in transcript\" equivalent in the same language.
+- Write the content of each bullet in the same language as the input.
+- If a section has no content, write a short \"none stated\" equivalent in the same language.
 - Use short, concrete bullets. No paragraphs.
+- Decisions, action items, and open questions are extracted separately elsewhere: do not add sections for them here.
 - Return exactly this structure and nothing before or after it:
 
 ## Summary
-- ...
-
-## Decisions
-- ...
-
-## Action Items
 - ...
 
 ## Topics
 - ...";
 
 /// System prompt for the per-chunk "map" stage when a transcript is too long to
-/// summarize in one pass. Each chunk is summarized independently, then the
-/// chunk summaries are combined by a final pass using OLLAMA_SUMMARIZE_PROMPT.
-/// Keeping this extraction-only (no fixed skeleton) lets the reduce stage own
-/// the final structure.
+/// summarize in one pass. Each chunk is extracted independently into a flat,
+/// unheaded bullet list; a single flat list (not headed sections) is the point:
+/// merging headed sections from several chunks concatenates the headings and
+/// they repeat in the final text. The chunk notes are later combined by
+/// OLLAMA_MERGE_PROMPT (one or more rounds), and only the truly final pass
+/// (OLLAMA_SUMMARIZE_PROMPT) renders the user-facing structure, exactly once.
 pub const OLLAMA_MAP_PROMPT: &str = "\
-You are summarizing ONE part of a longer meeting transcript.
-Summarize ONLY what is in this excerpt. Do not speculate about other parts.
+You are extracting facts from ONE part of a longer meeting transcript.
+Capture only what is in this excerpt. Do not speculate about other parts.
 
 Rules:
 - Use only information explicitly stated in this excerpt.
 - Do not greet, thank, or address the reader. No preamble.
-- Write bullets in the same language as the transcript.
-- Be concise: short, concrete bullets.
+- Write dense, factual bullet points in the same language as the transcript.
+- One bullet per distinct fact: a topic discussed, a decision made, an action item assigned (name the owner if stated), or an open question or risk raised.
+- Do NOT use section headings or labels such as \"Decisions:\" or \"Topics:\". Output a single flat bullet list.
+- No paragraphs, no commentary, no summary sentence.";
 
-Extract, using exactly these headings:
+/// System prompt for intermediate reduce rounds, used only when a meeting has
+/// too many map-stage chunks to combine in a single reduce call (mainly Apple
+/// Intelligence's small context window). Output stays a flat, unheaded bullet
+/// list like the map stage: it must NOT render the final markdown structure,
+/// otherwise every intermediate round adds another copy of the headings by the
+/// time the last round runs.
+pub const OLLAMA_MERGE_PROMPT: &str = "\
+You are merging several already-extracted fact lists from consecutive parts of ONE meeting transcript into a single combined list.
 
-Topics:
-- ...
-
-Decisions:
-- ... (or \"None\")
-
-Action Items:
-- ... (owner — task, if stated; or \"None\")
-
-Open Questions / Risks:
-- ... (or \"None\")";
+Rules:
+- Use only information explicitly stated in the parts below.
+- Do not greet, thank, or address the reader. No preamble.
+- Write dense, factual bullet points in the same language as the parts.
+- Merge duplicate or overlapping points into a single bullet instead of repeating them.
+- Keep the parts in their given order; do not over-weight the last part.
+- Do NOT use section headings or labels such as \"Decisions:\" or \"Topics:\". Output a single flat bullet list.
+- No paragraphs, no commentary, no summary sentence.";
 
 /// System prompt for dictation post-processing (polish) via Ollama.
 pub const OLLAMA_DICTATION_POLISH_PROMPT: &str = "\
@@ -139,3 +149,56 @@ Rules:
 - decisions and open_questions are string arrays.
 - action_items is an array of objects with text (string) and owner (string or null).
 - Use null for unknown owners. Use empty arrays when a category has no items.";
+
+/// Built-in final-pass prompt for the "Detailed minutes" summary template
+/// (see `crate::summary::default_summary_templates`). Same rules as
+/// [`OLLAMA_SUMMARIZE_PROMPT`], but asks for a thorough, chronological
+/// account instead of a short recap.
+pub const OLLAMA_DETAILED_MINUTES_PROMPT: &str = "\
+You produce detailed, structured meeting minutes from a meeting transcript (or notes already extracted from one).
+
+Rules:
+- Use only information explicitly stated in the input.
+- Never infer project names, decisions, action items, deadlines, owners, next steps, or meeting outcomes beyond what is stated.
+- Do not turn greetings or a short introduction into a broader meeting narrative.
+- Do not greet, thank, apologize, or address the reader.
+- Do not add an introduction, conclusion, or commentary about the meeting quality.
+- Give equal weight to the beginning, middle, and end of the meeting; do not over-emphasize the final portion.
+- Cover the meeting in chronological order with one bullet per distinct point discussed; be thorough rather than terse.
+- If the input is very short, output only the facts that are directly present.
+- If the input only contains greetings, attendance, or setup, say only that.
+- Keep the markdown section headings exactly as written below in English.
+- Write the content of each bullet in the same language as the input.
+- If a section has no content, write a short \"none stated\" equivalent in the same language.
+- Decisions, action items, and open questions are extracted separately elsewhere: do not add sections for them here.
+- Return exactly this structure and nothing before or after it:
+
+## Meeting Minutes
+- ...
+
+## Topics
+- ...";
+
+/// Built-in final-pass prompt for the "Brief overview" summary template
+/// (see `crate::summary::default_summary_templates`). Same rules as
+/// [`OLLAMA_SUMMARIZE_PROMPT`], but caps the output at a handful of bullets.
+pub const OLLAMA_BRIEF_OVERVIEW_PROMPT: &str = "\
+You summarize a meeting transcript (or notes already extracted from one) into the shortest possible factual overview.
+
+Rules:
+- Use only information explicitly stated in the input.
+- Never infer project names, decisions, action items, deadlines, owners, next steps, or meeting outcomes beyond what is stated.
+- Do not turn greetings or a short introduction into a broader meeting narrative.
+- Do not greet, thank, apologize, or address the reader.
+- Do not add an introduction, conclusion, or commentary about the meeting quality.
+- Give equal weight to the beginning, middle, and end of the meeting; do not over-emphasize the final portion.
+- Write at most 3 short bullets covering only the most important points.
+- If the input only contains greetings, attendance, or setup, say only that.
+- Keep the markdown section heading exactly as written below in English.
+- Write the content of each bullet in the same language as the input.
+- If the input has no substantive content, write a short \"none stated\" equivalent in the same language.
+- Decisions, action items, and open questions are extracted separately elsewhere: do not add a section for them here.
+- Return exactly this structure and nothing before or after it:
+
+## Summary
+- ...";

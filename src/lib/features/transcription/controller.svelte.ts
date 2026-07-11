@@ -3,6 +3,8 @@ import {
   addDictationEntry,
   getTranscriptionCatalog,
   pasteText,
+  pillHold,
+  pillRelease,
   startStreamingTranscription,
   stopStreamingTranscription,
 } from "../../api/transcription";
@@ -134,6 +136,21 @@ function createTranscriptionControllerInstance() {
 
     if (app.isRecording) {
       isStopping = true;
+
+      // Polish keeps running after the recording state ends (it's an LLM
+      // call over the finalized text); hold the pill open now, before the
+      // state machine leaves the recording state, so it doesn't flash shut
+      // and reopen. Always released below, even on error, so a failed
+      // polish or paste never leaves a zombie pill.
+      const holdForPolish = app.settings.dictation_polish_enabled;
+      if (holdForPolish) {
+        try {
+          await pillHold("polishing");
+        } catch (e) {
+          console.warn("Pill hold failed:", e);
+        }
+      }
+
       try {
         await stopStreamingTranscription();
 
@@ -166,6 +183,13 @@ function createTranscriptionControllerInstance() {
       } catch (e) {
         statusMessage = errorMessage(e);
       } finally {
+        if (holdForPolish) {
+          try {
+            await pillRelease();
+          } catch (e) {
+            console.warn("Pill release failed:", e);
+          }
+        }
         isStopping = false;
       }
       return;

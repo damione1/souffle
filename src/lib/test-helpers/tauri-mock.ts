@@ -82,7 +82,7 @@ export interface MeetingsApiMock {
   startMeetingRecording: ReturnType<typeof vi.fn<(title: string, calendar: unknown, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>>;
   resumeMeetingRecording: ReturnType<typeof vi.fn<(id: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>>;
   stopMeetingRecording: ReturnType<typeof vi.fn<() => Promise<string>>>;
-  summarizeMeeting: ReturnType<typeof vi.fn<(id: string, model: string, onProgress: (p: unknown) => void) => Promise<void>>>;
+  summarizeMeeting: ReturnType<typeof vi.fn<(id: string, model: string, templateId: string | null, onProgress: (p: unknown) => void) => Promise<void>>>;
   deleteMeeting: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
 }
 
@@ -95,7 +95,7 @@ export function createMeetingsApiMock(
     startMeetingRecording: vi.fn<(title: string, calendar: unknown, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>().mockResolvedValue(undefined),
     resumeMeetingRecording: vi.fn<(id: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>>().mockResolvedValue(undefined),
     stopMeetingRecording: vi.fn<() => Promise<string>>().mockResolvedValue("meeting-001"),
-    summarizeMeeting: vi.fn<(id: string, model: string, onProgress: (p: unknown) => void) => Promise<void>>().mockResolvedValue(undefined),
+    summarizeMeeting: vi.fn<(id: string, model: string, templateId: string | null, onProgress: (p: unknown) => void) => Promise<void>>().mockResolvedValue(undefined),
     deleteMeeting: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
     ...overrides,
   };

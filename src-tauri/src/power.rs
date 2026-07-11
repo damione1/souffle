@@ -9,7 +9,7 @@
 //! All AppKit interop lives here behind a narrow safe API; callers never
 //! touch objc2 types directly.
 
-use tracing::warn;
+use tracing::{info, warn};
 
 /// Install `NSWorkspace` observers for system sleep/wake on the current
 /// thread. Must be called once, from the Tauri setup closure (main thread) —
@@ -29,9 +29,11 @@ pub fn install_sleep_observers(
     let center = NSWorkspace::sharedWorkspace().notificationCenter();
 
     let will_sleep_block = block2::RcBlock::new(move |_note: NonNull<NSNotification>| {
+        info!(lid_closed = is_clamshell(), "System will sleep");
         on_will_sleep();
     });
     let did_wake_block = block2::RcBlock::new(move |_note: NonNull<NSNotification>| {
+        info!(lid_closed = is_clamshell(), "System woke up");
         on_did_wake();
     });
 

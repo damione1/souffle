@@ -258,7 +258,29 @@
     "no_compatible_model": "No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries.",
     "generate_hint": "Key points and action items, generated on device",
     "generate_cta": "Generate",
-    "local_badge": "local"
+    "local_badge": "local",
+    "stage_map": "Summarizing part {current} of {total}",
+    "stage_combine": "Combining parts...",
+    "stage_combine_progress": "Combining part {current} of {total}...",
+    "stage_extract": "Extracting outcomes...",
+    "template": "Summary template"
+  },
+  "summary_templates": {
+    "title": "Summary templates",
+    "description": "Customize how meeting summaries are written. The default template is used for automatic summaries and preselected when you generate one manually.",
+    "default": "Default template",
+    "edit": "Edit template",
+    "name": "Name",
+    "prompt": "Prompt instructions",
+    "prompt_desc": "Instructions sent to the model for the final summary pass.",
+    "prompt_desc_builtin": "Instructions sent to the model for the final summary pass. Clear the text to restore the built-in prompt.",
+    "new_name": "New template name",
+    "new_name_placeholder": "e.g. Client debrief",
+    "add": "Add template",
+    "delete": "Delete",
+    "template_default": "Default",
+    "template_detailed_minutes": "Detailed minutes",
+    "template_brief_overview": "Brief overview"
   },
   "meeting_structured": {
     "title": "Outcomes",
@@ -333,7 +355,8 @@
   "pill": {
     "dictation": "Dictating",
     "meeting": "Meeting",
-    "stop": "Stop recording"
+    "stop": "Stop recording",
+    "polishing": "Reformulating…"
   },
   "home": {
     "dictate": "Dictate",

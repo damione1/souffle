@@ -191,12 +191,17 @@ pub async fn check_summary_providers(
 }
 
 /// Summarize a meeting transcript using the selected provider, streaming results back.
+///
+/// `template_id` picks the summary template controlling the final-pass system
+/// prompt; `None` (or an unknown id) falls back to the default template
+/// configured in settings, so automatic summarization always uses the default.
 #[tauri::command]
 #[specta::specta]
 pub async fn summarize_meeting(
     state: State<'_, AppState>,
     id: String,
     model: String,
+    template_id: Option<String>,
     channel: Channel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
     let transcript = state.db.load_meeting(&id)?;
@@ -216,6 +221,9 @@ pub async fn summarize_meeting(
         return Err("Transcript has no text".into());
     }
 
+    let final_system_prompt =
+        crate::summary::resolve_summary_template_prompt(&settings, template_id.as_deref());
+
     let channel_clone = channel.clone();
     let db = state.db.clone();
     let summary = crate::summary::summarize_stream(
@@ -224,11 +232,20 @@ pub async fn summarize_meeting(
         &transcript.participants,
         &model,
         Some(&settings.ollama_url),
+        &final_system_prompt,
         move |progress| {
             let _ = channel_clone.send(progress);
         },
     )
     .await?;
+
+    let _ = channel.send(crate::summary::SummarizeProgress {
+        text: String::new(),
+        done: false,
+        stage: crate::summary::SummarizeStage::Extract,
+        current: None,
+        total: None,
+    });
 
     let structured_result = crate::summary::extract_structured_summary(
         &summary,

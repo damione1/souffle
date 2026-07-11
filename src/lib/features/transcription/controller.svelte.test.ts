@@ -138,6 +138,10 @@ describe("transcription controller", () => {
         return Promise.resolve(null);
       case "polish_dictation":
         return Promise.resolve({ text: args?.text ?? "", skipped: true, warning: null });
+      case "pill_hold":
+        return Promise.resolve(null);
+      case "pill_release":
+        return Promise.resolve(null);
       case "load_model":
         return Promise.resolve(null);
       case "download_model":
@@ -254,6 +258,60 @@ describe("transcription controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
     expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
     expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+  });
+
+  it("toggleRecording stop holds the pill before stopping when polish is enabled, then releases it", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    await ctrl.toggleRecording();
+
+    const holdIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === "pill_hold");
+    const stopIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === "stop_transcription");
+    const releaseIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === "pill_release");
+
+    expect(holdIndex).toBeGreaterThanOrEqual(0);
+    expect(stopIndex).toBeGreaterThan(holdIndex);
+    expect(releaseIndex).toBeGreaterThan(stopIndex);
+    expect(mockInvoke).toHaveBeenCalledWith("pill_hold", { kind: "polishing" });
+  });
+
+  it("toggleRecording stop never holds the pill when polish is disabled", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    expect(ctrl.app.settings.dictation_polish_enabled).toBe(false);
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("pill_hold", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("pill_release", expect.anything());
+  });
+
+  it("toggleRecording stop releases the pill hold even when the stop pipeline throws", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "stop_transcription") {
+        return Promise.reject(new Error("drain failed"));
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).toHaveBeenCalledWith("pill_hold", { kind: "polishing" });
+    expect(mockInvoke).toHaveBeenCalledWith("pill_release");
+    expect(ctrl.statusMessage).toContain("drain failed");
   });
 
   it("toggleRecording stop clipboard only when not fromShortcut", async () => {
