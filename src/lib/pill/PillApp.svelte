@@ -14,14 +14,20 @@
   // size in tauri.conf.json.
   const PILL_WIDTH = 280;
   const BASE_HEIGHT = 64;
-  // Expanded state (live-text preview showing): wide and tall enough for a
-  // comfortably readable 3-4 line tail of the running dictation.
+  // Expanded state (live-text preview showing): wide immediately; height is
+  // measured from the rounded container's natural content instead, so it
+  // grows line by line as the live-text tail fills in.
   const EXPANDED_WIDTH = 440;
-  const EXPANDED_HEIGHT = 152;
+  // Hard safety net only — the rounded container's real ceiling comes from
+  // `line-clamp-5` on the live-text paragraph (header row + 5 lines of
+  // 13px/leading-snug text + paddings), which already bounds the measured
+  // height well below this.
+  const MAX_HEIGHT = 200;
 
   let machineState = $state<AppStateMachine>({ state: "idle" });
   let holdKind = $state<PillHoldKind | null>(null);
   let liveText = $state("");
+  let measuredHeight = $state(BASE_HEIGHT);
   let unlistenState: (() => void) | null = null;
   let unlistenLiveText: (() => void) | null = null;
   let unlistenHold: (() => void) | null = null;
@@ -57,9 +63,31 @@
     }
   }
 
+  // Imperative resize bookkeeping, deliberately not reactive state.
+  let sessionMaxHeight = BASE_HEIGHT;
+  let appliedWidth = 0;
+  let appliedHeight = 0;
+
   $effect(() => {
     const targetWidth = showLiveText ? EXPANDED_WIDTH : PILL_WIDTH;
-    const targetHeight = showLiveText ? EXPANDED_HEIGHT : BASE_HEIGHT;
+    let targetHeight = BASE_HEIGHT;
+    if (showLiveText) {
+      // measuredHeight tracks the auto-height container, so it only moves
+      // when the wrapped line count changes. Monotonic within a session: a
+      // momentarily shorter tail must not shrink the pill mid-dictation.
+      const clamped = Math.min(Math.max(measuredHeight, BASE_HEIGHT), MAX_HEIGHT);
+      sessionMaxHeight = Math.max(sessionMaxHeight, clamped);
+      targetHeight = sessionMaxHeight;
+    } else {
+      sessionMaxHeight = BASE_HEIGHT;
+    }
+    // Skip no-op resizes so the post-resize re-measure settles instead of
+    // looping.
+    if (Math.abs(targetWidth - appliedWidth) <= 1 && Math.abs(targetHeight - appliedHeight) <= 1) {
+      return;
+    }
+    appliedWidth = targetWidth;
+    appliedHeight = targetHeight;
     // setSize keeps the window's top-left corner fixed, so a width change
     // drifts the pill off-center. Recenter once the resize lands.
     void getCurrentWindow()
@@ -111,11 +139,17 @@
   });
 </script>
 
+<!-- Auto-height and top-anchored: the window height chases this container's
+     measured height, so during the brief window/content mismatch nothing sits
+     off-center or leaves a dark band below the rounded shape. -->
 <div
   data-tauri-drag-region
-  class="flex h-full w-full flex-col justify-center gap-1 rounded-[28px] border border-white/10 bg-black/75 px-4 py-2.5 shadow-lg backdrop-blur-md"
+  bind:offsetHeight={measuredHeight}
+  class="flex w-full flex-col gap-1 rounded-[28px] border border-white/10 bg-black/75 px-4 py-2.5 shadow-lg backdrop-blur-md"
 >
-  <div class="flex shrink-0 items-center gap-3">
+  <!-- h-[42px] keeps the compact pill's natural height at exactly
+       BASE_HEIGHT (42 + 2x10 padding + 2x1 border = 64). -->
+  <div class="flex h-[42px] shrink-0 items-center gap-3">
     <span class="recording-dot shrink-0" aria-hidden="true"></span>
     <span class="shrink-0 text-xs font-medium text-white/90" data-tauri-drag-region>
       {#if displayMode === "polishing"}
@@ -145,7 +179,7 @@
   </div>
   {#if showLiveText}
     <p
-      class="line-clamp-4 border-t border-accent/15 pt-2 pl-[19px] text-[13px] leading-snug text-white/70"
+      class="line-clamp-5 border-t border-accent/15 pt-2 pb-1 pl-[19px] text-[13px] leading-snug text-white/70"
       data-tauri-drag-region
     >
       {liveText}
