@@ -4,7 +4,13 @@
   import CopyButton from "../../../components/ui/CopyButton.svelte";
   import Spinner from "../../../components/ui/Spinner.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
-  import type { MeetingTranscript, SummaryModelDescriptor, TranscriptionSegment } from "../../../types";
+  import type { MeetingTranscript, SummarizeProgress, SummaryModelDescriptor, SummaryTemplate, TranscriptionSegment } from "../../../types";
+
+  const builtInTemplateNameKeys: Record<string, string> = {
+    default: "summary_templates.template_default",
+    detailed_minutes: "summary_templates.template_detailed_minutes",
+    brief_overview: "summary_templates.template_brief_overview",
+  };
 
   let {
     meeting,
@@ -14,9 +20,15 @@
     summaryModels,
     selectedModel,
     onSelectModel,
+    summaryTemplates,
+    selectedTemplateId,
+    onSelectTemplate,
     onSummarize,
     isSummarizing,
     summaryStream,
+    summaryStage,
+    summaryStageCurrent,
+    summaryStageTotal,
   }: {
     meeting: MeetingTranscript;
     isRecordingMeeting: boolean;
@@ -25,10 +37,38 @@
     summaryModels: SummaryModelDescriptor[];
     selectedModel: string;
     onSelectModel: (modelId: string) => void;
+    summaryTemplates: SummaryTemplate[];
+    selectedTemplateId: string;
+    onSelectTemplate: (templateId: string) => void;
     onSummarize: () => void | Promise<void>;
     isSummarizing: boolean;
     summaryStream: string;
+    summaryStage: SummarizeProgress["stage"] | null;
+    summaryStageCurrent: number | null;
+    summaryStageTotal: number | null;
   } = $props();
+
+  function templateName(template: SummaryTemplate): string {
+    const key = builtInTemplateNameKeys[template.id];
+    return key ? $t(key) : template.name;
+  }
+
+  let stageLabel = $derived.by(() => {
+    if (!summaryStage) return "";
+    if (summaryStage === "map" && summaryStageCurrent && summaryStageTotal) {
+      return $t("meeting_summary.stage_map", { values: { current: summaryStageCurrent, total: summaryStageTotal } });
+    }
+    if (summaryStage === "combine") {
+      if (summaryStageCurrent && summaryStageTotal) {
+        return $t("meeting_summary.stage_combine_progress", { values: { current: summaryStageCurrent, total: summaryStageTotal } });
+      }
+      return $t("meeting_summary.stage_combine");
+    }
+    if (summaryStage === "extract") {
+      return $t("meeting_summary.stage_extract");
+    }
+    return "";
+  });
 
   let keyPoints = $derived.by(() => {
     const summary = meeting.summary?.trim();
@@ -138,12 +178,18 @@
     {/if}
 
     {#if isSummarizing}
+      {#if stageLabel}
+        <div class="flex items-center gap-2 text-xs text-text-muted">
+          <Spinner />
+          {stageLabel}
+        </div>
+      {/if}
       <div class="min-h-[80px] overflow-y-auto whitespace-pre-wrap rounded-xl bg-input p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-ghost-border">{summaryStream}<span class="text-accent" style="animation: blink 1s step-end infinite;">|</span></div>
     {/if}
 
     {#if !isRecordingMeeting && segments.length > 0}
       {#if summaryAvailable && summaryModels.length > 0}
-        <div class="flex gap-2 items-center">
+        <div class="flex gap-2 items-center flex-wrap">
           <select
             value={selectedModel}
             disabled={isSummarizing}
@@ -154,6 +200,19 @@
               <option value={model.id}>{model.label}</option>
             {/each}
           </select>
+          {#if summaryTemplates.length > 0}
+            <select
+              value={selectedTemplateId}
+              disabled={isSummarizing}
+              onchange={(event) => onSelectTemplate((event.currentTarget as HTMLSelectElement).value)}
+              class="field-select"
+              aria-label={$t("meeting_summary.template")}
+            >
+              {#each summaryTemplates as template (template.id)}
+                <option value={template.id}>{templateName(template)}</option>
+              {/each}
+            </select>
+          {/if}
           <button onclick={onSummarize} disabled={isSummarizing} class="btn btn-primary whitespace-nowrap">
             {#if isSummarizing}
               <Spinner />

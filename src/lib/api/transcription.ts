@@ -5,6 +5,7 @@ import type {
   DictationEntry,
   DownloadProgress,
   PasteMethod,
+  PillHoldKind,
   TranscriptionCatalog,
   TranscriptionProfileSelection,
   TranscriptionRuntimeStatus,
@@ -76,6 +77,17 @@ export async function pasteText(
 
 export async function getMachineState(): Promise<AppStateMachine> {
   return unwrap(commands.getMachineState());
+}
+
+/** Keep the pill window visible past the current recording state (e.g. while
+ * dictation polish reformulates in the background after transcription stops). */
+export async function pillHold(kind: PillHoldKind): Promise<void> {
+  await unwrap(commands.pillHold(kind));
+}
+
+/** Release a hold set by {@link pillHold}. Safe to call with nothing held. */
+export async function pillRelease(): Promise<void> {
+  await unwrap(commands.pillRelease());
 }
 
 export async function recoverState(): Promise<AppStateMachine> {

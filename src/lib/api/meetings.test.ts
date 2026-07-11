@@ -84,13 +84,17 @@ describe('meetings API', () => {
     expect(result).toBe('meeting-id-123');
   });
 
-  it('summarizeMeeting passes id, model, and channel', async () => {
+  it('summarizeMeeting passes id, model, template id, and channel', async () => {
     mockInvoke.mockResolvedValue(null);
     const onProgress = vi.fn();
 
-    await summarizeMeeting('meeting-1', 'llama3', onProgress);
+    await summarizeMeeting('meeting-1', 'llama3', 'brief_overview', onProgress);
 
-    expect(mockInvoke).toHaveBeenCalledWith('summarize_meeting', expect.objectContaining({ id: 'meeting-1', model: 'llama3' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'summarize_meeting',
+      expect.objectContaining({ id: 'meeting-1', model: 'llama3', templateId: 'brief_overview' }),
+      undefined,
+    );
   });
 
   it('deleteMeeting passes id', async () => {

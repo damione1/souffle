@@ -106,9 +106,17 @@
       onSelectModel={(modelId) => {
         controller.selectedModel = modelId;
       }}
+      summaryTemplates={controller.summaryTemplates}
+      selectedTemplateId={controller.selectedTemplateId}
+      onSelectTemplate={(templateId) => {
+        controller.selectedTemplateId = templateId;
+      }}
       onSummarize={controller.summarizeMeeting}
       isSummarizing={controller.isSummarizing}
       summaryStream={controller.summaryStream}
+      summaryStage={controller.summaryStage}
+      summaryStageCurrent={controller.summaryStageCurrent}
+      summaryStageTotal={controller.summaryStageTotal}
     />
 
     <MeetingStructuredSummarySection

@@ -162,3 +162,33 @@ pub struct ArchiveExportProgress {
 /// offer to resume it.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct SystemWokeUp;
+
+/// Reasons the floating pill must stay visible even though the state machine
+/// already left a recording state. Only "polishing" today: dictation's
+/// optional LLM reformulation pass runs for a few seconds after the
+/// transcript is finalized, and the user should see that it's still working
+/// before the paste lands.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PillHoldKind {
+    Polishing,
+}
+
+/// Frontend-driven hold on the pill window, toggled by the `pill_hold` /
+/// `pill_release` commands. The pill runs in its own webview, separate from
+/// whatever calls those commands, so it needs this event to know when to
+/// render the hold-specific state (e.g. "Reformulating...").
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Event)]
+pub struct PillHoldChanged {
+    pub kind: Option<PillHoldKind>,
+}
+
+/// Throttled tail of the current dictation transcript (final segments only,
+/// space-joined like the main window's assembled transcript), so the
+/// floating pill — a separate webview — can show what's being said without
+/// piggy-backing on the main window's segment channel. Dictation only, never
+/// emitted for meetings. An empty `text` marks the end of the session.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DictationLiveText {
+    pub text: String,
+}

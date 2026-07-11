@@ -8,6 +8,7 @@ mod mcp;
 mod meetings;
 mod model;
 mod permissions;
+mod pill;
 mod settings;
 pub(crate) mod transcription;
 
@@ -21,5 +22,6 @@ pub use mcp::*;
 pub use meetings::*;
 pub use model::*;
 pub use permissions::*;
+pub use pill::*;
 pub use settings::*;
 pub use transcription::*;

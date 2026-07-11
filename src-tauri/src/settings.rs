@@ -40,6 +40,8 @@ const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
 const DICTATION_POLISH_ENABLED_KEY: &str = "dictation_polish_enabled";
 const DICTATION_POLISH_TEMPLATE_ID_KEY: &str = "dictation_polish_template_id";
 const DICTATION_POLISH_TEMPLATES_KEY: &str = "dictation_polish_templates";
+const DEFAULT_SUMMARY_TEMPLATE_ID_KEY: &str = "default_summary_template_id";
+const SUMMARY_TEMPLATES_KEY: &str = "summary_templates";
 const LOG_LEVEL_KEY: &str = "log_level";
 const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
@@ -57,6 +59,16 @@ pub enum PasteMethod {
 pub struct DictationPolishTemplate {
     pub id: String,
     pub label: String,
+    pub prompt: String,
+}
+
+/// A meeting-summary template: `prompt` replaces the final-pass system
+/// prompt only (map/merge prompts stay fixed). Built-ins ship with
+/// well-known ids and are non-deletable; the user can also add their own.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
+pub struct SummaryTemplate {
+    pub id: String,
+    pub name: String,
     pub prompt: String,
 }
 
@@ -153,6 +165,12 @@ pub struct AppSettings {
     pub dictation_polish_template_id: String,
     /// User-editable polish prompt templates.
     pub dictation_polish_templates: Vec<DictationPolishTemplate>,
+    /// Active default meeting-summary template id: used by the Generate
+    /// button when the user doesn't pick another template, and by any
+    /// automatic summarization.
+    pub default_summary_template_id: String,
+    /// User-editable meeting-summary templates (final-pass system prompt).
+    pub summary_templates: Vec<SummaryTemplate>,
     /// App version the user has acknowledged (What's New / post-update dialog).
     pub last_seen_version: String,
 }
@@ -200,6 +218,8 @@ impl Default for AppSettings {
             dictation_polish_enabled: false,
             dictation_polish_template_id: crate::summary::TEMPLATE_EMAIL.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
+            default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
+            summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: String::new(),
         }
     }
@@ -366,6 +386,16 @@ impl AppSettings {
             settings.dictation_polish_templates =
                 crate::summary::merge_polish_templates(dictation_polish_templates);
         }
+        if let Some(default_summary_template_id) =
+            read_json_setting::<String>(db, DEFAULT_SUMMARY_TEMPLATE_ID_KEY)?
+        {
+            settings.default_summary_template_id = default_summary_template_id;
+        }
+        if let Some(summary_templates) =
+            read_json_setting::<Vec<SummaryTemplate>>(db, SUMMARY_TEMPLATES_KEY)?
+        {
+            settings.summary_templates = crate::summary::merge_summary_templates(summary_templates);
+        }
         if let Some(last_seen_version) = read_json_setting::<String>(db, LAST_SEEN_VERSION_KEY)? {
             settings.last_seen_version = last_seen_version;
         }
@@ -504,6 +534,31 @@ impl AppSettings {
             template.prompt = template.prompt.trim().to_string();
         }
 
+        normalized.default_summary_template_id =
+            normalized.default_summary_template_id.trim().to_string();
+        if normalized.summary_templates.is_empty() {
+            normalized.summary_templates = crate::summary::default_summary_templates();
+        } else {
+            normalized.summary_templates =
+                crate::summary::merge_summary_templates(normalized.summary_templates.clone());
+        }
+        if !normalized
+            .summary_templates
+            .iter()
+            .any(|template| template.id == normalized.default_summary_template_id)
+        {
+            normalized.default_summary_template_id = normalized
+                .summary_templates
+                .first()
+                .map(|template| template.id.clone())
+                .unwrap_or_else(|| crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string());
+        }
+        for template in &mut normalized.summary_templates {
+            template.id = template.id.trim().to_string();
+            template.name = template.name.trim().to_string();
+            template.prompt = template.prompt.trim().to_string();
+        }
+
         normalized
     }
 
@@ -617,6 +672,12 @@ impl AppSettings {
             DICTATION_POLISH_TEMPLATES_KEY,
             &normalized.dictation_polish_templates,
         )?;
+        write_json_setting(
+            db,
+            DEFAULT_SUMMARY_TEMPLATE_ID_KEY,
+            &normalized.default_summary_template_id,
+        )?;
+        write_json_setting(db, SUMMARY_TEMPLATES_KEY, &normalized.summary_templates)?;
         write_json_setting(db, LAST_SEEN_VERSION_KEY, &normalized.last_seen_version)?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
@@ -763,6 +824,8 @@ mod tests {
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
+            default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
+            summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: "0.0.9".into(),
         };
 
@@ -1037,6 +1100,67 @@ mod tests {
                 .find(|template| template.id == "email")
                 .map(|template| template.prompt.as_str()),
             Some("Custom email prompt")
+        );
+    }
+
+    #[test]
+    fn summary_template_settings_round_trip_keeps_custom_templates() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            default_summary_template_id: "custom-1".into(),
+            summary_templates: vec![
+                super::SummaryTemplate {
+                    id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.into(),
+                    name: "Default".into(),
+                    prompt: "Edited built-in prompt".into(),
+                },
+                super::SummaryTemplate {
+                    id: "custom-1".into(),
+                    name: "My format".into(),
+                    prompt: "Write it my way.".into(),
+                },
+            ],
+            ..AppSettings::default()
+        };
+
+        settings.save(&db).expect("save settings");
+        let loaded = AppSettings::load(&db).expect("load settings");
+
+        assert_eq!(loaded.default_summary_template_id, "custom-1");
+        // All built-ins are re-added, edited built-in keeps the user prompt,
+        // and the custom template survives after the built-ins.
+        assert_eq!(
+            loaded.summary_templates.len(),
+            crate::summary::default_summary_templates().len() + 1
+        );
+        assert_eq!(
+            loaded
+                .summary_templates
+                .iter()
+                .find(|t| t.id == crate::summary::TEMPLATE_SUMMARY_DEFAULT)
+                .map(|t| t.prompt.as_str()),
+            Some("Edited built-in prompt")
+        );
+        assert_eq!(
+            loaded
+                .summary_templates
+                .iter()
+                .find(|t| t.id == "custom-1")
+                .map(|t| t.name.as_str()),
+            Some("My format")
+        );
+    }
+
+    #[test]
+    fn unknown_default_summary_template_falls_back_to_first() {
+        let settings = AppSettings {
+            default_summary_template_id: "deleted-id".into(),
+            ..AppSettings::default()
+        };
+        let clean = settings.sanitize_for_save().expect("sanitize");
+        assert_eq!(
+            clean.default_summary_template_id,
+            crate::summary::TEMPLATE_SUMMARY_DEFAULT
         );
     }
 

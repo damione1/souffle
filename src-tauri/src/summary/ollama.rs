@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
-    OLLAMA_DEFAULT_URL, OLLAMA_MAP_PROMPT, OLLAMA_STRUCTURED_EXTRACT_PROMPT,
-    OLLAMA_SUMMARIZE_PROMPT,
+    OLLAMA_DEFAULT_URL, OLLAMA_MAP_PROMPT, OLLAMA_MERGE_PROMPT, OLLAMA_STRUCTURED_EXTRACT_PROMPT,
 };
 
 const REDUCE_NUM_CTX: u32 = 16384;
@@ -135,9 +134,15 @@ fn handle_ndjson_line(line: &[u8], full_text: &mut String, on_chunk: &impl Fn(su
     }
     if let Ok(parsed) = serde_json::from_str::<GenerateChunk>(text) {
         full_text.push_str(&parsed.response);
+        // Real generation tokens only ever flow through the caller's on_chunk
+        // for the truly final pass (map/intermediate reduce calls pass a
+        // no-op sink instead), so this is always the "final" stage.
         on_chunk(super::SummarizeProgress {
             text: parsed.response,
             done: parsed.done,
+            stage: super::SummarizeStage::Final,
+            current: None,
+            total: None,
         });
     }
 }
@@ -216,7 +221,7 @@ pub fn http_client() -> Result<reqwest::Client, String> {
 }
 
 pub const MAP_SYSTEM_PROMPT: &str = OLLAMA_MAP_PROMPT;
-pub const SUMMARIZE_SYSTEM_PROMPT: &str = OLLAMA_SUMMARIZE_PROMPT;
+pub const MERGE_SYSTEM_PROMPT: &str = OLLAMA_MERGE_PROMPT;
 pub const STRUCTURED_EXTRACT_SYSTEM_PROMPT: &str = OLLAMA_STRUCTURED_EXTRACT_PROMPT;
 pub const DICTATION_POLISH_SYSTEM_PROMPT: &str = crate::constants::OLLAMA_DICTATION_POLISH_PROMPT;
 pub const REDUCE_CONTEXT: u32 = REDUCE_NUM_CTX;

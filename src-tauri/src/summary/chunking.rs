@@ -23,6 +23,12 @@ impl ChunkConfig {
     };
 
     /// Foundation Models ship with a smaller context window than local Ollama.
+    /// The 4096-token window covers BOTH prompt and response (Apple TN3193),
+    /// so these budgets stay well under it. Apple ships a per-session
+    /// `SystemLanguageModel.contextSize` / `tokenCount(for:)` API since macOS
+    /// 26.4 for exact, dynamic budgeting instead of this hardcoded estimate;
+    /// worth switching to once the real FoundationModels bridge (not the CI
+    /// stub) is exercised in this build.
     pub const APPLE_INTELLIGENCE: Self = Self {
         stuff_token_limit: 1500,
         // ~4096 FM context minus system prompt and generation headroom.

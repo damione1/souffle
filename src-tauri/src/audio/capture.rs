@@ -298,8 +298,32 @@ pub struct AudioDeviceInfo {
     pub is_default: bool,
 }
 
-/// List all available input devices
+/// List all available input devices. Logged at info level (device count) so
+/// enumeration events show up in the Diagnostics live log.
 pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
+    let devices = list_input_devices_impl();
+    info!("Enumerated {} input device(s)", devices.len());
+    devices
+}
+
+/// CoreAudio property queries only, no cpal enumeration: cpal's
+/// `Host::input_devices()` filters every device through
+/// `supported_input_configs()`, which on coreaudio opens an AudioUnit on the
+/// device's input side just to check it has one. That's enough to wake a
+/// Bluetooth headset's input side and flip it from A2DP to HFP mono — with
+/// this list called on every Settings page mount, just opening Settings was
+/// enough to do that with no recording active. `device_watch::list_devices`
+/// does the same enumeration with only cheap property reads.
+#[cfg(target_os = "macos")]
+fn list_input_devices_impl() -> Vec<AudioDeviceInfo> {
+    super::device_watch::list_devices()
+        .into_iter()
+        .map(|(name, is_default)| AudioDeviceInfo { name, is_default })
+        .collect()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn list_input_devices_impl() -> Vec<AudioDeviceInfo> {
     let host = cpal::default_host();
     let default_name = host
         .default_input_device()
@@ -553,8 +577,16 @@ impl AudioCapture {
             self.clamshell_device.as_deref(),
             clamshell_active,
         ) {
+            // Unfiltered `devices()`, not `input_devices()`: the latter's
+            // default filter probes every device's supported input configs
+            // (opens an AudioUnit per device on coreaudio) just to enumerate
+            // them, which can flip a Bluetooth headset into HFP mono. This
+            // runs on every session start and every mic health check
+            // (MIC_CHECK_INTERVAL), so the unfiltered form matters even when
+            // no device is pinned by name below the fallback. `Device::name`
+            // itself is a cheap property read, safe to call on every device.
             let devices = host
-                .input_devices()
+                .devices()
                 .map_err(|e| format!("Failed to list devices: {e}"))?;
 
             for device in devices {

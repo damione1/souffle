@@ -40,8 +40,23 @@ function createMeetingControllerInstance() {
   let appleIntelligenceAvailable = $state(false);
   let summaryModels = $state<SummaryModelDescriptor[]>([]);
   let selectedModel = $state("");
+  // Explicit template pick for this session; empty means "follow the default
+  // template from settings", which the Generate dropdown shows preselected.
+  let pickedTemplateId = $state("");
+  let selectedTemplateId = $derived(
+    pickedTemplateId
+      && app.settings.summary_templates.some((template) => template.id === pickedTemplateId)
+      ? pickedTemplateId
+      : app.settings.default_summary_template_id,
+  );
   let isSummarizing = $state(false);
   let summaryStream = $state("");
+  // Live progress label for the current generation (map chunk N/M, combine
+  // round, structured extraction); null once the run finishes or has not
+  // reported a stage yet.
+  let summaryStage = $state<SummarizeProgress["stage"] | null>(null);
+  let summaryStageCurrent = $state<number | null>(null);
+  let summaryStageTotal = $state<number | null>(null);
   let transcriptionCatalog = $state<TranscriptionCatalog | null>(null);
 
   let isEditingTranscript = $state(false);
@@ -452,15 +467,23 @@ function createMeetingControllerInstance() {
     const meetingId = meeting.id;
     isSummarizing = true;
     summaryStream = "";
+    summaryStage = null;
+    summaryStageCurrent = null;
+    summaryStageTotal = null;
     statusMessage = "";
 
     try {
       // Stream tokens for live preview only. Completion is driven by the
       // command resolving (it returns after the summary is saved), NOT by the
       // streaming `done` flag — a dropped final chunk must not leave the UI
-      // stuck "Generating…".
-      await runMeetingSummary(meetingId, selectedModel, (progress: SummarizeProgress) => {
-        summaryStream += progress.text;
+      // stuck "Generating…". Text only carries real tokens during the
+      // "final" stage; map/combine/extract markers arrive with empty text
+      // and just update the stage label.
+      await runMeetingSummary(meetingId, selectedModel, selectedTemplateId || null, (progress: SummarizeProgress) => {
+        if (progress.text) summaryStream += progress.text;
+        summaryStage = progress.stage;
+        summaryStageCurrent = progress.current ?? null;
+        summaryStageTotal = progress.total ?? null;
       });
       const loadedMeeting = await getMeeting(meetingId);
       meeting = loadedMeeting;
@@ -469,6 +492,9 @@ function createMeetingControllerInstance() {
       statusMessage = errorMessage(e);
     } finally {
       isSummarizing = false;
+      summaryStage = null;
+      summaryStageCurrent = null;
+      summaryStageTotal = null;
     }
   }
 
@@ -561,8 +587,14 @@ function createMeetingControllerInstance() {
     get summaryModels() { return summaryModels; },
     get selectedModel() { return selectedModel; },
     set selectedModel(modelId: string) { selectedModel = modelId; },
+    get summaryTemplates() { return app.settings.summary_templates; },
+    get selectedTemplateId() { return selectedTemplateId; },
+    set selectedTemplateId(templateId: string) { pickedTemplateId = templateId; },
     get isSummarizing() { return isSummarizing; },
     get summaryStream() { return summaryStream; },
+    get summaryStage() { return summaryStage; },
+    get summaryStageCurrent() { return summaryStageCurrent; },
+    get summaryStageTotal() { return summaryStageTotal; },
     get isRecordingMeeting() { return isRecordingMeeting; },
     get liveTranscript() { return liveTranscript; },
     get liveMeetingSegments() { return liveMeetingSegments; },

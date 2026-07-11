@@ -362,6 +362,56 @@ export function createSettingsController() {
     });
   }
 
+  function onDefaultSummaryTemplateChange(templateId: string) {
+    void persistSettings((settings) => {
+      settings.default_summary_template_id = templateId;
+    });
+  }
+
+  function onSummaryTemplateNameChange(templateId: string, name: string) {
+    void persistSettings((settings) => {
+      settings.summary_templates = settings.summary_templates.map((template) =>
+        template.id === templateId ? { ...template, name } : template,
+      );
+    });
+  }
+
+  function onSummaryTemplatePromptChange(templateId: string, prompt: string) {
+    void persistSettings((settings) => {
+      settings.summary_templates = settings.summary_templates.map((template) =>
+        template.id === templateId ? { ...template, prompt } : template,
+      );
+    });
+  }
+
+  /** New custom templates start from the Default built-in prompt so the
+   * user edits a working baseline rather than a blank page. */
+  function addSummaryTemplate(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const basePrompt =
+      app.settings.summary_templates.find((template) => template.id === "default")?.prompt ?? "";
+    void persistSettings((settings) => {
+      settings.summary_templates = [
+        ...settings.summary_templates,
+        { id: crypto.randomUUID(), name: trimmed, prompt: basePrompt },
+      ];
+    });
+  }
+
+  /** Built-ins are re-added by the backend merge, so deletion is only
+   * meaningful for custom templates (the UI hides delete for built-ins). */
+  function deleteSummaryTemplate(templateId: string) {
+    void persistSettings((settings) => {
+      settings.summary_templates = settings.summary_templates.filter(
+        (template) => template.id !== templateId,
+      );
+      if (settings.default_summary_template_id === templateId) {
+        settings.default_summary_template_id = settings.summary_templates[0]?.id ?? "default";
+      }
+    });
+  }
+
   let summaryProviderAvailable = $derived(ollamaAvailable || appleIntelligenceAvailable);
 
   function onPasteDelayChange(event: Event) {
@@ -715,6 +765,11 @@ export function createSettingsController() {
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,
     onDictationPolishPromptChange,
+    onDefaultSummaryTemplateChange,
+    onSummaryTemplateNameChange,
+    onSummaryTemplatePromptChange,
+    addSummaryTemplate,
+    deleteSummaryTemplate,
     onPasteDelayChange,
     onPasteMethodChange,
     onDebugTranscriptionChange,

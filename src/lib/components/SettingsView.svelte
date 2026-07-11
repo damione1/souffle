@@ -15,6 +15,7 @@
   import MicrophoneSettingsSection from "../features/settings/components/MicrophoneSettingsSection.svelte";
   import ModelSettingsSection from "../features/settings/components/ModelSettingsSection.svelte";
   import PermissionsSettingsSection from "../features/settings/components/PermissionsSettingsSection.svelte";
+  import SummaryTemplatesSettingsSection from "../features/settings/components/SummaryTemplatesSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
@@ -170,6 +171,16 @@
       onOllamaUrlChange={controller.onOllamaUrlChange}
       onOllamaModelChange={controller.onOllamaModelChange}
       onRetrySummaryProviders={controller.refreshSummaryProviders}
+    />
+
+    <SummaryTemplatesSettingsSection
+      templates={controller.app.settings.summary_templates}
+      defaultTemplateId={controller.app.settings.default_summary_template_id}
+      onDefaultChange={controller.onDefaultSummaryTemplateChange}
+      onNameChange={controller.onSummaryTemplateNameChange}
+      onPromptChange={controller.onSummaryTemplatePromptChange}
+      onAdd={controller.addSummaryTemplate}
+      onDelete={controller.deleteSummaryTemplate}
     />
 
     <PermissionsSettingsSection />

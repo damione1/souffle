@@ -321,10 +321,14 @@ async checkSummaryProviders() : Promise<Result<SummaryProvidersStatus, string>> 
 },
 /**
  * Summarize a meeting transcript using the selected provider, streaming results back.
+ * 
+ * `template_id` picks the summary template controlling the final-pass system
+ * prompt; `None` (or an unknown id) falls back to the default template
+ * configured in settings, so automatic summarization always uses the default.
  */
-async summarizeMeeting(id: string, model: string, channel: TAURI_CHANNEL<SummarizeProgress>) : Promise<Result<null, string>> {
+async summarizeMeeting(id: string, model: string, templateId: string | null, channel: TAURI_CHANNEL<SummarizeProgress>) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("summarize_meeting", { id, model, channel }) };
+    return { status: "ok", data: await TAURI_INVOKE("summarize_meeting", { id, model, templateId, channel }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -391,6 +395,33 @@ async clearDictationHistory() : Promise<Result<null, string>> {
 async polishDictation(text: string) : Promise<Result<DictationPolishResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("polish_dictation", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ask the floating pill to stay visible even though the state machine left
+ * a recording state — used while dictation polish reformulates in the
+ * background after transcription stops. See `pill::sync` for how a hold
+ * combines with state-machine-driven visibility, and its safety net (a hold
+ * is auto-released the moment a new recording starts).
+ */
+async pillHold(kind: PillHoldKind) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pill_hold", { kind }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Release a hold set by `pill_hold`. Safe to call with nothing held (e.g.
+ * paste succeeded without dictation polish ever engaging a hold).
+ */
+async pillRelease() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pill_release") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -723,10 +754,12 @@ async getAppVersion() : Promise<string> {
 export const events = __makeEvents__<{
 archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
+dictationLiveText: DictationLiveText,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
 meetingStopRequested: MeetingStopRequested,
 navigate: Navigate,
+pillHoldChanged: PillHoldChanged,
 pipelineError: PipelineError,
 shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
@@ -739,10 +772,12 @@ upcomingMeeting: UpcomingMeeting
 }>({
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
+dictationLiveText: "dictation-live-text",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
 meetingStopRequested: "meeting-stop-requested",
 navigate: "navigate",
+pillHoldChanged: "pill-hold-changed",
 pipelineError: "pipeline-error",
 shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
@@ -845,6 +880,16 @@ dictation_polish_template_id: string;
  */
 dictation_polish_templates: DictationPolishTemplate[]; 
 /**
+ * Active default meeting-summary template id: used by the Generate
+ * button when the user doesn't pick another template, and by any
+ * automatic summarization.
+ */
+default_summary_template_id: string; 
+/**
+ * User-editable meeting-summary templates (final-pass system prompt).
+ */
+summary_templates: SummaryTemplate[]; 
+/**
  * App version the user has acknowledged (What's New / post-update dialog).
  */
 last_seen_version: string }
@@ -920,6 +965,14 @@ export type DiagnosticsBundle = { app_version: string; data_dir: string; log_dir
  * A dictation history entry
  */
 export type DictationEntry = { id: string; text: string; timestamp: string }
+/**
+ * Throttled tail of the current dictation transcript (final segments only,
+ * space-joined like the main window's assembled transcript), so the
+ * floating pill — a separate webview — can show what's being said without
+ * piggy-backing on the main window's segment channel. Dictation only, never
+ * emitted for meetings. An empty `text` marks the end of the session.
+ */
+export type DictationLiveText = { text: string }
 export type DictationPolishResult = { text: string; 
 /**
  * True when polish was skipped (disabled, blank input, or no provider).
@@ -1071,6 +1124,21 @@ export type PermState = "granted" | "denied" |
 export type PermissionKind = "microphone" | "system_audio" | "accessibility" | "calendar"
 export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState; calendar: PermState }
 /**
+ * Frontend-driven hold on the pill window, toggled by the `pill_hold` /
+ * `pill_release` commands. The pill runs in its own webview, separate from
+ * whatever calls those commands, so it needs this event to know when to
+ * render the hold-specific state (e.g. "Reformulating...").
+ */
+export type PillHoldChanged = { kind: PillHoldKind | null }
+/**
+ * Reasons the floating pill must stay visible even though the state machine
+ * already left a recording state. Only "polishing" today: dictation's
+ * optional LLM reformulation pass runs for a few seconds after the
+ * transcript is finalized, and the user should see that it's still working
+ * before the paste lands.
+ */
+export type PillHoldKind = "polishing"
+/**
  * Pipeline failure surfaced to the frontend instead of dying silently in logs.
  */
 export type PipelineError = { scope: PipelineErrorScope; message: string }
@@ -1107,7 +1175,36 @@ export type StructuredActionItem = { text: string; owner: string | null }
  * Typed structured summary: decisions, action items, open questions.
  */
 export type StructuredSummary = { decisions?: string[]; action_items?: StructuredActionItem[]; open_questions?: string[] }
-export type SummarizeProgress = { text: string; done: boolean }
+export type SummarizeProgress = { text: string; done: boolean; stage: SummarizeStage; 
+/**
+ * 1-based index of the current unit within `stage`, when applicable
+ * (e.g. chunk number during Map, batch number during Combine).
+ */
+current: number | null; total: number | null }
+/**
+ * Which phase of summarization a progress event belongs to, so the frontend
+ * can show a live stage label ("Summarizing part 3 of 12", "Combining...",
+ * "Extracting outcomes...") instead of a silent multi-minute spinner.
+ */
+export type SummarizeStage = 
+/**
+ * Per-chunk map pass over the raw transcript.
+ */
+"map" | 
+/**
+ * Reduce pass merging part summaries (one or more rounds).
+ */
+"combine" | 
+/**
+ * The single terminal pass producing the user-facing prose summary;
+ * `text` carries real generation tokens for this stage only.
+ */
+"final" | 
+/**
+ * Structured outcome extraction (decisions/action items/open questions)
+ * run after the prose summary is complete.
+ */
+"extract"
 export type SummaryModelDescriptor = { id: string; label: string; provider: SummaryProviderKind; can_summarize: boolean }
 export type SummaryProviderKind = "ollama" | "apple_intelligence"
 export type SummaryProvidersStatus = { ollama_url: string; ollama_available: boolean; apple_intelligence_available: boolean; 
@@ -1119,6 +1216,12 @@ apple_intelligence_is_stub: boolean;
  * Machine-readable reason Apple Intelligence is unavailable, `None` when available.
  */
 apple_intelligence_unavailable_reason: string | null; models: SummaryModelDescriptor[] }
+/**
+ * A meeting-summary template: `prompt` replaces the final-pass system
+ * prompt only (map/merge prompts stay fixed). Built-ins ship with
+ * well-known ids and are non-deletable; the user can also add their own.
+ */
+export type SummaryTemplate = { id: string; name: string; prompt: string }
 /**
  * State of the system-audio capture leg of a meeting session, emitted when
  * the session starts and whenever the leg changes (e.g. tap rebuild after

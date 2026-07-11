@@ -62,14 +62,17 @@ export async function takeSleepPausedMeeting(): Promise<string | null> {
   return commands.takeSleepPausedMeeting();
 }
 
+/** `templateId` picks the summary template for the final pass; null lets
+ * the backend fall back to the default template from settings. */
 export async function summarizeMeeting(
   id: string,
   model: string,
+  templateId: string | null,
   onProgress: (progress: SummarizeProgress) => void,
 ): Promise<void> {
   const channel = new Channel<SummarizeProgress>();
   channel.onmessage = onProgress;
-  await unwrap(commands.summarizeMeeting(id, model, channel));
+  await unwrap(commands.summarizeMeeting(id, model, templateId, channel));
 }
 
 export async function deleteMeeting(id: string): Promise<void> {
