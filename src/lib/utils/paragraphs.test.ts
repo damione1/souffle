@@ -80,6 +80,62 @@ describe('groupIntoParagraphs diarization', () => {
     expect(result[1]).toMatchObject({ speaker: 'them', text: 'hi good thanks' });
   });
 
+  it('closes an interrupted turn at the following sentence end, so the interjection lands between the two halves of a monologue', () => {
+    // Me monologues without a pause; Them interjects mid-monologue. Me's
+    // turn must not absorb everything: it closes at the first sentence end
+    // after the interjection, so Them's turn sorts in between Me's two turns.
+    const segments = [
+      dseg('Let me explain the whole plan', 0, 'me'),
+      dseg("in detail because it's", 0.6, 'me'),
+      dseg('wait', 1.2, 'them'),
+      dseg('complicated.', 1.8, 'me'),
+      dseg("So let's start now", 3.0, 'me'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result.map((p) => ({ speaker: p.speaker, text: p.text }))).toEqual([
+      { speaker: 'me', text: "Let me explain the whole plan in detail because it's complicated." },
+      { speaker: 'them', text: 'wait' },
+      { speaker: 'me', text: "So let's start now" },
+    ]);
+  });
+
+  it('only closes an interrupted turn at a sentence end at or after the interruption, not an earlier one', () => {
+    // Me already finished a sentence before Them interjects; that earlier
+    // sentence end must not retroactively split the turn, only the one
+    // that comes after the interjection does.
+    const segments = [
+      dseg('First point.', 0, 'me'),
+      dseg('Second part continues', 0.6, 'me'),
+      dseg('quick question', 1.2, 'them'),
+      dseg('and concludes.', 1.8, 'me'),
+      dseg('New topic starts', 3.0, 'me'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result.map((p) => ({ speaker: p.speaker, text: p.text }))).toEqual([
+      { speaker: 'me', text: 'First point. Second part continues and concludes.' },
+      { speaker: 'them', text: 'quick question' },
+      { speaker: 'me', text: 'New topic starts' },
+    ]);
+  });
+
+  it('leaves an unpunctuated monologue absorbing an interjection unchanged (closes on pause only)', () => {
+    // Me never produces sentence-final punctuation, so the interrupted flag
+    // never finds a sentence end to close on: behavior is unchanged, the
+    // turn keeps growing until a real pause.
+    const segments = [
+      dseg('so basically', 0, 'me'),
+      dseg('we were thinking', 0.6, 'me'),
+      dseg('right', 1.2, 'them'),
+      dseg('about moving the launch date', 1.8, 'me'),
+      dseg('to next quarter', 2.4, 'me'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result.map((p) => ({ speaker: p.speaker, text: p.text }))).toEqual([
+      { speaker: 'me', text: 'so basically we were thinking about moving the launch date to next quarter' },
+      { speaker: 'them', text: 'right' },
+    ]);
+  });
+
   it('closes a turn and starts a new one for the same speaker after a real pause', () => {
     // Me speaks, pauses well past the threshold, then speaks again: even
     // with no other speaker in between, this must not merge into one turn.

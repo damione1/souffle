@@ -159,6 +159,7 @@ function makeSummaryProvidersStatus(
     ollama_available: true,
     apple_intelligence_available: false,
     apple_intelligence_is_stub: true,
+    apple_intelligence_unavailable_reason: "stub",
     models: [
       { id: "llama3", label: "Llama 3", provider: "ollama", can_summarize: true },
       { id: "codellama", label: "Code Llama", provider: "ollama", can_summarize: false },

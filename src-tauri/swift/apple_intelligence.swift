@@ -43,6 +43,30 @@ public func isAppleIntelligenceAvailable() -> Int32 {
     }
 }
 
+@_cdecl("apple_intelligence_unavailable_reason")
+public func appleIntelligenceUnavailableReason() -> UnsafeMutablePointer<CChar>? {
+    guard #available(macOS 26.0, *) else {
+        return duplicateCString("macos_too_old")
+    }
+
+    let model = SystemLanguageModel.default
+    switch model.availability {
+    case .available:
+        return nil
+    case .unavailable(let reason):
+        switch reason {
+        case .deviceNotEligible:
+            return duplicateCString("device_not_eligible")
+        case .appleIntelligenceNotEnabled:
+            return duplicateCString("apple_intelligence_not_enabled")
+        case .modelNotReady:
+            return duplicateCString("model_not_ready")
+        @unknown default:
+            return duplicateCString("unknown:" + String(describing: reason))
+        }
+    }
+}
+
 @_cdecl("process_text_with_system_prompt_apple")
 public func processTextWithSystemPrompt(
     _ systemPrompt: UnsafePointer<CChar>,

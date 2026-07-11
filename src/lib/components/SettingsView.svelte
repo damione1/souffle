@@ -12,6 +12,7 @@
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
   import DictationPolishSettingsSection from "../features/settings/components/DictationPolishSettingsSection.svelte";
   import FeedbackSoundsSettingsSection from "../features/settings/components/FeedbackSoundsSettingsSection.svelte";
+  import MicrophoneSettingsSection from "../features/settings/components/MicrophoneSettingsSection.svelte";
   import ModelSettingsSection from "../features/settings/components/ModelSettingsSection.svelte";
   import PermissionsSettingsSection from "../features/settings/components/PermissionsSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
@@ -68,6 +69,13 @@
     unloadTimeoutMinutes={controller.app.settings.model_unload_timeout_minutes}
     onSelectModel={controller.selectModelOption}
     onUnloadTimeoutChange={controller.onModelUnloadTimeoutChange}
+  />
+
+  <MicrophoneSettingsSection
+    audioDevices={controller.audioDevices}
+    selectedDevice={controller.app.selectedDevice}
+    onDeviceChange={controller.onDeviceChange}
+    onRefreshDevices={controller.refreshDevices}
   />
 
   <InterfaceSettingsSection
@@ -129,7 +137,6 @@
   <AdvancedSettingsSection>
     <AudioSettingsSection
       audioDevices={controller.audioDevices}
-      selectedDevice={controller.app.selectedDevice}
       captureSystemAudio={controller.app.settings.capture_system_audio}
       systemAudioSupported={controller.systemAudioSupported}
       isLaptop={controller.isLaptop}
@@ -141,8 +148,6 @@
       meetingAutostopEnabled={controller.app.settings.meeting_autostop_enabled}
       meetingAutostopMinutes={controller.app.settings.meeting_autostop_minutes}
       meetingMaxDurationMinutes={controller.app.settings.meeting_max_duration_minutes}
-      onDeviceChange={controller.onDeviceChange}
-      onRefreshDevices={controller.refreshDevices}
       onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
       onClamshellDeviceChange={controller.onClamshellDeviceChange}
       onVadEnabledChange={controller.onVadEnabledChange}
@@ -158,6 +163,7 @@
       ollamaUrl={controller.app.settings.ollama_url}
       ollamaAvailable={controller.ollamaAvailable}
       appleIntelligenceAvailable={controller.appleIntelligenceAvailable}
+      appleIntelligenceUnavailableReason={controller.appleIntelligenceUnavailableReason}
       ollamaModels={controller.ollamaModels}
       summaryModels={controller.summaryModels}
       selectedOllamaModel={controller.app.settings.ollama_model}

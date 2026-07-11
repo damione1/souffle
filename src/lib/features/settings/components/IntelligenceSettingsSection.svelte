@@ -8,6 +8,7 @@
     ollamaUrl,
     ollamaAvailable,
     appleIntelligenceAvailable,
+    appleIntelligenceUnavailableReason = null,
     ollamaModels,
     summaryModels,
     selectedOllamaModel,
@@ -18,6 +19,7 @@
     ollamaUrl: string;
     ollamaAvailable: boolean;
     appleIntelligenceAvailable: boolean;
+    appleIntelligenceUnavailableReason?: string | null;
     ollamaModels: SummaryModelDescriptor[];
     summaryModels: SummaryModelDescriptor[];
     selectedOllamaModel: string;
@@ -25,6 +27,21 @@
     onOllamaModelChange: (event: Event) => void;
     onRetrySummaryProviders: () => void | Promise<void>;
   } = $props();
+
+  const KNOWN_REASON_KEYS: Record<string, string> = {
+    device_not_eligible: "settings_intelligence.ai_reason_device_not_eligible",
+    apple_intelligence_not_enabled: "settings_intelligence.ai_reason_apple_intelligence_not_enabled",
+    model_not_ready: "settings_intelligence.ai_reason_model_not_ready",
+    macos_too_old: "settings_intelligence.ai_reason_macos_too_old",
+    stub: "settings_intelligence.ai_reason_stub",
+    unsupported_platform: "settings_intelligence.ai_reason_unsupported_platform",
+  };
+
+  let appleIntelligenceHintKey = $derived(
+    !appleIntelligenceAvailable && appleIntelligenceUnavailableReason
+      ? (KNOWN_REASON_KEYS[appleIntelligenceUnavailableReason] ?? "settings_intelligence.ai_reason_unknown")
+      : null,
+  );
 </script>
 
 <section class="settings-group">
@@ -45,6 +62,14 @@
       </div>
     {/snippet}
   </SettingsField>
+
+  {#if appleIntelligenceHintKey}
+    <StatusBanner
+      message={appleIntelligenceHintKey === "settings_intelligence.ai_reason_unknown"
+        ? $t(appleIntelligenceHintKey, { values: { code: appleIntelligenceUnavailableReason } })
+        : $t(appleIntelligenceHintKey)}
+    />
+  {/if}
 
   <SettingsField
     label={$t("settings_intelligence.ollama_url")}

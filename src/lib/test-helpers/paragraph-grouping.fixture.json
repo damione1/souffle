@@ -208,6 +208,58 @@
       ]
     },
     {
+      "name": "diarized_monologue_interjection",
+      "segments": [
+        {
+          "text": "Let me explain the whole plan",
+          "start_time": 0.0,
+          "end_time": 0.5,
+          "speaker": "me"
+        },
+        {
+          "text": "in detail because it's",
+          "start_time": 0.6,
+          "end_time": 1.1,
+          "speaker": "me"
+        },
+        {
+          "text": "wait",
+          "start_time": 1.2,
+          "end_time": 1.7,
+          "speaker": "them"
+        },
+        {
+          "text": "complicated.",
+          "start_time": 1.8,
+          "end_time": 2.3,
+          "speaker": "me"
+        },
+        {
+          "text": "So let's start now",
+          "start_time": 3.0,
+          "end_time": 3.5,
+          "speaker": "me"
+        }
+      ],
+      "expected": [
+        {
+          "timestamp": "0:00",
+          "text": "Let me explain the whole plan in detail because it's complicated.",
+          "speaker": "me"
+        },
+        {
+          "timestamp": "0:01",
+          "text": "wait",
+          "speaker": "them"
+        },
+        {
+          "timestamp": "0:03",
+          "text": "So let's start now",
+          "speaker": "me"
+        }
+      ]
+    },
+    {
       "name": "sentence_count_cap",
       "segments": [
         {

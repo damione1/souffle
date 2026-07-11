@@ -66,6 +66,8 @@ pub struct SummaryProvidersStatus {
     pub apple_intelligence_available: bool,
     /// True when this build linked the Apple Intelligence stub (no FoundationModels).
     pub apple_intelligence_is_stub: bool,
+    /// Machine-readable reason Apple Intelligence is unavailable, `None` when available.
+    pub apple_intelligence_unavailable_reason: Option<String>,
     pub models: Vec<SummaryModelDescriptor>,
 }
 
@@ -128,6 +130,12 @@ pub async fn check_providers(ollama_url: &str) -> SummaryProvidersStatus {
     let (ollama_available, ollama_models) = ollama::check_available(Some(url)).await;
     let apple_intelligence_is_stub = apple_intelligence::is_stub_linked();
     let apple_intelligence_available = apple_intelligence_available();
+    let apple_intelligence_unavailable_reason = apple_intelligence::unavailable_reason();
+    if !apple_intelligence_available {
+        if let Some(reason) = &apple_intelligence_unavailable_reason {
+            tracing::info!(reason = %reason, "Apple Intelligence unavailable");
+        }
+    }
 
     let mut models = Vec::new();
     if apple_intelligence_available {
@@ -147,6 +155,7 @@ pub async fn check_providers(ollama_url: &str) -> SummaryProvidersStatus {
         ollama_available,
         apple_intelligence_available,
         apple_intelligence_is_stub,
+        apple_intelligence_unavailable_reason,
         models,
     }
 }
