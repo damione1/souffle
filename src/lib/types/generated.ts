@@ -428,14 +428,16 @@ async pillRelease() : Promise<Result<null, string>> {
 }
 },
 /**
- * Recenter the pill window below the menu bar. `setSize` keeps the window's
- * top-left corner fixed, so the frontend calls this after resizing (e.g.
- * switching between the compact and expanded live-text layouts) to keep the
- * pill horizontally centered instead of drifting sideways.
+ * Resize the pill window to `width` x `height` (logical pixels), keeping
+ * its top edge pinned below the menu bar and staying horizontally
+ * centered. The frontend calls this as the live transcript grows/shrinks
+ * (e.g. switching between the compact and expanded live-text layouts): a
+ * single native frame change avoids the top-edge drift that a separate
+ * resize-then-recenter pair produces.
  */
-async pillRecenter() : Promise<Result<null, string>> {
+async pillResize(width: number, height: number) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("pill_recenter") };
+    return { status: "ok", data: await TAURI_INVOKE("pill_resize", { width, height }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

@@ -114,7 +114,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::polish_dictation,
             commands::pill_hold,
             commands::pill_release,
-            commands::pill_recenter,
+            commands::pill_resize,
             commands::get_settings,
             commands::save_settings,
             commands::save_shortcuts,

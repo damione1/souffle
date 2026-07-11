@@ -90,9 +90,10 @@ export async function pillRelease(): Promise<void> {
   await unwrap(commands.pillRelease());
 }
 
-/** Recenter the pill window; call after resizing it so it stays centered. */
-export async function pillRecenter(): Promise<void> {
-  await unwrap(commands.pillRecenter());
+/** Resize the pill window, keeping its top edge pinned below the menu bar
+ * and staying horizontally centered. */
+export async function pillResize(width: number, height: number): Promise<void> {
+  await unwrap(commands.pillResize(width, height));
 }
 
 export async function recoverState(): Promise<AppStateMachine> {

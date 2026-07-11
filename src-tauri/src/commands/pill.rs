@@ -28,16 +28,18 @@ pub fn pill_release(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Recenter the pill window below the menu bar. `setSize` keeps the window's
-/// top-left corner fixed, so the frontend calls this after resizing (e.g.
-/// switching between the compact and expanded live-text layouts) to keep the
-/// pill horizontally centered instead of drifting sideways.
+/// Resize the pill window to `width` x `height` (logical pixels), keeping
+/// its top edge pinned below the menu bar and staying horizontally
+/// centered. The frontend calls this as the live transcript grows/shrinks
+/// (e.g. switching between the compact and expanded live-text layouts): a
+/// single native frame change avoids the top-edge drift that a separate
+/// resize-then-recenter pair produces.
 #[tauri::command]
 #[specta::specta]
-pub fn pill_recenter(state: State<'_, AppState>) -> Result<(), String> {
+pub fn pill_resize(state: State<'_, AppState>, width: f64, height: f64) -> Result<(), String> {
     let app = state.app_handle()?;
     let Some(pill) = app.get_webview_window("pill") else {
         return Ok(());
     };
-    crate::pill::position_top_center(&pill).map_err(|e| e.to_string())
+    crate::pill::set_frame_top_center(&pill, width, height).map_err(|e| e.to_string())
 }
