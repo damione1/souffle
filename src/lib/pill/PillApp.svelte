@@ -1,11 +1,9 @@
 <script lang="ts">
-  import { LogicalSize } from "@tauri-apps/api/dpi";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { Square } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { events } from "../api/generated";
-  import { getMachineState, pillRecenter } from "../api/transcription";
+  import { getMachineState, pillResize } from "../api/transcription";
   import Spinner from "../components/ui/Spinner.svelte";
   import Waveform from "../components/Waveform.svelte";
   import type { AppStateMachine, PillHoldKind } from "../types";
@@ -88,12 +86,9 @@
     }
     appliedWidth = targetWidth;
     appliedHeight = targetHeight;
-    // setSize keeps the window's top-left corner fixed, so a width change
-    // drifts the pill off-center. Recenter once the resize lands.
-    void getCurrentWindow()
-      .setSize(new LogicalSize(targetWidth, targetHeight))
-      .then(() => pillRecenter())
-      .catch((e) => console.warn("Pill resize/recenter failed:", e));
+    // A single native frame change keeps the top edge pinned and the pill
+    // centered, instead of the old setSize-then-recenter pair.
+    void pillResize(targetWidth, targetHeight).catch((e) => console.warn("Pill resize failed:", e));
   });
 
   onMount(() => {
