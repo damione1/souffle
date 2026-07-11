@@ -47,7 +47,13 @@ All models run locally and are downloaded on first use from HuggingFace:
 
 ## Download
 
-Prebuilt installers are on the [**Releases**](https://github.com/damione1/souffle/releases/latest) page: a `.dmg` for Apple Silicon Macs, requiring macOS 13 or newer.
+Install with [Homebrew](https://brew.sh/):
+
+```bash
+brew install --cask damione1/tap/souffle
+```
+
+Or grab a prebuilt installer from the [**Releases**](https://github.com/damione1/souffle/releases/latest) page: a `.dmg` for Apple Silicon Macs, requiring macOS 13 or newer.
 
 ## Develop
 
