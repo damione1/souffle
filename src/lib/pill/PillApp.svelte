@@ -5,16 +5,19 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { events } from "../api/generated";
-  import { getMachineState } from "../api/transcription";
+  import { getMachineState, pillRecenter } from "../api/transcription";
   import Spinner from "../components/ui/Spinner.svelte";
   import Waveform from "../components/Waveform.svelte";
   import type { AppStateMachine, PillHoldKind } from "../types";
 
-  // Must match the "pill" window's initial size in tauri.conf.json.
+  // Compact state (idle row only): must match the "pill" window's initial
+  // size in tauri.conf.json.
   const PILL_WIDTH = 280;
   const BASE_HEIGHT = 64;
-  // Extra room for the 2-3 line live-text preview below the main row.
-  const EXPANDED_HEIGHT = 108;
+  // Expanded state (live-text preview showing): wide and tall enough for a
+  // comfortably readable 3-4 line tail of the running dictation.
+  const EXPANDED_WIDTH = 440;
+  const EXPANDED_HEIGHT = 152;
 
   let machineState = $state<AppStateMachine>({ state: "idle" });
   let holdKind = $state<PillHoldKind | null>(null);
@@ -55,8 +58,14 @@
   }
 
   $effect(() => {
+    const targetWidth = showLiveText ? EXPANDED_WIDTH : PILL_WIDTH;
     const targetHeight = showLiveText ? EXPANDED_HEIGHT : BASE_HEIGHT;
-    void getCurrentWindow().setSize(new LogicalSize(PILL_WIDTH, targetHeight));
+    // setSize keeps the window's top-left corner fixed, so a width change
+    // drifts the pill off-center. Recenter once the resize lands.
+    void getCurrentWindow()
+      .setSize(new LogicalSize(targetWidth, targetHeight))
+      .then(() => pillRecenter())
+      .catch((e) => console.warn("Pill resize/recenter failed:", e));
   });
 
   onMount(() => {
@@ -104,7 +113,7 @@
 
 <div
   data-tauri-drag-region
-  class="flex h-full w-full flex-col justify-center gap-1.5 rounded-[28px] border border-white/10 bg-black/75 px-4 py-2.5 shadow-lg backdrop-blur-md"
+  class="flex h-full w-full flex-col justify-center gap-1 rounded-[28px] border border-white/10 bg-black/75 px-4 py-2.5 shadow-lg backdrop-blur-md"
 >
   <div class="flex shrink-0 items-center gap-3">
     <span class="recording-dot shrink-0" aria-hidden="true"></span>
@@ -136,7 +145,7 @@
   </div>
   {#if showLiveText}
     <p
-      class="line-clamp-3 pl-[19px] text-[11px] leading-snug text-white/60"
+      class="line-clamp-4 border-t border-accent/15 pt-2 pl-[19px] text-[13px] leading-snug text-white/70"
       data-tauri-drag-region
     >
       {liveText}
