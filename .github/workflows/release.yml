@@ -8,10 +8,9 @@ name: Release
 # taps are Apple Silicon only, and the bundled resources/libonnxruntime.dylib
 # is an arm64 build. There is no Intel mac, Windows, Linux, or mobile leg.
 #
-# Apple Intelligence: release builds on macos-15 link the FoundationModels stub
-# (Xcode 26 SDK required for the real bridge). Stub linkage sets
-# apple_intelligence_is_stub=true so Settings never advertises AI as available.
-# Bump the runner to a macOS image with Xcode 26 when GitHub ships one.
+# Apple Intelligence: release builds on macos-26 (GA since 2026-02-26) link the
+# real FoundationModels bridge via Xcode 26. The bridge is statically linked
+# into the binary during build; no separate dylib ships in the bundle.
 #
 # Signing + notarization are optional: the six APPLE_* secrets listed below
 # already exist in this repo. Without them the build still works, it just
@@ -63,7 +62,7 @@ jobs:
   # ---------------------------------------------------------------------------
   desktop:
     needs: create-release
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
 
@@ -95,10 +94,11 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           export VERSION="${TAG#v}"
-          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p));c.version=process.env.VERSION;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');"
-          echo "Built version set to $VERSION"
-        # The installer version comes from tauri.conf.json. We overwrite it from
-        # the tag here so the tag is the single source of truth for the release.
+          sed -i '' "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          echo "App version set to $VERSION in Cargo.toml"
+        # The app version comes from src-tauri/Cargo.toml [package] version.
+        # We patch it from the tag here so the tag is the single source of truth
+        # for the release. The build reads this via env!("CARGO_PKG_VERSION").
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0

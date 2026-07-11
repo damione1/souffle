@@ -207,6 +207,14 @@ pub trait TranscriptionEngine {
     fn mic_gain(&self) -> f32 {
         1.0
     }
+    /// Seconds by which this engine's emitted words lag behind the audio
+    /// that produced them (e.g. Kyutai's ASR delay). Used to size the
+    /// single-stream VAD drain window: how long to keep feeding audio to
+    /// the engine after speech stops, so a trailing word doesn't stay stuck
+    /// behind the next utterance. 0 for engines with no such lag.
+    fn emission_delay_seconds(&self) -> f64 {
+        0.0
+    }
     /// Normalize engine-specific tokens from transcribed text.
     /// Called by the pipeline on every segment before emitting to the frontend.
     /// Each engine overrides this to strip its own special tokens

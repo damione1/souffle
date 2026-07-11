@@ -13,6 +13,7 @@
   import DictationPolishSettingsSection from "../features/settings/components/DictationPolishSettingsSection.svelte";
   import FeedbackSoundsSettingsSection from "../features/settings/components/FeedbackSoundsSettingsSection.svelte";
   import ModelSettingsSection from "../features/settings/components/ModelSettingsSection.svelte";
+  import PermissionsSettingsSection from "../features/settings/components/PermissionsSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
@@ -164,6 +165,8 @@
       onOllamaModelChange={controller.onOllamaModelChange}
       onRetrySummaryProviders={controller.refreshSummaryProviders}
     />
+
+    <PermissionsSettingsSection />
 
     <DiagnosticsSettingsSection
       debugTranscription={controller.app.settings.debug_transcription}

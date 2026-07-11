@@ -20,6 +20,12 @@ pub struct MockEngine {
     /// the mock to the actor's factory, since the mock itself is moved), so
     /// idle-unload behavior can be observed from outside the actor thread.
     unload_count: Arc<AtomicUsize>,
+    /// Shared with tests via `reset_state_count_handle()`, for asserting the
+    /// actor's pre-warm / skip-reset-when-fresh behavior.
+    reset_state_count: Arc<AtomicUsize>,
+    /// Value returned by `emission_delay_seconds()`; configurable via
+    /// `with_emission_delay_seconds` for drain-window tests.
+    emission_delay_seconds: f64,
 }
 
 impl Default for MockEngine {
@@ -35,6 +41,8 @@ impl MockEngine {
             transcribe_responses: VecDeque::new(),
             flush_responses: VecDeque::new(),
             unload_count: Arc::new(AtomicUsize::new(0)),
+            reset_state_count: Arc::new(AtomicUsize::new(0)),
+            emission_delay_seconds: 0.0,
         }
     }
 
@@ -42,6 +50,18 @@ impl MockEngine {
     /// actor's factory closure.
     pub fn unload_count_handle(&self) -> Arc<AtomicUsize> {
         Arc::clone(&self.unload_count)
+    }
+
+    /// Clone of the reset_state call counter; call before the mock is moved
+    /// into the actor's factory closure.
+    pub fn reset_state_count_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.reset_state_count)
+    }
+
+    /// Configure the value returned by `emission_delay_seconds()`.
+    pub fn with_emission_delay_seconds(mut self, seconds: f64) -> Self {
+        self.emission_delay_seconds = seconds;
+        self
     }
 
     /// Convenience: pre-load N identical transcribe responses.
@@ -103,7 +123,12 @@ impl TranscriptionEngine for MockEngine {
     }
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
+        self.reset_state_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+
+    fn emission_delay_seconds(&self) -> f64 {
+        self.emission_delay_seconds
     }
 
     fn audio_requirements(&self) -> AudioInputRequirements {

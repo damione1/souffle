@@ -37,6 +37,48 @@ function countSentenceEnds(text: string): number {
 export type ParagraphRange = { start: number; end: number };
 
 /**
+ * Cluster time-sorted diarized segments into per-speaker turns, then emit
+ * them ordered by each turn's start time (turn segments stay contiguous and
+ * chronological internally). A segment joins its speaker's currently open
+ * turn if the gap since that turn's last segment is under `pauseThreshold`;
+ * otherwise that speaker's turn closes and a new one opens.
+ *
+ * Mic (Me) and system audio (Them) are transcribed on independent lanes, so
+ * during crosstalk a naive time-sort interleaves them word by word. Turn
+ * clustering keeps each speaker's own words together (one turn = one
+ * speaker's contiguous phrase) even while both are talking over each other,
+ * so the paragraph loop below breaks on turn boundaries instead of on every
+ * single word.
+ */
+function clusterIntoTurns(sorted: TranscriptionSegment[], pauseThreshold: number): TranscriptionSegment[] {
+  type Turn = { start: number; lastEnd: number; segments: TranscriptionSegment[] };
+  const openTurns = new Map<Speaker, Turn>();
+  const turns: Turn[] = [];
+
+  for (const seg of sorted) {
+    const speaker = seg.speaker;
+    if (speaker == null) {
+      // Non-diarized segment inside an otherwise-diarized stream (shouldn't
+      // normally happen): keep it as its own single-segment turn in place.
+      turns.push({ start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg] });
+      continue;
+    }
+    const open = openTurns.get(speaker);
+    if (open && seg.start_time - open.lastEnd < pauseThreshold) {
+      open.segments.push(seg);
+      open.lastEnd = Math.max(open.lastEnd, seg.end_time || seg.start_time);
+    } else {
+      const turn: Turn = { start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg] };
+      turns.push(turn);
+      openTurns.set(speaker, turn);
+    }
+  }
+
+  turns.sort((a, b) => a.start - b.start);
+  return turns.flatMap((t) => t.segments);
+}
+
+/**
  * Group segments into flowing paragraphs with a leading timestamp, also
  * returning the source index range (into the returned `ordered` array) each
  * paragraph consumed. Callers that need incremental/streaming regrouping use
@@ -61,13 +103,14 @@ export function groupIntoParagraphsWithRanges(
   if (segments.length === 0) return { paragraphs: [], ranges: [], ordered: segments };
 
   // Diarized meetings tag each segment with a speaker. Mic (Me) and system
-  // audio (Them) are transcribed independently, so order by time to read as a
-  // conversation and break paragraphs on every speaker change. Non-diarized
-  // streams are left exactly as emitted (legacy window-relative timestamps must
-  // not be reordered).
+  // audio (Them) are transcribed independently, so order by time first, then
+  // cluster into per-speaker turns so crosstalk reads as flowing phrases
+  // instead of breaking on every speaker change. Non-diarized streams are
+  // left exactly as emitted (legacy window-relative timestamps must not be
+  // reordered).
   const diarized = segments.some((s) => s.speaker != null);
   const ordered = diarized
-    ? [...segments].sort((a, b) => a.start_time - b.start_time)
+    ? clusterIntoTurns([...segments].sort((a, b) => a.start_time - b.start_time), pauseThreshold)
     : segments;
 
   const paragraphs: Paragraph[] = [];

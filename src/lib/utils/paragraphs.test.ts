@@ -60,6 +60,52 @@ describe('groupIntoParagraphs diarization', () => {
     const result = groupIntoParagraphs([seg('a', 0), seg('b', 1)], 1.5);
     expect(result[0].speaker == null).toBe(true);
   });
+
+  it('keeps each speaker flowing as one paragraph during word-level crosstalk', () => {
+    // Kyutai-style one-segment-per-word streams, Me and Them talking at the
+    // same time: interleaved by start_time this would otherwise flush a new
+    // paragraph on every single word.
+    const segments = [
+      dseg('hello', 0.0, 'me'),
+      dseg('hi', 0.15, 'them'),
+      dseg('how', 0.5, 'me'),
+      dseg('good', 0.6, 'them'),
+      dseg('are', 0.9, 'me'),
+      dseg('thanks', 1.0, 'them'),
+      dseg('you', 1.3, 'me'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ speaker: 'me', text: 'hello how are you' });
+    expect(result[1]).toMatchObject({ speaker: 'them', text: 'hi good thanks' });
+  });
+
+  it('closes a turn and starts a new one for the same speaker after a real pause', () => {
+    // Me speaks, pauses well past the threshold, then speaks again: even
+    // with no other speaker in between, this must not merge into one turn.
+    const segments = [
+      dseg('first turn.', 0, 'me'),
+      dseg('second turn.', 5, 'me'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result).toHaveLength(2);
+    expect(result[0].text).toBe('first turn.');
+    expect(result[1].text).toBe('second turn.');
+  });
+
+  it('renders normal turn-taking unchanged (each pause closes the speaking turn)', () => {
+    const segments = [
+      dseg('Hi, how are you?', 0, 'me'),
+      dseg("I'm good, thanks.", 3, 'them'),
+      dseg('Great to hear.', 6, 'me'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result.map((p) => ({ speaker: p.speaker, text: p.text }))).toEqual([
+      { speaker: 'me', text: 'Hi, how are you?' },
+      { speaker: 'them', text: "I'm good, thanks." },
+      { speaker: 'me', text: 'Great to hear.' },
+    ]);
+  });
 });
 
 describe('groupIntoParagraphs', () => {
@@ -208,6 +254,27 @@ describe('groupIntoParagraphsWithRanges', () => {
       dseg('first', 1, 'me'),
       dseg('third', 5, 'them'),
     ];
+    checkRangesReconstructParagraphs(segments, 1.5);
+  });
+
+  it('reorders crosstalk into per-speaker turns in `ordered`, with ranges over that reordering', () => {
+    const segments = [
+      dseg('hello', 0.0, 'me'),
+      dseg('hi', 0.15, 'them'),
+      dseg('how', 0.5, 'me'),
+      dseg('good', 0.6, 'them'),
+      dseg('are', 0.9, 'me'),
+      dseg('thanks', 1.0, 'them'),
+      dseg('you', 1.3, 'me'),
+    ];
+    const { ordered, ranges, paragraphs } = groupIntoParagraphsWithRanges(segments, 1.5);
+
+    // `ordered` groups Me's turn contiguously, then Them's turn, not the
+    // original interleaved-by-time order.
+    expect(ordered.map((s) => s.text)).toEqual(['hello', 'how', 'are', 'you', 'hi', 'good', 'thanks']);
+    expect(ranges).toEqual([{ start: 0, end: 4 }, { start: 4, end: 7 }]);
+    expect(paragraphs.map((p) => p.text)).toEqual(['hello how are you', 'hi good thanks']);
+
     checkRangesReconstructParagraphs(segments, 1.5);
   });
 

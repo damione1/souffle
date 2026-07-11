@@ -13,6 +13,20 @@ import { errorMessage } from "../../utils";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
 
+/**
+ * Matches the accessibility error clipboard.rs returns when
+ * `permissions::accessibility_granted()` fails at paste time (see
+ * `ACCESSIBILITY_STALE_ERROR` in src-tauri/src/clipboard.rs). Distinct from
+ * a raw Enigo error, so we can point the user at the repair action instead
+ * of just relaying the OS string.
+ */
+function accessibilityPasteFailureMessage(rawMessage: string): string {
+  if (rawMessage.includes("Accessibility permission missing")) {
+    return "Paste failed: accessibility permission needed. Open Settings > Advanced > Permissions and use Repair permission.";
+  }
+  return `Paste failed: ${rawMessage}`;
+}
+
 /** Finalize dictation text: invisible-char strip, optional LLM polish, skip-if-blank. */
 async function finalizeDictationText(rawText: string): Promise<{ text: string; warning?: string }> {
   const trimmed = rawText.trim();
@@ -139,7 +153,7 @@ function createTranscriptionControllerInstance() {
                 app.settings.paste_method,
               );
             } catch (e) {
-              statusMessage = `Paste failed: ${errorMessage(e)}`;
+              statusMessage = accessibilityPasteFailureMessage(errorMessage(e));
             }
           } else {
             try {

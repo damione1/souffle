@@ -716,6 +716,13 @@ impl TranscriptionEngine for KyutaiEngine {
         1.0
     }
 
+    fn emission_delay_seconds(&self) -> f64 {
+        self.model
+            .as_ref()
+            .map(|m| m.config.stt_config.audio_delay_seconds)
+            .unwrap_or(0.0)
+    }
+
     fn normalize_text(&self, text: &str) -> String {
         // SentencePiece uses ▁ (U+2581) as word-boundary marker.
         // Replace with space, then trim/collapse.

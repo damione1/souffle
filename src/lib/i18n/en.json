@@ -361,7 +361,12 @@
     "not_supported": "Not supported",
     "checking": "Checking…",
     "continue": "Continue",
-    "skip_hint": "You can grant these later when prompted."
+    "skip_hint": "You can grant these later when prompted.",
+    "accessibility_stale_hint": "Already checked in Settings but still failing? macOS can keep a stale entry after an app update. Try Repair, or remove Souffle with the minus button and re-add it.",
+    "repair": "Repair permission",
+    "settings_title": "Permissions",
+    "settings_desc": "Re-check or repair macOS permissions if pasting or recording stops working after an update.",
+    "review": "Review permissions"
   },
   "timeline": {
     "today": "Today",

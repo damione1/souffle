@@ -519,21 +519,76 @@ fn query_meeting_rows(
         .map_err(McpDbError::Query)
 }
 
+/// Cluster time-ordered segments into per-speaker turns, then emit them
+/// ordered by each turn's start time (turn segments stay contiguous and
+/// chronological internally). A segment joins its speaker's currently open
+/// turn if the gap since that turn's last segment is under
+/// `PARAGRAPH_GAP_SECONDS`; otherwise that speaker's turn closes and a new
+/// one opens. Simplified mirror of `clusterIntoTurns` in
+/// `src/lib/utils/paragraphs.ts`, kept a stand-in rather than a faithful
+/// port: same idea (during crosstalk, keep each speaker's words together
+/// instead of breaking on every interleaved segment), no sentence/length
+/// heuristics.
+fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
+    struct Turn<'a> {
+        start: f64,
+        last_end: f64,
+        segments: Vec<&'a SegmentRow>,
+    }
+
+    let mut open: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut turns: Vec<Turn> = Vec::new();
+
+    for seg in segments {
+        let end = seg.end_time.max(seg.start_time);
+        let Some(speaker) = seg.speaker.as_deref() else {
+            turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg] });
+            continue;
+        };
+
+        let joins = open
+            .get(speaker)
+            .is_some_and(|&idx| seg.start_time - turns[idx].last_end < PARAGRAPH_GAP_SECONDS);
+
+        if joins {
+            let idx = open[speaker];
+            turns[idx].segments.push(seg);
+            turns[idx].last_end = turns[idx].last_end.max(end);
+        } else {
+            turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg] });
+            open.insert(speaker, turns.len() - 1);
+        }
+    }
+
+    turns.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    turns.into_iter().flat_map(|t| t.segments).collect()
+}
+
 /// Simplified stand-in for the frontend's paragraph engine
-/// (`src/lib/utils/paragraphs.ts`): breaks on every speaker change and on
-/// gaps over `PARAGRAPH_GAP_SECONDS`, prefixing each new paragraph with the
-/// speaker label when known. It does not replicate the sentence/length
-/// heuristics the app uses for on-screen readability — this is meant to be a
-/// faithful, readable text dump for an AI assistant, not pixel-identical to
-/// the app's transcript view.
+/// (`src/lib/utils/paragraphs.ts`): breaks on every speaker/turn change and
+/// on gaps over `PARAGRAPH_GAP_SECONDS`, prefixing each new paragraph with
+/// the speaker label when known. Diarized input is first clustered into
+/// per-speaker turns (see `cluster_into_turns`) so crosstalk reads as
+/// flowing per-speaker phrases rather than breaking on every interleaved
+/// segment. It does not replicate the sentence/length heuristics the app
+/// uses for on-screen readability: this is meant to be a faithful, readable
+/// text dump for an AI assistant, not pixel-identical to the app's
+/// transcript view.
 fn render_transcript(segments: &[SegmentRow]) -> String {
+    let diarized = segments.iter().any(|s| s.speaker.is_some());
+    let ordered: Vec<&SegmentRow> = if diarized {
+        cluster_into_turns(segments)
+    } else {
+        segments.iter().collect()
+    };
+
     let mut paragraphs: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut current_speaker: Option<String> = None;
     let mut last_end = 0.0_f64;
     let mut started = false;
 
-    for seg in segments {
+    for seg in ordered {
         let text = seg.text.trim();
         if text.is_empty() {
             continue;
@@ -804,6 +859,35 @@ mod tests {
         assert!(transcript.contains("Them: General Kenobi."));
         // Same speaker but a big pause still starts a fresh paragraph.
         assert_eq!(transcript.matches("Them:").count(), 2);
+    }
+
+    #[test]
+    fn get_meeting_keeps_each_speaker_flowing_during_word_level_crosstalk() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("hello", 0.0, 0.3, Some("me")),
+                ("hi", 0.15, 0.35, Some("them")),
+                ("how", 0.5, 0.7, Some("me")),
+                ("good", 0.6, 0.8, Some("them")),
+                ("are", 0.9, 1.1, Some("me")),
+                ("thanks", 1.0, 1.2, Some("them")),
+                ("you", 1.3, 1.5, Some("me")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db.get_meeting("m1", IncludeSet::all()).unwrap().transcript.unwrap();
+        assert_eq!(
+            transcript,
+            "Me: hello how are you\n\nThem: hi good thanks"
+        );
     }
 
     #[test]

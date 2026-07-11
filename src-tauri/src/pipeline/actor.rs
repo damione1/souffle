@@ -137,6 +137,7 @@ impl EngineActorHandle {
                     audio_gone_reason,
                     unload_timeout: None,
                     idle_since: None,
+                    state_fresh_for: None,
                 }
                 .run();
             })
@@ -291,6 +292,12 @@ struct EngineActor {
     /// When the engine last became idle (loaded, no session active). `None`
     /// while a session is running or no engine is loaded.
     idle_since: Option<Instant>,
+    /// Diarize mode the engine's streaming state is currently reset/fresh
+    /// for (`Some(false)` = single-stream, `Some(true)` = diarized), or
+    /// `None` if the state is stale and needs a reset before the next
+    /// session. Set by the idle pre-warm after a session ends and by the
+    /// initial load; cleared as soon as a session starts consuming it.
+    state_fresh_for: Option<bool>,
 }
 
 /// Outcome of an active session loop.
@@ -384,6 +391,11 @@ impl EngineActor {
                     if let Some(duration) = pending_unload_timeout {
                         self.unload_timeout = duration;
                     }
+                    // Whether the session actually reached the engine (so its
+                    // state needs pre-warming back to dictation-ready before
+                    // the next start_session). Setup failures never touched
+                    // audio, so there's nothing to re-warm.
+                    let mut ran = true;
                     match end {
                         SessionEnd::Stopped(done, summary) => {
                             let _ = done.send(Ok(summary));
@@ -391,6 +403,7 @@ impl EngineActor {
                         }
                         SessionEnd::SetupFailed => {
                             warn!("Inference session {session_count} failed during setup");
+                            ran = false;
                         }
                         SessionEnd::Aborted(message) => {
                             error!("Inference session {session_count} aborted: {message}");
@@ -418,6 +431,11 @@ impl EngineActor {
                                 });
                             self.handle_session_abort(reason);
                         }
+                    }
+                    // Pre-warm AFTER the stop reply above so stop latency is
+                    // unchanged; the caller is already unblocked by now.
+                    if ran {
+                        self.prewarm_single_stream();
                     }
                     if self.engine.is_some() {
                         self.idle_since = Some(Instant::now());
@@ -479,6 +497,7 @@ impl EngineActor {
             drop(engine);
         }
         self.idle_since = None;
+        self.state_fresh_for = None;
     }
 
     /// Deadline at which the currently loaded, idle model should be
@@ -524,6 +543,10 @@ impl EngineActor {
         self.engine = Some(engine);
         // No session is active right after a load: start the idle clock.
         self.idle_since = Some(Instant::now());
+        // build_loaded_model always constructs single-stream (batch size 1)
+        // state, so the freshly loaded engine is already pre-warmed for a
+        // dictation start with no extra reset needed.
+        self.state_fresh_for = Some(false);
         Ok(info)
     }
 
@@ -533,7 +556,40 @@ impl EngineActor {
     ) -> Result<Vec<TranscriptionSegment>, String> {
         let engine = self.engine.as_mut().ok_or("No model loaded")?;
         engine.reset_state().map_err(|e| e.to_string())?;
-        engine.transcribe(samples, None).map_err(|e| e.to_string())
+        let result = engine.transcribe(samples, None).map_err(|e| e.to_string());
+        // Debug transcribe resets and then feeds arbitrary audio outside the
+        // normal session lifecycle; don't let a stale freshness claim skip a
+        // real reset on the next session start.
+        self.state_fresh_for = None;
+        result
+    }
+
+    /// After a session ends, reset the engine to single-stream (dictation)
+    /// state while idle, so the next `start_session` for dictation can skip
+    /// the reset entirely. Meeting starts (diarize=true) still pay the reset
+    /// cost, same as today, since they begin from an explicit UI click.
+    fn prewarm_single_stream(&mut self) {
+        if self.state_fresh_for == Some(false) {
+            return; // already fresh for single-stream
+        }
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        engine.set_diarization(false);
+        let start = Instant::now();
+        match engine.reset_state() {
+            Ok(()) => {
+                info!(
+                    duration_ms = start.elapsed().as_millis(),
+                    "Pre-warmed engine state for dictation while idle"
+                );
+                self.state_fresh_for = Some(false);
+            }
+            Err(e) => {
+                warn!("Idle pre-warm reset_state failed: {e}");
+                self.state_fresh_for = None;
+            }
+        }
     }
 
     /// Prepare and run one transcription session. Replies on `reply` once the
@@ -546,6 +602,7 @@ impl EngineActor {
         reply: Sender<Result<EngineInfo, String>>,
         pending_unload_timeout: &mut Option<Option<Duration>>,
     ) -> SessionEnd {
+        let session_start = Instant::now();
         // Clear stale audio left over from previous sessions before resetting.
         let drained = self.drain_audio_queue();
         if drained > 0 && crate::debug::transcription_debug_enabled() {
@@ -560,14 +617,36 @@ impl EngineActor {
         // Diarize only if requested AND the engine can run two batched lanes.
         // Otherwise the meeting falls back to a single mixed stream.
         let diarize = config.diarize && engine.supports_diarization();
+
         engine.set_diarization(diarize);
 
-        // Reset rebuilds streaming state with the right batch size (2 when
-        // diarized, 1 otherwise).
-        if let Err(e) = engine.reset_state() {
-            let _ = reply.send(Err(format!("State reset: {e}")));
-            return SessionEnd::SetupFailed;
+        // The idle pre-warm (see `prewarm_single_stream`) keeps the engine
+        // state reset for dictation between sessions; skip the reset here
+        // (a full model rebuild for Kyutai, on the order of seconds) when
+        // the requested mode already matches what's pre-warmed. A meeting
+        // start (diarize=true) after a dictation pre-warm still pays it,
+        // since that flow starts from a UI click and tolerates the latency.
+        if self.state_fresh_for == Some(diarize) {
+            info!(session_id, diarize, "Engine state pre-warmed, skipping reset_state");
+        } else {
+            let reset_start = Instant::now();
+            // Reset rebuilds streaming state with the right batch size (2 when
+            // diarized, 1 otherwise).
+            if let Err(e) = engine.reset_state() {
+                let _ = reply.send(Err(format!("State reset: {e}")));
+                self.state_fresh_for = None;
+                return SessionEnd::SetupFailed;
+            }
+            info!(
+                session_id,
+                diarize,
+                duration_ms = reset_start.elapsed().as_millis(),
+                "Engine reset_state completed"
+            );
         }
+        // The session is about to consume this state; it stops being fresh
+        // the moment real audio flows. Re-established once the session ends.
+        self.state_fresh_for = None;
 
         let info = EngineInfo {
             audio: engine.audio_requirements(),
@@ -595,14 +674,29 @@ impl EngineActor {
         let mut mode: Box<dyn SessionMode> = if diarize {
             Box::new(DiarizedMode::new())
         } else {
-            Box::new(SingleMode::new(build_audio_filters(
-                &config.pipeline_config,
-                sample_rate,
-            )))
+            let filters_start = Instant::now();
+            let audio_filters = build_audio_filters(&config.pipeline_config, sample_rate);
+            info!(
+                session_id,
+                duration_ms = filters_start.elapsed().as_millis(),
+                "Audio filter chain built"
+            );
+            // Bounded window (in engine frames) to keep feeding the engine
+            // after VAD gates speech, so the emission-delayed tail word
+            // drains instead of staying stuck behind the next utterance.
+            let frames_per_second = sample_rate as f64 / info.audio.chunk_size_samples as f64;
+            let drain_window_frames =
+                ((engine.emission_delay_seconds() + 0.5) * frames_per_second).ceil() as usize;
+            Box::new(SingleMode::new(audio_filters, drain_window_frames))
         };
 
         // Caller may now start audio capture.
         let _ = reply.send(Ok(info));
+        info!(
+            session_id,
+            duration_ms = session_start.elapsed().as_millis(),
+            "start_session setup completed"
+        );
 
         run_session_loop(
             &self.cmd_rx,
@@ -689,14 +783,28 @@ struct SingleMode {
     buffer: Vec<f32>,
     audio_filters: AudioFilterChain,
     vad_skipped: u64,
+    /// Frames still fed to the engine after VAD gated them, to drain the
+    /// engine's emission delay once speech stops (counted separately from
+    /// `vad_skipped` so the health counters stay meaningful).
+    vad_drained: u64,
+    /// How many consecutive VAD-negative frames to keep feeding the engine
+    /// after the last VAD-positive frame, before actually gating. Sized to
+    /// the engine's emission delay so a trailing word/punctuation still
+    /// surfaces during a pause instead of waiting for the next utterance.
+    drain_window_frames: usize,
+    /// Consecutive VAD-negative frames seen since the last VAD-positive one.
+    frames_since_speech: usize,
 }
 
 impl SingleMode {
-    fn new(audio_filters: AudioFilterChain) -> Self {
+    fn new(audio_filters: AudioFilterChain, drain_window_frames: usize) -> Self {
         Self {
             buffer: Vec::new(),
             audio_filters,
             vad_skipped: 0,
+            vad_drained: 0,
+            drain_window_frames,
+            frames_since_speech: 0,
         }
     }
 }
@@ -716,9 +824,16 @@ impl SessionMode for SingleMode {
         chunk_size: usize,
     ) -> Result<Option<Vec<TranscriptionSegment>>, String> {
         let frame: Vec<f32> = self.buffer.drain(..chunk_size).collect();
-        if !self.audio_filters.process(&frame) {
-            self.vad_skipped += 1;
-            return Ok(None); // VAD says no speech — skip this frame
+        let speech = self.audio_filters.process(&frame);
+        if speech {
+            self.frames_since_speech = 0;
+        } else {
+            self.frames_since_speech += 1;
+            if self.frames_since_speech > self.drain_window_frames {
+                self.vad_skipped += 1;
+                return Ok(None); // Past the drain window, no speech: skip.
+            }
+            self.vad_drained += 1;
         }
         engine
             .transcribe(&frame, None)
@@ -758,6 +873,7 @@ impl SessionMode for SingleMode {
             session_id,
             transcribed_frames = frames_processed,
             vad_skipped = self.vad_skipped,
+            vad_drained = self.vad_drained,
             segments_emitted,
             audio_backlog,
             "Session heartbeat"
@@ -1300,7 +1416,7 @@ mod tests {
     use crate::engine::{Speaker, TranscriptionSegment, default_transcription_profile};
     use crate::filter::PipelineConfig;
 
-    use super::{EngineActorHandle, SessionConfig};
+    use super::{EngineActorHandle, SessionConfig, SessionMode, SingleMode};
 
     /// Helper: create a disabled filter config for tests (no VAD, no text filters).
     fn noop_filter_config() -> PipelineConfig {
@@ -1835,5 +1951,138 @@ mod tests {
             .expect("stop session with max-duration idle config");
         assert_eq!(summary.frames_processed, 5);
         assert!(collected.lock().unwrap().iter().any(|s| s.text == "hi"));
+    }
+
+    /// Test-only VAD stand-in whose speech/silence decision is toggled from
+    /// outside, so the drain-window logic can be exercised deterministically
+    /// without a real Silero model.
+    struct ToggleVad(Arc<std::sync::atomic::AtomicBool>);
+
+    impl crate::filter::AudioFilter for ToggleVad {
+        fn kind(&self) -> crate::filter::AudioFilterKind {
+            crate::filter::AudioFilterKind::SileroVad
+        }
+        fn process(&mut self, _audio: &[f32]) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+        fn reset(&mut self) {}
+    }
+
+    #[test]
+    fn single_mode_drain_window_feeds_engine_then_gates() {
+        use std::sync::atomic::AtomicBool;
+
+        let chunk_size = MIMI_FRAME_SIZE;
+        let make_frame = || AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        let drain_window = 3;
+        let mut mode = SingleMode::new(chain, drain_window);
+        let mut engine = MockEngine::new();
+
+        // Speech: fed and counted as transcribed, not skipped.
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+
+        // Speech stops: the drain window still feeds the next `drain_window`
+        // frames to the engine so the emission-delayed tail word can surface.
+        speech.store(false, Ordering::SeqCst);
+        for i in 0..drain_window {
+            mode.ingest(make_frame());
+            let result = mode.step(&mut engine, chunk_size);
+            assert!(
+                matches!(result, Ok(Some(_))),
+                "frame {i} within the drain window should still reach the engine"
+            );
+        }
+        assert_eq!(mode.vad_drained, drain_window as u64);
+        assert_eq!(mode.vad_skipped, 0);
+
+        // Beyond the window: now genuinely gated.
+        mode.ingest(make_frame());
+        let result = mode.step(&mut engine, chunk_size);
+        assert!(
+            matches!(result, Ok(None)),
+            "frame past the drain window should be VAD-gated"
+        );
+        assert_eq!(mode.vad_skipped, 1);
+
+        // Speech resumes: the drain-window counter resets.
+        speech.store(true, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+    }
+
+    #[test]
+    fn start_session_skips_reset_when_prewarmed_and_resets_on_mode_change() {
+        let mock = MockEngine::new();
+        let reset_count = mock.reset_state_count_handle();
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        // load_model alone builds fresh single-stream state; no reset needed yet.
+        assert_eq!(reset_count.load(Ordering::SeqCst), 0);
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect("start dictation 1");
+        assert_eq!(
+            reset_count.load(Ordering::SeqCst),
+            0,
+            "pre-warmed single-stream state must skip reset_state on start"
+        );
+        audio_tx.send(end_of_stream(1)).unwrap();
+        actor.stop_session(Duration::from_secs(2)).expect("stop 1");
+
+        // The idle pre-warm runs on the actor thread AFTER the stop reply
+        // (so it never adds to stop latency), so poll for it instead of
+        // asserting immediately.
+        assert!(
+            wait_for(|| reset_count.load(Ordering::SeqCst) >= 1, Duration::from_secs(2)),
+            "session end should pre-warm single-stream state"
+        );
+
+        actor
+            .start_session(2, session_config(), Box::new(|_| {}))
+            .expect("start dictation 2");
+        assert_eq!(
+            reset_count.load(Ordering::SeqCst),
+            1,
+            "second dictation start should reuse the pre-warmed state"
+        );
+        audio_tx.send(end_of_stream(2)).unwrap();
+        actor.stop_session(Duration::from_secs(2)).expect("stop 2");
+        assert!(
+            wait_for(|| reset_count.load(Ordering::SeqCst) >= 2, Duration::from_secs(2)),
+            "second session end should pre-warm again"
+        );
+
+        // A diarized start after a single-stream pre-warm must still pay the reset.
+        let diarized_cfg = SessionConfig {
+            diarize: true,
+            ..session_config()
+        };
+        actor
+            .start_session(3, diarized_cfg, Box::new(|_| {}))
+            .expect("start diarized");
+        assert_eq!(
+            reset_count.load(Ordering::SeqCst),
+            3,
+            "diarize mode change must pay the reset even when pre-warmed"
+        );
+        audio_tx.send(end_of_stream(3)).unwrap();
+        actor
+            .stop_session(Duration::from_secs(2))
+            .expect("stop diarized");
+        assert!(
+            wait_for(|| reset_count.load(Ordering::SeqCst) >= 4, Duration::from_secs(2)),
+            "post-session pre-warm resets back to single-stream"
+        );
     }
 }
