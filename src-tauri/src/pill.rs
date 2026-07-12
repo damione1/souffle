@@ -163,6 +163,14 @@ fn frame_origin(monitor_width: f64, monitor_height: f64, width: f64, height: f64
 /// edge into the menu bar until AppKit's `constrainFrameRect` clamps it) and
 /// bypasses the two-step JS resize-then-recenter dance, which raced because
 /// tao dispatches the resize asynchronously.
+///
+/// The frame is applied without animation (`setFrame:display:`, not
+/// `setFrame:display:animate:`). `animate:YES` runs synchronously on the
+/// main thread via a nested run loop (`NSAnimation`) until the animation
+/// finishes, and it does not bail out early if the window is ordered out
+/// mid-animation. At end-of-dictation the pill resizes back to compact at
+/// the same moment the backend hides the window, so an animated call here
+/// can spin forever and deadlock the main thread.
 pub(crate) fn set_frame_top_center(pill: &tauri::WebviewWindow, width: f64, height: f64) -> tauri::Result<()> {
     let width = width.clamp(MIN_WIDTH, MAX_WIDTH);
     let height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
@@ -189,7 +197,7 @@ pub(crate) fn set_frame_top_center(pill: &tauri::WebviewWindow, width: f64, heig
             origin: objc2_foundation::NSPoint { x, y },
             size: objc2_foundation::NSSize { width, height },
         };
-        ns_window.setFrame_display_animate(frame, true, true);
+        ns_window.setFrame_display(frame, true);
     })
 }
 
