@@ -59,3 +59,21 @@ pub async fn get_release_notes_for_version(version: String) -> Result<Option<Str
     .await
     .map_err(|e| format!("Release notes task failed: {e}"))
 }
+
+/// Open a GitHub release page in the default browser. WKWebView suppresses
+/// new-window navigation for `target="_blank"` links, so a plain `<a>` tag
+/// silently does nothing; this shells out to `open` instead. Restricted to
+/// `https://github.com/` URLs since it's only ever passed the release URL
+/// returned by `check_for_updates`.
+#[tauri::command]
+#[specta::specta]
+pub fn open_release_page(url: String) -> Result<(), String> {
+    if !url.starts_with("https://github.com/") {
+        return Err("Refusing to open a non-GitHub URL".into());
+    }
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| format!("Failed to open release page: {e}"))?;
+    Ok(())
+}

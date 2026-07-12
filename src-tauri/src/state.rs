@@ -179,23 +179,34 @@ impl AppState {
     }
 
     /// Apply a state transition, update the machine, and emit a StateChanged event.
+    ///
+    /// INVARIANT: never call window/AppKit operations (they dispatch to the
+    /// main thread and block until it services them) while holding an
+    /// AppState mutex. A `#[tauri::command]` running on the main thread may
+    /// be waiting on that very mutex (e.g. `state.app_handle()`), which
+    /// deadlocks both threads permanently: this method waits forever for the
+    /// main thread to drain its queue, and the main thread waits forever for
+    /// this method to release the lock. So the `machine` lock is scoped to
+    /// just the transition itself, and the `AppHandle` is cloned out of its
+    /// lock before any emit/sync call runs.
     pub fn apply_transition(&self, action: StateAction) -> Result<AppStateMachine, String> {
-        let mut machine = self.machine.acquire()?;
-        let new_state = machine.clone().transition(action)?;
-        debug!(
-            from = machine.variant_name(),
-            to = new_state.variant_name(),
-            "State transition"
-        );
-        *machine = new_state.clone();
+        let new_state = {
+            let mut machine = self.machine.acquire()?;
+            let new_state = machine.clone().transition(action)?;
+            debug!(
+                from = machine.variant_name(),
+                to = new_state.variant_name(),
+                "State transition"
+            );
+            *machine = new_state.clone();
+            new_state
+        };
 
-        // Emit event to frontend if app_handle is available
-        if let Ok(handle_guard) = self.app_handle.lock()
-            && let Some(ref handle) = *handle_guard
-        {
-            let _ = StateChanged(new_state.clone()).emit(handle);
-            crate::pill::sync(handle, &new_state);
-            crate::tray::sync(handle, &new_state);
+        let handle = self.app_handle.acquire()?.as_ref().cloned();
+        if let Some(handle) = handle {
+            let _ = StateChanged(new_state.clone()).emit(&handle);
+            crate::pill::sync(&handle, &new_state);
+            crate::tray::sync(&handle, &new_state);
         }
 
         Ok(new_state)
