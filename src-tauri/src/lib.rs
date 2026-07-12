@@ -144,6 +144,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::check_for_updates,
             commands::get_release_notes_for_version,
             commands::get_app_version,
+            commands::open_release_page,
         ])
         .events(collect_events![
             app_events::Navigate,

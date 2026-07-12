@@ -406,6 +406,12 @@ async polishDictation(text: string) : Promise<Result<DictationPolishResult, stri
  * background after transcription stops. See `pill::sync` for how a hold
  * combines with state-machine-driven visibility, and its safety net (a hold
  * is auto-released the moment a new recording starts).
+ * 
+ * Takes `AppHandle` directly rather than `State<'_, AppState>`: this command
+ * runs on the main thread, and reading `AppState.app_handle` (a mutex) would
+ * risk deadlocking against `AppState::apply_transition`, which briefly holds
+ * that same mutex from a background thread while dispatching to the main
+ * thread for window operations.
  */
 async pillHold(kind: PillHoldKind) : Promise<Result<null, string>> {
     try {
@@ -761,6 +767,21 @@ async getReleaseNotesForVersion(version: string) : Promise<Result<string | null,
  */
 async getAppVersion() : Promise<string> {
     return await TAURI_INVOKE("get_app_version");
+},
+/**
+ * Open a GitHub release page in the default browser. WKWebView suppresses
+ * new-window navigation for `target="_blank"` links, so a plain `<a>` tag
+ * silently does nothing; this shells out to `open` instead. Restricted to
+ * `https://github.com/` URLs since it's only ever passed the release URL
+ * returned by `check_for_updates`.
+ */
+async openReleasePage(url: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_release_page", { url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 

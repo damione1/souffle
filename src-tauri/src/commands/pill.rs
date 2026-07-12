@@ -1,4 +1,4 @@
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager};
 
 use crate::app_events::PillHoldKind;
 use crate::state::AppState;
@@ -8,11 +8,17 @@ use crate::state::AppState;
 /// background after transcription stops. See `pill::sync` for how a hold
 /// combines with state-machine-driven visibility, and its safety net (a hold
 /// is auto-released the moment a new recording starts).
+///
+/// Takes `AppHandle` directly rather than `State<'_, AppState>`: this command
+/// runs on the main thread, and reading `AppState.app_handle` (a mutex) would
+/// risk deadlocking against `AppState::apply_transition`, which briefly holds
+/// that same mutex from a background thread while dispatching to the main
+/// thread for window operations.
 #[tauri::command]
 #[specta::specta]
-pub fn pill_hold(state: State<'_, AppState>, kind: PillHoldKind) -> Result<(), String> {
-    let app = state.app_handle()?;
+pub fn pill_hold(app: AppHandle, kind: PillHoldKind) -> Result<(), String> {
     crate::pill::set_hold(&app, kind);
+    let state = app.state::<AppState>();
     crate::pill::sync(&app, &state.current_machine_state()?);
     Ok(())
 }
@@ -21,9 +27,9 @@ pub fn pill_hold(state: State<'_, AppState>, kind: PillHoldKind) -> Result<(), S
 /// paste succeeded without dictation polish ever engaging a hold).
 #[tauri::command]
 #[specta::specta]
-pub fn pill_release(state: State<'_, AppState>) -> Result<(), String> {
-    let app = state.app_handle()?;
+pub fn pill_release(app: AppHandle) -> Result<(), String> {
     crate::pill::clear_hold(&app);
+    let state = app.state::<AppState>();
     crate::pill::sync(&app, &state.current_machine_state()?);
     Ok(())
 }
@@ -36,8 +42,7 @@ pub fn pill_release(state: State<'_, AppState>) -> Result<(), String> {
 /// resize-then-recenter pair produces.
 #[tauri::command]
 #[specta::specta]
-pub fn pill_resize(state: State<'_, AppState>, width: f64, height: f64) -> Result<(), String> {
-    let app = state.app_handle()?;
+pub fn pill_resize(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     let Some(pill) = app.get_webview_window("pill") else {
         return Ok(());
     };

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import { checkForUpdates, getAppVersion } from "../../../api/diagnostics";
+  import { checkForUpdates, getAppVersion, openReleasePage } from "../../../api/diagnostics";
   import type { UpdateCheckResult } from "../../../types";
   import { errorMessage } from "../../../utils";
 
@@ -80,14 +80,12 @@
           {checking ? $t("settings_about.checking") : $t("settings_about.check_updates")}
         </button>
         {#if updateResult?.update_available && updateResult.release_url}
-          <a
-            href={updateResult.release_url}
-            target="_blank"
-            rel="noreferrer"
-            class="text-xs text-accent hover:underline"
+          <button
+            onclick={() => void openReleasePage(updateResult!.release_url!)}
+            class="text-xs text-accent hover:underline cursor-pointer"
           >
             {$t("settings_about.download_update")}
-          </a>
+          </button>
         {/if}
       </div>
     </div>

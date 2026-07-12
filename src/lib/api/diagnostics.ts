@@ -29,4 +29,8 @@ export async function getAppVersion(): Promise<string> {
   return commands.getAppVersion();
 }
 
+export async function openReleasePage(url: string): Promise<void> {
+  await unwrap(commands.openReleasePage(url));
+}
+
 export type { LogLevel };
