@@ -12,6 +12,21 @@ const EMIT_INTERVAL: Duration = Duration::from_secs(1);
 const LAG_THRESHOLD: Duration = Duration::from_millis(1500);
 /// No frame processed for this long while audio is queued = stalled.
 const STALL_THRESHOLD: Duration = Duration::from_secs(5);
+/// How long audio chunks may keep arriving with zero engine frames ever
+/// processed before the startup watchdog treats the session as stalled.
+///
+/// This closes a blind spot in the queue-depth check above: `STALL_THRESHOLD`
+/// only fires once the audio channel backs up (`queue_depth > 0`). A session
+/// whose mode never coalesces a processable frame, e.g. a diarized lane that
+/// never fills, a wedged per-mode buffer, an engine that silently accepts
+/// frames it never returns from `frame_ready()` for, drains every chunk as
+/// it arrives into buffers instead of leaving them queued, so the channel
+/// never backs up and that check never trips, even though capture is alive
+/// (audio level bars keep moving) and the engine has never produced a single
+/// frame. This uses a longer window than `STALL_THRESHOLD` since it must
+/// also tolerate a session's legitimate startup latency (model warm-up,
+/// silence prefix, first-frame buffering).
+const STARTUP_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Tracks pipeline health for one session. Lives on the actor thread;
 /// only the drop counter is shared (with the capture callback).
@@ -24,6 +39,11 @@ pub struct SessionHealth {
     /// Drop count at the last emit, to detect new drops per window.
     drops_at_last_emit: u64,
     last_frame_at: Instant,
+    /// When an audio chunk was last dequeued for this session, so the
+    /// startup watchdog can tell "capture is still alive" apart from "audio
+    /// stopped arriving entirely" (a different failure, handled elsewhere).
+    /// `None` until the first chunk arrives.
+    last_chunk_at: Option<Instant>,
 }
 
 impl SessionHealth {
@@ -38,6 +58,7 @@ impl SessionHealth {
             window_max_lag: Duration::ZERO,
             drops_at_last_emit: 0,
             last_frame_at: now,
+            last_chunk_at: None,
         }
     }
 
@@ -47,6 +68,7 @@ impl SessionHealth {
         if lag > self.window_max_lag {
             self.window_max_lag = lag;
         }
+        self.last_chunk_at = Some(Instant::now());
     }
 
     /// Record that a frame went through the engine (or was VAD-skipped).
@@ -66,7 +88,18 @@ impl SessionHealth {
 
         let dropped = self.dropped.load(Ordering::Relaxed);
         let new_drops = dropped > self.drops_at_last_emit;
-        let stalled = queue_depth > 0 && self.last_frame_at.elapsed() > STALL_THRESHOLD;
+        let queue_stalled = queue_depth > 0 && self.last_frame_at.elapsed() > STALL_THRESHOLD;
+        // Startup watchdog: audio is actively arriving (a chunk within the
+        // last STALL_THRESHOLD) but no engine frame has ever landed, or
+        // frames stopped landing, for STARTUP_WATCHDOG_TIMEOUT. Independent
+        // of queue depth, so it catches a session mode that drains chunks
+        // into buffers without ever reaching `frame_ready()`.
+        let capture_alive = self
+            .last_chunk_at
+            .is_some_and(|t| t.elapsed() <= STALL_THRESHOLD);
+        let startup_stalled =
+            capture_alive && self.last_frame_at.elapsed() > STARTUP_WATCHDOG_TIMEOUT;
+        let stalled = queue_stalled || startup_stalled;
 
         let status = if stalled {
             HealthStatus::Stalled
@@ -113,12 +146,18 @@ pub enum StallAction {
 /// engine access), so it can be driven and unit-tested independently of
 /// `run_session_loop`.
 ///
+/// Fed by two distinct `SessionHealth` stall signals, both funneled into the
+/// same `HealthStatus::Stalled` status so this ladder doesn't need to know
+/// which one fired: the audio queue backing up with no frames processed
+/// (`STALL_THRESHOLD`), and the startup watchdog (audio still arriving but
+/// zero frames ever landing, or landing then stopping, for
+/// `STARTUP_WATCHDOG_TIMEOUT`), independent of queue depth.
+///
 /// Known limitation: this only detects a session loop that is alive but not
-/// producing frames (queue building up, `note_frame()` not being called). A
-/// stall where the engine blocks forever *inside* a single `transcribe`
-/// call never returns control to the loop that drives this struct, so the
-/// ladder cannot see or recover from that case. Covering it would need a
-/// cross-thread watchdog, which is out of scope here.
+/// producing frames. A stall where the engine blocks forever *inside* a
+/// single `transcribe` call never returns control to the loop that drives
+/// this struct, so the ladder cannot see or recover from that case. Covering
+/// it would need a cross-thread watchdog, which is out of scope here.
 pub struct StallRecovery {
     stalled_since: Option<Instant>,
     reset_attempted: bool,
@@ -203,6 +242,68 @@ mod tests {
         h.last_emit = Instant::now() - Duration::from_secs(2);
         let snap = h.tick(10).expect("snapshot due");
         assert_eq!(snap.status, crate::app_events::HealthStatus::Stalled);
+    }
+
+    #[test]
+    fn snapshot_reports_stalled_via_startup_watchdog_with_empty_queue() {
+        // Chunks are actively arriving (capture is alive, so UI level bars
+        // would be moving) but no engine frame has ever landed for well past
+        // the startup watchdog window, and the queue is empty the whole time
+        // (every chunk is being drained into a mode buffer, not backing up).
+        // The old queue-depth-only check would never flag this.
+        let mut h = SessionHealth::start(1, Arc::new(AtomicU64::new(0)));
+        h.last_frame_at = Instant::now() - Duration::from_secs(21);
+        h.last_chunk_at = Some(Instant::now());
+        h.last_emit = Instant::now() - Duration::from_secs(2);
+        let snap = h.tick(0).expect("snapshot due");
+        assert_eq!(snap.status, crate::app_events::HealthStatus::Stalled);
+        assert_eq!(snap.queue_depth, 0);
+    }
+
+    #[test]
+    fn snapshot_not_stalled_before_startup_watchdog_timeout() {
+        // Same shape as above but still within the startup grace period
+        // (model warm-up, silence prefix, first-frame buffering all take
+        // real time) must not fire early.
+        let mut h = SessionHealth::start(1, Arc::new(AtomicU64::new(0)));
+        h.last_frame_at = Instant::now() - Duration::from_secs(19);
+        h.last_chunk_at = Some(Instant::now());
+        h.last_emit = Instant::now() - Duration::from_secs(2);
+        let snap = h.tick(0).expect("snapshot due");
+        assert_eq!(snap.status, crate::app_events::HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn snapshot_not_stalled_via_startup_watchdog_when_capture_inactive() {
+        // No frames AND no recent chunks: capture itself has gone quiet
+        // (a different failure, handled elsewhere, e.g. AudioGone). The
+        // startup watchdog must not also fire here; it only covers "capture
+        // is alive but the engine never produces a frame".
+        let mut h = SessionHealth::start(1, Arc::new(AtomicU64::new(0)));
+        h.last_frame_at = Instant::now() - Duration::from_secs(21);
+        h.last_chunk_at = Some(Instant::now() - Duration::from_secs(10));
+        h.last_emit = Instant::now() - Duration::from_secs(2);
+        let snap = h.tick(0).expect("snapshot due");
+        assert_eq!(snap.status, crate::app_events::HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn snapshot_not_stalled_via_startup_watchdog_before_any_chunk() {
+        // Session just started, no chunk has arrived yet at all: nothing
+        // abnormal, still within ordinary startup latency.
+        let mut h = SessionHealth::start(1, Arc::new(AtomicU64::new(0)));
+        h.last_frame_at = Instant::now() - Duration::from_secs(21);
+        h.last_emit = Instant::now() - Duration::from_secs(2);
+        let snap = h.tick(0).expect("snapshot due");
+        assert_eq!(snap.status, crate::app_events::HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn note_chunk_marks_capture_alive() {
+        let mut h = SessionHealth::start(1, Arc::new(AtomicU64::new(0)));
+        assert!(h.last_chunk_at.is_none());
+        h.note_chunk(Instant::now());
+        assert!(h.last_chunk_at.is_some());
     }
 
     #[test]
@@ -302,6 +403,38 @@ mod tests {
         assert_eq!(
             r.on_snapshot(HealthStatus::Stalled, t1 + Duration::from_secs(30)),
             Some(StallAction::Reset)
+        );
+    }
+
+    #[test]
+    fn startup_watchdog_status_drives_the_same_recovery_ladder() {
+        // End-to-end: a session where audio keeps arriving but the engine
+        // never produces a single frame (queue never backs up, so the old
+        // check would stay silent forever) must still reach Reset then
+        // Abort through the exact same `StallRecovery` ladder as a
+        // queue-depth stall.
+        let mut h = SessionHealth::start(1, Arc::new(AtomicU64::new(0)));
+        let mut r = StallRecovery::new();
+
+        // Chunks arrive continuously; the engine never processes one.
+        h.last_chunk_at = Some(Instant::now());
+        h.last_frame_at = Instant::now() - Duration::from_secs(21);
+        h.last_emit = Instant::now() - Duration::from_secs(2);
+        let snap = h.tick(0).expect("snapshot due");
+        assert_eq!(snap.status, HealthStatus::Stalled);
+        let t0 = Instant::now();
+        assert_eq!(r.on_snapshot(snap.status, t0), None);
+
+        // Simulate later snapshots (chunk arrival kept refreshing, frames
+        // still never landed) by re-driving `on_snapshot` directly at the
+        // ladder's own thresholds, same as the queue-depth tests above.
+        assert_eq!(
+            r.on_snapshot(HealthStatus::Stalled, t0 + Duration::from_secs(30)),
+            Some(StallAction::Reset)
+        );
+        assert_eq!(
+            r.on_snapshot(HealthStatus::Stalled, t0 + Duration::from_secs(60)),
+            Some(StallAction::Abort)
         );
     }
 }
