@@ -1,0 +1,40 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Soufflé logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#39240f"></stop>
+      <stop offset="1" stop-color="#160e06"></stop>
+    </linearGradient>
+    <linearGradient id="dome" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8d089"></stop>
+      <stop offset="0.55" stop-color="#eab255"></stop>
+      <stop offset="1" stop-color="#d9973f"></stop>
+    </linearGradient>
+    <linearGradient id="ramekin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2e7d1"></stop>
+      <stop offset="1" stop-color="#dccdb0"></stop>
+    </linearGradient>
+  </defs>
+
+  <rect x="32" y="32" width="448" height="448" rx="116" fill="url(#bg)"></rect>
+  <rect x="32.5" y="32.5" width="447" height="447" rx="115.5" fill="none" stroke="#e9ae55" stroke-opacity="0.28" stroke-width="1.5"></rect>
+
+  
+  <g fill="none" stroke="#f3e7d0" stroke-width="13" stroke-linecap="round">
+    <path d="M206 158 C188 126 214 104 196 74" opacity="0.5"></path>
+    <path d="M256 150 C236 112 270 90 248 56" opacity="0.85"></path>
+    <path d="M306 158 C324 126 298 104 316 74" opacity="0.5"></path>
+  </g>
+
+  
+  <path d="M150 302 C150 190 200 150 256 150 C312 150 362 190 362 302 Z" fill="url(#dome)"></path>
+  <path d="M193 236 C218 196 248 180 274 178" fill="none" stroke="#ffe6b4" stroke-width="15" stroke-linecap="round" opacity="0.65"></path>
+
+  
+  <path d="M156 322 L356 322 L336 432 C332 456 316 460 300 460 L212 460 C196 460 180 456 176 432 Z" fill="url(#ramekin)"></path>
+  <rect x="134" y="284" width="244" height="42" rx="21" fill="#fbf3e4"></rect>
+  <g stroke="#d3bc93" stroke-width="9" stroke-linecap="round">
+    <line x1="204" y1="336" x2="199" y2="448"></line>
+    <line x1="256" y1="336" x2="256" y2="452"></line>
+    <line x1="308" y1="336" x2="313" y2="448"></line>
+  </g>
+</svg>
