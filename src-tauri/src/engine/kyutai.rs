@@ -20,6 +20,17 @@ const VAD_PAUSE_THRESHOLD: f32 = 0.5;
 /// Safety margin (frames) on top of the ASR delay before trusting the VAD
 /// pause streak: semantic VAD can fire slightly before speech fully clears.
 const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
+/// Semantic-pause streak before a soft context refresh is allowed. ~0.5s at
+/// 12.5 Hz — long enough to sit between utterances, short enough to fire
+/// before the LM context window saturates.
+const REFRESH_PAUSE_FRAMES: usize = 6;
+/// Soft refresh fires at this fraction of `config.context` when pausing
+/// (Kyutai/Unmute recommend clearing KV between speech turns).
+const REFRESH_SOFT_CONTEXT_NUM: usize = 6;
+const REFRESH_SOFT_CONTEXT_DEN: usize = 10;
+/// Hard deadline margin: force refresh this many frames before `context`
+/// even mid-speech so attention never runs fully masked.
+const REFRESH_HARD_MARGIN_FRAMES: usize = 25;
 
 /// Extract frame `f` (MIMI_FRAME_SIZE samples) from `buf`, zero-padding when the
 /// buffer is short or the frame is past its end. Used to align the two diarized
@@ -104,6 +115,41 @@ impl KyutaiConfig {
     }
 }
 
+/// Whether a proactive KV-cache refresh should run, and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefreshKind {
+    /// Pause-aligned refresh inside the soft context window (preferred).
+    SoftPause,
+    /// Forced refresh before the LM context window saturates.
+    HardDeadline,
+}
+
+/// Decide whether to clear the ASR KV cache before the next frame.
+///
+/// Kyutai STT is a decoder-only model with a finite `context` (375 frames /
+/// ~30s on stt-2.6b). Past that window inference still runs but Word emission
+/// can starve — matching the production "frames climb, segments flat" freeze.
+/// Upstream guidance (Unmute #168) is to reset between speech turns; we do the
+/// local equivalent with `State::reset()` rather than a full Metal rebuild.
+fn should_refresh(
+    frames_since_refresh: usize,
+    context: usize,
+    pausing: bool,
+) -> Option<RefreshKind> {
+    if context == 0 || frames_since_refresh == 0 {
+        return None;
+    }
+    let soft = (context * REFRESH_SOFT_CONTEXT_NUM) / REFRESH_SOFT_CONTEXT_DEN;
+    let hard = context.saturating_sub(REFRESH_HARD_MARGIN_FRAMES);
+    if frames_since_refresh >= hard {
+        Some(RefreshKind::HardDeadline)
+    } else if pausing && frames_since_refresh >= soft {
+        Some(RefreshKind::SoftPause)
+    } else {
+        None
+    }
+}
+
 /// Loaded model components — kept together so they can be used by the inference loop
 struct LoadedModel {
     state: moshi::asr::State,
@@ -113,11 +159,17 @@ struct LoadedModel {
     #[allow(dead_code)]
     model_path: std::path::PathBuf,
     /// Silence prefix (config audio_silence_prefix_seconds) still to be fed
-    /// before the first real audio of the session.
+    /// before the first real audio of the current refresh epoch.
     prefix_pending: bool,
-    /// Word timestamps include the silence prefix; subtract this to report
-    /// times relative to the real audio.
+    /// Prefix duration for the current epoch; subtracted from moshi times.
     time_offset_seconds: f64,
+    /// Wall-clock seconds of real audio attributed to prior refresh epochs,
+    /// so Word timestamps stay monotone across soft KV clears.
+    epoch_origin_seconds: f64,
+    /// LM frames since the last soft/hard refresh (includes this epoch's prefix).
+    frames_since_refresh: usize,
+    /// Soft context refreshes performed this session (diagnostics).
+    refresh_count: u64,
     /// Consecutive frames where the semantic VAD pause head fired.
     vad_pause_streak: usize,
 }
@@ -212,6 +264,9 @@ impl KyutaiEngine {
             model_path,
             prefix_pending: true,
             time_offset_seconds: 0.0,
+            epoch_origin_seconds: 0.0,
+            frames_since_refresh: 0,
+            refresh_count: 0,
             vad_pause_streak: 0,
         })
     }
@@ -238,12 +293,279 @@ impl KyutaiEngine {
             .map_err(|e| EngineError::InferenceError(format!("{context}: {e}")))
     }
 
+    /// Map a moshi word timestamp into session wall-clock seconds, accounting
+    /// for the current epoch's silence prefix and prior soft-refresh epochs.
+    fn word_start_time(model: &LoadedModel, moshi_start: f64) -> f64 {
+        Self::word_start_time_raw(
+            moshi_start,
+            model.time_offset_seconds,
+            model.epoch_origin_seconds,
+        )
+    }
+
+    fn word_start_time_raw(
+        moshi_start: f64,
+        time_offset_seconds: f64,
+        epoch_origin_seconds: f64,
+    ) -> f64 {
+        (moshi_start - time_offset_seconds + epoch_origin_seconds).max(0.0)
+    }
+
+    /// Soft KV-cache clear: empties LM/Mimi/ItemState without rebuilding Metal
+    /// devices or remapping weights. Preferred over full `reset_state` mid-session.
+    fn refresh_loaded(model: &mut LoadedModel, kind: RefreshKind) -> Result<(), EngineError> {
+        let frames = model.frames_since_refresh;
+        let context = model.config.context;
+        let real_secs =
+            frames as f64 / MIMI_FRAMES_PER_SECOND - model.time_offset_seconds;
+        model.epoch_origin_seconds += real_secs.max(0.0);
+        model
+            .state
+            .reset()
+            .map_err(|e| EngineError::InferenceError(format!("ASR context refresh: {e}")))?;
+        model.prefix_pending = true;
+        model.time_offset_seconds = 0.0;
+        model.frames_since_refresh = 0;
+        model.vad_pause_streak = 0;
+        model.refresh_count = model.refresh_count.saturating_add(1);
+        info!(
+            kind = ?kind,
+            frames_before_refresh = frames,
+            context,
+            refresh_count = model.refresh_count,
+            epoch_origin_seconds = format!("{:.2}", model.epoch_origin_seconds),
+            "ASR context refreshed (soft KV clear)"
+        );
+        Ok(())
+    }
+
+    fn maybe_refresh_before_frame(model: &mut LoadedModel) -> Result<(), EngineError> {
+        let pausing = model.vad_pause_streak >= REFRESH_PAUSE_FRAMES;
+        if let Some(kind) =
+            should_refresh(model.frames_since_refresh, model.config.context, pausing)
+        {
+            Self::refresh_loaded(model, kind)?;
+        }
+        Ok(())
+    }
+
+    fn note_vad_pause(model: &mut LoadedModel, prs: &[Vec<f32>]) {
+        if let Some(p) = prs.get(VAD_PAUSE_HEAD).and_then(|h| h.first()) {
+            if *p > VAD_PAUSE_THRESHOLD {
+                model.vad_pause_streak += 1;
+            } else {
+                model.vad_pause_streak = 0;
+            }
+        }
+    }
+
+    /// Feed the configured silence prefix as real LM frames (counts toward
+    /// the context budget) and set `time_offset_seconds` for this epoch.
+    fn feed_silence_prefix(
+        model: &mut LoadedModel,
+        device: &Device,
+        debug_enabled: bool,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) -> Result<(), EngineError> {
+        model.prefix_pending = false;
+        let prefix_frames =
+            Self::prefix_frame_count(model.config.stt_config.audio_silence_prefix_seconds);
+        if prefix_frames == 0 {
+            model.time_offset_seconds = 0.0;
+            return Ok(());
+        }
+        model.time_offset_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
+        info!(
+            frames = prefix_frames,
+            seconds = model.time_offset_seconds,
+            "Feeding silence prefix before epoch audio"
+        );
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        for _ in 0..prefix_frames {
+            let asr_msgs = if model.state.batch_size() == 2 {
+                let mut data = Vec::with_capacity(2 * MIMI_FRAME_SIZE);
+                data.extend_from_slice(&silence);
+                data.extend_from_slice(&silence);
+                Self::step_pcm_dual(model, device, &data)?
+            } else {
+                Self::step_pcm_single(model, device, &silence, debug_enabled)?
+            };
+            // Prefix frames can still emit delayed words from the previous
+            // epoch's lookahead — keep consuming them with correct timestamps.
+            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, segments);
+        }
+        Ok(())
+    }
+
+    fn step_pcm_single(
+        model: &mut LoadedModel,
+        device: &Device,
+        chunk_data: &[f32],
+        debug_enabled: bool,
+    ) -> Result<Vec<moshi::asr::AsrMsg>, EngineError> {
+        // Wrap Metal operations in autorelease pool to drain ObjC objects
+        // created by candle's Metal backend (matmul, attention, etc.).
+        // Without this, autoreleased objects accumulate and corrupt GPU
+        // memory after ~3 recording sessions.
+        let asr_msgs = with_autorelease_pool(|| {
+            let pcm_tensor = Tensor::new(chunk_data, device)
+                .and_then(|t| t.reshape((1, 1, MIMI_FRAME_SIZE)))
+                .map_err(|e| EngineError::InferenceError(format!("Tensor creation: {e}")))?;
+
+            model
+                .state
+                .step_pcm(
+                    pcm_tensor,
+                    None,
+                    &().into(),
+                    |items, text_tensor, _audio_tensors| {
+                        let frame = FRAME_COUNT.load(Ordering::Relaxed);
+                        if debug_enabled
+                            && (frame < 20 || frame.is_multiple_of(50))
+                            && let Ok(text_vals) = text_tensor.to_vec2::<u32>()
+                        {
+                            for (i, item) in items.iter().enumerate() {
+                                let tv = text_vals
+                                    .get(i)
+                                    .map(|v| format!("{v:?}"))
+                                    .unwrap_or_default();
+                                trace!(
+                                    frame,
+                                    batch = i,
+                                    text_token = item.text_token(),
+                                    first_step = item.is_first_step(),
+                                    input_text = tv,
+                                    "pre-forward"
+                                );
+                            }
+                        }
+                    },
+                )
+                .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
+        })?;
+        model.frames_since_refresh = model.frames_since_refresh.saturating_add(1);
+        FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+        Ok(asr_msgs)
+    }
+
+    fn step_pcm_dual(
+        model: &mut LoadedModel,
+        device: &Device,
+        data: &[f32],
+    ) -> Result<Vec<moshi::asr::AsrMsg>, EngineError> {
+        let asr_msgs = with_autorelease_pool(|| {
+            let pcm_tensor = Tensor::new(data, device)
+                .and_then(|t| t.reshape((2, 1, MIMI_FRAME_SIZE)))
+                .map_err(|e| EngineError::InferenceError(format!("Tensor creation: {e}")))?;
+            model
+                .state
+                .step_pcm(pcm_tensor, None, &().into(), |_, _, _| {})
+                .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
+        })?;
+        model.frames_since_refresh = model.frames_since_refresh.saturating_add(1);
+        FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+        Ok(asr_msgs)
+    }
+
+    fn consume_asr_msgs(
+        model: &mut LoadedModel,
+        asr_msgs: &[moshi::asr::AsrMsg],
+        debug_enabled: bool,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        let frame_num = FRAME_COUNT.load(Ordering::Relaxed).saturating_sub(1);
+        let diarized = model.state.batch_size() == 2;
+
+        if debug_enabled && (frame_num < 20 || frame_num.is_multiple_of(50)) {
+            let mut words = 0;
+            let mut end_words = 0;
+            let mut steps = 0;
+            for msg in asr_msgs {
+                match msg {
+                    moshi::asr::AsrMsg::Word { .. } => words += 1,
+                    moshi::asr::AsrMsg::EndWord { .. } => end_words += 1,
+                    moshi::asr::AsrMsg::Step { step_idx, prs, .. } => {
+                        steps += 1;
+                        if frame_num < 10 || frame_num.is_multiple_of(50) {
+                            let vad_str: Vec<String> =
+                                prs.iter().map(|p| format!("{:.2}", p[0])).collect();
+                            trace!(
+                                frame = frame_num,
+                                model_step = step_idx,
+                                vad = vad_str.join(", "),
+                                "Step VAD"
+                            );
+                        }
+                    }
+                }
+            }
+            if words > 0 || end_words > 0 {
+                debug!(frame = frame_num, words, end_words, steps, "ASR messages");
+            }
+        }
+
+        for msg in asr_msgs {
+            match msg {
+                moshi::asr::AsrMsg::Word {
+                    tokens,
+                    start_time,
+                    batch_idx,
+                } => {
+                    let text = model
+                        .text_tokenizer
+                        .decode_piece_ids(tokens)
+                        .unwrap_or_default();
+                    if debug_enabled {
+                        debug!(tokens = ?tokens, text = ?text, t = format!("{start_time:.2}"), "WORD emitted");
+                    }
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let start_time = Self::word_start_time(model, *start_time);
+                    let speaker = if diarized {
+                        Some(if *batch_idx == 0 {
+                            Speaker::Me
+                        } else {
+                            Speaker::Them
+                        })
+                    } else {
+                        None
+                    };
+                    segments.push(TranscriptionSegment {
+                        text,
+                        start_time,
+                        end_time: start_time,
+                        is_final: true,
+                        language: None,
+                        confidence: None,
+                        speaker,
+                    });
+                }
+                moshi::asr::AsrMsg::EndWord { .. } => {}
+                moshi::asr::AsrMsg::Step { prs, .. } => {
+                    Self::note_vad_pause(model, prs);
+                }
+            }
+        }
+    }
+
+    fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
+        self.model.as_ref().map(|m| super::ContextWindowStats {
+            context_frames: m.config.context,
+            frames_since_refresh: m.frames_since_refresh,
+            refresh_count: m.refresh_count,
+        })
+    }
+
     /// Reset the ASR state for a new recording session.
     /// Full rebuild of Mimi + LM + State from disk because moshi's
     /// State::reset() does NOT reset model_step_idx, causing RoPE
     /// positional encoding to start at the wrong offset with empty KV caches.
     /// Teardown and rebuild use separate autorelease pools so stale Metal
     /// objects are drained before a fresh device/model is created.
+    ///
+    /// Mid-session freezes should use soft `refresh_loaded` instead; this
+    /// full rebuild remains for session boundaries and diarize mode changes.
     pub fn reset_state(&mut self) -> Result<(), EngineError> {
         FRAME_COUNT.store(0, Ordering::Relaxed);
         if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
@@ -401,35 +723,15 @@ impl TranscriptionEngine for KyutaiEngine {
         // without conflicting with mutable borrow of model.state
         let device = model.device.clone();
 
-        // The model is trained with audio_silence_prefix_seconds of leading
-        // silence; feed it before the first real audio of each session.
-        let prefixed;
-        let audio = if model.prefix_pending {
-            model.prefix_pending = false;
-            let prefix_frames =
-                Self::prefix_frame_count(model.config.stt_config.audio_silence_prefix_seconds);
-            if prefix_frames > 0 {
-                model.time_offset_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
-                info!(
-                    frames = prefix_frames,
-                    seconds = model.time_offset_seconds,
-                    "Feeding silence prefix before session audio"
-                );
-                prefixed = {
-                    let mut v = vec![0.0f32; prefix_frames * MIMI_FRAME_SIZE];
-                    v.extend_from_slice(audio);
-                    v
-                };
-                &prefixed[..]
-            } else {
-                audio
-            }
-        } else {
-            audio
-        };
-
-        // Process audio in MIMI_FRAME_SIZE-sample frames (80ms at 24kHz)
+        // Process audio in MIMI_FRAME_SIZE-sample frames (80ms at 24kHz).
+        // Soft context refresh + silence prefix are handled per-frame so a
+        // mid-session KV clear can re-anchor before the next real samples.
         for chunk in audio.chunks(MIMI_FRAME_SIZE) {
+            Self::maybe_refresh_before_frame(model)?;
+            if model.prefix_pending {
+                Self::feed_silence_prefix(model, &device, debug_enabled, &mut segments)?;
+            }
+
             let padded;
             let chunk_data = if chunk.len() < MIMI_FRAME_SIZE {
                 padded = {
@@ -442,125 +744,9 @@ impl TranscriptionEngine for KyutaiEngine {
                 chunk
             };
 
-            // Wrap Metal operations in autorelease pool to drain ObjC objects
-            // created by candle's Metal backend (matmul, attention, etc.).
-            // Without this, autoreleased objects accumulate and corrupt GPU
-            // memory after ~3 recording sessions.
-            let asr_msgs = with_autorelease_pool(|| {
-                let pcm_tensor = Tensor::new(chunk_data, &device)
-                    .and_then(|t| t.reshape((1, 1, MIMI_FRAME_SIZE)))
-                    .map_err(|e| EngineError::InferenceError(format!("Tensor creation: {e}")))?;
-
-                model
-                    .state
-                    .step_pcm(
-                        pcm_tensor,
-                        None,
-                        &().into(),
-                        |items, text_tensor, _audio_tensors| {
-                            // Debug: log what the model is producing
-                            let frame = FRAME_COUNT.load(Ordering::Relaxed);
-                            if debug_enabled
-                                && (frame < 20 || frame.is_multiple_of(50))
-                                && let Ok(text_vals) = text_tensor.to_vec2::<u32>()
-                            {
-                                for (i, item) in items.iter().enumerate() {
-                                    let tv = text_vals
-                                        .get(i)
-                                        .map(|v| format!("{v:?}"))
-                                        .unwrap_or_default();
-                                    trace!(
-                                        frame,
-                                        batch = i,
-                                        text_token = item.text_token(),
-                                        first_step = item.is_first_step(),
-                                        input_text = tv,
-                                        "pre-forward"
-                                    );
-                                }
-                            }
-                        },
-                    )
-                    .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
-            })?;
-
-            let frame_num = FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
-
-            // Log message types for first 20 frames then every 50th
-            if debug_enabled && (frame_num < 20 || frame_num.is_multiple_of(50)) {
-                let mut words = 0;
-                let mut end_words = 0;
-                let mut steps = 0;
-                for msg in &asr_msgs {
-                    match msg {
-                        moshi::asr::AsrMsg::Word { .. } => words += 1,
-                        moshi::asr::AsrMsg::EndWord { .. } => end_words += 1,
-                        moshi::asr::AsrMsg::Step { step_idx, prs, .. } => {
-                            steps += 1;
-                            if frame_num < 10 || frame_num.is_multiple_of(50) {
-                                let vad_str: Vec<String> =
-                                    prs.iter().map(|p| format!("{:.2}", p[0])).collect();
-                                trace!(
-                                    frame = frame_num,
-                                    model_step = step_idx,
-                                    vad = vad_str.join(", "),
-                                    "Step VAD"
-                                );
-                            }
-                        }
-                    }
-                }
-                if words > 0 || end_words > 0 {
-                    debug!(frame = frame_num, words, end_words, steps, "ASR messages");
-                }
-            }
-
-            for msg in &asr_msgs {
-                match msg {
-                    moshi::asr::AsrMsg::Word {
-                        tokens, start_time, ..
-                    } => {
-                        let text = model
-                            .text_tokenizer
-                            .decode_piece_ids(tokens)
-                            .unwrap_or_default();
-                        if debug_enabled {
-                            debug!(tokens = ?tokens, text = ?text, t = format!("{start_time:.2}"), "WORD emitted");
-                        }
-                        if !text.is_empty() {
-                            // Emit immediately — the Word message contains the fully
-                            // decoded text. EndWord is just a timing boundary that can
-                            // arrive 5+ seconds later; waiting for it causes truncation
-                            // at end of speech.
-                            let start_time = (*start_time - model.time_offset_seconds).max(0.0);
-                            segments.push(TranscriptionSegment {
-                                text,
-                                start_time,
-                                end_time: start_time,
-                                is_final: true,
-                                language: None,
-                                confidence: None,
-                                speaker: None,
-                            });
-                        }
-                    }
-                    moshi::asr::AsrMsg::EndWord { .. } => {
-                        // Timing boundary only — word was already emitted on Word event
-                    }
-                    moshi::asr::AsrMsg::Step { prs, .. } => {
-                        // Semantic VAD (models with extra heads only): track how
-                        // long the pause head has been firing so flush() can skip
-                        // the silence suffix when the delay window is already drained.
-                        if let Some(p) = prs.get(VAD_PAUSE_HEAD).and_then(|h| h.first()) {
-                            if *p > VAD_PAUSE_THRESHOLD {
-                                model.vad_pause_streak += 1;
-                            } else {
-                                model.vad_pause_streak = 0;
-                            }
-                        }
-                    }
-                }
-            }
+            let asr_msgs =
+                Self::step_pcm_single(model, &device, chunk_data, debug_enabled)?;
+            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments);
         }
 
         Ok(segments)
@@ -572,8 +758,7 @@ impl TranscriptionEngine for KyutaiEngine {
         // Words are emitted audio_delay after they are spoken. If the semantic
         // VAD has reported a pause for longer than that delay (plus margin),
         // every word has already cleared the pipeline and the silence suffix
-        // would only burn inference time at stop. (Single-stream only — the
-        // diarized path doesn't track a shared pause streak.)
+        // would only burn inference time at stop.
         let delay_frames =
             (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
         let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
@@ -617,88 +802,30 @@ impl TranscriptionEngine for KyutaiEngine {
         me: &[f32],
         them: &[f32],
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let debug_enabled = crate::debug::transcription_debug_enabled();
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
         let device = model.device.clone();
         let mut segments = Vec::new();
 
-        // Feed the silence prefix to BOTH lanes before the first real audio so
-        // their timelines (and time_offset) stay identical.
-        let me_buf;
-        let them_buf;
-        let (me_in, them_in): (&[f32], &[f32]) = if model.prefix_pending {
-            model.prefix_pending = false;
-            let prefix_frames =
-                Self::prefix_frame_count(model.config.stt_config.audio_silence_prefix_seconds);
-            if prefix_frames > 0 {
-                model.time_offset_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
-                let pad = vec![0.0f32; prefix_frames * MIMI_FRAME_SIZE];
-                me_buf = [pad.as_slice(), me].concat();
-                them_buf = [pad.as_slice(), them].concat();
-                (&me_buf[..], &them_buf[..])
-            } else {
-                (me, them)
-            }
-        } else {
-            (me, them)
-        };
-
-        let time_offset = model.time_offset_seconds;
         // Both lanes step together; cover whichever is longer (the mixer keeps
         // them equal, but pad defensively).
-        let frame_count = me_in
+        let frame_count = me
             .len()
             .div_ceil(MIMI_FRAME_SIZE)
-            .max(them_in.len().div_ceil(MIMI_FRAME_SIZE));
+            .max(them.len().div_ceil(MIMI_FRAME_SIZE));
 
         for f in 0..frame_count {
-            let mut data = Vec::with_capacity(2 * MIMI_FRAME_SIZE);
-            data.extend_from_slice(&frame_at(me_in, f));
-            data.extend_from_slice(&frame_at(them_in, f));
-
-            let asr_msgs = with_autorelease_pool(|| {
-                // Row-major (2, 1, FRAME): row 0 = me (batch 0), row 1 = them.
-                let pcm_tensor = Tensor::new(data.as_slice(), &device)
-                    .and_then(|t| t.reshape((2, 1, MIMI_FRAME_SIZE)))
-                    .map_err(|e| EngineError::InferenceError(format!("Tensor creation: {e}")))?;
-                model
-                    .state
-                    .step_pcm(pcm_tensor, None, &().into(), |_, _, _| {})
-                    .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
-            })?;
-
-            FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
-
-            for msg in &asr_msgs {
-                if let moshi::asr::AsrMsg::Word {
-                    tokens,
-                    start_time,
-                    batch_idx,
-                } = msg
-                {
-                    let text = model
-                        .text_tokenizer
-                        .decode_piece_ids(tokens)
-                        .unwrap_or_default();
-                    if text.is_empty() {
-                        continue;
-                    }
-                    let start_time = (*start_time - time_offset).max(0.0);
-                    let speaker = if *batch_idx == 0 {
-                        Speaker::Me
-                    } else {
-                        Speaker::Them
-                    };
-                    segments.push(TranscriptionSegment {
-                        text,
-                        start_time,
-                        end_time: start_time,
-                        is_final: true,
-                        language: None,
-                        confidence: None,
-                        speaker: Some(speaker),
-                    });
-                }
+            Self::maybe_refresh_before_frame(model)?;
+            if model.prefix_pending {
+                Self::feed_silence_prefix(model, &device, debug_enabled, &mut segments)?;
             }
+
+            let mut data = Vec::with_capacity(2 * MIMI_FRAME_SIZE);
+            data.extend_from_slice(&frame_at(me, f));
+            data.extend_from_slice(&frame_at(them, f));
+
+            let asr_msgs = Self::step_pcm_dual(model, &device, &data)?;
+            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments);
         }
 
         Ok(segments)
@@ -729,6 +856,10 @@ impl TranscriptionEngine for KyutaiEngine {
         let normalized = text.replace('▁', " ");
         collapse_whitespace(&normalized)
     }
+
+    fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
+        KyutaiEngine::context_window_stats(self)
+    }
 }
 
 #[cfg(test)]
@@ -749,5 +880,47 @@ mod tests {
         assert_eq!(KyutaiEngine::prefix_frame_count(1.0), 13);
         assert_eq!(KyutaiEngine::prefix_frame_count(0.5), 7);
         assert_eq!(KyutaiEngine::prefix_frame_count(2.0), 25);
+    }
+
+    #[test]
+    fn should_refresh_none_before_soft_window() {
+        // stt-2.6b context = 375 → soft at 225, hard at 350
+        assert_eq!(should_refresh(100, 375, true), None);
+        assert_eq!(should_refresh(224, 375, true), None);
+        assert_eq!(should_refresh(225, 375, false), None);
+    }
+
+    #[test]
+    fn should_refresh_soft_pause_at_60_percent_context() {
+        assert_eq!(
+            should_refresh(225, 375, true),
+            Some(RefreshKind::SoftPause)
+        );
+    }
+
+    #[test]
+    fn should_refresh_hard_deadline_near_context() {
+        assert_eq!(
+            should_refresh(350, 375, false),
+            Some(RefreshKind::HardDeadline)
+        );
+        assert_eq!(
+            should_refresh(350, 375, true),
+            Some(RefreshKind::HardDeadline)
+        );
+    }
+
+    #[test]
+    fn should_refresh_ignores_zero_context_or_fresh_epoch() {
+        assert_eq!(should_refresh(400, 0, true), None);
+        assert_eq!(should_refresh(0, 375, true), None);
+    }
+
+    #[test]
+    fn word_start_time_keeps_epochs_monotone() {
+        // moshi_start within epoch, minus prefix, plus prior epochs.
+        assert_eq!(KyutaiEngine::word_start_time_raw(2.0, 1.0, 30.0), 31.0);
+        // Prefix still draining: clamp at 0.
+        assert_eq!(KyutaiEngine::word_start_time_raw(0.5, 1.0, 0.0), 0.0);
     }
 }
