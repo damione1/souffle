@@ -125,6 +125,10 @@ impl MeetingAccumulator {
             notes: self.notes,
             calendar_event_id: self.calendar_event_id,
             participants: self.participants,
+            // Recomputed from segments by `Database::load_meeting`; this
+            // transcript goes through `save_meeting`/`upsert_meeting_header`,
+            // neither of which reads this field.
+            speakers: Vec::new(),
         }
     }
 }

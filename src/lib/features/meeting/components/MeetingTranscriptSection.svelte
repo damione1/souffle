@@ -2,14 +2,15 @@
   import { Pencil, RotateCcw } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import CopyButton from "../../../components/ui/CopyButton.svelte";
-  import type { MeetingRecordingSession, TranscriptionSegment } from "../../../types";
-  import { buildMeetingTranscriptBlocks } from "../../../utils";
+  import type { MeetingRecordingSession, MeetingSpeaker, Speaker, TranscriptionSegment } from "../../../types";
+  import { buildMeetingTranscriptBlocks, resolveSpeakerLabel, speakerPlainLabel } from "../../../utils";
 
   let {
     segments,
     recordingSessions,
     liveSessionStartIndex,
     isRecordingMeeting,
+    speakers = [],
     hasEditedTranscript = false,
     isEditing = false,
     editedTranscriptDraft = "",
@@ -25,6 +26,9 @@
     recordingSessions: MeetingRecordingSession[];
     liveSessionStartIndex: number | null;
     isRecordingMeeting: boolean;
+    /** Persistent speakers referenced by this meeting, for resolving
+     * `spk:<id>` labels to a display name; empty for Me/Them-only meetings. */
+    speakers?: MeetingSpeaker[];
     hasEditedTranscript?: boolean;
     isEditing?: boolean;
     editedTranscriptDraft?: string;
@@ -50,11 +54,16 @@
     if (isRecordingMeeting) return "recording_empty";
     return "empty";
   });
+  function copyLinePrefix(speaker: Speaker | null | undefined): string {
+    const label = speakerPlainLabel(speaker, speakers);
+    return label ? `${label} ` : "";
+  }
+
   let copyText = $derived(
     transcriptBlocks
       .map((block) =>
         block.type === "paragraph"
-          ? `${block.speaker ? (block.speaker === "me" ? "Me" : "Them") + " " : ""}[${block.timestamp}] ${block.text}`
+          ? `${copyLinePrefix(block.speaker)}[${block.timestamp}] ${block.text}`
           : `--- ${block.endLabel} ---\n--- ${block.startLabel} ---`,
       )
       .join("\n\n"),
@@ -124,14 +133,21 @@
       {#if phase === "has_content"}
         {#each transcriptBlocks as block}
           {#if block.type === "paragraph"}
+            {@const label = resolveSpeakerLabel(block.speaker, speakers)}
             <div class="flex flex-col gap-[3px]">
               <div class="flex items-center gap-2">
-                {#if block.speaker}
+                {#if label}
                   <span
                     class="text-[11.5px] font-semibold"
-                    class:text-accent={block.speaker === "me"}
-                    class:text-secondary={block.speaker === "them"}
-                  >{block.speaker === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
+                    class:text-accent={label.kind === "me"}
+                    class:text-secondary={label.kind === "them"}
+                  >{label.kind === "me"
+                    ? $t("transcript.me")
+                    : label.kind === "them"
+                      ? $t("transcript.them")
+                      : label.kind === "named"
+                        ? label.name
+                        : $t("transcript.speaker_fallback", { values: { id: label.id } })}</span>
                 {/if}
                 {#if onParagraphClick}
                   <button

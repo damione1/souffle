@@ -5,6 +5,7 @@ pub mod migrate;
 pub mod schema;
 pub mod search;
 pub mod settings;
+pub mod speakers;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -176,6 +177,12 @@ impl Database {
                 schema::migrate_add_structured_summary_to_v11(&conn)?;
                 conn.execute("UPDATE schema_version SET version = 11", [])
                     .map_err(|e| format!("Update schema version v11: {e}"))?;
+            }
+
+            if current_version < 12 {
+                schema::migrate_add_speakers_to_v12(&conn)?;
+                conn.execute("UPDATE schema_version SET version = 12", [])
+                    .map_err(|e| format!("Update schema version v12: {e}"))?;
             }
 
             info!("Schema migration complete");

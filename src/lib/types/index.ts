@@ -29,6 +29,7 @@ export type {
   MeetingListItem,
   MeetingParticipant,
   MeetingRecordingSession,
+  MeetingSpeaker,
   MeetingTranscript,
   ModelArtifactDescriptor,
   SummaryModelDescriptor,
@@ -41,7 +42,6 @@ export type {
   PillHoldKind,
   RecordingKind,
   ShortcutSettings,
-  Speaker,
   SummarizeProgress,
   Theme,
   TodayCalendar,
@@ -64,3 +64,12 @@ export type {
   SearchResult,
   UpdateCheckResult,
 } from "./generated";
+
+/** Who produced a transcript segment: "me", "them", or a persistent
+ * cross-meeting speaker identity encoded as `spk:<id>`. Backend wire format
+ * (see `engine::Speaker` in Rust); specta emits it as a plain `string`
+ * rather than a named union so the `spk:<id>` case doesn't need a literal
+ * type per id. Compare with `===` and use as a `Record` key like any string;
+ * resolve a persistent id's display name via a meeting's `speakers` list
+ * (see `resolveSpeakerLabel` in `../utils/speaker-label`). */
+export type Speaker = string;

@@ -36,6 +36,17 @@ pub struct StructuredSummary {
     pub open_questions: Vec<String>,
 }
 
+/// A persistent speaker referenced by a meeting's segments, resolved for
+/// display. Computed at read time from the `speakers` table joined against
+/// the distinct `spk:<id>` labels in the meeting's segments, not itself
+/// persisted on the meeting row. Empty for meetings with only Me/Them
+/// segments (or no diarization at all).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
+pub struct MeetingSpeaker {
+    pub id: i64,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct MeetingRecordingSession {
     pub id: String,
@@ -105,6 +116,10 @@ pub struct MeetingTranscript {
     /// Attendees captured from the calendar event; shown in the UI and fed
     /// into the summary prompt.
     pub participants: Vec<MeetingParticipant>,
+    /// Persistent speakers referenced by this meeting's segments, for
+    /// resolving `Speaker::Persistent(id)` labels to a display name. Computed
+    /// at read time (see `MeetingSpeaker`); empty for Me/Them-only meetings.
+    pub speakers: Vec<MeetingSpeaker>,
 }
 
 /// Calendar context passed by the frontend when starting a meeting from a
@@ -148,6 +163,11 @@ struct MeetingTranscriptWire {
     calendar_event_id: Option<String>,
     #[serde(default)]
     participants: Vec<MeetingParticipant>,
+    /// Always recomputed at read time (see `Database::load_meeting`); a
+    /// value in a legacy JSON file or wire payload is intentionally ignored.
+    #[serde(default)]
+    #[allow(dead_code)]
+    speakers: Vec<MeetingSpeaker>,
 }
 
 impl<'de> Deserialize<'de> for MeetingTranscript {
@@ -188,6 +208,9 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             notes: wire.notes,
             calendar_event_id: wire.calendar_event_id,
             participants: wire.participants,
+            // Recomputed by the DB layer at read time, never carried over
+            // the wire or from a legacy JSON file.
+            speakers: Vec::new(),
         })
     }
 }
@@ -312,6 +335,7 @@ mod tests {
             notes: None,
             calendar_event_id: None,
             participants: Vec::new(),
+            speakers: Vec::new(),
         };
 
         let json = serde_json::to_string(&meeting).unwrap();
@@ -353,6 +377,7 @@ mod tests {
             notes: None,
             calendar_event_id: None,
             participants: Vec::new(),
+            speakers: Vec::new(),
         };
 
         let item = MeetingListItem::from(&transcript);

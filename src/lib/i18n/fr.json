@@ -233,7 +233,8 @@
   },
   "transcript": {
     "me": "Moi",
-    "them": "Eux"
+    "them": "Eux",
+    "speaker_fallback": "Intervenant {id}"
   },
   "meeting_audio": {
     "play": "Lecture",

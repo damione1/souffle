@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use crate::engine::{Speaker, TranscriptionSegment};
-use crate::transcript::{MeetingTranscript, StructuredSummary};
+use crate::transcript::{MeetingSpeaker, MeetingTranscript, StructuredSummary};
 
 /// Minimum on-screen duration given to a subtitle cue whose segment has a
 /// zero or inverted end time, so SRT/VTT players never render a cue with
@@ -180,7 +180,7 @@ fn render_markdown(meeting: &MeetingTranscript) -> String {
             );
             let rendered = grouped
                 .iter()
-                .map(render_paragraph_markdown)
+                .map(|p| render_paragraph_markdown(p, &meeting.speakers))
                 .collect::<Vec<_>>()
                 .join("\n\n");
             out.push_str(&rendered);
@@ -241,10 +241,29 @@ fn render_structured_markdown(out: &mut String, structured: &StructuredSummary) 
     }
 }
 
-fn render_paragraph_markdown(p: &paragraphs::Paragraph) -> String {
+/// Display name for a speaker label: Me -> "Me", Them -> "Them", a
+/// persistent speaker -> its `MeetingSpeaker.name` if it's in the list
+/// (i.e. still referenced and resolvable), else a "Speaker <id>" fallback.
+fn speaker_display_name(speaker: Speaker, speakers: &[MeetingSpeaker]) -> String {
+    match speaker {
+        Speaker::Me => "Me".to_string(),
+        Speaker::Them => "Them".to_string(),
+        Speaker::Persistent(id) => speakers
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("Speaker {id}")),
+    }
+}
+
+fn render_paragraph_markdown(p: &paragraphs::Paragraph, speakers: &[MeetingSpeaker]) -> String {
     match p.speaker {
-        Some(Speaker::Me) => format!("**Me** [{}] {}", p.timestamp, p.text),
-        Some(Speaker::Them) => format!("**Them** [{}] {}", p.timestamp, p.text),
+        Some(speaker) => format!(
+            "**{}** [{}] {}",
+            speaker_display_name(speaker, speakers),
+            p.timestamp,
+            p.text
+        ),
         None => format!("[{}] {}", p.timestamp, p.text),
     }
 }
@@ -273,10 +292,9 @@ fn time_ordered_segments(segments: &[TranscriptionSegment]) -> Vec<&Transcriptio
     ordered
 }
 
-fn speaker_prefix(speaker: Option<Speaker>, text: &str) -> String {
+fn speaker_prefix(speaker: Option<Speaker>, text: &str, speakers: &[MeetingSpeaker]) -> String {
     match speaker {
-        Some(Speaker::Me) => format!("Me: {text}"),
-        Some(Speaker::Them) => format!("Them: {text}"),
+        Some(speaker) => format!("{}: {text}", speaker_display_name(speaker, speakers)),
         None => text.to_string(),
     }
 }
@@ -318,7 +336,7 @@ fn render_srt(meeting: &MeetingTranscript) -> String {
             "{index}\n{} --> {}\n{}\n\n",
             srt_timestamp(start),
             srt_timestamp(end),
-            speaker_prefix(seg.speaker, text),
+            speaker_prefix(seg.speaker, text, &meeting.speakers),
         ));
         index += 1;
     }
@@ -337,7 +355,7 @@ fn render_vtt(meeting: &MeetingTranscript) -> String {
             "{} --> {}\n{}\n\n",
             vtt_timestamp(start),
             vtt_timestamp(end),
-            speaker_prefix(seg.speaker, text),
+            speaker_prefix(seg.speaker, text, &meeting.speakers),
         ));
     }
     finish_cue_block(out)
@@ -436,8 +454,9 @@ mod paragraphs {
     /// speaker's currently open turn if the gap since that turn's last
     /// segment is under `pause_threshold`; otherwise that speaker's turn
     /// closes and a new one opens. Port of `clusterIntoTurns` in
-    /// `src/lib/utils/paragraphs.ts`; only `Speaker::Me`/`Speaker::Them`
-    /// exist so two plain slots stand in for the TS `Map`.
+    /// `src/lib/utils/paragraphs.ts`; a `HashMap<Speaker, usize>` of open
+    /// turn indices stands in for the TS `Map`, generalizing to any number of
+    /// speakers (not just Me/Them).
     ///
     /// Without a pause, a monologue would otherwise absorb everything
     /// indefinitely, so a second speaker's interjection would render far
@@ -461,50 +480,38 @@ mod paragraphs {
             interrupted: bool,
         }
 
-        let mut open_me: Option<usize> = None;
-        let mut open_them: Option<usize> = None;
+        let mut open_turns: std::collections::HashMap<Speaker, usize> =
+            std::collections::HashMap::new();
         let mut turns: Vec<Turn<'a>> = Vec::new();
 
         for seg in sorted {
             let end = if seg.end_time != 0.0 { seg.end_time } else { seg.start_time };
-            match seg.speaker {
-                None => {
-                    turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
+            let Some(speaker) = seg.speaker else {
+                turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
+                continue;
+            };
+
+            let open_idx = open_turns.get(&speaker).copied();
+            let joins = match open_idx {
+                Some(idx) => seg.start_time - turns[idx].last_end < pause_threshold,
+                None => false,
+            };
+            if let Some(idx) = open_idx.filter(|_| joins) {
+                turns[idx].segments.push(seg);
+                turns[idx].last_end = turns[idx].last_end.max(end);
+                if turns[idx].interrupted && ends_sentence(seg.text.trim()) {
+                    // First sentence end at or after the interruption: close
+                    // now so the speaker's next segment starts a fresh,
+                    // later-sorting turn.
+                    open_turns.remove(&speaker);
                 }
-                Some(speaker) => {
-                    let open_idx = match speaker {
-                        Speaker::Me => open_me,
-                        Speaker::Them => open_them,
-                    };
-                    let joins = match open_idx {
-                        Some(idx) => seg.start_time - turns[idx].last_end < pause_threshold,
-                        None => false,
-                    };
-                    if let Some(idx) = open_idx.filter(|_| joins) {
-                        turns[idx].segments.push(seg);
-                        turns[idx].last_end = turns[idx].last_end.max(end);
-                        if turns[idx].interrupted && ends_sentence(seg.text.trim()) {
-                            // First sentence end at or after the
-                            // interruption: close now so the speaker's next
-                            // segment starts a fresh, later-sorting turn.
-                            match speaker {
-                                Speaker::Me => open_me = None,
-                                Speaker::Them => open_them = None,
-                            }
-                        }
-                    } else {
-                        turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
-                        let new_idx = turns.len() - 1;
-                        match speaker {
-                            Speaker::Me => open_me = Some(new_idx),
-                            Speaker::Them => open_them = Some(new_idx),
-                        }
-                        if let Some(idx) = open_me.filter(|_| speaker != Speaker::Me) {
-                            turns[idx].interrupted = true;
-                        }
-                        if let Some(idx) = open_them.filter(|_| speaker != Speaker::Them) {
-                            turns[idx].interrupted = true;
-                        }
+            } else {
+                turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
+                let new_idx = turns.len() - 1;
+                open_turns.insert(speaker, new_idx);
+                for (&other_speaker, &idx) in open_turns.iter() {
+                    if other_speaker != speaker {
+                        turns[idx].interrupted = true;
                     }
                 }
             }
@@ -856,6 +863,39 @@ mod tests {
         let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
         assert!(rendered.contains("**Me** [0:00] Hi there"));
         assert!(rendered.contains("**Them** [0:02] Hello back"));
+    }
+
+    #[test]
+    fn markdown_paragraphs_resolve_persistent_speaker_name() {
+        let mut meeting = sample_meeting("m1");
+        meeting.segments = vec![diarized_segment("Hi there", 0.0, 1.0, Speaker::Persistent(1))];
+        meeting.speakers = vec![crate::transcript::MeetingSpeaker {
+            id: 1,
+            name: "Alice".to_string(),
+        }];
+        let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
+        assert!(rendered.contains("**Alice** [0:00] Hi there"));
+    }
+
+    #[test]
+    fn markdown_paragraphs_fall_back_to_speaker_id_when_unresolved() {
+        let mut meeting = sample_meeting("m1");
+        meeting.segments = vec![diarized_segment("Hi there", 0.0, 1.0, Speaker::Persistent(99))];
+        // No matching entry in meeting.speakers (deleted, or never resolved).
+        let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
+        assert!(rendered.contains("**Speaker 99** [0:00] Hi there"));
+    }
+
+    #[test]
+    fn srt_resolves_persistent_speaker_name() {
+        let mut meeting = sample_meeting("m1");
+        meeting.segments = vec![diarized_segment("Hi there", 0.0, 1.0, Speaker::Persistent(7))];
+        meeting.speakers = vec![crate::transcript::MeetingSpeaker {
+            id: 7,
+            name: "Bob".to_string(),
+        }];
+        let rendered = render_meeting(&meeting, ExportFormat::Srt).unwrap();
+        assert!(rendered.contains("Bob: Hi there"));
     }
 
     #[test]

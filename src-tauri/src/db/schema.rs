@@ -4,8 +4,9 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 11: meetings.structured_summary JSON column.
-pub const SCHEMA_VERSION: i64 = 11;
+/// Schema version 12: `speakers` table for persistent, cross-meeting speaker
+/// identities resolved by offline diarization.
+pub const SCHEMA_VERSION: i64 = 12;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -117,6 +118,20 @@ pub const CREATE_DICTIONARY: &str = "
         category TEXT,
         created_at TEXT NOT NULL,
         UNIQUE(term)
+    );
+";
+
+/// Persistent, cross-meeting speaker identities resolved by offline
+/// diarization. `centroid` is an opaque BLOB from the DB layer's point of
+/// view: the diarization crate encodes it as 256 little-endian f32s.
+pub const CREATE_SPEAKERS: &str = "
+    CREATE TABLE IF NOT EXISTS speakers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        centroid BLOB,
+        embedding_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL
     );
 ";
 
@@ -405,6 +420,15 @@ pub fn migrate_add_structured_summary_to_v11(conn: &Connection) -> Result<(), St
     Ok(())
 }
 
+/// v12: `speakers` table for persistent, cross-meeting speaker identities.
+/// `segments.speaker` values of the form `spk:<id>` reference this table;
+/// existing "me"/"them" segments are untouched.
+pub fn migrate_add_speakers_to_v12(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(CREATE_SPEAKERS)
+        .map_err(|e| format!("Create speakers table: {e}"))?;
+    Ok(())
+}
+
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
@@ -599,6 +623,67 @@ mod tests {
             columns.iter().any(|column| column == "structured_summary"),
             "v11 migration should add structured_summary column"
         );
+    }
+
+    #[test]
+    fn v11_migrate_to_v12_adds_speakers_table() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        // Minimal v11-era fixture: meetings v3 shape plus the structured_summary
+        // column v11 added, no speakers table yet.
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute(
+            "ALTER TABLE meetings ADD COLUMN structured_summary TEXT",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(CREATE_SEGMENTS).unwrap();
+        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(CREATE_SETTINGS).unwrap();
+        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (11)", [])
+            .unwrap();
+        drop(conn);
+
+        let db = Database::open(&db_path).unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='speakers'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            table_exists,
+            "v12 migration should create the speakers table"
+        );
+
+        let columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(speakers)").unwrap();
+            stmt.query_map([], |row| row.get(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        for expected in [
+            "id",
+            "name",
+            "centroid",
+            "embedding_count",
+            "created_at",
+            "last_seen_at",
+        ] {
+            assert!(
+                columns.iter().any(|column| column == expected),
+                "speakers table should have column {expected}"
+            );
+        }
     }
 
     #[test]
