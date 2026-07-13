@@ -34,3 +34,10 @@ app-icon.png
 /test-results/
 /playwright-report/
 /blob-report/
+
+# Agent / assistant working files
+.serena/
+.claude/
+.cursor/
+AGENTS.md
+CLAUDE.md
