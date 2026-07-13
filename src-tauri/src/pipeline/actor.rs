@@ -1071,6 +1071,15 @@ fn run_session_loop(
                 segments_emitted,
                 audio_rx.len(),
             );
+            if let Some(stats) = engine.context_window_stats() {
+                info!(
+                    session_id,
+                    context_frames = stats.context_frames,
+                    frames_since_refresh = stats.frames_since_refresh,
+                    refresh_count = stats.refresh_count,
+                    "ASR context window heartbeat"
+                );
+            }
         }
 
         // Check for commands (non-blocking)

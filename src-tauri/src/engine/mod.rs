@@ -187,6 +187,15 @@ pub fn transcription_runtime_phase(downloaded: bool, loaded: bool) -> Transcript
 
 /// Runtime interface implemented by each engine family/backend pair.
 /// Product metadata belongs in descriptors, not on the runtime itself.
+/// Optional streaming context diagnostics for engines with a finite LM window
+/// (Kyutai). Exposed on heartbeats so long-meeting freezes are legible in logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextWindowStats {
+    pub context_frames: usize,
+    pub frames_since_refresh: usize,
+    pub refresh_count: u64,
+}
+
 /// Methods take &mut self and there is no Send/Sync bound: engines are
 /// created, used, and dropped on the engine actor thread only.
 pub trait TranscriptionEngine {
@@ -247,6 +256,11 @@ pub trait TranscriptionEngine {
         Err(EngineError::InferenceError(
             "diarization not supported by this engine".into(),
         ))
+    }
+
+    /// Finite LM context window stats when the engine tracks them (Kyutai).
+    fn context_window_stats(&self) -> Option<ContextWindowStats> {
+        None
     }
 }
 
