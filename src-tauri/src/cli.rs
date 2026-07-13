@@ -31,6 +31,11 @@ struct CliArgs {
     #[arg(long, value_name = "WAV")]
     transcribe_file: Option<PathBuf>,
 
+    /// Run offline speaker diarization on a WAV file and exit. Downloads the
+    /// segmentation/embedding models on first use.
+    #[arg(long, value_name = "WAV")]
+    diarize_file: Option<PathBuf>,
+
     /// Override the selected transcription engine id.
     #[arg(long)]
     engine: Option<String>,
@@ -63,7 +68,7 @@ struct CliArgs {
 
 impl CliArgs {
     fn is_headless(&self) -> bool {
-        self.transcribe_file.is_some() || self.list_models || self.list_engines
+        self.transcribe_file.is_some() || self.diarize_file.is_some() || self.list_models || self.list_engines
     }
 }
 
@@ -102,6 +107,8 @@ fn has_headless_flag(args: &[String]) -> bool {
     args.iter().any(|a| {
         a == "--transcribe-file"
             || a.starts_with("--transcribe-file=")
+            || a == "--diarize-file"
+            || a.starts_with("--diarize-file=")
             || a == "--list-models"
             || a == "--list-engines"
     })
@@ -136,8 +143,12 @@ fn run(cli: CliArgs) -> i32 {
         return list_models(cli.json);
     }
 
+    if let Some(wav_path) = cli.diarize_file.clone() {
+        return run_diarize(&wav_path, cli.json);
+    }
+
     let Some(wav_path) = cli.transcribe_file.clone() else {
-        eprintln!("No action requested. Use --transcribe-file, --list-models, or --list-engines.");
+        eprintln!("No action requested. Use --transcribe-file, --diarize-file, --list-models, or --list-engines.");
         return 1;
     };
 
@@ -192,6 +203,73 @@ fn run(cli: CliArgs) -> i32 {
 
     print_outcome(&cli, &profile, source, &outcome);
     0
+}
+
+/// `--diarize-file`: load/download the two diarization models, resample the
+/// WAV to 16kHz mono, run offline speaker diarization, and print the result.
+fn run_diarize(wav_path: &Path, json: bool) -> i32 {
+    if !crate::diarize::models::models_downloaded()
+        && let Err(e) = crate::diarize::models::download_models(&|progress| {
+            eprintln!(
+                "Downloading {} ({}/{})...",
+                progress.file, progress.completed_files, progress.total_files
+            );
+        })
+    {
+        eprintln!("Error: failed to download diarization models: {e}");
+        return 1;
+    }
+
+    let wav = match load_wav(wav_path) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return 1;
+        }
+    };
+
+    let samples = resample_to_engine_rate(wav.samples, wav.sample_rate, crate::diarize::segmentation::SAMPLE_RATE);
+
+    let cfg = crate::diarize::DiarizeConfig::new(
+        crate::diarize::models::segmentation_model_path(),
+        crate::diarize::models::embedding_model_path(),
+    );
+
+    let result = match crate::diarize::diarize(&samples, crate::diarize::segmentation::SAMPLE_RATE, &cfg) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: diarization failed: {e}");
+            return 2;
+        }
+    };
+
+    print_diarization_result(&result, json);
+    0
+}
+
+fn print_diarization_result(result: &crate::diarize::DiarizationResult, json: bool) {
+    if json {
+        let json_value = serde_json::json!({
+            "speaker_count": result.speakers.len(),
+            "segments": result.segments.iter().map(|s| serde_json::json!({
+                "start_ms": s.start_ms,
+                "end_ms": s.end_ms,
+                "speaker": s.speaker,
+            })).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string(&json_value).unwrap_or_default());
+        return;
+    }
+
+    println!("Detected {} speaker(s), {} segment(s)", result.speakers.len(), result.segments.len());
+    for seg in &result.segments {
+        println!(
+            "[{:>8.2}s .. {:>8.2}s] speaker {}",
+            seg.start_ms as f64 / 1000.0,
+            seg.end_ms as f64 / 1000.0,
+            seg.speaker
+        );
+    }
 }
 
 fn init_cli_logging(quiet: bool) {
@@ -612,6 +690,18 @@ mod tests {
     }
 
     #[test]
+    fn has_headless_flag_detects_diarize_file() {
+        let args = vec!["souffle".to_string(), "--diarize-file".to_string(), "x.wav".to_string()];
+        assert!(has_headless_flag(&args));
+    }
+
+    #[test]
+    fn has_headless_flag_detects_diarize_file_equals_form() {
+        let args = vec!["souffle".to_string(), "--diarize-file=x.wav".to_string()];
+        assert!(has_headless_flag(&args));
+    }
+
+    #[test]
     fn has_headless_flag_detects_list_models() {
         let args = vec!["souffle".to_string(), "--list-models".to_string()];
         assert!(has_headless_flag(&args));
@@ -674,6 +764,15 @@ mod tests {
         assert_eq!(cli.backend.as_deref(), Some("whisper-rs"));
         assert!(cli.json);
         assert_eq!(cli.repeat, 3);
+        assert!(cli.is_headless());
+    }
+
+    #[test]
+    fn parses_diarize_file_with_json() {
+        let args = ["souffle", "--diarize-file", "in.wav", "--json"];
+        let cli = CliArgs::try_parse_from(args).unwrap();
+        assert_eq!(cli.diarize_file, Some(PathBuf::from("in.wav")));
+        assert!(cli.json);
         assert!(cli.is_headless());
     }
 

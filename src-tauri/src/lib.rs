@@ -9,6 +9,7 @@ pub mod constants;
 pub mod db;
 pub mod debug;
 pub mod diagnostics;
+pub mod diarize;
 pub mod engine;
 pub mod errors;
 pub mod export;
