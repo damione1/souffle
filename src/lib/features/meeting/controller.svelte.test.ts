@@ -152,6 +152,7 @@ function makeMeeting(overrides: Partial<MeetingTranscript> = {}): MeetingTranscr
     notes: null,
     calendar_event_id: null,
     participants: [],
+    speakers: [],
     ...overrides,
   };
 }

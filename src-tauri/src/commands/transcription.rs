@@ -52,6 +52,8 @@ fn meeting_header(acc: &MeetingAccumulator) -> MeetingTranscript {
         notes: acc.notes.clone(),
         calendar_event_id: acc.calendar_event_id.clone(),
         participants: acc.participants.clone(),
+        // Header-only write; `speakers` is recomputed by `load_meeting`.
+        speakers: Vec::new(),
     }
 }
 

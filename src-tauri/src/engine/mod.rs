@@ -265,20 +265,31 @@ pub trait TranscriptionEngine {
 }
 
 /// Who produced a segment in a diarized meeting: the microphone is the local
-/// user (Me), system audio is everyone else (Them). `None` = single-stream
-/// session (dictation, or a meeting recorded without diarization).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "lowercase")]
+/// user (Me), system audio is everyone else (Them), or a persistent speaker
+/// identity resolved by offline diarization (`Persistent`, keyed by the
+/// `speakers.id` row). `None` = single-stream session (dictation, or a
+/// meeting recorded without diarization).
+///
+/// Wire/DB encoding is always a plain string: "me", "them", or "spk:<id>".
+/// Serialize/Deserialize/specta::Type are implemented by hand below (instead
+/// of derived) so the `Persistent` variant's payload still round-trips
+/// through a single string on the wire, and the generated TypeScript type is
+/// a plain `string` rather than a tagged union.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Speaker {
     Me,
     Them,
+    /// A persistent, cross-meeting speaker identity. The `i64` is the
+    /// `speakers.id` primary key.
+    Persistent(i64),
 }
 
 impl Speaker {
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> String {
         match self {
-            Speaker::Me => "me",
-            Speaker::Them => "them",
+            Speaker::Me => "me".to_string(),
+            Speaker::Them => "them".to_string(),
+            Speaker::Persistent(id) => format!("spk:{id}"),
         }
     }
 
@@ -286,8 +297,43 @@ impl Speaker {
         match s {
             "me" => Some(Speaker::Me),
             "them" => Some(Speaker::Them),
-            _ => None,
+            other => other
+                .strip_prefix("spk:")
+                .and_then(|id| id.parse::<i64>().ok())
+                .map(Speaker::Persistent),
         }
+    }
+}
+
+impl serde::Serialize for Speaker {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Speaker {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Speaker::parse(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid speaker: {s:?}")))
+    }
+}
+
+/// Manual impl (rather than `#[derive(specta::Type)]`) so the generated
+/// TypeScript type is a plain `string` ("me" | "them" | `spk:<id>`), matching
+/// the hand-written `Serialize`/`Deserialize` above.
+impl specta::Type for Speaker {
+    fn inline(
+        type_map: &mut specta::TypeCollection,
+        generics: specta::Generics,
+    ) -> specta::DataType {
+        <String as specta::Type>::inline(type_map, generics)
     }
 }
 
