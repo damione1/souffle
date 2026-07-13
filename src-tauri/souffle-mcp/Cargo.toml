@@ -3,7 +3,7 @@ name = "souffle-mcp"
 version = "0.1.0"
 description = "Standalone MCP stdio server exposing Souffle meeting transcripts, summaries, and dictation history to AI assistants"
 authors = ["Damien Goehrig"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 edition = "2024"
 
 [lib]

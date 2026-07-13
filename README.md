@@ -12,7 +12,7 @@
 </p>
 
 <p>
-  <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg">
+  <img alt="License: GPL v3" src="https://img.shields.io/badge/License-GPLv3-blue.svg">
   <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white">
   <img alt="Svelte 5" src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white">
   <img alt="macOS Apple Silicon" src="https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey">
@@ -103,4 +103,6 @@ npm run tauri dev
 
 ## License
 
-Released under the MIT License.
+Copyright (c) 2026 Damien Goehrig.
+
+Released under the GNU General Public License v3.0 or later (GPL-3.0-or-later). You are free to use, study, modify, and redistribute this software, provided that derivative works are also published under the same license. See [LICENSE.md](LICENSE.md) for the full text.
