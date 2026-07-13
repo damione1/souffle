@@ -866,6 +866,17 @@ impl AudioCapture {
             .play()
             .map_err(|e| format!("Failed to start stream: {e}"))?;
 
+        // Accept mic samples into the ring buffer from here on, even though
+        // `spawn_tap` below can block this thread for up to its 5s timeout
+        // when coreaudiod is slow or wedged. The mic callback gates on this
+        // id, so storing it only after the tap resolves silently dropped
+        // every mic sample captured during that wait, up to several
+        // seconds of the meeting's start, despite the mixer/meeting_tick not
+        // running yet to drain them. The ring buffer (~2s capacity) still
+        // bounds how much of a slow tap's wait it can retain, but that beats
+        // discarding all of it outright.
+        self.active_session_id.store(session_id, Ordering::Release);
+
         #[cfg(target_os = "macos")]
         let (tap, tap_rate) = match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
             Ok(tap) => {
@@ -910,7 +921,6 @@ impl AudioCapture {
         #[cfg(not(target_os = "macos"))]
         let aec_active = false;
 
-        self.active_session_id.store(session_id, Ordering::Release);
         self.stream = Some(stream);
         self.meeting = Some(MeetingState {
             session_id,

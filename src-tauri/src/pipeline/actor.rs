@@ -623,10 +623,17 @@ impl EngineActor {
         // The idle pre-warm (see `prewarm_single_stream`) keeps the engine
         // state reset for dictation between sessions; skip the reset here
         // (a full model rebuild for Kyutai, on the order of seconds) when
-        // the requested mode already matches what's pre-warmed. A meeting
-        // start (diarize=true) after a dictation pre-warm still pays it,
-        // since that flow starts from a UI click and tolerates the latency.
-        if self.state_fresh_for == Some(diarize) {
+        // the requested mode already matches what's pre-warmed. A diarized
+        // meeting start always pays the reset: `prewarm_single_stream` only
+        // ever leaves the engine fresh for single-stream (batch size 1), so
+        // a diarized session must never take the skip path even if
+        // `state_fresh_for` ever changed shape. This is checked explicitly
+        // (`!diarize`) rather than relying on `state_fresh_for` never
+        // being `Some(true)`, so a future pre-warm change can't silently let
+        // a meeting reuse single-stream state and produce a session that
+        // decodes with the wrong batch layout.
+        let can_skip_reset = !diarize && self.state_fresh_for == Some(false);
+        if can_skip_reset {
             info!(session_id, diarize, "Engine state pre-warmed, skipping reset_state");
         } else {
             let reset_start = Instant::now();
