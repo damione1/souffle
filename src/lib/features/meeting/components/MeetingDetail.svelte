@@ -83,6 +83,7 @@
       recordingSessions={controller.meeting.recording_sessions}
       liveSessionStartIndex={liveSessionStartIndex}
       isRecordingMeeting={controller.isRecordingMeeting}
+      speakers={controller.meeting.speakers}
       hasEditedTranscript={controller.meeting.edited_transcript != null}
       isEditing={controller.isEditingTranscript}
       editedTranscriptDraft={controller.editedTranscriptDraft}

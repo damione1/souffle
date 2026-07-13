@@ -4,8 +4,8 @@ use rusqlite::params;
 use crate::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
 use crate::transcript::{
-    MeetingListItem, MeetingParticipant, MeetingRecordingSession, MeetingTranscript,
-    StructuredSummary,
+    MeetingListItem, MeetingParticipant, MeetingRecordingSession, MeetingSpeaker,
+    MeetingTranscript, StructuredSummary,
 };
 
 use super::Database;
@@ -357,10 +357,24 @@ impl Database {
             .map_err(|e| format!("Query segments: {e}"))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect segments: {e}"))?;
+        drop(stmt);
+        // `speakers_for_meeting` acquires the connection lock itself, so the
+        // guard held by this function must be released first (the Mutex is
+        // not reentrant).
+        drop(conn);
+
         let transcription_profile = meeting.transcription_profile()?;
         let recording_sessions = meeting.recording_sessions()?;
         let participants = meeting.participants()?;
         let structured_summary = meeting.structured_summary()?;
+        let speakers = self
+            .speakers_for_meeting(id)?
+            .into_iter()
+            .map(|record| MeetingSpeaker {
+                id: record.id,
+                name: record.name,
+            })
+            .collect();
         let started_at = parse_datetime(&meeting.started_at)?;
         let ended_at = meeting
             .ended_at
@@ -391,6 +405,7 @@ impl Database {
             calendar_event_id: meeting.calendar_event_id,
             participants,
             structured_summary,
+            speakers,
         })
     }
 
@@ -649,6 +664,38 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
 mod tests {
     use crate::engine::TranscriptionProfile;
     use crate::test_helpers::fixtures::{sample_meeting, test_db};
+
+    #[test]
+    fn load_meeting_resolves_persistent_speakers() {
+        use crate::engine::Speaker;
+
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        meeting.segments[1].speaker = Some(Speaker::Persistent(bob));
+        db.save_meeting(&meeting).unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Persistent(alice)));
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(bob)));
+        assert_eq!(
+            loaded.speakers.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![alice, bob]
+        );
+        assert_eq!(loaded.speakers[0].name, "Alice");
+        assert_eq!(loaded.speakers[1].name, "Bob");
+    }
+
+    #[test]
+    fn load_meeting_speakers_empty_for_me_them_only() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        let loaded = db.load_meeting("m1").unwrap();
+        assert!(loaded.speakers.is_empty());
+    }
 
     #[test]
     fn save_and_load_meeting() {

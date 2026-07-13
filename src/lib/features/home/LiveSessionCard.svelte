@@ -9,6 +9,7 @@
   import type { LiveParagraph } from "../meeting/live-transcript.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
+  import { resolveSpeakerLabel } from "../../utils";
 
   let {
     mode,
@@ -19,6 +20,12 @@
     transcription: ReturnType<typeof createTranscriptionController>;
     meeting: ReturnType<typeof createMeetingController>;
   } = $props();
+
+  // Live paragraphs only ever tag Me/Them today (persistent speaker
+  // identities aren't wired into the live pipeline yet), but resolve
+  // through the same helper as the finished transcript view for consistency
+  // and forward-compatibility.
+  const liveSpeakers = $derived(meeting.meeting?.speakers ?? []);
 
   /** Only the most recent paragraphs stay in the DOM; older ones are still in
    * `meeting.liveTranscript.committed` but are never rendered live. */
@@ -227,14 +234,21 @@
           <span class="text-sm text-text-muted">{$t("home.listening")}</span>
         {:else}
           {#each liveParagraphs as paragraph, i (paragraph.id)}
+            {@const label = resolveSpeakerLabel(paragraph.speaker, liveSpeakers)}
             <div class="flex flex-col gap-[3px]" style="animation: rise-in 240ms ease;">
               <div class="flex items-center gap-2">
-                {#if paragraph.speaker}
+                {#if label}
                   <span
                     class="text-[11.5px] font-semibold"
-                    class:text-accent={paragraph.speaker === "me"}
-                    class:text-secondary={paragraph.speaker === "them"}
-                  >{paragraph.speaker === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
+                    class:text-accent={label.kind === "me"}
+                    class:text-secondary={label.kind === "them"}
+                  >{label.kind === "me"
+                    ? $t("transcript.me")
+                    : label.kind === "them"
+                      ? $t("transcript.them")
+                      : label.kind === "named"
+                        ? label.name
+                        : $t("transcript.speaker_fallback", { values: { id: label.id } })}</span>
                 {/if}
                 <span class="font-mono text-[10.5px] text-text-faint">{paragraph.timestamp}</span>
               </div>

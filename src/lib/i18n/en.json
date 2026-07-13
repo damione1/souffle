@@ -248,7 +248,8 @@
   },
   "transcript": {
     "me": "Me",
-    "them": "Them"
+    "them": "Them",
+    "speaker_fallback": "Speaker {id}"
   },
   "meeting_audio": {
     "play": "Play",

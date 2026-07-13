@@ -1146,6 +1146,14 @@ export type MeetingListItem = { id: string; title: string; started_at: string; d
 export type MeetingParticipant = { name: string; email: string | null; is_organizer: boolean; is_current_user: boolean }
 export type MeetingRecordingSession = { id: string; started_at: string; ended_at: string; duration_seconds: number; start_segment_index: number; end_segment_index: number }
 /**
+ * A persistent speaker referenced by a meeting's segments, resolved for
+ * display. Computed at read time from the `speakers` table joined against
+ * the distinct `spk:<id>` labels in the meeting's segments, not itself
+ * persisted on the meeting row. Empty for meetings with only Me/Them
+ * segments (or no diarization at all).
+ */
+export type MeetingSpeaker = { id: number; name: string }
+/**
  * Emitted by the floating recording pill (or the tray) to ask the meeting
  * controller in the main window to stop the active meeting through its
  * normal stop pipeline.
@@ -1168,7 +1176,13 @@ calendar_event_id: string | null;
  * Attendees captured from the calendar event; shown in the UI and fed
  * into the summary prompt.
  */
-participants: MeetingParticipant[] }
+participants: MeetingParticipant[]; 
+/**
+ * Persistent speakers referenced by this meeting's segments, for
+ * resolving `Speaker::Persistent(id)` labels to a display name. Computed
+ * at read time (see `MeetingSpeaker`); empty for Me/Them-only meetings.
+ */
+speakers: MeetingSpeaker[] }
 /**
  * How long recorded meeting audio is kept on disk before the startup sweep
  * deletes it. Opt-in: recording itself only happens when this is not `Off`.
@@ -1231,12 +1245,6 @@ export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
-/**
- * Who produced a segment in a diarized meeting: the microphone is the local
- * user (Me), system audio is everyone else (Them). `None` = single-stream
- * session (dictation, or a meeting recorded without diarization).
- */
-export type Speaker = "me" | "them"
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.
@@ -1349,7 +1357,7 @@ export type TranscriptionSegment = { text: string; start_time: number; end_time:
 /**
  * Set by the pipeline for diarized meetings; `None` otherwise.
  */
-speaker?: Speaker | null }
+speaker?: string | null }
 /**
  * Emitted by the calendar reminder scheduler shortly before a calendar
  * event starts, so the frontend can offer a one-click transcription start.

@@ -291,6 +291,7 @@ function createMeetingControllerInstance() {
         notes: null,
         calendar_event_id: calendar?.event_id ?? null,
         participants: calendar?.participants ?? [],
+        speakers: [],
       };
     } catch (e) {
       statusMessage = errorMessage(e);
