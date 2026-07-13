@@ -79,6 +79,12 @@ ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dy
 parakeet-rs = { version = "=0.3.6", default-features = false, features = ["load-dynamic"] }
 strsim = "0.11"
 regex = "1"
+# Offline speaker diarization (src-tauri/src/diarize): tensor plumbing for the
+# ort sessions (already an ort dependency, pinned here to the same resolved
+# version) and a pure-Rust FFT for the Kaldi-style fbank frontend feeding the
+# WeSpeaker embedding model (already resolved transitively via rubato).
+ndarray = "0.17"
+rustfft = "6.4"
 
 # Phase 3: Clipboard/paste + Ollama
 arboard = "3"
