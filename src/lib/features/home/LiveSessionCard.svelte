@@ -156,7 +156,20 @@
       {/if}
     </div>
   {:else}
-    {#if mode === "meeting" && meeting.idleSignal}
+    {#if mode === "meeting" && meeting.endNudgeSignal}
+      <div class="flex items-center gap-3 rounded-default bg-warning/10 px-4 py-3 outline-1 outline-warning/30">
+        <AlarmClockOff size={16} class="shrink-0 text-warning" aria-hidden="true" />
+        <p class="m-0 min-w-0 flex-1 text-sm text-warning">
+          {$t("home.end_nudge_banner")}
+        </p>
+        <button onclick={stop} class="btn btn-danger btn-sm shrink-0" disabled={stopping}>
+          {$t("home.idle_stop_now")}
+        </button>
+        <button onclick={() => meeting.dismissEndNudge()} class="btn btn-sm shrink-0">
+          {$t("home.idle_keep_recording")}
+        </button>
+      </div>
+    {:else if mode === "meeting" && meeting.idleSignal}
       <div class="flex items-center gap-3 rounded-default bg-warning/10 px-4 py-3 outline-1 outline-warning/30">
         <AlarmClockOff size={16} class="shrink-0 text-warning" aria-hidden="true" />
         <p class="m-0 min-w-0 flex-1 text-sm text-warning">

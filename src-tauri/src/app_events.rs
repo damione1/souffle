@@ -123,6 +123,41 @@ pub struct UpcomingMeeting {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
+pub enum MeetingStartNudgeSource {
+    Process,
+    AudioActivity,
+    Calendar,
+}
+
+/// Coalesced suggestion to start a meeting transcription from process,
+/// system-audio activity, and/or an in-progress calendar event.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct MeetingStartNudge {
+    pub title: String,
+    pub source: MeetingStartNudgeSource,
+    pub app_label: Option<String>,
+    pub calendar_event: Option<crate::calendar::CalendarEvent>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingEndNudgeReason {
+    AppTerminated,
+    KnownAppMicStopped,
+    MicInactive,
+}
+
+/// Strong meeting-end signal from process/microphone detection during an
+/// active recording. Drives the live-card banner with a short auto-stop
+/// countdown; silence-based idle detection continues independently.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct MeetingEndNudge {
+    pub reason: MeetingEndNudgeReason,
+    pub app_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
 pub enum MeetingIdleReason {
     /// No transcript segment with text for the configured silence threshold.
     Silence,

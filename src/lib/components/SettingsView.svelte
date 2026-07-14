@@ -149,6 +149,9 @@
       meetingAutostopEnabled={controller.app.settings.meeting_autostop_enabled}
       meetingAutostopMinutes={controller.app.settings.meeting_autostop_minutes}
       meetingMaxDurationMinutes={controller.app.settings.meeting_max_duration_minutes}
+      meetingDetectSupported={controller.meetingDetectSupported}
+      meetingSmartStartEnabled={controller.app.settings.meeting_smart_start_enabled}
+      meetingSmartStopEnabled={controller.app.settings.meeting_smart_stop_enabled}
       meetingTranscriptionLanguage={controller.app.settings.meeting_transcription_language}
       onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
       onClamshellDeviceChange={controller.onClamshellDeviceChange}
@@ -159,6 +162,8 @@
       onMeetingAutostopEnabledChange={controller.onMeetingAutostopEnabledChange}
       onMeetingAutostopMinutesChange={controller.onMeetingAutostopMinutesChange}
       onMeetingMaxDurationMinutesChange={controller.onMeetingMaxDurationMinutesChange}
+      onMeetingSmartStartEnabledChange={controller.onMeetingSmartStartEnabledChange}
+      onMeetingSmartStopEnabledChange={controller.onMeetingSmartStopEnabledChange}
       onMeetingTranscriptionLanguageChange={controller.onMeetingTranscriptionLanguageChange}
     />
 

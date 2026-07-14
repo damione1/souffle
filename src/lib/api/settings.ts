@@ -29,6 +29,10 @@ export async function getSystemAudioSupport(): Promise<boolean> {
   return commands.getSystemAudioSupport();
 }
 
+export async function getMeetingDetectSupport(): Promise<boolean> {
+  return commands.getMeetingDetectSupport();
+}
+
 export async function isLaptop(): Promise<boolean> {
   return commands.isLaptop();
 }

@@ -1,7 +1,8 @@
 import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
-import {
-  deleteMeeting as removeMeeting,
-  exportMeetingFilename,
+  import {
+    deleteMeeting as removeMeeting,
+    dismissMeetingEndNudge,
+    exportMeetingFilename,
   exportMeetingToFile,
   getMeeting,
   getMeetingAudio,
@@ -17,7 +18,7 @@ import {
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+  import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingEndNudge, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -31,6 +32,9 @@ function defaultMeetingTitle(): string {
 /** Extra silence tolerated after the banner first appears before auto-stop
  * kicks in, on top of the configured silence threshold. */
 const SILENCE_AUTOSTOP_GRACE_SECONDS = 120;
+
+/** Grace after a strong end nudge before auto-stop (backend uses the same window). */
+const END_NUDGE_AUTOSTOP_SECONDS = 10;
 
 function createMeetingControllerInstance() {
   const app = getAppState();
@@ -70,9 +74,13 @@ function createMeetingControllerInstance() {
 
   // Meeting-idle ("meeting seems to be over") banner state.
   let idleSignal = $state<MeetingIdle | null>(null);
+  // Strong end signal from process/mic detection during recording.
+  let endNudgeSignal = $state<MeetingEndNudge | null>(null);
   // True once the user dismissed the current silence episode ("keep
   // recording"); suppresses further banners until a segment re-arms it.
   let idleDismissed = $state(false);
+  let endNudgeDismissed = $state(false);
+  let endNudgeTimer: ReturnType<typeof setTimeout> | null = null;
 
   let isRecordingMeeting = $derived(
     app.machineState.state === "recording_meeting"
@@ -210,9 +218,28 @@ function createMeetingControllerInstance() {
 
   /** Speech activity (a new segment) or a fresh recording resets the idle
    * banner and re-arms it for the next episode of silence. */
+  function clearEndNudgeState() {
+    endNudgeSignal = null;
+    endNudgeDismissed = false;
+    if (endNudgeTimer) {
+      clearTimeout(endNudgeTimer);
+      endNudgeTimer = null;
+    }
+  }
+
   function clearIdleState() {
     idleSignal = null;
     idleDismissed = false;
+    clearEndNudgeState();
+  }
+
+  function scheduleEndNudgeAutostop() {
+    if (endNudgeTimer) clearTimeout(endNudgeTimer);
+    endNudgeTimer = setTimeout(() => {
+      if (endNudgeSignal && !endNudgeDismissed && isRecordingMeeting) {
+        void stopRecording();
+      }
+    }, END_NUDGE_AUTOSTOP_SECONDS * 1000);
   }
 
   async function refreshSummaryProviders() {
@@ -378,7 +405,7 @@ function createMeetingControllerInstance() {
   /** The backend detected the meeting has probably ended (silence or the
    * max-duration failsafe). Ignored outside an active meeting recording. */
   function handleMeetingIdle(payload: MeetingIdle) {
-    if (!isRecordingMeeting) return;
+    if (!isRecordingMeeting || endNudgeSignal) return;
 
     if (payload.reason === "max_duration") {
       if (isStopping) return;
@@ -394,6 +421,25 @@ function createMeetingControllerInstance() {
     if (payload.idle_seconds >= payload.threshold_seconds + SILENCE_AUTOSTOP_GRACE_SECONDS) {
       void stopRecording();
     }
+  }
+
+  /** Strong end signal: meeting app closed or mic no longer captured. */
+  function handleMeetingEndNudge(payload: MeetingEndNudge) {
+    if (!isRecordingMeeting || endNudgeDismissed) return;
+    endNudgeSignal = payload;
+    idleSignal = null;
+    scheduleEndNudgeAutostop();
+  }
+
+  /** "Keep recording" after a strong end nudge. */
+  function dismissEndNudge() {
+    endNudgeDismissed = true;
+    endNudgeSignal = null;
+    if (endNudgeTimer) {
+      clearTimeout(endNudgeTimer);
+      endNudgeTimer = null;
+    }
+    void dismissMeetingEndNudge().catch(() => {});
   }
 
   /** "Keep recording": suppress the banner until speech resumes. */
@@ -614,6 +660,8 @@ function createMeetingControllerInstance() {
     get notesSaveState() { return notesSaveState; },
     get idleSignal() { return idleSignal; },
     get idleDismissed() { return idleDismissed; },
+    get endNudgeSignal() { return endNudgeSignal; },
+    get endNudgeDismissed() { return endNudgeDismissed; },
     onNotesChange,
     flushNotes,
     mount,
@@ -635,7 +683,9 @@ function createMeetingControllerInstance() {
     handleRecordingAborted,
     handleMeetingFinalized,
     handleMeetingIdle,
+    handleMeetingEndNudge,
     dismissIdle,
+    dismissEndNudge,
     resumeAfterSystemWake,
   };
 }
@@ -664,6 +714,10 @@ export function notifyMeetingStopRequested() {
  * meeting has probably ended (silence or the max-duration failsafe). */
 export function notifyMeetingIdle(payload: MeetingIdle) {
   instance?.handleMeetingIdle(payload);
+}
+
+export function notifyMeetingEndNudge(payload: MeetingEndNudge) {
+  instance?.handleMeetingEndNudge(payload);
 }
 
 /** Called from the global SystemWokeUp listener and from the webview

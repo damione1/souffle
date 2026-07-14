@@ -154,6 +154,8 @@ pub struct AppState {
     /// (as opposed to a user-initiated stop), so the frontend can offer to
     /// resume it after wake. Cleared by `take_sleep_paused_meeting`.
     pub sleep_paused_meeting_id: Mutex<Option<String>>,
+    /// Strong meeting-end auto-stop monitor, shared with the smart coordinator.
+    pub meeting_end_monitor: std::sync::Arc<Mutex<crate::audio::meeting_smart::EndNudgeMonitor>>,
 }
 
 impl AppState {
@@ -175,6 +177,9 @@ impl AppState {
             machine: Mutex::new(AppStateMachine::Idle),
             app_handle: Mutex::new(None),
             sleep_paused_meeting_id: Mutex::new(None),
+            meeting_end_monitor: std::sync::Arc::new(Mutex::new(
+                crate::audio::meeting_smart::EndNudgeMonitor::default(),
+            )),
         }
     }
 

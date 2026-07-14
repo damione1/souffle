@@ -35,6 +35,11 @@
     "meeting_max_duration_2h": "2 heures",
     "meeting_max_duration_4h": "4 heures",
     "meeting_max_duration_8h": "8 heures",
+    "meeting_smart_start": "Suggérer de démarrer les réunions",
+    "meeting_smart_start_desc": "Notification quand une app de réunion utilise le micro, l'audio système est actif, ou un événement calendrier est en cours. La détection par app requiert macOS 14.4+.",
+    "meeting_smart_start_desc_legacy": "Notification quand l'audio système est actif ou qu'un événement calendrier est en cours. La détection par app n'est pas disponible sur ce Mac (macOS 14.4+ requis).",
+    "meeting_smart_stop": "Détecter la fin (apps et micro)",
+    "meeting_smart_stop_desc": "Pendant l'enregistrement, proposer d'arrêter quand l'app de réunion se ferme ou que le micro n'est plus utilisé. Complète la détection par silence.",
     "meeting_transcription_language": "Langue de la réunion",
     "meeting_transcription_language_desc": "Indication pour la détection de langue pendant les réunions. N'impose pas la langue au modèle.",
     "meeting_transcription_language_auto": "Détection automatique",
@@ -379,6 +384,7 @@
     "live_transcript": "Transcription en direct",
     "system_audio_active": "Audio système actif",
     "idle_silence_banner": "Aucune parole détectée depuis {minutes} min. L'enregistrement va bientôt s'arrêter.",
+    "end_nudge_banner": "La réunion semble terminée. Arrêt dans environ 10 s.",
     "idle_stop_now": "Arrêter maintenant",
     "idle_keep_recording": "Continuer l'enregistrement"
   },
@@ -426,5 +432,9 @@
     "starts_in_minutes": "Commence dans {minutes} min",
     "started_system_audio": "Réunion commencée — audio système actif",
     "dismiss": "Ignorer"
+  },
+  "meeting_smart": {
+    "start_process": "{app} utilise le micro",
+    "start_audio": "L'audio système est actif"
   }
 }

@@ -16,6 +16,7 @@
   import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
   import {
     notifyMeetingAborted,
+    notifyMeetingEndNudge,
     notifyMeetingFinalized,
     notifyMeetingIdle,
     notifyMeetingStopRequested,
@@ -43,6 +44,8 @@
   let unlistenMeetingFinalized: (() => void) | null = null;
   let unlistenUpcomingMeeting: (() => void) | null = null;
   let unlistenMeetingIdle: (() => void) | null = null;
+  let unlistenMeetingEndNudge: (() => void) | null = null;
+  let unlistenMeetingStartNudge: (() => void) | null = null;
   let unlistenSystemWokeUp: (() => void) | null = null;
 
   const healthDegraded = $derived(
@@ -198,6 +201,18 @@
       unlistenMeetingIdle = fn;
     });
 
+    events.meetingEndNudge.listen((event) => {
+      notifyMeetingEndNudge(event.payload);
+    }).then((fn) => {
+      unlistenMeetingEndNudge = fn;
+    });
+
+    events.meetingStartNudge.listen((event) => {
+      app.meetingStartNudge = event.payload;
+    }).then((fn) => {
+      unlistenMeetingStartNudge = fn;
+    });
+
     events.systemWokeUp.listen(() => {
       notifySystemWokeUp();
     }).then((fn) => {
@@ -225,6 +240,8 @@
       unlistenMeetingFinalized?.();
       unlistenUpcomingMeeting?.();
       unlistenMeetingIdle?.();
+      unlistenMeetingEndNudge?.();
+      unlistenMeetingStartNudge?.();
       unlistenSystemWokeUp?.();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };

@@ -1,12 +1,12 @@
-//! Meeting-app detection signals (groundwork; no start/stop policy yet).
+//! Meeting-app detection signals consumed by the smart start/stop coordinator.
 //!
 //! Observes known video-call apps via three macOS sources:
 //! - CoreAudio per-process input capture (macOS 14.4+, ~1 s poll)
 //! - `DeviceIsRunningSomewhere` on the default input device (macOS 13+ fallback)
 //! - `NSWorkspace` launch/terminate notifications
 //!
-//! Emits typed begin/end signals and logs them. Recording start/stop policy is
-//! handled elsewhere.
+//! Emits typed begin/end signals on an optional mpsc bus (and logs them).
+//! Start/stop nudge policy lives in `meeting_smart`.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -225,14 +225,15 @@ pub struct MeetingDetectHandle {
 pub struct MeetingDetectHandle;
 
 /// Start meeting-detect watchers. Must be called from the main thread (NSWorkspace).
+/// When `signal_tx` is set, every emitted signal is forwarded after logging.
 /// Returns `None` on non-macOS targets.
 #[cfg(target_os = "macos")]
-pub fn start() -> Option<MeetingDetectHandle> {
-    macos::start()
+pub fn start(signal_tx: Option<std::sync::mpsc::Sender<MeetingDetectSignal>>) -> Option<MeetingDetectHandle> {
+    macos::start(signal_tx)
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn start() -> Option<MeetingDetectHandle> {
+pub fn start(_signal_tx: Option<std::sync::mpsc::Sender<MeetingDetectSignal>>) -> Option<MeetingDetectHandle> {
     None
 }
 
@@ -271,7 +272,9 @@ mod macos {
         AppTerminated(MeetingAppRef),
     }
 
-    pub(super) fn start() -> Option<MeetingDetectHandle> {
+    pub(super) fn start(
+        signal_tx: Option<std::sync::mpsc::Sender<MeetingDetectSignal>>,
+    ) -> Option<MeetingDetectHandle> {
         let (event_tx, event_rx) = std::sync::mpsc::channel();
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
 
@@ -291,7 +294,7 @@ mod macos {
 
         thread::Builder::new()
             .name("meeting-detect".into())
-            .spawn(move || run_signal_worker(event_rx))
+            .spawn(move || run_signal_worker(event_rx, signal_tx))
             .expect("failed to spawn meeting-detect worker thread");
 
         Some(MeetingDetectHandle {
@@ -315,10 +318,20 @@ mod macos {
         blocks: Mutex<Vec<ListenerBlock>>,
     }
 
-    fn run_signal_worker(rx: Receiver<InternalEvent>) {
+    fn run_signal_worker(
+        rx: Receiver<InternalEvent>,
+        signal_tx: Option<std::sync::mpsc::Sender<MeetingDetectSignal>>,
+    ) {
         let mut mic_apps: HashSet<MicCapturingApp> = HashSet::new();
         let mut process_snapshot_primed = false;
         let mut mic_capture: Option<bool> = None;
+
+        let emit = |signal: MeetingDetectSignal| {
+            log_signal(&signal);
+            if let Some(tx) = signal_tx.as_ref() {
+                let _ = tx.send(signal);
+            }
+        };
 
         for event in rx {
             match event {
@@ -328,22 +341,20 @@ mod macos {
                     mic_apps = result.snapshot;
                     process_snapshot_primed = result.primed;
                     for signal in result.signals {
-                        log_signal(&signal);
+                        emit(signal);
                     }
                 }
                 InternalEvent::MicCaptureRunning(running) => {
                     if let Some(signal) = mic_capture_transition(mic_capture, running) {
-                        log_signal(&signal);
+                        emit(signal);
                     }
                     mic_capture = Some(running);
                 }
                 InternalEvent::AppLaunched(app) => {
-                    let signal = MeetingDetectSignal::MeetingAppLaunched(app);
-                    log_signal(&signal);
+                    emit(MeetingDetectSignal::MeetingAppLaunched(app));
                 }
                 InternalEvent::AppTerminated(app) => {
-                    let signal = MeetingDetectSignal::MeetingAppTerminated(app);
-                    log_signal(&signal);
+                    emit(MeetingDetectSignal::MeetingAppTerminated(app));
                 }
             }
         }

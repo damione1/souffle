@@ -5,6 +5,7 @@ import type {
   SystemAudioStatus,
   TranscriptionHealth,
   TranscriptionRuntimePhase,
+  MeetingStartNudge,
   UpcomingMeeting,
 } from "../types";
 import type { TranscriptionModelOperationState } from "../features/transcription/state";
@@ -35,6 +36,9 @@ let systemAudioStatus = $state<SystemAudioStatus | null>(null);
 
 // Calendar reminder awaiting the user's decision (drives the home banner)
 let upcomingMeeting = $state<UpcomingMeeting | null>(null);
+
+// Coalesced smart-start nudge (process / audio / calendar)
+let meetingStartNudge = $state<MeetingStartNudge | null>(null);
 
 // First-run onboarding (model not downloaded yet) — derived at bootstrap
 let showOnboarding = $state(false);
@@ -80,6 +84,8 @@ let settings = $state<AppSettings>({
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
+  meeting_smart_start_enabled: true,
+  meeting_smart_stop_enabled: true,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
   dictation_polish_enabled: false,
@@ -179,6 +185,8 @@ export function getAppState() {
     set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },
     get upcomingMeeting() { return upcomingMeeting; },
     set upcomingMeeting(u: UpcomingMeeting | null) { upcomingMeeting = u; },
+    get meetingStartNudge() { return meetingStartNudge; },
+    set meetingStartNudge(n: MeetingStartNudge | null) { meetingStartNudge = n; },
 
     get showOnboarding() { return showOnboarding; },
     set showOnboarding(v: boolean) { showOnboarding = v; },

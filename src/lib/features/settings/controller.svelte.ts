@@ -2,6 +2,7 @@ import { getSummaryProvidersStatus } from "../../api/summary";
 import { deleteModel, getTranscriptionCatalog } from "../../api/transcription";
 import {
   getSettings,
+  getMeetingDetectSupport,
   getShortcuts,
   getSystemAudioSupport,
   isLaptop as checkIsLaptop,
@@ -50,6 +51,7 @@ export function createSettingsController() {
 
   let audioDevices = $state<AudioDeviceInfo[]>([]);
   let systemAudioSupported = $state(false);
+  let meetingDetectSupported = $state(false);
   // Gates the "microphone when lid is closed" picker: meaningless on a
   // desktop Mac, so it's hidden entirely rather than shown disabled.
   let isLaptop = $state(false);
@@ -77,6 +79,9 @@ export function createSettingsController() {
     getSystemAudioSupport()
       .then((supported) => { systemAudioSupported = supported; })
       .catch(() => { systemAudioSupported = false; });
+    getMeetingDetectSupport()
+      .then((supported) => { meetingDetectSupported = supported; })
+      .catch(() => { meetingDetectSupported = false; });
     checkIsLaptop()
       .then((laptop) => { isLaptop = laptop; })
       .catch(() => { isLaptop = false; });
@@ -522,6 +527,20 @@ export function createSettingsController() {
     });
   }
 
+  function onMeetingSmartStartEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.meeting_smart_start_enabled = checked;
+    });
+  }
+
+  function onMeetingSmartStopEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.meeting_smart_stop_enabled = checked;
+    });
+  }
+
   function onMeetingTranscriptionLanguageChange(event: Event) {
     const value = (event.target as HTMLSelectElement)
       .value as AppSettings["meeting_transcription_language"];
@@ -785,6 +804,7 @@ export function createSettingsController() {
     onOllamaUrlChange,
     onOllamaModelChange,
     get systemAudioSupported() { return systemAudioSupported; },
+    get meetingDetectSupported() { return meetingDetectSupported; },
     get isLaptop() { return isLaptop; },
     onCaptureSystemAudioChange,
     onClamshellDeviceChange,
@@ -792,6 +812,8 @@ export function createSettingsController() {
     onMeetingAutostopEnabledChange,
     onMeetingAutostopMinutesChange,
     onMeetingMaxDurationMinutesChange,
+    onMeetingSmartStartEnabledChange,
+    onMeetingSmartStopEnabledChange,
     onMeetingTranscriptionLanguageChange,
     onMeetingAudioRetentionChange,
     onVadEnabledChange,
