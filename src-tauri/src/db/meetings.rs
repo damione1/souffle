@@ -227,6 +227,38 @@ impl Database {
         Ok(())
     }
 
+    /// Set the speaker label on specific segments of a meeting, identified
+    /// by their `sort_order`, in one transaction. Only segments whose
+    /// speaker is currently NULL are rewritten. Me/Them attribution and any
+    /// previous diarization pass are never overwritten. Segment text is
+    /// untouched, so the FTS index and any edited transcript stay valid
+    /// as-is. Returns how many rows actually changed.
+    pub fn set_segment_speakers(
+        &self,
+        meeting_id: &str,
+        assignments: &[(u64, Speaker)],
+    ) -> Result<usize, String> {
+        if assignments.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+        let mut changed = 0usize;
+        for (sort_order, speaker) in assignments {
+            changed += tx
+                .execute(
+                    "UPDATE segments SET speaker = ?1
+                     WHERE meeting_id = ?2 AND sort_order = ?3 AND speaker IS NULL",
+                    params![speaker.as_str(), meeting_id, *sort_order as i64],
+                )
+                .map_err(|e| format!("Set segment speaker: {e}"))?;
+        }
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+        Ok(changed)
+    }
+
     /// Finalize meetings left with `ended_at IS NULL` by a crash mid-recording.
     /// Empty shells (a started meeting with no persisted segments) are deleted;
     /// the rest get `ended_at`/`duration`/`recording_sessions` synthesized from
@@ -662,13 +694,11 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::TranscriptionProfile;
+    use crate::engine::{Speaker, TranscriptionProfile};
     use crate::test_helpers::fixtures::{sample_meeting, test_db};
 
     #[test]
     fn load_meeting_resolves_persistent_speakers() {
-        use crate::engine::Speaker;
-
         let (db, _dir) = test_db();
         let alice = db.create_speaker("Alice").unwrap();
         let bob = db.create_speaker("Bob").unwrap();
@@ -906,6 +936,54 @@ mod tests {
         assert_eq!(loaded.segments[0].text, "one");
         assert_eq!(loaded.segments[2].text, "three");
         assert!(loaded.ended_at.is_none(), "still in progress");
+    }
+
+    #[test]
+    fn set_segment_speakers_only_rewrites_null_speakers() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Me);
+        meeting.segments[1].speaker = None;
+        db.save_meeting(&meeting).unwrap();
+
+        let changed = db
+            .set_segment_speakers(
+                "m1",
+                &[(0, Speaker::Persistent(7)), (1, Speaker::Persistent(7))],
+            )
+            .unwrap();
+        assert_eq!(changed, 1, "the Me segment must not be rewritten");
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Me));
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(7)));
+    }
+
+    #[test]
+    fn set_segment_speakers_empty_assignments_is_a_noop() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        assert_eq!(db.set_segment_speakers("m1", &[]).unwrap(), 0);
+    }
+
+    #[test]
+    fn set_segment_speakers_ignores_unknown_sort_orders() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        let changed = db
+            .set_segment_speakers("m1", &[(999, Speaker::Persistent(1))])
+            .unwrap();
+        assert_eq!(changed, 0);
+    }
+
+    #[test]
+    fn set_segment_speakers_keeps_fts_search_working() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        db.set_segment_speakers("m1", &[(0, Speaker::Persistent(1))])
+            .unwrap();
+        let hits = db.search_text("Hello", 10).unwrap();
+        assert!(hits.iter().any(|hit| hit.source_id == "m1"));
     }
 
     #[test]

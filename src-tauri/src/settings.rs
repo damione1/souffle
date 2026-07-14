@@ -47,6 +47,8 @@ const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
+const DIARIZE_ENABLED_KEY: &str = "diarize_enabled";
+const DIARIZE_MAX_SPEAKERS_KEY: &str = "diarize_max_speakers";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -188,6 +190,16 @@ pub struct AppSettings {
     pub summary_templates: Vec<SummaryTemplate>,
     /// App version the user has acknowledged (What's New / post-update dialog).
     pub last_seen_version: String,
+    /// Offline speaker recognition for mic-only meetings: after a mic-only
+    /// meeting stops, label its segments with a persistent, cross-meeting
+    /// speaker identity. Off by default (extra local inference + on-disk
+    /// model download); meetings with a system-audio lane are unaffected
+    /// regardless of this setting (Me/Them attribution stays authoritative).
+    pub diarize_enabled: bool,
+    /// Optional upper bound on how many distinct speakers a single meeting
+    /// can be split into. `None` means unbounded (the clustering stage
+    /// decides on its own).
+    pub diarize_max_speakers: Option<u32>,
 }
 
 /// Allowed values for `model_unload_timeout_minutes`: 0 (never) plus the
@@ -196,6 +208,7 @@ const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
 
 const MEETING_AUTOSTOP_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 3..=60;
 const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 60..=720;
+const DIARIZE_MAX_SPEAKERS_RANGE: std::ops::RangeInclusive<u32> = 1..=20;
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -237,6 +250,8 @@ impl Default for AppSettings {
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: String::new(),
+            diarize_enabled: false,
+            diarize_max_speakers: None,
         }
     }
 }
@@ -420,6 +435,14 @@ impl AppSettings {
         if let Some(last_seen_version) = read_json_setting::<String>(db, LAST_SEEN_VERSION_KEY)? {
             settings.last_seen_version = last_seen_version;
         }
+        if let Some(diarize_enabled) = read_json_setting::<bool>(db, DIARIZE_ENABLED_KEY)? {
+            settings.diarize_enabled = diarize_enabled;
+        }
+        if let Some(diarize_max_speakers) =
+            read_json_setting::<Option<u32>>(db, DIARIZE_MAX_SPEAKERS_KEY)?
+        {
+            settings.diarize_max_speakers = diarize_max_speakers;
+        }
 
         Ok(settings.sanitized())
     }
@@ -536,6 +559,12 @@ impl AppSettings {
         ) {
             normalized.meeting_transcription_language =
                 Self::default().meeting_transcription_language;
+        }
+
+        if let Some(max_speakers) = normalized.diarize_max_speakers
+            && !DIARIZE_MAX_SPEAKERS_RANGE.contains(&max_speakers)
+        {
+            normalized.diarize_max_speakers = None;
         }
 
         normalized.dictation_polish_template_id = normalized
@@ -715,6 +744,8 @@ impl AppSettings {
         )?;
         write_json_setting(db, SUMMARY_TEMPLATES_KEY, &normalized.summary_templates)?;
         write_json_setting(db, LAST_SEEN_VERSION_KEY, &normalized.last_seen_version)?;
+        write_json_setting(db, DIARIZE_ENABLED_KEY, &normalized.diarize_enabled)?;
+        write_json_setting(db, DIARIZE_MAX_SPEAKERS_KEY, &normalized.diarize_max_speakers)?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
             write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
@@ -864,6 +895,8 @@ mod tests {
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: "0.0.9".into(),
+            diarize_enabled: true,
+            diarize_max_speakers: Some(4),
         };
 
         settings.save(&db).expect("save settings");
@@ -1062,6 +1095,47 @@ mod tests {
     #[test]
     fn meeting_autostop_enabled_defaults_true() {
         assert!(AppSettings::default().meeting_autostop_enabled);
+    }
+
+    #[test]
+    fn diarize_enabled_defaults_false() {
+        assert!(!AppSettings::default().diarize_enabled);
+        assert_eq!(AppSettings::default().diarize_max_speakers, None);
+    }
+
+    #[test]
+    fn diarize_max_speakers_out_of_range_falls_back_to_none() {
+        let s = AppSettings {
+            diarize_max_speakers: Some(0),
+            ..AppSettings::default()
+        };
+        assert_eq!(s.sanitize_for_save().unwrap().diarize_max_speakers, None);
+
+        let s = AppSettings {
+            diarize_max_speakers: Some(21),
+            ..AppSettings::default()
+        };
+        assert_eq!(s.sanitize_for_save().unwrap().diarize_max_speakers, None);
+
+        let s = AppSettings {
+            diarize_max_speakers: Some(6),
+            ..AppSettings::default()
+        };
+        assert_eq!(s.sanitize_for_save().unwrap().diarize_max_speakers, Some(6));
+    }
+
+    #[test]
+    fn diarize_settings_round_trip() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            diarize_enabled: true,
+            diarize_max_speakers: Some(3),
+            ..AppSettings::default()
+        };
+        settings.save(&db).expect("save settings");
+        let loaded = AppSettings::load(&db).expect("load settings");
+        assert!(loaded.diarize_enabled);
+        assert_eq!(loaded.diarize_max_speakers, Some(3));
     }
 
     #[test]

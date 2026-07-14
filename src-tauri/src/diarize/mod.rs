@@ -11,16 +11,20 @@
 //! 3. `clustering`: cosine-similarity greedy agglomerative clustering groups
 //!    same-speaker segments together.
 //!
-//! This module only implements the core algorithm; wiring it into the
-//! meeting pipeline (auto-labeling transcript segments) is a separate,
-//! follow-up change. See `crate::cli`'s `--diarize-file` flag for a
-//! standalone way to exercise it today.
+//! This module implements the core algorithm only. Wiring it into the
+//! meeting pipeline (tapping mic-only meeting audio, matching clusters
+//! against persistent speakers, and assigning transcript segments) lives in
+//! `persist`, `assign`, `crate::audio::diarize_tap`, and
+//! `crate::pipeline::diarize_task`. See `crate::cli`'s `--diarize-file` flag
+//! for a standalone way to exercise the core algorithm directly.
 
 pub mod aggregate;
+pub mod assign;
 pub mod clustering;
 pub mod embedding;
 pub mod fbank;
 pub mod models;
+pub mod persist;
 pub mod powerset;
 pub mod segmentation;
 

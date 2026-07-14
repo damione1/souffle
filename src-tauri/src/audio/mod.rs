@@ -1,6 +1,7 @@
 pub mod aec;
 pub mod capture;
 pub mod device_watch;
+pub mod diarize_tap;
 pub mod feedback;
 pub mod mixer;
 pub mod output_route;
