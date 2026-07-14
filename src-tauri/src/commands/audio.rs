@@ -1,22 +1,23 @@
 use tauri::State;
 
-use crate::audio::capture::{AudioDeviceInfo, list_input_devices};
+use crate::audio::capture::list_input_devices;
+use crate::audio::AudioInputDevice;
 use crate::state::{AppState, AudioCommand};
 
 /// List available audio input devices
 #[tauri::command]
 #[specta::specta]
-pub fn list_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+pub fn list_audio_devices() -> Result<Vec<AudioInputDevice>, String> {
     Ok(list_input_devices())
 }
 
-/// Select an audio input device by name
+/// Select an audio input device by stable CoreAudio UID.
 #[tauri::command]
 #[specta::specta]
-pub fn select_audio_device(state: State<'_, AppState>, device_name: String) -> Result<(), String> {
+pub fn select_audio_device(state: State<'_, AppState>, device_uid: String) -> Result<(), String> {
     state
         .audio_cmd_sender
-        .send(AudioCommand::SelectDevice(device_name))
+        .send(AudioCommand::SelectDevice(device_uid))
         .map_err(|e| format!("Failed to send device selection: {e}"))
 }
 

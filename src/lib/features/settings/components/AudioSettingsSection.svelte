@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
-  import type { AudioDeviceInfo } from "../../../types";
+  import type { AudioInputDevice } from "../../../types";
 
   const autostopMinutesOptions = [5, 10, 15, 30] as const;
   const autostopMinutesKeys: Record<(typeof autostopMinutesOptions)[number], string> = {
@@ -50,7 +50,7 @@
     onMeetingMaxDurationMinutesChange,
     onMeetingTranscriptionLanguageChange,
   }: {
-    audioDevices: AudioDeviceInfo[];
+    audioDevices: AudioInputDevice[];
     captureSystemAudio: boolean;
     systemAudioSupported: boolean;
     isLaptop: boolean;
@@ -94,7 +94,7 @@
         >
           <option value="">{$t("settings_audio.clamshell_device_follow_default")}</option>
           {#each audioDevices as device}
-            <option value={device.name}>{device.name}</option>
+            <option value={device.uid}>{device.name}</option>
           {/each}
         </select>
       {/snippet}

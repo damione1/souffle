@@ -126,8 +126,9 @@ pub struct AppSettings {
     pub debug_transcription: bool,
     /// Global tracing verbosity for the `souffle` crate.
     pub log_level: LogLevel,
+    /// Pinned input device UID (`kAudioDevicePropertyDeviceUID`).
     pub audio_device: Option<String>,
-    /// Preferred microphone while the lid is closed with an external display
+    /// Preferred microphone UID while the lid is closed with an external display
     /// attached (clamshell mode). `None` means just follow whatever macOS
     /// reports as the default input, the previous behavior.
     pub clamshell_audio_device: Option<String>,
@@ -421,7 +422,50 @@ impl AppSettings {
             settings.last_seen_version = last_seen_version;
         }
 
-        Ok(settings.sanitized())
+        let mut settings = settings.sanitized();
+        Self::migrate_audio_device_preferences(&mut settings, db)?;
+
+        Ok(settings)
+    }
+
+    /// Best-effort upgrade from legacy name pins to stable CoreAudio UIDs.
+    fn migrate_audio_device_preferences(
+        settings: &mut AppSettings,
+        db: &Database,
+    ) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            use crate::audio::device::migrate_stored_device_id;
+            use crate::audio::device_watch::list_devices;
+
+            let devices = list_devices();
+            let mut changed = false;
+
+            if let Some(stored) = settings.audio_device.as_ref() {
+                let (migrated, did_change) = migrate_stored_device_id(stored, &devices);
+                if did_change {
+                    settings.audio_device = Some(migrated);
+                    changed = true;
+                }
+            }
+            if let Some(stored) = settings.clamshell_audio_device.as_ref() {
+                let (migrated, did_change) = migrate_stored_device_id(stored, &devices);
+                if did_change {
+                    settings.clamshell_audio_device = Some(migrated);
+                    changed = true;
+                }
+            }
+
+            if changed {
+                if let Some(audio_device) = settings.audio_device.as_ref() {
+                    write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
+                }
+                if let Some(clamshell_audio_device) = settings.clamshell_audio_device.as_ref() {
+                    write_json_setting(db, CLAMSHELL_AUDIO_DEVICE_KEY, clamshell_audio_device)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn sanitize_for_save(&self) -> Result<Self, String> {
