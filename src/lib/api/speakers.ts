@@ -1,5 +1,5 @@
 import { commands, unwrap } from "./generated";
-import type { MeetingSpeaker, MeetingTranscript, RetagMeetingSpeakerRequest } from "../types";
+import type { MeetingSpeaker, MeetingTranscript, RetagMeetingSpeakerRequest, SpeakerProfile } from "../types";
 
 export async function renameSpeaker(id: number, name: string): Promise<void> {
   await unwrap(commands.renameSpeaker(id, name));
@@ -7,6 +7,14 @@ export async function renameSpeaker(id: number, name: string): Promise<void> {
 
 export async function listSpeakers(): Promise<MeetingSpeaker[]> {
   return unwrap(commands.listSpeakers());
+}
+
+export async function listSpeakerProfiles(): Promise<SpeakerProfile[]> {
+  return unwrap(commands.listSpeakerProfiles());
+}
+
+export async function deleteSpeaker(id: number): Promise<void> {
+  await unwrap(commands.deleteSpeaker(id));
 }
 
 export async function retagMeetingSpeaker(

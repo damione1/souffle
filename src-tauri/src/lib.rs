@@ -112,6 +112,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::export_meeting_to_file,
             commands::rename_speaker,
             commands::list_speakers,
+            commands::list_speaker_profiles,
+            commands::delete_speaker,
             commands::retag_meeting_speaker,
             commands::check_summary_providers,
             commands::summarize_meeting,
