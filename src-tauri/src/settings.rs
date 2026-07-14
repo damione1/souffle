@@ -705,6 +705,23 @@ impl AppSettings {
         normalized
     }
 
+    /// Refresh `known` from the current connected-device snapshot and persist
+    /// only the input-priority JSON. Used when CoreAudio reports a device
+    /// list or default-input change.
+    pub fn sync_input_priority_from_devices(db: &Database) -> Result<(InputPriority, bool), String> {
+        let mut settings = Self::load(db)?;
+        #[cfg(target_os = "macos")]
+        {
+            use crate::audio::touch_known;
+            use crate::audio::device_watch::list_devices;
+
+            touch_known(&mut settings.input_priority, &list_devices());
+        }
+        let normalized = settings.sanitize_for_save()?;
+        write_json_setting(db, INPUT_PRIORITY_KEY, &normalized.input_priority)?;
+        Ok((normalized.input_priority, normalized.allow_bluetooth_mic))
+    }
+
     pub fn save(&self, db: &Database) -> Result<(), String> {
         let mut normalized = self.sanitize_for_save()?;
         #[cfg(target_os = "macos")]

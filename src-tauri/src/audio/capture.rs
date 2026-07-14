@@ -12,7 +12,7 @@ use tracing::{debug, error, info, warn};
 use super::mixer::MeetingMixer;
 use super::recorder::MeetingRecorder;
 use super::resampler::Resampler;
-use crate::audio::device::{AudioInputDevice, resolve_device_name};
+use crate::audio::device::{AudioInputDevice, resolve_device_name, uid_for_device_name};
 use crate::audio::priority::{InputPriority, ResolveInputParams, resolve_input};
 use crate::state::AudioCommand;
 
@@ -392,6 +392,8 @@ pub struct AudioCapture {
     active_params: Option<StartParams>,
     /// Name of the input device the current stream was built on.
     mic_device_name: Option<String>,
+    /// UID resolved when the current stream was built (for route hot-swap).
+    mic_device_uid: Option<String>,
     /// Set by the cpal error callback when the stream dies (e.g. its device
     /// disappeared); the next mic health check rebuilds the capture leg.
     stream_failed: Arc<std::sync::atomic::AtomicBool>,
@@ -451,6 +453,7 @@ impl AudioCapture {
                     app: None,
                     active_params: None,
                     mic_device_name: None,
+                    mic_device_uid: None,
                     stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     last_mic_check: Instant::now(),
                     level_throttle: AudioLevelThrottle::new(),
@@ -543,6 +546,7 @@ impl AudioCapture {
                                 info!("Selected input device UID: {uid}");
                                 capture.selected_device = Some(uid);
                             }
+                            capture.refresh_input_route();
                         }
                         AudioCommand::SetClamshellDevice(uid) => {
                             if let Some(ref uid) = uid {
@@ -551,6 +555,7 @@ impl AudioCapture {
                                 info!("Clamshell-mode microphone preference cleared");
                             }
                             capture.clamshell_device = uid;
+                            capture.refresh_input_route();
                         }
                         AudioCommand::SetInputPolicy {
                             priority,
@@ -558,9 +563,13 @@ impl AudioCapture {
                         } => {
                             capture.input_priority = priority;
                             capture.allow_bluetooth_mic = allow_bluetooth_mic;
+                            capture.refresh_input_route();
                         }
                         AudioCommand::AttachApp(app) => {
                             capture.app = Some(app);
+                        }
+                        AudioCommand::RefreshInputRoute => {
+                            capture.refresh_input_route();
                         }
                     }
                 }
@@ -666,10 +675,16 @@ impl AudioCapture {
         self.stream_failed
             .store(false, std::sync::atomic::Ordering::Relaxed);
         self.mic_device_name = None;
+        self.mic_device_uid = None;
 
+        let known_devices = list_input_devices_impl();
         let device = self.find_device()?;
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".into());
+        // Track the UID of the device cpal actually opened, not just what
+        // resolve_input picked — find_device may fall back to the OS default
+        // when the resolved name is missing from the cpal device list.
+        self.mic_device_uid = uid_for_device_name(&known_devices, &device_name);
         info!("Using input device: {device_name}");
         self.mic_device_name = Some(device_name.clone());
 
@@ -1031,12 +1046,13 @@ impl AudioCapture {
             .stream_failed
             .swap(false, std::sync::atomic::Ordering::Relaxed);
 
-        // Rebuild when the resolved input device changes (lid closed, headset
+        // Rebuild when the resolved input UID changes (lid closed, headset
         // plugged in, priority policy update…) or the stream died.
-        let default_changed = self.mic_device_name.is_some()
-            && self.find_device().ok().and_then(|d| d.name().ok()) != self.mic_device_name;
+        let resolved_changed = self.active_params.is_some()
+            && self.resolved_input_uid(&list_input_devices_impl()).as_deref()
+                != self.mic_device_uid.as_deref();
 
-        if !failed && !default_changed {
+        if !failed && !resolved_changed {
             return false;
         }
 
@@ -1086,6 +1102,18 @@ impl AudioCapture {
                         true
                     }
                 }
+            }
+        }
+    }
+
+    /// Re-run input resolution and hot-swap the mic leg when recording.
+    fn refresh_input_route(&mut self) {
+        if self.active_params.is_some() {
+            self.last_mic_check = Instant::now();
+            if self.check_mic_health() {
+                tracing::error!(
+                    "Microphone unrecoverable after input route change; ending session"
+                );
             }
         }
     }
@@ -1214,6 +1242,7 @@ impl AudioCapture {
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
         self.active_params = None;
         self.mic_device_name = None;
+        self.mic_device_uid = None;
         self.stream.take();
         self.resampler.take();
         #[cfg(target_os = "macos")]
@@ -1266,6 +1295,7 @@ impl AudioCapture {
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
         self.active_params = None;
         self.mic_device_name = None;
+        self.mic_device_uid = None;
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
 

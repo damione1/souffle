@@ -1,7 +1,7 @@
 //! Stable CoreAudio input-device identity and preference helpers.
 
 /// Human-facing transport label for an input device.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportType {
     BuiltIn,
@@ -14,7 +14,7 @@ pub enum TransportType {
 }
 
 /// An input-capable audio device as reported to the frontend.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct AudioInputDevice {
     /// Stable CoreAudio device UID (`kAudioDevicePropertyDeviceUID`).
     pub uid: String,
@@ -44,6 +44,16 @@ pub fn resolve_device_name<'a>(devices: &'a [AudioInputDevice], stored: &str) ->
                 .find(|device| device.name == stored)
                 .map(|device| device.name.as_str())
         })
+}
+
+/// Map a cpal-opened device name to a stable UID from an enumeration snapshot.
+/// Returns `None` when the name is absent (e.g. OS default opened before the
+/// next CoreAudio list refresh); callers treat that as "needs reconcile".
+pub fn uid_for_device_name(devices: &[AudioInputDevice], opened_name: &str) -> Option<String> {
+    devices
+        .iter()
+        .find(|device| device.name == opened_name)
+        .map(|device| device.uid.clone())
 }
 
 /// On upgrade, map a legacy name pin to the matching connected device's UID.
@@ -123,6 +133,24 @@ mod tests {
     fn resolve_returns_none_for_unknown_value() {
         let devices = vec![device("uid-a", "USB Microphone")];
         assert_eq!(resolve_device_name(&devices, "Missing"), None);
+    }
+
+    #[test]
+    fn uid_for_device_name_matches_snapshot() {
+        let devices = vec![
+            device("uid-a", "Built-in Microphone"),
+            device("uid-b", "USB Mic"),
+        ];
+        assert_eq!(
+            uid_for_device_name(&devices, "USB Mic"),
+            Some("uid-b".into()),
+        );
+    }
+
+    #[test]
+    fn uid_for_device_name_unknown_returns_none() {
+        let devices = vec![device("uid-a", "Built-in Microphone")];
+        assert_eq!(uid_for_device_name(&devices, "Ghost Mic"), None);
     }
 
     #[test]

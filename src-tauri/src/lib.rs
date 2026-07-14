@@ -175,6 +175,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::ArchiveExportProgress,
             app_events::PillHoldChanged,
             app_events::DictationLiveText,
+            app_events::InputDevicesChanged,
+            app_events::InputPinAvailable,
+            app_events::InputPinUnavailable,
         ])
 }
 
@@ -347,12 +350,43 @@ pub fn run() {
                 move || commands::handle_system_did_wake(&did_wake_app),
             );
 
-            // Diagnostic device-change logging for the Bluetooth headset /
-            // input-priority work. No natural long-lived owner here, so the
-            // handle is deliberately leaked to keep the listeners alive for
-            // the app's lifetime, same as the sleep observer tokens above.
+            // CoreAudio device-change listeners: diagnostic logging plus
+            // input-route hot-swap when the device list or default input
+            // changes. No natural long-lived owner here, so the handle is
+            // deliberately leaked to keep the listeners alive for the app's
+            // lifetime, same as the sleep observer tokens above.
             #[cfg(target_os = "macos")]
-            std::mem::forget(audio::device_watch::start());
+            {
+                use std::sync::mpsc::channel;
+                use crate::audio::device_watch::{self, ChangeKind};
+
+                let (route_tx, route_rx) = channel::<ChangeKind>();
+                std::mem::forget(device_watch::start(Some(route_tx)));
+
+                let route_state = app.state::<AppState>();
+                let route_cmd_tx = route_state.audio_cmd_sender.clone();
+                let route_db = route_state.db.clone();
+                let route_app = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("input-route".into())
+                    .spawn(move || {
+                        for kind in route_rx {
+                            match kind {
+                                ChangeKind::DeviceList | ChangeKind::DefaultInput => {
+                                    if let Err(e) = commands::handle_input_route_change(
+                                        &route_db,
+                                        &route_cmd_tx,
+                                        &route_app,
+                                    ) {
+                                        tracing::warn!("Input route refresh failed: {e}");
+                                    }
+                                }
+                                ChangeKind::DefaultOutput => {}
+                            }
+                        }
+                    })
+                    .expect("failed to spawn input-route thread");
+            }
 
             tray::setup_tray(app.handle())?;
             calendar::scheduler::spawn(app.handle().clone());
