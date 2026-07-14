@@ -75,7 +75,9 @@
   <MicrophoneSettingsSection
     audioDevices={controller.audioDevices}
     selectedDevice={controller.app.selectedDevice}
+    allowBluetoothMic={controller.app.settings.allow_bluetooth_mic}
     onDeviceChange={controller.onDeviceChange}
+    onAllowBluetoothMicChange={controller.onAllowBluetoothMicChange}
     onRefreshDevices={controller.refreshDevices}
   />
 

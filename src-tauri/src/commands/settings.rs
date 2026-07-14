@@ -32,6 +32,10 @@ pub fn save_settings(
     let _ = state.audio_cmd_sender.send(crate::state::AudioCommand::SetClamshellDevice(
         settings.clamshell_audio_device.clone(),
     ));
+    let _ = state.audio_cmd_sender.send(crate::state::AudioCommand::SetInputPolicy {
+        priority: settings.input_priority.clone(),
+        allow_bluetooth_mic: settings.allow_bluetooth_mic,
+    });
     // A locale change must relabel the tray menu immediately.
     if let Ok(machine) = state.current_machine_state() {
         crate::tray::sync(&app, &machine);
