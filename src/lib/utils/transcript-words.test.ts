@@ -26,10 +26,10 @@ describe("tokenizeTranscriptWords", () => {
 
   it("gives duplicate words distinct indices for popover targeting", () => {
     const tokens = tokenizeTranscriptWords("Alex met Alex");
-    const jeanIndexes = tokens.flatMap((token, index) =>
+    const wordIndexes = tokens.flatMap((token, index) =>
       token.kind === "word" && token.text === "Alex" ? [index] : [],
     );
-    expect(jeanIndexes).toEqual([0, 4]);
+    expect(wordIndexes).toEqual([0, 4]);
   });
 });
 
