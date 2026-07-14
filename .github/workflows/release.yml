@@ -41,16 +41,54 @@ jobs:
         with:
           script: |
             const tag = process.env.GITHUB_REF_NAME;
+            const footer = [
+              'Download the .dmg below for Apple Silicon Macs.',
+              '',
+              'Requires macOS 13 or newer on Apple Silicon (M1 or newer).',
+            ].join('\n');
+
+            // Hand-written notes live in the annotated tag message (see
+            // CLAUDE.md, "Release changelogs"). Use them as the release body
+            // when present; a lightweight or empty-message tag falls back to
+            // GitHub's auto-generated notes (merged PR titles, structured by
+            // .github/release.yml) so no release ever ships without notes.
+            let notes = '';
+            try {
+              const { data: ref } = await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${tag}`,
+              });
+              if (ref.object.type === 'tag') {
+                const { data: tagObj } = await github.rest.git.getTag({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag_sha: ref.object.sha,
+                });
+                notes = (tagObj.message ?? '')
+                  .replace(/-----BEGIN (PGP|SSH) SIGNATURE-----[\s\S]*$/, '')
+                  .trim();
+                // Drop a leading title line that just repeats the release
+                // name (the common `git tag -a` habit) to avoid duplication.
+                const lines = notes.split('\n');
+                if (/^(Soufflé\s+)?v?\d+\.\d+\.\d+$/.test(lines[0]?.trim() ?? '')) {
+                  notes = lines.slice(1).join('\n').trim();
+                }
+              }
+            } catch (e) {
+              core.warning(`Could not read tag annotation: ${e.message}`);
+            }
+
+            // With generate_release_notes, GitHub appends its generated
+            // "What's Changed" section after the provided body, so
+            // hand-written notes are never overwritten either way.
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tag,
               name: `Soufflé ${tag}`,
-              body: [
-                'Download the .dmg below for Apple Silicon Macs.',
-                '',
-                'Requires macOS 13 or newer on Apple Silicon (M1 or newer).',
-              ].join('\n'),
+              body: notes ? `${notes}\n\n---\n\n${footer}` : `${footer}\n`,
+              generate_release_notes: notes === '',
               draft: true,
               prerelease: false,
             });
