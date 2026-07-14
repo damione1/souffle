@@ -317,6 +317,10 @@ pub fn run() {
                     let _ = state.audio_cmd_sender.send(state::AudioCommand::SetClamshellDevice(
                         app_settings.clamshell_audio_device,
                     ));
+                    let _ = state.audio_cmd_sender.send(state::AudioCommand::SetInputPolicy {
+                        priority: app_settings.input_priority,
+                        allow_bluetooth_mic: app_settings.allow_bluetooth_mic,
+                    });
                     // Directory walk over recordings/ can take a moment with
                     // a large history; never block startup on it. The same
                     // sweep also clears any diarization WAVs left over from

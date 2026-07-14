@@ -6,6 +6,7 @@ pub mod diarize_tap;
 pub mod feedback;
 pub mod mixer;
 pub mod output_route;
+pub mod priority;
 pub mod recorder;
 pub mod resampler;
 pub mod retention;
@@ -14,4 +15,5 @@ pub mod system_tap;
 
 pub use capture::{AudioCapture, AudioChunk, AudioMessage};
 pub use device::{AudioInputDevice, TransportType};
+pub use priority::{InputPriority, KnownDevice, ResolveInputParams, resolve_input, touch_known};
 pub use resampler::Resampler;

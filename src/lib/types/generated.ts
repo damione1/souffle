@@ -938,7 +938,16 @@ audio_device: string | null;
  * attached (clamshell mode). `None` means just follow whatever macOS
  * reports as the default input, the previous behavior.
  */
-clamshell_audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean; 
+clamshell_audio_device: string | null; 
+/**
+ * Ordered input-device preferences and remembered devices.
+ */
+input_priority: InputPriority; 
+/**
+ * When false, Bluetooth headset microphones are avoided for automatic
+ * selection to keep stereo output on A2DP instead of HFP mono.
+ */
+allow_bluetooth_mic: boolean; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean; 
 /**
  * Meeting mode: capture system audio (other participants) alongside
  * the microphone via a Core Audio tap.
@@ -1167,6 +1176,30 @@ export type HealthStatus = "healthy" |
  * No frame has been processed for several seconds while audio is queued.
  */
 "stalled"
+/**
+ * User-declared input routing preferences (UID-based).
+ */
+export type InputPriority = { 
+/**
+ * Preferred device UIDs, highest priority first.
+ */
+priorities: string[]; 
+/**
+ * Connected devices in this list are never auto-selected.
+ */
+hidden: string[]; 
+/**
+ * Devices seen before, including ones currently disconnected.
+ */
+known: KnownDevice[] }
+/**
+ * A device remembered across disconnects for display and preference ordering.
+ */
+export type KnownDevice = { uid: string; name: string; 
+/**
+ * Unix timestamp (seconds) when this device was last seen connected.
+ */
+last_seen: number }
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace"
 export type McpSetupInfo = { binary_path: string; exists: boolean; claude_desktop_snippet: string; claude_code_command: string }
 export type MeetingAudioRetention = 
