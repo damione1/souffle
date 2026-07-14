@@ -167,13 +167,7 @@ export function createSettingsController() {
         const exists = audioDevices.some((device) => device.uid === app.selectedDevice);
         if (exists) {
           await selectAudioDevice(app.selectedDevice);
-          return;
         }
-      }
-      const defaultDevice = audioDevices.find((device) => device.is_default);
-      if (defaultDevice) {
-        app.selectedDevice = defaultDevice.uid;
-        await selectAudioDevice(defaultDevice.uid);
       }
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -182,14 +176,23 @@ export function createSettingsController() {
 
   async function onDeviceChange(event: Event) {
     const target = event.target as HTMLSelectElement;
+    const value = target.value;
     try {
-      await selectAudioDevice(target.value);
+      await selectAudioDevice(value);
+      app.selectedDevice = value;
       await persistSettings((settings) => {
-        settings.audio_device = target.value;
+        settings.audio_device = value || null;
       });
     } catch (e) {
       statusMessage = errorMessage(e);
     }
+  }
+
+  function onAllowBluetoothMicChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    void persistSettings((settings) => {
+      settings.allow_bluetooth_mic = target.checked;
+    });
   }
 
   /** Empty option value means "follow system default" (the previous,
@@ -764,6 +767,7 @@ export function createSettingsController() {
     refreshRuntimeStatus,
     refreshDevices,
     onDeviceChange,
+    onAllowBluetoothMicChange,
     refreshSummaryProviders,
     selectModelOption,
     handleDeleteModel,

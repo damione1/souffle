@@ -62,6 +62,8 @@ let settings = $state<AppSettings>({
   log_level: "info",
   audio_device: null,
   clamshell_audio_device: null,
+  input_priority: { priorities: [], hidden: [], known: [] },
+  allow_bluetooth_mic: false,
   transcription_engine_id: "",
   transcription_model_id: "",
   transcription_backend_id: "",
