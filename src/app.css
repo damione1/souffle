@@ -470,6 +470,71 @@ img {
   color: var(--color-text-muted);
 }
 
+/* ─── Release notes (rendered Markdown from GitHub releases) ─── */
+.release-notes h1,
+.release-notes h2,
+.release-notes h3,
+.release-notes h4 {
+  font-family: var(--font-heading);
+  color: var(--color-text-primary);
+  margin: 1em 0 0.375em;
+}
+
+.release-notes h1 { font-size: 1.05rem; }
+.release-notes h2 { font-size: 0.95rem; }
+.release-notes h3,
+.release-notes h4 { font-size: 0.875rem; }
+
+.release-notes > :first-child {
+  margin-top: 0;
+}
+
+.release-notes p {
+  margin: 0.5em 0;
+}
+
+.release-notes ul,
+.release-notes ol {
+  margin: 0.5em 0;
+  padding-left: 1.25em;
+}
+
+.release-notes li {
+  margin: 0.25em 0;
+}
+
+.release-notes ul li {
+  list-style: disc;
+}
+
+.release-notes ol li {
+  list-style: decimal;
+}
+
+.release-notes strong {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.release-notes code {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  background: var(--color-surface-3);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.release-notes a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+
+.release-notes a:hover {
+  color: var(--color-accent-hover);
+}
+
 /* ─── Search highlight (FTS5 <mark> tags) ─── */
 .search-highlight mark {
   background: color-mix(in srgb, var(--color-accent) 25%, transparent);

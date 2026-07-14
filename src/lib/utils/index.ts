@@ -3,5 +3,6 @@ export { applyTheme } from "./theme";
 export { buildMeetingTranscriptBlocks, groupIntoParagraphs } from "./paragraphs";
 export type { Paragraph, TranscriptBlock } from "./paragraphs";
 export { errorMessage } from "./errors";
+export { renderReleaseNotesMarkdown } from "./markdown";
 export { createDebouncedSearch, filterResultsByType, findSnippet, matchedIdsForType } from "./search.svelte";
 export type { DebouncedSearch } from "./search.svelte";

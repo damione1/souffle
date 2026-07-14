@@ -1,0 +1,17 @@
+# Structure for GitHub's auto-generated release notes. Only used when a tag
+# is pushed without an annotated message (see .github/workflows/release.yml);
+# hand-written notes in the tag annotation always take precedence.
+changelog:
+  exclude:
+    authors:
+      - dependabot
+      - github-actions
+  categories:
+    # Label-based buckets first; PRs without labels land in the catch-all.
+    - title: Fixes
+      labels:
+        - bug
+        - fix
+    - title: Changes
+      labels:
+        - "*"
