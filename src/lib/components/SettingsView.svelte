@@ -149,6 +149,7 @@
       meetingAutostopEnabled={controller.app.settings.meeting_autostop_enabled}
       meetingAutostopMinutes={controller.app.settings.meeting_autostop_minutes}
       meetingMaxDurationMinutes={controller.app.settings.meeting_max_duration_minutes}
+      meetingTranscriptionLanguage={controller.app.settings.meeting_transcription_language}
       onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
       onClamshellDeviceChange={controller.onClamshellDeviceChange}
       onVadEnabledChange={controller.onVadEnabledChange}
@@ -158,6 +159,7 @@
       onMeetingAutostopEnabledChange={controller.onMeetingAutostopEnabledChange}
       onMeetingAutostopMinutesChange={controller.onMeetingAutostopMinutesChange}
       onMeetingMaxDurationMinutesChange={controller.onMeetingMaxDurationMinutesChange}
+      onMeetingTranscriptionLanguageChange={controller.onMeetingTranscriptionLanguageChange}
     />
 
     <IntelligenceSettingsSection

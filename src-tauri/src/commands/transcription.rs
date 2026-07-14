@@ -289,6 +289,7 @@ fn start_pipeline_blocking(
         session_terms,
         diarize,
         idle_config,
+        meeting_transcription_language: settings.meeting_transcription_language,
     };
 
     // The actor replies once the engine is reset and ready for audio.

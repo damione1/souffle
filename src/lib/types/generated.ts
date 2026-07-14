@@ -905,6 +905,11 @@ meeting_max_duration_minutes: number;
  */
 meeting_audio_retention: MeetingAudioRetention; 
 /**
+ * Heuristic prior for meeting language stability (LID + lane resets).
+ * Does not force Kyutai/moshi decode language.
+ */
+meeting_transcription_language: MeetingTranscriptionLanguage; 
+/**
  * Optional LLM post-processing applied to dictation before paste/history.
  */
 dictation_polish_enabled: boolean; 
@@ -1046,10 +1051,6 @@ export type HealthStatus = "healthy" |
 "stalled"
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace"
 export type McpSetupInfo = { binary_path: string; exists: boolean; claude_desktop_snippet: string; claude_code_command: string }
-/**
- * How long recorded meeting audio is kept on disk before the startup sweep
- * deletes it. Opt-in: recording itself only happens when this is not `Off`.
- */
 export type MeetingAudioRetention = 
 /**
  * No recording at all; existing recordings from a previous, more
@@ -1142,6 +1143,13 @@ calendar_event_id: string | null;
  * into the summary prompt.
  */
 participants: MeetingParticipant[] }
+/**
+ * How long recorded meeting audio is kept on disk before the startup sweep
+ * deletes it. Opt-in: recording itself only happens when this is not `Off`.
+ * Heuristic prior for meeting language detection and mismatch resets.
+ * Never passed to the STT engine as a forced decode language.
+ */
+export type MeetingTranscriptionLanguage = "auto" | "en" | "fr"
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
 export type PasteMethod = "clipboard" | "type"

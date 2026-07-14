@@ -245,6 +245,10 @@ pub trait TranscriptionEngine {
     /// batch size). No-op for engines that don't support diarization.
     fn set_diarization(&mut self, _enabled: bool) {}
 
+    /// Heuristic meeting-language prior for LID and lane resets (Kyutai only).
+    /// Never passed to the engine as a forced decode language.
+    fn set_meeting_language_prior(&mut self, _prior: crate::settings::MeetingTranscriptionLanguage) {}
+
     /// Transcribe one paired frame from both streams (mic = Me, system = Them),
     /// returning segments already tagged with their speaker. Only valid after
     /// `set_diarization(true)` + `reset_state` on an engine that supports it.

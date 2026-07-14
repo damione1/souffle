@@ -4,14 +4,16 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use candle_core::{Device, Tensor};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 use super::{
     AudioInputRequirements, EngineError, Speaker, TranscriptionEngine, TranscriptionSegment,
     collapse_whitespace,
 };
 use crate::constants::{MIMI_FRAME_SIZE, MIMI_FRAMES_PER_SECOND, SAMPLE_RATE};
+use crate::lid::{LanguageTracker, detect_word};
 use crate::platform::with_autorelease_pool;
+use crate::settings::MeetingTranscriptionLanguage;
 
 /// Extra-head index used for pause detection, matching Kyutai's reference
 /// stt-rs example (`prs[2][0] > 0.5`).
@@ -117,37 +119,74 @@ impl KyutaiConfig {
 
 /// Whether a proactive KV-cache refresh should run, and why.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RefreshKind {
+pub enum RefreshKind {
     /// Pause-aligned refresh inside the soft context window (preferred).
     SoftPause,
     /// Forced refresh before the LM context window saturates.
     HardDeadline,
+    /// Per-lane reset triggered by consecutive language mismatches.
+    LanguageMismatch,
 }
 
-/// Decide whether to clear the ASR KV cache before the next frame.
-///
-/// Kyutai STT is a decoder-only model with a finite `context` (375 frames /
-/// ~30s on stt-2.6b). Past that window inference still runs but Word emission
-/// can starve — matching the production "frames climb, segments flat" freeze.
-/// Upstream guidance (Unmute #168) is to reset between speech turns; we do the
-/// local equivalent with `State::reset()` rather than a full Metal rebuild.
-fn should_refresh(
+/// Whether to clear KV cache and how.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefreshDecision {
+    None,
+    Full(RefreshKind),
+    Lane {
+        batch_idx: usize,
+        kind: RefreshKind,
+    },
+}
+
+/// Decide proactive KV refresh before the next frame.
+fn decide_refresh(
     frames_since_refresh: usize,
     context: usize,
-    pausing: bool,
-) -> Option<RefreshKind> {
+    vad_pause_streak: &[usize],
+    batch_size: usize,
+) -> RefreshDecision {
     if context == 0 || frames_since_refresh == 0 {
-        return None;
+        return RefreshDecision::None;
     }
     let soft = (context * REFRESH_SOFT_CONTEXT_NUM) / REFRESH_SOFT_CONTEXT_DEN;
     let hard = context.saturating_sub(REFRESH_HARD_MARGIN_FRAMES);
+
     if frames_since_refresh >= hard {
-        Some(RefreshKind::HardDeadline)
-    } else if pausing && frames_since_refresh >= soft {
-        Some(RefreshKind::SoftPause)
-    } else {
-        None
+        return RefreshDecision::Full(RefreshKind::HardDeadline);
     }
+
+    if frames_since_refresh < soft {
+        return RefreshDecision::None;
+    }
+
+    let pausing: Vec<usize> = vad_pause_streak
+        .iter()
+        .enumerate()
+        .filter(|(_, streak)| **streak >= REFRESH_PAUSE_FRAMES)
+        .map(|(idx, _)| idx)
+        .collect();
+
+    if pausing.is_empty() {
+        return RefreshDecision::None;
+    }
+
+    if batch_size == 1 {
+        return RefreshDecision::Full(RefreshKind::SoftPause);
+    }
+
+    if pausing.len() == 1 {
+        let paused = pausing[0];
+        let other = 1 - paused;
+        if vad_pause_streak.get(other).copied().unwrap_or(0) < REFRESH_PAUSE_FRAMES {
+            return RefreshDecision::Lane {
+                batch_idx: paused,
+                kind: RefreshKind::SoftPause,
+            };
+        }
+    }
+
+    RefreshDecision::Full(RefreshKind::SoftPause)
 }
 
 /// Loaded model components — kept together so they can be used by the inference loop
@@ -170,8 +209,10 @@ struct LoadedModel {
     frames_since_refresh: usize,
     /// Soft context refreshes performed this session (diagnostics).
     refresh_count: u64,
-    /// Consecutive frames where the semantic VAD pause head fired.
-    vad_pause_streak: usize,
+    /// Consecutive frames where the semantic VAD pause head fired, per batch lane.
+    vad_pause_streak: Vec<usize>,
+    /// Per-lane LID and mismatch streak tracking.
+    language_tracker: LanguageTracker,
 }
 
 /// Kyutai STT engine implementation.
@@ -183,6 +224,8 @@ pub struct KyutaiEngine {
     /// and system audio (Them) legs are transcribed as independent batch lanes
     /// of one model. Takes effect on the next `reset_state`.
     diarize: bool,
+    /// Heuristic prior for LID/mismatch resets (never passed to moshi).
+    meeting_language_prior: MeetingTranscriptionLanguage,
 }
 
 impl Default for KyutaiEngine {
@@ -196,6 +239,7 @@ impl KyutaiEngine {
         Self {
             model: None,
             diarize: false,
+            meeting_language_prior: MeetingTranscriptionLanguage::Auto,
         }
     }
 
@@ -254,6 +298,7 @@ impl KyutaiEngine {
         config: KyutaiConfig,
         text_tokenizer: sentencepiece::SentencePieceProcessor,
         batch_size: usize,
+        meeting_language_prior: MeetingTranscriptionLanguage,
     ) -> Result<LoadedModel, EngineError> {
         let state = Self::build_state(&device, &model_path, &config, batch_size)?;
         Ok(LoadedModel {
@@ -267,7 +312,8 @@ impl KyutaiEngine {
             epoch_origin_seconds: 0.0,
             frames_since_refresh: 0,
             refresh_count: 0,
-            vad_pause_streak: 0,
+            vad_pause_streak: vec![0; batch_size],
+            language_tracker: LanguageTracker::new(batch_size, meeting_language_prior),
         })
     }
 
@@ -326,7 +372,8 @@ impl KyutaiEngine {
         model.prefix_pending = true;
         model.time_offset_seconds = 0.0;
         model.frames_since_refresh = 0;
-        model.vad_pause_streak = 0;
+        model.vad_pause_streak = vec![0; model.state.batch_size()];
+        model.language_tracker.reset_all();
         model.refresh_count = model.refresh_count.saturating_add(1);
         info!(
             kind = ?kind,
@@ -339,22 +386,50 @@ impl KyutaiEngine {
         Ok(())
     }
 
+    /// Per-lane KV clear via moshi `reset_batch_idx`. Does not rebuild Metal or
+    /// re-feed the silence prefix; the other lane keeps decoding uninterrupted.
+    fn refresh_lane(model: &mut LoadedModel, batch_idx: usize, kind: RefreshKind) -> Result<(), EngineError> {
+        model
+            .state
+            .reset_batch_idx(batch_idx)
+            .map_err(|e| EngineError::InferenceError(format!("ASR lane reset: {e}")))?;
+        if let Some(streak) = model.vad_pause_streak.get_mut(batch_idx) {
+            *streak = 0;
+        }
+        model.language_tracker.reset_lane(batch_idx);
+        debug!(
+            kind = ?kind,
+            batch_idx,
+            "ASR lane context reset (per-batch KV clear)"
+        );
+        Ok(())
+    }
+
     fn maybe_refresh_before_frame(model: &mut LoadedModel) -> Result<(), EngineError> {
-        let pausing = model.vad_pause_streak >= REFRESH_PAUSE_FRAMES;
-        if let Some(kind) =
-            should_refresh(model.frames_since_refresh, model.config.context, pausing)
-        {
-            Self::refresh_loaded(model, kind)?;
+        let batch_size = model.state.batch_size();
+        match decide_refresh(
+            model.frames_since_refresh,
+            model.config.context,
+            &model.vad_pause_streak,
+            batch_size,
+        ) {
+            RefreshDecision::None => {}
+            RefreshDecision::Full(kind) => Self::refresh_loaded(model, kind)?,
+            RefreshDecision::Lane { batch_idx, kind } => Self::refresh_lane(model, batch_idx, kind)?,
         }
         Ok(())
     }
 
     fn note_vad_pause(model: &mut LoadedModel, prs: &[Vec<f32>]) {
-        if let Some(p) = prs.get(VAD_PAUSE_HEAD).and_then(|h| h.first()) {
-            if *p > VAD_PAUSE_THRESHOLD {
-                model.vad_pause_streak += 1;
-            } else {
-                model.vad_pause_streak = 0;
+        if let Some(pause_head) = prs.get(VAD_PAUSE_HEAD) {
+            for (batch_idx, p) in pause_head.iter().enumerate() {
+                if let Some(streak) = model.vad_pause_streak.get_mut(batch_idx) {
+                    if *p > VAD_PAUSE_THRESHOLD {
+                        *streak += 1;
+                    } else {
+                        *streak = 0;
+                    }
+                }
             }
         }
     }
@@ -521,6 +596,14 @@ impl KyutaiEngine {
                     if text.is_empty() {
                         continue;
                     }
+                    let language = detect_word(&text).map(|code| code.as_str().to_string());
+                    let mismatch_reset = model.language_tracker.on_word(&text, *batch_idx);
+                    if mismatch_reset
+                        && let Err(e) =
+                            Self::refresh_lane(model, *batch_idx, RefreshKind::LanguageMismatch)
+                    {
+                        warn!(batch_idx, "Language mismatch lane reset failed: {e}");
+                    }
                     let start_time = Self::word_start_time(model, *start_time);
                     let speaker = if diarized {
                         Some(if *batch_idx == 0 {
@@ -536,7 +619,7 @@ impl KyutaiEngine {
                         start_time,
                         end_time: start_time,
                         is_final: true,
-                        language: None,
+                        language,
                         confidence: None,
                         speaker,
                     });
@@ -555,6 +638,16 @@ impl KyutaiEngine {
             frames_since_refresh: m.frames_since_refresh,
             refresh_count: m.refresh_count,
         })
+    }
+
+    pub fn set_meeting_language_prior(&mut self, prior: MeetingTranscriptionLanguage) {
+        self.meeting_language_prior = prior;
+        if let Some(model) = self.model.as_mut() {
+            let batch_size = model.state.batch_size();
+            model
+                .language_tracker
+                .resize(batch_size, self.meeting_language_prior);
+        }
     }
 
     /// Reset the ASR state for a new recording session.
@@ -579,6 +672,7 @@ impl KyutaiEngine {
 
         // Captured before the rebuild closure moves the model fields.
         let batch_size = self.batch_size();
+        let meeting_language_prior = self.meeting_language_prior;
         let old = self.model.take().ok_or(EngineError::NotInitialized)?;
         let LoadedModel {
             state: old_state,
@@ -596,7 +690,14 @@ impl KyutaiEngine {
 
         let rebuilt = with_autorelease_pool(move || -> Result<LoadedModel, EngineError> {
             let device = Self::select_device()?;
-            Self::build_loaded_model(device, model_path, config, text_tokenizer, batch_size)
+            Self::build_loaded_model(
+                device,
+                model_path,
+                config,
+                text_tokenizer,
+                batch_size,
+                meeting_language_prior,
+            )
         })?;
 
         self.model = Some(rebuilt);
@@ -631,6 +732,7 @@ impl TranscriptionEngine for KyutaiEngine {
         // Initial load is always single-stream; diarization is enabled later via
         // set_diarization + reset_state.
         let batch_size = self.batch_size();
+        let meeting_language_prior = self.meeting_language_prior;
         let loaded = with_autorelease_pool(move || {
             Self::build_loaded_model(
                 device,
@@ -638,6 +740,7 @@ impl TranscriptionEngine for KyutaiEngine {
                 config,
                 text_tokenizer,
                 batch_size,
+                meeting_language_prior,
             )
         })?;
 
@@ -764,7 +867,11 @@ impl TranscriptionEngine for KyutaiEngine {
         let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
         let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
         let diarize = self.diarize;
-        let pause_streak = model.vad_pause_streak;
+        let pause_streak = model
+            .vad_pause_streak
+            .first()
+            .copied()
+            .unwrap_or(0);
 
         if !diarize && pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES {
             info!(
@@ -795,6 +902,10 @@ impl TranscriptionEngine for KyutaiEngine {
 
     fn set_diarization(&mut self, enabled: bool) {
         self.diarize = enabled;
+    }
+
+    fn set_meeting_language_prior(&mut self, prior: crate::settings::MeetingTranscriptionLanguage) {
+        KyutaiEngine::set_meeting_language_prior(self, prior);
     }
 
     fn transcribe_dual(
@@ -883,37 +994,56 @@ mod tests {
     }
 
     #[test]
-    fn should_refresh_none_before_soft_window() {
-        // stt-2.6b context = 375 → soft at 225, hard at 350
-        assert_eq!(should_refresh(100, 375, true), None);
-        assert_eq!(should_refresh(224, 375, true), None);
-        assert_eq!(should_refresh(225, 375, false), None);
+    fn decide_refresh_none_before_soft_window() {
+        let streak = [0usize];
+        assert_eq!(decide_refresh(100, 375, &streak, 1), RefreshDecision::None);
+        assert_eq!(decide_refresh(224, 375, &streak, 1), RefreshDecision::None);
+        assert_eq!(decide_refresh(225, 375, &[0], 1), RefreshDecision::None);
     }
 
     #[test]
-    fn should_refresh_soft_pause_at_60_percent_context() {
+    fn decide_refresh_soft_pause_at_60_percent_context() {
         assert_eq!(
-            should_refresh(225, 375, true),
-            Some(RefreshKind::SoftPause)
+            decide_refresh(225, 375, &[8], 1),
+            RefreshDecision::Full(RefreshKind::SoftPause)
         );
     }
 
     #[test]
-    fn should_refresh_hard_deadline_near_context() {
+    fn decide_refresh_hard_deadline_near_context() {
         assert_eq!(
-            should_refresh(350, 375, false),
-            Some(RefreshKind::HardDeadline)
+            decide_refresh(350, 375, &[0], 1),
+            RefreshDecision::Full(RefreshKind::HardDeadline)
         );
         assert_eq!(
-            should_refresh(350, 375, true),
-            Some(RefreshKind::HardDeadline)
+            decide_refresh(350, 375, &[8], 1),
+            RefreshDecision::Full(RefreshKind::HardDeadline)
         );
     }
 
     #[test]
-    fn should_refresh_ignores_zero_context_or_fresh_epoch() {
-        assert_eq!(should_refresh(400, 0, true), None);
-        assert_eq!(should_refresh(0, 375, true), None);
+    fn decide_refresh_ignores_zero_context_or_fresh_epoch() {
+        assert_eq!(decide_refresh(400, 0, &[8], 1), RefreshDecision::None);
+        assert_eq!(decide_refresh(0, 375, &[8], 1), RefreshDecision::None);
+    }
+
+    #[test]
+    fn decide_refresh_dual_one_lane_paused_other_active() {
+        assert_eq!(
+            decide_refresh(300, 375, &[8, 2], 2),
+            RefreshDecision::Lane {
+                batch_idx: 0,
+                kind: RefreshKind::SoftPause,
+            }
+        );
+    }
+
+    #[test]
+    fn decide_refresh_dual_both_paused_full_refresh() {
+        assert_eq!(
+            decide_refresh(300, 375, &[8, 10], 2),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
     }
 
     #[test]
