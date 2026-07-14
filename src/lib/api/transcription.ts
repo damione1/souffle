@@ -35,6 +35,21 @@ export async function loadModel(selection: TranscriptionProfileSelection): Promi
   await unwrap(commands.loadModel(selection));
 }
 
+/** Whether the offline speaker-recognition (diarization) models are on disk. */
+export async function getDiarizeModelsStatus(): Promise<boolean> {
+  return commands.getDiarizeModelsStatus();
+}
+
+/** Download the offline speaker-recognition models (~32MB), streaming
+ * progress like {@link downloadModel}. */
+export async function downloadDiarizeModels(
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<void> {
+  const channel = new Channel<DownloadProgress>();
+  channel.onmessage = onProgress;
+  await unwrap(commands.downloadDiarizeModels(channel));
+}
+
 export async function deleteModel(selection: TranscriptionProfileSelection): Promise<void> {
   await unwrap(commands.deleteModel(selection));
 }

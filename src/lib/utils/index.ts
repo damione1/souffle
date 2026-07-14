@@ -8,3 +8,6 @@ export { errorMessage } from "./errors";
 export { renderReleaseNotesMarkdown } from "./markdown";
 export { createDebouncedSearch, filterResultsByType, findSnippet, matchedIdsForType } from "./search.svelte";
 export type { DebouncedSearch } from "./search.svelte";
+export { resolveSpeakerLabel, speakerPlainLabel } from "./speaker-label";
+export type { SpeakerLabel } from "./speaker-label";
+export { speakerPaletteIndex, speakerPillClass, persistentSpeakerId, SPEAKER_PALETTE_SIZE } from "./speaker-color";

@@ -1,5 +1,10 @@
 import { getSummaryProvidersStatus } from "../../api/summary";
-import { deleteModel, getTranscriptionCatalog } from "../../api/transcription";
+import {
+  deleteModel,
+  downloadDiarizeModels,
+  getDiarizeModelsStatus,
+  getTranscriptionCatalog,
+} from "../../api/transcription";
 import {
   getSettings,
   getShortcuts,
@@ -67,6 +72,14 @@ export function createSettingsController() {
 
   let dictionaryEntries = $state<DictionaryEntry[]>([]);
 
+  // Offline speaker-recognition models (separate from the transcription
+  // model lifecycle): enabling the toggle when they're missing kicks off
+  // the download and only persists the setting once it succeeds.
+  let diarizeModelsDownloaded = $state(false);
+  let diarizeDownloadState = $state<"idle" | "downloading" | "error">("idle");
+  let diarizeDownloadedBytes = $state(0);
+  let diarizeDownloadTotalBytes = $state<number | null>(null);
+
   let calendars = $state<CalendarInfo[]>([]);
   let calendarPermission = $state<PermState>("unknown");
 
@@ -80,6 +93,9 @@ export function createSettingsController() {
     checkIsLaptop()
       .then((laptop) => { isLaptop = laptop; })
       .catch(() => { isLaptop = false; });
+    getDiarizeModelsStatus()
+      .then((downloaded) => { diarizeModelsDownloaded = downloaded; })
+      .catch(() => { diarizeModelsDownloaded = false; });
     await Promise.all([
       loadShortcuts(),
       refreshDevices(),
@@ -530,6 +546,69 @@ export function createSettingsController() {
     });
   }
 
+  function onDiarizeEnabledChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked && !diarizeModelsDownloaded) {
+      void enableDiarizeAfterDownload();
+      return;
+    }
+    void persistSettings((settings) => {
+      settings.diarize_enabled = checked;
+    });
+  }
+
+  function onDiarizeMaxSpeakersChange(event: Event) {
+    const raw = (event.target as HTMLSelectElement).value;
+    const value = raw === "" ? null : parseInt(raw, 10);
+    if (raw !== "" && !Number.isFinite(value)) return;
+    void persistSettings((settings) => {
+      settings.diarize_max_speakers = value;
+    });
+  }
+
+  /** Enabling speaker recognition with the models missing first downloads
+   * them (~32MB), showing progress on the toggle row, then persists the
+   * setting. A failed download leaves the setting off. */
+  async function enableDiarizeAfterDownload() {
+    if (diarizeDownloadState === "downloading") return;
+    diarizeDownloadState = "downloading";
+    diarizeDownloadedBytes = 0;
+    diarizeDownloadTotalBytes = null;
+
+    let failed: string | null = null;
+    const done = new Promise<void>((resolve) => {
+      void downloadDiarizeModels((progress) => {
+        diarizeDownloadedBytes = progress.downloaded_bytes;
+        if (progress.total_bytes !== null) {
+          diarizeDownloadTotalBytes = progress.total_bytes;
+        }
+        if (typeof progress.status === "object" && "error" in progress.status) {
+          failed = progress.status.error;
+          resolve();
+          return;
+        }
+        if (progress.status === "complete" && progress.file === "all") {
+          resolve();
+        }
+      }).catch((e) => {
+        failed = errorMessage(e);
+        resolve();
+      });
+    });
+    await done;
+
+    if (failed !== null) {
+      diarizeDownloadState = "error";
+      statusMessage = `Speaker recognition model download failed: ${failed}`;
+      return;
+    }
+    diarizeModelsDownloaded = true;
+    diarizeDownloadState = "idle";
+    await persistSettings((settings) => {
+      settings.diarize_enabled = true;
+    });
+  }
+
   function onMeetingAudioRetentionChange(event: Event) {
     const value = (event.target as HTMLSelectElement).value as AppSettings["meeting_audio_retention"];
     void persistSettings((settings) => {
@@ -794,6 +873,12 @@ export function createSettingsController() {
     onMeetingMaxDurationMinutesChange,
     onMeetingTranscriptionLanguageChange,
     onMeetingAudioRetentionChange,
+    get diarizeModelsDownloaded() { return diarizeModelsDownloaded; },
+    get diarizeDownloadState() { return diarizeDownloadState; },
+    get diarizeDownloadedBytes() { return diarizeDownloadedBytes; },
+    get diarizeDownloadTotalBytes() { return diarizeDownloadTotalBytes; },
+    onDiarizeEnabledChange,
+    onDiarizeMaxSpeakersChange,
     onVadEnabledChange,
     onFillerRemovalChange,
     onStutterCollapseChange,

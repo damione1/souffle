@@ -16,10 +16,11 @@ import {
   summarizeMeeting as runMeetingSummary,
   takeSleepPausedMeeting,
 } from "../../api/meetings";
+import { listSpeakers, renameSpeaker as applySpeakerRename, retagMeetingSpeaker } from "../../api/speakers";
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { DiarizationProgress, ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingSpeaker, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -90,6 +91,7 @@ function createMeetingControllerInstance() {
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
 
   let meeting = $state<MeetingTranscript | null>(null);
+  let allSpeakers = $state<MeetingSpeaker[]>([]);
   let isLoadingMeeting = $state(false);
   // Recorded audio files for the open meeting (empty when recording was off,
   // or nothing survived retention) — drives whether the player bar shows.
@@ -161,6 +163,7 @@ function createMeetingControllerInstance() {
       // Best-effort: a missing/unreadable recordings directory should never
       // block loading the meeting itself, the player bar just stays hidden.
       audioSessions = await getMeetingAudio(id).catch(() => []);
+      allSpeakers = await listSpeakers().catch(() => []);
     } catch (e) {
       statusMessage = errorMessage(e);
     } finally {
@@ -291,6 +294,7 @@ function createMeetingControllerInstance() {
         notes: null,
         calendar_event_id: calendar?.event_id ?? null,
         participants: calendar?.participants ?? [],
+        speakers: [],
       };
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -364,6 +368,33 @@ function createMeetingControllerInstance() {
     liveMeetingSegments = [];
     clearIdleState();
     void loadMeeting(id);
+  }
+
+  /** The backend finished the post-stop speaker-recognition pass and
+   * relabeled this meeting's segments. Reload so labels appear; no-op if the
+   * user is looking at a different meeting (labels are already persisted and
+   * will show whenever it's opened). */
+  function handleMeetingDiarized(id: string) {
+    if (app.currentMeetingId !== id && meeting?.id !== id) return;
+    statusMessage = "";
+    void loadMeeting(id);
+  }
+
+  /** Coarse progress for the background speaker-recognition pass after stop.
+   * Only shown while the same meeting is open; errors stay on the banner. */
+  function handleDiarizationProgress(payload: DiarizationProgress) {
+    if (app.currentMeetingId !== payload.meeting_id && meeting?.id !== payload.meeting_id) return;
+    if (payload.finished) {
+      if (payload.error) {
+        statusMessage = `Speaker recognition failed: ${payload.error}`;
+      } else {
+        statusMessage = "";
+      }
+      return;
+    }
+    if (payload.total_sessions > 0) {
+      statusMessage = `Labeling speakers (${payload.done_sessions}/${payload.total_sessions})...`;
+    }
   }
 
   /** The backend aborted the recording session (machine went to Error).
@@ -614,6 +645,42 @@ function createMeetingControllerInstance() {
     }
   }
 
+  /** Rename a persistent speaker globally (propagates to every meeting). */
+  async function renameSpeaker(id: number, name: string) {
+    try {
+      await applySpeakerRename(id, name);
+      if (meeting?.id) {
+        meeting = await getMeeting(meeting.id);
+      }
+      allSpeakers = await listSpeakers().catch(() => []);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
+  /** Reassign persistent-speaker labels within the open meeting. */
+  async function retagSpeaker(options: {
+    fromSpeakerId: number;
+    segmentSortOrders: number[];
+    scope: "turn" | "meeting";
+    toSpeakerId: number | null;
+    newSpeakerName: string | null;
+  }) {
+    if (!meeting?.id) return;
+    try {
+      meeting = await retagMeetingSpeaker({
+        meeting_id: meeting.id,
+        from_speaker_id: options.fromSpeakerId,
+        sort_orders: options.scope === "turn" ? options.segmentSortOrders : [],
+        to_speaker_id: options.toSpeakerId,
+        new_speaker_name: options.newSpeakerName,
+      });
+      allSpeakers = await listSpeakers().catch(() => []);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
   async function deleteMeeting() {
     if (!meeting || !meeting.id) return;
     try {
@@ -672,6 +739,7 @@ function createMeetingControllerInstance() {
     get liveTranscript() { return liveTranscript; },
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
+    get allSpeakers() { return allSpeakers; },
     get audioSessions() { return audioSessions; },
     get seekTarget() { return seekTarget; },
     get seekRequestId() { return seekRequestId; },
@@ -705,8 +773,12 @@ function createMeetingControllerInstance() {
     saveTranscriptEdit,
     saveTranscriptAndSummarize,
     resetEditedTranscript,
+    renameSpeaker,
+    retagSpeaker,
     handleRecordingAborted,
     handleMeetingFinalized,
+    handleMeetingDiarized,
+    handleDiarizationProgress,
     handleMeetingIdle,
     dismissIdle,
     applyLiveParagraphEdit,
@@ -725,6 +797,18 @@ export function notifyMeetingAborted() {
  * been fully drained and saved in the background. */
 export function notifyMeetingFinalized(id: string) {
   instance?.handleMeetingFinalized(id);
+}
+
+/** Called from the global MeetingDiarized listener when the post-stop
+ * speaker-recognition pass relabeled a meeting's segments. */
+export function notifyMeetingDiarized(id: string) {
+  instance?.handleMeetingDiarized(id);
+}
+
+/** Called from the global DiarizationProgress listener while the post-stop
+ * speaker-recognition pass runs. */
+export function notifyDiarizationProgress(payload: DiarizationProgress) {
+  instance?.handleDiarizationProgress(payload);
 }
 
 /** The floating pill (or tray) asked to stop the active meeting; run the

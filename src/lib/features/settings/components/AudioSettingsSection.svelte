@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
+  import ProgressBar from "../../../components/ui/ProgressBar.svelte";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import type { AudioDeviceInfo } from "../../../types";
 
@@ -10,6 +11,8 @@
     15: "settings_audio.meeting_autostop_15min",
     30: "settings_audio.meeting_autostop_30min",
   };
+
+  const diarizeMaxSpeakersOptions = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20] as const;
 
   const maxDurationMinutesOptions = [120, 240, 480] as const;
   const maxDurationMinutesKeys: Record<(typeof maxDurationMinutesOptions)[number], string> = {
@@ -39,6 +42,11 @@
     meetingAutostopMinutes,
     meetingMaxDurationMinutes,
     meetingTranscriptionLanguage,
+    diarizeEnabled,
+    diarizeMaxSpeakers,
+    diarizeDownloadState,
+    diarizeDownloadedBytes,
+    diarizeDownloadTotalBytes,
     onCaptureSystemAudioChange,
     onClamshellDeviceChange,
     onVadEnabledChange,
@@ -49,6 +57,8 @@
     onMeetingAutostopMinutesChange,
     onMeetingMaxDurationMinutesChange,
     onMeetingTranscriptionLanguageChange,
+    onDiarizeEnabledChange,
+    onDiarizeMaxSpeakersChange,
   }: {
     audioDevices: AudioDeviceInfo[];
     captureSystemAudio: boolean;
@@ -63,6 +73,11 @@
     meetingAutostopMinutes: number;
     meetingMaxDurationMinutes: number;
     meetingTranscriptionLanguage: (typeof meetingLanguageOptions)[number];
+    diarizeEnabled: boolean;
+    diarizeMaxSpeakers: number | null;
+    diarizeDownloadState: "idle" | "downloading" | "error";
+    diarizeDownloadedBytes: number;
+    diarizeDownloadTotalBytes: number | null;
     onCaptureSystemAudioChange: (event: Event) => void | Promise<void>;
     onClamshellDeviceChange: (event: Event) => void | Promise<void>;
     onVadEnabledChange: (event: Event) => void | Promise<void>;
@@ -73,6 +88,8 @@
     onMeetingAutostopMinutesChange: (event: Event) => void | Promise<void>;
     onMeetingMaxDurationMinutesChange: (event: Event) => void | Promise<void>;
     onMeetingTranscriptionLanguageChange: (event: Event) => void | Promise<void>;
+    onDiarizeEnabledChange: (event: Event) => void | Promise<void>;
+    onDiarizeMaxSpeakersChange: (event: Event) => void | Promise<void>;
   } = $props();
 </script>
 
@@ -130,6 +147,55 @@
       </select>
     {/snippet}
   </SettingsField>
+
+  <SettingsField
+    label={$t("settings_audio.diarize_enabled")}
+    description={$t("settings_audio.diarize_enabled_desc")}
+  >
+    {#snippet control()}
+      <input
+        type="checkbox"
+        checked={diarizeEnabled}
+        disabled={diarizeDownloadState === "downloading"}
+        onchange={onDiarizeEnabledChange}
+        class="switch"
+        aria-label={$t("settings_audio.diarize_enabled")}
+      />
+    {/snippet}
+  </SettingsField>
+
+  {#if diarizeDownloadState === "downloading"}
+    <div>
+      <ProgressBar
+        value={diarizeDownloadedBytes}
+        max={diarizeDownloadTotalBytes && diarizeDownloadTotalBytes > 0 ? diarizeDownloadTotalBytes : 100}
+        label={$t("settings_audio.diarize_downloading")}
+      />
+    </div>
+  {/if}
+
+  {#if diarizeEnabled}
+    <SettingsField
+      label={$t("settings_audio.diarize_max_speakers_label")}
+      description={$t("settings_audio.diarize_max_speakers_desc")}
+      htmlFor="diarize-max-speakers"
+    >
+      {#snippet control()}
+        <select
+          id="diarize-max-speakers"
+          value={diarizeMaxSpeakers ?? ""}
+          onchange={onDiarizeMaxSpeakersChange}
+          class="field-select max-w-48"
+        >
+          <option value="">{$t("settings_audio.diarize_max_speakers_auto")}</option>
+          {#each diarizeMaxSpeakersOptions as count}
+            <option value={count}>{count}</option>
+          {/each}
+        </select>
+      {/snippet}
+    </SettingsField>
+  {/if}
+
 
   <SettingsField
     label={$t("settings_audio.meeting_autostop")}

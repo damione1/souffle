@@ -83,6 +83,9 @@
       recordingSessions={controller.meeting.recording_sessions}
       liveSessionStartIndex={liveSessionStartIndex}
       isRecordingMeeting={controller.isRecordingMeeting}
+      speakers={controller.meeting.speakers}
+      allSpeakers={controller.allSpeakers}
+      canManageSpeakers={!controller.isRecordingMeeting && Boolean(controller.meeting.id)}
       hasEditedTranscript={controller.meeting.edited_transcript != null}
       isEditing={controller.isEditingTranscript}
       editedTranscriptDraft={controller.editedTranscriptDraft}
@@ -94,6 +97,8 @@
       onEditDraftChange={(value) => { controller.editedTranscriptDraft = value; }}
       onParagraphClick={controller.audioSessions.length > 0 ? controller.requestAudioSeek : undefined}
       onAddDictionaryAlias={controller.addDictionaryAlias}
+      onRenameSpeaker={(id, name) => controller.renameSpeaker(id, name)}
+      onRetagSpeaker={(options) => controller.retagSpeaker(options)}
     />
 
     <!-- AI summary, generated from notes + transcript. -->

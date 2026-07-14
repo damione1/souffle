@@ -66,6 +66,7 @@ pub mod fixtures {
             notes: None,
             calendar_event_id: None,
             participants: Vec::new(),
+            speakers: Vec::new(),
         }
     }
 

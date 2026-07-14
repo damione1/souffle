@@ -77,6 +77,22 @@ describe("createLiveTranscript equivalence", () => {
     expect(all).toEqual(groupIntoParagraphs(segments, PAUSE_THRESHOLD));
   });
 
+  it("matches batch grouping for three interleaved persistent speakers", () => {
+    // Same "arrive slightly interleaved, sorted by start_time" shape as the
+    // two-speaker case above, but with three persistent speaker ids
+    // (spk:1/spk:2/spk:3) instead of just me/them.
+    const segments = [
+      dseg("hi everyone", 0, "spk:1"),
+      dseg("hello", 2.1, "spk:2"),
+      dseg("morning", 2.15, "spk:3"),
+      dseg("how's it going", 4.3, "spk:1"),
+      dseg("good thanks", 4.35, "spk:2"),
+      dseg("same here", 6.5, "spk:3"),
+    ];
+    const { all } = runStream(segments);
+    expect(all).toEqual(groupIntoParagraphs(segments, PAUSE_THRESHOLD));
+  });
+
   it("matches batch grouping for a long unpunctuated stream (hard length cap)", () => {
     const segments = Array.from({ length: 300 }, (_, i) => seg(`word${i}`, i * 0.1));
     const { all } = runStream(segments);

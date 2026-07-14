@@ -155,6 +155,31 @@ pub struct ArchiveExportProgress {
     pub error: Option<String>,
 }
 
+/// A background diarization pass finished labeling a mic-only meeting's
+/// segments with persistent speaker identities. The frontend reloads the
+/// meeting if it's currently open, so the labels appear without a manual
+/// refresh. Only ever emitted after `MeetingFinalized` for the same meeting
+/// (diarization runs strictly after the transcript is saved), and only when
+/// at least one segment was actually relabeled.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct MeetingDiarized {
+    pub meeting_id: String,
+}
+
+/// Coarse progress for the background diarization pass over one meeting's
+/// recorded sessions (same shape as `ArchiveExportProgress`): one event when
+/// the pass starts, one per session completed, and a final event with
+/// `finished: true`. `error` carries a whole-pass failure; a single bad
+/// session is non-fatal and only logged.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DiarizationProgress {
+    pub meeting_id: String,
+    pub done_sessions: u32,
+    pub total_sessions: u32,
+    pub finished: bool,
+    pub error: Option<String>,
+}
+
 /// The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
 /// The frontend calls `take_sleep_paused_meeting` on receiving this (and again
 /// on webview visibility change, in case the webview itself was suspended

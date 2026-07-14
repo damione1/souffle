@@ -10,7 +10,7 @@
 
 use chrono::Utc;
 use souffle_lib::db::Database;
-use souffle_lib::engine::{TranscriptionProfile, TranscriptionSegment};
+use souffle_lib::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
 use souffle_lib::transcript::{
     MeetingParticipant, MeetingRecordingSession, MeetingTranscript, StructuredActionItem,
     StructuredSummary,
@@ -77,6 +77,7 @@ fn build_meeting() -> MeetingTranscript {
             is_organizer: true,
             is_current_user: false,
         }],
+        speakers: Vec::new(),
     }
 }
 
@@ -142,6 +143,43 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
     assert_eq!(dictations.len(), 1);
     assert_eq!(dictations[0].id, "dict-1");
     assert_eq!(dictations[0].text, "Buy milk on the way home");
+}
+
+#[test]
+fn sidecar_resolves_persistent_speaker_names_written_by_the_real_app() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("souffle.db");
+
+    let app_db = Database::open(&db_path).unwrap();
+    let alice_id = app_db.create_speaker("Alice Martin").unwrap();
+    let bob_id = app_db.create_speaker("Bob Chen").unwrap();
+
+    let mut meeting = build_meeting();
+    meeting.id = "contract-speakers".to_string();
+    meeting.segments[0].speaker = Some(Speaker::Persistent(alice_id));
+    meeting.segments[1].speaker = Some(Speaker::Persistent(bob_id));
+    app_db.save_meeting(&meeting).unwrap();
+
+    // The app's own read path resolves the same speakers list.
+    let loaded = app_db.load_meeting("contract-speakers").unwrap();
+    assert_eq!(loaded.speakers.len(), 2);
+    drop(app_db);
+
+    let sidecar = McpDb::open(&db_path).unwrap();
+    let detail = sidecar
+        .get_meeting("contract-speakers", IncludeSet::all())
+        .unwrap();
+
+    assert_eq!(
+        detail.speakers.iter().map(|s| s.id).collect::<Vec<_>>(),
+        vec![alice_id, bob_id]
+    );
+    assert_eq!(detail.speakers[0].name, "Alice Martin");
+    assert_eq!(detail.speakers[1].name, "Bob Chen");
+
+    let transcript = detail.transcript.unwrap();
+    assert!(transcript.contains("Alice Martin: Hello from the contract test meeting."));
+    assert!(transcript.contains("Bob Chen: This checks schema drift end to end."));
 }
 
 #[test]

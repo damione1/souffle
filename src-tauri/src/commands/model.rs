@@ -274,6 +274,71 @@ pub fn delete_model(
     Ok(())
 }
 
+/// Whether both offline speaker-diarization models are already on disk.
+/// Separate from the transcription-model status: diarization models are not
+/// a `TranscriptionProfile` and never touch the state machine.
+#[tauri::command]
+#[specta::specta]
+pub fn get_diarize_models_status() -> bool {
+    crate::diarize::models::models_downloaded()
+}
+
+/// Download the two offline speaker-diarization models (~32MB total),
+/// streaming progress back via the same Channel API as `download_model`.
+/// No state-machine transitions: these models are independent of the
+/// transcription engine lifecycle, so a failure only surfaces through the
+/// channel's error status.
+#[tauri::command]
+#[specta::specta]
+pub fn download_diarize_models(channel: Channel<models::DownloadProgress>) -> Result<(), String> {
+    if crate::diarize::models::models_downloaded() {
+        channel
+            .send(models::DownloadProgress {
+                file: "all".into(),
+                downloaded_bytes: 0,
+                total_bytes: None,
+                completed_files: 1,
+                total_files: 1,
+                status: models::DownloadStatus::Complete,
+            })
+            .map_err(|e| format!("Channel send: {e}"))?;
+        return Ok(());
+    }
+
+    std::thread::Builder::new()
+        .name("diarize-model-download".into())
+        .spawn(move || {
+            let result = crate::diarize::models::download_models(&|progress| {
+                let _ = channel.send(progress);
+            });
+            match result {
+                Ok(()) => {
+                    let _ = channel.send(models::DownloadProgress {
+                        file: "all".into(),
+                        downloaded_bytes: 0,
+                        total_bytes: None,
+                        completed_files: 1,
+                        total_files: 1,
+                        status: models::DownloadStatus::Complete,
+                    });
+                }
+                Err(e) => {
+                    let _ = channel.send(models::DownloadProgress {
+                        file: "error".into(),
+                        downloaded_bytes: 0,
+                        total_bytes: None,
+                        completed_files: 0,
+                        total_files: 1,
+                        status: models::DownloadStatus::Error(e),
+                    });
+                }
+            }
+        })
+        .map_err(|e| format!("Failed to spawn diarize model download thread: {e}"))?;
+
+    Ok(())
+}
+
 /// Debug: feed the debug WAV through the engine to test model in isolation.
 #[tauri::command]
 #[specta::specta]

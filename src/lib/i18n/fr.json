@@ -24,6 +24,12 @@
     "dictionary_correction_desc": "Corrige les mots mal reconnus à l'aide de votre dictionnaire personnalisé.",
     "capture_system_audio": "Capture de l'audio système",
     "capture_system_audio_desc": "Pendant les meetings, capture la sortie audio de l'ordinateur (Teams, Zoom…) en plus du micro. Aucune configuration requise.",
+    "diarize_enabled": "Reconnaissance des interlocuteurs",
+    "diarize_enabled_desc": "Pour les réunions en personne enregistrées uniquement au micro, identifie qui parle et annote la transcription après coup. Tout se passe sur ce Mac ; rien ne quitte votre ordinateur.",
+    "diarize_downloading": "Téléchargement des modèles de reconnaissance des interlocuteurs…",
+    "diarize_max_speakers_label": "Nombre max. d'interlocuteurs",
+    "diarize_max_speakers_desc": "Limite optionnelle du nombre de voix distinctes détectées dans une réunion. Auto laisse le moteur décider.",
+    "diarize_max_speakers_auto": "Auto",
     "meeting_autostop": "Détecter la fin de réunion",
     "meeting_autostop_desc": "Arrête l'enregistrement automatiquement quand personne n'a parlé depuis un moment.",
     "meeting_autostop_minutes_label": "Arrêter après",
@@ -248,7 +254,22 @@
   },
   "transcript": {
     "me": "Moi",
-    "them": "Eux"
+    "them": "Eux",
+    "speaker_fallback": "Intervenant {id}"
+  },
+  "speaker_manage": {
+    "edit_aria": "Gerer l'intervenant {name}",
+    "rename_heading": "Renommer l'intervenant",
+    "rename_label": "Nom de l'intervenant",
+    "save_name": "Enregistrer",
+    "retag_heading": "Reattribuer les etiquettes",
+    "scope_turn": "Ce tour seulement",
+    "scope_meeting": "Tous les tours dans cette reunion",
+    "pick_existing": "Intervenant existant",
+    "no_other_speakers": "Aucun autre intervenant",
+    "new_speaker": "Nouvel intervenant",
+    "new_speaker_placeholder": "Saisir un nom",
+    "apply_retag": "Appliquer la reattribution"
   },
   "meeting_audio": {
     "play": "Lecture",

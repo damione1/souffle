@@ -52,6 +52,8 @@ fn meeting_header(acc: &MeetingAccumulator) -> MeetingTranscript {
         notes: acc.notes.clone(),
         calendar_event_id: acc.calendar_event_id.clone(),
         participants: acc.participants.clone(),
+        // Header-only write; `speakers` is recomputed by `load_meeting`.
+        speakers: Vec::new(),
     }
 }
 
@@ -303,7 +305,26 @@ fn start_pipeline_blocking(
         && settings.meeting_audio_retention != crate::settings::MeetingAudioRetention::Off
     {
         recording_target
+            .as_ref()
             .map(|target| crate::audio::recorder::session_path(&target.meeting_id, target.session_index))
+    } else {
+        None
+    };
+
+    // Offline speaker recognition only applies to mic-only meetings: a
+    // system-audio lane already gives authoritative Me/Them attribution, so
+    // tapping audio for diarization would be pointless work. Silently skips
+    // (no tap, no capture, no inference) whenever the feature is off or its
+    // models aren't downloaded yet. The Settings UI is where downloading
+    // happens, this path never triggers it.
+    let diarize_capture_path = if mode == PipelineMode::Meeting
+        && !capture_system_audio
+        && settings.diarize_enabled
+        && crate::diarize::models::models_downloaded()
+    {
+        recording_target
+            .as_ref()
+            .map(|target| crate::audio::diarize_tap::session_wav_path(&target.meeting_id, target.session_index))
     } else {
         None
     };
@@ -316,6 +337,7 @@ fn start_pipeline_blocking(
             capture_system_audio,
             diarize,
             record_path,
+            diarize_capture_path,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
@@ -735,7 +757,13 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
             warn!("Pipeline stop failed (meeting saved anyway): {err}");
         }
 
-        let _ = MeetingFinalized { id: id_for_task }.emit(&app);
+        let _ = MeetingFinalized { id: id_for_task.clone() }.emit(&app);
+
+        // Offline speaker recognition for mic-only meetings runs strictly
+        // after the transcript is saved and the finalize event is out, on
+        // its own thread: it must never delay (nor be able to fail) the
+        // stop path. A meeting with no tapped audio is a silent no-op inside.
+        crate::pipeline::spawn_post_meeting_diarization(app.clone(), id_for_task);
     });
 
     Ok(meeting_id)
