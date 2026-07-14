@@ -400,6 +400,12 @@ pub struct AudioCapture {
     mic_device_name: Option<String>,
     /// UID resolved when the current stream was built (for route hot-swap).
     mic_device_uid: Option<String>,
+    /// Resolved target UID of the last route-change rebuild. When the opened
+    /// device cannot converge on that target (duplicate device names, or a
+    /// resolved device cpal cannot open), this stops the periodic health
+    /// check from tearing the stream down every interval; explicit route
+    /// events (`refresh_input_route`) clear it so a real change retries.
+    route_attempt_uid: Option<String>,
     /// Set by the cpal error callback when the stream dies (e.g. its device
     /// disappeared); the next mic health check rebuilds the capture leg.
     stream_failed: Arc<std::sync::atomic::AtomicBool>,
@@ -461,6 +467,7 @@ impl AudioCapture {
                     active_params: None,
                     mic_device_name: None,
                     mic_device_uid: None,
+                    route_attempt_uid: None,
                     stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     last_mic_check: Instant::now(),
                     level_throttle: AudioLevelThrottle::new(),
@@ -609,12 +616,14 @@ impl AudioCapture {
         )
     }
 
-    fn find_device(&self) -> Result<Device, String> {
+    /// Open the cpal device for the resolved input route. `known_devices` is
+    /// the CoreAudio snapshot the caller already holds, so resolution and
+    /// UID mapping work from one consistent device list.
+    fn find_device(&self, known_devices: &[AudioInputDevice]) -> Result<Device, String> {
         let host = cpal::default_host();
-        let known_devices = list_input_devices_impl();
 
-        if let Some(uid) = self.resolved_input_uid(&known_devices) {
-            let target_name = resolve_device_name(&known_devices, &uid).or({
+        if let Some(uid) = self.resolved_input_uid(known_devices) {
+            let target_name = resolve_device_name(known_devices, &uid).or({
                 // Disconnected UID or legacy name not in the current snapshot:
                 // try the stored value as a cpal device name directly.
                 Some(uid.as_str())
@@ -644,6 +653,11 @@ impl AudioCapture {
             }
         }
 
+        // Also reached when `resolve_input` found no auto-eligible device
+        // (every connected mic hidden, or Bluetooth-only with the Bluetooth
+        // preference off): recording on the OS default, even an excluded
+        // one, beats not recording at all. The policy only steers the
+        // automatic choice among alternatives.
         host.default_input_device()
             .ok_or_else(|| "No input device available".to_string())
     }
@@ -694,11 +708,11 @@ impl AudioCapture {
         self.mic_device_uid = None;
 
         let known_devices = list_input_devices_impl();
-        let device = self.find_device()?;
+        let device = self.find_device(&known_devices)?;
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".into());
         // Track the UID of the device cpal actually opened, not just what
-        // resolve_input picked — find_device may fall back to the OS default
+        // resolve_input picked: find_device may fall back to the OS default
         // when the resolved name is missing from the cpal device list.
         self.mic_device_uid = uid_for_device_name(&known_devices, &device_name);
         info!("Using input device: {device_name}");
@@ -1113,17 +1127,28 @@ impl AudioCapture {
             .swap(false, std::sync::atomic::Ordering::Relaxed);
 
         // Rebuild when the resolved input UID changes (lid closed, headset
-        // plugged in, priority policy update…) or the stream died.
-        let resolved_changed = self.active_params.is_some()
-            && self.resolved_input_uid(&list_input_devices_impl()).as_deref()
-                != self.mic_device_uid.as_deref();
+        // plugged in, priority policy update) or the stream died. Two guards
+        // keep this from looping every MIC_CHECK_INTERVAL:
+        // - `None` (no auto-eligible device under the current policy) never
+        //   tears down a healthy stream; a dead one is caught by `failed`.
+        // - A target already attempted without converging (duplicate device
+        //   names, resolved device cpal cannot open) is parked in
+        //   `route_attempt_uid` until an explicit route event retries it.
+        let resolved = self.resolved_input_uid(&list_input_devices_impl());
+        let resolved_changed = resolved.is_some()
+            && resolved != self.mic_device_uid
+            && resolved != self.route_attempt_uid;
 
         if !failed && !resolved_changed {
             return false;
         }
 
+        if resolved_changed {
+            self.route_attempt_uid = resolved.clone();
+        }
+
         info!(
-            "Input device {} — rebuilding audio capture",
+            "Input device {}, rebuilding audio capture",
             if failed { "failed" } else { "changed" }
         );
         match self.start(
@@ -1139,6 +1164,14 @@ impl AudioCapture {
             Ok(()) => {
                 self.mic_rebuild_failures = 0;
                 self.mic_loss_warned = false;
+                if resolved_changed && resolved != self.mic_device_uid {
+                    warn!(
+                        "Input route did not converge on the resolved device \
+                         (target {:?}, opened {:?}); keeping the opened device \
+                         until the route changes",
+                        resolved, self.mic_device_uid
+                    );
+                }
                 false
             }
             Err(e) => {
@@ -1174,7 +1207,11 @@ impl AudioCapture {
     }
 
     /// Re-run input resolution and hot-swap the mic leg when recording.
+    /// Called on explicit route events (device pick, policy change, CoreAudio
+    /// device-list or default-input change), so a previously non-converged
+    /// target is fair game again.
     fn refresh_input_route(&mut self) {
+        self.route_attempt_uid = None;
         if self.active_params.is_some() {
             self.last_mic_check = Instant::now();
             if self.check_mic_health() {
@@ -1312,6 +1349,7 @@ impl AudioCapture {
         self.active_params = None;
         self.mic_device_name = None;
         self.mic_device_uid = None;
+        self.route_attempt_uid = None;
         self.stream.take();
         self.resampler.take();
         #[cfg(target_os = "macos")]
@@ -1366,6 +1404,7 @@ impl AudioCapture {
         self.active_params = None;
         self.mic_device_name = None;
         self.mic_device_uid = None;
+        self.route_attempt_uid = None;
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
 

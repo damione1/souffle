@@ -5,7 +5,7 @@
 
 use super::DiarizedSegment;
 
-/// one transcript segment's time span, local to a single recording session
+/// One transcript segment's time span, local to a single recording session
 /// (matching the per-session zero-based clock `TranscriptionSegment.start_time`
 /// / `end_time` already use). `has_speaker` marks a segment whose label must
 /// not be overwritten for this pass: mic pass locks Them and persistent

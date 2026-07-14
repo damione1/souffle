@@ -228,30 +228,49 @@ impl Database {
     }
 
     /// Set the speaker label on specific segments of a meeting, identified
-    /// by their `sort_order`, in one transaction. Only segments whose
-    /// speaker is currently NULL are rewritten. Me/Them attribution and any
-    /// previous diarization pass are never overwritten. Segment text is
-    /// untouched, so the FTS index and any edited transcript stay valid
-    /// as-is. Returns how many rows actually changed.
+    /// by their `sort_order`, in one transaction. Segments whose speaker is
+    /// currently NULL are always writable. `replaceable` optionally names the
+    /// one live-attribution label (Me or Them) this write may also overwrite,
+    /// so an offline diarization pass can refine its own lane: the mic pass
+    /// replaces `me`, the system pass replaces `them`. Any other existing
+    /// label (the opposite lane, previous diarization passes) is never
+    /// touched. Segment text is untouched, so the FTS index and any edited
+    /// transcript stay valid as-is. Returns how many rows actually changed.
     pub fn set_segment_speakers(
         &self,
         meeting_id: &str,
         assignments: &[(u64, Speaker)],
+        replaceable: Option<Speaker>,
     ) -> Result<usize, String> {
         if assignments.is_empty() {
             return Ok(0);
         }
+        if matches!(replaceable, Some(Speaker::Persistent(_))) {
+            return Err(
+                "Persistent labels cannot be marked replaceable; use retag_persistent_speaker"
+                    .into(),
+            );
+        }
+        let replaceable_label = replaceable.map(Speaker::as_str);
         let mut conn = self.conn.acquire()?;
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
         let mut changed = 0usize;
         for (sort_order, speaker) in assignments {
+            // `speaker = NULL` is never true in SQL, so a `replaceable` of
+            // `None` reduces the predicate to `speaker IS NULL`.
             changed += tx
                 .execute(
                     "UPDATE segments SET speaker = ?1
-                     WHERE meeting_id = ?2 AND sort_order = ?3 AND speaker IS NULL",
-                    params![speaker.as_str(), meeting_id, *sort_order as i64],
+                     WHERE meeting_id = ?2 AND sort_order = ?3
+                       AND (speaker IS NULL OR speaker = ?4)",
+                    params![
+                        speaker.as_str(),
+                        meeting_id,
+                        *sort_order as i64,
+                        replaceable_label
+                    ],
                 )
                 .map_err(|e| format!("Set segment speaker: {e}"))?;
         }
@@ -1266,7 +1285,7 @@ mod tests {
     }
 
     #[test]
-    fn set_segment_speakers_only_rewrites_null_speakers() {
+    fn set_segment_speakers_without_replaceable_only_rewrites_null_speakers() {
         let (db, _dir) = test_db();
         let mut meeting = sample_meeting("m1");
         meeting.segments[0].speaker = Some(Speaker::Me);
@@ -1277,6 +1296,7 @@ mod tests {
             .set_segment_speakers(
                 "m1",
                 &[(0, Speaker::Persistent(7)), (1, Speaker::Persistent(7))],
+                None,
             )
             .unwrap();
         assert_eq!(changed, 1, "the Me segment must not be rewritten");
@@ -1286,11 +1306,64 @@ mod tests {
         assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(7)));
     }
 
+    /// Regression test for the system-audio diarization pass: segments in a
+    /// meeting with a system-audio lane are live-labeled Me/Them, and each
+    /// offline pass must be able to replace exactly its own lane.
+    #[test]
+    fn set_segment_speakers_replaces_only_the_allowed_lane() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Me);
+        meeting.segments[1].speaker = Some(Speaker::Them);
+        db.save_meeting(&meeting).unwrap();
+
+        // System pass: may replace Them, must not touch Me.
+        let changed = db
+            .set_segment_speakers(
+                "m1",
+                &[(0, Speaker::Persistent(7)), (1, Speaker::Persistent(7))],
+                Some(Speaker::Them),
+            )
+            .unwrap();
+        assert_eq!(changed, 1, "only the Them segment is replaceable");
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Me));
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(7)));
+
+        // Mic pass: may replace Me, must not touch the persistent label the
+        // system pass just wrote.
+        let changed = db
+            .set_segment_speakers(
+                "m1",
+                &[(0, Speaker::Persistent(9)), (1, Speaker::Persistent(9))],
+                Some(Speaker::Me),
+            )
+            .unwrap();
+        assert_eq!(changed, 1, "only the Me segment is replaceable");
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Persistent(9)));
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(7)));
+    }
+
+    #[test]
+    fn set_segment_speakers_rejects_persistent_replaceable() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        let result = db.set_segment_speakers(
+            "m1",
+            &[(0, Speaker::Persistent(1))],
+            Some(Speaker::Persistent(2)),
+        );
+        assert!(result.is_err());
+    }
+
     #[test]
     fn set_segment_speakers_empty_assignments_is_a_noop() {
         let (db, _dir) = test_db();
         db.save_meeting(&sample_meeting("m1")).unwrap();
-        assert_eq!(db.set_segment_speakers("m1", &[]).unwrap(), 0);
+        assert_eq!(db.set_segment_speakers("m1", &[], None).unwrap(), 0);
     }
 
     #[test]
@@ -1298,7 +1371,7 @@ mod tests {
         let (db, _dir) = test_db();
         db.save_meeting(&sample_meeting("m1")).unwrap();
         let changed = db
-            .set_segment_speakers("m1", &[(999, Speaker::Persistent(1))])
+            .set_segment_speakers("m1", &[(999, Speaker::Persistent(1))], None)
             .unwrap();
         assert_eq!(changed, 0);
     }
@@ -1307,7 +1380,7 @@ mod tests {
     fn set_segment_speakers_keeps_fts_search_working() {
         let (db, _dir) = test_db();
         db.save_meeting(&sample_meeting("m1")).unwrap();
-        db.set_segment_speakers("m1", &[(0, Speaker::Persistent(1))])
+        db.set_segment_speakers("m1", &[(0, Speaker::Persistent(1))], None)
             .unwrap();
         let hits = db.search_text("Hello", 10).unwrap();
         assert!(hits.iter().any(|hit| hit.source_id == "m1"));

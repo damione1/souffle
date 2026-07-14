@@ -193,8 +193,10 @@ fn parse_diarize_wav_stem(stem: &str) -> Option<(usize, DiarizationPass)> {
 /// Diarize every tapped session of one meeting and write the resulting
 /// speaker labels back. Each session may run a mic pass, a system pass, or
 /// both; a failed pass is logged and skipped (its segments stay unlabeled),
-/// it does not abort the rest. All segment updates land in one transaction at
-/// the end. Returns how many segments were relabeled.
+/// it does not abort the rest. Segment updates land at the end, one
+/// transaction per lane: the mic pass may replace live `me` labels, the
+/// system pass may replace live `them` labels, and either may fill NULL
+/// speakers (mic-only meetings). Returns how many segments were relabeled.
 fn diarize_meeting(
     db: &Database,
     meeting_id: &str,
@@ -207,7 +209,8 @@ fn diarize_meeting(
     let mut cfg = DiarizeConfig::new(models::segmentation_model_path(), models::embedding_model_path());
     cfg.max_speakers = settings.diarize_max_speakers.map(|n| n as usize);
 
-    let mut assignments: Vec<(u64, Speaker)> = Vec::new();
+    let mut mic_assignments: Vec<(u64, Speaker)> = Vec::new();
+    let mut system_assignments: Vec<(u64, Speaker)> = Vec::new();
     let mut done_passes = 0u32;
     for session in session_files {
         if let Some(wav_path) = &session.mic_wav {
@@ -219,7 +222,7 @@ fn diarize_meeting(
                 &cfg,
                 DiarizationPass::Mic,
             ) {
-                Ok(mut session_assignments) => assignments.append(&mut session_assignments),
+                Ok(mut session_assignments) => mic_assignments.append(&mut session_assignments),
                 Err(e) => warn!(
                     meeting_id = %meeting_id,
                     session = session.session_index,
@@ -239,7 +242,7 @@ fn diarize_meeting(
                 &cfg,
                 DiarizationPass::System,
             ) {
-                Ok(mut session_assignments) => assignments.append(&mut session_assignments),
+                Ok(mut session_assignments) => system_assignments.append(&mut session_assignments),
                 Err(e) => warn!(
                     meeting_id = %meeting_id,
                     session = session.session_index,
@@ -252,7 +255,12 @@ fn diarize_meeting(
         }
     }
 
-    db.set_segment_speakers(meeting_id, &assignments)
+    // The mic write runs first, so a NULL segment both passes claimed keeps
+    // the mic label (the system write only replaces NULL or `them`).
+    let mic_changed = db.set_segment_speakers(meeting_id, &mic_assignments, Some(Speaker::Me))?;
+    let system_changed =
+        db.set_segment_speakers(meeting_id, &system_assignments, Some(Speaker::Them))?;
+    Ok(mic_changed + system_changed)
 }
 
 /// Diarize one recording session's WAV and return the (sort_order, speaker)
@@ -457,7 +465,9 @@ mod tests {
         .expect("diarize session");
         assert!(!assignments.is_empty(), "expected at least one labeled segment");
 
-        let changed = db.set_segment_speakers("diarize-e2e", &assignments).unwrap();
+        let changed = db
+            .set_segment_speakers("diarize-e2e", &assignments, Some(Speaker::Me))
+            .unwrap();
         assert_eq!(changed, assignments.len());
 
         let relabeled = db.load_meeting("diarize-e2e").unwrap();
