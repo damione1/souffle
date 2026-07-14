@@ -7,6 +7,8 @@
 //! the engine lifecycle across command and inference threads.
 
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
@@ -26,7 +28,7 @@ use crate::engine::{
 };
 use crate::filter::{
     AudioFilterChain, DictionaryEntry, PipelineConfig, TextFilterChain, build_audio_filters,
-    build_text_filters,
+    build_text_filters, session_terms::SessionCorrection,
 };
 use crate::platform::with_autorelease_pool;
 
@@ -63,6 +65,8 @@ pub struct SessionConfig {
     /// Ephemeral correction terms for this session only (participant names,
     /// meeting jargon); never persisted to the user's dictionary.
     pub session_terms: Vec<String>,
+    /// Explicit misspelling-to-term pairs from live transcript edits.
+    pub session_corrections: Vec<SessionCorrection>,
     /// Diarized meeting: run a second engine so the mic (Me) and system audio
     /// (Them) legs are transcribed separately and segments are speaker-tagged.
     pub diarize: bool,
@@ -100,6 +104,12 @@ pub enum EngineCommand {
     },
     /// Reconfigure the idle-unload timeout. `None` disables it. Fire-and-forget.
     SetUnloadTimeout(Option<Duration>),
+    /// Register a live transcript correction for the active session's filter
+    /// chain. Replies once the dictionary filter has been rebuilt.
+    AddSessionCorrection {
+        correction: SessionCorrection,
+        reply: Sender<Result<(), String>>,
+    },
     Shutdown,
 }
 
@@ -246,6 +256,15 @@ impl EngineActorHandle {
         )
     }
 
+    /// Register a live transcript correction so later STT output of the same
+    /// misspelling is rewritten for the rest of this recording session.
+    pub fn add_session_correction(&self, correction: SessionCorrection) -> Result<(), String> {
+        self.request(
+            |reply| EngineCommand::AddSessionCorrection { correction, reply },
+            None,
+        )
+    }
+
     /// Shut down the actor thread: unloads and drops the engine on the actor
     /// thread, then joins. Idempotent.
     pub fn shutdown(&self) -> Result<(), String> {
@@ -300,6 +319,36 @@ struct EngineActor {
     /// session. Set by the idle pre-warm after a session ends and by the
     /// initial load; cleared as soon as a session starts consuming it.
     state_fresh_for: Option<bool>,
+}
+
+/// Mutable filter state for an active session; rebuilt when live corrections arrive.
+struct LiveFilterState {
+    pipeline_config: PipelineConfig,
+    dictionary_entries: Vec<DictionaryEntry>,
+    session_terms: Vec<String>,
+    session_corrections: Vec<SessionCorrection>,
+}
+
+impl LiveFilterState {
+    fn rebuild_chain(&self) -> TextFilterChain {
+        build_text_filters(
+            &self.pipeline_config,
+            self.dictionary_entries.clone(),
+            &self.session_terms,
+            &self.session_corrections,
+        )
+    }
+
+    fn register_correction(&mut self, correction: SessionCorrection) {
+        if self
+            .session_corrections
+            .iter()
+            .any(|existing| existing.misspelling.eq_ignore_ascii_case(&correction.misspelling))
+        {
+            return;
+        }
+        self.session_corrections.push(correction);
+    }
 }
 
 /// Outcome of an active session loop.
@@ -456,6 +505,9 @@ impl EngineActor {
                 }
                 EngineCommand::SetUnloadTimeout(duration) => {
                     self.unload_timeout = duration;
+                }
+                EngineCommand::AddSessionCorrection { reply, .. } => {
+                    let _ = reply.send(Err("No active recording session".into()));
                 }
                 EngineCommand::Shutdown => break,
             }
@@ -665,12 +717,18 @@ impl EngineActor {
         let sample_rate = info.audio.sample_rate_hz;
 
         // Filter chains are built on this thread so ONNX Runtime (Silero VAD)
-        // initialization shares the thread with engine Metal work.
-        let text_filters = build_text_filters(
-            &config.pipeline_config,
-            config.dictionary_entries,
-            &config.session_terms,
-        );
+        // initialization shares the thread with engine Metal work. The chain
+        // is shared behind an RwLock so live transcript edits can register
+        // session corrections mid-recording.
+        let filter_state = Rc::new(RefCell::new(LiveFilterState {
+            pipeline_config: config.pipeline_config.clone(),
+            dictionary_entries: config.dictionary_entries,
+            session_terms: config.session_terms,
+            session_corrections: config.session_corrections,
+        }));
+        let text_filters = Rc::new(RefCell::new(
+            filter_state.borrow().rebuild_chain(),
+        ));
 
         let mut health = SessionHealth::start(session_id, Arc::clone(&self.dropped_counter));
         let idle_monitor = config
@@ -715,6 +773,7 @@ impl EngineActor {
             &on_segment,
             session_id,
             &text_filters,
+            &filter_state,
             &mut health,
             self.app.as_ref(),
             mode.as_mut(),
@@ -992,7 +1051,8 @@ fn run_session_loop(
     engine: &mut dyn TranscriptionEngine,
     on_segment: &SegmentCallback,
     session_id: u64,
-    text_filters: &TextFilterChain,
+    text_filters: &Rc<RefCell<TextFilterChain>>,
+    filter_state: &Rc<RefCell<LiveFilterState>>,
     health: &mut SessionHealth,
     app: Option<&tauri::AppHandle>,
     mode: &mut dyn SessionMode,
@@ -1134,6 +1194,14 @@ fn run_session_loop(
             // rather than silently dropping the setting change.
             Ok(EngineCommand::SetUnloadTimeout(duration)) => {
                 *pending_unload_timeout = Some(duration);
+            }
+            Ok(EngineCommand::AddSessionCorrection { correction, reply }) => {
+                {
+                    let mut state = filter_state.borrow_mut();
+                    state.register_correction(correction);
+                    *text_filters.borrow_mut() = state.rebuild_chain();
+                }
+                let _ = reply.send(Ok(()));
             }
             Err(_) => {}
         }
@@ -1287,7 +1355,7 @@ fn finish_session(
     engine: &mut dyn TranscriptionEngine,
     on_segment: &SegmentCallback,
     session_id: u64,
-    text_filters: &TextFilterChain,
+    text_filters: &Rc<RefCell<TextFilterChain>>,
     mode: &mut dyn SessionMode,
     summary: &mut SessionSummary,
 ) {
@@ -1370,14 +1438,14 @@ fn catch_engine<T, E: std::string::ToString>(
 /// speech-activity signal.
 fn emit_filtered(
     engine: &dyn TranscriptionEngine,
-    text_filters: &TextFilterChain,
+    text_filters: &Rc<RefCell<TextFilterChain>>,
     mut segment: TranscriptionSegment,
     on_segment: &SegmentCallback,
 ) -> bool {
     // Step 1: engine-specific normalization (strip [_TT_], ▁, etc.)
     segment.text = engine.normalize_text(&segment.text);
     // Step 2: shared text filter chain (filler, stutter, dictionary, whitespace)
-    segment.text = text_filters.apply(&segment.text);
+    segment.text = text_filters.borrow().apply(&segment.text);
     if segment.text.is_empty() {
         return false;
     }
@@ -1453,6 +1521,7 @@ mod tests {
             pipeline_config: noop_filter_config(),
             dictionary_entries: vec![],
             session_terms: vec![],
+            session_corrections: vec![],
             diarize: false,
             idle_config: None,
             meeting_transcription_language: crate::settings::MeetingTranscriptionLanguage::Auto,
@@ -1550,6 +1619,7 @@ mod tests {
             pipeline_config: noop_filter_config(),
             dictionary_entries: vec![],
             session_terms: vec![],
+            session_corrections: vec![],
             diarize: true,
             idle_config: None,
             meeting_transcription_language: crate::settings::MeetingTranscriptionLanguage::Auto,

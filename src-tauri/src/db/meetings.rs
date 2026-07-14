@@ -202,6 +202,31 @@ impl Database {
         Ok(())
     }
 
+    /// Patch segment text for segments already flushed during a live meeting.
+    /// `updates` pairs `(sort_order, new_text)`.
+    pub fn update_segment_texts(
+        &self,
+        meeting_id: &str,
+        updates: &[(i64, String)],
+    ) -> Result<(), String> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+        for (sort_order, text) in updates {
+            tx.execute(
+                "UPDATE segments SET text = ?3 WHERE meeting_id = ?1 AND sort_order = ?2",
+                params![meeting_id, sort_order, text],
+            )
+            .map_err(|e| format!("Update segment text: {e}"))?;
+        }
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+        Ok(())
+    }
+
     /// Finalize meetings left with `ended_at IS NULL` by a crash mid-recording.
     /// Empty shells (a started meeting with no persisted segments) are deleted;
     /// the rest get `ended_at`/`duration`/`recording_sessions` synthesized from

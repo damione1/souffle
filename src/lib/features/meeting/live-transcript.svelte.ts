@@ -1,4 +1,4 @@
-import type { Paragraph } from "../../utils/paragraphs";
+import type { Paragraph, ParagraphRange } from "../../utils/paragraphs";
 import { groupIntoParagraphsWithRanges } from "../../utils/paragraphs";
 import type { TranscriptionSegment } from "../../types";
 
@@ -6,7 +6,13 @@ import type { TranscriptionSegment } from "../../types";
  * once, when a paragraph first comes into existence (either at commit time,
  * or the first time it appears in the tail), and never reassigned while the
  * paragraph keeps growing. */
-export type LiveParagraph = Paragraph & { id: number };
+export type LiveParagraph = Paragraph & {
+  id: number;
+  /** Half-open range into the finalized segment list for this paragraph. */
+  segmentRange: ParagraphRange;
+};
+
+type IndexedSegment = { segment: TranscriptionSegment; index: number };
 
 /**
  * Incremental paragraph grouper for a live transcript stream.
@@ -43,54 +49,72 @@ export function createLiveTranscript(pauseThreshold: number) {
   // Not reactive state on purpose: only the derived paragraphs need to drive
   // rendering, and re-sorting/regrouping this buffer never touches anything
   // outside the (bounded) tail.
-  let tailSegments: TranscriptionSegment[] = [];
+  let tailSegments: IndexedSegment[] = [];
   let nextParagraphId = 0;
 
-  function insertByStartTime(seg: TranscriptionSegment) {
-    // Fast path: in-order arrival, the overwhelming common case.
-    if (tailSegments.length === 0 || seg.start_time >= tailSegments[tailSegments.length - 1].start_time) {
-      tailSegments.push(seg);
+  function insertByStartTime(entry: IndexedSegment) {
+    const seg = entry.segment;
+    if (
+      tailSegments.length === 0
+      || seg.start_time >= tailSegments[tailSegments.length - 1].segment.start_time
+    ) {
+      tailSegments.push(entry);
       return;
     }
     let lo = 0;
     let hi = tailSegments.length;
     while (lo < hi) {
       const mid = (lo + hi) >>> 1;
-      if (tailSegments[mid].start_time <= seg.start_time) lo = mid + 1;
+      if (tailSegments[mid].segment.start_time <= seg.start_time) lo = mid + 1;
       else hi = mid;
     }
-    tailSegments.splice(lo, 0, seg);
+    tailSegments.splice(lo, 0, entry);
+  }
+
+  function globalRange(range: ParagraphRange): ParagraphRange {
+    const startIndex = tailSegments[range.start]?.index;
+    const endIndex = tailSegments[range.end - 1]?.index;
+    return {
+      start: startIndex ?? range.start,
+      end: endIndex == null ? range.end : endIndex + 1,
+    };
   }
 
   function regroupTail() {
-    const { paragraphs, ranges, ordered } = groupIntoParagraphsWithRanges(tailSegments, pauseThreshold);
+    const ordered = tailSegments.map((entry) => entry.segment);
+    const { paragraphs, ranges } = groupIntoParagraphsWithRanges(ordered, pauseThreshold);
     const prevTail = tail;
     const numToCommit = Math.max(0, paragraphs.length - MAX_TAIL_PARAGRAPHS);
 
-    // A committed paragraph is always a prefix of the previous tail (new
-    // paragraphs only ever appear at the end), so it keeps the id it was
-    // already assigned while still open rather than getting a new one now.
-    let cutIndex = 0;
     for (let i = 0; i < numToCommit; i++) {
       const id = i < prevTail.length ? prevTail[i].id : nextParagraphId++;
-      committed.push({ ...paragraphs[i], id });
-      cutIndex = ranges[i].end;
+      committed.push({
+        ...paragraphs[i],
+        id,
+        segmentRange: globalRange(ranges[i]),
+      });
     }
-    if (numToCommit > 0) tailSegments = ordered.slice(cutIndex);
+    if (numToCommit > 0) {
+      const cutIndex = ranges[numToCommit - 1].end;
+      tailSegments = tailSegments.slice(cutIndex);
+    }
 
-    // Reassign ids: a paragraph that already existed in the previous tail
-    // keeps its id (so keyed rendering treats it as the same, growing node);
-    // only a genuinely new trailing paragraph gets a fresh id.
     const remaining = paragraphs.slice(numToCommit);
+    const remainingRanges = ranges.slice(numToCommit);
     const survivingOldCount = Math.max(0, prevTail.length - numToCommit);
-    tail = remaining.map((paragraph, i) =>
-      i < survivingOldCount
-        ? { ...paragraph, id: prevTail[numToCommit + i].id }
-        : { ...paragraph, id: nextParagraphId++ },
-    );
+    tail = remaining.map((paragraph, i) => {
+      const id = i < survivingOldCount
+        ? prevTail[numToCommit + i].id
+        : nextParagraphId++;
+      return {
+        ...paragraph,
+        id,
+        segmentRange: globalRange(remainingRanges[i]),
+      };
+    });
   }
 
-  function append(segment: TranscriptionSegment) {
+  function append(segment: TranscriptionSegment, segmentIndex: number) {
     if (!segment.is_final) {
       tentative = segment.text;
       return;
@@ -98,11 +122,29 @@ export function createLiveTranscript(pauseThreshold: number) {
     tentative = "";
     segmentCount++;
 
-    const diarizedSoFar = segment.speaker != null || tailSegments.some((s) => s.speaker != null);
-    if (diarizedSoFar) insertByStartTime(segment);
-    else tailSegments.push(segment);
+    const entry = { segment, index: segmentIndex };
+    const diarizedSoFar =
+      segment.speaker != null || tailSegments.some((item) => item.segment.speaker != null);
+    if (diarizedSoFar) insertByStartTime(entry);
+    else tailSegments.push(entry);
 
     regroupTail();
+  }
+
+  /** Update a paragraph's displayed text after a live edit without reopening
+   * the incremental grouper. */
+  function editParagraph(id: number, newText: string): LiveParagraph | null {
+    const committedIndex = committed.findIndex((paragraph) => paragraph.id === id);
+    if (committedIndex !== -1) {
+      committed[committedIndex] = { ...committed[committedIndex], text: newText };
+      return committed[committedIndex];
+    }
+    const tailIndex = tail.findIndex((paragraph) => paragraph.id === id);
+    if (tailIndex !== -1) {
+      tail[tailIndex] = { ...tail[tailIndex], text: newText };
+      return tail[tailIndex];
+    }
+    return null;
   }
 
   function reset() {
@@ -116,6 +158,7 @@ export function createLiveTranscript(pauseThreshold: number) {
 
   return {
     append,
+    editParagraph,
     reset,
     get committed() { return committed; },
     get tail() { return tail; },

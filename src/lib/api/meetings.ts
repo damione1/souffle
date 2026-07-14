@@ -87,6 +87,15 @@ export async function saveEditedTranscript(id: string, editedTranscript: string 
   await unwrap(commands.saveEditedTranscript(id, editedTranscript));
 }
 
+export async function applyLiveParagraphEdit(
+  meetingId: string,
+  segmentStart: number,
+  segmentEnd: number,
+  newText: string,
+): Promise<void> {
+  await unwrap(commands.applyLiveParagraphEdit(meetingId, segmentStart, segmentEnd, newText));
+}
+
 /** Suggested filename for a meeting export (e.g. "2026-07-09-weekly-sync.md"). */
 export async function exportMeetingFilename(id: string, format: ExportFormat): Promise<string> {
   return unwrap(commands.exportMeetingFilename(id, format));

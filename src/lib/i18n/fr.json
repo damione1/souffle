@@ -380,7 +380,10 @@
     "system_audio_active": "Audio système actif",
     "idle_silence_banner": "Aucune parole détectée depuis {minutes} min. L'enregistrement va bientôt s'arrêter.",
     "idle_stop_now": "Arrêter maintenant",
-    "idle_keep_recording": "Continuer l'enregistrement"
+    "idle_keep_recording": "Continuer l'enregistrement",
+    "live_edit_hint": "Double-cliquez sur un paragraphe pour corriger un mot mal entendu. Les occurrences suivantes seront corrigées automatiquement.",
+    "live_edit_save": "Enregistrer",
+    "live_edit_cancel": "Annuler"
   },
   "permissions": {
     "title": "Autoriser les permissions",

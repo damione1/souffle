@@ -152,6 +152,7 @@ pub fn build_text_filters(
     config: &PipelineConfig,
     dictionary: Vec<DictionaryEntry>,
     session_terms: &[String],
+    session_corrections: &[session_terms::SessionCorrection],
 ) -> TextFilterChain {
     let mut filters: Vec<Box<dyn TextFilter>> = Vec::new();
     if config.filler_removal_enabled {
@@ -160,11 +161,21 @@ pub fn build_text_filters(
     if config.stutter_collapse_enabled {
         filters.push(Box::new(text_stutter::StutterCollapseFilter::new()));
     }
-    if config.dictionary_correction_enabled && (!dictionary.is_empty() || !session_terms.is_empty())
+    if config.dictionary_correction_enabled
+        && (!dictionary.is_empty()
+            || !session_terms.is_empty()
+            || !session_corrections.is_empty())
     {
-        filters.push(Box::new(
-            text_dictionary::DictionaryFilter::with_session_terms(dictionary, session_terms),
-        ));
+        let filter = if session_corrections.is_empty() {
+            text_dictionary::DictionaryFilter::with_session_terms(dictionary, session_terms)
+        } else {
+            text_dictionary::DictionaryFilter::with_session_hints(
+                dictionary,
+                session_terms,
+                session_corrections,
+            )
+        };
+        filters.push(Box::new(filter));
     }
     // Whitespace normalization always runs last to clean up artifacts from previous filters
     filters.push(Box::new(text_whitespace::WhitespaceNormFilter));
@@ -237,8 +248,52 @@ mod tests {
             stutter_collapse_enabled: false,
             dictionary_correction_enabled: false,
         };
-        let chain = build_text_filters(&config, vec![], &[]);
+        let chain = build_text_filters(&config, vec![], &[], &[]);
         // Whitespace normalization should still clean up
         assert_eq!(chain.apply("  hello   world  "), "hello world");
+    }
+
+    #[test]
+    fn session_corrections_apply_when_dictionary_correction_enabled() {
+        use crate::filter::session_terms::SessionCorrection;
+        let config = PipelineConfig {
+            vad_enabled: false,
+            vad_model_path: None,
+            filler_removal_enabled: false,
+            stutter_collapse_enabled: false,
+            dictionary_correction_enabled: true,
+        };
+        let chain = build_text_filters(
+            &config,
+            vec![],
+            &[],
+            &[SessionCorrection {
+                misspelling: "Kubernetis".to_string(),
+                term: "Kubernetes".to_string(),
+            }],
+        );
+        assert_eq!(chain.apply("Kubernetis cluster"), "Kubernetes cluster");
+    }
+
+    #[test]
+    fn session_corrections_skipped_when_dictionary_correction_disabled() {
+        use crate::filter::session_terms::SessionCorrection;
+        let config = PipelineConfig {
+            vad_enabled: false,
+            vad_model_path: None,
+            filler_removal_enabled: false,
+            stutter_collapse_enabled: false,
+            dictionary_correction_enabled: false,
+        };
+        let chain = build_text_filters(
+            &config,
+            vec![],
+            &[],
+            &[SessionCorrection {
+                misspelling: "Kubernetis".to_string(),
+                term: "Kubernetes".to_string(),
+            }],
+        );
+        assert_eq!(chain.apply("Kubernetis cluster"), "Kubernetis cluster");
     }
 }

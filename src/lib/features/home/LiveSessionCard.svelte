@@ -5,6 +5,7 @@
   import Waveform from "../../components/Waveform.svelte";
   import Spinner from "../../components/ui/Spinner.svelte";
   import MeetingNotesSection from "../meeting/components/MeetingNotesSection.svelte";
+  import type { LiveParagraph } from "../meeting/live-transcript.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
 
@@ -26,15 +27,12 @@
 
   let elapsedSeconds = $state(0);
   let transcriptEl: HTMLDivElement | undefined = $state();
+  let editingParagraphId = $state<number | null>(null);
+  let editDraft = $state("");
+  let editSaving = $state(false);
 
   const liveText = $derived(mode === "dictation" ? transcription.transcript : "");
 
-  // Meetings render through the same paragraph grouping as the finished
-  // transcript, so diarized sessions show Me/Them live: segments are ordered
-  // by time and split on speaker changes instead of one undifferentiated blob.
-  // `committed` only grows by push and can hold hours of history, so slice it
-  // to the window first: slicing the last N elements is O(N), not O(meeting
-  // length), which keeps this derived cheap on every incoming segment.
   const liveParagraphs = $derived(
     mode === "meeting"
       ? [...meeting.liveTranscript.committed.slice(-LIVE_PARAGRAPH_WINDOW), ...meeting.liveTranscript.tail]
@@ -70,9 +68,49 @@
     }
   }
 
-  // Track whether the user is (still) parked near the bottom, independent of
-  // content changes, so a burst of new segments never fights a manual scroll
-  // up to read earlier text.
+  function paragraphEditable(paragraph: LiveParagraph, index: number): boolean {
+    if (stopping || editSaving) return false;
+    const isCommitted = meeting.liveTranscript.committed.some((item) => item.id === paragraph.id);
+    if (!isCommitted) return false;
+    const isLast = index === liveParagraphs.length - 1;
+    return !(isLast && Boolean(liveTentative));
+  }
+
+  function startParagraphEdit(paragraph: LiveParagraph) {
+    editingParagraphId = paragraph.id;
+    editDraft = paragraph.text;
+  }
+
+  function cancelParagraphEdit() {
+    editingParagraphId = null;
+    editDraft = "";
+  }
+
+  async function saveParagraphEdit() {
+    if (editingParagraphId == null || editSaving) return;
+    const trimmed = editDraft.trim();
+    if (!trimmed) return;
+    editSaving = true;
+    try {
+      await meeting.applyLiveParagraphEdit(editingParagraphId, trimmed);
+      cancelParagraphEdit();
+    } finally {
+      editSaving = false;
+    }
+  }
+
+  function handleParagraphKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelParagraphEdit();
+      return;
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void saveParagraphEdit();
+    }
+  }
+
   let isNearBottom = true;
   let scrollRafId: number | null = null;
 
@@ -90,8 +128,6 @@
     });
   }
 
-  // Keep the latest words in view as they stream in, coalesced to one scroll
-  // per frame instead of one per segment.
   $effect(() => {
     void liveText;
     void liveParagraphs;
@@ -139,7 +175,6 @@
   </div>
 
   {#if mode === "dictation"}
-    <!-- Dictation hero: the words are the whole surface. -->
     <div class="flex min-h-[340px] flex-col rounded-[18px] bg-surface-1 p-[30px] px-8 outline-1 outline-ghost-border">
       <p class="m-0 text-[19px] font-normal leading-[1.85] text-text-secondary">
         {liveText}<span
@@ -171,9 +206,8 @@
       </div>
     {/if}
 
-    <!-- Meeting hero: live transcript front and center. -->
     <div class="flex min-h-[300px] flex-col gap-[18px] rounded-[18px] bg-surface-1 px-6 py-[22px] outline-1 outline-ghost-border">
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between gap-3">
         <h3 class="text-sm font-semibold text-text-primary">{$t("home.live_transcript")}</h3>
         <span class="inline-flex items-center gap-1.5 text-[11.5px] text-text-muted">
           <span class={`h-1.5 w-1.5 rounded-full ${systemAudioActive ? "bg-accent" : "bg-surface-4"}`}></span>
@@ -182,6 +216,7 @@
             : $t("meeting_header.system_audio_unavailable")}
         </span>
       </div>
+      <p class="m-0 text-[11.5px] text-text-muted">{$t("home.live_edit_hint")}</p>
       <div
         bind:this={transcriptEl}
         onscroll={handleScroll}
@@ -202,12 +237,46 @@
                 {/if}
                 <span class="font-mono text-[10.5px] text-text-faint">{paragraph.timestamp}</span>
               </div>
-              <p class="m-0 text-[15px] leading-[1.75] text-text-secondary">
-                {paragraph.text}
-                {#if i === liveParagraphs.length - 1 && liveTentative}
-                  <span class="opacity-50">{paragraph.text ? " " : ""}{liveTentative}</span>
-                {/if}
-              </p>
+              {#if editingParagraphId === paragraph.id}
+                <div class="flex flex-col gap-2">
+                  <textarea
+                    bind:value={editDraft}
+                    onkeydown={handleParagraphKeydown}
+                    class="field-input min-h-[72px] resize-y text-[15px] leading-[1.75]"
+                    disabled={editSaving}
+                  ></textarea>
+                  <div class="flex gap-2">
+                    <button
+                      onclick={() => void saveParagraphEdit()}
+                      class="btn btn-sm"
+                      disabled={editSaving || !editDraft.trim()}
+                    >
+                      {$t("home.live_edit_save")}
+                    </button>
+                    <button onclick={cancelParagraphEdit} class="btn btn-ghost btn-sm" disabled={editSaving}>
+                      {$t("home.live_edit_cancel")}
+                    </button>
+                  </div>
+                </div>
+              {:else}
+                <p
+                  class="m-0 text-[15px] leading-[1.75] text-text-secondary"
+                  class:cursor-text={paragraphEditable(paragraph, i)}
+                  class:hover:outline-1={paragraphEditable(paragraph, i)}
+                  class:hover:outline-ghost-border={paragraphEditable(paragraph, i)}
+                  class:rounded-default={paragraphEditable(paragraph, i)}
+                  class:px-1={paragraphEditable(paragraph, i)}
+                  class:-mx-1={paragraphEditable(paragraph, i)}
+                  ondblclick={() => {
+                    if (paragraphEditable(paragraph, i)) startParagraphEdit(paragraph);
+                  }}
+                >
+                  {paragraph.text}
+                  {#if i === liveParagraphs.length - 1 && liveTentative}
+                    <span class="opacity-50">{paragraph.text ? " " : ""}{liveTentative}</span>
+                  {/if}
+                </p>
+              {/if}
             </div>
           {/each}
           {#if liveParagraphs.length === 0 && liveTentative}

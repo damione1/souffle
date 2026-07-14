@@ -25,12 +25,21 @@ function dseg(text: string, start: number, speaker: Speaker): TranscriptionSegme
 
 const PAUSE_THRESHOLD = 1.5;
 
+/** Feed finalized segments one-by-one, mirroring the controller's index assignment. */
+function feedSegments(live: ReturnType<typeof createLiveTranscript>, segments: TranscriptionSegment[]) {
+  let segmentIndex = 0;
+  for (const s of segments) {
+    live.append(s, segmentIndex);
+    if (s.is_final !== false) segmentIndex++;
+  }
+}
+
 /** Feed segments one-by-one into a fresh grouper and return the final
- * flattened committed+tail paragraphs (stripped of the live-only `id`). */
+ * flattened committed+tail paragraphs (stripped of live-only fields). */
 function runStream(segments: TranscriptionSegment[]) {
   const live = createLiveTranscript(PAUSE_THRESHOLD);
-  for (const s of segments) live.append(s);
-  const all = [...live.committed, ...live.tail].map(({ id: _id, ...rest }) => rest);
+  feedSegments(live, segments);
+  const all = [...live.committed, ...live.tail].map(({ id: _id, segmentRange: _range, ...rest }) => rest);
   return { live, all };
 }
 
@@ -82,7 +91,7 @@ describe("createLiveTranscript equivalence", () => {
       seg("Fourth paragraph.", 6.0),
     ];
     const live = createLiveTranscript(PAUSE_THRESHOLD);
-    for (const s of segments) live.append(s);
+    feedSegments(live, segments);
 
     expect(live.tail.length).toBeLessThanOrEqual(2);
     expect(live.committed.length + live.tail.length).toBe(4);
@@ -100,14 +109,16 @@ describe("createLiveTranscript committed immutability", () => {
       seg("Fifth paragraph.", 8.0),
     ];
     const live = createLiveTranscript(PAUSE_THRESHOLD);
-    for (const s of segments) live.append(s);
+    feedSegments(live, segments);
 
     expect(live.committed.length).toBeGreaterThan(0);
     const snapshot = live.committed.map((p) => ({ ref: p, copy: { ...p } }));
 
     // Append more segments; already-committed paragraphs must stay identical.
-    live.append(seg("Sixth paragraph.", 10.0));
-    live.append(seg("Seventh paragraph.", 12.0));
+    feedSegments(live, [
+      seg("Sixth paragraph.", 10.0),
+      seg("Seventh paragraph.", 12.0),
+    ]);
 
     for (const { ref, copy } of snapshot) {
       expect(ref).toEqual(copy);
@@ -118,12 +129,12 @@ describe("createLiveTranscript committed immutability", () => {
 describe("createLiveTranscript tentative text", () => {
   it("sets tentative on a non-final segment and clears it on the next final", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
-    live.append(seg("Hello wor", 0, { is_final: false }));
+    live.append(seg("Hello wor", 0, { is_final: false }), 0);
     expect(live.tentative).toBe("Hello wor");
     expect(live.committed).toEqual([]);
     expect(live.tail).toEqual([]);
 
-    live.append(seg("Hello world.", 0));
+    live.append(seg("Hello world.", 0), 0);
     expect(live.tentative).toBe("");
     expect(live.tail).toHaveLength(1);
     expect(live.tail[0].text).toBe("Hello world.");
@@ -131,9 +142,9 @@ describe("createLiveTranscript tentative text", () => {
 
   it("does not increment segmentCount for non-final segments", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
-    live.append(seg("partial", 0, { is_final: false }));
+    live.append(seg("partial", 0, { is_final: false }), 0);
     expect(live.segmentCount).toBe(0);
-    live.append(seg("partial done.", 0));
+    live.append(seg("partial done.", 0), 0);
     expect(live.segmentCount).toBe(1);
   });
 });
@@ -141,11 +152,13 @@ describe("createLiveTranscript tentative text", () => {
 describe("createLiveTranscript reset", () => {
   it("clears committed, tail, tentative, and segmentCount", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
-    live.append(seg("First paragraph.", 0));
-    live.append(seg("Second paragraph.", 2.0));
-    live.append(seg("Third paragraph.", 4.0));
-    live.append(seg("Fourth paragraph.", 6.0));
-    live.append(seg("partial", 8.0, { is_final: false }));
+    feedSegments(live, [
+      seg("First paragraph.", 0),
+      seg("Second paragraph.", 2.0),
+      seg("Third paragraph.", 4.0),
+      seg("Fourth paragraph.", 6.0),
+    ]);
+    live.append(seg("partial", 8.0, { is_final: false }), 4);
 
     expect(live.committed.length + live.tail.length).toBeGreaterThan(0);
     expect(live.tentative).toBe("partial");
@@ -158,7 +171,7 @@ describe("createLiveTranscript reset", () => {
     expect(live.segmentCount).toBe(0);
 
     // Grouper is fully usable again after reset.
-    live.append(seg("Fresh start.", 0));
+    live.append(seg("Fresh start.", 0), 0);
     expect(live.tail).toHaveLength(1);
     expect(live.tail[0].text).toBe("Fresh start.");
   });
@@ -168,7 +181,7 @@ describe("createLiveTranscript paragraph ids", () => {
   it("assigns strictly increasing ids across committed and tail paragraphs", () => {
     const segments = Array.from({ length: 10 }, (_, i) => seg(`Sentence ${i}.`, i * 2.0));
     const live = createLiveTranscript(PAUSE_THRESHOLD);
-    for (const s of segments) live.append(s);
+    feedSegments(live, segments);
 
     const ids = [...live.committed, ...live.tail].map((p) => p.id);
     expect(ids.length).toBeGreaterThan(1);
@@ -179,14 +192,47 @@ describe("createLiveTranscript paragraph ids", () => {
 
   it("keeps the same id for a growing tail paragraph across appends", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
-    live.append(seg("Hello", 0));
+    live.append(seg("Hello", 0), 0);
     expect(live.tail).toHaveLength(1);
     const firstId = live.tail[0].id;
 
     // No pause, no sentence end yet: still the same open paragraph.
-    live.append(seg("world", 0.5));
+    live.append(seg("world", 0.5), 1);
     expect(live.tail).toHaveLength(1);
     expect(live.tail[0].id).toBe(firstId);
     expect(live.tail[0].text).toBe("Hello world");
+  });
+});
+
+describe("createLiveTranscript segment ranges and live edits", () => {
+  it("tracks segment ranges on committed paragraphs", () => {
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    feedSegments(live, [
+      seg("hello", 0),
+      seg("world", 1),
+      seg("again", 3),
+    ]);
+
+    const paragraphs = [...live.committed, ...live.tail];
+    expect(paragraphs.length).toBeGreaterThan(0);
+    expect(paragraphs[0].segmentRange.start).toBe(0);
+    expect(paragraphs[0].segmentRange.end).toBeGreaterThan(0);
+  });
+
+  it("editParagraph updates committed text without resetting the stream", () => {
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    feedSegments(live, [
+      seg("hello", 0),
+      seg("world", 1),
+      seg("First paragraph.", 2.0),
+      seg("Second paragraph.", 4.0),
+      seg("Third paragraph.", 6.0),
+    ]);
+
+    expect(live.committed.length).toBeGreaterThan(0);
+    const target = live.committed[0];
+    const updated = live.editParagraph(target.id, "hello universe");
+    expect(updated?.text).toBe("hello universe");
+    expect(live.committed[0].text).toBe("hello universe");
   });
 });

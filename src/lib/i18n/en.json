@@ -380,7 +380,10 @@
     "system_audio_active": "System audio active",
     "idle_silence_banner": "No speech detected for {minutes} min. Recording will stop soon.",
     "idle_stop_now": "Stop now",
-    "idle_keep_recording": "Keep recording"
+    "idle_keep_recording": "Keep recording",
+    "live_edit_hint": "Double-click a paragraph to fix a misheard word. Later occurrences are corrected automatically.",
+    "live_edit_save": "Save",
+    "live_edit_cancel": "Cancel"
   },
   "permissions": {
     "title": "Grant permissions",

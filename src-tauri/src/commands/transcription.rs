@@ -287,6 +287,7 @@ fn start_pipeline_blocking(
         pipeline_config: settings.pipeline_config(),
         dictionary_entries: db.list_dictionary_entries()?,
         session_terms,
+        session_corrections: vec![],
         diarize,
         idle_config,
         meeting_transcription_language: settings.meeting_transcription_language,

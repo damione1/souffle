@@ -2,6 +2,7 @@ use tauri::State;
 use tauri::ipc::Channel;
 
 use crate::db::search::SearchResult;
+use crate::engine::TranscriptionSegment;
 use crate::export::{self, ExportFormat};
 use crate::settings::AppSettings;
 use crate::state::AppState;
@@ -137,6 +138,112 @@ pub fn save_edited_transcript(
     state
         .db
         .save_edited_transcript(&id, edited_transcript.as_deref())
+}
+
+/// Apply a live paragraph edit during an active meeting: patch the edited
+/// segments in the accumulator (and on disk when already flushed), and
+/// register session corrections so later STT output of the same misspelling
+/// is rewritten for the rest of this recording session.
+#[tauri::command]
+#[specta::specta]
+pub fn apply_live_paragraph_edit(
+    state: State<'_, AppState>,
+    meeting_id: String,
+    segment_start: u32,
+    segment_end: u32,
+    new_text: String,
+) -> Result<(), String> {
+    use crate::filter::session_terms::derive_corrections_from_edit;
+    use crate::lock_ext::MutexExt;
+
+    let segment_start = segment_start as usize;
+    let segment_end = segment_end as usize;
+    if segment_end <= segment_start {
+        return Err("Invalid segment range".into());
+    }
+
+    let new_text = new_text.trim().to_string();
+    if new_text.is_empty() {
+        return Err("Paragraph text cannot be empty".into());
+    }
+
+    let (original_text, db_updates, corrections) = {
+        let mut acc = state.meeting_accumulator.acquire()?;
+        let Some(meeting) = acc.as_mut() else {
+            return Err("No meeting is recording".into());
+        };
+        if meeting.id != meeting_id {
+            return Err("Meeting id mismatch".into());
+        }
+        if segment_end > meeting.new_segments.len() {
+            return Err("Segment range out of bounds".into());
+        }
+
+        let slice = &meeting.new_segments[segment_start..segment_end];
+        let original_text = slice
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let corrections = derive_corrections_from_edit(&original_text, &new_text);
+
+        redistribute_segment_texts(
+            &mut meeting.new_segments[segment_start..segment_end],
+            &new_text,
+        );
+
+        let global_base = meeting.existing_segments.len();
+        let db_updates: Vec<(i64, String)> = (segment_start..segment_end)
+            .filter(|index| *index < meeting.persisted_new_count)
+            .map(|index| {
+                (
+                    (global_base + index) as i64,
+                    meeting.new_segments[index].text.clone(),
+                )
+            })
+            .collect();
+
+        (original_text, db_updates, corrections)
+    };
+
+    if original_text == new_text {
+        return Ok(());
+    }
+
+    if !db_updates.is_empty() {
+        state.db.update_segment_texts(&meeting_id, &db_updates)?;
+    }
+
+    for correction in corrections {
+        state.engine_actor.add_session_correction(correction)?;
+    }
+
+    Ok(())
+}
+
+fn redistribute_segment_texts(segments: &mut [TranscriptionSegment], new_text: &str) {
+    let words: Vec<&str> = new_text.split_whitespace().collect();
+    if segments.is_empty() {
+        return;
+    }
+    if words.is_empty() {
+        for segment in segments.iter_mut() {
+            segment.text.clear();
+        }
+        return;
+    }
+    if segments.len() == 1 {
+        segments[0].text = new_text.to_string();
+        return;
+    }
+    let last_index = segments.len() - 1;
+    for (index, segment) in segments.iter_mut().enumerate() {
+        if index < last_index {
+            segment.text = words.get(index).copied().unwrap_or("").to_string();
+        } else {
+            segment.text = words.get(index..).unwrap_or(&[""]).join(" ");
+        }
+    }
 }
 
 /// Render a meeting export without writing to disk. Used by tests and, if
