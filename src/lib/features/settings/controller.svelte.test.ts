@@ -37,7 +37,7 @@ import { createSettingsController } from "./controller.svelte";
 import { getAppState } from "../../stores/app.svelte";
 import type {
   AppSettings,
-  AudioDeviceInfo,
+  AudioInputDevice,
   ShortcutSettings,
   TranscriptionCatalog,
   TranscriptionRuntimeStatus,
@@ -57,6 +57,8 @@ const defaultSettings: AppSettings = {
   log_level: "info",
   audio_device: null,
   clamshell_audio_device: null,
+  input_priority: { priorities: [], hidden: [], known: [] },
+  allow_bluetooth_mic: false,
   transcription_engine_id: "kyutai",
   transcription_model_id: "stt-1b-en_fr",
   transcription_backend_id: "candle",
@@ -95,9 +97,9 @@ const defaultSettings: AppSettings = {
   diarize_max_speakers: null,
 }
 
-const fakeDevices: AudioDeviceInfo[] = [
-  { name: "Built-in Microphone", is_default: true },
-  { name: "USB Microphone", is_default: false },
+const fakeDevices: AudioInputDevice[] = [
+  { uid: "builtin-mic", name: "Built-in Microphone", transport: "built_in", is_default: true },
+  { uid: "usb-mic", name: "USB Microphone", transport: "usb", is_default: false },
 ];
 
 const fakeShortcuts: ShortcutSettings = {
@@ -294,14 +296,14 @@ describe("settings controller", () => {
     await ctrl.mount();
 
     const fakeEvent = {
-      target: { value: "USB Microphone" },
+      target: { value: "usb-mic" },
     } as unknown as Event;
 
     await ctrl.onDeviceChange(fakeEvent);
 
-    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceName: "USB Microphone" });
+    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceUid: "usb-mic" });
     expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
-      settings: expect.objectContaining({ audio_device: "USB Microphone" }),
+      settings: expect.objectContaining({ audio_device: "usb-mic" }),
     }));
   });
 

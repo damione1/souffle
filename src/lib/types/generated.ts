@@ -118,7 +118,7 @@ async stopTranscription() : Promise<Result<null, string>> {
 /**
  * List available audio input devices
  */
-async listAudioDevices() : Promise<Result<AudioDeviceInfo[], string>> {
+async listAudioDevices() : Promise<Result<AudioInputDevice[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_audio_devices") };
 } catch (e) {
@@ -127,11 +127,13 @@ async listAudioDevices() : Promise<Result<AudioDeviceInfo[], string>> {
 }
 },
 /**
- * Select an audio input device by name
+ * Select an audio input device by stable CoreAudio UID. When the UID is not
+ * connected, the pin is kept and capture falls back through the priority
+ * policy; the frontend is notified via [`crate::app_events::InputPinUnavailable`].
  */
-async selectAudioDevice(deviceName: string) : Promise<Result<null, string>> {
+async selectAudioDevice(deviceUid: string) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("select_audio_device", { deviceName }) };
+    return { status: "ok", data: await TAURI_INVOKE("select_audio_device", { deviceUid }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -877,6 +879,9 @@ archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
 diarizationProgress: DiarizationProgress,
 dictationLiveText: DictationLiveText,
+inputDevicesChanged: InputDevicesChanged,
+inputPinAvailable: InputPinAvailable,
+inputPinUnavailable: InputPinUnavailable,
 meetingDiarized: MeetingDiarized,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
@@ -897,6 +902,9 @@ archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
 diarizationProgress: "diarization-progress",
 dictationLiveText: "dictation-live-text",
+inputDevicesChanged: "input-devices-changed",
+inputPinAvailable: "input-pin-available",
+inputPinUnavailable: "input-pin-unavailable",
 meetingDiarized: "meeting-diarized",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
@@ -928,13 +936,26 @@ paste_method: PasteMethod; ollama_url: string; ollama_model: string; debug_trans
 /**
  * Global tracing verbosity for the `souffle` crate.
  */
-log_level: LogLevel; audio_device: string | null; 
+log_level: LogLevel; 
 /**
- * Preferred microphone while the lid is closed with an external display
+ * Pinned input device UID (`kAudioDevicePropertyDeviceUID`).
+ */
+audio_device: string | null; 
+/**
+ * Preferred microphone UID while the lid is closed with an external display
  * attached (clamshell mode). `None` means just follow whatever macOS
  * reports as the default input, the previous behavior.
  */
-clamshell_audio_device: string | null; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean; 
+clamshell_audio_device: string | null; 
+/**
+ * Ordered input-device preferences and remembered devices.
+ */
+input_priority: InputPriority; 
+/**
+ * When false, Bluetooth headset microphones are avoided for automatic
+ * selection to keep stereo output on A2DP instead of HFP mono.
+ */
+allow_bluetooth_mic: boolean; transcription_engine_id: string; transcription_model_id: string; transcription_backend_id: string; vad_enabled: boolean; filler_removal: boolean; stutter_collapse: boolean; dictionary_correction: boolean; 
 /**
  * Meeting mode: capture system audio (other participants) alongside
  * the microphone via a Core Audio tap.
@@ -1054,9 +1075,13 @@ export type AppView = "home" | "settings"
  */
 export type ArchiveExportProgress = { done: number; total: number; finished: boolean; error: string | null }
 /**
- * Info about an available audio input device, sent to frontend
+ * An input-capable audio device as reported to the frontend.
  */
-export type AudioDeviceInfo = { name: string; is_default: boolean }
+export type AudioInputDevice = { 
+/**
+ * Stable CoreAudio device UID (`kAudioDevicePropertyDeviceUID`).
+ */
+uid: string; name: string; transport: TransportType; is_default: boolean }
 export type AudioInputRequirements = { sample_rate_hz: number; channels: number; chunk_size_samples: number }
 /**
  * Current microphone/meeting input level (RMS, 0.0-1.0), pushed by the audio
@@ -1159,6 +1184,44 @@ export type HealthStatus = "healthy" |
  * No frame has been processed for several seconds while audio is queued.
  */
 "stalled"
+/**
+ * CoreAudio reported a new input-device snapshot (connect/disconnect or
+ * default-input change). Settings listens to refresh the microphone list.
+ */
+export type InputDevicesChanged = { devices: AudioInputDevice[] }
+/**
+ * A previously unavailable pinned input device is connected again.
+ */
+export type InputPinAvailable = { uid: string }
+/**
+ * The user pinned an input device that is not currently connected. Capture
+ * falls back through the priority policy without clearing the saved pin.
+ */
+export type InputPinUnavailable = { uid: string }
+/**
+ * User-declared input routing preferences (UID-based).
+ */
+export type InputPriority = { 
+/**
+ * Preferred device UIDs, highest priority first.
+ */
+priorities: string[]; 
+/**
+ * Connected devices in this list are never auto-selected.
+ */
+hidden: string[]; 
+/**
+ * Devices seen before, including ones currently disconnected.
+ */
+known: KnownDevice[] }
+/**
+ * A device remembered across disconnects for display and preference ordering.
+ */
+export type KnownDevice = { uid: string; name: string; 
+/**
+ * Unix timestamp (seconds) when this device was last seen connected.
+ */
+last_seen: number }
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace"
 export type McpSetupInfo = { binary_path: string; exists: boolean; claude_desktop_snippet: string; claude_code_command: string }
 export type MeetingAudioRetention = 
@@ -1469,6 +1532,10 @@ export type TranscriptionSegment = { text: string; start_time: number; end_time:
  * Set by the pipeline for diarized meetings; `None` otherwise.
  */
 speaker?: string | null }
+/**
+ * Human-facing transport label for an input device.
+ */
+export type TransportType = "built_in" | "usb" | "bluetooth" | "bluetooth_le" | "virtual" | "aggregate" | "unknown"
 /**
  * Emitted by the calendar reminder scheduler shortly before a calendar
  * event starts, so the frontend can offer a one-click transcription start.

@@ -2,6 +2,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::OLLAMA_DEFAULT_URL;
+use crate::audio::InputPriority;
 use crate::db::Database;
 use crate::engine::{
     CANDLE_BACKEND_ID, KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, resolve_transcription_profile,
@@ -16,6 +17,8 @@ const OLLAMA_MODEL_KEY: &str = "ollama_model";
 const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
 const AUDIO_DEVICE_KEY: &str = "audio_device";
 const CLAMSHELL_AUDIO_DEVICE_KEY: &str = "clamshell_audio_device";
+const INPUT_PRIORITY_KEY: &str = "input_priority";
+const ALLOW_BLUETOOTH_MIC_KEY: &str = "allow_bluetooth_mic";
 const TRANSCRIPTION_ENGINE_ID_KEY: &str = "transcription_engine_id";
 const TRANSCRIPTION_MODEL_ID_KEY: &str = "transcription_model_id";
 const TRANSCRIPTION_BACKEND_ID_KEY: &str = "transcription_backend_id";
@@ -128,11 +131,17 @@ pub struct AppSettings {
     pub debug_transcription: bool,
     /// Global tracing verbosity for the `souffle` crate.
     pub log_level: LogLevel,
+    /// Pinned input device UID (`kAudioDevicePropertyDeviceUID`).
     pub audio_device: Option<String>,
-    /// Preferred microphone while the lid is closed with an external display
+    /// Preferred microphone UID while the lid is closed with an external display
     /// attached (clamshell mode). `None` means just follow whatever macOS
     /// reports as the default input, the previous behavior.
     pub clamshell_audio_device: Option<String>,
+    /// Ordered input-device preferences and remembered devices.
+    pub input_priority: InputPriority,
+    /// When false, Bluetooth headset microphones are avoided for automatic
+    /// selection to keep stereo output on A2DP instead of HFP mono.
+    pub allow_bluetooth_mic: bool,
     pub transcription_engine_id: String,
     pub transcription_model_id: String,
     pub transcription_backend_id: String,
@@ -224,6 +233,8 @@ impl Default for AppSettings {
             log_level: LogLevel::default(),
             audio_device: None,
             clamshell_audio_device: None,
+            input_priority: InputPriority::default(),
+            allow_bluetooth_mic: false,
             transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
             transcription_model_id: KYUTAI_MODEL_ID.to_string(),
             transcription_backend_id: CANDLE_BACKEND_ID.to_string(),
@@ -312,6 +323,14 @@ impl AppSettings {
             read_json_setting::<String>(db, CLAMSHELL_AUDIO_DEVICE_KEY)?
         {
             settings.clamshell_audio_device = Some(clamshell_audio_device);
+        }
+        if let Some(input_priority) = read_json_setting::<InputPriority>(db, INPUT_PRIORITY_KEY)? {
+            settings.input_priority = input_priority;
+        }
+        if let Some(allow_bluetooth_mic) =
+            read_json_setting::<bool>(db, ALLOW_BLUETOOTH_MIC_KEY)?
+        {
+            settings.allow_bluetooth_mic = allow_bluetooth_mic;
         }
         if let Some(transcription_engine_id) =
             read_json_setting::<String>(db, TRANSCRIPTION_ENGINE_ID_KEY)?
@@ -444,7 +463,50 @@ impl AppSettings {
             settings.diarize_max_speakers = diarize_max_speakers;
         }
 
-        Ok(settings.sanitized())
+        let mut settings = settings.sanitized();
+        Self::migrate_audio_device_preferences(&mut settings, db)?;
+
+        Ok(settings)
+    }
+
+    /// Best-effort upgrade from legacy name pins to stable CoreAudio UIDs.
+    fn migrate_audio_device_preferences(
+        settings: &mut AppSettings,
+        db: &Database,
+    ) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            use crate::audio::device::migrate_stored_device_id;
+            use crate::audio::device_watch::list_devices;
+
+            let devices = list_devices();
+            let mut changed = false;
+
+            if let Some(stored) = settings.audio_device.as_ref() {
+                let (migrated, did_change) = migrate_stored_device_id(stored, &devices);
+                if did_change {
+                    settings.audio_device = Some(migrated);
+                    changed = true;
+                }
+            }
+            if let Some(stored) = settings.clamshell_audio_device.as_ref() {
+                let (migrated, did_change) = migrate_stored_device_id(stored, &devices);
+                if did_change {
+                    settings.clamshell_audio_device = Some(migrated);
+                    changed = true;
+                }
+            }
+
+            if changed {
+                if let Some(audio_device) = settings.audio_device.as_ref() {
+                    write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
+                }
+                if let Some(clamshell_audio_device) = settings.clamshell_audio_device.as_ref() {
+                    write_json_setting(db, CLAMSHELL_AUDIO_DEVICE_KEY, clamshell_audio_device)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn sanitize_for_save(&self) -> Result<Self, String> {
@@ -489,6 +551,27 @@ impl AppSettings {
             .as_ref()
             .map(|device| device.trim().to_string())
             .filter(|device| !device.is_empty());
+
+        normalized.input_priority.priorities = sanitize_uid_list(&normalized.input_priority.priorities);
+        normalized.input_priority.hidden = sanitize_uid_list(&normalized.input_priority.hidden);
+        normalized.input_priority.known = normalized
+            .input_priority
+            .known
+            .iter()
+            .filter_map(|entry| {
+                let uid = entry.uid.trim();
+                let name = entry.name.trim();
+                if uid.is_empty() || name.is_empty() {
+                    return None;
+                }
+                Some(crate::audio::KnownDevice {
+                    uid: uid.to_string(),
+                    name: name.to_string(),
+                    last_seen: entry.last_seen,
+                })
+            })
+            .collect();
+        dedupe_known_devices(&mut normalized.input_priority.known);
 
         if normalized.ollama_url.is_empty() {
             normalized.ollama_url = OLLAMA_DEFAULT_URL.to_string();
@@ -622,8 +705,32 @@ impl AppSettings {
         normalized
     }
 
+    /// Refresh `known` from the current connected-device snapshot and persist
+    /// only the input-priority JSON. Used when CoreAudio reports a device
+    /// list or default-input change.
+    pub fn sync_input_priority_from_devices(db: &Database) -> Result<(InputPriority, bool), String> {
+        let mut settings = Self::load(db)?;
+        #[cfg(target_os = "macos")]
+        {
+            use crate::audio::touch_known;
+            use crate::audio::device_watch::list_devices;
+
+            touch_known(&mut settings.input_priority, &list_devices());
+        }
+        let normalized = settings.sanitize_for_save()?;
+        write_json_setting(db, INPUT_PRIORITY_KEY, &normalized.input_priority)?;
+        Ok((normalized.input_priority, normalized.allow_bluetooth_mic))
+    }
+
     pub fn save(&self, db: &Database) -> Result<(), String> {
-        let normalized = self.sanitize_for_save()?;
+        let mut normalized = self.sanitize_for_save()?;
+        #[cfg(target_os = "macos")]
+        {
+            use crate::audio::touch_known;
+            use crate::audio::device_watch::list_devices;
+
+            touch_known(&mut normalized.input_priority, &list_devices());
+        }
 
         write_json_setting(db, THEME_KEY, &normalized.theme)?;
         write_json_setting(db, LOCALE_KEY, &normalized.locale)?;
@@ -759,8 +866,26 @@ impl AppSettings {
             db.delete_setting(CLAMSHELL_AUDIO_DEVICE_KEY)?;
         }
 
+        write_json_setting(db, INPUT_PRIORITY_KEY, &normalized.input_priority)?;
+        write_json_setting(db, ALLOW_BLUETOOTH_MIC_KEY, &normalized.allow_bluetooth_mic)?;
+
         Ok(())
     }
+}
+
+fn sanitize_uid_list(values: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = values
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    out.dedup();
+    out
+}
+
+fn dedupe_known_devices(known: &mut Vec<crate::audio::KnownDevice>) {
+    let mut seen = std::collections::HashSet::new();
+    known.retain(|entry| seen.insert(entry.uid.clone()));
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
@@ -850,6 +975,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{AppSettings, MeetingAudioRetention, PasteMethod, ShortcutSettings, Theme};
+    use crate::audio::InputPriority;
     use crate::logging::LogLevel;
     use crate::constants::OLLAMA_DEFAULT_URL;
     use crate::test_helpers::fixtures::test_db;
@@ -869,6 +995,8 @@ mod tests {
             log_level: LogLevel::Debug,
             audio_device: Some("BlackHole".into()),
             clamshell_audio_device: Some("USB Mic".into()),
+            input_priority: InputPriority::default(),
+            allow_bluetooth_mic: true,
             transcription_engine_id: "kyutai".into(),
             transcription_model_id: "stt-1b-en_fr".into(),
             transcription_backend_id: "candle".into(),
@@ -901,7 +1029,12 @@ mod tests {
 
         settings.save(&db).expect("save settings");
 
-        assert_eq!(AppSettings::load(&db).expect("load settings"), settings);
+        let loaded = AppSettings::load(&db).expect("load settings");
+        let mut expected = settings;
+        expected.input_priority.known = loaded.input_priority.known.clone();
+        assert_eq!(loaded, expected);
+        #[cfg(target_os = "macos")]
+        assert!(!loaded.input_priority.known.is_empty());
     }
 
     #[test]

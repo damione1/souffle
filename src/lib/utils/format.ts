@@ -40,3 +40,20 @@ export function formatBytes(bytes: number): string {
   const precision = value < 10 ? 1 : 0;
   return `${value.toFixed(precision)} ${units[unitIndex]}`;
 }
+
+/** Relative last-seen age for i18n in Settings microphone list. */
+export type LastSeenAge =
+  | { kind: "just_now" }
+  | { kind: "minutes"; count: number }
+  | { kind: "hours"; count: number }
+  | { kind: "days"; count: number };
+
+export function lastSeenAge(unixSeconds: number, nowMs = Date.now()): LastSeenAge {
+  const deltaSec = Math.max(0, Math.floor(nowMs / 1000) - unixSeconds);
+  if (deltaSec < 60) return { kind: "just_now" };
+  const minutes = Math.floor(deltaSec / 60);
+  if (minutes < 60) return { kind: "minutes", count: minutes };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return { kind: "hours", count: hours };
+  return { kind: "days", count: Math.floor(hours / 24) };
+}

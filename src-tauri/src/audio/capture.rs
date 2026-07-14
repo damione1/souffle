@@ -12,6 +12,8 @@ use tracing::{debug, error, info, warn};
 use super::mixer::MeetingMixer;
 use super::recorder::MeetingRecorder;
 use super::resampler::Resampler;
+use crate::audio::device::{AudioInputDevice, resolve_device_name, uid_for_device_name};
+use crate::audio::priority::{InputPriority, ResolveInputParams, resolve_input};
 use crate::state::AudioCommand;
 
 /// Tell the frontend whether the system-audio leg of a meeting is live.
@@ -296,16 +298,9 @@ pub enum AudioMessage {
     },
 }
 
-/// Info about an available audio input device, sent to frontend
-#[derive(Debug, Clone, serde::Serialize, specta::Type)]
-pub struct AudioDeviceInfo {
-    pub name: String,
-    pub is_default: bool,
-}
-
 /// List all available input devices. Logged at info level (device count) so
 /// enumeration events show up in the Diagnostics live log.
-pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
+pub fn list_input_devices() -> Vec<AudioInputDevice> {
     let devices = list_input_devices_impl();
     info!("Enumerated {} input device(s)", devices.len());
     devices
@@ -320,15 +315,14 @@ pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
 /// enough to do that with no recording active. `device_watch::list_devices`
 /// does the same enumeration with only cheap property reads.
 #[cfg(target_os = "macos")]
-fn list_input_devices_impl() -> Vec<AudioDeviceInfo> {
+fn list_input_devices_impl() -> Vec<AudioInputDevice> {
     super::device_watch::list_devices()
-        .into_iter()
-        .map(|(name, is_default)| AudioDeviceInfo { name, is_default })
-        .collect()
 }
 
 #[cfg(not(target_os = "macos"))]
-fn list_input_devices_impl() -> Vec<AudioDeviceInfo> {
+fn list_input_devices_impl() -> Vec<AudioInputDevice> {
+    use crate::audio::device::TransportType;
+
     let host = cpal::default_host();
     let default_name = host
         .default_input_device()
@@ -346,9 +340,11 @@ fn list_input_devices_impl() -> Vec<AudioDeviceInfo> {
     devices
         .filter_map(|d| {
             let name = d.name().ok()?;
-            Some(AudioDeviceInfo {
-                is_default: name == default_name,
+            Some(AudioInputDevice {
+                uid: name.clone(),
                 name,
+                transport: TransportType::Unknown,
+                is_default: name == default_name,
             })
         })
         .collect()
@@ -361,11 +357,16 @@ fn list_input_devices_impl() -> Vec<AudioDeviceInfo> {
 pub struct AudioCapture {
     stream: Option<Stream>,
     audio_sender: Sender<AudioMessage>,
+    /// Pinned input device UID (or legacy name during migration).
     selected_device: Option<String>,
-    /// Preferred microphone while the lid is closed with an external display
+    /// Preferred microphone UID while the lid is closed with an external display
     /// attached (clamshell mode); `None` disables the override entirely, so
     /// `find_device` never pays for the `is_clamshell()` probe.
     clamshell_device: Option<String>,
+    /// Ordered input preferences and remembered devices.
+    input_priority: InputPriority,
+    /// When false, skip Bluetooth inputs during automatic device selection.
+    allow_bluetooth_mic: bool,
     active_session_id: Arc<AtomicU64>,
     audio_rms: Arc<AtomicU32>,
     /// Shared with the cpal callback so stop() can flush the resampler tail
@@ -391,6 +392,8 @@ pub struct AudioCapture {
     active_params: Option<StartParams>,
     /// Name of the input device the current stream was built on.
     mic_device_name: Option<String>,
+    /// UID resolved when the current stream was built (for route hot-swap).
+    mic_device_uid: Option<String>,
     /// Set by the cpal error callback when the stream dies (e.g. its device
     /// disappeared); the next mic health check rebuilds the capture leg.
     stream_failed: Arc<std::sync::atomic::AtomicBool>,
@@ -438,6 +441,8 @@ impl AudioCapture {
                     audio_sender: audio_tx,
                     selected_device: None,
                     clamshell_device: None,
+                    input_priority: InputPriority::default(),
+                    allow_bluetooth_mic: false,
                     active_session_id: Arc::new(AtomicU64::new(0)),
                     audio_rms,
                     resampler: None,
@@ -448,6 +453,7 @@ impl AudioCapture {
                     app: None,
                     active_params: None,
                     mic_device_name: None,
+                    mic_device_uid: None,
                     stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     last_mic_check: Instant::now(),
                     level_throttle: AudioLevelThrottle::new(),
@@ -532,20 +538,38 @@ impl AudioCapture {
                         AudioCommand::Stop => {
                             capture.stop();
                         }
-                        AudioCommand::SelectDevice(name) => {
-                            info!("Selected input device: {name}");
-                            capture.selected_device = Some(name);
+                        AudioCommand::SelectDevice(uid) => {
+                            if uid.is_empty() {
+                                info!("Cleared explicit input device pin");
+                                capture.selected_device = None;
+                            } else {
+                                info!("Selected input device UID: {uid}");
+                                capture.selected_device = Some(uid);
+                            }
+                            capture.refresh_input_route();
                         }
-                        AudioCommand::SetClamshellDevice(name) => {
-                            if let Some(ref name) = name {
-                                info!("Clamshell-mode microphone preference: {name}");
+                        AudioCommand::SetClamshellDevice(uid) => {
+                            if let Some(ref uid) = uid {
+                                info!("Clamshell-mode microphone preference UID: {uid}");
                             } else {
                                 info!("Clamshell-mode microphone preference cleared");
                             }
-                            capture.clamshell_device = name;
+                            capture.clamshell_device = uid;
+                            capture.refresh_input_route();
+                        }
+                        AudioCommand::SetInputPolicy {
+                            priority,
+                            allow_bluetooth_mic,
+                        } => {
+                            capture.input_priority = priority;
+                            capture.allow_bluetooth_mic = allow_bluetooth_mic;
+                            capture.refresh_input_route();
                         }
                         AudioCommand::AttachApp(app) => {
                             capture.app = Some(app);
+                        }
+                        AudioCommand::RefreshInputRoute => {
+                            capture.refresh_input_route();
                         }
                     }
                 }
@@ -557,58 +581,58 @@ impl AudioCapture {
         Ok((cmd_tx, audio_rx))
     }
 
-    /// Which device name (if any) `find_device` should target, given the
-    /// user's explicit pin, the configured clamshell-mode preference, and
-    /// whether clamshell mode is currently active *and* a preference is
-    /// configured. Returns `None` to mean "follow whatever the OS reports as
-    /// the default input" — presence of the named device is checked by the
-    /// caller, not here, so this stays a pure decision with no I/O.
-    fn effective_device<'a>(
-        selected: Option<&'a str>,
-        clamshell_pref: Option<&'a str>,
-        clamshell_active: bool,
-    ) -> Option<&'a str> {
-        // An explicit pin always wins: the clamshell preference only stands
-        // in for "the system default", it never overrides a deliberate
-        // user choice of device.
-        selected.or_else(|| clamshell_pref.filter(|_| clamshell_active))
-    }
-
-    fn find_device(&self) -> Result<Device, String> {
-        let host = cpal::default_host();
-
-        // The ioreg probe behind `is_clamshell()` shells out; only pay for it
-        // when a clamshell device is actually configured, and skip it
-        // entirely once an explicit pin already decides the device.
+    /// Which device UID `find_device` should target, given the user's pin,
+    /// clamshell preference, priority list, and anti-Bluetooth policy.
+    fn resolved_input_uid(&self, connected: &[AudioInputDevice]) -> Option<String> {
         let clamshell_active = self.selected_device.is_none()
             && self.clamshell_device.is_some()
             && crate::power::is_clamshell();
 
-        if let Some(name) = Self::effective_device(
-            self.selected_device.as_deref(),
-            self.clamshell_device.as_deref(),
-            clamshell_active,
-        ) {
-            // Unfiltered `devices()`, not `input_devices()`: the latter's
-            // default filter probes every device's supported input configs
-            // (opens an AudioUnit per device on coreaudio) just to enumerate
-            // them, which can flip a Bluetooth headset into HFP mono. This
-            // runs on every session start and every mic health check
-            // (MIC_CHECK_INTERVAL), so the unfiltered form matters even when
-            // no device is pinned by name below the fallback. `Device::name`
-            // itself is a cheap property read, safe to call on every device.
-            let devices = host
-                .devices()
-                .map_err(|e| format!("Failed to list devices: {e}"))?;
+        resolve_input(
+            connected,
+            ResolveInputParams {
+                pin: self.selected_device.as_deref(),
+                clamshell_pref: self.clamshell_device.as_deref(),
+                clamshell_active,
+                priority: &self.input_priority,
+                allow_bluetooth_mic: self.allow_bluetooth_mic,
+            },
+        )
+    }
 
-            for device in devices {
-                if let Ok(n) = device.name()
-                    && n == name
-                {
-                    return Ok(device);
+    fn find_device(&self) -> Result<Device, String> {
+        let host = cpal::default_host();
+        let known_devices = list_input_devices_impl();
+
+        if let Some(uid) = self.resolved_input_uid(&known_devices) {
+            let target_name = resolve_device_name(&known_devices, &uid).or({
+                // Disconnected UID or legacy name not in the current snapshot:
+                // try the stored value as a cpal device name directly.
+                Some(uid.as_str())
+            });
+
+            if let Some(name) = target_name {
+                // Unfiltered `devices()`, not `input_devices()`: the latter's
+                // default filter probes every device's supported input configs
+                // (opens an AudioUnit per device on coreaudio) just to enumerate
+                // them, which can flip a Bluetooth headset into HFP mono. This
+                // runs on every session start and every mic health check
+                // (MIC_CHECK_INTERVAL), so the unfiltered form matters even when
+                // no device is pinned below the fallback. `Device::name`
+                // itself is a cheap property read, safe to call on every device.
+                let devices = host
+                    .devices()
+                    .map_err(|e| format!("Failed to list devices: {e}"))?;
+
+                for device in devices {
+                    if let Ok(n) = device.name()
+                        && n == name
+                    {
+                        return Ok(device);
+                    }
                 }
+                warn!("Input device '{name}' not found, falling back to default");
             }
-            warn!("Input device '{name}' not found, falling back to default");
         }
 
         host.default_input_device()
@@ -651,10 +675,16 @@ impl AudioCapture {
         self.stream_failed
             .store(false, std::sync::atomic::Ordering::Relaxed);
         self.mic_device_name = None;
+        self.mic_device_uid = None;
 
+        let known_devices = list_input_devices_impl();
         let device = self.find_device()?;
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".into());
+        // Track the UID of the device cpal actually opened, not just what
+        // resolve_input picked — find_device may fall back to the OS default
+        // when the resolved name is missing from the cpal device list.
+        self.mic_device_uid = uid_for_device_name(&known_devices, &device_name);
         info!("Using input device: {device_name}");
         self.mic_device_name = Some(device_name.clone());
 
@@ -1016,19 +1046,13 @@ impl AudioCapture {
             .stream_failed
             .swap(false, std::sync::atomic::Ordering::Relaxed);
 
-        // Only follow the system default (or a configured clamshell
-        // override) when the user hasn't pinned a device; a pinned device
-        // that vanishes surfaces as a stream error and falls back to the
-        // default on rebuild. Comparing against `find_device`'s own
-        // resolution (rather than the raw OS default) means this settles
-        // after one rebuild even when the clamshell device is configured but
-        // not currently present — `find_device` falls back to the same OS
-        // default every time in that case, so the names converge.
-        let default_changed = self.selected_device.is_none()
-            && self.mic_device_name.is_some()
-            && self.find_device().ok().and_then(|d| d.name().ok()) != self.mic_device_name;
+        // Rebuild when the resolved input UID changes (lid closed, headset
+        // plugged in, priority policy update…) or the stream died.
+        let resolved_changed = self.active_params.is_some()
+            && self.resolved_input_uid(&list_input_devices_impl()).as_deref()
+                != self.mic_device_uid.as_deref();
 
-        if !failed && !default_changed {
+        if !failed && !resolved_changed {
             return false;
         }
 
@@ -1078,6 +1102,18 @@ impl AudioCapture {
                         true
                     }
                 }
+            }
+        }
+    }
+
+    /// Re-run input resolution and hot-swap the mic leg when recording.
+    fn refresh_input_route(&mut self) {
+        if self.active_params.is_some() {
+            self.last_mic_check = Instant::now();
+            if self.check_mic_health() {
+                tracing::error!(
+                    "Microphone unrecoverable after input route change; ending session"
+                );
             }
         }
     }
@@ -1206,6 +1242,7 @@ impl AudioCapture {
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
         self.active_params = None;
         self.mic_device_name = None;
+        self.mic_device_uid = None;
         self.stream.take();
         self.resampler.take();
         #[cfg(target_os = "macos")]
@@ -1258,6 +1295,7 @@ impl AudioCapture {
         self.audio_rms.store(0f32.to_bits(), Ordering::Relaxed);
         self.active_params = None;
         self.mic_device_name = None;
+        self.mic_device_uid = None;
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
 
@@ -1367,45 +1405,5 @@ impl AudioCapture {
             .ok_or_else(|| "No supported input config found".to_string())?;
 
         Ok(config.with_max_sample_rate().into())
-    }
-}
-
-#[cfg(test)]
-mod effective_device_tests {
-    use super::AudioCapture;
-
-    #[test]
-    fn explicit_pin_wins_over_clamshell_preference() {
-        assert_eq!(
-            AudioCapture::effective_device(Some("Pinned Mic"), Some("USB Mic"), true),
-            Some("Pinned Mic"),
-        );
-    }
-
-    #[test]
-    fn explicit_pin_wins_even_without_clamshell_active() {
-        assert_eq!(
-            AudioCapture::effective_device(Some("Pinned Mic"), Some("USB Mic"), false),
-            Some("Pinned Mic"),
-        );
-    }
-
-    #[test]
-    fn clamshell_preference_applies_when_no_pin_and_active() {
-        assert_eq!(
-            AudioCapture::effective_device(None, Some("USB Mic"), true),
-            Some("USB Mic"),
-        );
-    }
-
-    #[test]
-    fn clamshell_preference_ignored_when_not_active() {
-        assert_eq!(AudioCapture::effective_device(None, Some("USB Mic"), false), None);
-    }
-
-    #[test]
-    fn no_pin_no_clamshell_preference_follows_default() {
-        assert_eq!(AudioCapture::effective_device(None, None, true), None);
-        assert_eq!(AudioCapture::effective_device(None, None, false), None);
     }
 }

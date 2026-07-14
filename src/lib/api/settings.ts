@@ -1,5 +1,5 @@
 import { commands, unwrap } from "./generated";
-import type { AppSettings, AudioDeviceInfo, ShortcutSettings } from "../types";
+import type { AppSettings, AudioInputDevice, ShortcutSettings } from "../types";
 
 export async function getSettings(): Promise<AppSettings> {
   return unwrap(commands.getSettings());
@@ -17,12 +17,12 @@ export async function saveShortcuts(shortcuts: ShortcutSettings): Promise<void> 
   await unwrap(commands.saveShortcuts(shortcuts));
 }
 
-export async function listAudioDevices(): Promise<AudioDeviceInfo[]> {
+export async function listAudioDevices(): Promise<AudioInputDevice[]> {
   return unwrap(commands.listAudioDevices());
 }
 
-export async function selectAudioDevice(deviceName: string): Promise<void> {
-  await unwrap(commands.selectAudioDevice(deviceName));
+export async function selectAudioDevice(deviceUid: string): Promise<void> {
+  await unwrap(commands.selectAudioDevice(deviceUid));
 }
 
 export async function getSystemAudioSupport(): Promise<boolean> {

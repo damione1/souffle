@@ -44,9 +44,18 @@ pub enum AudioCommand {
     /// startup and whenever the setting changes; `None` means "just follow
     /// the system default", the previous behavior.
     SetClamshellDevice(Option<String>),
+    /// Refresh input priority policy and anti-Bluetooth preference. Sent at
+    /// startup and whenever related settings change.
+    SetInputPolicy {
+        priority: crate::audio::InputPriority,
+        allow_bluetooth_mic: bool,
+    },
     /// Give the audio thread an AppHandle so meeting mode can emit
     /// SystemAudioStatus events.
     AttachApp(AppHandle),
+    /// Re-run input resolution and hot-swap the mic leg when needed (device
+    /// list or default-input change, priority update, explicit pin change).
+    RefreshInputRoute,
 }
 
 /// Accumulated meeting segments while recording

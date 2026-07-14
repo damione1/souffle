@@ -26,7 +26,7 @@ import { setLocale } from "../../i18n";
 import { getAppState } from "../../stores/app.svelte";
 import type {
   AppSettings,
-  AudioDeviceInfo,
+  AudioInputDevice,
   CalendarInfo,
   DictionaryEntry,
   PermState,
@@ -36,6 +36,10 @@ import type {
   TranscriptionCatalog,
 } from "../../types";
 import { applyTheme, errorMessage, formatShortcutLabel } from "../../utils";
+import {
+  buildMicrophoneList,
+  reorderMicrophoneList,
+} from "./microphone-list";
 import {
   getFirstAvailableTranscriptionBackend,
   getFirstAvailableTranscriptionModel,
@@ -53,7 +57,8 @@ import {
 export function createSettingsController() {
   const app = getAppState();
 
-  let audioDevices = $state<AudioDeviceInfo[]>([]);
+  let audioDevices = $state<AudioInputDevice[]>([]);
+  let pinUnavailable = $state(false);
   let systemAudioSupported = $state(false);
   // Gates the "microphone when lid is closed" picker: meaningless on a
   // desktop Mac, so it's hidden entirely rather than shown disabled.
@@ -180,32 +185,67 @@ export function createSettingsController() {
     try {
       audioDevices = await listAudioDevices();
       if (app.selectedDevice) {
-        const exists = audioDevices.some((device) => device.name === app.selectedDevice);
-        if (exists) {
-          await selectAudioDevice(app.selectedDevice);
-          return;
-        }
-      }
-      const defaultDevice = audioDevices.find((device) => device.is_default);
-      if (defaultDevice) {
-        app.selectedDevice = defaultDevice.name;
-        await selectAudioDevice(defaultDevice.name);
+        await selectAudioDevice(app.selectedDevice);
+        const connected = audioDevices.some((device) => device.uid === app.selectedDevice);
+        pinUnavailable = !connected;
       }
     } catch (e) {
       statusMessage = errorMessage(e);
     }
   }
 
+  async function onInputDevicesChanged() {
+    await syncSettings();
+    await refreshDevices();
+  }
+
+  function setPinUnavailable(uid: string | null) {
+    pinUnavailable = Boolean(uid && uid === app.selectedDevice);
+  }
+
   async function onDeviceChange(event: Event) {
     const target = event.target as HTMLSelectElement;
+    const value = target.value;
     try {
-      await selectAudioDevice(target.value);
+      await selectAudioDevice(value);
+      app.selectedDevice = value;
+      pinUnavailable = Boolean(
+        value && !audioDevices.some((device) => device.uid === value),
+      );
       await persistSettings((settings) => {
-        settings.audio_device = target.value;
+        settings.audio_device = value || null;
       });
     } catch (e) {
       statusMessage = errorMessage(e);
     }
+  }
+
+  async function moveInputDevice(uid: string, direction: -1 | 1) {
+    const list = buildMicrophoneList(audioDevices, app.settings.input_priority);
+    const next = reorderMicrophoneList(list, uid, direction);
+    if (!next) return;
+    await persistSettings((settings) => {
+      settings.input_priority.priorities = next;
+    });
+  }
+
+  async function toggleInputDeviceHidden(uid: string, hidden: boolean) {
+    await persistSettings((settings) => {
+      const hiddenSet = new Set(settings.input_priority.hidden);
+      if (hidden) {
+        hiddenSet.add(uid);
+      } else {
+        hiddenSet.delete(uid);
+      }
+      settings.input_priority.hidden = [...hiddenSet];
+    });
+  }
+
+  function onAllowBluetoothMicChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    void persistSettings((settings) => {
+      settings.allow_bluetooth_mic = target.checked;
+    });
   }
 
   /** Empty option value means "follow system default" (the previous,
@@ -811,6 +851,9 @@ export function createSettingsController() {
   return {
     get app() { return app; },
     get audioDevices() { return audioDevices; },
+    get pinUnavailable() { return pinUnavailable; },
+    setPinUnavailable,
+    onInputDevicesChanged,
     get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },
     get appleIntelligenceUnavailableReason() { return appleIntelligenceUnavailableReason; },
     get summaryProviderAvailable() { return summaryProviderAvailable; },
@@ -843,6 +886,9 @@ export function createSettingsController() {
     refreshRuntimeStatus,
     refreshDevices,
     onDeviceChange,
+    onMoveDevice: moveInputDevice,
+    onToggleHidden: toggleInputDeviceHidden,
+    onAllowBluetoothMicChange,
     refreshSummaryProviders,
     selectModelOption,
     handleDeleteModel,

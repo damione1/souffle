@@ -18,6 +18,7 @@
   import SummaryTemplatesSettingsSection from "../features/settings/components/SummaryTemplatesSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
+  import { events } from "../api/generated";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
@@ -39,6 +40,38 @@
 
   onMount(() => {
     void controller.mount();
+
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+
+    const register = (promise: Promise<() => void>) => {
+      void promise.then((unlisten) => {
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlisteners.push(unlisten);
+      });
+    };
+
+    register(events.inputDevicesChanged.listen(() => {
+      void controller.onInputDevicesChanged();
+    }));
+    register(events.inputPinUnavailable.listen((event) => {
+      controller.setPinUnavailable(event.payload.uid);
+    }));
+    register(events.inputPinAvailable.listen((event) => {
+      if (event.payload.uid === controller.app.selectedDevice) {
+        controller.setPinUnavailable(null);
+      }
+    }));
+
+    return () => {
+      cancelled = true;
+      for (const unlisten of unlisteners) {
+        unlisten();
+      }
+    };
   });
 </script>
 
@@ -74,9 +107,15 @@
 
   <MicrophoneSettingsSection
     audioDevices={controller.audioDevices}
+    inputPriority={controller.app.settings.input_priority}
     selectedDevice={controller.app.selectedDevice}
+    pinUnavailable={controller.pinUnavailable}
+    allowBluetoothMic={controller.app.settings.allow_bluetooth_mic}
     onDeviceChange={controller.onDeviceChange}
+    onAllowBluetoothMicChange={controller.onAllowBluetoothMicChange}
     onRefreshDevices={controller.refreshDevices}
+    onMoveDevice={controller.onMoveDevice}
+    onToggleHidden={controller.onToggleHidden}
   />
 
   <InterfaceSettingsSection

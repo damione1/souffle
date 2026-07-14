@@ -65,7 +65,12 @@ describe('settings API', () => {
   });
 
   it('listAudioDevices calls correct command', async () => {
-    const devices = [{ name: 'MacBook Pro Microphone', is_default: true }];
+    const devices = [{
+      uid: 'BuiltInMic',
+      name: 'MacBook Pro Microphone',
+      transport: 'built_in',
+      is_default: true,
+    }];
     mockInvoke.mockResolvedValue(devices);
 
     const result = await listAudioDevices();
@@ -74,11 +79,11 @@ describe('settings API', () => {
     expect(result).toEqual(devices);
   });
 
-  it('selectAudioDevice passes device name', async () => {
+  it('selectAudioDevice passes device UID', async () => {
     mockInvoke.mockResolvedValue(null);
 
-    await selectAudioDevice('External Mic');
+    await selectAudioDevice('ExternalMicUid');
 
-    expect(mockInvoke).toHaveBeenCalledWith('select_audio_device', expect.objectContaining({ deviceName: 'External Mic' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith('select_audio_device', expect.objectContaining({ deviceUid: 'ExternalMicUid' }), undefined);
   });
 });

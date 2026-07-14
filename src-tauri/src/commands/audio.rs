@@ -1,23 +1,78 @@
 use tauri::State;
 
-use crate::audio::capture::{AudioDeviceInfo, list_input_devices};
+use crate::audio::capture::list_input_devices;
+use crate::audio::AudioInputDevice;
+use crate::db::Database;
+use crate::settings::AppSettings;
 use crate::state::{AppState, AudioCommand};
+use crossbeam_channel::Sender;
+use tauri::AppHandle;
+use tauri_specta::Event;
 
 /// List available audio input devices
 #[tauri::command]
 #[specta::specta]
-pub fn list_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+pub fn list_audio_devices() -> Result<Vec<AudioInputDevice>, String> {
     Ok(list_input_devices())
 }
 
-/// Select an audio input device by name
+/// Select an audio input device by stable CoreAudio UID. When the UID is not
+/// connected, the pin is kept and capture falls back through the priority
+/// policy; the frontend is notified via [`crate::app_events::InputPinUnavailable`].
 #[tauri::command]
 #[specta::specta]
-pub fn select_audio_device(state: State<'_, AppState>, device_name: String) -> Result<(), String> {
+pub fn select_audio_device(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device_uid: String,
+) -> Result<(), String> {
     state
         .audio_cmd_sender
-        .send(AudioCommand::SelectDevice(device_name))
-        .map_err(|e| format!("Failed to send device selection: {e}"))
+        .send(AudioCommand::SelectDevice(device_uid.clone()))
+        .map_err(|e| format!("Failed to send device selection: {e}"))?;
+    emit_pin_status(&app, device_uid.as_str());
+    Ok(())
+}
+
+/// React to CoreAudio device-list or default-input changes: refresh known
+/// devices, push the updated policy to capture, hot-swap when recording, and
+/// notify the frontend.
+pub fn handle_input_route_change(
+    db: &Database,
+    cmd_tx: &Sender<AudioCommand>,
+    app: &AppHandle,
+) -> Result<(), String> {
+    let (priority, allow_bluetooth_mic) = AppSettings::sync_input_priority_from_devices(db)?;
+    cmd_tx
+        .send(AudioCommand::SetInputPolicy {
+            priority,
+            allow_bluetooth_mic,
+        })
+        .map_err(|e| format!("Failed to push input policy: {e}"))?;
+
+    let devices = list_input_devices();
+    let _ = crate::app_events::InputDevicesChanged { devices }.emit(app);
+
+    if let Ok(settings) = AppSettings::load(db)
+        && let Some(uid) = settings.audio_device
+    {
+        emit_pin_status(app, &uid);
+    }
+    Ok(())
+}
+
+fn emit_pin_status(app: &AppHandle, uid: &str) {
+    if uid.is_empty() {
+        return;
+    }
+    let connected = list_input_devices()
+        .iter()
+        .any(|device| device.uid == uid);
+    if connected {
+        let _ = crate::app_events::InputPinAvailable { uid: uid.to_string() }.emit(app);
+    } else {
+        let _ = crate::app_events::InputPinUnavailable { uid: uid.to_string() }.emit(app);
+    }
 }
 
 /// Whether system-audio capture (Core Audio process taps) is available on this OS

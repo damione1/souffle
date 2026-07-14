@@ -13,7 +13,7 @@
 import { vi } from "vitest";
 import type {
   AppSettings,
-  AudioDeviceInfo,
+  AudioInputDevice,
   DictationEntry,
   MeetingListItem,
   MeetingTranscript,
@@ -110,8 +110,8 @@ export interface SettingsApiMock {
   saveSettings: ReturnType<typeof vi.fn<(settings: AppSettings) => Promise<void>>>;
   getShortcuts: ReturnType<typeof vi.fn<() => Promise<ShortcutSettings>>>;
   saveShortcuts: ReturnType<typeof vi.fn<(shortcuts: ShortcutSettings) => Promise<void>>>;
-  listAudioDevices: ReturnType<typeof vi.fn<() => Promise<AudioDeviceInfo[]>>>;
-  selectAudioDevice: ReturnType<typeof vi.fn<(deviceName: string) => Promise<void>>>;
+  listAudioDevices: ReturnType<typeof vi.fn<() => Promise<AudioInputDevice[]>>>;
+  selectAudioDevice: ReturnType<typeof vi.fn<(deviceUid: string) => Promise<void>>>;
 }
 
 export function createSettingsApiMock(
@@ -122,11 +122,11 @@ export function createSettingsApiMock(
     saveSettings: vi.fn<(settings: AppSettings) => Promise<void>>().mockResolvedValue(undefined),
     getShortcuts: vi.fn<() => Promise<ShortcutSettings>>().mockResolvedValue(mockShortcuts),
     saveShortcuts: vi.fn<(shortcuts: ShortcutSettings) => Promise<void>>().mockResolvedValue(undefined),
-    listAudioDevices: vi.fn<() => Promise<AudioDeviceInfo[]>>().mockResolvedValue([
-      { name: "Built-in Microphone", is_default: true },
-      { name: "External USB Mic", is_default: false },
+    listAudioDevices: vi.fn<() => Promise<AudioInputDevice[]>>().mockResolvedValue([
+      { uid: "builtin-mic", name: "Built-in Microphone", transport: "built_in", is_default: true },
+      { uid: "usb-mic", name: "External USB Mic", transport: "usb", is_default: false },
     ]),
-    selectAudioDevice: vi.fn<(deviceName: string) => Promise<void>>().mockResolvedValue(undefined),
+    selectAudioDevice: vi.fn<(deviceUid: string) => Promise<void>>().mockResolvedValue(undefined),
     ...overrides,
   };
 }
