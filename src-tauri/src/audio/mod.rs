@@ -2,6 +2,7 @@ pub mod aec;
 pub mod capture;
 pub mod device_watch;
 pub mod feedback;
+pub mod meeting_detect;
 pub mod mixer;
 pub mod output_route;
 pub mod recorder;
