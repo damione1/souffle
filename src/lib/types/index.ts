@@ -33,6 +33,7 @@ export type {
   MeetingRecordingSession,
   MeetingSpeaker,
   MeetingTranscript,
+  RetagMeetingSpeakerRequest,
   ModelArtifactDescriptor,
   SummaryModelDescriptor,
   SummaryProvidersStatus,

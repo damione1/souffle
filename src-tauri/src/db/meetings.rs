@@ -259,6 +259,109 @@ impl Database {
         Ok(changed)
     }
 
+    /// Reassign persistent-speaker labels within one meeting. Only segments
+    /// currently labeled `spk:from_persistent_id` are rewritten; Me/Them and
+    /// NULL speakers are left alone. When `sort_orders` is `Some`, only those
+    /// segment indices are retagged; when `None`, every matching segment in
+    /// the meeting is retagged. Unlike `set_segment_speakers`, this overwrites
+    /// existing `spk:*` labels. The target must be `Speaker::Persistent`.
+    /// Returns how many rows changed.
+    pub fn retag_persistent_speaker(
+        &self,
+        meeting_id: &str,
+        from_persistent_id: i64,
+        to_speaker: Speaker,
+        sort_orders: Option<&[u64]>,
+    ) -> Result<usize, String> {
+        let Speaker::Persistent(to_id) = to_speaker else {
+            return Err("Retag target must be a persistent speaker".into());
+        };
+        let from_label = Speaker::Persistent(from_persistent_id).as_str();
+        let to_label = Speaker::Persistent(to_id).as_str();
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+        let changed = execute_retag_persistent_speaker(
+            &tx,
+            meeting_id,
+            &from_label,
+            &to_label,
+            sort_orders,
+        )?;
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+        Ok(changed)
+    }
+
+    /// Meeting-scoped retag used by the UI: optionally creates a new
+    /// persistent speaker, but only after verifying matching segments exist.
+    /// The create + segment rewrite run in one transaction so a failed retag
+    /// never leaves an orphan speaker row.
+    pub fn retag_meeting_speaker_labels(
+        &self,
+        meeting_id: &str,
+        from_persistent_id: i64,
+        to_speaker_id: Option<i64>,
+        new_speaker_name: Option<&str>,
+        sort_orders: Option<&[u64]>,
+    ) -> Result<usize, String> {
+        match (to_speaker_id, new_speaker_name) {
+            (Some(id), None) => {
+                if id == from_persistent_id {
+                    return Err("Target speaker must differ from the source speaker".into());
+                }
+            }
+            (None, Some(name)) => {
+                if name.trim().is_empty() {
+                    return Err("Speaker name cannot be empty".into());
+                }
+            }
+            (Some(_), Some(_)) => {
+                return Err("Specify either to_speaker_id or new_speaker_name, not both".into());
+            }
+            (None, None) => return Err("Specify to_speaker_id or new_speaker_name".into()),
+        }
+
+        let from_label = Speaker::Persistent(from_persistent_id).as_str();
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+
+        let candidate_count =
+            count_retag_candidates(&tx, meeting_id, &from_label, sort_orders)?;
+        if candidate_count == 0 {
+            return Err("No matching segments were retagged".into());
+        }
+
+        let resolved_to_id = match (to_speaker_id, new_speaker_name) {
+            (Some(id), None) => id,
+            (None, Some(name)) => {
+                let name = name.trim();
+                let now = chrono::Utc::now().to_rfc3339();
+                tx.execute(
+                    "INSERT INTO speakers (name, centroid, embedding_count, created_at, last_seen_at)
+                     VALUES (?1, NULL, 0, ?2, ?2)",
+                    params![name, now],
+                )
+                .map_err(|e| format!("Insert speaker: {e}"))?;
+                tx.last_insert_rowid()
+            }
+            _ => unreachable!("validated above"),
+        };
+
+        let to_label = Speaker::Persistent(resolved_to_id).as_str();
+        let changed = execute_retag_persistent_speaker(
+            &tx,
+            meeting_id,
+            &from_label,
+            &to_label,
+            sort_orders,
+        )?;
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+        Ok(changed)
+    }
+
     /// Finalize meetings left with `ended_at IS NULL` by a crash mid-recording.
     /// Empty shells (a started meeting with no persisted segments) are deleted;
     /// the rest get `ended_at`/`duration`/`recording_sessions` synthesized from
@@ -692,6 +795,75 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
         .map_err(|e| format!("Parse datetime '{value}': {e}"))
 }
 
+fn count_retag_candidates(
+    tx: &rusqlite::Transaction<'_>,
+    meeting_id: &str,
+    from_label: &str,
+    sort_orders: Option<&[u64]>,
+) -> Result<usize, String> {
+    match sort_orders {
+        None => {
+            let count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM segments
+                     WHERE meeting_id = ?1 AND speaker = ?2",
+                    params![meeting_id, from_label],
+                    |row| row.get(0),
+                )
+                .map_err(|e| format!("Count retag candidates: {e}"))?;
+            Ok(count.max(0) as usize)
+        }
+        Some([]) => Ok(0),
+        Some(orders) => {
+            let mut total = 0usize;
+            for sort_order in orders {
+                let count: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM segments
+                         WHERE meeting_id = ?1 AND speaker = ?2 AND sort_order = ?3",
+                        params![meeting_id, from_label, *sort_order as i64],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| format!("Count retag candidates: {e}"))?;
+                total += count.max(0) as usize;
+            }
+            Ok(total)
+        }
+    }
+}
+
+fn execute_retag_persistent_speaker(
+    tx: &rusqlite::Transaction<'_>,
+    meeting_id: &str,
+    from_label: &str,
+    to_label: &str,
+    sort_orders: Option<&[u64]>,
+) -> Result<usize, String> {
+    match sort_orders {
+        None => tx
+            .execute(
+                "UPDATE segments SET speaker = ?1
+                 WHERE meeting_id = ?2 AND speaker = ?3",
+                params![to_label, meeting_id, from_label],
+            )
+            .map_err(|e| format!("Retag meeting speaker: {e}")),
+        Some([]) => Ok(0),
+        Some(orders) => {
+            let mut total = 0usize;
+            for sort_order in orders {
+                total += tx
+                    .execute(
+                        "UPDATE segments SET speaker = ?1
+                         WHERE meeting_id = ?2 AND sort_order = ?3 AND speaker = ?4",
+                        params![to_label, meeting_id, *sort_order as i64, from_label],
+                    )
+                    .map_err(|e| format!("Retag meeting speaker: {e}"))?;
+            }
+            Ok(total)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::engine::{Speaker, TranscriptionProfile};
@@ -936,6 +1108,161 @@ mod tests {
         assert_eq!(loaded.segments[0].text, "one");
         assert_eq!(loaded.segments[2].text, "three");
         assert!(loaded.ended_at.is_none(), "still in progress");
+    }
+
+    #[test]
+    fn retag_persistent_speaker_rejects_non_persistent_target() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+
+        assert_eq!(
+            db.retag_persistent_speaker("m1", alice, Speaker::Me, None)
+                .unwrap_err(),
+            "Retag target must be a persistent speaker"
+        );
+        assert_eq!(
+            db.retag_persistent_speaker("m1", alice, Speaker::Them, None)
+                .unwrap_err(),
+            "Retag target must be a persistent speaker"
+        );
+    }
+
+    #[test]
+    fn retag_meeting_speaker_labels_rejects_empty_new_name() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+
+        assert_eq!(
+            db.retag_meeting_speaker_labels("m1", alice, None, Some("  "), None)
+                .unwrap_err(),
+            "Speaker name cannot be empty"
+        );
+    }
+
+    #[test]
+    fn retag_meeting_speaker_labels_does_not_create_speaker_without_matches() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+
+        assert_eq!(
+            db.retag_meeting_speaker_labels("m1", alice, None, Some("Carol"), None)
+                .unwrap_err(),
+            "No matching segments were retagged"
+        );
+        assert_eq!(db.list_speakers().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn retag_meeting_speaker_labels_creates_speaker_only_when_segments_match() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+
+        let changed = db
+            .retag_meeting_speaker_labels("m1", alice, None, Some("Carol"), None)
+            .unwrap();
+        assert_eq!(changed, 1);
+
+        let speakers = db.list_speakers().unwrap();
+        assert_eq!(speakers.len(), 2);
+        let carol = speakers.iter().find(|speaker| speaker.name == "Carol").unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(
+            loaded.segments[0].speaker,
+            Some(Speaker::Persistent(carol.id))
+        );
+    }
+
+    #[test]
+    fn retag_persistent_speaker_rewrites_matching_segments() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        meeting.segments[1].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+
+        let changed = db
+            .retag_persistent_speaker("m1", alice, Speaker::Persistent(bob), None)
+            .unwrap();
+        assert_eq!(changed, 2);
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Persistent(bob)));
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(bob)));
+    }
+
+    #[test]
+    fn retag_persistent_speaker_leaves_me_and_them_untouched() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        meeting.segments[1].speaker = Some(Speaker::Me);
+        db.save_meeting(&meeting).unwrap();
+
+        let changed = db
+            .retag_persistent_speaker("m1", alice, Speaker::Persistent(bob), None)
+            .unwrap();
+        assert_eq!(changed, 1);
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Persistent(bob)));
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Me));
+    }
+
+    #[test]
+    fn retag_persistent_speaker_scoped_to_sort_orders() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        meeting.segments[1].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+
+        let changed = db
+            .retag_persistent_speaker("m1", alice, Speaker::Persistent(bob), Some(&[0]))
+            .unwrap();
+        assert_eq!(changed, 1);
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Persistent(bob)));
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(alice)));
+    }
+
+    #[test]
+    fn retag_persistent_speaker_does_not_touch_me_or_them() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Me);
+        meeting.segments[1].speaker = Some(Speaker::Them);
+        db.save_meeting(&meeting).unwrap();
+
+        let changed = db
+            .retag_persistent_speaker("m1", alice, Speaker::Persistent(99), None)
+            .unwrap();
+        assert_eq!(changed, 0);
     }
 
     #[test]

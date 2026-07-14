@@ -16,10 +16,11 @@ import {
   summarizeMeeting as runMeetingSummary,
   takeSleepPausedMeeting,
 } from "../../api/meetings";
+import { listSpeakers, renameSpeaker as applySpeakerRename, retagMeetingSpeaker } from "../../api/speakers";
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { DiarizationProgress, ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { DiarizationProgress, ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingSpeaker, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -90,6 +91,7 @@ function createMeetingControllerInstance() {
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
 
   let meeting = $state<MeetingTranscript | null>(null);
+  let allSpeakers = $state<MeetingSpeaker[]>([]);
   let isLoadingMeeting = $state(false);
   // Recorded audio files for the open meeting (empty when recording was off,
   // or nothing survived retention) — drives whether the player bar shows.
@@ -161,6 +163,7 @@ function createMeetingControllerInstance() {
       // Best-effort: a missing/unreadable recordings directory should never
       // block loading the meeting itself, the player bar just stays hidden.
       audioSessions = await getMeetingAudio(id).catch(() => []);
+      allSpeakers = await listSpeakers().catch(() => []);
     } catch (e) {
       statusMessage = errorMessage(e);
     } finally {
@@ -642,6 +645,42 @@ function createMeetingControllerInstance() {
     }
   }
 
+  /** Rename a persistent speaker globally (propagates to every meeting). */
+  async function renameSpeaker(id: number, name: string) {
+    try {
+      await applySpeakerRename(id, name);
+      if (meeting?.id) {
+        meeting = await getMeeting(meeting.id);
+      }
+      allSpeakers = await listSpeakers().catch(() => []);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
+  /** Reassign persistent-speaker labels within the open meeting. */
+  async function retagSpeaker(options: {
+    fromSpeakerId: number;
+    segmentSortOrders: number[];
+    scope: "turn" | "meeting";
+    toSpeakerId: number | null;
+    newSpeakerName: string | null;
+  }) {
+    if (!meeting?.id) return;
+    try {
+      meeting = await retagMeetingSpeaker({
+        meeting_id: meeting.id,
+        from_speaker_id: options.fromSpeakerId,
+        sort_orders: options.scope === "turn" ? options.segmentSortOrders : [],
+        to_speaker_id: options.toSpeakerId,
+        new_speaker_name: options.newSpeakerName,
+      });
+      allSpeakers = await listSpeakers().catch(() => []);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
   async function deleteMeeting() {
     if (!meeting || !meeting.id) return;
     try {
@@ -700,6 +739,7 @@ function createMeetingControllerInstance() {
     get liveTranscript() { return liveTranscript; },
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
+    get allSpeakers() { return allSpeakers; },
     get audioSessions() { return audioSessions; },
     get seekTarget() { return seekTarget; },
     get seekRequestId() { return seekRequestId; },
@@ -733,6 +773,8 @@ function createMeetingControllerInstance() {
     saveTranscriptEdit,
     saveTranscriptAndSummarize,
     resetEditedTranscript,
+    renameSpeaker,
+    retagSpeaker,
     handleRecordingAborted,
     handleMeetingFinalized,
     handleMeetingDiarized,
