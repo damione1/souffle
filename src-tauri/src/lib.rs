@@ -84,6 +84,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::download_model,
             commands::delete_model,
             commands::load_model,
+            commands::get_diarize_models_status,
+            commands::download_diarize_models,
             commands::start_transcription,
             commands::stop_transcription,
             commands::list_audio_devices,
@@ -159,6 +161,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::AudioLevel,
             app_events::MeetingStopRequested,
             app_events::MeetingFinalized,
+            app_events::MeetingDiarized,
+            app_events::DiarizationProgress,
             app_events::UpcomingMeeting,
             app_events::MeetingIdle,
             app_events::SystemWokeUp,
@@ -308,10 +312,13 @@ pub fn run() {
                         app_settings.clamshell_audio_device,
                     ));
                     // Directory walk over recordings/ can take a moment with
-                    // a large history; never block startup on it.
+                    // a large history; never block startup on it. The same
+                    // sweep also clears any diarization WAVs left over from
+                    // a crash mid-task (those meetings just stay unlabeled).
                     let retention = app_settings.meeting_audio_retention;
                     std::thread::spawn(move || {
                         audio::retention::sweep_expired_recordings(retention, std::time::SystemTime::now());
+                        audio::diarize_tap::cleanup_all_tmp();
                     });
                 }
                 Err(e) => {

@@ -64,6 +64,29 @@ async loadModel(selection: TranscriptionProfileSelection) : Promise<Result<null,
 }
 },
 /**
+ * Whether both offline speaker-diarization models are already on disk.
+ * Separate from the transcription-model status: diarization models are not
+ * a `TranscriptionProfile` and never touch the state machine.
+ */
+async getDiarizeModelsStatus() : Promise<boolean> {
+    return await TAURI_INVOKE("get_diarize_models_status");
+},
+/**
+ * Download the two offline speaker-diarization models (~32MB total),
+ * streaming progress back via the same Channel API as `download_model`.
+ * No state-machine transitions: these models are independent of the
+ * transcription engine lifecycle, so a failure only surfaces through the
+ * channel's error status.
+ */
+async downloadDiarizeModels(channel: TAURI_CHANNEL<DownloadProgress>) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("download_diarize_models", { channel }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Start streaming transcription.
  * 
  * `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
@@ -791,7 +814,9 @@ async openReleasePage(url: string) : Promise<Result<null, string>> {
 export const events = __makeEvents__<{
 archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
+diarizationProgress: DiarizationProgress,
 dictationLiveText: DictationLiveText,
+meetingDiarized: MeetingDiarized,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
 meetingStopRequested: MeetingStopRequested,
@@ -809,7 +834,9 @@ upcomingMeeting: UpcomingMeeting
 }>({
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
+diarizationProgress: "diarization-progress",
 dictationLiveText: "dictation-live-text",
+meetingDiarized: "meeting-diarized",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
 meetingStopRequested: "meeting-stop-requested",
@@ -929,7 +956,21 @@ summary_templates: SummaryTemplate[];
 /**
  * App version the user has acknowledged (What's New / post-update dialog).
  */
-last_seen_version: string }
+last_seen_version: string; 
+/**
+ * Offline speaker recognition for mic-only meetings: after a mic-only
+ * meeting stops, label its segments with a persistent, cross-meeting
+ * speaker identity. Off by default (extra local inference + on-disk
+ * model download); meetings with a system-audio lane are unaffected
+ * regardless of this setting (Me/Them attribution stays authoritative).
+ */
+diarize_enabled: boolean; 
+/**
+ * Optional upper bound on how many distinct speakers a single meeting
+ * can be split into. `None` means unbounded (the clustering stage
+ * decides on its own).
+ */
+diarize_max_speakers: number | null }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
@@ -998,6 +1039,14 @@ export type CalendarMeetingNudgeKind =
  */
 export type DataStats = { db_size_bytes: number; meeting_count: number; dictation_count: number; recordings_size_bytes: number }
 export type DiagnosticsBundle = { app_version: string; data_dir: string; log_dir: string; log_file: string | null; db_path: string; models_dir: string; machine_state: string; log_level: string; debug_transcription: boolean }
+/**
+ * Coarse progress for the background diarization pass over one meeting's
+ * recorded sessions (same shape as `ArchiveExportProgress`): one event when
+ * the pass starts, one per session completed, and a final event with
+ * `finished: true`. `error` carries a whole-pass failure; a single bad
+ * session is non-fatal and only logged.
+ */
+export type DiarizationProgress = { meeting_id: string; done_sessions: number; total_sessions: number; finished: boolean; error: string | null }
 /**
  * A dictation history entry
  */
@@ -1083,6 +1132,15 @@ export type MeetingCalendarContext = { event_id: string; participants: MeetingPa
  * start, not persisted.
  */
 description?: string | null }
+/**
+ * A background diarization pass finished labeling a mic-only meeting's
+ * segments with persistent speaker identities. The frontend reloads the
+ * meeting if it's currently open, so the labels appear without a manual
+ * refresh. Only ever emitted after `MeetingFinalized` for the same meeting
+ * (diarization runs strictly after the transcript is saved), and only when
+ * at least one segment was actually relabeled.
+ */
+export type MeetingDiarized = { meeting_id: string }
 /**
  * Emitted once a stopped meeting has been fully drained and saved in the
  * background, so the detail view can refresh from the now-complete record.

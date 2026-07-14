@@ -17,7 +17,7 @@ import {
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { DiarizationProgress, ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -363,6 +363,33 @@ function createMeetingControllerInstance() {
     void loadMeeting(id);
   }
 
+  /** The backend finished the post-stop speaker-recognition pass and
+   * relabeled this meeting's segments. Reload so labels appear; no-op if the
+   * user is looking at a different meeting (labels are already persisted and
+   * will show whenever it's opened). */
+  function handleMeetingDiarized(id: string) {
+    if (app.currentMeetingId !== id && meeting?.id !== id) return;
+    statusMessage = "";
+    void loadMeeting(id);
+  }
+
+  /** Coarse progress for the background speaker-recognition pass after stop.
+   * Only shown while the same meeting is open; errors stay on the banner. */
+  function handleDiarizationProgress(payload: DiarizationProgress) {
+    if (app.currentMeetingId !== payload.meeting_id && meeting?.id !== payload.meeting_id) return;
+    if (payload.finished) {
+      if (payload.error) {
+        statusMessage = `Speaker recognition failed: ${payload.error}`;
+      } else {
+        statusMessage = "";
+      }
+      return;
+    }
+    if (payload.total_sessions > 0) {
+      statusMessage = `Labeling speakers (${payload.done_sessions}/${payload.total_sessions})...`;
+    }
+  }
+
   /** The backend aborted the recording session (machine went to Error).
    * The backend salvages the accumulated meeting to history before failing. */
   function handleRecordingAborted() {
@@ -635,6 +662,8 @@ function createMeetingControllerInstance() {
     resetEditedTranscript,
     handleRecordingAborted,
     handleMeetingFinalized,
+    handleMeetingDiarized,
+    handleDiarizationProgress,
     handleMeetingIdle,
     dismissIdle,
     resumeAfterSystemWake,
@@ -651,6 +680,18 @@ export function notifyMeetingAborted() {
  * been fully drained and saved in the background. */
 export function notifyMeetingFinalized(id: string) {
   instance?.handleMeetingFinalized(id);
+}
+
+/** Called from the global MeetingDiarized listener when the post-stop
+ * speaker-recognition pass relabeled a meeting's segments. */
+export function notifyMeetingDiarized(id: string) {
+  instance?.handleMeetingDiarized(id);
+}
+
+/** Called from the global DiarizationProgress listener while the post-stop
+ * speaker-recognition pass runs. */
+export function notifyDiarizationProgress(payload: DiarizationProgress) {
+  instance?.handleDiarizationProgress(payload);
 }
 
 /** The floating pill (or tray) asked to stop the active meeting; run the
