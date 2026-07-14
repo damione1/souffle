@@ -149,6 +149,11 @@
       meetingAutostopEnabled={controller.app.settings.meeting_autostop_enabled}
       meetingAutostopMinutes={controller.app.settings.meeting_autostop_minutes}
       meetingMaxDurationMinutes={controller.app.settings.meeting_max_duration_minutes}
+      diarizeEnabled={controller.app.settings.diarize_enabled}
+      diarizeMaxSpeakers={controller.app.settings.diarize_max_speakers}
+      diarizeDownloadState={controller.diarizeDownloadState}
+      diarizeDownloadedBytes={controller.diarizeDownloadedBytes}
+      diarizeDownloadTotalBytes={controller.diarizeDownloadTotalBytes}
       onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
       onClamshellDeviceChange={controller.onClamshellDeviceChange}
       onVadEnabledChange={controller.onVadEnabledChange}
@@ -158,6 +163,8 @@
       onMeetingAutostopEnabledChange={controller.onMeetingAutostopEnabledChange}
       onMeetingAutostopMinutesChange={controller.onMeetingAutostopMinutesChange}
       onMeetingMaxDurationMinutesChange={controller.onMeetingMaxDurationMinutesChange}
+      onDiarizeEnabledChange={controller.onDiarizeEnabledChange}
+      onDiarizeMaxSpeakersChange={controller.onDiarizeMaxSpeakersChange}
     />
 
     <IntelligenceSettingsSection
