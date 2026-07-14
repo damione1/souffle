@@ -82,6 +82,11 @@ pub fn touch_known(priority: &mut InputPriority, connected: &[AudioInputDevice])
 /// Order: explicit pin (if connected) -> clamshell preference (when active and
 /// connected) -> first connected non-hidden priority entry -> system default
 /// (with anti-Bluetooth preference when `allow_bluetooth_mic` is false).
+///
+/// `None` is also returned when devices are connected but none is
+/// auto-eligible (all hidden, or Bluetooth-only with Bluetooth disallowed).
+/// The caller decides that fallback: capture opens the OS default anyway so
+/// recording still works, and never rebuilds toward a `None` resolution.
 pub fn resolve_input(connected: &[AudioInputDevice], params: ResolveInputParams<'_>) -> Option<String> {
     if connected.is_empty() {
         return None;
@@ -343,6 +348,18 @@ mod tests {
     fn empty_connected_returns_none() {
         assert_eq!(
             resolve_input(&[], params(None, None, false, &empty_priority(), false)),
+            None,
+        );
+    }
+
+    #[test]
+    fn bluetooth_only_returns_none_for_caller_fallback() {
+        let connected = vec![device("bt", "AirPods", TransportType::Bluetooth, true)];
+        assert_eq!(
+            resolve_input(
+                &connected,
+                params(None, None, false, &empty_priority(), false),
+            ),
             None,
         );
     }
