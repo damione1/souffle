@@ -240,9 +240,9 @@
     "title": "Ajouter au dictionnaire",
     "description": "Associez la forme entendue à l'orthographe souhaitée.",
     "term": "Terme correct",
-    "term_placeholder": "ex. J-F",
+    "term_placeholder": "ex. Kubernetes",
     "pronunciation": "Entendu comme",
-    "pronunciation_placeholder": "ex. jef",
+    "pronunciation_placeholder": "ex. kubernetis",
     "pronunciation_desc": "Orthographe optionnelle de la forme mal entendue. Aide à reconnaître les prochaines transcriptions.",
     "save": "Ajouter l'entrée"
   },

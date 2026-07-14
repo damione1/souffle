@@ -3,10 +3,10 @@ import { isClickableTranscriptWord, tokenizeTranscriptWords } from "./transcript
 
 describe("tokenizeTranscriptWords", () => {
   it("splits words and preserves gaps", () => {
-    expect(tokenizeTranscriptWords("Hello, Jean-François!")).toEqual([
+    expect(tokenizeTranscriptWords("Hello, café-théâtre!")).toEqual([
       { kind: "word", text: "Hello" },
       { kind: "gap", text: ", " },
-      { kind: "word", text: "Jean-François" },
+      { kind: "word", text: "café-théâtre" },
       { kind: "gap", text: "!" },
     ]);
   });
@@ -25,9 +25,9 @@ describe("tokenizeTranscriptWords", () => {
   });
 
   it("gives duplicate words distinct indices for popover targeting", () => {
-    const tokens = tokenizeTranscriptWords("Jean met Jean");
+    const tokens = tokenizeTranscriptWords("Alex met Alex");
     const jeanIndexes = tokens.flatMap((token, index) =>
-      token.kind === "word" && token.text === "Jean" ? [index] : [],
+      token.kind === "word" && token.text === "Alex" ? [index] : [],
     );
     expect(jeanIndexes).toEqual([0, 4]);
   });
