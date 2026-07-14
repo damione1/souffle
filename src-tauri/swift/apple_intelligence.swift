@@ -6,6 +6,11 @@ import FoundationModels
 
 private typealias ResponsePointer = UnsafeMutablePointer<AppleLLMResponse>
 
+/// Inner per-request timeout. The Rust caller (summary/apple.rs) enforces a
+/// 120s hard wall and abandons its waiting thread; resolving earlier on the
+/// Swift side lets that thread exit normally instead of leaking.
+private let requestTimeoutSeconds = 100
+
 private func duplicateCString(_ text: String) -> UnsafeMutablePointer<CChar>? {
     text.withCString { basePointer in
         guard let duplicated = strdup(basePointer) else {
@@ -26,6 +31,54 @@ private func truncatedText(_ text: String, limit: Int) -> String {
         return text
     }
     return words.prefix(limit).joined(separator: " ")
+}
+
+/// Stable machine-readable markers parsed by the Rust caller (summary/apple.rs)
+/// to decide between retry, structural re-batching, and clean failure.
+@available(macOS 26.0, *)
+private func classifyGenerationError(_ error: LanguageModelSession.GenerationError) -> String {
+    switch error {
+    case .exceededContextWindowSize:
+        return "exceeded_context_window: \(error.localizedDescription)"
+    case .guardrailViolation:
+        return "guardrail_violation: \(error.localizedDescription)"
+    case .rateLimited:
+        return "rate_limited: \(error.localizedDescription)"
+    case .unsupportedLanguageOrLocale:
+        return "unsupported_language: \(error.localizedDescription)"
+    default:
+        return error.localizedDescription
+    }
+}
+
+/// Single-consumer outcome holder shared between the request task and the
+/// waiting FFI thread. Once the waiter times out and abandons the request,
+/// a late completion is dropped instead of racing the reader.
+private final class ResultBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var response: String?
+    private var error: String?
+    private var abandoned = false
+
+    func complete(response: String?, error: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !abandoned else { return }
+        self.response = response
+        self.error = error
+    }
+
+    func abandon() {
+        lock.lock()
+        defer { lock.unlock() }
+        abandoned = true
+    }
+
+    func take() -> (response: String?, error: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (response, error)
+    }
 }
 
 @_cdecl("is_apple_intelligence_available")
@@ -95,16 +148,15 @@ public func processTextWithSystemPrompt(
 
     let tokenLimit = max(0, Int(maxTokens))
     let semaphore = DispatchSemaphore(value: 0)
-
-    final class ResultBox: @unchecked Sendable {
-        var response: String?
-        var error: String?
-    }
     let box = ResultBox()
 
-    Task.detached(priority: .userInitiated) {
+    let task = Task.detached(priority: .userInitiated) {
         defer { semaphore.signal() }
         do {
+            // A fresh session per request keeps every call single-turn: no
+            // context accumulates across map/reduce chunks (each prompt
+            // re-provides its own transcript excerpt), and one wedged
+            // request cannot poison later ones through shared session state.
             let session = LanguageModelSession(
                 model: model,
                 instructions: swiftSystemPrompt
@@ -114,19 +166,33 @@ public func processTextWithSystemPrompt(
             if tokenLimit > 0 {
                 output = truncatedText(output, limit: tokenLimit)
             }
-            box.response = output
+            box.complete(response: output, error: nil)
+        } catch let error as LanguageModelSession.GenerationError {
+            box.complete(response: nil, error: classifyGenerationError(error))
         } catch {
-            box.error = error.localizedDescription
+            box.complete(response: nil, error: error.localizedDescription)
         }
     }
 
-    semaphore.wait()
+    let waitResult = semaphore.wait(timeout: .now() + .seconds(requestTimeoutSeconds))
+    if waitResult == .timedOut {
+        // Abandon the request: drop any late completion and ask the task to
+        // stop (respond may or may not honor cancellation). The Rust caller
+        // treats this marker as retryable.
+        box.abandon()
+        task.cancel()
+        responsePtr.pointee.error_message = duplicateCString(
+            "request_timeout: FoundationModels did not respond within \(requestTimeoutSeconds)s"
+        )
+        return responsePtr
+    }
 
-    if let response = box.response {
+    let outcome = box.take()
+    if let response = outcome.response {
         responsePtr.pointee.response = duplicateCString(response)
         responsePtr.pointee.success = 1
     } else {
-        responsePtr.pointee.error_message = duplicateCString(box.error ?? "Unknown error")
+        responsePtr.pointee.error_message = duplicateCString(outcome.error ?? "Unknown error")
     }
 
     return responsePtr
