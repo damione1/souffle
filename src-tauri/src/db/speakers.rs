@@ -19,6 +19,14 @@ pub struct SpeakerRecord {
     pub last_seen_at: DateTime<Utc>,
 }
 
+/// How many transcript segments and distinct meetings reference a speaker,
+/// for the Settings management list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SpeakerUsage {
+    pub segment_count: i64,
+    pub meeting_count: i64,
+}
+
 impl Database {
     /// Create a new persistent speaker with the given display name. Returns
     /// the new row's id. `centroid`/`embedding_count` start empty; call
@@ -107,6 +115,59 @@ impl Database {
             params![centroid, embedding_count, last_seen_at.to_rfc3339(), id],
         )
         .map_err(|e| format!("Update speaker centroid: {e}"))?;
+        Ok(())
+    }
+
+    /// Usage counts for every persistent speaker, keyed by speaker id.
+    /// Speakers referenced by no segment map to zero counts.
+    pub fn speaker_usage(&self) -> Result<std::collections::HashMap<i64, SpeakerUsage>, String> {
+        let conn = self.conn.acquire()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT s.id, COUNT(seg.rowid), COUNT(DISTINCT seg.meeting_id)
+                 FROM speakers s
+                 LEFT JOIN segments seg ON seg.speaker = 'spk:' || s.id
+                 GROUP BY s.id",
+            )
+            .map_err(|e| format!("Prepare speaker usage: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    SpeakerUsage {
+                        segment_count: row.get(1)?,
+                        meeting_count: row.get(2)?,
+                    },
+                ))
+            })
+            .map_err(|e| format!("Query speaker usage: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Collect speaker usage: {e}"))?;
+        Ok(rows.into_iter().collect())
+    }
+
+    /// Delete a persistent speaker and unlabel every segment that referenced
+    /// it (their speaker returns to NULL, so the lines render as plain
+    /// unattributed text). One transaction, so a failure never leaves
+    /// segments pointing at a missing speaker row.
+    pub fn delete_speaker(&self, id: i64) -> Result<(), String> {
+        let label = crate::engine::Speaker::Persistent(id).as_str();
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+        tx.execute(
+            "UPDATE segments SET speaker = NULL WHERE speaker = ?1",
+            params![label],
+        )
+        .map_err(|e| format!("Unlabel speaker segments: {e}"))?;
+        let deleted = tx
+            .execute("DELETE FROM speakers WHERE id = ?1", params![id])
+            .map_err(|e| format!("Delete speaker: {e}"))?;
+        if deleted == 0 {
+            return Err(format!("Speaker not found: {id}"));
+        }
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
 
@@ -315,5 +376,50 @@ mod tests {
 
         let speakers = db.speakers_for_meeting("m1").unwrap();
         assert_eq!(speakers.len(), 1);
+    }
+
+    #[test]
+    fn speaker_usage_counts_segments_and_meetings() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        let mut m1 = sample_meeting("m1");
+        m1.segments[0].speaker = Some(Speaker::Persistent(alice));
+        m1.segments[1].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&m1).unwrap();
+        let mut m2 = sample_meeting("m2");
+        m2.segments[0].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&m2).unwrap();
+
+        let usage = db.speaker_usage().unwrap();
+        assert_eq!(usage[&alice].segment_count, 3);
+        assert_eq!(usage[&alice].meeting_count, 2);
+        assert_eq!(usage[&bob], super::SpeakerUsage::default());
+    }
+
+    #[test]
+    fn delete_speaker_unlabels_segments_and_removes_row() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        meeting.segments[1].speaker = Some(Speaker::Persistent(bob));
+        db.save_meeting(&meeting).unwrap();
+
+        db.delete_speaker(alice).unwrap();
+
+        assert!(db.get_speaker(alice).unwrap().is_none());
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, None);
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(bob)));
+    }
+
+    #[test]
+    fn delete_speaker_missing_id_errors() {
+        let (db, _dir) = test_db();
+        assert!(db.delete_speaker(999).is_err());
     }
 }

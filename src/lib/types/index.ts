@@ -34,6 +34,7 @@ export type {
   MeetingSpeaker,
   MeetingTranscript,
   RetagMeetingSpeakerRequest,
+  SpeakerProfile,
   ModelArtifactDescriptor,
   SummaryModelDescriptor,
   SummaryProvidersStatus,

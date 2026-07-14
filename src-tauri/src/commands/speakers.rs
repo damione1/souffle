@@ -27,6 +27,49 @@ pub fn list_speakers(state: State<'_, AppState>) -> Result<Vec<MeetingSpeaker>, 
         .collect())
 }
 
+/// One remembered voice with usage counts, for the Settings management list.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct SpeakerProfile {
+    pub id: i64,
+    pub name: String,
+    /// RFC3339 timestamp of the last meeting this voice was recognized in.
+    pub last_seen_at: String,
+    pub meeting_count: u32,
+    pub segment_count: u32,
+}
+
+/// All persistent speakers with usage counts, most recently seen first.
+#[tauri::command]
+#[specta::specta]
+pub fn list_speaker_profiles(state: State<'_, AppState>) -> Result<Vec<SpeakerProfile>, String> {
+    let usage = state.db.speaker_usage()?;
+    let mut profiles: Vec<SpeakerProfile> = state
+        .db
+        .list_speakers()?
+        .into_iter()
+        .map(|record| {
+            let counts = usage.get(&record.id).copied().unwrap_or_default();
+            SpeakerProfile {
+                id: record.id,
+                name: record.name,
+                last_seen_at: record.last_seen_at.to_rfc3339(),
+                meeting_count: counts.meeting_count.max(0) as u32,
+                segment_count: counts.segment_count.max(0) as u32,
+            }
+        })
+        .collect();
+    profiles.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
+    Ok(profiles)
+}
+
+/// Delete a persistent speaker; every segment that referenced it goes back
+/// to unlabeled, and future meetings can no longer match this voice.
+#[tauri::command]
+#[specta::specta]
+pub fn delete_speaker(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.db.delete_speaker(id)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RetagMeetingSpeakerRequest {
     pub meeting_id: String,

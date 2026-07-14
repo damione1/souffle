@@ -383,6 +383,29 @@ async listSpeakers() : Promise<Result<MeetingSpeaker[], string>> {
 }
 },
 /**
+ * All persistent speakers with usage counts, most recently seen first.
+ */
+async listSpeakerProfiles() : Promise<Result<SpeakerProfile[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_speaker_profiles") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a persistent speaker; every segment that referenced it goes back
+ * to unlabeled, and future meetings can no longer match this voice.
+ */
+async deleteSpeaker(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_speaker", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Reassign persistent-speaker labels within one meeting. Me/Them segments
  * are never touched. Returns the reloaded meeting so the UI can refresh.
  */
@@ -1428,6 +1451,14 @@ export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
+/**
+ * One remembered voice with usage counts, for the Settings management list.
+ */
+export type SpeakerProfile = { id: number; name: string; 
+/**
+ * RFC3339 timestamp of the last meeting this voice was recognized in.
+ */
+last_seen_at: string; meeting_count: number; segment_count: number }
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.
