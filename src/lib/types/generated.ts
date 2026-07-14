@@ -95,7 +95,7 @@ async stopTranscription() : Promise<Result<null, string>> {
 /**
  * List available audio input devices
  */
-async listAudioDevices() : Promise<Result<AudioDeviceInfo[], string>> {
+async listAudioDevices() : Promise<Result<AudioInputDevice[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_audio_devices") };
 } catch (e) {
@@ -104,11 +104,11 @@ async listAudioDevices() : Promise<Result<AudioDeviceInfo[], string>> {
 }
 },
 /**
- * Select an audio input device by name
+ * Select an audio input device by stable CoreAudio UID.
  */
-async selectAudioDevice(deviceName: string) : Promise<Result<null, string>> {
+async selectAudioDevice(deviceUid: string) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("select_audio_device", { deviceName }) };
+    return { status: "ok", data: await TAURI_INVOKE("select_audio_device", { deviceUid }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -866,9 +866,13 @@ paste_method: PasteMethod; ollama_url: string; ollama_model: string; debug_trans
 /**
  * Global tracing verbosity for the `souffle` crate.
  */
-log_level: LogLevel; audio_device: string | null; 
+log_level: LogLevel; 
 /**
- * Preferred microphone while the lid is closed with an external display
+ * Pinned input device UID (`kAudioDevicePropertyDeviceUID`).
+ */
+audio_device: string | null; 
+/**
+ * Preferred microphone UID while the lid is closed with an external display
  * attached (clamshell mode). `None` means just follow whatever macOS
  * reports as the default input, the previous behavior.
  */
@@ -978,9 +982,13 @@ export type AppView = "home" | "settings"
  */
 export type ArchiveExportProgress = { done: number; total: number; finished: boolean; error: string | null }
 /**
- * Info about an available audio input device, sent to frontend
+ * An input-capable audio device as reported to the frontend.
  */
-export type AudioDeviceInfo = { name: string; is_default: boolean }
+export type AudioInputDevice = { 
+/**
+ * Stable CoreAudio device UID (`kAudioDevicePropertyDeviceUID`).
+ */
+uid: string; name: string; transport: TransportType; is_default: boolean }
 export type AudioInputRequirements = { sample_rate_hz: number; channels: number; chunk_size_samples: number }
 /**
  * Current microphone/meeting input level (RMS, 0.0-1.0), pushed by the audio
@@ -1350,6 +1358,10 @@ export type TranscriptionSegment = { text: string; start_time: number; end_time:
  * Set by the pipeline for diarized meetings; `None` otherwise.
  */
 speaker?: Speaker | null }
+/**
+ * Human-facing transport label for an input device.
+ */
+export type TransportType = "built_in" | "usb" | "bluetooth" | "bluetooth_le" | "virtual" | "aggregate" | "unknown"
 /**
  * Emitted by the calendar reminder scheduler shortly before a calendar
  * event starts, so the frontend can offer a one-click transcription start.

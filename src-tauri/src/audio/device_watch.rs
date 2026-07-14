@@ -27,17 +27,19 @@ use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2_core_audio::{
     AudioObjectAddPropertyListenerBlock, AudioObjectGetPropertyData,
     AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress,
-    kAudioDevicePropertyStreams, kAudioDevicePropertyTransportType,
-    kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeBluetooth,
-    kAudioDeviceTransportTypeBluetoothLE, kAudioDeviceTransportTypeBuiltIn,
-    kAudioDeviceTransportTypeUSB, kAudioDeviceTransportTypeVirtual,
-    kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyDefaultOutputDevice,
-    kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMain, kAudioObjectPropertyName,
-    kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput, kAudioObjectSystemObject,
+    kAudioDevicePropertyDeviceUID, kAudioDevicePropertyStreams,
+    kAudioDevicePropertyTransportType, kAudioDeviceTransportTypeAggregate,
+    kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
+    kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeUSB,
+    kAudioDeviceTransportTypeVirtual, kAudioHardwarePropertyDefaultInputDevice,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDevices,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyScopeInput, kAudioObjectSystemObject,
 };
 use objc2_core_foundation::{CFRetained, CFString};
 use tracing::{info, warn};
 
+use crate::audio::device::{AudioInputDevice, TransportType, is_souffle_tap_device};
 use crate::power::is_clamshell;
 
 type ListenerBlock = RcBlock<dyn Fn(u32, NonNull<AudioObjectPropertyAddress>)>;
@@ -263,18 +265,29 @@ fn diff_devices(
     DeviceDiff { arrived, removed }
 }
 
+fn map_transport(transport: u32) -> TransportType {
+    match transport {
+        t if t == kAudioDeviceTransportTypeBuiltIn => TransportType::BuiltIn,
+        t if t == kAudioDeviceTransportTypeBluetooth => TransportType::Bluetooth,
+        t if t == kAudioDeviceTransportTypeBluetoothLE => TransportType::BluetoothLe,
+        t if t == kAudioDeviceTransportTypeUSB => TransportType::Usb,
+        t if t == kAudioDeviceTransportTypeVirtual => TransportType::Virtual,
+        t if t == kAudioDeviceTransportTypeAggregate => TransportType::Aggregate,
+        _ => TransportType::Unknown,
+    }
+}
+
 /// Human transport label for logging. Falls back to the raw four-char-code
 /// hex value for transports not worth naming individually.
-fn transport_name(transport: u32) -> String {
+fn transport_name(transport: TransportType) -> String {
     match transport {
-        t if t == kAudioDeviceTransportTypeBuiltIn => "built-in".into(),
-        t if t == kAudioDeviceTransportTypeBluetooth => "bluetooth".into(),
-        t if t == kAudioDeviceTransportTypeBluetoothLE => "bluetooth-le".into(),
-        t if t == kAudioDeviceTransportTypeUSB => "usb".into(),
-        t if t == kAudioDeviceTransportTypeVirtual => "virtual".into(),
-        t if t == kAudioDeviceTransportTypeAggregate => "aggregate".into(),
-        0 => "unknown".into(),
-        other => format!("{other:#x}"),
+        TransportType::BuiltIn => "built-in".into(),
+        TransportType::Bluetooth => "bluetooth".into(),
+        TransportType::BluetoothLe => "bluetooth-le".into(),
+        TransportType::Usb => "usb".into(),
+        TransportType::Virtual => "virtual".into(),
+        TransportType::Aggregate => "aggregate".into(),
+        TransportType::Unknown => "unknown".into(),
     }
 }
 
@@ -366,10 +379,25 @@ fn device_name(device: AudioObjectID) -> String {
     }
 }
 
-fn device_transport(device: AudioObjectID) -> u32 {
+fn device_uid(device: AudioObjectID) -> String {
+    let mut uid_ptr: *const CFString = std::ptr::null();
+    if !get_property(device, global_address(kAudioDevicePropertyDeviceUID), &mut uid_ptr) {
+        return format!("device#{device}");
+    }
+    match NonNull::new(uid_ptr.cast_mut()) {
+        Some(ptr) => unsafe { CFRetained::from_raw(ptr) }.to_string(),
+        None => format!("device#{device}"),
+    }
+}
+
+fn device_transport(device: AudioObjectID) -> TransportType {
     let mut transport: u32 = 0;
-    get_property(device, global_address(kAudioDevicePropertyTransportType), &mut transport);
-    transport
+    get_property(
+        device,
+        global_address(kAudioDevicePropertyTransportType),
+        &mut transport,
+    );
+    map_transport(transport)
 }
 
 /// Input-capable = has at least one stream in the input scope.
@@ -381,6 +409,15 @@ fn device_info(device: AudioObjectID) -> DeviceInfo {
     DeviceInfo {
         name: device_name(device),
         transport: transport_name(device_transport(device)),
+    }
+}
+
+fn input_device(device: AudioObjectID, is_default: bool) -> AudioInputDevice {
+    AudioInputDevice {
+        uid: device_uid(device),
+        name: device_name(device),
+        transport: device_transport(device),
+        is_default,
     }
 }
 
@@ -412,12 +449,12 @@ pub(crate) fn default_input_device_id() -> Option<AudioObjectID> {
     default_device_id(kAudioHardwarePropertyDefaultInputDevice)
 }
 
-/// `(name, is_default)` for every input-capable device. Pure CoreAudio
-/// property queries only (device list, stream count, name, transport-free) —
+/// Every input-capable device with stable UID and transport. Pure CoreAudio
+/// property queries only (device list, stream count, name, uid, transport) —
 /// unlike cpal's `Host::input_devices()`, this never queries a device's
 /// supported stream formats, so it can't open an AudioUnit on a device and
 /// force a Bluetooth headset out of A2DP. Used for the Settings device list.
-pub(crate) fn list_devices() -> Vec<(String, bool)> {
+pub(crate) fn list_devices() -> Vec<AudioInputDevice> {
     let default = default_input_device_id();
     device_ids(
         kAudioObjectSystemObject as AudioObjectID,
@@ -425,7 +462,8 @@ pub(crate) fn list_devices() -> Vec<(String, bool)> {
     )
     .into_iter()
     .filter(|&id| is_input_capable(id))
-    .map(|id| (device_name(id), Some(id) == default))
+    .map(|id| input_device(id, Some(id) == default))
+    .filter(|device| !is_souffle_tap_device(&device.name))
     .collect()
 }
 
@@ -493,18 +531,23 @@ mod tests {
 
     #[test]
     fn transport_maps_known_types() {
-        assert_eq!(transport_name(kAudioDeviceTransportTypeBuiltIn), "built-in");
-        assert_eq!(transport_name(kAudioDeviceTransportTypeBluetooth), "bluetooth");
-        assert_eq!(transport_name(kAudioDeviceTransportTypeBluetoothLE), "bluetooth-le");
-        assert_eq!(transport_name(kAudioDeviceTransportTypeUSB), "usb");
-        assert_eq!(transport_name(kAudioDeviceTransportTypeVirtual), "virtual");
-        assert_eq!(transport_name(kAudioDeviceTransportTypeAggregate), "aggregate");
+        assert_eq!(transport_name(TransportType::BuiltIn), "built-in");
+        assert_eq!(transport_name(TransportType::Bluetooth), "bluetooth");
+        assert_eq!(transport_name(TransportType::BluetoothLe), "bluetooth-le");
+        assert_eq!(transport_name(TransportType::Usb), "usb");
+        assert_eq!(transport_name(TransportType::Virtual), "virtual");
+        assert_eq!(transport_name(TransportType::Aggregate), "aggregate");
+        assert_eq!(transport_name(TransportType::Unknown), "unknown");
     }
 
     #[test]
-    fn transport_unknown_falls_back_to_hex() {
-        assert_eq!(transport_name(0), "unknown");
-        assert_eq!(transport_name(0xdead_beef), "0xdeadbeef");
+    fn map_transport_covers_coreaudio_codes() {
+        assert_eq!(map_transport(kAudioDeviceTransportTypeBuiltIn), TransportType::BuiltIn);
+        assert_eq!(
+            map_transport(kAudioDeviceTransportTypeBluetooth),
+            TransportType::Bluetooth
+        );
+        assert_eq!(map_transport(0xdead_beef), TransportType::Unknown);
     }
 
     #[test]

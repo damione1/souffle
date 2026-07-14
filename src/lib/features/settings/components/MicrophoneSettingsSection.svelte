@@ -1,7 +1,7 @@
 <script lang="ts">
   import { RefreshCw } from "@lucide/svelte";
   import { t } from "svelte-i18n";
-  import type { AudioDeviceInfo } from "../../../types";
+  import type { AudioInputDevice } from "../../../types";
 
   let {
     audioDevices,
@@ -9,7 +9,7 @@
     onDeviceChange,
     onRefreshDevices,
   }: {
-    audioDevices: AudioDeviceInfo[];
+    audioDevices: AudioInputDevice[];
     selectedDevice: string;
     onDeviceChange: (event: Event) => void | Promise<void>;
     onRefreshDevices: () => void | Promise<void>;
@@ -27,7 +27,7 @@
       <div class="flex shrink-0 gap-1.5 items-center">
         <select id="input-device" value={selectedDevice} onchange={onDeviceChange} class="field-select max-w-52">
           {#each audioDevices as device}
-            <option value={device.name}>
+            <option value={device.uid}>
               {device.name}{device.is_default ? ` ${$t("settings_audio.device_default_suffix")}` : ""}
             </option>
           {/each}
