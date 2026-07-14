@@ -71,6 +71,27 @@ impl Database {
         rows.into_iter().map(SpeakerRow::into_record).collect()
     }
 
+    /// Update a persistent speaker's display name. Propagates everywhere the
+    /// speaker id appears because labels are `spk:<id>` and names are read
+    /// from this table at meeting load time.
+    pub fn rename_speaker(&self, id: i64, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Speaker name cannot be empty".into());
+        }
+        let conn = self.conn.acquire()?;
+        let changed = conn
+            .execute(
+                "UPDATE speakers SET name = ?1 WHERE id = ?2",
+                params![name, id],
+            )
+            .map_err(|e| format!("Rename speaker: {e}"))?;
+        if changed == 0 {
+            return Err(format!("Speaker not found: {id}"));
+        }
+        Ok(())
+    }
+
     /// Overwrite a speaker's centroid, embedding count, and `last_seen_at`
     /// (typically after re-clustering embeddings into a fresh centroid).
     pub fn update_speaker_centroid(
@@ -199,6 +220,28 @@ mod tests {
         assert_eq!(all.iter().map(|s| s.id).collect::<Vec<_>>(), vec![a, b]);
         assert_eq!(all[0].name, "Alice");
         assert_eq!(all[1].name, "Bob");
+    }
+
+    #[test]
+    fn rename_speaker_updates_display_name() {
+        let (db, _dir) = test_db();
+        let id = db.create_speaker("Alice").unwrap();
+        db.rename_speaker(id, "Alicia").unwrap();
+        let record = db.get_speaker(id).unwrap().expect("speaker exists");
+        assert_eq!(record.name, "Alicia");
+    }
+
+    #[test]
+    fn rename_speaker_rejects_empty_name() {
+        let (db, _dir) = test_db();
+        let id = db.create_speaker("Alice").unwrap();
+        assert!(db.rename_speaker(id, "  ").is_err());
+    }
+
+    #[test]
+    fn rename_speaker_missing_id_errors() {
+        let (db, _dir) = test_db();
+        assert!(db.rename_speaker(999, "Bob").is_err());
     }
 
     #[test]

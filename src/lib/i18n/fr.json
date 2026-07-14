@@ -242,6 +242,20 @@
     "them": "Eux",
     "speaker_fallback": "Intervenant {id}"
   },
+  "speaker_manage": {
+    "edit_aria": "Gerer l'intervenant {name}",
+    "rename_heading": "Renommer l'intervenant",
+    "rename_label": "Nom de l'intervenant",
+    "save_name": "Enregistrer",
+    "retag_heading": "Reattribuer les etiquettes",
+    "scope_turn": "Ce tour seulement",
+    "scope_meeting": "Tous les tours dans cette reunion",
+    "pick_existing": "Intervenant existant",
+    "no_other_speakers": "Aucun autre intervenant",
+    "new_speaker": "Nouvel intervenant",
+    "new_speaker_placeholder": "Saisir un nom",
+    "apply_retag": "Appliquer la reattribution"
+  },
   "meeting_audio": {
     "play": "Lecture",
     "pause": "Pause",

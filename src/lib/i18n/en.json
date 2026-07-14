@@ -242,6 +242,20 @@
     "them": "Them",
     "speaker_fallback": "Speaker {id}"
   },
+  "speaker_manage": {
+    "edit_aria": "Manage speaker {name}",
+    "rename_heading": "Rename speaker",
+    "rename_label": "Speaker name",
+    "save_name": "Save",
+    "retag_heading": "Reassign labels",
+    "scope_turn": "This turn only",
+    "scope_meeting": "All turns in this meeting",
+    "pick_existing": "Existing speaker",
+    "no_other_speakers": "No other speakers yet",
+    "new_speaker": "New speaker",
+    "new_speaker_placeholder": "Enter a name",
+    "apply_retag": "Apply reassignment"
+  },
   "meeting_audio": {
     "play": "Play",
     "pause": "Pause",

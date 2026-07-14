@@ -309,6 +309,78 @@ img {
   background: var(--color-surface-2);
 }
 
+/* Persistent speaker badges: warm palette keyed by speaker id hash. */
+.speaker-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  outline: 1px solid var(--color-ghost-border);
+}
+
+.speaker-pill-0 {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  outline-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.speaker-pill-1 {
+  color: var(--color-secondary);
+  background: color-mix(in srgb, var(--color-secondary) 12%, transparent);
+  outline-color: color-mix(in srgb, var(--color-secondary) 22%, transparent);
+}
+
+.speaker-pill-2 {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  outline-color: color-mix(in srgb, var(--color-warning) 22%, transparent);
+}
+
+.speaker-pill-3 {
+  color: #8fb88a;
+  background: color-mix(in srgb, #8fb88a 12%, transparent);
+  outline-color: color-mix(in srgb, #8fb88a 22%, transparent);
+}
+
+.speaker-pill-4 {
+  color: #7eb8c4;
+  background: color-mix(in srgb, #7eb8c4 12%, transparent);
+  outline-color: color-mix(in srgb, #7eb8c4 22%, transparent);
+}
+
+.speaker-pill-5 {
+  color: #c49a7e;
+  background: color-mix(in srgb, #c49a7e 12%, transparent);
+  outline-color: color-mix(in srgb, #c49a7e 22%, transparent);
+}
+
+.speaker-pill-6 {
+  color: #b8a07e;
+  background: color-mix(in srgb, #b8a07e 12%, transparent);
+  outline-color: color-mix(in srgb, #b8a07e 22%, transparent);
+}
+
+.speaker-pill-7 {
+  color: #9a8fc4;
+  background: color-mix(in srgb, #9a8fc4 12%, transparent);
+  outline-color: color-mix(in srgb, #9a8fc4 22%, transparent);
+}
+
+.speaker-pill-8 {
+  color: #c47e8f;
+  background: color-mix(in srgb, #c47e8f 12%, transparent);
+  outline-color: color-mix(in srgb, #c47e8f 22%, transparent);
+}
+
+.speaker-pill-9 {
+  color: var(--color-text-tertiary);
+  background: var(--color-surface-2);
+  outline-color: var(--color-ghost-border);
+}
+
 /* ─── Form inputs ─── */
 .field-input,
 .field-select {

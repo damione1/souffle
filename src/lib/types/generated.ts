@@ -332,6 +332,41 @@ async exportMeetingToFile(id: string, format: ExportFormat, path: string) : Prom
 }
 },
 /**
+ * Rename a persistent speaker. The new name appears everywhere that speaker
+ * id is referenced because segment labels stay `spk:<id>`.
+ */
+async renameSpeaker(id: number, name: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_speaker", { id, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * All persistent speakers in the database, for pickers when retagging.
+ */
+async listSpeakers() : Promise<Result<MeetingSpeaker[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_speakers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reassign persistent-speaker labels within one meeting. Me/Them segments
+ * are never touched. Returns the reloaded meeting so the UI can refresh.
+ */
+async retagMeetingSpeaker(request: RetagMeetingSpeakerRequest) : Promise<Result<MeetingTranscript, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("retag_meeting_speaker", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List available summary providers and models (Ollama + Apple Intelligence).
  */
 async checkSummaryProviders() : Promise<Result<SummaryProvidersStatus, string>> {
@@ -1261,6 +1296,24 @@ export type PipelineErrorScope =
  */
 "session"
 export type RecordingKind = "dictation" | { meeting: { meeting_id: string } }
+export type RetagMeetingSpeakerRequest = { meeting_id: string; 
+/**
+ * Persistent speaker id currently on the segments being retagged.
+ */
+from_speaker_id: number; 
+/**
+ * Retag only these segment indices (`sort_order`). Omit or pass an empty
+ * vec to retag every `spk:from_speaker_id` segment in this meeting.
+ */
+sort_orders?: number[]; 
+/**
+ * Assign to an existing persistent speaker.
+ */
+to_speaker_id: number | null; 
+/**
+ * Create a new persistent speaker with this name and assign to it.
+ */
+new_speaker_name: string | null }
 /**
  * Search result from FTS5 full-text search
  */
