@@ -93,6 +93,7 @@
       onResetEdited={controller.resetEditedTranscript}
       onEditDraftChange={(value) => { controller.editedTranscriptDraft = value; }}
       onParagraphClick={controller.audioSessions.length > 0 ? controller.requestAudioSeek : undefined}
+      onAddDictionaryAlias={controller.addDictionaryAlias}
     />
 
     <!-- AI summary, generated from notes + transcript. -->

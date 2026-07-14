@@ -4,6 +4,7 @@
   import CopyButton from "../../../components/ui/CopyButton.svelte";
   import type { MeetingRecordingSession, TranscriptionSegment } from "../../../types";
   import { buildMeetingTranscriptBlocks } from "../../../utils";
+  import TranscriptWordLine from "./TranscriptWordLine.svelte";
 
   let {
     segments,
@@ -20,6 +21,7 @@
     onResetEdited,
     onEditDraftChange,
     onParagraphClick,
+    onAddDictionaryAlias,
   }: {
     segments: TranscriptionSegment[];
     recordingSessions: MeetingRecordingSession[];
@@ -37,6 +39,7 @@
     /** A paragraph's timestamp was clicked; seeks the audio player if that
      * paragraph maps to a recorded session (no-op otherwise). */
     onParagraphClick?: (recordingSessionIndex: number | null, startTime: number) => void;
+    onAddDictionaryAlias?: (term: string, pronunciation: string | null) => void | Promise<void>;
   } = $props();
 
   type TranscriptPhase = "has_content" | "recording_empty" | "empty";
@@ -144,7 +147,15 @@
                   <span class="font-mono text-[10.5px] text-text-faint">{block.timestamp}</span>
                 {/if}
               </div>
-              <p class="m-0 text-sm leading-[1.7] text-text-secondary">{block.text}</p>
+              {#if onAddDictionaryAlias}
+                <TranscriptWordLine
+                  text={block.text}
+                  onAddAlias={onAddDictionaryAlias}
+                  class="m-0 block text-sm leading-[1.7] text-text-secondary"
+                />
+              {:else}
+                <p class="m-0 text-sm leading-[1.7] text-text-secondary">{block.text}</p>
+              {/if}
             </div>
           {:else}
             <div class="my-1 flex items-center gap-3 text-text-muted/80">

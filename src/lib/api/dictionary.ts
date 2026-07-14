@@ -29,3 +29,10 @@ export async function deleteDictionaryEntry(id: number): Promise<void> {
 export async function clearDictionary(): Promise<void> {
   await unwrap(commands.clearDictionary());
 }
+
+export async function addSessionCorrection(
+  misspelling: string,
+  term: string,
+): Promise<void> {
+  await unwrap(commands.addSessionCorrection(misspelling, term));
+}

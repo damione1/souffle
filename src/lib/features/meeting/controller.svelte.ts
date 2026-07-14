@@ -1,4 +1,5 @@
 import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
+import { addDictionaryEntry, addSessionCorrection } from "../../api/dictionary";
 import {
   deleteMeeting as removeMeeting,
   exportMeetingFilename,
@@ -428,6 +429,30 @@ function createMeetingControllerInstance() {
     }
   }
 
+  async function addDictionaryAlias(term: string, pronunciation: string | null) {
+    const trimmedTerm = term.trim();
+    if (!trimmedTerm) return;
+
+    const trimmedPronunciation = pronunciation?.trim() || null;
+    try {
+      await addDictionaryEntry(trimmedTerm, trimmedPronunciation, null);
+      if (
+        isRecordingMeeting
+        && trimmedPronunciation
+        && trimmedPronunciation.toLowerCase() !== trimmedTerm.toLowerCase()
+      ) {
+        try {
+          await addSessionCorrection(trimmedPronunciation, trimmedTerm);
+        } catch {
+          // Session hint is best-effort; the dictionary entry still persists.
+        }
+      }
+    } catch (e) {
+      statusMessage = errorMessage(e);
+      throw e;
+    }
+  }
+
   async function applyLiveParagraphEdit(paragraphId: number, newText: string) {
     const trimmed = newText.trim();
     if (!trimmed || !isRecordingMeeting) return;
@@ -685,6 +710,7 @@ function createMeetingControllerInstance() {
     handleMeetingIdle,
     dismissIdle,
     applyLiveParagraphEdit,
+    addDictionaryAlias,
     resumeAfterSystemWake,
   };
 }

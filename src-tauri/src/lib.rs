@@ -103,6 +103,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::save_meeting_notes,
             commands::save_edited_transcript,
             commands::apply_live_paragraph_edit,
+            commands::add_session_correction,
             commands::export_meeting_preview,
             commands::export_meeting_filename,
             commands::export_meeting_to_file,
