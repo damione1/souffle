@@ -273,6 +273,20 @@ async saveEditedTranscript(id: string, editedTranscript: string | null) : Promis
 }
 },
 /**
+ * Apply a live paragraph edit during an active meeting: patch the edited
+ * segments in the accumulator (and on disk when already flushed), and
+ * register session corrections so later STT output of the same misspelling
+ * is rewritten for the rest of this recording session.
+ */
+async applyLiveParagraphEdit(meetingId: string, segmentStart: number, segmentEnd: number, newText: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("apply_live_paragraph_edit", { meetingId, segmentStart, segmentEnd, newText }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Render a meeting export without writing to disk. Used by tests and, if
  * ever needed, a clipboard-copy affordance.
  */

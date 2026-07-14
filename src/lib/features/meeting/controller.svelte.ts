@@ -8,6 +8,7 @@ import {
   renameMeeting as applyMeetingRename,
   resumeMeetingRecording,
   saveEditedTranscript,
+  applyLiveParagraphEdit as submitLiveParagraphEdit,
   saveMeetingNotes,
   startMeetingRecording,
   stopMeetingRecording,
@@ -265,7 +266,8 @@ function createMeetingControllerInstance() {
         // Only skip empty finals; non-final (tentative) segments still flow
         // through so the live view can show them as a faded suffix.
         if (segment.is_final && !segment.text) return;
-        liveTranscript.append(segment);
+        const segmentIndex = liveMeetingSegments.length;
+        liveTranscript.append(segment, segmentIndex);
         if (segment.is_final && segment.text) liveMeetingSegments.push(segment);
         clearIdleState();
       });
@@ -310,7 +312,8 @@ function createMeetingControllerInstance() {
 
       await resumeMeetingRecording(meeting.id, (segment) => {
         if (segment.is_final && !segment.text) return;
-        liveTranscript.append(segment);
+        const segmentIndex = liveMeetingSegments.length;
+        liveTranscript.append(segment, segmentIndex);
         if (segment.is_final && segment.text) liveMeetingSegments.push(segment);
         clearIdleState();
       });
@@ -400,6 +403,51 @@ function createMeetingControllerInstance() {
   function dismissIdle() {
     idleDismissed = true;
     idleSignal = null;
+  }
+
+  function recordingMeetingId(): string {
+    const machineState = app.machineState;
+    if (machineState.state === "recording_meeting") return machineState.data.meeting_id;
+    return meeting?.id ?? "";
+  }
+
+  function redistributeSegmentTexts(segmentStart: number, segmentEnd: number, newText: string) {
+    const words = newText.trim().split(/\s+/).filter(Boolean);
+    const slice = liveMeetingSegments.slice(segmentStart, segmentEnd);
+    if (slice.length === 0) return;
+    if (slice.length === 1) {
+      slice[0].text = newText.trim();
+      return;
+    }
+    for (let i = 0; i < slice.length; i++) {
+      if (i + 1 < slice.length) {
+        slice[i].text = words[i] ?? "";
+      } else {
+        slice[i].text = words.slice(i).join(" ");
+      }
+    }
+  }
+
+  async function applyLiveParagraphEdit(paragraphId: number, newText: string) {
+    const trimmed = newText.trim();
+    if (!trimmed || !isRecordingMeeting) return;
+
+    const updated = liveTranscript.editParagraph(paragraphId, trimmed);
+    if (!updated) return;
+
+    const { start, end } = updated.segmentRange;
+    if (end <= start || end > liveMeetingSegments.length) return;
+
+    redistributeSegmentTexts(start, end, trimmed);
+
+    const meetingId = recordingMeetingId();
+    if (!meetingId) return;
+
+    try {
+      await submitLiveParagraphEdit(meetingId, start, end, trimmed);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
   }
 
   /** The system woke from sleep (or the webview visibility turned to
@@ -636,6 +684,7 @@ function createMeetingControllerInstance() {
     handleMeetingFinalized,
     handleMeetingIdle,
     dismissIdle,
+    applyLiveParagraphEdit,
     resumeAfterSystemWake,
   };
 }

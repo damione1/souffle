@@ -96,6 +96,15 @@ impl DictionaryFilter {
     /// `session_terms` are ephemeral additions for one recording session
     /// (participant names, meeting jargon); they match phonetically only.
     pub fn with_session_terms(entries: Vec<DictionaryEntry>, session_terms: &[String]) -> Self {
+        Self::with_session_hints(entries, session_terms, &[])
+    }
+
+    /// Session terms plus explicit misspelling-to-term pairs from live edits.
+    pub fn with_session_hints(
+        entries: Vec<DictionaryEntry>,
+        session_terms: &[String],
+        session_corrections: &[super::session_terms::SessionCorrection],
+    ) -> Self {
         let mut matches: Vec<DictionaryMatch> = entries
             .into_iter()
             .map(|e| {
@@ -123,6 +132,19 @@ impl DictionaryFilter {
                 phonetic_code: soundex(term),
                 phonetic_only: true,
                 explicit_pronunciation: false,
+            });
+        }
+        for correction in session_corrections {
+            let term_lower = correction.term.to_lowercase();
+            if matches.iter().any(|m| m.term_lower == term_lower) {
+                continue;
+            }
+            matches.push(DictionaryMatch {
+                term: correction.term.clone(),
+                term_lower,
+                phonetic_code: soundex(&correction.misspelling),
+                phonetic_only: false,
+                explicit_pronunciation: true,
             });
         }
         Self { entries: matches }
@@ -350,6 +372,20 @@ mod tests {
 
         let user = DictionaryFilter::with_session_terms(vec![entry("Martin")], &[]);
         assert_eq!(user.apply("le matin venu"), "le Martin venu");
+    }
+
+    #[test]
+    fn session_corrections_rewrite_live_misspellings() {
+        use crate::filter::session_terms::SessionCorrection;
+        let f = DictionaryFilter::with_session_hints(
+            vec![],
+            &[],
+            &[SessionCorrection {
+                misspelling: "Kubernetis".to_string(),
+                term: "Kubernetes".to_string(),
+            }],
+        );
+        assert_eq!(f.apply("Kubernetis cluster"), "Kubernetes cluster");
     }
 
     #[test]
