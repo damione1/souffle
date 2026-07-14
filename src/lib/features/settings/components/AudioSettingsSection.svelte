@@ -18,6 +18,13 @@
     480: "settings_audio.meeting_max_duration_8h",
   };
 
+  const meetingLanguageOptions = ["auto", "en", "fr"] as const;
+  const meetingLanguageKeys: Record<(typeof meetingLanguageOptions)[number], string> = {
+    auto: "settings_audio.meeting_transcription_language_auto",
+    en: "settings_audio.meeting_transcription_language_en",
+    fr: "settings_audio.meeting_transcription_language_fr",
+  };
+
   let {
     audioDevices,
     captureSystemAudio,
@@ -31,6 +38,7 @@
     meetingAutostopEnabled,
     meetingAutostopMinutes,
     meetingMaxDurationMinutes,
+    meetingTranscriptionLanguage,
     onCaptureSystemAudioChange,
     onClamshellDeviceChange,
     onVadEnabledChange,
@@ -40,6 +48,7 @@
     onMeetingAutostopEnabledChange,
     onMeetingAutostopMinutesChange,
     onMeetingMaxDurationMinutesChange,
+    onMeetingTranscriptionLanguageChange,
   }: {
     audioDevices: AudioDeviceInfo[];
     captureSystemAudio: boolean;
@@ -53,6 +62,7 @@
     meetingAutostopEnabled: boolean;
     meetingAutostopMinutes: number;
     meetingMaxDurationMinutes: number;
+    meetingTranscriptionLanguage: (typeof meetingLanguageOptions)[number];
     onCaptureSystemAudioChange: (event: Event) => void | Promise<void>;
     onClamshellDeviceChange: (event: Event) => void | Promise<void>;
     onVadEnabledChange: (event: Event) => void | Promise<void>;
@@ -62,6 +72,7 @@
     onMeetingAutostopEnabledChange: (event: Event) => void | Promise<void>;
     onMeetingAutostopMinutesChange: (event: Event) => void | Promise<void>;
     onMeetingMaxDurationMinutesChange: (event: Event) => void | Promise<void>;
+    onMeetingTranscriptionLanguageChange: (event: Event) => void | Promise<void>;
   } = $props();
 </script>
 
@@ -100,6 +111,25 @@
       {/snippet}
     </SettingsField>
   {/if}
+
+  <SettingsField
+    label={$t("settings_audio.meeting_transcription_language")}
+    description={$t("settings_audio.meeting_transcription_language_desc")}
+    htmlFor="meeting-transcription-language"
+  >
+    {#snippet control()}
+      <select
+        id="meeting-transcription-language"
+        value={meetingTranscriptionLanguage}
+        onchange={onMeetingTranscriptionLanguageChange}
+        class="field-select max-w-48"
+      >
+        {#each meetingLanguageOptions as lang}
+          <option value={lang}>{$t(meetingLanguageKeys[lang])}</option>
+        {/each}
+      </select>
+    {/snippet}
+  </SettingsField>
 
   <SettingsField
     label={$t("settings_audio.meeting_autostop")}

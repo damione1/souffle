@@ -34,7 +34,12 @@
     "meeting_max_duration_label": "Maximum meeting length",
     "meeting_max_duration_2h": "2 hours",
     "meeting_max_duration_4h": "4 hours",
-    "meeting_max_duration_8h": "8 hours"
+    "meeting_max_duration_8h": "8 hours",
+    "meeting_transcription_language": "Meeting language",
+    "meeting_transcription_language_desc": "Hint for language detection during meetings. Does not force the transcription model.",
+    "meeting_transcription_language_auto": "Auto-detect",
+    "meeting_transcription_language_en": "English",
+    "meeting_transcription_language_fr": "French"
   },
   "settings_dictionary": {
     "title": "Custom Dictionary",

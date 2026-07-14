@@ -46,6 +46,7 @@ const LOG_LEVEL_KEY: &str = "log_level";
 const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
+const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -83,6 +84,17 @@ pub enum Theme {
 
 /// How long recorded meeting audio is kept on disk before the startup sweep
 /// deletes it. Opt-in: recording itself only happens when this is not `Off`.
+/// Heuristic prior for meeting language detection and mismatch resets.
+/// Never passed to the STT engine as a forced decode language.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingTranscriptionLanguage {
+    #[default]
+    Auto,
+    En,
+    Fr,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingAudioRetention {
@@ -159,6 +171,9 @@ pub struct AppSettings {
     /// Opt-in recording of meeting audio to compressed files on disk, and
     /// for how long they're kept. Off by default.
     pub meeting_audio_retention: MeetingAudioRetention,
+    /// Heuristic prior for meeting language stability (LID + lane resets).
+    /// Does not force Kyutai/moshi decode language.
+    pub meeting_transcription_language: MeetingTranscriptionLanguage,
     /// Optional LLM post-processing applied to dictation before paste/history.
     pub dictation_polish_enabled: bool,
     /// Active polish template id (email, bullets, no_fillers).
@@ -215,6 +230,7 @@ impl Default for AppSettings {
             meeting_autostop_minutes: 10,
             meeting_max_duration_minutes: 240,
             meeting_audio_retention: MeetingAudioRetention::default(),
+            meeting_transcription_language: MeetingTranscriptionLanguage::default(),
             dictation_polish_enabled: false,
             dictation_polish_template_id: crate::summary::TEMPLATE_EMAIL.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -370,6 +386,11 @@ impl AppSettings {
         {
             settings.meeting_audio_retention = meeting_audio_retention;
         }
+        if let Some(meeting_transcription_language) =
+            read_json_setting::<MeetingTranscriptionLanguage>(db, MEETING_TRANSCRIPTION_LANGUAGE_KEY)?
+        {
+            settings.meeting_transcription_language = meeting_transcription_language;
+        }
         if let Some(dictation_polish_enabled) =
             read_json_setting::<bool>(db, DICTATION_POLISH_ENABLED_KEY)?
         {
@@ -505,6 +526,16 @@ impl AppSettings {
         }
         if !MEETING_MAX_DURATION_MINUTES_RANGE.contains(&normalized.meeting_max_duration_minutes) {
             normalized.meeting_max_duration_minutes = Self::default().meeting_max_duration_minutes;
+        }
+
+        if !matches!(
+            normalized.meeting_transcription_language,
+            MeetingTranscriptionLanguage::Auto
+                | MeetingTranscriptionLanguage::En
+                | MeetingTranscriptionLanguage::Fr
+        ) {
+            normalized.meeting_transcription_language =
+                Self::default().meeting_transcription_language;
         }
 
         normalized.dictation_polish_template_id = normalized
@@ -656,6 +687,11 @@ impl AppSettings {
             db,
             MEETING_AUDIO_RETENTION_KEY,
             &normalized.meeting_audio_retention,
+        )?;
+        write_json_setting(
+            db,
+            MEETING_TRANSCRIPTION_LANGUAGE_KEY,
+            &normalized.meeting_transcription_language,
         )?;
         write_json_setting(
             db,
@@ -821,6 +857,7 @@ mod tests {
             meeting_autostop_minutes: 15,
             meeting_max_duration_minutes: 120,
             meeting_audio_retention: MeetingAudioRetention::Keep30d,
+            meeting_transcription_language: super::MeetingTranscriptionLanguage::Fr,
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),

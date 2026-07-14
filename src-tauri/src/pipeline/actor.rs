@@ -69,6 +69,8 @@ pub struct SessionConfig {
     /// Meeting-only auto-stop detection (silence + max duration). `None` for
     /// dictation sessions, where "meeting is over" doesn't apply.
     pub idle_config: Option<MeetingIdleConfig>,
+    /// Heuristic prior for meeting language stability (LID + lane resets).
+    pub meeting_transcription_language: crate::settings::MeetingTranscriptionLanguage,
 }
 
 pub enum EngineCommand {
@@ -619,6 +621,7 @@ impl EngineActor {
         let diarize = config.diarize && engine.supports_diarization();
 
         engine.set_diarization(diarize);
+        engine.set_meeting_language_prior(config.meeting_transcription_language);
 
         // The idle pre-warm (see `prewarm_single_stream`) keeps the engine
         // state reset for dictation between sessions; skip the reset here
@@ -1452,6 +1455,7 @@ mod tests {
             session_terms: vec![],
             diarize: false,
             idle_config: None,
+            meeting_transcription_language: crate::settings::MeetingTranscriptionLanguage::Auto,
         }
     }
 
@@ -1548,6 +1552,7 @@ mod tests {
             session_terms: vec![],
             diarize: true,
             idle_config: None,
+            meeting_transcription_language: crate::settings::MeetingTranscriptionLanguage::Auto,
         };
         actor.start_session(1, cfg, cb).expect("start diarized");
 

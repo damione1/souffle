@@ -522,6 +522,14 @@ export function createSettingsController() {
     });
   }
 
+  function onMeetingTranscriptionLanguageChange(event: Event) {
+    const value = (event.target as HTMLSelectElement)
+      .value as AppSettings["meeting_transcription_language"];
+    void persistSettings((settings) => {
+      settings.meeting_transcription_language = value;
+    });
+  }
+
   function onMeetingAudioRetentionChange(event: Event) {
     const value = (event.target as HTMLSelectElement).value as AppSettings["meeting_audio_retention"];
     void persistSettings((settings) => {
@@ -784,6 +792,7 @@ export function createSettingsController() {
     onMeetingAutostopEnabledChange,
     onMeetingAutostopMinutesChange,
     onMeetingMaxDurationMinutesChange,
+    onMeetingTranscriptionLanguageChange,
     onMeetingAudioRetentionChange,
     onVadEnabledChange,
     onFillerRemovalChange,
