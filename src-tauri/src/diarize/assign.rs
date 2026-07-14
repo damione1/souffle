@@ -17,18 +17,32 @@ pub struct SegmentSpan {
     pub has_speaker: bool,
 }
 
+/// How far (seconds) an instant span may sit outside every diarized range
+/// and still snap to the nearest one. Word onsets rarely line up exactly
+/// with VAD-derived range boundaries.
+const INSTANT_TOLERANCE_S: f64 = 0.75;
+
 /// For each entry in `segments`, the local cluster index (`DiarizedSegment.speaker`)
 /// with the greatest temporal overlap, or `None` if the segment already has a
-/// speaker, has zero/negative duration, or no diarized range overlaps it at
-/// all. Output is index-aligned with `segments`.
+/// speaker or no diarized range overlaps it at all. Output is index-aligned
+/// with `segments`.
+///
+/// Zero-duration spans are word-level segments (Kyutai stores each word with
+/// `end_time == start_time`); they are assigned to the diarized range that
+/// contains the instant, or the nearest range within
+/// [`INSTANT_TOLERANCE_S`].
 pub fn assign_by_overlap(diarized: &[DiarizedSegment], segments: &[SegmentSpan]) -> Vec<Option<usize>> {
     segments
         .iter()
         .map(|segment| {
-            if segment.has_speaker || segment.end_s <= segment.start_s {
+            if segment.has_speaker {
                 return None;
             }
-            best_overlap(diarized, segment)
+            if segment.end_s > segment.start_s {
+                best_overlap(diarized, segment)
+            } else {
+                best_containing(diarized, segment.start_s)
+            }
         })
         .collect()
 }
@@ -45,6 +59,31 @@ fn best_overlap(diarized: &[DiarizedSegment], segment: &SegmentSpan) -> Option<u
         match best {
             Some((_, best_overlap)) if best_overlap >= overlap => {}
             _ => best = Some((d.speaker, overlap)),
+        }
+    }
+    best.map(|(speaker, _)| speaker)
+}
+
+/// Cluster of the diarized range containing instant `t` (distance 0), or the
+/// nearest range within [`INSTANT_TOLERANCE_S`]. Ties keep the earlier range.
+fn best_containing(diarized: &[DiarizedSegment], t: f64) -> Option<usize> {
+    let mut best: Option<(usize, f64)> = None;
+    for d in diarized {
+        let d_start = d.start_ms as f64 / 1000.0;
+        let d_end = d.end_ms as f64 / 1000.0;
+        let distance = if t < d_start {
+            d_start - t
+        } else if t > d_end {
+            t - d_end
+        } else {
+            0.0
+        };
+        if distance > INSTANT_TOLERANCE_S {
+            continue;
+        }
+        match best {
+            Some((_, best_distance)) if best_distance <= distance => {}
+            _ => best = Some((d.speaker, distance)),
         }
     }
     best.map(|(speaker, _)| speaker)
@@ -110,11 +149,50 @@ mod tests {
         assert_eq!(assign_by_overlap(&diarized, &segments), vec![None]);
     }
 
+    /// Kyutai stores each word with `end_time == start_time`; those instants
+    /// must land in the diarized range containing them, not be dropped.
     #[test]
-    fn zero_or_negative_duration_segment_is_unassigned() {
+    fn word_instant_inside_a_range_gets_that_cluster() {
+        let diarized = vec![seg(0, 1000, 0), seg(1000, 2000, 1)];
+        let segments = vec![span(0.5, 0.5), span(1.5, 1.5)];
+        assert_eq!(assign_by_overlap(&diarized, &segments), vec![Some(0), Some(1)]);
+    }
+
+    #[test]
+    fn word_instant_in_a_gap_snaps_to_the_nearest_range_within_tolerance() {
+        // Gap between the ranges: 2.0..2.5s. An instant at 2.4 is 0.4s from
+        // cluster 0's end and 0.1s from cluster 1's start.
+        let diarized = vec![seg(0, 2000, 0), seg(2500, 4000, 1)];
+        let segments = vec![span(2.4, 2.4)];
+        assert_eq!(assign_by_overlap(&diarized, &segments), vec![Some(1)]);
+    }
+
+    #[test]
+    fn word_instant_beyond_tolerance_is_unassigned() {
         let diarized = vec![seg(0, 1000, 0)];
-        let segments = vec![span(0.5, 0.5), span(0.8, 0.3)];
-        assert_eq!(assign_by_overlap(&diarized, &segments), vec![None, None]);
+        let segments = vec![span(5.0, 5.0)];
+        assert_eq!(assign_by_overlap(&diarized, &segments), vec![None]);
+    }
+
+    #[test]
+    fn negative_duration_segment_is_treated_as_an_instant_at_its_start() {
+        let diarized = vec![seg(0, 1000, 0)];
+        let segments = vec![span(0.8, 0.3)];
+        assert_eq!(assign_by_overlap(&diarized, &segments), vec![Some(0)]);
+    }
+
+    #[test]
+    fn labeled_word_instant_is_never_reassigned() {
+        let diarized = vec![seg(0, 1000, 0)];
+        let segments = vec![SegmentSpan { start_s: 0.5, end_s: 0.5, has_speaker: true }];
+        assert_eq!(assign_by_overlap(&diarized, &segments), vec![None]);
+    }
+
+    #[test]
+    fn word_instant_contained_by_overlapping_ranges_keeps_the_earlier_one() {
+        let diarized = vec![seg(0, 2000, 0), seg(1000, 3000, 1)];
+        let segments = vec![span(1.5, 1.5)];
+        assert_eq!(assign_by_overlap(&diarized, &segments), vec![Some(0)]);
     }
 
     #[test]

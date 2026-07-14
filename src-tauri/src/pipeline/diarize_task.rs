@@ -126,6 +126,11 @@ fn run(app: &tauri::AppHandle, meeting_id: &str) {
                     meeting_id: meeting_id.to_string(),
                 }
                 .emit(app);
+            } else {
+                info!(
+                    meeting_id = %meeting_id,
+                    "Speaker recognition finished without labeling any segments"
+                );
             }
         }
         Err(e) => {
@@ -260,6 +265,14 @@ fn diarize_meeting(
     let mic_changed = db.set_segment_speakers(meeting_id, &mic_assignments, Some(Speaker::Me))?;
     let system_changed =
         db.set_segment_speakers(meeting_id, &system_assignments, Some(Speaker::Them))?;
+    info!(
+        meeting_id = %meeting_id,
+        mic_assigned = mic_assignments.len(),
+        mic_changed,
+        system_assigned = system_assignments.len(),
+        system_changed,
+        "Speaker recognition assignments written"
+    );
     Ok(mic_changed + system_changed)
 }
 
@@ -293,6 +306,24 @@ fn diarize_session(
     let result = crate::diarize::diarize(&samples, crate::diarize::segmentation::SAMPLE_RATE, cfg)
         .map_err(|e| format!("Diarize inference: {e}"))?;
     if result.segments.is_empty() || result.speakers.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Segment times restart at zero for each recording session, and so does
+    // the tapped WAV, so session-local segment spans line up with diarized
+    // ranges directly. Mapped before any speaker-row write: a pass whose
+    // ranges match no segment at all must not create orphan "Speaker N"
+    // rows or fold their centroids.
+    let spans: Vec<SegmentSpan> = meeting.segments[start..end]
+        .iter()
+        .map(|seg| SegmentSpan {
+            start_s: seg.start_time,
+            end_s: seg.end_time,
+            has_speaker: speaker_label_is_locked(seg.speaker.as_ref(), pass),
+        })
+        .collect();
+    let cluster_per_span = assign_by_overlap(&result.segments, &spans);
+    if cluster_per_span.iter().all(Option::is_none) {
         return Ok(Vec::new());
     }
 
@@ -331,19 +362,6 @@ fn diarize_session(
         )?;
         cluster_to_speaker.insert(decision.cluster, speaker_id);
     }
-
-    // Segment times restart at zero for each recording session, and so does
-    // the tapped WAV, so session-local segment spans line up with diarized
-    // ranges directly.
-    let spans: Vec<SegmentSpan> = meeting.segments[start..end]
-        .iter()
-        .map(|seg| SegmentSpan {
-            start_s: seg.start_time,
-            end_s: seg.end_time,
-            has_speaker: speaker_label_is_locked(seg.speaker.as_ref(), pass),
-        })
-        .collect();
-    let cluster_per_span = assign_by_overlap(&result.segments, &spans);
 
     Ok(cluster_per_span
         .into_iter()
