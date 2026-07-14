@@ -2,6 +2,8 @@ export { formatTimestamp, formatDate, formatDuration, formatShortcutLabel, forma
 export { applyTheme } from "./theme";
 export { buildMeetingTranscriptBlocks, groupIntoParagraphs } from "./paragraphs";
 export type { Paragraph, TranscriptBlock } from "./paragraphs";
+export { isClickableTranscriptWord, tokenizeTranscriptWords } from "./transcript-words";
+export type { TranscriptWordToken } from "./transcript-words";
 export { errorMessage } from "./errors";
 export { renderReleaseNotesMarkdown } from "./markdown";
 export { createDebouncedSearch, filterResultsByType, findSnippet, matchedIdsForType } from "./search.svelte";

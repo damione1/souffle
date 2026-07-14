@@ -5,6 +5,7 @@
   import Waveform from "../../components/Waveform.svelte";
   import Spinner from "../../components/ui/Spinner.svelte";
   import MeetingNotesSection from "../meeting/components/MeetingNotesSection.svelte";
+  import TranscriptWordLine from "../meeting/components/TranscriptWordLine.svelte";
   import type { LiveParagraph } from "../meeting/live-transcript.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
@@ -271,7 +272,11 @@
                     if (paragraphEditable(paragraph, i)) startParagraphEdit(paragraph);
                   }}
                 >
-                  {paragraph.text}
+                  <TranscriptWordLine
+                    text={paragraph.text}
+                    onAddAlias={meeting.addDictionaryAlias}
+                    class="m-0 inline text-[15px] leading-[1.75] text-text-secondary"
+                  />
                   {#if i === liveParagraphs.length - 1 && liveTentative}
                     <span class="opacity-50">{paragraph.text ? " " : ""}{liveTentative}</span>
                   {/if}

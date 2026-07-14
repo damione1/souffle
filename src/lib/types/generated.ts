@@ -287,6 +287,18 @@ async applyLiveParagraphEdit(meetingId: string, segmentStart: number, segmentEnd
 }
 },
 /**
+ * Register a misspelling-to-term pair for the active recording session so
+ * later STT output of the same form is rewritten immediately.
+ */
+async addSessionCorrection(misspelling: string, term: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_session_correction", { misspelling, term }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Render a meeting export without writing to disk. Used by tests and, if
  * ever needed, a clipboard-copy affordance.
  */

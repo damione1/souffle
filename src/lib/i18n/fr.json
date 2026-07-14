@@ -236,6 +236,16 @@
     "reset_to_original": "Revenir à l'original",
     "segments_count": "{count} segments"
   },
+  "dictionary_alias": {
+    "title": "Ajouter au dictionnaire",
+    "description": "Associez la forme entendue à l'orthographe souhaitée.",
+    "term": "Terme correct",
+    "term_placeholder": "ex. Kubernetes",
+    "pronunciation": "Entendu comme",
+    "pronunciation_placeholder": "ex. kubernetis",
+    "pronunciation_desc": "Orthographe optionnelle de la forme mal entendue. Aide à reconnaître les prochaines transcriptions.",
+    "save": "Ajouter l'entrée"
+  },
   "transcript": {
     "me": "Moi",
     "them": "Eux"

@@ -221,6 +221,40 @@ pub fn apply_live_paragraph_edit(
     Ok(())
 }
 
+/// Register a misspelling-to-term pair for the active recording session so
+/// later STT output of the same form is rewritten immediately.
+#[tauri::command]
+#[specta::specta]
+pub fn add_session_correction(
+    state: State<'_, AppState>,
+    misspelling: String,
+    term: String,
+) -> Result<(), String> {
+    use crate::filter::session_terms::SessionCorrection;
+    use crate::lock_ext::MutexExt;
+
+    let misspelling = misspelling.trim().to_string();
+    let term = term.trim().to_string();
+    if misspelling.is_empty() || term.is_empty() {
+        return Err("Misspelling and term cannot be empty".into());
+    }
+    if misspelling == term {
+        return Ok(());
+    }
+
+    {
+        let acc = state.meeting_accumulator.acquire()?;
+        if acc.is_none() {
+            return Err("No meeting is recording".into());
+        }
+    }
+
+    state.engine_actor.add_session_correction(SessionCorrection {
+        misspelling,
+        term,
+    })
+}
+
 fn redistribute_segment_texts(segments: &mut [TranscriptionSegment], new_text: &str) {
     let words: Vec<&str> = new_text.split_whitespace().collect();
     if segments.is_empty() {

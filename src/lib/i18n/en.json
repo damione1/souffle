@@ -236,6 +236,16 @@
     "reset_to_original": "Reset to original",
     "segments_count": "{count} segments"
   },
+  "dictionary_alias": {
+    "title": "Add to dictionary",
+    "description": "Map how this word was heard to the spelling you want.",
+    "term": "Correct term",
+    "term_placeholder": "e.g. Kubernetes",
+    "pronunciation": "Heard as",
+    "pronunciation_placeholder": "e.g. kubernetis",
+    "pronunciation_desc": "Optional spelling of how the word sounds when misheard. Helps match future transcriptions.",
+    "save": "Add entry"
+  },
   "transcript": {
     "me": "Me",
     "them": "Them"
