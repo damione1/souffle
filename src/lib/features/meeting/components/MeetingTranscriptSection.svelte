@@ -10,6 +10,7 @@
     resolveSpeakerLabel,
     speakerPillClass,
     speakerPlainLabel,
+    type AnchorRect,
   } from "../../../utils";
   import TranscriptWordLine from "./TranscriptWordLine.svelte";
 
@@ -73,6 +74,7 @@
     speakerId: number;
     speakerName: string;
     segmentSortOrders: number[];
+    anchorRect: AnchorRect;
   };
 
   const pauseThreshold = 1.5;
@@ -114,12 +116,15 @@
     speakerId: number,
     speakerName: string,
     segmentRange: { start: number; end: number },
+    event: MouseEvent,
   ) {
     if (!canManageSpeakers) return;
+    const target = event.currentTarget as HTMLElement;
     openSpeakerPopover = {
       speakerId,
       speakerName,
       segmentSortOrders: segmentSortOrdersForRange(segmentRange.start, segmentRange.end),
+      anchorRect: target.getBoundingClientRect(),
     };
   }
 
@@ -215,7 +220,7 @@
                           type="button"
                           class="speaker-pill cursor-pointer transition-opacity hover:opacity-85 {speakerPillClass(speakerId)}"
                           aria-label={$t("speaker_manage.edit_aria", { values: { name: speakerDisplayText(label) } })}
-                          onclick={() => openSpeakerManage(speakerId, speakerDisplayText(label), block.segmentRange)}
+                          onclick={(event) => openSpeakerManage(speakerId, speakerDisplayText(label), block.segmentRange, event)}
                         >{speakerDisplayText(label)}</button>
                       {:else}
                         <span class="speaker-pill {speakerPillClass(speakerId)}">
@@ -228,6 +233,7 @@
                           speakerName={openSpeakerPopover.speakerName}
                           meetingSpeakers={speakers}
                           allSpeakers={allSpeakers}
+                          anchorRect={openSpeakerPopover.anchorRect}
                           onClose={() => { openSpeakerPopover = null; }}
                           onRename={(name) => onRenameSpeaker?.(openSpeakerPopover!.speakerId, name)}
                           onRetag={(options) => onRetagSpeaker?.({

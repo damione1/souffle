@@ -1045,13 +1045,22 @@ summary_templates: SummaryTemplate[];
  */
 last_seen_version: string; 
 /**
- * Offline speaker recognition for mic-only meetings: after a mic-only
- * meeting stops, label its segments with a persistent, cross-meeting
- * speaker identity. Off by default (extra local inference + on-disk
- * model download); meetings with a system-audio lane are unaffected
- * regardless of this setting (Me/Them attribution stays authoritative).
+ * Offline speaker recognition after a meeting stops. Off by default
+ * (extra local inference + on-disk model download). When on, at least
+ * one of `diarize_mic` / `diarize_system_audio` must be enabled.
  */
 diarize_enabled: boolean; 
+/**
+ * Run speaker recognition on microphone (Me-lane) audio after a meeting
+ * stops. On by default when speaker recognition is enabled.
+ */
+diarize_mic: boolean; 
+/**
+ * Run speaker recognition on system-audio (Them-lane) capture after a
+ * meeting stops. Only meaningful when `capture_system_audio` is on.
+ * Off by default.
+ */
+diarize_system_audio: boolean; 
 /**
  * Optional upper bound on how many distinct speakers a single meeting
  * can be split into. `None` means unbounded (the clustering stage

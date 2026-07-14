@@ -1,11 +1,16 @@
-//! Post-stop offline speaker diarization for mic-only meetings. Spawned by
+//! Post-stop offline speaker diarization. Spawned by
 //! `stop_meeting_recording` right after the transcript is saved and
 //! `MeetingFinalized` is emitted (never delaying either): for each recording
-//! session whose mic audio was tapped to a temporary WAV
+//! session whose mic and/or system audio was tapped to temporary WAVs
 //! (`audio::diarize_tap`), run the offline diarization engine, match the
 //! detected voice clusters against persistent speakers (`diarize::persist`),
 //! map the diarized time ranges onto that session's transcript segments
 //! (`diarize::assign`), and write the labels back in one transaction.
+//!
+//! Mic and system-audio passes are independent: the mic WAV rewrites Me-lane
+//! segments (Them and persistent labels stay locked); the system WAV rewrites
+//! Them-lane segments (Me and persistent labels stay locked). Live Me/Them
+//! lanes during recording are unchanged.
 //!
 //! Everything here is best-effort: any failure just leaves the meeting
 //! unlabeled (logged, surfaced via `DiarizationProgress.error`), and the
@@ -26,11 +31,27 @@ use crate::diarize::{DiarizeConfig, models};
 use crate::engine::Speaker;
 use crate::state::AppState;
 
+/// Which transcript lane a diarization pass may rewrite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiarizationPass {
+    /// Mic WAV: assign onto Me-lane (or unlabeled mic-only) segments.
+    Mic,
+    /// System WAV: assign onto Them-lane segments.
+    System,
+}
+
+/// Pending diarization WAVs for one recording session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionDiarizeFiles {
+    session_index: usize,
+    mic_wav: Option<std::path::PathBuf>,
+    system_wav: Option<std::path::PathBuf>,
+}
+
 /// Kick off the background diarization pass for `meeting_id`. Returns
 /// immediately; all work happens on a dedicated thread. A meeting with no
-/// pending diarization WAVs (system-audio meeting, feature off, models
-/// missing at record time) is a silent no-op: no events, no logs beyond
-/// trace level.
+/// pending diarization WAVs (feature off, models missing at record time) is
+/// a silent no-op: no events, no logs beyond trace level.
 pub fn spawn_post_meeting_diarization(app: tauri::AppHandle, meeting_id: String) {
     let spawned = std::thread::Builder::new()
         .name("diarize-task".into())
@@ -57,10 +78,11 @@ pub fn spawn_post_meeting_diarization(app: tauri::AppHandle, meeting_id: String)
 }
 
 fn run(app: &tauri::AppHandle, meeting_id: &str) {
-    // Pending WAVs are the trigger: they only exist if this was a mic-only
-    // meeting recorded with the feature enabled and models present.
-    let session_wavs = pending_session_wavs(meeting_id);
-    if session_wavs.is_empty() {
+    // Pending WAVs are the trigger: they only exist if this meeting was
+    // recorded with speaker recognition enabled and models present.
+    let session_files = pending_session_diarize_files(meeting_id);
+    let total_passes = session_files.iter().map(SessionDiarizeFiles::pass_count).sum::<usize>();
+    if total_passes == 0 {
         return;
     }
 
@@ -74,7 +96,7 @@ fn run(app: &tauri::AppHandle, meeting_id: &str) {
 
     let state = app.state::<AppState>();
     let db = &state.db;
-    let total_sessions = session_wavs.len() as u32;
+    let total_sessions = total_passes as u32;
 
     let emit_progress = |done: u32, finished: bool, error: Option<String>| {
         let _ = DiarizationProgress {
@@ -88,7 +110,7 @@ fn run(app: &tauri::AppHandle, meeting_id: &str) {
     };
     emit_progress(0, false, None);
 
-    let outcome = diarize_meeting(db, meeting_id, &session_wavs, |done| {
+    let outcome = diarize_meeting(db, meeting_id, &session_files, |done| {
         emit_progress(done, false, None);
     });
 
@@ -113,39 +135,71 @@ fn run(app: &tauri::AppHandle, meeting_id: &str) {
     }
 }
 
-/// The tapped WAVs waiting for this meeting, as (session_index, path) pairs
-/// sorted by session index. Non-WAV or non-numeric entries are ignored.
-fn pending_session_wavs(meeting_id: &str) -> Vec<(usize, std::path::PathBuf)> {
+impl SessionDiarizeFiles {
+    fn pass_count(&self) -> usize {
+        usize::from(self.mic_wav.is_some()) + usize::from(self.system_wav.is_some())
+    }
+}
+
+/// Discover mic and/or system WAVs waiting for this meeting, grouped by
+/// session index and sorted. Recognizes `{index}-mic.wav`, `{index}-system.wav`,
+/// and legacy `{index}.wav` (mic-only from older builds).
+fn pending_session_diarize_files(meeting_id: &str) -> Vec<SessionDiarizeFiles> {
     let dir = diarize_tap::meeting_diarize_tmp_dir(meeting_id);
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
-    let mut wavs: Vec<(usize, std::path::PathBuf)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let index = path
-                .file_stem()?
-                .to_str()?
-                .parse::<usize>()
-                .ok()?;
-            (path.extension()?.to_str()? == "wav").then_some((index, path))
-        })
-        .collect();
-    wavs.sort_by_key(|(index, _)| *index);
-    wavs
+
+    let mut by_session: std::collections::BTreeMap<usize, SessionDiarizeFiles> =
+        std::collections::BTreeMap::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("wav") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let (session_index, lane) = match parse_diarize_wav_stem(stem) {
+            Some(parsed) => parsed,
+            None => continue,
+        };
+        let slot = by_session.entry(session_index).or_insert_with(|| SessionDiarizeFiles {
+            session_index,
+            mic_wav: None,
+            system_wav: None,
+        });
+        match lane {
+            DiarizationPass::Mic => slot.mic_wav = Some(path),
+            DiarizationPass::System => slot.system_wav = Some(path),
+        }
+    }
+
+    by_session.into_values().collect()
+}
+
+/// Parse a diarization WAV stem into `(session_index, lane)`.
+fn parse_diarize_wav_stem(stem: &str) -> Option<(usize, DiarizationPass)> {
+    if let Some(index_str) = stem.strip_suffix("-mic") {
+        return Some((index_str.parse().ok()?, DiarizationPass::Mic));
+    }
+    if let Some(index_str) = stem.strip_suffix("-system") {
+        return Some((index_str.parse().ok()?, DiarizationPass::System));
+    }
+    stem.parse::<usize>().ok().map(|index| (index, DiarizationPass::Mic))
 }
 
 /// Diarize every tapped session of one meeting and write the resulting
-/// speaker labels back. Sessions are processed in order and independently:
-/// a failed session is logged and skipped (its segments stay unlabeled), it
-/// does not abort the rest. All segment updates land in one transaction at
+/// speaker labels back. Each session may run a mic pass, a system pass, or
+/// both; a failed pass is logged and skipped (its segments stay unlabeled),
+/// it does not abort the rest. All segment updates land in one transaction at
 /// the end. Returns how many segments were relabeled.
 fn diarize_meeting(
     db: &Database,
     meeting_id: &str,
-    session_wavs: &[(usize, std::path::PathBuf)],
-    mut on_session_done: impl FnMut(u32),
+    session_files: &[SessionDiarizeFiles],
+    mut on_pass_done: impl FnMut(u32),
 ) -> Result<usize, String> {
     let settings = crate::settings::AppSettings::load(db)?;
     let meeting = db.load_meeting(meeting_id)?;
@@ -154,16 +208,48 @@ fn diarize_meeting(
     cfg.max_speakers = settings.diarize_max_speakers.map(|n| n as usize);
 
     let mut assignments: Vec<(u64, Speaker)> = Vec::new();
-    for (done, (session_index, wav_path)) in session_wavs.iter().enumerate() {
-        match diarize_session(db, &meeting, *session_index, wav_path, &cfg) {
-            Ok(mut session_assignments) => assignments.append(&mut session_assignments),
-            Err(e) => warn!(
-                meeting_id = %meeting_id,
-                session = session_index,
-                "Diarization failed for one session (its segments stay unlabeled): {e}"
-            ),
+    let mut done_passes = 0u32;
+    for session in session_files {
+        if let Some(wav_path) = &session.mic_wav {
+            match diarize_session(
+                db,
+                &meeting,
+                session.session_index,
+                wav_path,
+                &cfg,
+                DiarizationPass::Mic,
+            ) {
+                Ok(mut session_assignments) => assignments.append(&mut session_assignments),
+                Err(e) => warn!(
+                    meeting_id = %meeting_id,
+                    session = session.session_index,
+                    pass = "mic",
+                    "Diarization failed for one session (its segments stay unlabeled): {e}"
+                ),
+            }
+            done_passes += 1;
+            on_pass_done(done_passes);
         }
-        on_session_done(done as u32 + 1);
+        if let Some(wav_path) = &session.system_wav {
+            match diarize_session(
+                db,
+                &meeting,
+                session.session_index,
+                wav_path,
+                &cfg,
+                DiarizationPass::System,
+            ) {
+                Ok(mut session_assignments) => assignments.append(&mut session_assignments),
+                Err(e) => warn!(
+                    meeting_id = %meeting_id,
+                    session = session.session_index,
+                    pass = "system",
+                    "Diarization failed for one session (its segments stay unlabeled): {e}"
+                ),
+            }
+            done_passes += 1;
+            on_pass_done(done_passes);
+        }
     }
 
     db.set_segment_speakers(meeting_id, &assignments)
@@ -179,6 +265,7 @@ fn diarize_session(
     session_index: usize,
     wav_path: &std::path::Path,
     cfg: &DiarizeConfig,
+    pass: DiarizationPass,
 ) -> Result<Vec<(u64, Speaker)>, String> {
     let session = meeting
         .recording_sessions
@@ -240,17 +327,12 @@ fn diarize_session(
     // Segment times restart at zero for each recording session, and so does
     // the tapped WAV, so session-local segment spans line up with diarized
     // ranges directly.
-    let start = session.start_segment_index as usize;
-    let end = (session.end_segment_index as usize).min(meeting.segments.len());
-    if start >= end {
-        return Ok(Vec::new());
-    }
     let spans: Vec<SegmentSpan> = meeting.segments[start..end]
         .iter()
         .map(|seg| SegmentSpan {
             start_s: seg.start_time,
             end_s: seg.end_time,
-            has_speaker: seg.speaker.is_some(),
+            has_speaker: speaker_label_is_locked(seg.speaker.as_ref(), pass),
         })
         .collect();
     let cluster_per_span = assign_by_overlap(&result.segments, &spans);
@@ -265,14 +347,57 @@ fn diarize_session(
         .collect())
 }
 
+/// Mic pass locks Them and persistent speakers; system pass locks Me and
+/// persistent speakers. Unlabeled segments on the target lane are fair game.
+fn speaker_label_is_locked(speaker: Option<&Speaker>, pass: DiarizationPass) -> bool {
+    match pass {
+        DiarizationPass::Mic => {
+            matches!(speaker, Some(Speaker::Them) | Some(Speaker::Persistent(_)))
+        }
+        DiarizationPass::System => {
+            matches!(speaker, Some(Speaker::Me) | Some(Speaker::Persistent(_)))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_helpers::fixtures::{sample_meeting, test_db};
 
     #[test]
-    fn pending_session_wavs_on_missing_dir_is_empty() {
-        assert!(pending_session_wavs("no-such-meeting-id-for-tests").is_empty());
+    fn pending_session_diarize_files_on_missing_dir_is_empty() {
+        assert!(pending_session_diarize_files("no-such-meeting-id-for-tests").is_empty());
+    }
+
+    #[test]
+    fn parse_diarize_wav_stem_recognizes_mic_system_and_legacy() {
+        assert_eq!(
+            parse_diarize_wav_stem("2-mic"),
+            Some((2, DiarizationPass::Mic))
+        );
+        assert_eq!(
+            parse_diarize_wav_stem("2-system"),
+            Some((2, DiarizationPass::System))
+        );
+        assert_eq!(parse_diarize_wav_stem("2"), Some((2, DiarizationPass::Mic)));
+        assert_eq!(parse_diarize_wav_stem("2-other"), None);
+    }
+
+    #[test]
+    fn speaker_label_lock_respects_pass() {
+        assert!(speaker_label_is_locked(Some(&Speaker::Them), DiarizationPass::Mic));
+        assert!(!speaker_label_is_locked(Some(&Speaker::Me), DiarizationPass::Mic));
+        assert!(speaker_label_is_locked(Some(&Speaker::Me), DiarizationPass::System));
+        assert!(!speaker_label_is_locked(Some(&Speaker::Them), DiarizationPass::System));
+        assert!(speaker_label_is_locked(
+            Some(&Speaker::Persistent(1)),
+            DiarizationPass::Mic
+        ));
+        assert!(speaker_label_is_locked(
+            Some(&Speaker::Persistent(1)),
+            DiarizationPass::System
+        ));
     }
 
     /// End-to-end match-then-assign against the real downloaded models and a
@@ -327,6 +452,7 @@ mod tests {
             0,
             std::path::Path::new("/tmp/diarize_test.wav"),
             &cfg,
+            DiarizationPass::Mic,
         )
         .expect("diarize session");
         assert!(!assignments.is_empty(), "expected at least one labeled segment");
@@ -358,6 +484,7 @@ mod tests {
             0,
             std::path::Path::new("/tmp/diarize_test.wav"),
             &cfg,
+            DiarizationPass::Mic,
         )
         .expect("second diarize session");
         let speakers_after = db.list_speakers().unwrap().len();

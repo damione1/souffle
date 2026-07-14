@@ -459,20 +459,17 @@ mod paragraphs {
     /// speakers (not just Me/Them).
     ///
     /// Without a pause, a monologue would otherwise absorb everything
-    /// indefinitely, so a second speaker's interjection would render far
-    /// below the point in the monologue it actually responded to. To keep
-    /// interjections anchored near their moment: opening a new turn marks
-    /// every other speaker's currently open turn as interrupted. An
-    /// interrupted turn still keeps absorbing segments (crosstalk should
-    /// stay readable), but closes as soon as one of them ends a sentence, so
-    /// the speaker's next segment opens a fresh turn that sorts after the
-    /// interjection instead of the interjection trailing behind an
-    /// ever-growing paragraph. A turn that never hits a sentence end (no
-    /// punctuation) still only closes on pause, same as before.
+    /// indefinitely. Opening a new turn for speaker B:
+    /// - If B starts clearly after A's last end (>= 350ms handoff), A's turn
+    ///   closes immediately so A's later speech opens a fresh line below.
+    /// - If B overlaps A or starts within 350ms (crosstalk / tight
+    ///   interjection), A is marked interrupted and keeps absorbing until a
+    ///   sentence end.
     fn cluster_into_turns<'a>(
         sorted: Vec<&'a TranscriptionSegment>,
         pause_threshold: f64,
     ) -> Vec<&'a TranscriptionSegment> {
+        const HANDOFF_GAP_S: f64 = 0.35;
         struct Turn<'a> {
             start: f64,
             last_end: f64,
@@ -509,8 +506,15 @@ mod paragraphs {
                 turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
                 let new_idx = turns.len() - 1;
                 open_turns.insert(speaker, new_idx);
-                for (&other_speaker, &idx) in open_turns.iter() {
-                    if other_speaker != speaker {
+                let handoffs: Vec<(Speaker, usize)> = open_turns
+                    .iter()
+                    .filter(|(other, _)| **other != speaker)
+                    .map(|(&other, &idx)| (other, idx))
+                    .collect();
+                for (other_speaker, idx) in handoffs {
+                    if turns[new_idx].start >= turns[idx].last_end + HANDOFF_GAP_S {
+                        open_turns.remove(&other_speaker);
+                    } else {
                         turns[idx].interrupted = true;
                     }
                 }
@@ -1114,16 +1118,16 @@ mod tests {
     }
 
     #[test]
-    fn unpunctuated_monologue_absorbing_an_interjection_is_unchanged() {
-        // Me never produces sentence-final punctuation, so the interrupted
-        // flag never finds a sentence end to close on: behavior is
-        // unchanged, the turn keeps growing until a real pause.
+    fn unpunctuated_sequential_handoff_opens_a_new_line() {
+        // Me never produces sentence-final punctuation. Them starts clearly
+        // after Me's last end (>= 350ms handoff), so Me closes immediately
+        // and later Me speech opens a fresh turn below.
         let segments = vec![
             diarized_segment("so basically", 0.0, 0.5, Speaker::Me),
             diarized_segment("we were thinking", 0.6, 1.1, Speaker::Me),
-            diarized_segment("right", 1.2, 1.7, Speaker::Them),
-            diarized_segment("about moving the launch date", 1.8, 2.3, Speaker::Me),
-            diarized_segment("to next quarter", 2.4, 2.9, Speaker::Me),
+            diarized_segment("right", 1.6, 2.1, Speaker::Them),
+            diarized_segment("about moving the launch date", 2.2, 2.7, Speaker::Me),
+            diarized_segment("to next quarter", 2.8, 3.3, Speaker::Me),
         ];
         let result = paragraphs::group_into_paragraphs(&segments, 1.5);
         let texts: Vec<(Option<Speaker>, &str)> =
@@ -1131,8 +1135,9 @@ mod tests {
         assert_eq!(
             texts,
             vec![
-                (Some(Speaker::Me), "so basically we were thinking about moving the launch date to next quarter"),
+                (Some(Speaker::Me), "so basically we were thinking"),
                 (Some(Speaker::Them), "right"),
+                (Some(Speaker::Me), "about moving the launch date to next quarter"),
             ]
         );
     }

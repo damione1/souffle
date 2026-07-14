@@ -1,12 +1,14 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import type { MeetingSpeaker } from "../../../types";
+  import { fixedPopoverStyle, portal, type AnchorRect } from "../../../utils";
 
   let {
     speakerId,
     speakerName,
     meetingSpeakers,
     allSpeakers,
+    anchorRect,
     onClose,
     onRename,
     onRetag,
@@ -15,6 +17,7 @@
     speakerName: string;
     meetingSpeakers: MeetingSpeaker[];
     allSpeakers: MeetingSpeaker[];
+    anchorRect: AnchorRect;
     onClose: () => void;
     onRename: (name: string) => void | Promise<void>;
     onRetag: (options: {
@@ -30,6 +33,10 @@
   let targetSpeakerId = $state<number | null>(null);
   let newSpeakerName = $state("");
   let isSaving = $state(false);
+
+  const panelStyle = $derived(
+    fixedPopoverStyle(anchorRect, { width: 288, estimatedHeight: 360 }),
+  );
 
   $effect(() => {
     nameDraft = speakerName;
@@ -97,85 +104,90 @@
   }
 </script>
 
-<button
-  type="button"
-  class="fixed inset-0 z-10 cursor-default"
-  aria-label={$t("ui.cancel")}
-  onclick={onClose}
-></button>
+<div use:portal>
+  <button
+    type="button"
+    class="fixed inset-0 z-40 cursor-default"
+    aria-label={$t("ui.cancel")}
+    onclick={onClose}
+  ></button>
 
-<div class="absolute left-0 top-full z-20 mt-1.5 w-72 rounded-[11px] bg-surface-1 p-3 shadow-lg outline-1 outline-ghost-border">
-  <p class="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">
-    {$t("speaker_manage.rename_heading")}
-  </p>
-  <div class="flex gap-2">
-    <input
-      bind:value={nameDraft}
-      class="field-input flex-1 text-[13px]"
-      aria-label={$t("speaker_manage.rename_label")}
-      onkeydown={(e) => {
-        if (e.key === "Enter") void saveRename();
-        if (e.key === "Escape") onClose();
-      }}
-    />
-    <button class="btn px-2.5 py-1 text-[12.5px]" disabled={isSaving} onclick={() => void saveRename()}>
-      {$t("speaker_manage.save_name")}
+  <div
+    class="fixed z-50 rounded-[11px] bg-surface-1 p-3 shadow-lg outline-1 outline-ghost-border"
+    style={panelStyle}
+  >
+    <p class="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">
+      {$t("speaker_manage.rename_heading")}
+    </p>
+    <div class="flex gap-2">
+      <input
+        bind:value={nameDraft}
+        class="field-input flex-1 text-[13px]"
+        aria-label={$t("speaker_manage.rename_label")}
+        onkeydown={(e) => {
+          if (e.key === "Enter") void saveRename();
+          if (e.key === "Escape") onClose();
+        }}
+      />
+      <button class="btn px-2.5 py-1 text-[12.5px]" disabled={isSaving} onclick={() => void saveRename()}>
+        {$t("speaker_manage.save_name")}
+      </button>
+    </div>
+
+    <div class="my-3 h-px bg-ghost-border"></div>
+
+    <p class="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">
+      {$t("speaker_manage.retag_heading")}
+    </p>
+
+    <fieldset class="m-0 mb-2 flex flex-col gap-1.5 border-0 p-0">
+      <label class="flex items-center gap-2 text-[12.5px] text-text-secondary">
+        <input type="radio" bind:group={retagScope} value="turn" />
+        {$t("speaker_manage.scope_turn")}
+      </label>
+      <label class="flex items-center gap-2 text-[12.5px] text-text-secondary">
+        <input type="radio" bind:group={retagScope} value="meeting" />
+        {$t("speaker_manage.scope_meeting")}
+      </label>
+    </fieldset>
+
+    <div class="mb-2 flex flex-col gap-1.5">
+      <label class="flex items-center gap-2 text-[12.5px] text-text-secondary">
+        <input type="radio" bind:group={targetMode} value="existing" />
+        {$t("speaker_manage.pick_existing")}
+      </label>
+      {#if targetMode === "existing"}
+        <select bind:value={targetSpeakerId} class="field-select text-[12.5px]" disabled={pickerSpeakers.length === 0}>
+          {#if pickerSpeakers.length === 0}
+            <option value={null}>{$t("speaker_manage.no_other_speakers")}</option>
+          {:else}
+            {#each pickerSpeakers as speaker (speaker.id)}
+              <option value={speaker.id}>{speaker.name}</option>
+            {/each}
+          {/if}
+        </select>
+      {/if}
+
+      <label class="flex items-center gap-2 text-[12.5px] text-text-secondary">
+        <input type="radio" bind:group={targetMode} value="new" />
+        {$t("speaker_manage.new_speaker")}
+      </label>
+      {#if targetMode === "new"}
+        <input
+          bind:value={newSpeakerName}
+          class="field-input text-[13px]"
+          placeholder={$t("speaker_manage.new_speaker_placeholder")}
+          aria-label={$t("speaker_manage.new_speaker_placeholder")}
+        />
+      {/if}
+    </div>
+
+    <button
+      class="btn btn-primary w-full text-[12.5px]"
+      disabled={isSaving || (targetMode === "existing" && pickerSpeakers.length === 0)}
+      onclick={() => void applyRetag()}
+    >
+      {$t("speaker_manage.apply_retag")}
     </button>
   </div>
-
-  <div class="my-3 h-px bg-ghost-border"></div>
-
-  <p class="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">
-    {$t("speaker_manage.retag_heading")}
-  </p>
-
-  <fieldset class="m-0 mb-2 flex flex-col gap-1.5 border-0 p-0">
-    <label class="flex items-center gap-2 text-[12.5px] text-text-secondary">
-      <input type="radio" bind:group={retagScope} value="turn" />
-      {$t("speaker_manage.scope_turn")}
-    </label>
-    <label class="flex items-center gap-2 text-[12.5px] text-text-secondary">
-      <input type="radio" bind:group={retagScope} value="meeting" />
-      {$t("speaker_manage.scope_meeting")}
-    </label>
-  </fieldset>
-
-  <div class="mb-2 flex flex-col gap-1.5">
-    <label class="flex items-center gap-2 text-[12.5px] text-text-secondary">
-      <input type="radio" bind:group={targetMode} value="existing" />
-      {$t("speaker_manage.pick_existing")}
-    </label>
-    {#if targetMode === "existing"}
-      <select bind:value={targetSpeakerId} class="field-select text-[12.5px]" disabled={pickerSpeakers.length === 0}>
-        {#if pickerSpeakers.length === 0}
-          <option value={null}>{$t("speaker_manage.no_other_speakers")}</option>
-        {:else}
-          {#each pickerSpeakers as speaker (speaker.id)}
-            <option value={speaker.id}>{speaker.name}</option>
-          {/each}
-        {/if}
-      </select>
-    {/if}
-
-    <label class="flex items-center gap-2 text-[12.5px] text-text-secondary">
-      <input type="radio" bind:group={targetMode} value="new" />
-      {$t("speaker_manage.new_speaker")}
-    </label>
-    {#if targetMode === "new"}
-      <input
-        bind:value={newSpeakerName}
-        class="field-input text-[13px]"
-        placeholder={$t("speaker_manage.new_speaker_placeholder")}
-        aria-label={$t("speaker_manage.new_speaker_placeholder")}
-      />
-    {/if}
-  </div>
-
-  <button
-    class="btn btn-primary w-full text-[12.5px]"
-    disabled={isSaving || (targetMode === "existing" && pickerSpeakers.length === 0)}
-    onclick={() => void applyRetag()}
-  >
-    {$t("speaker_manage.apply_retag")}
-  </button>
 </div>

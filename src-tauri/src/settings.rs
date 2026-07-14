@@ -51,6 +51,8 @@ const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
 const DIARIZE_ENABLED_KEY: &str = "diarize_enabled";
+const DIARIZE_MIC_KEY: &str = "diarize_mic";
+const DIARIZE_SYSTEM_AUDIO_KEY: &str = "diarize_system_audio";
 const DIARIZE_MAX_SPEAKERS_KEY: &str = "diarize_max_speakers";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
@@ -199,12 +201,17 @@ pub struct AppSettings {
     pub summary_templates: Vec<SummaryTemplate>,
     /// App version the user has acknowledged (What's New / post-update dialog).
     pub last_seen_version: String,
-    /// Offline speaker recognition for mic-only meetings: after a mic-only
-    /// meeting stops, label its segments with a persistent, cross-meeting
-    /// speaker identity. Off by default (extra local inference + on-disk
-    /// model download); meetings with a system-audio lane are unaffected
-    /// regardless of this setting (Me/Them attribution stays authoritative).
+    /// Offline speaker recognition after a meeting stops. Off by default
+    /// (extra local inference + on-disk model download). When on, at least
+    /// one of `diarize_mic` / `diarize_system_audio` must be enabled.
     pub diarize_enabled: bool,
+    /// Run speaker recognition on microphone (Me-lane) audio after a meeting
+    /// stops. On by default when speaker recognition is enabled.
+    pub diarize_mic: bool,
+    /// Run speaker recognition on system-audio (Them-lane) capture after a
+    /// meeting stops. Only meaningful when `capture_system_audio` is on.
+    /// Off by default.
+    pub diarize_system_audio: bool,
     /// Optional upper bound on how many distinct speakers a single meeting
     /// can be split into. `None` means unbounded (the clustering stage
     /// decides on its own).
@@ -262,6 +269,8 @@ impl Default for AppSettings {
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: String::new(),
             diarize_enabled: false,
+            diarize_mic: true,
+            diarize_system_audio: false,
             diarize_max_speakers: None,
         }
     }
@@ -457,6 +466,14 @@ impl AppSettings {
         if let Some(diarize_enabled) = read_json_setting::<bool>(db, DIARIZE_ENABLED_KEY)? {
             settings.diarize_enabled = diarize_enabled;
         }
+        if let Some(diarize_mic) = read_json_setting::<bool>(db, DIARIZE_MIC_KEY)? {
+            settings.diarize_mic = diarize_mic;
+        }
+        if let Some(diarize_system_audio) =
+            read_json_setting::<bool>(db, DIARIZE_SYSTEM_AUDIO_KEY)?
+        {
+            settings.diarize_system_audio = diarize_system_audio;
+        }
         if let Some(diarize_max_speakers) =
             read_json_setting::<Option<u32>>(db, DIARIZE_MAX_SPEAKERS_KEY)?
         {
@@ -648,6 +665,16 @@ impl AppSettings {
             && !DIARIZE_MAX_SPEAKERS_RANGE.contains(&max_speakers)
         {
             normalized.diarize_max_speakers = None;
+        }
+
+        if !normalized.capture_system_audio {
+            normalized.diarize_system_audio = false;
+        }
+        if normalized.diarize_enabled
+            && !normalized.diarize_mic
+            && !normalized.diarize_system_audio
+        {
+            normalized.diarize_mic = true;
         }
 
         normalized.dictation_polish_template_id = normalized
@@ -852,6 +879,8 @@ impl AppSettings {
         write_json_setting(db, SUMMARY_TEMPLATES_KEY, &normalized.summary_templates)?;
         write_json_setting(db, LAST_SEEN_VERSION_KEY, &normalized.last_seen_version)?;
         write_json_setting(db, DIARIZE_ENABLED_KEY, &normalized.diarize_enabled)?;
+        write_json_setting(db, DIARIZE_MIC_KEY, &normalized.diarize_mic)?;
+        write_json_setting(db, DIARIZE_SYSTEM_AUDIO_KEY, &normalized.diarize_system_audio)?;
         write_json_setting(db, DIARIZE_MAX_SPEAKERS_KEY, &normalized.diarize_max_speakers)?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
@@ -1024,6 +1053,8 @@ mod tests {
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: "0.0.9".into(),
             diarize_enabled: true,
+            diarize_mic: true,
+            diarize_system_audio: false,
             diarize_max_speakers: Some(4),
         };
 
@@ -1233,7 +1264,31 @@ mod tests {
     #[test]
     fn diarize_enabled_defaults_false() {
         assert!(!AppSettings::default().diarize_enabled);
+        assert!(AppSettings::default().diarize_mic);
+        assert!(!AppSettings::default().diarize_system_audio);
         assert_eq!(AppSettings::default().diarize_max_speakers, None);
+    }
+
+    #[test]
+    fn diarize_sub_options_force_mic_when_both_off() {
+        let s = AppSettings {
+            diarize_enabled: true,
+            diarize_mic: false,
+            diarize_system_audio: false,
+            ..AppSettings::default()
+        };
+        assert!(s.sanitize_for_save().unwrap().diarize_mic);
+    }
+
+    #[test]
+    fn diarize_system_audio_cleared_without_system_capture() {
+        let s = AppSettings {
+            diarize_enabled: true,
+            diarize_system_audio: true,
+            capture_system_audio: false,
+            ..AppSettings::default()
+        };
+        assert!(!s.sanitize_for_save().unwrap().diarize_system_audio);
     }
 
     #[test]
@@ -1262,12 +1317,16 @@ mod tests {
         let (db, _dir) = test_db();
         let settings = AppSettings {
             diarize_enabled: true,
+            diarize_mic: true,
+            diarize_system_audio: true,
             diarize_max_speakers: Some(3),
             ..AppSettings::default()
         };
         settings.save(&db).expect("save settings");
         let loaded = AppSettings::load(&db).expect("load settings");
         assert!(loaded.diarize_enabled);
+        assert!(loaded.diarize_mic);
+        assert!(loaded.diarize_system_audio);
         assert_eq!(loaded.diarize_max_speakers, Some(3));
     }
 

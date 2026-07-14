@@ -495,6 +495,46 @@ img {
   flex-shrink: 0;
 }
 
+/* ─── Settings tabs ─── */
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
+  border-radius: var(--radius-card);
+  outline: 1px solid var(--color-ghost-border);
+}
+
+.settings-tab {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 0.5rem 0.75rem;
+  border-radius: calc(var(--radius-card) - 2px);
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.settings-tab:hover {
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-surface-2) 70%, transparent);
+}
+
+.settings-tab-active {
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-card);
+}
+
+.settings-tab-active:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
+}
+
 /* ─── Settings groups: uppercase label above a card of divided rows ─── */
 .settings-group {
   display: flex;

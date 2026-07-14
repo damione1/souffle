@@ -43,6 +43,8 @@
     meetingMaxDurationMinutes,
     meetingTranscriptionLanguage,
     diarizeEnabled,
+    diarizeMic,
+    diarizeSystemAudio,
     diarizeMaxSpeakers,
     diarizeDownloadState,
     diarizeDownloadedBytes,
@@ -58,6 +60,8 @@
     onMeetingMaxDurationMinutesChange,
     onMeetingTranscriptionLanguageChange,
     onDiarizeEnabledChange,
+    onDiarizeMicChange,
+    onDiarizeSystemAudioChange,
     onDiarizeMaxSpeakersChange,
   }: {
     audioDevices: AudioInputDevice[];
@@ -74,6 +78,8 @@
     meetingMaxDurationMinutes: number;
     meetingTranscriptionLanguage: (typeof meetingLanguageOptions)[number];
     diarizeEnabled: boolean;
+    diarizeMic: boolean;
+    diarizeSystemAudio: boolean;
     diarizeMaxSpeakers: number | null;
     diarizeDownloadState: "idle" | "downloading" | "error";
     diarizeDownloadedBytes: number;
@@ -89,6 +95,8 @@
     onMeetingMaxDurationMinutesChange: (event: Event) => void | Promise<void>;
     onMeetingTranscriptionLanguageChange: (event: Event) => void | Promise<void>;
     onDiarizeEnabledChange: (event: Event) => void | Promise<void>;
+    onDiarizeMicChange: (event: Event) => void | Promise<void>;
+    onDiarizeSystemAudioChange: (event: Event) => void | Promise<void>;
     onDiarizeMaxSpeakersChange: (event: Event) => void | Promise<void>;
   } = $props();
 </script>
@@ -175,6 +183,40 @@
   {/if}
 
   {#if diarizeEnabled}
+    <SettingsField
+      label={$t("settings_audio.diarize_mic")}
+      description={$t("settings_audio.diarize_mic_desc")}
+    >
+      {#snippet control()}
+        <input
+          type="checkbox"
+          checked={diarizeMic}
+          disabled={diarizeDownloadState === "downloading"}
+          onchange={onDiarizeMicChange}
+          class="switch"
+          aria-label={$t("settings_audio.diarize_mic")}
+        />
+      {/snippet}
+    </SettingsField>
+
+    <SettingsField
+      label={$t("settings_audio.diarize_system_audio")}
+      description={captureSystemAudio
+        ? $t("settings_audio.diarize_system_audio_desc")
+        : $t("settings_audio.diarize_system_audio_requires_capture")}
+    >
+      {#snippet control()}
+        <input
+          type="checkbox"
+          checked={diarizeSystemAudio}
+          disabled={!captureSystemAudio || diarizeDownloadState === "downloading"}
+          onchange={onDiarizeSystemAudioChange}
+          class="switch"
+          aria-label={$t("settings_audio.diarize_system_audio")}
+        />
+      {/snippet}
+    </SettingsField>
+
     <SettingsField
       label={$t("settings_audio.diarize_max_speakers_label")}
       description={$t("settings_audio.diarize_max_speakers_desc")}

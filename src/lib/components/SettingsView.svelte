@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
-  import AdvancedSettingsSection from "../features/settings/components/AdvancedSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
   import CalendarSettingsSection from "../features/settings/components/CalendarSettingsSection.svelte";
   import DataSettingsSection from "../features/settings/components/DataSettingsSection.svelte";
@@ -22,7 +21,18 @@
   import ConfirmAction from "./ui/ConfirmAction.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
+  type SettingsTab = "transcription" | "audio" | "interface" | "meetings" | "system";
+
+  const TABS: { id: SettingsTab; labelKey: string }[] = [
+    { id: "transcription", labelKey: "settings.tab_transcription" },
+    { id: "audio", labelKey: "settings.tab_audio" },
+    { id: "interface", labelKey: "settings.tab_interface" },
+    { id: "meetings", labelKey: "settings.tab_meetings" },
+    { id: "system", labelKey: "settings.tab_system" },
+  ];
+
   const controller = createSettingsController();
+  let activeTab = $state<SettingsTab>("transcription");
 
   let selectedTranscriptionLabel = $derived(
     formatSelectedTranscriptionLabel(
@@ -91,179 +101,211 @@
     <StatusBanner message={controller.statusMessage} />
   {/if}
 
-  <ModelSettingsSection
-    catalog={controller.catalog}
-    selectedEngineId={controller.app.settings.transcription_engine_id}
-    selectedModelId={controller.app.settings.transcription_model_id}
-    runtimePhase={controller.runtimePhase}
-    operationState={controller.modelOperationState}
-    downloadedBytes={controller.downloadedBytes}
-    downloadTotalBytes={controller.downloadTotalBytes}
-    downloadFile={controller.downloadFile}
-    unloadTimeoutMinutes={controller.app.settings.model_unload_timeout_minutes}
-    onSelectModel={controller.selectModelOption}
-    onUnloadTimeoutChange={controller.onModelUnloadTimeoutChange}
-  />
+  <div
+    class="settings-tabs"
+    role="tablist"
+    aria-label={$t("settings.title")}
+  >
+    {#each TABS as tab}
+      <button
+        type="button"
+        role="tab"
+        id={`settings-tab-${tab.id}`}
+        aria-selected={activeTab === tab.id}
+        aria-controls={`settings-panel-${tab.id}`}
+        class="settings-tab"
+        class:settings-tab-active={activeTab === tab.id}
+        onclick={() => { activeTab = tab.id; }}
+      >
+        {$t(tab.labelKey)}
+      </button>
+    {/each}
+  </div>
 
-  <MicrophoneSettingsSection
-    audioDevices={controller.audioDevices}
-    inputPriority={controller.app.settings.input_priority}
-    selectedDevice={controller.app.selectedDevice}
-    pinUnavailable={controller.pinUnavailable}
-    allowBluetoothMic={controller.app.settings.allow_bluetooth_mic}
-    onDeviceChange={controller.onDeviceChange}
-    onAllowBluetoothMicChange={controller.onAllowBluetoothMicChange}
-    onRefreshDevices={controller.refreshDevices}
-    onMoveDevice={controller.onMoveDevice}
-    onToggleHidden={controller.onToggleHidden}
-  />
+  <div
+    role="tabpanel"
+    id={`settings-panel-${activeTab}`}
+    aria-labelledby={`settings-tab-${activeTab}`}
+    class="flex flex-col gap-[22px]"
+  >
+    {#if activeTab === "transcription"}
+      <ModelSettingsSection
+        catalog={controller.catalog}
+        selectedEngineId={controller.app.settings.transcription_engine_id}
+        selectedModelId={controller.app.settings.transcription_model_id}
+        runtimePhase={controller.runtimePhase}
+        operationState={controller.modelOperationState}
+        downloadedBytes={controller.downloadedBytes}
+        downloadTotalBytes={controller.downloadTotalBytes}
+        downloadFile={controller.downloadFile}
+        unloadTimeoutMinutes={controller.app.settings.model_unload_timeout_minutes}
+        onSelectModel={controller.selectModelOption}
+        onUnloadTimeoutChange={controller.onModelUnloadTimeoutChange}
+      />
 
-  <InterfaceSettingsSection
-    theme={controller.app.settings.theme}
-    locale={controller.app.settings.locale}
-    autoPaste={controller.app.settings.auto_paste}
-    pasteDelayMs={controller.app.settings.paste_delay_ms}
-    pasteMethod={controller.app.settings.paste_method}
-    toggleShortcut={controller.toggleShortcut}
-    pttShortcut={controller.pttShortcut}
-    recordingField={controller.recordingField}
-    shortcutError={controller.shortcutError}
-    onThemeChange={controller.onThemeChange}
-    onLocaleChange={controller.onLocaleChange}
-    onAutoPasteChange={controller.onAutoPasteChange}
-    onPasteDelayChange={controller.onPasteDelayChange}
-    onPasteMethodChange={controller.onPasteMethodChange}
-    onStartRecording={controller.startRecording}
-    onClearShortcut={controller.clearShortcut}
-    formatShortcut={controller.formatShortcut}
-  />
+      <DictationPolishSettingsSection
+        enabled={controller.app.settings.dictation_polish_enabled}
+        templateId={controller.app.settings.dictation_polish_template_id}
+        templates={controller.app.settings.dictation_polish_templates}
+        providerAvailable={controller.summaryProviderAvailable}
+        onEnabledChange={controller.onDictationPolishEnabledChange}
+        onTemplateChange={controller.onDictationPolishTemplateChange}
+        onPromptChange={controller.onDictationPolishPromptChange}
+      />
 
-  <DictationPolishSettingsSection
-    enabled={controller.app.settings.dictation_polish_enabled}
-    templateId={controller.app.settings.dictation_polish_template_id}
-    templates={controller.app.settings.dictation_polish_templates}
-    providerAvailable={controller.summaryProviderAvailable}
-    onEnabledChange={controller.onDictationPolishEnabledChange}
-    onTemplateChange={controller.onDictationPolishTemplateChange}
-    onPromptChange={controller.onDictationPolishPromptChange}
-  />
+      <DictionarySettingsSection
+        entries={controller.dictionaryEntries}
+        onAdd={controller.handleAddDictionaryEntry}
+        onDelete={controller.handleDeleteDictionaryEntry}
+      />
+    {:else if activeTab === "audio"}
+      <MicrophoneSettingsSection
+        audioDevices={controller.audioDevices}
+        inputPriority={controller.app.settings.input_priority}
+        selectedDevice={controller.app.selectedDevice}
+        pinUnavailable={controller.pinUnavailable}
+        allowBluetoothMic={controller.app.settings.allow_bluetooth_mic}
+        onDeviceChange={controller.onDeviceChange}
+        onAllowBluetoothMicChange={controller.onAllowBluetoothMicChange}
+        onRefreshDevices={controller.refreshDevices}
+        onMoveDevice={controller.onMoveDevice}
+        onToggleHidden={controller.onToggleHidden}
+      />
 
-  <FeedbackSoundsSettingsSection
-    enabled={controller.app.settings.feedback_sounds_enabled}
-    volume={controller.app.settings.feedback_sounds_volume}
-    onEnabledChange={controller.onFeedbackSoundsEnabledChange}
-    onVolumeChange={controller.onFeedbackSoundsVolumeChange}
-  />
-
-  <DictionarySettingsSection
-    entries={controller.dictionaryEntries}
-    onAdd={controller.handleAddDictionaryEntry}
-    onDelete={controller.handleDeleteDictionaryEntry}
-  />
-
-  <CalendarSettingsSection
-    enabled={controller.app.settings.calendar_integration_enabled}
-    permission={controller.calendarPermission}
-    calendars={controller.calendars}
-    selectedIds={controller.app.settings.calendar_selected_ids}
-    reminderMinutes={controller.app.settings.calendar_reminder_minutes}
-    autostartEnabled={controller.app.settings.calendar_autostart_enabled}
-    onEnabledChange={controller.onCalendarEnabledChange}
-    onToggleCalendar={controller.toggleCalendarSelected}
-    onReminderMinutesChange={controller.onCalendarReminderMinutesChange}
-    onAutostartEnabledChange={controller.onCalendarAutostartEnabledChange}
-  />
-
-  <AdvancedSettingsSection>
-    <AudioSettingsSection
-      audioDevices={controller.audioDevices}
-      captureSystemAudio={controller.app.settings.capture_system_audio}
-      systemAudioSupported={controller.systemAudioSupported}
-      isLaptop={controller.isLaptop}
-      clamshellAudioDevice={controller.app.settings.clamshell_audio_device}
-      vadEnabled={controller.app.settings.vad_enabled}
-      fillerRemoval={controller.app.settings.filler_removal}
-      stutterCollapse={controller.app.settings.stutter_collapse}
-      dictionaryCorrection={controller.app.settings.dictionary_correction}
-      meetingAutostopEnabled={controller.app.settings.meeting_autostop_enabled}
-      meetingAutostopMinutes={controller.app.settings.meeting_autostop_minutes}
-      meetingMaxDurationMinutes={controller.app.settings.meeting_max_duration_minutes}
-      meetingTranscriptionLanguage={controller.app.settings.meeting_transcription_language}
+      <AudioSettingsSection
+        audioDevices={controller.audioDevices}
+        captureSystemAudio={controller.app.settings.capture_system_audio}
+        systemAudioSupported={controller.systemAudioSupported}
+        isLaptop={controller.isLaptop}
+        clamshellAudioDevice={controller.app.settings.clamshell_audio_device}
+        vadEnabled={controller.app.settings.vad_enabled}
+        fillerRemoval={controller.app.settings.filler_removal}
+        stutterCollapse={controller.app.settings.stutter_collapse}
+        dictionaryCorrection={controller.app.settings.dictionary_correction}
+        meetingAutostopEnabled={controller.app.settings.meeting_autostop_enabled}
+        meetingAutostopMinutes={controller.app.settings.meeting_autostop_minutes}
+        meetingMaxDurationMinutes={controller.app.settings.meeting_max_duration_minutes}
+        meetingTranscriptionLanguage={controller.app.settings.meeting_transcription_language}
       diarizeEnabled={controller.app.settings.diarize_enabled}
+      diarizeMic={controller.app.settings.diarize_mic}
+      diarizeSystemAudio={controller.app.settings.diarize_system_audio}
       diarizeMaxSpeakers={controller.app.settings.diarize_max_speakers}
-      diarizeDownloadState={controller.diarizeDownloadState}
-      diarizeDownloadedBytes={controller.diarizeDownloadedBytes}
-      diarizeDownloadTotalBytes={controller.diarizeDownloadTotalBytes}
-      onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
-      onClamshellDeviceChange={controller.onClamshellDeviceChange}
-      onVadEnabledChange={controller.onVadEnabledChange}
-      onFillerRemovalChange={controller.onFillerRemovalChange}
-      onStutterCollapseChange={controller.onStutterCollapseChange}
-      onDictionaryCorrectionChange={controller.onDictionaryCorrectionChange}
-      onMeetingAutostopEnabledChange={controller.onMeetingAutostopEnabledChange}
-      onMeetingAutostopMinutesChange={controller.onMeetingAutostopMinutesChange}
-      onMeetingMaxDurationMinutesChange={controller.onMeetingMaxDurationMinutesChange}
-      onMeetingTranscriptionLanguageChange={controller.onMeetingTranscriptionLanguageChange}
+        diarizeDownloadState={controller.diarizeDownloadState}
+        diarizeDownloadedBytes={controller.diarizeDownloadedBytes}
+        diarizeDownloadTotalBytes={controller.diarizeDownloadTotalBytes}
+        onCaptureSystemAudioChange={controller.onCaptureSystemAudioChange}
+        onClamshellDeviceChange={controller.onClamshellDeviceChange}
+        onVadEnabledChange={controller.onVadEnabledChange}
+        onFillerRemovalChange={controller.onFillerRemovalChange}
+        onStutterCollapseChange={controller.onStutterCollapseChange}
+        onDictionaryCorrectionChange={controller.onDictionaryCorrectionChange}
+        onMeetingAutostopEnabledChange={controller.onMeetingAutostopEnabledChange}
+        onMeetingAutostopMinutesChange={controller.onMeetingAutostopMinutesChange}
+        onMeetingMaxDurationMinutesChange={controller.onMeetingMaxDurationMinutesChange}
+        onMeetingTranscriptionLanguageChange={controller.onMeetingTranscriptionLanguageChange}
       onDiarizeEnabledChange={controller.onDiarizeEnabledChange}
+      onDiarizeMicChange={controller.onDiarizeMicChange}
+      onDiarizeSystemAudioChange={controller.onDiarizeSystemAudioChange}
       onDiarizeMaxSpeakersChange={controller.onDiarizeMaxSpeakersChange}
-    />
+      />
+    {:else if activeTab === "interface"}
+      <InterfaceSettingsSection
+        theme={controller.app.settings.theme}
+        locale={controller.app.settings.locale}
+        autoPaste={controller.app.settings.auto_paste}
+        pasteDelayMs={controller.app.settings.paste_delay_ms}
+        pasteMethod={controller.app.settings.paste_method}
+        toggleShortcut={controller.toggleShortcut}
+        pttShortcut={controller.pttShortcut}
+        recordingField={controller.recordingField}
+        shortcutError={controller.shortcutError}
+        onThemeChange={controller.onThemeChange}
+        onLocaleChange={controller.onLocaleChange}
+        onAutoPasteChange={controller.onAutoPasteChange}
+        onPasteDelayChange={controller.onPasteDelayChange}
+        onPasteMethodChange={controller.onPasteMethodChange}
+        onStartRecording={controller.startRecording}
+        onClearShortcut={controller.clearShortcut}
+        formatShortcut={controller.formatShortcut}
+      />
 
-    <IntelligenceSettingsSection
-      ollamaUrl={controller.app.settings.ollama_url}
-      ollamaAvailable={controller.ollamaAvailable}
-      appleIntelligenceAvailable={controller.appleIntelligenceAvailable}
-      appleIntelligenceUnavailableReason={controller.appleIntelligenceUnavailableReason}
-      ollamaModels={controller.ollamaModels}
-      summaryModels={controller.summaryModels}
-      selectedOllamaModel={controller.app.settings.ollama_model}
-      onOllamaUrlChange={controller.onOllamaUrlChange}
-      onOllamaModelChange={controller.onOllamaModelChange}
-      onRetrySummaryProviders={controller.refreshSummaryProviders}
-    />
+      <FeedbackSoundsSettingsSection
+        enabled={controller.app.settings.feedback_sounds_enabled}
+        volume={controller.app.settings.feedback_sounds_volume}
+        onEnabledChange={controller.onFeedbackSoundsEnabledChange}
+        onVolumeChange={controller.onFeedbackSoundsVolumeChange}
+      />
+    {:else if activeTab === "meetings"}
+      <CalendarSettingsSection
+        enabled={controller.app.settings.calendar_integration_enabled}
+        permission={controller.calendarPermission}
+        calendars={controller.calendars}
+        selectedIds={controller.app.settings.calendar_selected_ids}
+        reminderMinutes={controller.app.settings.calendar_reminder_minutes}
+        autostartEnabled={controller.app.settings.calendar_autostart_enabled}
+        onEnabledChange={controller.onCalendarEnabledChange}
+        onToggleCalendar={controller.toggleCalendarSelected}
+        onReminderMinutesChange={controller.onCalendarReminderMinutesChange}
+        onAutostartEnabledChange={controller.onCalendarAutostartEnabledChange}
+      />
 
-    <SummaryTemplatesSettingsSection
-      templates={controller.app.settings.summary_templates}
-      defaultTemplateId={controller.app.settings.default_summary_template_id}
-      onDefaultChange={controller.onDefaultSummaryTemplateChange}
-      onNameChange={controller.onSummaryTemplateNameChange}
-      onPromptChange={controller.onSummaryTemplatePromptChange}
-      onAdd={controller.addSummaryTemplate}
-      onDelete={controller.deleteSummaryTemplate}
-    />
+      <IntelligenceSettingsSection
+        ollamaUrl={controller.app.settings.ollama_url}
+        ollamaAvailable={controller.ollamaAvailable}
+        appleIntelligenceAvailable={controller.appleIntelligenceAvailable}
+        appleIntelligenceUnavailableReason={controller.appleIntelligenceUnavailableReason}
+        ollamaModels={controller.ollamaModels}
+        summaryModels={controller.summaryModels}
+        selectedOllamaModel={controller.app.settings.ollama_model}
+        onOllamaUrlChange={controller.onOllamaUrlChange}
+        onOllamaModelChange={controller.onOllamaModelChange}
+        onRetrySummaryProviders={controller.refreshSummaryProviders}
+      />
 
-    <PermissionsSettingsSection />
+      <SummaryTemplatesSettingsSection
+        templates={controller.app.settings.summary_templates}
+        defaultTemplateId={controller.app.settings.default_summary_template_id}
+        onDefaultChange={controller.onDefaultSummaryTemplateChange}
+        onNameChange={controller.onSummaryTemplateNameChange}
+        onPromptChange={controller.onSummaryTemplatePromptChange}
+        onAdd={controller.addSummaryTemplate}
+        onDelete={controller.deleteSummaryTemplate}
+      />
+    {:else}
+      <PermissionsSettingsSection />
 
-    <DiagnosticsSettingsSection
-      debugTranscription={controller.app.settings.debug_transcription}
-      logLevel={controller.app.settings.log_level}
-      onDebugTranscriptionChange={controller.onDebugTranscriptionChange}
-      onLogLevelChange={controller.onLogLevelChange}
-    />
+      <DiagnosticsSettingsSection
+        debugTranscription={controller.app.settings.debug_transcription}
+        logLevel={controller.app.settings.log_level}
+        onDebugTranscriptionChange={controller.onDebugTranscriptionChange}
+        onLogLevelChange={controller.onLogLevelChange}
+      />
 
-    <DataSettingsSection
-      retention={controller.app.settings.meeting_audio_retention}
-      onRetentionChange={controller.onMeetingAudioRetentionChange}
-    />
+      <DataSettingsSection
+        retention={controller.app.settings.meeting_audio_retention}
+        onRetentionChange={controller.onMeetingAudioRetentionChange}
+      />
 
-    <section class="settings-group">
-      <h3>{$t("settings_advanced.model_storage")}</h3>
-      <div class="settings-rows">
-        <div class="flex items-center justify-between gap-4">
-          <span class="setting-desc min-w-0 flex-1">{$t("settings_advanced.model_storage_desc")}</span>
-          <ConfirmAction
-            label={$t("settings_advanced.delete_model")}
-            confirmLabel={$t("settings_advanced.delete_model_confirm")}
-            confirmMessage={$t("settings_advanced.delete_model_msg")}
-            variant="danger"
-            onConfirm={controller.handleDeleteModel}
-          />
+      <section class="settings-group">
+        <h3>{$t("settings_advanced.model_storage")}</h3>
+        <div class="settings-rows">
+          <div class="flex items-center justify-between gap-4">
+            <span class="setting-desc min-w-0 flex-1">{$t("settings_advanced.model_storage_desc")}</span>
+            <ConfirmAction
+              label={$t("settings_advanced.delete_model")}
+              confirmLabel={$t("settings_advanced.delete_model_confirm")}
+              confirmMessage={$t("settings_advanced.delete_model_msg")}
+              variant="danger"
+              onConfirm={controller.handleDeleteModel}
+            />
+          </div>
         </div>
-      </div>
-    </section>
-  </AdvancedSettingsSection>
+      </section>
 
-  <AboutSettingsSection
-    selectedTranscriptionLabel={selectedTranscriptionLabel}
-    selectedOllamaModelLabel={selectedOllamaModelLabel}
-  />
+      <AboutSettingsSection
+        selectedTranscriptionLabel={selectedTranscriptionLabel}
+        selectedOllamaModelLabel={selectedOllamaModelLabel}
+      />
+    {/if}
+  </div>
 </div>

@@ -11,3 +11,5 @@ export type { DebouncedSearch } from "./search.svelte";
 export { resolveSpeakerLabel, speakerPlainLabel } from "./speaker-label";
 export type { SpeakerLabel } from "./speaker-label";
 export { speakerPaletteIndex, speakerPillClass, persistentSpeakerId, SPEAKER_PALETTE_SIZE } from "./speaker-color";
+export { portal, fixedPopoverStyle } from "./portal";
+export type { AnchorRect } from "./portal";
