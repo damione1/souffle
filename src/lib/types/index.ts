@@ -3,7 +3,7 @@ export type {
   AppStateMachine,
   AppView,
   ArchiveExportProgress,
-  AudioDeviceInfo,
+  AudioInputDevice,
   AudioInputRequirements,
   CalendarEvent,
   CalendarInfo,

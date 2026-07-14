@@ -26,7 +26,7 @@ import { setLocale } from "../../i18n";
 import { getAppState } from "../../stores/app.svelte";
 import type {
   AppSettings,
-  AudioDeviceInfo,
+  AudioInputDevice,
   CalendarInfo,
   DictionaryEntry,
   PermState,
@@ -53,7 +53,7 @@ import {
 export function createSettingsController() {
   const app = getAppState();
 
-  let audioDevices = $state<AudioDeviceInfo[]>([]);
+  let audioDevices = $state<AudioInputDevice[]>([]);
   let systemAudioSupported = $state(false);
   // Gates the "microphone when lid is closed" picker: meaningless on a
   // desktop Mac, so it's hidden entirely rather than shown disabled.
@@ -180,7 +180,7 @@ export function createSettingsController() {
     try {
       audioDevices = await listAudioDevices();
       if (app.selectedDevice) {
-        const exists = audioDevices.some((device) => device.name === app.selectedDevice);
+        const exists = audioDevices.some((device) => device.uid === app.selectedDevice);
         if (exists) {
           await selectAudioDevice(app.selectedDevice);
           return;
@@ -188,8 +188,8 @@ export function createSettingsController() {
       }
       const defaultDevice = audioDevices.find((device) => device.is_default);
       if (defaultDevice) {
-        app.selectedDevice = defaultDevice.name;
-        await selectAudioDevice(defaultDevice.name);
+        app.selectedDevice = defaultDevice.uid;
+        await selectAudioDevice(defaultDevice.uid);
       }
     } catch (e) {
       statusMessage = errorMessage(e);

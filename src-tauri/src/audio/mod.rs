@@ -1,5 +1,6 @@
 pub mod aec;
 pub mod capture;
+pub mod device;
 pub mod device_watch;
 pub mod diarize_tap;
 pub mod feedback;
@@ -12,4 +13,5 @@ pub mod system_activity;
 pub mod system_tap;
 
 pub use capture::{AudioCapture, AudioChunk, AudioMessage};
+pub use device::{AudioInputDevice, TransportType};
 pub use resampler::Resampler;
