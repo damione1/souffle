@@ -337,6 +337,12 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             std::mem::forget(audio::device_watch::start());
 
+            // Meeting-app detection signals (B1): log-only groundwork for B2.
+            #[cfg(target_os = "macos")]
+            if let Some(handle) = audio::meeting_detect::start() {
+                std::mem::forget(handle);
+            }
+
             tray::setup_tray(app.handle())?;
             calendar::scheduler::spawn(app.handle().clone());
             info!("Souffle started");

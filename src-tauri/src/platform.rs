@@ -35,7 +35,13 @@ pub fn system_audio_capture_supported() -> bool {
     })
 }
 
+/// Whether Core Audio per-process input detection is available (macOS 14.4+).
+#[cfg(target_os = "macos")]
+pub fn core_audio_process_detection_supported() -> bool {
+    system_audio_capture_supported()
+}
+
 #[cfg(not(target_os = "macos"))]
-pub fn system_audio_capture_supported() -> bool {
+pub fn core_audio_process_detection_supported() -> bool {
     false
 }
