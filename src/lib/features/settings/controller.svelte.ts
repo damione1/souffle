@@ -597,6 +597,29 @@ export function createSettingsController() {
     });
   }
 
+  function onDiarizeMicChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      if (!checked && !settings.diarize_system_audio) {
+        settings.diarize_mic = true;
+        return;
+      }
+      settings.diarize_mic = checked;
+    });
+  }
+
+  function onDiarizeSystemAudioChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked && !app.settings.capture_system_audio) return;
+    void persistSettings((settings) => {
+      if (!checked && !settings.diarize_mic) {
+        settings.diarize_mic = true;
+        return;
+      }
+      settings.diarize_system_audio = checked;
+    });
+  }
+
   function onDiarizeMaxSpeakersChange(event: Event) {
     const raw = (event.target as HTMLSelectElement).value;
     const value = raw === "" ? null : parseInt(raw, 10);
@@ -924,6 +947,8 @@ export function createSettingsController() {
     get diarizeDownloadedBytes() { return diarizeDownloadedBytes; },
     get diarizeDownloadTotalBytes() { return diarizeDownloadTotalBytes; },
     onDiarizeEnabledChange,
+    onDiarizeMicChange,
+    onDiarizeSystemAudioChange,
     onDiarizeMaxSpeakersChange,
     onVadEnabledChange,
     onFillerRemovalChange,

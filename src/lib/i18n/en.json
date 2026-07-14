@@ -2,7 +2,12 @@
   "settings": {
     "title": "Settings",
     "no_model_selected": "No transcription model selected",
-    "done": "Done"
+    "done": "Done",
+    "tab_transcription": "Transcription",
+    "tab_audio": "Audio",
+    "tab_interface": "Interface",
+    "tab_meetings": "Meetings",
+    "tab_system": "System"
   },
   "settings_audio": {
     "title": "Audio",
@@ -44,7 +49,12 @@
     "capture_system_audio": "System Audio Capture",
     "capture_system_audio_desc": "During meetings, capture the computer's audio output (Teams, Zoom…) alongside the microphone. No configuration needed.",
     "diarize_enabled": "Speaker recognition",
-    "diarize_enabled_desc": "For in-person meetings recorded from the microphone only, recognize who is speaking and label the transcript afterwards. Runs entirely on this Mac; nothing leaves your computer.",
+    "diarize_enabled_desc": "After a meeting stops, recognize who spoke and label those turns with named speakers. Runs entirely on this Mac.",
+    "diarize_mic": "Diarize microphone",
+    "diarize_mic_desc": "Recognize voices on the microphone (Me) after the meeting stops.",
+    "diarize_system_audio": "Diarize system audio",
+    "diarize_system_audio_desc": "Recognize voices on captured system audio (Them) after the meeting stops. Requires system audio capture.",
+    "diarize_system_audio_requires_capture": "Turn on system audio capture above to use this.",
     "diarize_downloading": "Downloading speaker recognition models…",
     "diarize_max_speakers_label": "Maximum speakers",
     "diarize_max_speakers_desc": "Optional cap on how many distinct voices to detect in one meeting. Auto leaves the limit to the diarization engine.",

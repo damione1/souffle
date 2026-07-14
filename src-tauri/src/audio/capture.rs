@@ -224,11 +224,14 @@ struct StartParams {
     /// not `off`. `None` for dictation sessions and for meetings recorded
     /// with retention off.
     record_path: Option<PathBuf>,
-    /// File to tee this session's mic audio to for offline speaker
-    /// diarization, if the feature is on and this is a mic-only meeting.
-    /// `None` for dictation, for meetings with a system-audio lane, and
-    /// whenever the feature is off or its models aren't downloaded.
-    diarize_capture_path: Option<PathBuf>,
+    /// File to tee this session's mic (Me-lane) audio to for offline speaker
+    /// diarization, when enabled. `None` for dictation and whenever the
+    /// feature is off or its models aren't downloaded.
+    diarize_mic_capture_path: Option<PathBuf>,
+    /// File to tee this session's system-audio (Them-lane) capture to for
+    /// offline speaker diarization, when enabled. `None` unless system
+    /// capture and system-audio diarization are both on.
+    diarize_system_capture_path: Option<PathBuf>,
 }
 
 /// Per-session state for meeting mode (mic + system audio).
@@ -382,10 +385,13 @@ pub struct AudioCapture {
     /// a mic rebuild mid-session must keep recording to the same file —
     /// only a genuinely new `session_id` (or no `record_path`) replaces it.
     recorder: Option<MeetingRecorder>,
-    /// Tees this session's mic audio to a temporary 16kHz mono WAV for
-    /// offline speaker diarization, when enabled. Same lifecycle rule as
+    /// Tees this session's mic (Me-lane) audio to a temporary 16kHz mono WAV
+    /// for offline speaker diarization, when enabled. Same lifecycle rule as
     /// `recorder`: survives a mid-session mic rebuild by session id.
     diarize_tap: Option<super::diarize_tap::DiarizeTapWriter>,
+    /// Tees this session's system-audio (Them-lane) capture to a temporary
+    /// 16kHz mono WAV for offline speaker diarization, when enabled.
+    diarize_system_tap: Option<super::diarize_tap::DiarizeTapWriter>,
     /// For emitting SystemAudioStatus events (set during app setup).
     app: Option<tauri::AppHandle>,
     /// Parameters of the running session, kept for mid-session rebuilds.
@@ -450,6 +456,7 @@ impl AudioCapture {
                     meeting: None,
                     recorder: None,
                     diarize_tap: None,
+                    diarize_system_tap: None,
                     app: None,
                     active_params: None,
                     mic_device_name: None,
@@ -521,7 +528,8 @@ impl AudioCapture {
                             capture_system_audio,
                             diarize,
                             record_path,
-                            diarize_capture_path,
+                            diarize_mic_capture_path,
+                            diarize_system_capture_path,
                         } => {
                             if let Err(e) = capture.start(
                                 session_id,
@@ -530,7 +538,8 @@ impl AudioCapture {
                                 capture_system_audio,
                                 diarize,
                                 record_path,
-                                diarize_capture_path,
+                                diarize_mic_capture_path,
+                                diarize_system_capture_path,
                             ) {
                                 warn!("Failed to start audio capture: {e}");
                             }
@@ -648,18 +657,24 @@ impl AudioCapture {
         capture_system_audio: bool,
         diarize: bool,
         record_path: Option<PathBuf>,
-        diarize_capture_path: Option<PathBuf>,
+        diarize_mic_capture_path: Option<PathBuf>,
+        diarize_system_capture_path: Option<PathBuf>,
     ) -> Result<(), String> {
         // Ensure any previous callback stops emitting immediately, and tear
         // down any leftover meeting state (tap included). The recorder and
-        // diarize tap are NOT torn down here; see `sync_recorder` /
+        // diarize taps are NOT torn down here; see `sync_recorder` /
         // `sync_diarize_tap`, so a mid-session mic rebuild (same
         // session_id) keeps recording to the same file(s).
         self.active_session_id.store(0, Ordering::Release);
         self.stream.take();
         self.meeting.take();
         self.sync_recorder(session_id, record_path.as_deref(), target_sample_rate);
-        self.sync_diarize_tap(session_id, diarize_capture_path.as_deref(), target_sample_rate);
+        self.sync_diarize_tap(session_id, diarize_mic_capture_path.as_deref(), target_sample_rate);
+        self.sync_diarize_system_tap(
+            session_id,
+            diarize_system_capture_path.as_deref(),
+            target_sample_rate,
+        );
 
         // Stored before any fallible step so a failed (re)build is retried
         // by the next mic health check instead of killing the session.
@@ -670,7 +685,8 @@ impl AudioCapture {
             capture_system_audio,
             diarize,
             record_path,
-            diarize_capture_path,
+            diarize_mic_capture_path,
+            diarize_system_capture_path,
         });
         self.stream_failed
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -887,6 +903,56 @@ impl AudioCapture {
         }
     }
 
+    /// Reconcile `self.diarize_system_tap` with what this `start()` call
+    /// wants, mirroring `sync_diarize_tap`.
+    fn sync_diarize_system_tap(
+        &mut self,
+        session_id: u64,
+        path: Option<&std::path::Path>,
+        sample_rate: u32,
+    ) {
+        let same_session = self
+            .diarize_system_tap
+            .as_ref()
+            .is_some_and(|t| t.session_id() == session_id);
+        match path {
+            Some(_) if same_session => {}
+            Some(path) => {
+                self.finish_diarize_system_tap();
+                match super::diarize_tap::DiarizeTapWriter::start(path.to_path_buf(), sample_rate, session_id)
+                {
+                    Ok(tap) => self.diarize_system_tap = Some(tap),
+                    Err(e) => warn!("Failed to start system diarization audio tap: {e}"),
+                }
+            }
+            None => self.finish_diarize_system_tap(),
+        }
+    }
+
+    /// Finalize and drop the active system diarize tap, if any.
+    fn finish_diarize_system_tap(&mut self) {
+        if let Some(tap) = self.diarize_system_tap.take() {
+            let dropped = tap.dropped_chunks();
+            if dropped > 0 {
+                warn!("System diarization audio tap dropped {dropped} audio chunks this session");
+            }
+        }
+    }
+
+    /// Feed one mono chunk to the mic diarization tap, if any.
+    fn push_diarize_mic(&self, samples: &[f32]) {
+        if let Some(tap) = &self.diarize_tap {
+            tap.push(samples);
+        }
+    }
+
+    /// Feed one mono chunk to the system-audio diarization tap, if any.
+    fn push_diarize_system(&self, samples: &[f32]) {
+        if let Some(tap) = &self.diarize_system_tap {
+            tap.push(samples);
+        }
+    }
+
     /// Feed one diarized meeting-audio tick to the active recorder, if any:
     /// the two legs are summed with soft clipping into the single mixed
     /// stream the recording represents (diarization only affects
@@ -1067,7 +1133,8 @@ impl AudioCapture {
             params.capture_system_audio,
             params.diarize,
             params.record_path.clone(),
-            params.diarize_capture_path.clone(),
+            params.diarize_mic_capture_path.clone(),
+            params.diarize_system_capture_path.clone(),
         ) {
             Ok(()) => {
                 self.mic_rebuild_failures = 0;
@@ -1142,6 +1209,8 @@ impl AudioCapture {
         use crate::engine::Speaker;
         if diarize {
             self.push_recording_diarized(&me, &them);
+            self.push_diarize_mic(&me);
+            self.push_diarize_system(&them);
             self.store_meeting_rms(&me, &them);
             self.send_meeting_chunk(session_id, me, Some(Speaker::Me));
             self.send_meeting_chunk(session_id, them, Some(Speaker::Them));
@@ -1258,6 +1327,7 @@ impl AudioCapture {
         // but structurally valid Ogg file is acceptable here.
         self.finish_recording();
         self.finish_diarize_tap();
+        self.finish_diarize_system_tap();
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
     }
@@ -1312,6 +1382,8 @@ impl AudioCapture {
                 if meeting.diarize {
                     let (me, them) = meeting.mixer.flush_split();
                     self.push_recording_diarized(&me, &them);
+                    self.push_diarize_mic(&me);
+                    self.push_diarize_system(&them);
                     self.send_meeting_chunk(session_id, me, Some(crate::engine::Speaker::Me));
                     self.send_meeting_chunk(session_id, them, Some(crate::engine::Speaker::Them));
                 } else {
@@ -1327,6 +1399,7 @@ impl AudioCapture {
             }
             self.finish_recording();
             self.finish_diarize_tap();
+            self.finish_diarize_system_tap();
 
             if had_stream {
                 info!("Meeting audio capture stopped");
@@ -1343,9 +1416,7 @@ impl AudioCapture {
             {
                 let tail = r.flush();
                 if !tail.is_empty() {
-                    if let Some(tap) = &self.diarize_tap {
-                        tap.push(&tail);
-                    }
+                    self.push_diarize_mic(&tail);
                     let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
                         session_id,
                         samples: tail,
@@ -1362,9 +1433,11 @@ impl AudioCapture {
             // header is written by then. Not a realtime path (the cpal
             // stream is already dropped).
             self.finish_diarize_tap();
+            self.finish_diarize_system_tap();
             self.send_end_of_stream(session_id);
         }
         self.finish_diarize_tap();
+        self.finish_diarize_system_tap();
 
         if had_stream {
             info!("Audio capture stopped");

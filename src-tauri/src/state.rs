@@ -32,10 +32,15 @@ pub enum AudioCommand {
         /// setting is not off. `None` for dictation and for meetings
         /// recorded with retention off.
         record_path: Option<std::path::PathBuf>,
-        /// Where to tee this session's mic audio for offline speaker
-        /// diarization. `None` unless this is a mic-only meeting with the
-        /// feature enabled and its models downloaded.
-        diarize_capture_path: Option<std::path::PathBuf>,
+        /// Where to tee this session's mic (Me-lane) audio for offline speaker
+        /// diarization. `None` unless speaker recognition on the microphone
+        /// is enabled and its models are downloaded.
+        diarize_mic_capture_path: Option<std::path::PathBuf>,
+        /// Where to tee this session's system-audio (Them-lane) capture for
+        /// offline speaker diarization. `None` unless speaker recognition on
+        /// system audio is enabled, system capture is on, and models are
+        /// downloaded.
+        diarize_system_capture_path: Option<std::path::PathBuf>,
     },
     Stop,
     SelectDevice(String),

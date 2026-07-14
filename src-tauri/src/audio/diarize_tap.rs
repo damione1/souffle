@@ -1,10 +1,11 @@
-//! Temporary 16kHz mono WAV capture of mic-only meeting audio, so a
-//! background task can run offline speaker diarization on it once the
-//! recording stops. Same shape as `recorder.rs`'s `MeetingRecorder`: a
-//! dedicated writer thread fed by a bounded channel, so the realtime
-//! audio-capture callback never blocks on resampling or disk I/O:
-//! `DiarizeTapWriter::push`/`DiarizeTapHandle::push` are `try_send`, and a
-//! full channel just drops the chunk (counted, logged at session end).
+//! Temporary 16kHz mono WAV capture of meeting audio for offline speaker
+//! diarization once the recording stops. Mic and system-audio lanes can each
+//! have their own tap (`{index}-mic.wav` and `{index}-system.wav`). Same
+//! shape as `recorder.rs`'s `MeetingRecorder`: a dedicated writer thread fed
+//! by a bounded channel, so the realtime audio-capture callback never blocks
+//! on resampling or disk I/O: `DiarizeTapWriter::push`/`DiarizeTapHandle::push`
+//! are `try_send`, and a full channel just drops the chunk (counted, logged at
+//! session end).
 //!
 //! Unlike the opus recorder, this tap is meeting-and-mic-only, opt-in via
 //! `AppSettings::diarize_enabled`, and its output is always transient: every
@@ -39,10 +40,22 @@ pub fn meeting_diarize_tmp_dir(meeting_id: &str) -> PathBuf {
     diarize_tmp_root().join(meeting_id)
 }
 
-/// WAV path for one recording session's tapped mic audio, at 16kHz mono.
-/// `session_index` matches the corresponding `MeetingRecordingSession`'s
-/// position in the meeting's `recording_sessions`.
-pub fn session_wav_path(meeting_id: &str, session_index: usize) -> PathBuf {
+/// WAV path for one recording session's tapped microphone (Me-lane) audio,
+/// at 16kHz mono. `session_index` matches the corresponding
+/// `MeetingRecordingSession`'s position in the meeting's `recording_sessions`.
+pub fn session_mic_wav_path(meeting_id: &str, session_index: usize) -> PathBuf {
+    meeting_diarize_tmp_dir(meeting_id).join(format!("{session_index}-mic.wav"))
+}
+
+/// WAV path for one recording session's tapped system-audio (Them-lane)
+/// capture, at 16kHz mono.
+pub fn session_system_wav_path(meeting_id: &str, session_index: usize) -> PathBuf {
+    meeting_diarize_tmp_dir(meeting_id).join(format!("{session_index}-system.wav"))
+}
+
+/// Legacy mic WAV path (`{index}.wav`) kept for pending files from older
+/// builds. New recordings use `session_mic_wav_path`.
+pub fn legacy_session_mic_wav_path(meeting_id: &str, session_index: usize) -> PathBuf {
     meeting_diarize_tmp_dir(meeting_id).join(format!("{session_index}.wav"))
 }
 
@@ -282,13 +295,17 @@ mod tests {
     }
 
     #[test]
-    fn session_wav_path_is_scoped_by_meeting_and_index() {
-        let a = session_wav_path("meeting-1", 0);
-        let b = session_wav_path("meeting-1", 1);
-        let c = session_wav_path("meeting-2", 0);
-        assert_ne!(a, b);
-        assert_ne!(a, c);
-        assert!(a.ends_with("meeting-1/0.wav") || a.to_string_lossy().replace('\\', "/").ends_with("meeting-1/0.wav"));
+    fn session_mic_and_system_wav_paths_are_scoped_by_meeting_and_index() {
+        let mic0 = session_mic_wav_path("meeting-1", 0);
+        let mic1 = session_mic_wav_path("meeting-1", 1);
+        let sys0 = session_system_wav_path("meeting-1", 0);
+        let legacy = legacy_session_mic_wav_path("meeting-1", 0);
+        assert_ne!(mic0, mic1);
+        assert_ne!(mic0, sys0);
+        assert_ne!(mic0, legacy);
+        assert!(mic0.to_string_lossy().ends_with("0-mic.wav"));
+        assert!(sys0.to_string_lossy().ends_with("0-system.wav"));
+        assert!(legacy.to_string_lossy().ends_with("0.wav"));
     }
 
     #[test]

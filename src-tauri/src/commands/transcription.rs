@@ -311,20 +311,32 @@ fn start_pipeline_blocking(
         None
     };
 
-    // Offline speaker recognition only applies to mic-only meetings: a
-    // system-audio lane already gives authoritative Me/Them attribution, so
-    // tapping audio for diarization would be pointless work. Silently skips
-    // (no tap, no capture, no inference) whenever the feature is off or its
-    // models aren't downloaded yet. The Settings UI is where downloading
-    // happens, this path never triggers it.
-    let diarize_capture_path = if mode == PipelineMode::Meeting
-        && !capture_system_audio
+    // Offline speaker recognition: tap mic and/or system WAVs when enabled
+    // and models are present. Each pass labels only its target lane (Me or
+    // Them); persistent speakers stay locked on both passes.
+    let models_ready = crate::diarize::models::models_downloaded();
+    let diarize_mic_capture_path = if mode == PipelineMode::Meeting
         && settings.diarize_enabled
-        && crate::diarize::models::models_downloaded()
+        && settings.diarize_mic
+        && models_ready
     {
         recording_target
             .as_ref()
-            .map(|target| crate::audio::diarize_tap::session_wav_path(&target.meeting_id, target.session_index))
+            .map(|target| crate::audio::diarize_tap::session_mic_wav_path(&target.meeting_id, target.session_index))
+    } else {
+        None
+    };
+    let diarize_system_capture_path = if mode == PipelineMode::Meeting
+        && settings.diarize_enabled
+        && settings.diarize_system_audio
+        && capture_system_audio
+        && models_ready
+    {
+        recording_target
+            .as_ref()
+            .map(|target| {
+                crate::audio::diarize_tap::session_system_wav_path(&target.meeting_id, target.session_index)
+            })
     } else {
         None
     };
@@ -337,7 +349,8 @@ fn start_pipeline_blocking(
             capture_system_audio,
             diarize,
             record_path,
-            diarize_capture_path,
+            diarize_mic_capture_path,
+            diarize_system_capture_path,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 

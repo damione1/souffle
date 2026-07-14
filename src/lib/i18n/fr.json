@@ -2,7 +2,12 @@
   "settings": {
     "title": "Paramètres",
     "no_model_selected": "Aucun modèle de transcription sélectionné",
-    "done": "Terminé"
+    "done": "Terminé",
+    "tab_transcription": "Transcription",
+    "tab_audio": "Audio",
+    "tab_interface": "Interface",
+    "tab_meetings": "Réunions",
+    "tab_system": "Système"
   },
   "settings_audio": {
     "title": "Audio",
@@ -44,7 +49,12 @@
     "capture_system_audio": "Capture de l'audio système",
     "capture_system_audio_desc": "Pendant les meetings, capture la sortie audio de l'ordinateur (Teams, Zoom…) en plus du micro. Aucune configuration requise.",
     "diarize_enabled": "Reconnaissance des interlocuteurs",
-    "diarize_enabled_desc": "Pour les réunions en personne enregistrées uniquement au micro, identifie qui parle et annote la transcription après coup. Tout se passe sur ce Mac ; rien ne quitte votre ordinateur.",
+    "diarize_enabled_desc": "À la fin d'une réunion, reconnaît qui a parlé et annote ces tours avec des interlocuteurs nommés. Tout se passe sur ce Mac.",
+    "diarize_mic": "Diariser le micro",
+    "diarize_mic_desc": "Reconnaît les voix au micro (Moi) après la réunion.",
+    "diarize_system_audio": "Diariser l'audio système",
+    "diarize_system_audio_desc": "Reconnaît les voix sur l'audio système capturé (Eux) après la réunion. Nécessite la capture audio système.",
+    "diarize_system_audio_requires_capture": "Activez la capture audio système ci-dessus pour utiliser cette option.",
     "diarize_downloading": "Téléchargement des modèles de reconnaissance des interlocuteurs…",
     "diarize_max_speakers_label": "Nombre max. d'interlocuteurs",
     "diarize_max_speakers_desc": "Limite optionnelle du nombre de voix distinctes détectées dans une réunion. Auto laisse le moteur décider.",

@@ -227,6 +227,8 @@ export const mockSettings: AppSettings = {
   ],
   last_seen_version: "",
   diarize_enabled: false,
+  diarize_mic: true,
+  diarize_system_audio: false,
   diarize_max_speakers: null,
 }
 

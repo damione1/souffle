@@ -55,16 +55,18 @@ export type ParagraphRange = { start: number; end: number };
  *
  * Without a pause, a monologue would otherwise absorb everything indefinitely,
  * so a second speaker's interjection would render far below the point in the
- * monologue it actually responded to. To keep interjections anchored near
- * their moment: opening a new turn marks every other speaker's currently open
- * turn as interrupted. An interrupted turn still keeps absorbing segments
- * (crosstalk should stay readable), but closes as soon as one of them ends a
- * sentence, so the speaker's next segment opens a fresh turn that sorts after
- * the interjection instead of the interjection trailing behind an
- * ever-growing paragraph. A turn that never hits a sentence end (no
- * punctuation) still only closes on pause, same as before.
+ * monologue it actually responded to. Opening a new turn for speaker B:
+ * - If B starts clearly after A's last end (sequential handoff, >= 350ms),
+ *   A's turn closes immediately so A's later speech opens a fresh line below.
+ *   This matters for unpunctuated word streams (Kyutai) that never hit a
+ *   sentence end.
+ * - If B overlaps A or starts within 350ms (true crosstalk / tight
+ *   interjection), A is marked interrupted and keeps absorbing until a
+ *   sentence end, so word-level interleaving stays readable as two phrases.
  */
 function clusterIntoTurns(sorted: TranscriptionSegment[], pauseThreshold: number): TranscriptionSegment[] {
+  /** Gap after which a new speaker is treated as a handoff, not crosstalk. */
+  const HANDOFF_GAP_S = 0.35;
   type Turn = { start: number; lastEnd: number; segments: TranscriptionSegment[]; interrupted: boolean };
   const openTurns = new Map<Speaker, Turn>();
   const turns: Turn[] = [];
@@ -90,8 +92,15 @@ function clusterIntoTurns(sorted: TranscriptionSegment[], pauseThreshold: number
       const turn: Turn = { start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg], interrupted: false };
       turns.push(turn);
       openTurns.set(speaker, turn);
-      for (const [otherSpeaker, otherTurn] of openTurns) {
-        if (otherSpeaker !== speaker) otherTurn.interrupted = true;
+      for (const [otherSpeaker, otherTurn] of [...openTurns.entries()]) {
+        if (otherSpeaker === speaker) continue;
+        if (turn.start >= otherTurn.lastEnd + HANDOFF_GAP_S) {
+          // Sequential handoff: close now so later speech from that speaker
+          // opens a new line below instead of editing the earlier monologue.
+          openTurns.delete(otherSpeaker);
+        } else {
+          otherTurn.interrupted = true;
+        }
       }
     }
   }

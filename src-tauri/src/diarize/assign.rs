@@ -5,11 +5,11 @@
 
 use super::DiarizedSegment;
 
-/// One transcript segment's time span, local to a single recording session
+/// one transcript segment's time span, local to a single recording session
 /// (matching the per-session zero-based clock `TranscriptionSegment.start_time`
-/// / `end_time` already use). `has_speaker` marks a segment that already
-/// carries a label (Me/Them, or a previous diarization pass). Such segments
-/// are always left untouched, whatever the overlap.
+/// / `end_time` already use). `has_speaker` marks a segment whose label must
+/// not be overwritten for this pass: mic pass locks Them and persistent
+/// speakers; system pass locks Me and persistent speakers.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SegmentSpan {
     pub start_s: f64,

@@ -118,21 +118,22 @@ describe('groupIntoParagraphs diarization', () => {
     ]);
   });
 
-  it('leaves an unpunctuated monologue absorbing an interjection unchanged (closes on pause only)', () => {
-    // Me never produces sentence-final punctuation, so the interrupted flag
-    // never finds a sentence end to close on: behavior is unchanged, the
-    // turn keeps growing until a real pause.
+  it('closes an unpunctuated turn on sequential handoff so later speech opens a new line', () => {
+    // Me never produces sentence-final punctuation. Them starts clearly
+    // after Me's last end (>= 350ms handoff), so Me must close immediately:
+    // later Me speech opens a fresh turn below Them instead of editing the top.
     const segments = [
       dseg('so basically', 0, 'me'),
       dseg('we were thinking', 0.6, 'me'),
-      dseg('right', 1.2, 'them'),
-      dseg('about moving the launch date', 1.8, 'me'),
-      dseg('to next quarter', 2.4, 'me'),
+      dseg('right', 1.6, 'them'),
+      dseg('about moving the launch date', 2.2, 'me'),
+      dseg('to next quarter', 2.8, 'me'),
     ];
     const result = groupIntoParagraphs(segments, 1.5);
     expect(result.map((p) => ({ speaker: p.speaker, text: p.text }))).toEqual([
-      { speaker: 'me', text: 'so basically we were thinking about moving the launch date to next quarter' },
+      { speaker: 'me', text: 'so basically we were thinking' },
       { speaker: 'them', text: 'right' },
+      { speaker: 'me', text: 'about moving the launch date to next quarter' },
     ]);
   });
 
