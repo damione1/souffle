@@ -38,6 +38,9 @@
     meetingAutostopEnabled,
     meetingAutostopMinutes,
     meetingMaxDurationMinutes,
+    meetingDetectSupported,
+    meetingSmartStartEnabled,
+    meetingSmartStopEnabled,
     meetingTranscriptionLanguage,
     onCaptureSystemAudioChange,
     onClamshellDeviceChange,
@@ -48,6 +51,8 @@
     onMeetingAutostopEnabledChange,
     onMeetingAutostopMinutesChange,
     onMeetingMaxDurationMinutesChange,
+    onMeetingSmartStartEnabledChange,
+    onMeetingSmartStopEnabledChange,
     onMeetingTranscriptionLanguageChange,
   }: {
     audioDevices: AudioDeviceInfo[];
@@ -62,6 +67,9 @@
     meetingAutostopEnabled: boolean;
     meetingAutostopMinutes: number;
     meetingMaxDurationMinutes: number;
+    meetingDetectSupported: boolean;
+    meetingSmartStartEnabled: boolean;
+    meetingSmartStopEnabled: boolean;
     meetingTranscriptionLanguage: (typeof meetingLanguageOptions)[number];
     onCaptureSystemAudioChange: (event: Event) => void | Promise<void>;
     onClamshellDeviceChange: (event: Event) => void | Promise<void>;
@@ -72,6 +80,8 @@
     onMeetingAutostopEnabledChange: (event: Event) => void | Promise<void>;
     onMeetingAutostopMinutesChange: (event: Event) => void | Promise<void>;
     onMeetingMaxDurationMinutesChange: (event: Event) => void | Promise<void>;
+    onMeetingSmartStartEnabledChange: (event: Event) => void | Promise<void>;
+    onMeetingSmartStopEnabledChange: (event: Event) => void | Promise<void>;
     onMeetingTranscriptionLanguageChange: (event: Event) => void | Promise<void>;
   } = $props();
 </script>
@@ -177,6 +187,26 @@
       {/snippet}
     </SettingsField>
   {/if}
+
+  <SettingsField
+    label={$t("settings_audio.meeting_smart_start")}
+    description={meetingDetectSupported
+      ? $t("settings_audio.meeting_smart_start_desc")
+      : $t("settings_audio.meeting_smart_start_desc_legacy")}
+  >
+    {#snippet control()}
+      <input type="checkbox" checked={meetingSmartStartEnabled} onchange={onMeetingSmartStartEnabledChange} class="switch" aria-label={$t("settings_audio.meeting_smart_start")} />
+    {/snippet}
+  </SettingsField>
+
+  <SettingsField
+    label={$t("settings_audio.meeting_smart_stop")}
+    description={$t("settings_audio.meeting_smart_stop_desc")}
+  >
+    {#snippet control()}
+      <input type="checkbox" checked={meetingSmartStopEnabled} onchange={onMeetingSmartStopEnabledChange} class="switch" aria-label={$t("settings_audio.meeting_smart_stop")} />
+    {/snippet}
+  </SettingsField>
 
   <SettingsField
     label={$t("settings_audio.vad_enabled")}

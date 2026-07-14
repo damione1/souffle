@@ -101,3 +101,7 @@ export async function exportMeetingPreview(id: string, format: ExportFormat): Pr
 export async function exportMeetingToFile(id: string, format: ExportFormat, path: string): Promise<void> {
   await unwrap(commands.exportMeetingToFile(id, format, path));
 }
+
+export async function dismissMeetingEndNudge(): Promise<void> {
+  await unwrap(commands.dismissMeetingEndNudge());
+}

@@ -8,6 +8,7 @@
   import LiveSessionCard from "../features/home/LiveSessionCard.svelte";
   import { createCalendarController } from "../features/calendar/controller.svelte";
   import UpcomingMeetingBanner from "../features/calendar/components/UpcomingMeetingBanner.svelte";
+  import MeetingStartNudgeBanner from "../features/meeting/components/MeetingStartNudgeBanner.svelte";
   import MeetingDetail from "../features/meeting/components/MeetingDetail.svelte";
   import { createMeetingController } from "../features/meeting/controller.svelte";
   import { createTimelineController } from "../features/timeline/controller.svelte";
@@ -87,7 +88,25 @@
     {/if}
 
     {#if recordingMode === "idle"}
-      {#if app.upcomingMeeting}
+      {#if app.meetingStartNudge}
+        <MeetingStartNudgeBanner
+          nudge={app.meetingStartNudge}
+          canStart={modelReady}
+          onStart={() => {
+            const nudge = app.meetingStartNudge;
+            app.meetingStartNudge = null;
+            if (!nudge) return;
+            if (nudge.calendar_event) {
+              void calendar.startFromEvent(nudge.calendar_event);
+            } else {
+              void meeting.startRecording({ title: nudge.title });
+            }
+          }}
+          onDismiss={() => {
+            app.meetingStartNudge = null;
+          }}
+        />
+      {:else if app.upcomingMeeting}
         <UpcomingMeetingBanner
           reminder={app.upcomingMeeting}
           canStart={modelReady}

@@ -16,6 +16,7 @@ pub mod filter;
 pub mod lid;
 pub mod lock_ext;
 pub mod logging;
+pub mod meeting_smart;
 pub mod models;
 pub mod apple_intelligence;
 pub mod summary;
@@ -121,6 +122,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::save_shortcuts,
             commands::get_shortcuts,
             commands::get_system_audio_support,
+            commands::get_meeting_detect_support,
+            commands::dismiss_meeting_end_nudge,
             commands::debug_record_system_audio,
             commands::get_machine_state,
             commands::recover_state,
@@ -160,6 +163,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::MeetingStopRequested,
             app_events::MeetingFinalized,
             app_events::UpcomingMeeting,
+            app_events::MeetingStartNudge,
+            app_events::MeetingEndNudge,
             app_events::MeetingIdle,
             app_events::SystemWokeUp,
             app_events::ArchiveExportProgress,
@@ -337,10 +342,17 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             std::mem::forget(audio::device_watch::start());
 
-            // Meeting-app detection signals (B1): log-only groundwork for B2.
+            // Meeting-app detection (signal bus) + smart start/stop UX.
             #[cfg(target_os = "macos")]
-            if let Some(handle) = audio::meeting_detect::start() {
-                std::mem::forget(handle);
+            {
+                let (detect_tx, detect_rx) = std::sync::mpsc::channel();
+                if let Some(handle) = audio::meeting_detect::start(Some(detect_tx)) {
+                    std::mem::forget(handle);
+                    let end_monitor = std::sync::Arc::clone(
+                        &app.state::<AppState>().meeting_end_monitor,
+                    );
+                    meeting_smart::spawn(app.handle().clone(), detect_rx, end_monitor);
+                }
             }
 
             tray::setup_tray(app.handle())?;

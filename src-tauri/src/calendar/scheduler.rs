@@ -30,7 +30,7 @@ use crate::state::AppState;
 
 /// One occurrence of a (possibly recurring) event: the event identifier is
 /// shared across occurrences, so the start timestamp disambiguates.
-type OccurrenceKey = (String, i64);
+pub type OccurrenceKey = (String, i64);
 
 /// How long after an event starts the auto-start nudge remains eligible.
 const AUTOSTART_WINDOW_MINUTES: u32 = 10;
@@ -138,6 +138,7 @@ async fn run(app: tauri::AppHandle) {
 
         if !recording
             && settings.calendar_autostart_enabled
+            && !settings.meeting_smart_start_enabled
             && activity.is_recently_active(system_activity::ACTIVITY_RECENCY)
         {
             for event in due_autostart_nudges(now, &events, &fired_autostart) {
@@ -209,7 +210,7 @@ pub fn due_autostart_nudges(
 }
 
 /// Drop fired keys older than a day so the set stays bounded.
-fn prune_fired(fired: &mut HashSet<OccurrenceKey>, now: DateTime<Utc>) {
+pub fn prune_fired(fired: &mut HashSet<OccurrenceKey>, now: DateTime<Utc>) {
     let cutoff = (now - chrono::Duration::days(1)).timestamp();
     fired.retain(|(_, start)| *start >= cutoff);
 }

@@ -35,6 +35,11 @@
     "meeting_max_duration_2h": "2 hours",
     "meeting_max_duration_4h": "4 hours",
     "meeting_max_duration_8h": "8 hours",
+    "meeting_smart_start": "Suggest starting meetings",
+    "meeting_smart_start_desc": "Nudge when a meeting app uses the microphone, system audio is active, or a calendar event is in progress. Per-app detection requires macOS 14.4+.",
+    "meeting_smart_start_desc_legacy": "Nudge when system audio is active or a calendar event is in progress. Per-app detection is unavailable on this Mac (requires macOS 14.4+).",
+    "meeting_smart_stop": "Detect meeting end (apps and mic)",
+    "meeting_smart_stop_desc": "During recording, offer to stop when the meeting app closes or the microphone is no longer in use. Works alongside silence detection.",
     "meeting_transcription_language": "Meeting language",
     "meeting_transcription_language_desc": "Hint for language detection during meetings. Does not force the transcription model.",
     "meeting_transcription_language_auto": "Auto-detect",
@@ -379,6 +384,7 @@
     "live_transcript": "Live transcript",
     "system_audio_active": "System audio active",
     "idle_silence_banner": "No speech detected for {minutes} min. Recording will stop soon.",
+    "end_nudge_banner": "The meeting seems to be over. Recording will stop in about 10 s.",
     "idle_stop_now": "Stop now",
     "idle_keep_recording": "Keep recording"
   },
@@ -426,5 +432,9 @@
     "starts_in_minutes": "Starts in {minutes} min",
     "started_system_audio": "Meeting started — system audio active",
     "dismiss": "Dismiss"
+  },
+  "meeting_smart": {
+    "start_process": "{app} is using the microphone",
+    "start_audio": "System audio is active"
   }
 }

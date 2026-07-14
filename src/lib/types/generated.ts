@@ -500,6 +500,23 @@ async getSystemAudioSupport() : Promise<boolean> {
     return await TAURI_INVOKE("get_system_audio_support");
 },
 /**
+ * Whether per-process meeting-app mic detection is available (macOS 14.4+).
+ */
+async getMeetingDetectSupport() : Promise<boolean> {
+    return await TAURI_INVOKE("get_meeting_detect_support");
+},
+/**
+ * User chose to keep recording after a strong meeting-end nudge.
+ */
+async dismissMeetingEndNudge() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dismiss_meeting_end_nudge") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Debug: record system audio for `seconds` and write it to a WAV file.
  * Returns the file path. Exercises the tap end-to-end (TCC prompt included).
  */
@@ -792,8 +809,10 @@ export const events = __makeEvents__<{
 archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
 dictationLiveText: DictationLiveText,
+meetingEndNudge: MeetingEndNudge,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
+meetingStartNudge: MeetingStartNudge,
 meetingStopRequested: MeetingStopRequested,
 navigate: Navigate,
 pillHoldChanged: PillHoldChanged,
@@ -810,8 +829,10 @@ upcomingMeeting: UpcomingMeeting
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
 dictationLiveText: "dictation-live-text",
+meetingEndNudge: "meeting-end-nudge",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
+meetingStartNudge: "meeting-start-nudge",
 meetingStopRequested: "meeting-stop-requested",
 navigate: "navigate",
 pillHoldChanged: "pill-hold-changed",
@@ -899,6 +920,16 @@ meeting_autostop_minutes: number;
  * speech activity.
  */
 meeting_max_duration_minutes: number; 
+/**
+ * Suggest starting a meeting when a known app captures the mic, system
+ * audio is active, and/or a calendar event is in progress (coalesced).
+ */
+meeting_smart_start_enabled: boolean; 
+/**
+ * During recording, offer to stop when a meeting app closes or the mic
+ * is no longer captured (alongside silence-based auto-stop).
+ */
+meeting_smart_stop_enabled: boolean; 
 /**
  * Opt-in recording of meeting audio to compressed files on disk, and
  * for how long they're kept. Off by default.
@@ -1085,6 +1116,13 @@ export type MeetingCalendarContext = { event_id: string; participants: MeetingPa
  */
 description?: string | null }
 /**
+ * Strong meeting-end signal from process/microphone detection during an
+ * active recording. Drives the live-card banner with a short auto-stop
+ * countdown; silence-based idle detection continues independently.
+ */
+export type MeetingEndNudge = { reason: MeetingEndNudgeReason; app_label: string | null }
+export type MeetingEndNudgeReason = "app_terminated" | "known_app_mic_stopped" | "mic_inactive"
+/**
  * Emitted once a stopped meeting has been fully drained and saved in the
  * background, so the detail view can refresh from the now-complete record.
  * `stop_meeting_recording` returns before this work finishes (decoupled stop),
@@ -1119,6 +1157,12 @@ export type MeetingListItem = { id: string; title: string; started_at: string; d
  */
 export type MeetingParticipant = { name: string; email: string | null; is_organizer: boolean; is_current_user: boolean }
 export type MeetingRecordingSession = { id: string; started_at: string; ended_at: string; duration_seconds: number; start_segment_index: number; end_segment_index: number }
+/**
+ * Coalesced suggestion to start a meeting transcription from process,
+ * system-audio activity, and/or an in-progress calendar event.
+ */
+export type MeetingStartNudge = { title: string; source: MeetingStartNudgeSource; app_label: string | null; calendar_event: CalendarEvent | null }
+export type MeetingStartNudgeSource = "process" | "audio_activity" | "calendar"
 /**
  * Emitted by the floating recording pill (or the tray) to ask the meeting
  * controller in the main window to stop the active meeting through its

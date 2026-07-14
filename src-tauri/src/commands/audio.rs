@@ -27,6 +27,25 @@ pub fn get_system_audio_support() -> bool {
     crate::platform::system_audio_capture_supported()
 }
 
+/// Whether per-process meeting-app mic detection is available (macOS 14.4+).
+#[tauri::command]
+#[specta::specta]
+pub fn get_meeting_detect_support() -> bool {
+    crate::platform::core_audio_process_detection_supported()
+}
+
+/// User chose to keep recording after a strong meeting-end nudge.
+#[tauri::command]
+#[specta::specta]
+pub fn dismiss_meeting_end_nudge(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .meeting_end_monitor
+        .lock()
+        .map_err(|_| "Meeting end monitor lock poisoned".to_string())?
+        .dismiss();
+    Ok(())
+}
+
 /// Whether this Mac has a battery (i.e. is a laptop). Gates the
 /// clamshell-microphone setting in the UI — meaningless on a desktop Mac.
 #[tauri::command]
