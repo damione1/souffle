@@ -268,8 +268,22 @@ pub(crate) async fn generate_with_provider(
         }
         SummaryProviderKind::AppleIntelligence => {
             let system = system.to_string();
+            // Guarded call: dedicated thread per attempt, hard wall-clock
+            // timeout, one retry (see apple::generate_guarded). Without it a
+            // wedged FoundationModels request blocks this future forever and
+            // the summarize command never resolves.
             let full = tokio::task::spawn_blocking(move || {
-                apple_intelligence::process_text_with_system_prompt(&system, &prompt, 0)
+                apple::generate_guarded(
+                    || {
+                        let system = system.clone();
+                        let prompt = prompt.clone();
+                        move || {
+                            apple_intelligence::process_text_with_system_prompt(&system, &prompt, 0)
+                        }
+                    },
+                    apple::REQUEST_TIMEOUT,
+                    apple::RETRY_BACKOFF,
+                )
             })
             .await
             .map_err(|e| format!("Apple Intelligence task: {e}"))??;
@@ -521,24 +535,40 @@ where
     G: FnMut(bool, String) -> Fut,
     Fut: std::future::Future<Output = Result<String, String>>,
 {
-    if skip_initial_fit_check
-        || reduce::reduce_prompt_fits(part_summaries, notes, participants, reduce_token_limit)
-    {
-        return generate(true, build_reduce_prompt(part_summaries, notes, participants)).await;
-    }
+    let mut token_limit = reduce_token_limit;
+    // The token budget is an ESTIMATE (estimate_tokens); the real
+    // FoundationModels tokenizer can exceed it and reject a prompt with a
+    // context-overflow error even though the fit check passed. One structural
+    // recovery is allowed per reduce: halve the budget and re-batch. Ollama
+    // never emits the overflow marker, so its path is unaffected.
+    let mut overflow_shrink_available = !skip_initial_fit_check;
 
     let mut current: Vec<String> = part_summaries.to_vec();
-    loop {
-        if reduce::reduce_prompt_fits(&current, notes, participants, reduce_token_limit) {
-            return generate(true, build_reduce_prompt(&current, notes, participants)).await;
+    'rounds: loop {
+        if skip_initial_fit_check
+            || reduce::reduce_prompt_fits(&current, notes, participants, token_limit)
+        {
+            match generate(true, build_reduce_prompt(&current, notes, participants)).await {
+                Ok(text) => return Ok(text),
+                Err(error)
+                    if overflow_shrink_available
+                        && current.len() > 1
+                        && apple::is_context_overflow(&error) =>
+                {
+                    overflow_shrink_available = false;
+                    token_limit /= 2;
+                    continue 'rounds;
+                }
+                Err(error) => return Err(error),
+            }
         }
 
-        let batches = reduce::partition_for_reduce(&current, reduce_token_limit)?;
+        let batches = reduce::partition_for_reduce(&current, token_limit)?;
         if batches.len() == 1 && batches[0].len() == current.len() {
             let tokens = estimate_tokens(&build_reduce_prompt(&current, None, &[]));
             return Err(format!(
                 "Meeting summary is too large for Apple Intelligence after batching \
-                 ({tokens} estimated tokens, limit {reduce_token_limit}). Use Ollama for very long meetings."
+                 ({tokens} estimated tokens, limit {token_limit}). Use Ollama for very long meetings."
             ));
         }
 
@@ -546,8 +576,20 @@ where
         let mut next = Vec::with_capacity(batches.len());
         for (i, batch) in batches.into_iter().enumerate() {
             on_batch_start(i as u32 + 1, total_batches);
-            let merged = generate(false, build_reduce_prompt(&batch, None, &[])).await?;
-            next.push(merged);
+            match generate(false, build_reduce_prompt(&batch, None, &[])).await {
+                Ok(merged) => next.push(merged),
+                Err(error)
+                    if overflow_shrink_available && apple::is_context_overflow(&error) =>
+                {
+                    // Redo the whole round with the tighter budget; merges
+                    // already done this round are discarded, which is the
+                    // price of a one-time recovery.
+                    overflow_shrink_available = false;
+                    token_limit /= 2;
+                    continue 'rounds;
+                }
+                Err(error) => return Err(error),
+            }
         }
         current = next;
     }
@@ -782,6 +824,108 @@ mod tests {
 
         assert_eq!(final_calls.get(), 1);
         assert_eq!(result.matches("## Summary").count(), 1);
+    }
+
+    // --- Context-overflow recovery ---------------------------------------
+
+    /// Parts sized so the reduce prompt fits the full Apple budget (3200)
+    /// but not half of it: after one overflow shrink the tree must re-batch
+    /// instead of retrying the same oversized final prompt.
+    fn overflow_test_parts() -> Vec<String> {
+        (1..=6)
+            .map(|i| format!("Part {i}: {}", "decision topic detail ".repeat(80)))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn run_reduce_tree_shrinks_budget_once_on_context_overflow() {
+        let parts = overflow_test_parts();
+        let limit = ChunkConfig::APPLE_INTELLIGENCE.reduce_token_limit;
+        // Sanity: fits the full budget, does not fit half of it.
+        assert!(super::reduce::reduce_prompt_fits(&parts, None, &[], limit));
+        assert!(!super::reduce::reduce_prompt_fits(&parts, None, &[], limit / 2));
+
+        let final_calls = std::cell::Cell::new(0u32);
+        let merge_calls = std::cell::Cell::new(0u32);
+
+        let result = run_reduce_tree(
+            &parts,
+            None,
+            &[],
+            limit,
+            false,
+            &|_current, _total| {},
+            |is_final, _prompt| {
+                if is_final {
+                    final_calls.set(final_calls.get() + 1);
+                } else {
+                    merge_calls.set(merge_calls.get() + 1);
+                }
+                let first_final = is_final && final_calls.get() == 1;
+                async move {
+                    if first_final {
+                        // The estimate said it fits; the real tokenizer says no.
+                        Err("exceeded_context_window: prompt exceeds 4096 tokens".to_string())
+                    } else if is_final {
+                        Ok("## Summary\n- recovered\n".to_string())
+                    } else {
+                        Ok("- merged note\n".to_string())
+                    }
+                }
+            },
+        )
+        .await
+        .expect("reduce tree should recover from one context overflow");
+
+        assert_eq!(result, "## Summary\n- recovered\n");
+        assert_eq!(final_calls.get(), 2, "overflowed final + recovered final");
+        assert!(
+            merge_calls.get() >= 1,
+            "the halved budget must force at least one merge round"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_reduce_tree_gives_up_after_second_context_overflow() {
+        let parts = overflow_test_parts();
+        let error = run_reduce_tree(
+            &parts,
+            None,
+            &[],
+            ChunkConfig::APPLE_INTELLIGENCE.reduce_token_limit,
+            false,
+            &|_current, _total| {},
+            |_is_final, _prompt| async move {
+                Err::<String, _>("exceeded_context_window: still too large".to_string())
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("exceeded_context_window"), "got: {error}");
+    }
+
+    #[tokio::test]
+    async fn run_reduce_tree_skip_fit_check_propagates_overflow_untouched() {
+        // Ollama path (skip_initial_fit_check): no shrink recovery, the error
+        // surfaces as-is from the single final call.
+        let parts = vec!["- a fact".to_string()];
+        let final_calls = std::cell::Cell::new(0u32);
+        let error = run_reduce_tree(
+            &parts,
+            None,
+            &[],
+            ChunkConfig::OLLAMA.reduce_token_limit,
+            true,
+            &|_current, _total| {},
+            |_is_final, _prompt| {
+                final_calls.set(final_calls.get() + 1);
+                async move { Err::<String, _>("exceeded_context_window: whatever".to_string()) }
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(final_calls.get(), 1);
+        assert!(error.contains("exceeded_context_window"));
     }
 
     /// A user-selected summary template must reach ONLY the terminal
