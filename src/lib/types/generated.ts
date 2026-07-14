@@ -104,7 +104,9 @@ async listAudioDevices() : Promise<Result<AudioInputDevice[], string>> {
 }
 },
 /**
- * Select an audio input device by stable CoreAudio UID.
+ * Select an audio input device by stable CoreAudio UID. When the UID is not
+ * connected, the pin is kept and capture falls back through the priority
+ * policy; the frontend is notified via [`crate::app_events::InputPinUnavailable`].
  */
 async selectAudioDevice(deviceUid: string) : Promise<Result<null, string>> {
     try {
@@ -818,6 +820,9 @@ export const events = __makeEvents__<{
 archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
 dictationLiveText: DictationLiveText,
+inputDevicesChanged: InputDevicesChanged,
+inputPinAvailable: InputPinAvailable,
+inputPinUnavailable: InputPinUnavailable,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
 meetingStopRequested: MeetingStopRequested,
@@ -836,6 +841,9 @@ upcomingMeeting: UpcomingMeeting
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
 dictationLiveText: "dictation-live-text",
+inputDevicesChanged: "input-devices-changed",
+inputPinAvailable: "input-pin-available",
+inputPinUnavailable: "input-pin-unavailable",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
 meetingStopRequested: "meeting-stop-requested",
@@ -1092,6 +1100,20 @@ export type HealthStatus = "healthy" |
  * No frame has been processed for several seconds while audio is queued.
  */
 "stalled"
+/**
+ * CoreAudio reported a new input-device snapshot (connect/disconnect or
+ * default-input change). Settings listens to refresh the microphone list.
+ */
+export type InputDevicesChanged = { devices: AudioInputDevice[] }
+/**
+ * A previously unavailable pinned input device is connected again.
+ */
+export type InputPinAvailable = { uid: string }
+/**
+ * The user pinned an input device that is not currently connected. Capture
+ * falls back through the priority policy without clearing the saved pin.
+ */
+export type InputPinUnavailable = { uid: string }
 /**
  * User-declared input routing preferences (UID-based).
  */

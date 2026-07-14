@@ -192,3 +192,23 @@ pub struct PillHoldChanged {
 pub struct DictationLiveText {
     pub text: String,
 }
+
+/// CoreAudio reported a new input-device snapshot (connect/disconnect or
+/// default-input change). Settings listens to refresh the microphone list.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct InputDevicesChanged {
+    pub devices: Vec<crate::audio::AudioInputDevice>,
+}
+
+/// The user pinned an input device that is not currently connected. Capture
+/// falls back through the priority policy without clearing the saved pin.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct InputPinUnavailable {
+    pub uid: String,
+}
+
+/// A previously unavailable pinned input device is connected again.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct InputPinAvailable {
+    pub uid: String,
+}

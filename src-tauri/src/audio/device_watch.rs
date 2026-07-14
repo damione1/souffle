@@ -1,11 +1,9 @@
-//! CoreAudio input-device observability.
+//! CoreAudio input-device observability and route-change notifications.
 //!
-//! Diagnostic groundwork for two problems: understanding why a Bluetooth
-//! headset gets forced into HFP mono while the app is running, and a future
-//! input-priority system (Bluetooth headset > built-in mic > USB mic,
-//! depending on lid state). Nothing here changes audio routing; it only
-//! logs what CoreAudio reports so the live log in Settings > Diagnostics can
-//! be watched while reproducing the issue.
+//! Property listeners log device arrivals/removals and default input/output
+//! changes for Settings > Diagnostics. Relevant changes (device list and
+//! default input) are also forwarded to the input-route coordinator so
+//! capture can re-resolve the mic and hot-swap when needed.
 //!
 //! Property listeners are registered once on the system object and left
 //! running for the app's lifetime — see [`start`]. The listener blocks fire
@@ -54,8 +52,8 @@ struct DeviceInfo {
 /// Which property changed, forwarded from a listener block to the worker
 /// thread. Carries no data itself — the worker re-queries CoreAudio, which
 /// is safe from any thread and keeps the callback itself trivial.
-#[derive(Clone, Copy)]
-enum ChangeKind {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChangeKind {
     DeviceList,
     DefaultInput,
     DefaultOutput,
@@ -73,8 +71,9 @@ pub struct DeviceWatchHandle {
 /// Start watching CoreAudio input-device changes. Logs an initial snapshot
 /// immediately, then keeps logging device arrivals/removals and default
 /// input/output changes for as long as the returned handle is kept alive.
-/// Call once, from app setup.
-pub fn start() -> DeviceWatchHandle {
+/// When `route_notify` is set, `DeviceList` and `DefaultInput` changes are
+/// forwarded there for the input-route coordinator. Call once, from app setup.
+pub fn start(route_notify: Option<Sender<ChangeKind>>) -> DeviceWatchHandle {
     let (tx, rx) = channel::<ChangeKind>();
     let queue = DispatchQueue::new("com.souffle.device-watch", None);
 
@@ -101,7 +100,7 @@ pub fn start() -> DeviceWatchHandle {
 
     std::thread::Builder::new()
         .name("device-watch".into())
-        .spawn(move || run_worker(rx))
+        .spawn(move || run_worker(rx, route_notify))
         .expect("failed to spawn device-watch worker thread");
 
     DeviceWatchHandle {
@@ -142,7 +141,7 @@ fn add_listener(
 /// Owns the previous snapshots and reacts to change events. Runs on its own
 /// thread for the app's lifetime; all the actual CoreAudio querying and
 /// `ioreg` clamshell probing happens here, off the CoreAudio dispatch queue.
-fn run_worker(rx: Receiver<ChangeKind>) {
+fn run_worker(rx: Receiver<ChangeKind>, route_notify: Option<Sender<ChangeKind>>) {
     let mut devices = enumerate_input_devices();
     let mut default_input = default_device_info(kAudioHardwarePropertyDefaultInputDevice);
     let mut default_output = default_device_info(kAudioHardwarePropertyDefaultOutputDevice);
@@ -154,11 +153,13 @@ fn run_worker(rx: Receiver<ChangeKind>) {
                 let current = enumerate_input_devices();
                 log_device_diff(&devices, &current);
                 devices = current;
+                notify_route_change(&route_notify, kind);
             }
             ChangeKind::DefaultInput => {
                 let current = default_device_info(kAudioHardwarePropertyDefaultInputDevice);
                 log_default_input_change(&default_input, &current);
                 default_input = current;
+                notify_route_change(&route_notify, kind);
             }
             ChangeKind::DefaultOutput => {
                 let current = default_device_info(kAudioHardwarePropertyDefaultOutputDevice);
@@ -166,6 +167,12 @@ fn run_worker(rx: Receiver<ChangeKind>) {
                 default_output = current;
             }
         }
+    }
+}
+
+fn notify_route_change(route_notify: &Option<Sender<ChangeKind>>, kind: ChangeKind) {
+    if let Some(tx) = route_notify {
+        let _ = tx.send(kind);
     }
 }
 

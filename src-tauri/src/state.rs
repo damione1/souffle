@@ -49,6 +49,9 @@ pub enum AudioCommand {
     /// Give the audio thread an AppHandle so meeting mode can emit
     /// SystemAudioStatus events.
     AttachApp(AppHandle),
+    /// Re-run input resolution and hot-swap the mic leg when needed (device
+    /// list or default-input change, priority update, explicit pin change).
+    RefreshInputRoute,
 }
 
 /// Accumulated meeting segments while recording
