@@ -315,7 +315,11 @@ impl Database {
     /// Meeting-scoped retag used by the UI: optionally creates a new
     /// persistent speaker, but only after verifying matching segments exist.
     /// The create + segment rewrite run in one transaction so a failed retag
-    /// never leaves an orphan speaker row.
+    /// never leaves an orphan speaker row. When `remember` is true, the voice
+    /// embeddings this meeting recorded for `from_persistent_id` move to the
+    /// resolved target too, so future matching benefits from the correction;
+    /// when false, the retag only overrides the label shown for this meeting
+    /// and the embeddings stay where they are.
     pub fn retag_meeting_speaker_labels(
         &self,
         meeting_id: &str,
@@ -323,6 +327,7 @@ impl Database {
         to_speaker_id: Option<i64>,
         new_speaker_name: Option<&str>,
         sort_orders: Option<&[u64]>,
+        remember: bool,
     ) -> Result<usize, String> {
         match (to_speaker_id, new_speaker_name) {
             (Some(id), None) => {
@@ -377,6 +382,17 @@ impl Database {
             &to_label,
             sort_orders,
         )?;
+
+        if remember {
+            tx.execute(
+                "UPDATE speaker_embeddings SET speaker_id = ?1
+                 WHERE speaker_id = ?2 AND meeting_id = ?3",
+                params![resolved_to_id, from_persistent_id, meeting_id],
+            )
+            .map_err(|e| format!("Move retagged speaker embeddings: {e}"))?;
+            super::speakers::prune_speaker_embeddings(&tx, resolved_to_id)?;
+        }
+
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(changed)
     }
@@ -1160,7 +1176,7 @@ mod tests {
         db.save_meeting(&meeting).unwrap();
 
         assert_eq!(
-            db.retag_meeting_speaker_labels("m1", alice, None, Some("  "), None)
+            db.retag_meeting_speaker_labels("m1", alice, None, Some("  "), None, false)
                 .unwrap_err(),
             "Speaker name cannot be empty"
         );
@@ -1173,7 +1189,7 @@ mod tests {
         db.save_meeting(&sample_meeting("m1")).unwrap();
 
         assert_eq!(
-            db.retag_meeting_speaker_labels("m1", alice, None, Some("Carol"), None)
+            db.retag_meeting_speaker_labels("m1", alice, None, Some("Carol"), None, false)
                 .unwrap_err(),
             "No matching segments were retagged"
         );
@@ -1190,7 +1206,7 @@ mod tests {
         db.save_meeting(&meeting).unwrap();
 
         let changed = db
-            .retag_meeting_speaker_labels("m1", alice, None, Some("Carol"), None)
+            .retag_meeting_speaker_labels("m1", alice, None, Some("Carol"), None, false)
             .unwrap();
         assert_eq!(changed, 1);
 
@@ -1203,6 +1219,78 @@ mod tests {
             loaded.segments[0].speaker,
             Some(Speaker::Persistent(carol.id))
         );
+    }
+
+    #[test]
+    fn retag_meeting_speaker_labels_remember_moves_meeting_embeddings_to_target() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+
+        // One embedding from this meeting, one from another: only the one
+        // tied to this meeting should move on a remembered retag.
+        db.append_speaker_embedding(alice, Some("m1"), &[1u8], 1.0, chrono::Utc::now())
+            .unwrap();
+        db.append_speaker_embedding(alice, Some("m2"), &[2u8], 1.0, chrono::Utc::now())
+            .unwrap();
+
+        db.retag_meeting_speaker_labels("m1", alice, Some(bob), None, None, true)
+            .unwrap();
+
+        assert_eq!(db.speaker_embeddings(alice).unwrap(), vec![vec![2u8]]);
+        assert_eq!(db.speaker_embeddings(bob).unwrap(), vec![vec![1u8]]);
+    }
+
+    #[test]
+    fn retag_meeting_speaker_labels_without_remember_leaves_embeddings_in_place() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+        db.append_speaker_embedding(alice, Some("m1"), &[1u8], 1.0, chrono::Utc::now())
+            .unwrap();
+
+        db.retag_meeting_speaker_labels("m1", alice, Some(bob), None, None, false)
+            .unwrap();
+
+        assert_eq!(db.speaker_embeddings(alice).unwrap(), vec![vec![1u8]]);
+        assert!(db.speaker_embeddings(bob).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retag_meeting_speaker_labels_remember_only_moves_this_meetings_rows_for_new_speaker() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+        db.append_speaker_embedding(alice, Some("m1"), &[1u8], 1.0, chrono::Utc::now())
+            .unwrap();
+        db.append_speaker_embedding(alice, Some("m2"), &[2u8], 1.0, chrono::Utc::now())
+            .unwrap();
+
+        let changed = db
+            .retag_meeting_speaker_labels("m1", alice, None, Some("Carol"), None, true)
+            .unwrap();
+        assert_eq!(changed, 1);
+
+        let carol = db
+            .list_speakers()
+            .unwrap()
+            .into_iter()
+            .find(|speaker| speaker.name == "Carol")
+            .unwrap();
+
+        assert_eq!(db.speaker_embeddings(alice).unwrap(), vec![vec![2u8]]);
+        assert_eq!(db.speaker_embeddings(carol.id).unwrap(), vec![vec![1u8]]);
     }
 
     #[test]

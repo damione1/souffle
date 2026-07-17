@@ -406,6 +406,29 @@ async deleteSpeaker(id: number) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Merge one persistent speaker into another: segments and voice embeddings
+ * move to the target, and the source is deleted.
+ */
+async mergeSpeakers(sourceId: number, targetId: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("merge_speakers", { sourceId, targetId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Flag (or unflag) a persistent speaker as the app's user.
+ */
+async setSpeakerIsMe(id: number, isMe: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_speaker_is_me", { id, isMe }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Reassign persistent-speaker labels within one meeting. Me/Them segments
  * are never touched. Returns the reloaded meeting so the UI can refresh.
  */
@@ -1442,7 +1465,13 @@ to_speaker_id: number | null;
 /**
  * Create a new persistent speaker with this name and assign to it.
  */
-new_speaker_name: string | null }
+new_speaker_name: string | null; 
+/**
+ * When true, also move this meeting's voice embeddings for the source
+ * speaker to the target, so future matching benefits from the
+ * correction. When false, the retag only relabels this meeting.
+ */
+remember?: boolean }
 /**
  * Search result from FTS5 full-text search
  */
@@ -1458,7 +1487,7 @@ export type SpeakerProfile = { id: number; name: string;
 /**
  * RFC3339 timestamp of the last meeting this voice was recognized in.
  */
-last_seen_at: string; meeting_count: number; segment_count: number }
+last_seen_at: string; meeting_count: number; segment_count: number; is_me: boolean }
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.
