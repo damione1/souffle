@@ -243,11 +243,63 @@ fn run_diarize(wav_path: &Path, json: bool) -> i32 {
         }
     };
 
-    print_diarization_result(&result, json);
+    let stored = load_stored_speakers_for_calibration();
+    print_diarization_result(&result, &stored, json);
     0
 }
 
-fn print_diarization_result(result: &crate::diarize::DiarizationResult, json: bool) {
+/// One stored speaker's id, name, and decoded embeddings, loaded for the
+/// `--diarize-file` calibration report. Best-effort: a missing or unreadable
+/// `souffle.db` (e.g. the app has never been launched) degrades to an empty
+/// list rather than failing the whole run, since this flag is a calibration
+/// tool over whatever real speakers happen to be enrolled, not something
+/// that should require the app database to exist.
+fn load_stored_speakers_for_calibration() -> Vec<(i64, String, Vec<Vec<f32>>)> {
+    let db_path = crate::constants::app_data_dir().join("souffle.db");
+    let Ok(db) = crate::db::Database::open(&db_path) else {
+        return Vec::new();
+    };
+    let Ok(speakers) = db.list_speakers_with_embeddings() else {
+        return Vec::new();
+    };
+    speakers
+        .into_iter()
+        .map(|s| {
+            let embeddings = s
+                .embeddings
+                .iter()
+                .filter_map(|e| crate::diarize::persist::decode_embedding(e))
+                .collect();
+            (s.speaker.id, s.speaker.name, embeddings)
+        })
+        .collect()
+}
+
+/// Cosine similarity of `embedding` against the MAX-similarity embedding of
+/// each `(id, name, embeddings)` stored speaker, for calibrating
+/// `persist::MATCH_THRESHOLD`/`MATCH_MARGIN` against real recordings.
+/// `None` for a stored speaker with no embeddings recorded yet.
+fn max_similarity_per_speaker<'a>(
+    embedding: &[f32],
+    stored: &'a [(i64, String, Vec<Vec<f32>>)],
+) -> Vec<(i64, &'a str, Option<f32>)> {
+    stored
+        .iter()
+        .map(|(id, name, embeddings)| {
+            let max_sim = embeddings
+                .iter()
+                .map(|e| crate::diarize::persist::cosine_similarity(embedding, e))
+                .max_by(f32::total_cmp);
+            (*id, name.as_str(), max_sim)
+        })
+        .collect()
+}
+
+fn print_diarization_result(
+    result: &crate::diarize::DiarizationResult,
+    stored: &[(i64, String, Vec<Vec<f32>>)],
+    json: bool,
+) {
     if json {
         let json_value = serde_json::json!({
             "speaker_count": result.speakers.len(),
@@ -255,6 +307,17 @@ fn print_diarization_result(result: &crate::diarize::DiarizationResult, json: bo
                 "start_ms": s.start_ms,
                 "end_ms": s.end_ms,
                 "speaker": s.speaker,
+            })).collect::<Vec<_>>(),
+            "clusters": result.speakers.iter().map(|c| serde_json::json!({
+                "speaker": c.speaker,
+                "speech_seconds": c.speech_seconds,
+                "similarities": max_similarity_per_speaker(&c.embedding, stored).into_iter()
+                    .map(|(id, name, sim)| serde_json::json!({
+                        "speaker_id": id,
+                        "name": name,
+                        "max_similarity": sim,
+                    }))
+                    .collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         });
         println!("{}", serde_json::to_string(&json_value).unwrap_or_default());
@@ -269,6 +332,22 @@ fn print_diarization_result(result: &crate::diarize::DiarizationResult, json: bo
             seg.end_ms as f64 / 1000.0,
             seg.speaker
         );
+    }
+
+    println!();
+    if stored.is_empty() {
+        println!("No stored speakers in the database; nothing to calibrate against.");
+        return;
+    }
+    println!("Calibration: cluster similarity against stored speakers");
+    for cluster in &result.speakers {
+        println!("  Cluster {} ({:.1}s of speech):", cluster.speaker, cluster.speech_seconds);
+        for (id, name, sim) in max_similarity_per_speaker(&cluster.embedding, stored) {
+            match sim {
+                Some(sim) => println!("    vs speaker {id} '{name}': {sim:.3}"),
+                None => println!("    vs speaker {id} '{name}': no embeddings recorded"),
+            }
+        }
     }
 }
 

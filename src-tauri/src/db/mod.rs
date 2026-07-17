@@ -185,6 +185,12 @@ impl Database {
                     .map_err(|e| format!("Update schema version v12: {e}"))?;
             }
 
+            if current_version < 13 {
+                schema::migrate_speaker_embeddings_to_v13(&conn)?;
+                conn.execute("UPDATE schema_version SET version = 13", [])
+                    .map_err(|e| format!("Update schema version v13: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

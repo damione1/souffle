@@ -26,8 +26,8 @@ use crate::app_events::{DiarizationProgress, MeetingDiarized};
 use crate::audio::diarize_tap;
 use crate::db::Database;
 use crate::diarize::assign::{SegmentSpan, assign_by_overlap};
-use crate::diarize::persist::{StoredSpeaker, decode_centroid, encode_centroid, match_speakers};
-use crate::diarize::{DiarizeConfig, models};
+use crate::diarize::persist::{MatchOutcome, StoredSpeaker, decode_embedding, encode_embedding, match_speakers};
+use crate::diarize::{DiarizeConfig, SpeakerCentroid, models};
 use crate::engine::Speaker;
 use crate::state::AppState;
 
@@ -278,8 +278,8 @@ fn diarize_meeting(
 
 /// Diarize one recording session's WAV and return the (sort_order, speaker)
 /// assignments for that session's slice of the meeting's segments. Persists
-/// speaker rows and centroid updates as a side effect, so a later session in
-/// the same meeting (and any later meeting) matches against fresh centroids.
+/// speaker rows and embeddings as a side effect, so a later session in the
+/// same meeting (and any later meeting) matches against fresh data.
 fn diarize_session(
     db: &Database,
     meeting: &crate::transcript::MeetingTranscript,
@@ -313,7 +313,7 @@ fn diarize_session(
     // the tapped WAV, so session-local segment spans line up with diarized
     // ranges directly. Mapped before any speaker-row write: a pass whose
     // ranges match no segment at all must not create orphan "Speaker N"
-    // rows or fold their centroids.
+    // rows or spend embedding slots on them.
     let spans: Vec<SegmentSpan> = meeting.segments[start..end]
         .iter()
         .map(|seg| SegmentSpan {
@@ -323,41 +323,46 @@ fn diarize_session(
         })
         .collect();
     let cluster_per_span = assign_by_overlap(&result.segments, &spans);
-    if cluster_per_span.iter().all(Option::is_none) {
+    let assigned_clusters: std::collections::HashSet<usize> =
+        cluster_per_span.iter().flatten().copied().collect();
+    if assigned_clusters.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Resolve each detected cluster to a persistent speaker id, creating
-    // rows / folding centroids as decided by the pure matcher.
-    let stored: Vec<StoredSpeaker> = db
-        .list_speakers()?
+    // Only clusters that actually labeled at least one span are worth
+    // matching: an unassigned cluster (e.g. a stray VAD trigger nothing
+    // overlaps) must never create a stored speaker row or spend one of a
+    // speaker's limited embedding slots.
+    let clusters_to_match: Vec<SpeakerCentroid> = result
+        .speakers
         .into_iter()
-        .map(|record| StoredSpeaker {
-            id: record.id,
-            name: record.name,
-            centroid: record.centroid.as_deref().and_then(decode_centroid),
-            embedding_count: record.embedding_count,
+        .filter(|c| assigned_clusters.contains(&c.speaker))
+        .collect();
+
+    let stored: Vec<StoredSpeaker> = db
+        .list_speakers_with_embeddings()?
+        .into_iter()
+        .map(|s| StoredSpeaker {
+            id: s.speaker.id,
+            name: s.speaker.name,
+            embeddings: s.embeddings.iter().filter_map(|e| decode_embedding(e)).collect(),
         })
         .collect();
-    let decisions = match_speakers(&result.speakers, &stored);
+    let decisions = match_speakers(&clusters_to_match, &stored);
 
     let now = chrono::Utc::now();
     let mut cluster_to_speaker: std::collections::HashMap<usize, i64> = std::collections::HashMap::new();
     for decision in &decisions {
-        let speaker_id = match decision.matched_speaker_id {
-            Some(id) => id,
-            None => {
-                let name = decision
-                    .new_name
-                    .as_deref()
-                    .ok_or("Match decision with neither id nor name")?;
-                db.create_speaker(name)?
-            }
+        let speaker_id = match &decision.outcome {
+            MatchOutcome::Matched { speaker_id } => *speaker_id,
+            MatchOutcome::NewSpeaker { name } => db.create_speaker(name)?,
+            MatchOutcome::Unlabeled => continue,
         };
-        db.update_speaker_centroid(
+        db.append_speaker_embedding(
             speaker_id,
-            &encode_centroid(&decision.updated_centroid),
-            decision.updated_embedding_count,
+            Some(meeting.id.as_str()),
+            &encode_embedding(&decision.embedding),
+            decision.speech_seconds,
             now,
         )?;
         cluster_to_speaker.insert(decision.cluster, speaker_id);
@@ -460,14 +465,14 @@ mod tests {
         meeting.recording_sessions[0].end_segment_index = meeting.segments.len() as u64;
         db.save_meeting(&meeting).unwrap();
 
-        // Seed a fake stored speaker with an orthogonal-ish centroid that
+        // Seed a fake stored speaker with an orthogonal-ish embedding that
         // should NOT match any real voice cluster (unit vector on dim 0 of a
         // 256-dim space is essentially uncorrelated with real embeddings),
         // proving new-speaker creation coexists with the stored row.
         let fake_id = db.create_speaker("Preexisting").unwrap();
-        let mut fake_centroid = vec![0.0f32; 256];
-        fake_centroid[0] = 1.0;
-        db.update_speaker_centroid(fake_id, &encode_centroid(&fake_centroid), 1, chrono::Utc::now())
+        let mut fake_embedding = vec![0.0f32; 256];
+        fake_embedding[0] = 1.0;
+        db.append_speaker_embedding(fake_id, None, &encode_embedding(&fake_embedding), 10.0, chrono::Utc::now())
             .unwrap();
 
         let cfg = DiarizeConfig::new(models::segmentation_model_path(), models::embedding_model_path());

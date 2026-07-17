@@ -61,7 +61,11 @@ pub struct DiarizeConfig {
     /// Gaps shorter than this between same-slot segments are merged.
     pub min_duration_off_s: f64,
     /// Cosine similarity above which two speaker embeddings are merged into
-    /// the same cluster.
+    /// the same cluster. 0.5 matches the sherpa-onnx reference implementation
+    /// (`fast-clustering.cc`), which merges up to a cosine distance of 0.5,
+    /// i.e. an equivalent similarity of 0.5. A higher threshold over-splits
+    /// the same voice into several per-meeting clusters, which then compete
+    /// with each other against persistent speaker matching.
     pub cluster_threshold: f32,
     pub min_speakers: Option<usize>,
     pub max_speakers: Option<usize>,
@@ -76,7 +80,7 @@ impl DiarizeConfig {
             offset: 0.5,
             min_duration_on_s: 0.1,
             min_duration_off_s: 0.5,
-            cluster_threshold: 0.7,
+            cluster_threshold: 0.5,
             min_speakers: None,
             max_speakers: None,
         }
@@ -92,13 +96,17 @@ pub struct DiarizedSegment {
 
 /// A detected speaker's embedding centroid (mean of its member segments'
 /// L2-normalized embeddings, re-normalized). Kept in the result (rather than
-/// discarded once clustering is done) so a follow-up feature can persist
-/// speaker identity across meetings by comparing centroids, without
-/// re-running inference on old recordings.
+/// discarded once clustering is done) so persistent speaker matching
+/// (`persist::match_speakers`) can compare it against stored speakers
+/// without re-running inference on old recordings. `speech_seconds` is the
+/// total duration of this cluster's member segments, used as an enrollment
+/// guard: a cluster with only a fraction of a second of speech is not
+/// trustworthy enough to become a permanent identity.
 #[derive(Debug, Clone)]
 pub struct SpeakerCentroid {
     pub speaker: usize,
     pub embedding: Vec<f32>,
+    pub speech_seconds: f64,
 }
 
 /// `diarize()`'s output. Deviates from a bare `Vec<DiarizedSegment>` on
@@ -115,6 +123,40 @@ pub struct DiarizationResult {
 /// a stable speaker embedding, and too short to matter in a transcript.
 /// 0.25s at 16kHz, matching sherpa-onnx's own short-segment skip.
 const MIN_SEGMENT_SAMPLES_FOR_EMBEDDING: usize = 4_000;
+
+/// Longest single embedding window, in seconds. A raw segment longer than
+/// this is split into equal chunks at or under this length before embedding
+/// (`chunk_segment`): one embedding representing several minutes of
+/// continuous speech is a worse discriminator than several shorter ones, and
+/// `merge_adjacent_same_speaker` naturally reassembles chunks that cluster
+/// back into the same speaker.
+const MAX_EMBEDDING_WINDOW_S: f64 = 10.0;
+
+/// Split `(start_s, end_s)` into consecutive equal-length chunks of at most
+/// `max_window_s` seconds each. A span already at or under the limit is
+/// returned unchanged as a single-element result, so this is a safe no-op
+/// wrapper for the common case. `max_window_s <= 0.0` is treated as "no
+/// limit" (also a single-element result) rather than dividing by zero or
+/// looping forever.
+fn chunk_segment(start_s: f64, end_s: f64, max_window_s: f64) -> Vec<(f64, f64)> {
+    let duration = end_s - start_s;
+    if max_window_s <= 0.0 || duration <= max_window_s {
+        return vec![(start_s, end_s)];
+    }
+    let chunk_count = (duration / max_window_s).ceil() as usize;
+    let chunk_len = duration / chunk_count as f64;
+    (0..chunk_count)
+        .map(|i| {
+            let chunk_start = start_s + chunk_len * i as f64;
+            let chunk_end = if i + 1 == chunk_count {
+                end_s
+            } else {
+                start_s + chunk_len * (i + 1) as f64
+            };
+            (chunk_start, chunk_end)
+        })
+        .collect()
+}
 
 /// Run offline speaker diarization on a full, already-decoded recording.
 ///
@@ -161,19 +203,21 @@ pub fn diarize(samples: &[f32], sample_rate: u32, cfg: &DiarizeConfig) -> Result
         let mut kept_segments = Vec::with_capacity(raw_segments.len());
         let mut embeddings = Vec::with_capacity(raw_segments.len());
 
-        for (start_s, end_s) in raw_segments {
-            let start_sample = (start_s * sample_rate as f64).round().max(0.0) as usize;
-            let end_sample = ((end_s * sample_rate as f64).round() as usize).min(samples.len());
-            if end_sample <= start_sample || end_sample - start_sample < MIN_SEGMENT_SAMPLES_FOR_EMBEDDING {
-                continue;
+        for (raw_start_s, raw_end_s) in raw_segments {
+            for (start_s, end_s) in chunk_segment(raw_start_s, raw_end_s, MAX_EMBEDDING_WINDOW_S) {
+                let start_sample = (start_s * sample_rate as f64).round().max(0.0) as usize;
+                let end_sample = ((end_s * sample_rate as f64).round() as usize).min(samples.len());
+                if end_sample <= start_sample || end_sample - start_sample < MIN_SEGMENT_SAMPLES_FOR_EMBEDDING {
+                    continue;
+                }
+
+                let Some(embedding) = emb_model.embed(&samples[start_sample..end_sample])? else {
+                    continue;
+                };
+
+                kept_segments.push((start_s, end_s));
+                embeddings.push(embedding);
             }
-
-            let Some(embedding) = emb_model.embed(&samples[start_sample..end_sample])? else {
-                continue;
-            };
-
-            kept_segments.push((start_s, end_s));
-            embeddings.push(embedding);
         }
         (kept_segments, embeddings)
     };
@@ -201,11 +245,25 @@ pub fn diarize(samples: &[f32], sample_rate: u32, cfg: &DiarizeConfig) -> Result
     let max_gap_ms = (cfg.min_duration_off_s * 1000.0).round() as u64;
     let segments = merge_adjacent_same_speaker(segments, max_gap_ms);
 
+    // Sum of member segment durations per cluster, computed from the
+    // pre-merge (start_s, end_s) spans: chunking splits raw segments into
+    // non-overlapping pieces, so summing their durations per label gives the
+    // same total as the post-merge segments would, without needing to
+    // recover per-cluster spans from the merged, speaker-only output.
+    let mut speech_seconds_per_cluster = vec![0.0f64; cluster_result.centroids.len()];
+    for (&(start_s, end_s), &label) in kept_segments.iter().zip(cluster_result.labels.iter()) {
+        speech_seconds_per_cluster[label] += end_s - start_s;
+    }
+
     let speakers = cluster_result
         .centroids
         .into_iter()
         .enumerate()
-        .map(|(speaker, embedding)| SpeakerCentroid { speaker, embedding })
+        .map(|(speaker, embedding)| SpeakerCentroid {
+            speaker,
+            embedding,
+            speech_seconds: speech_seconds_per_cluster[speaker],
+        })
         .collect();
 
     Ok(DiarizationResult { segments, speakers })
@@ -265,6 +323,45 @@ mod tests {
     #[test]
     fn merge_adjacent_same_speaker_empty_input() {
         assert!(merge_adjacent_same_speaker(Vec::new(), 500).is_empty());
+    }
+
+    #[test]
+    fn chunk_segment_leaves_short_span_unchanged() {
+        assert_eq!(chunk_segment(0.0, 5.0, 10.0), vec![(0.0, 5.0)]);
+    }
+
+    #[test]
+    fn chunk_segment_leaves_span_at_exact_limit_unchanged() {
+        assert_eq!(chunk_segment(2.0, 12.0, 10.0), vec![(2.0, 12.0)]);
+    }
+
+    #[test]
+    fn chunk_segment_splits_long_span_into_equal_pieces() {
+        let chunks = chunk_segment(0.0, 25.0, 10.0);
+        // 25s / 10s -> 3 chunks of ~8.33s each, not 2 chunks of 10s + one
+        // short 5s tail: equal splitting avoids a degenerate final chunk.
+        assert_eq!(chunks.len(), 3);
+        for &(start, end) in &chunks {
+            assert!(end - start <= 10.0 + 1e-9);
+        }
+        assert!((chunks[0].0 - 0.0).abs() < 1e-9);
+        assert!((chunks.last().unwrap().1 - 25.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn chunk_segment_pieces_are_contiguous_and_preserve_total_duration() {
+        let chunks = chunk_segment(3.0, 37.0, 10.0);
+        for pair in chunks.windows(2) {
+            assert!((pair[0].1 - pair[1].0).abs() < 1e-9, "chunks must be contiguous");
+        }
+        let total: f64 = chunks.iter().map(|&(s, e)| e - s).sum();
+        assert!((total - 34.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn chunk_segment_non_positive_limit_is_a_no_op() {
+        assert_eq!(chunk_segment(0.0, 25.0, 0.0), vec![(0.0, 25.0)]);
+        assert_eq!(chunk_segment(0.0, 25.0, -1.0), vec![(0.0, 25.0)]);
     }
 
     #[test]

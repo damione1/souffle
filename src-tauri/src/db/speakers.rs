@@ -27,10 +27,28 @@ pub struct SpeakerUsage {
     pub meeting_count: i64,
 }
 
+/// A stored speaker together with its recent voice embeddings (raw BLOBs,
+/// undecoded), for the offline diarization matcher.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpeakerWithEmbeddings {
+    pub speaker: SpeakerRecord,
+    pub embeddings: Vec<Vec<u8>>,
+}
+
+/// How many recent embeddings `append_speaker_embedding` keeps per speaker.
+/// A bag of embeddings (matched by MAX cosine similarity) tolerates
+/// variation across sessions, mics, and vocal tone far better than a single
+/// running-mean centroid, but an unbounded bag would grow forever and slow
+/// matching down; 20 is enough recent samples to cover that variation
+/// without a meaningful cost per match.
+pub const MAX_EMBEDDINGS_PER_SPEAKER: usize = 20;
+
 impl Database {
     /// Create a new persistent speaker with the given display name. Returns
-    /// the new row's id. `centroid`/`embedding_count` start empty; call
-    /// `update_speaker_centroid` once diarization has a centroid for it.
+    /// the new row's id. `centroid`/`embedding_count` are unused legacy
+    /// columns (kept for schema stability, see `schema::CREATE_SPEAKERS`)
+    /// and stay at their empty defaults; call `append_speaker_embedding`
+    /// once diarization has an embedding for it.
     pub fn create_speaker(&self, name: &str) -> Result<i64, String> {
         let conn = self.conn.acquire()?;
         let now = Utc::now().to_rfc3339();
@@ -100,22 +118,95 @@ impl Database {
         Ok(())
     }
 
-    /// Overwrite a speaker's centroid, embedding count, and `last_seen_at`
-    /// (typically after re-clustering embeddings into a fresh centroid).
-    pub fn update_speaker_centroid(
+    /// Record one new voice embedding for a speaker (from a matched or
+    /// freshly enrolled diarization cluster), touch its `last_seen_at`, and
+    /// prune down to `MAX_EMBEDDINGS_PER_SPEAKER` by dropping the oldest
+    /// rows (by `created_at`, then `id` to break ties deterministically).
+    /// One transaction, so a crash mid-append never leaves the speaker with
+    /// more than the cap or a stale `last_seen_at`.
+    pub fn append_speaker_embedding(
         &self,
-        id: i64,
-        centroid: &[u8],
-        embedding_count: i64,
-        last_seen_at: DateTime<Utc>,
+        speaker_id: i64,
+        meeting_id: Option<&str>,
+        embedding: &[u8],
+        speech_seconds: f64,
+        now: DateTime<Utc>,
     ) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
-        conn.execute(
-            "UPDATE speakers SET centroid = ?1, embedding_count = ?2, last_seen_at = ?3 WHERE id = ?4",
-            params![centroid, embedding_count, last_seen_at.to_rfc3339(), id],
+        let now = now.to_rfc3339();
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+
+        tx.execute(
+            "INSERT INTO speaker_embeddings (speaker_id, meeting_id, embedding, speech_seconds, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![speaker_id, meeting_id, embedding, speech_seconds, now],
         )
-        .map_err(|e| format!("Update speaker centroid: {e}"))?;
+        .map_err(|e| format!("Insert speaker embedding: {e}"))?;
+
+        tx.execute(
+            "DELETE FROM speaker_embeddings WHERE speaker_id = ?1 AND id NOT IN (
+                SELECT id FROM speaker_embeddings WHERE speaker_id = ?1
+                ORDER BY created_at DESC, id DESC LIMIT ?2
+             )",
+            params![speaker_id, MAX_EMBEDDINGS_PER_SPEAKER as i64],
+        )
+        .map_err(|e| format!("Prune speaker embeddings: {e}"))?;
+
+        tx.execute(
+            "UPDATE speakers SET last_seen_at = ?1 WHERE id = ?2",
+            params![now, speaker_id],
+        )
+        .map_err(|e| format!("Update speaker last_seen_at: {e}"))?;
+
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
+    }
+
+    /// Raw embedding BLOBs for one speaker, oldest first. Callers decode
+    /// with `diarize::persist::decode_embedding`.
+    pub fn speaker_embeddings(&self, speaker_id: i64) -> Result<Vec<Vec<u8>>, String> {
+        let conn = self.conn.acquire()?;
+        let mut stmt = conn
+            .prepare("SELECT embedding FROM speaker_embeddings WHERE speaker_id = ?1 ORDER BY id")
+            .map_err(|e| format!("Prepare speaker embeddings: {e}"))?;
+        stmt.query_map(params![speaker_id], |row| row.get::<_, Vec<u8>>(0))
+            .map_err(|e| format!("Query speaker embeddings: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Collect speaker embeddings: {e}"))
+    }
+
+    /// Every persistent speaker with its embedding BLOBs, for the offline
+    /// diarization matcher. One query for all embeddings (grouped in Rust)
+    /// rather than N+1 per-speaker queries.
+    pub fn list_speakers_with_embeddings(&self) -> Result<Vec<SpeakerWithEmbeddings>, String> {
+        let speakers = self.list_speakers()?;
+
+        let mut by_speaker: std::collections::HashMap<i64, Vec<Vec<u8>>> =
+            std::collections::HashMap::new();
+        {
+            let conn = self.conn.acquire()?;
+            let mut stmt = conn
+                .prepare("SELECT speaker_id, embedding FROM speaker_embeddings ORDER BY speaker_id, id")
+                .map_err(|e| format!("Prepare list embeddings: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?)))
+                .map_err(|e| format!("Query list embeddings: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Collect list embeddings: {e}"))?;
+            for (speaker_id, embedding) in rows {
+                by_speaker.entry(speaker_id).or_default().push(embedding);
+            }
+        }
+
+        Ok(speakers
+            .into_iter()
+            .map(|speaker| {
+                let embeddings = by_speaker.remove(&speaker.id).unwrap_or_default();
+                SpeakerWithEmbeddings { speaker, embeddings }
+            })
+            .collect())
     }
 
     /// Usage counts for every persistent speaker, keyed by speaker id.
@@ -146,10 +237,12 @@ impl Database {
         Ok(rows.into_iter().collect())
     }
 
-    /// Delete a persistent speaker and unlabel every segment that referenced
-    /// it (their speaker returns to NULL, so the lines render as plain
-    /// unattributed text). One transaction, so a failure never leaves
-    /// segments pointing at a missing speaker row.
+    /// Delete a persistent speaker, its recorded embeddings, and unlabel
+    /// every segment that referenced it (their speaker returns to NULL, so
+    /// the lines render as plain unattributed text). One transaction, so a
+    /// failure never leaves segments pointing at a missing speaker row or
+    /// orphaned `speaker_embeddings` rows behind (no FK cascade covers this;
+    /// see `schema::CREATE_SPEAKER_EMBEDDINGS`).
     pub fn delete_speaker(&self, id: i64) -> Result<(), String> {
         let label = crate::engine::Speaker::Persistent(id).as_str();
         let mut conn = self.conn.acquire()?;
@@ -161,6 +254,11 @@ impl Database {
             params![label],
         )
         .map_err(|e| format!("Unlabel speaker segments: {e}"))?;
+        tx.execute(
+            "DELETE FROM speaker_embeddings WHERE speaker_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("Delete speaker embeddings: {e}"))?;
         let deleted = tx
             .execute("DELETE FROM speakers WHERE id = ?1", params![id])
             .map_err(|e| format!("Delete speaker: {e}"))?;
@@ -250,6 +348,8 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::params;
+
     use crate::engine::Speaker;
     use crate::test_helpers::fixtures::{sample_meeting, test_db};
 
@@ -306,20 +406,84 @@ mod tests {
     }
 
     #[test]
-    fn update_speaker_centroid_overwrites_fields() {
+    fn append_speaker_embedding_round_trips_and_touches_last_seen_at() {
         let (db, _dir) = test_db();
         let id = db.create_speaker("Alice").unwrap();
-        let centroid = vec![0u8; 1024]; // 256 f32s
+        let embedding = vec![0u8; 1024]; // 256 f32s
         let now = chrono::Utc::now();
 
-        db.update_speaker_centroid(id, &centroid, 5, now).unwrap();
+        db.append_speaker_embedding(id, Some("m1"), &embedding, 6.5, now)
+            .unwrap();
+
+        let stored = db.speaker_embeddings(id).unwrap();
+        assert_eq!(stored, vec![embedding]);
 
         let record = db.get_speaker(id).unwrap().unwrap();
-        assert_eq!(record.centroid, Some(centroid));
-        assert_eq!(record.embedding_count, 5);
         // Sub-second precision may be lost in the RFC3339 round trip; compare
         // at second resolution.
         assert_eq!(record.last_seen_at.timestamp(), now.timestamp());
+    }
+
+    #[test]
+    fn append_speaker_embedding_caps_at_max_dropping_oldest() {
+        let (db, _dir) = test_db();
+        let id = db.create_speaker("Alice").unwrap();
+        let base = chrono::Utc::now();
+
+        // One more than the cap; each embedding is a distinguishable single
+        // byte so we can tell which ones survived.
+        for i in 0..(super::MAX_EMBEDDINGS_PER_SPEAKER + 1) {
+            let embedding = vec![i as u8];
+            let now = base + chrono::Duration::seconds(i as i64);
+            db.append_speaker_embedding(id, None, &embedding, 1.0, now)
+                .unwrap();
+        }
+
+        let stored = db.speaker_embeddings(id).unwrap();
+        assert_eq!(stored.len(), super::MAX_EMBEDDINGS_PER_SPEAKER);
+        // The oldest (embedding 0) must have been pruned; the newest
+        // (embedding MAX_EMBEDDINGS_PER_SPEAKER) must remain.
+        assert!(!stored.contains(&vec![0u8]));
+        assert!(stored.contains(&vec![super::MAX_EMBEDDINGS_PER_SPEAKER as u8]));
+    }
+
+    #[test]
+    fn list_speakers_with_embeddings_groups_by_speaker() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+        let now = chrono::Utc::now();
+
+        db.append_speaker_embedding(alice, None, &[1u8], 1.0, now)
+            .unwrap();
+        db.append_speaker_embedding(alice, None, &[2u8], 1.0, now)
+            .unwrap();
+
+        let all = db.list_speakers_with_embeddings().unwrap();
+        let alice_entry = all.iter().find(|s| s.speaker.id == alice).unwrap();
+        let bob_entry = all.iter().find(|s| s.speaker.id == bob).unwrap();
+        assert_eq!(alice_entry.embeddings, vec![vec![1u8], vec![2u8]]);
+        assert!(bob_entry.embeddings.is_empty());
+    }
+
+    #[test]
+    fn delete_speaker_removes_its_embeddings() {
+        let (db, _dir) = test_db();
+        let id = db.create_speaker("Alice").unwrap();
+        db.append_speaker_embedding(id, None, &[1u8], 1.0, chrono::Utc::now())
+            .unwrap();
+
+        db.delete_speaker(id).unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM speaker_embeddings WHERE speaker_id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0, "deleting a speaker must remove its embedding rows");
     }
 
     #[test]
