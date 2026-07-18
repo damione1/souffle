@@ -31,7 +31,14 @@
     "rename_aria": "Renommer l'interlocuteur {name}",
     "delete": "Supprimer",
     "delete_confirm": "Supprimer",
-    "delete_msg": "Oublier cette voix et retirer ses annotations ?"
+    "delete_msg": "Oublier cette voix et retirer ses annotations ?",
+    "me_badge": "Moi",
+    "mark_me": "Marquer comme moi",
+    "unmark_me": "Ne plus marquer comme moi",
+    "merge": "Fusionner",
+    "merge_into": "Fusionner {name} dans :",
+    "merge_confirm": "Fusionner",
+    "merge_msg": "Fusionner {source} dans {target} ? Leurs réunions et leur voix seront regroupées. Action irréversible."
   },
   "settings_audio": {
     "title": "Audio",
@@ -311,6 +318,9 @@
     "no_other_speakers": "Aucun autre intervenant",
     "new_speaker": "Nouvel intervenant",
     "new_speaker_placeholder": "Saisir un nom",
+    "remember_label": "Mémoriser pour les prochaines réunions",
+    "remember_help_on": "Souffle reconnaîtra mieux cette voix la prochaine fois.",
+    "remember_help_off": "Ne change que cette réunion.",
     "apply_retag": "Appliquer la reattribution"
   },
   "meeting_audio": {

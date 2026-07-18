@@ -66,6 +66,7 @@
       scope: "turn" | "meeting";
       toSpeakerId: number | null;
       newSpeakerName: string | null;
+      remember: boolean;
     }) => void | Promise<void>;
   } = $props();
 

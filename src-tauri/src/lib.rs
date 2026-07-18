@@ -114,6 +114,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::list_speakers,
             commands::list_speaker_profiles,
             commands::delete_speaker,
+            commands::merge_speakers,
+            commands::set_speaker_is_me,
             commands::retag_meeting_speaker,
             commands::check_summary_providers,
             commands::summarize_meeting,

@@ -31,7 +31,14 @@
     "rename_aria": "Rename speaker {name}",
     "delete": "Delete",
     "delete_confirm": "Delete",
-    "delete_msg": "Forget this voice and unlabel its lines?"
+    "delete_msg": "Forget this voice and unlabel its lines?",
+    "me_badge": "Me",
+    "mark_me": "Mark as me",
+    "unmark_me": "Unmark as me",
+    "merge": "Merge",
+    "merge_into": "Merge {name} into:",
+    "merge_confirm": "Merge",
+    "merge_msg": "Merge {source} into {target}? Their meetings and voice will be combined. This cannot be undone."
   },
   "settings_audio": {
     "title": "Audio",
@@ -311,6 +318,9 @@
     "no_other_speakers": "No other speakers yet",
     "new_speaker": "New speaker",
     "new_speaker_placeholder": "Enter a name",
+    "remember_label": "Remember for future meetings",
+    "remember_help_on": "Souffle will recognize this voice better next time.",
+    "remember_help_off": "Only changes this meeting.",
     "apply_retag": "Apply reassignment"
   },
   "meeting_audio": {

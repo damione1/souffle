@@ -36,6 +36,7 @@ pub struct SpeakerProfile {
     pub last_seen_at: String,
     pub meeting_count: u32,
     pub segment_count: u32,
+    pub is_me: bool,
 }
 
 /// All persistent speakers with usage counts, most recently seen first.
@@ -55,6 +56,7 @@ pub fn list_speaker_profiles(state: State<'_, AppState>) -> Result<Vec<SpeakerPr
                 last_seen_at: record.last_seen_at.to_rfc3339(),
                 meeting_count: counts.meeting_count.max(0) as u32,
                 segment_count: counts.segment_count.max(0) as u32,
+                is_me: record.is_me,
             }
         })
         .collect();
@@ -70,6 +72,21 @@ pub fn delete_speaker(state: State<'_, AppState>, id: i64) -> Result<(), String>
     state.db.delete_speaker(id)
 }
 
+/// Merge one persistent speaker into another: segments and voice embeddings
+/// move to the target, and the source is deleted.
+#[tauri::command]
+#[specta::specta]
+pub fn merge_speakers(state: State<'_, AppState>, source_id: i64, target_id: i64) -> Result<(), String> {
+    state.db.merge_speakers(source_id, target_id)
+}
+
+/// Flag (or unflag) a persistent speaker as the app's user.
+#[tauri::command]
+#[specta::specta]
+pub fn set_speaker_is_me(state: State<'_, AppState>, id: i64, is_me: bool) -> Result<(), String> {
+    state.db.set_speaker_is_me(id, is_me)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RetagMeetingSpeakerRequest {
     pub meeting_id: String,
@@ -83,6 +100,11 @@ pub struct RetagMeetingSpeakerRequest {
     pub to_speaker_id: Option<i64>,
     /// Create a new persistent speaker with this name and assign to it.
     pub new_speaker_name: Option<String>,
+    /// When true, also move this meeting's voice embeddings for the source
+    /// speaker to the target, so future matching benefits from the
+    /// correction. When false, the retag only relabels this meeting.
+    #[serde(default)]
+    pub remember: bool,
 }
 
 /// Reassign persistent-speaker labels within one meeting. Me/Them segments
@@ -105,6 +127,7 @@ pub fn retag_meeting_speaker(
         request.to_speaker_id,
         request.new_speaker_name.as_deref(),
         scope,
+        request.remember,
     )?;
 
     state.db.load_meeting(&request.meeting_id)

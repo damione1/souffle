@@ -24,6 +24,7 @@
       scope: "turn" | "meeting";
       toSpeakerId: number | null;
       newSpeakerName: string | null;
+      remember: boolean;
     }) => void | Promise<void>;
   } = $props();
 
@@ -32,6 +33,7 @@
   let targetMode = $state<"existing" | "new">("existing");
   let targetSpeakerId = $state<number | null>(null);
   let newSpeakerName = $state("");
+  let remember = $state(true);
   let isSaving = $state(false);
 
   const panelStyle = $derived(
@@ -43,6 +45,7 @@
     retagScope = "turn";
     targetMode = "existing";
     newSpeakerName = "";
+    remember = true;
   });
 
   const pickerSpeakers = $derived.by(() => {
@@ -79,6 +82,11 @@
   }
 
   async function applyRetag() {
+    // Remembering only ever moves this meeting's voice embeddings once the
+    // source speaker has no turns left in it. A meeting-scoped retag always
+    // satisfies that; a turn-scoped one only sometimes does, so the choice
+    // is only offered (and only ever sent as true) for the meeting scope.
+    const effectiveRemember = retagScope === "meeting" && remember;
     isSaving = true;
     try {
       if (targetMode === "existing") {
@@ -87,6 +95,7 @@
           scope: retagScope,
           toSpeakerId: targetSpeakerId,
           newSpeakerName: null,
+          remember: effectiveRemember,
         });
       } else {
         const trimmed = newSpeakerName.trim();
@@ -95,6 +104,7 @@
           scope: retagScope,
           toSpeakerId: null,
           newSpeakerName: trimmed,
+          remember: effectiveRemember,
         });
       }
       onClose();
@@ -181,6 +191,16 @@
         />
       {/if}
     </div>
+
+    {#if retagScope === "meeting"}
+      <label class="mb-1 flex items-center gap-2 text-[12.5px] text-text-secondary">
+        <input type="checkbox" bind:checked={remember} />
+        {$t("speaker_manage.remember_label")}
+      </label>
+      <p class="m-0 mb-2 text-[11px] text-text-faint">
+        {remember ? $t("speaker_manage.remember_help_on") : $t("speaker_manage.remember_help_off")}
+      </p>
+    {/if}
 
     <button
       class="btn btn-primary w-full text-[12.5px]"

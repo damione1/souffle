@@ -45,6 +45,17 @@ const mockExportMeetingToFile = vi.fn<
   (id: string, format: import("../../types").ExportFormat, path: string) => Promise<void>
 >();
 const mockShowSaveDialog = vi.fn<(opts: unknown) => Promise<string | null>>();
+const mockListSpeakers = vi.fn<() => Promise<import("../../types").MeetingSpeaker[]>>();
+const mockRetagMeetingSpeaker = vi.fn<
+  (request: import("../../types").RetagMeetingSpeakerRequest) => Promise<MeetingTranscript>
+>();
+
+vi.mock("../../api/speakers", () => ({
+  listSpeakers: (...a: unknown[]) => mockListSpeakers(...(a as [])),
+  retagMeetingSpeaker: (...a: unknown[]) =>
+    mockRetagMeetingSpeaker(...(a as [import("../../types").RetagMeetingSpeakerRequest])),
+  renameSpeaker: vi.fn(),
+}));
 
 vi.mock("../../api/meetings", () => ({
   startMeetingRecording: (...a: unknown[]) =>
@@ -232,6 +243,7 @@ describe("MeetingController", () => {
     vi.clearAllMocks();
     resetMeetingControllerForTest();
     mockApp = createMockAppState();
+    mockListSpeakers.mockResolvedValue([]);
   });
 
   it("mount checks ollama and loads transcription catalog", async () => {
@@ -443,6 +455,53 @@ describe("MeetingController", () => {
     expect(mockDeleteMeeting).toHaveBeenCalledWith("meet-1");
     expect(ctrl.meeting).toBeNull();
     expect(mockApp.currentMeetingId).toBeNull();
+  });
+
+  it("retagSpeaker forwards the remember flag to the request", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockGetMeeting.mockResolvedValue(makeMeeting());
+    mockRetagMeetingSpeaker.mockResolvedValue(makeMeeting());
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    await ctrl.onMeetingSelectionChange("meet-1");
+
+    await ctrl.retagSpeaker({
+      fromSpeakerId: 1,
+      segmentSortOrders: [3, 4],
+      scope: "turn",
+      toSpeakerId: 2,
+      newSpeakerName: null,
+      remember: true,
+    });
+
+    expect(mockRetagMeetingSpeaker).toHaveBeenCalledWith({
+      meeting_id: "meet-1",
+      from_speaker_id: 1,
+      sort_orders: [3, 4],
+      to_speaker_id: 2,
+      new_speaker_name: null,
+      remember: true,
+    });
+
+    await ctrl.retagSpeaker({
+      fromSpeakerId: 1,
+      segmentSortOrders: [3, 4],
+      scope: "meeting",
+      toSpeakerId: null,
+      newSpeakerName: "Carol",
+      remember: false,
+    });
+
+    expect(mockRetagMeetingSpeaker).toHaveBeenLastCalledWith({
+      meeting_id: "meet-1",
+      from_speaker_id: 1,
+      sort_orders: [],
+      to_speaker_id: null,
+      new_speaker_name: "Carol",
+      remember: false,
+    });
   });
 
   it("exportMeeting looks up the filename, opens the save dialog, and writes the file", async () => {

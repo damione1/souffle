@@ -4,9 +4,9 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 12: `speakers` table for persistent, cross-meeting speaker
-/// identities resolved by offline diarization.
-pub const SCHEMA_VERSION: i64 = 12;
+/// Schema version 13: `speaker_embeddings` table for multi-embedding speaker
+/// matching, replacing the single running-mean centroid on `speakers`.
+pub const SCHEMA_VERSION: i64 = 13;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -122,8 +122,15 @@ pub const CREATE_DICTIONARY: &str = "
 ";
 
 /// Persistent, cross-meeting speaker identities resolved by offline
-/// diarization. `centroid` is an opaque BLOB from the DB layer's point of
-/// view: the diarization crate encodes it as 256 little-endian f32s.
+/// diarization. `centroid`/`embedding_count` are no longer populated by
+/// `create_speaker` or read by the matcher as of v13 (matching uses the
+/// multi-embedding `speaker_embeddings` table instead of a single
+/// running-mean centroid), and `db::speakers::SpeakerRecord` doesn't expose
+/// them either. The columns stay in the schema anyway, purely to avoid an
+/// ALTER-driven table rebuild: the MCP sidecar (`souffle-mcp`) only reads
+/// `name` from this table, so it is not a reason to keep them. `is_me` flags
+/// the speaker who is the app's user; at most one row has it set (enforced
+/// by `Database::set_speaker_is_me`, not by the schema).
 pub const CREATE_SPEAKERS: &str = "
     CREATE TABLE IF NOT EXISTS speakers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,8 +138,42 @@ pub const CREATE_SPEAKERS: &str = "
         centroid BLOB,
         embedding_count INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
-        last_seen_at TEXT NOT NULL
+        last_seen_at TEXT NOT NULL,
+        is_me INTEGER NOT NULL DEFAULT 0
     );
+";
+
+/// Up to `db::speakers::MAX_EMBEDDINGS_PER_SPEAKER` recent voice embeddings
+/// per persistent speaker, used to match future clusters by MAX cosine
+/// similarity across the bag rather than a single running-mean centroid.
+/// `embedding` is an opaque BLOB from this layer's point of view: the
+/// diarization crate encodes it as little-endian f32s. No FK cascade (the
+/// `PRAGMA foreign_keys` setting is not guaranteed active on every
+/// connection): `delete_speaker` removes matching rows explicitly.
+pub const CREATE_SPEAKER_EMBEDDINGS: &str = "
+    CREATE TABLE IF NOT EXISTS speaker_embeddings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        speaker_id INTEGER NOT NULL,
+        meeting_id TEXT,
+        embedding BLOB NOT NULL,
+        speech_seconds REAL NOT NULL,
+        created_at TEXT NOT NULL
+    );
+";
+
+pub const CREATE_SPEAKER_EMBEDDINGS_INDEX: &str = "
+    CREATE INDEX IF NOT EXISTS idx_speaker_embeddings_speaker ON speaker_embeddings(speaker_id);
+";
+
+/// Enforces at most one speaker flagged `is_me` at a time at the schema
+/// level, not just by application code (`Database::set_speaker_is_me`
+/// already maintains it transactionally, and `Database::merge_speakers`
+/// orders its statements to avoid a transient double-`is_me` mid-merge, but
+/// the invariant is cheap enough to also guarantee here). A partial index
+/// (`WHERE is_me = 1`) only constrains rows where the flag is set, so any
+/// number of `is_me = 0` rows coexist freely.
+pub const CREATE_SPEAKERS_IS_ME_INDEX: &str = "
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_speakers_is_me ON speakers(is_me) WHERE is_me = 1;
 ";
 
 /// All schema creation statements in order
@@ -429,6 +470,67 @@ pub fn migrate_add_speakers_to_v12(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// v13: multi-embedding speaker matching replaces the single running-mean
+/// centroid. Every historical match attempt under the old thresholds
+/// (0.65 similarity floor, 0.03 margin) failed in practice, so `speakers`
+/// rows that no segment ever ended up referencing are purged first: they
+/// are pure duplicate-name clutter, not identities worth carrying forward.
+/// Surviving speakers with a centroid get it seeded as their first
+/// `speaker_embeddings` row, so an existing enrollment isn't lost outright
+/// even though the matcher will accumulate fresher, more representative
+/// embeddings over time. Also adds `speakers.is_me`, guarded by a column
+/// check: a database that just went through the v12 step above already has
+/// it (`CREATE_SPEAKERS` includes it), so the `ALTER TABLE` only fires for
+/// databases that were already at v12 before this column existed. Finally
+/// creates `CREATE_SPEAKERS_IS_ME_INDEX`: this is also where a fresh
+/// database picks it up, since `ensure_schema` runs every versioned step in
+/// order starting from 0 rather than jumping straight to the latest schema.
+pub fn migrate_speaker_embeddings_to_v13(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM speakers WHERE id NOT IN (
+            SELECT DISTINCT CAST(substr(speaker, 5) AS INTEGER)
+            FROM segments WHERE speaker LIKE 'spk:%'
+        )",
+        [],
+    )
+    .map_err(|e| format!("Purge orphaned speakers: {e}"))?;
+
+    if !speakers_has_is_me_column(conn)? {
+        conn.execute("ALTER TABLE speakers ADD COLUMN is_me INTEGER NOT NULL DEFAULT 0", [])
+            .map_err(|e| format!("Add is_me column: {e}"))?;
+    }
+
+    conn.execute_batch(CREATE_SPEAKER_EMBEDDINGS)
+        .map_err(|e| format!("Create speaker_embeddings table: {e}"))?;
+    conn.execute_batch(CREATE_SPEAKER_EMBEDDINGS_INDEX)
+        .map_err(|e| format!("Create speaker_embeddings index: {e}"))?;
+    conn.execute_batch(CREATE_SPEAKERS_IS_ME_INDEX)
+        .map_err(|e| format!("Create speakers is_me unique index: {e}"))?;
+
+    conn.execute(
+        "INSERT INTO speaker_embeddings (speaker_id, meeting_id, embedding, speech_seconds, created_at)
+         SELECT id, NULL, centroid, 0.0, last_seen_at FROM speakers WHERE centroid IS NOT NULL",
+        [],
+    )
+    .map_err(|e| format!("Seed speaker_embeddings from centroids: {e}"))?;
+
+    Ok(())
+}
+
+fn speakers_has_is_me_column(conn: &Connection) -> Result<bool, String> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(speakers)")
+        .map_err(|e| format!("Prepare speakers table_info: {e}"))?;
+    let has_column = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| format!("Query speakers table_info: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Collect speakers table_info: {e}"))?
+        .iter()
+        .any(|name| name == "is_me");
+    Ok(has_column)
+}
+
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
@@ -512,6 +614,9 @@ mod tests {
         conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
         conn.execute_batch(CREATE_SEGMENTS).unwrap();
         conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        // A real v9 database has already been through the v7 migration.
+        conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
+            .unwrap();
         conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
         conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
@@ -603,6 +708,9 @@ mod tests {
         conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
         conn.execute_batch(CREATE_SEGMENTS).unwrap();
         conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        // A real v10 database has already been through the v7 migration.
+        conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
+            .unwrap();
         conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
         conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
@@ -642,6 +750,9 @@ mod tests {
         .unwrap();
         conn.execute_batch(CREATE_SEGMENTS).unwrap();
         conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        // A real v11 database has already been through the v7 migration.
+        conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
+            .unwrap();
         conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
         conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
@@ -684,6 +795,210 @@ mod tests {
                 "speakers table should have column {expected}"
             );
         }
+    }
+
+    #[test]
+    fn v12_migrate_to_v13_purges_orphans_and_seeds_embeddings() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        // Minimal v12-era fixture: meetings v3 shape with structured_summary,
+        // segments referencing one of two speakers, and the v12 speakers
+        // table (with a centroid) but no speaker_embeddings table yet.
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute(
+            "ALTER TABLE meetings ADD COLUMN structured_summary TEXT",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(CREATE_SEGMENTS).unwrap();
+        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        // A real v12 database has already been through the v7 migration.
+        conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
+            .unwrap();
+        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(CREATE_SETTINGS).unwrap();
+        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(super::CREATE_SPEAKERS).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (12)", [])
+            .unwrap();
+
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, ended_at, duration_seconds, transcription_profile, recording_sessions, summary, summary_is_stale, summary_model, summary_generated_at, edited_transcript)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                "m1",
+                "Meeting",
+                "2026-03-01T10:00:00Z",
+                "2026-03-01T10:10:00Z",
+                600.0,
+                r#"{"engine_id":"parakeet","engine_label":"Parakeet","model_id":"parakeet-tdt-0.6b-v2","model_label":"Parakeet TDT 0.6B v2","backend_id":"ort","backend_label":"ONNX Runtime"}"#,
+                "[]",
+                None::<String>,
+                0,
+                None::<String>,
+                None::<String>,
+                None::<String>,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params!["m1", "Hello", 0.0, 1.0, 1, Some("en"), None::<f32>, 0, "spk:1"],
+        )
+        .unwrap();
+
+        let now = "2026-03-01T10:00:00Z";
+        // Speaker 1 is referenced by a segment and has a centroid: it must
+        // survive and get that centroid seeded as an embedding.
+        conn.execute(
+            "INSERT INTO speakers (id, name, centroid, embedding_count, created_at, last_seen_at) VALUES (1, 'Alice', ?1, 3, ?2, ?2)",
+            params![vec![0u8; 1024], now],
+        )
+        .unwrap();
+        // Speaker 2 has no segment referencing it: orphaned, must be purged.
+        conn.execute(
+            "INSERT INTO speakers (id, name, centroid, embedding_count, created_at, last_seen_at) VALUES (2, 'Orphan', NULL, 0, ?1, ?1)",
+            params![now],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock().unwrap();
+
+        let speaker_ids: Vec<i64> = {
+            let mut stmt = conn.prepare("SELECT id FROM speakers ORDER BY id").unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            speaker_ids,
+            vec![1],
+            "orphaned speaker 2 must be purged, referenced speaker 1 kept"
+        );
+
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='speaker_embeddings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(table_exists, "v13 migration should create speaker_embeddings");
+
+        let seeded_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM speaker_embeddings WHERE speaker_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            seeded_count, 1,
+            "surviving speaker with a centroid should get one seeded embedding"
+        );
+
+        let is_me: i64 = conn
+            .query_row("SELECT is_me FROM speakers WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(is_me, 0, "is_me should default to 0");
+    }
+
+    #[test]
+    fn v12_speakers_without_is_me_column_migrate_to_v13_add_it() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        // A real v12 database predating this column: the speakers table has
+        // the pre-v13 shape (no is_me), unlike super::CREATE_SPEAKERS which
+        // already includes it.
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute(
+            "ALTER TABLE meetings ADD COLUMN structured_summary TEXT",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(CREATE_SEGMENTS).unwrap();
+        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
+            .unwrap();
+        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(CREATE_SETTINGS).unwrap();
+        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS speakers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                centroid BLOB,
+                embedding_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (12)", [])
+            .unwrap();
+
+        let now = "2026-03-01T10:00:00Z";
+        conn.execute(
+            "INSERT INTO speakers (id, name, centroid, embedding_count, created_at, last_seen_at) VALUES (1, 'Alice', NULL, 0, ?1, ?1)",
+            params![now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, ended_at, duration_seconds, transcription_profile, recording_sessions, summary, summary_is_stale, summary_model, summary_generated_at, edited_transcript)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                "m1",
+                "Meeting",
+                now,
+                now,
+                600.0,
+                r#"{"engine_id":"parakeet","engine_label":"Parakeet","model_id":"parakeet-tdt-0.6b-v2","model_label":"Parakeet TDT 0.6B v2","backend_id":"ort","backend_label":"ONNX Runtime"}"#,
+                "[]",
+                None::<String>,
+                0,
+                None::<String>,
+                None::<String>,
+                None::<String>,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params!["m1", "Hello", 0.0, 1.0, 1, Some("en"), None::<f32>, 0, "spk:1"],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock().unwrap();
+
+        let columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(speakers)").unwrap();
+            stmt.query_map([], |row| row.get(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            columns.iter().any(|column| column == "is_me"),
+            "v13 migration should add is_me to a v12 speakers table missing it"
+        );
+
+        let is_me: i64 = conn
+            .query_row("SELECT is_me FROM speakers WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(is_me, 0, "is_me should default to 0 for existing rows");
     }
 
     #[test]

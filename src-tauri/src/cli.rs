@@ -13,6 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use rusqlite::{Connection, OpenFlags};
 
 use crate::constants::{SAMPLE_RATE_F64, SILENCE_SUFFIX_SAMPLES};
 use crate::engine::{
@@ -243,11 +244,127 @@ fn run_diarize(wav_path: &Path, json: bool) -> i32 {
         }
     };
 
-    print_diarization_result(&result, json);
+    let stored = load_stored_speakers_for_calibration();
+    print_diarization_result(&result, &stored, json);
     0
 }
 
-fn print_diarization_result(result: &crate::diarize::DiarizationResult, json: bool) {
+/// One stored speaker's id, name, and decoded embeddings, loaded for the
+/// `--diarize-file` calibration report.
+struct CalibrationSpeaker {
+    id: i64,
+    name: String,
+    embeddings: Vec<Vec<f32>>,
+}
+
+/// A `load_calibration_speakers` failure, distinguishing "this database
+/// predates the feature" (silent) from every other failure (reported).
+enum CalibrationLoadError {
+    /// `speakers` or `speaker_embeddings` doesn't exist: a pre-v13 (or
+    /// pre-v12) database that has simply never had persistent speakers.
+    MissingTable,
+    Other(rusqlite::Error),
+}
+
+impl From<rusqlite::Error> for CalibrationLoadError {
+    fn from(e: rusqlite::Error) -> Self {
+        let missing_table = matches!(
+            &e,
+            rusqlite::Error::SqliteFailure(_, Some(msg)) if msg.contains("no such table")
+        );
+        if missing_table {
+            CalibrationLoadError::MissingTable
+        } else {
+            CalibrationLoadError::Other(e)
+        }
+    }
+}
+
+/// Stored speakers for the `--diarize-file` calibration report, read
+/// straight from `souffle.db` in read-only mode: this is a diagnostic tool
+/// run against whatever database the app happens to have, not a codepath
+/// that should ever create, migrate, or lock one for writing. Three
+/// outcomes: no database file yet is a silent empty list (the app has never
+/// been launched); a database that predates the `speaker_embeddings` table
+/// (schema v13) is also a silent empty list (there's nothing to have
+/// migrated); any other failure (permissions, corruption, a locked file) is
+/// reported on stderr before falling back to an empty list, since silently
+/// swallowing those would make "No stored speakers" a misleading message.
+fn load_stored_speakers_for_calibration() -> Vec<CalibrationSpeaker> {
+    let db_path = crate::constants::app_data_dir().join("souffle.db");
+    if !db_path.exists() {
+        return Vec::new();
+    }
+    match load_calibration_speakers(&db_path) {
+        Ok(speakers) => speakers,
+        Err(CalibrationLoadError::MissingTable) => Vec::new(),
+        Err(CalibrationLoadError::Other(e)) => {
+            eprintln!(
+                "Warning: could not read stored speakers from '{}': {e}",
+                db_path.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn load_calibration_speakers(db_path: &Path) -> Result<Vec<CalibrationSpeaker>, CalibrationLoadError> {
+    let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+
+    let mut speakers_stmt = conn.prepare("SELECT id, name FROM speakers ORDER BY id")?;
+    let speakers: Vec<(i64, String)> = speakers_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut embeddings_stmt =
+        conn.prepare("SELECT speaker_id, embedding FROM speaker_embeddings ORDER BY speaker_id, id")?;
+    let embedding_rows: Vec<(i64, Vec<u8>)> = embeddings_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(embeddings_stmt);
+
+    let mut by_speaker: std::collections::HashMap<i64, Vec<Vec<f32>>> = std::collections::HashMap::new();
+    for (speaker_id, blob) in embedding_rows {
+        if let Some(decoded) = crate::diarize::persist::decode_embedding(&blob) {
+            by_speaker.entry(speaker_id).or_default().push(decoded);
+        }
+    }
+
+    Ok(speakers
+        .into_iter()
+        .map(|(id, name)| CalibrationSpeaker {
+            id,
+            name,
+            embeddings: by_speaker.remove(&id).unwrap_or_default(),
+        })
+        .collect())
+}
+
+/// Cosine similarity of `embedding` against the MAX-similarity embedding of
+/// each stored speaker, for calibrating `persist::MATCH_THRESHOLD`/
+/// `MATCH_MARGIN` against real recordings. `None` for a stored speaker with
+/// no embeddings recorded yet.
+fn max_similarity_per_speaker<'a>(
+    embedding: &[f32],
+    stored: &'a [CalibrationSpeaker],
+) -> Vec<(i64, &'a str, Option<f32>)> {
+    stored
+        .iter()
+        .map(|s| {
+            (
+                s.id,
+                s.name.as_str(),
+                crate::diarize::persist::max_similarity(embedding, &s.embeddings),
+            )
+        })
+        .collect()
+}
+
+fn print_diarization_result(
+    result: &crate::diarize::DiarizationResult,
+    stored: &[CalibrationSpeaker],
+    json: bool,
+) {
     if json {
         let json_value = serde_json::json!({
             "speaker_count": result.speakers.len(),
@@ -255,6 +372,17 @@ fn print_diarization_result(result: &crate::diarize::DiarizationResult, json: bo
                 "start_ms": s.start_ms,
                 "end_ms": s.end_ms,
                 "speaker": s.speaker,
+            })).collect::<Vec<_>>(),
+            "clusters": result.speakers.iter().map(|c| serde_json::json!({
+                "speaker": c.speaker,
+                "speech_seconds": c.speech_seconds,
+                "similarities": max_similarity_per_speaker(&c.embedding, stored).into_iter()
+                    .map(|(id, name, sim)| serde_json::json!({
+                        "speaker_id": id,
+                        "name": name,
+                        "max_similarity": sim,
+                    }))
+                    .collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         });
         println!("{}", serde_json::to_string(&json_value).unwrap_or_default());
@@ -269,6 +397,22 @@ fn print_diarization_result(result: &crate::diarize::DiarizationResult, json: bo
             seg.end_ms as f64 / 1000.0,
             seg.speaker
         );
+    }
+
+    println!();
+    if stored.is_empty() {
+        println!("No stored speakers in the database; nothing to calibrate against.");
+        return;
+    }
+    println!("Calibration: cluster similarity against stored speakers");
+    for cluster in &result.speakers {
+        println!("  Cluster {} ({:.1}s of speech):", cluster.speaker, cluster.speech_seconds);
+        for (id, name, sim) in max_similarity_per_speaker(&cluster.embedding, stored) {
+            match sim {
+                Some(sim) => println!("    vs speaker {id} '{name}': {sim:.3}"),
+                None => println!("    vs speaker {id} '{name}': no embeddings recorded"),
+            }
+        }
     }
 }
 
