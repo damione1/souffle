@@ -264,7 +264,7 @@ impl MeetingState {
         if can_leak != self.aec_active {
             if can_leak {
                 info!("Speakers audible, echo cancellation engaged");
-                self.mixer.set_aec(Some(aec::Aec::new(mixer::MIX_RATE)));
+                self.mixer.set_aec(Some(aec::Aec::new_with_default_delay_hint(mixer::MIX_RATE)));
             } else {
                 info!("Output muted or off speakers, echo cancellation disengaged");
                 self.mixer.set_aec(None);
@@ -1084,7 +1084,7 @@ impl AudioCapture {
             let can_leak = tap.is_some() && super::output_route::output_can_leak_into_mic();
             if can_leak {
                 info!("Speakers audible, echo cancellation engaged");
-                mixer.set_aec(Some(super::aec::Aec::new(super::mixer::MIX_RATE)));
+                mixer.set_aec(Some(super::aec::Aec::new_with_default_delay_hint(super::mixer::MIX_RATE)));
             }
             can_leak
         };

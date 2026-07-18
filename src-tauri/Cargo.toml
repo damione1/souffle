@@ -130,6 +130,27 @@ souffle = { path = ".", features = ["test-support"] }
 # without a real webview.
 tauri = { version = "2", features = ["test"] }
 
+# sonora-aec3 0.1.0 (the only version published to crates.io) panics in
+# `AdaptiveFirFilter::set_size_partitions` when the filter shrinks immediately
+# (e.g. on an echo-path-change event after the filter grew past its initial
+# size): `zero_filter(old_size, new_size, ..)` slices `old_size..new_size`,
+# which is an invalid range once old_size > new_size. Fixed upstream in
+# dec6a074 ("prevent panic when shrinking adaptive FIR filter", #15) but not
+# yet released as a new crates.io version. Pinned to a specific commit
+# (rather than a branch) so the fix is reproducible via Cargo.lock; bump this
+# rev, or drop the patch entirely, once 0.1.1+ ships. Every sonora-* crate is
+# patched to the same rev (not just sonora-aec3) so the whole dependency
+# graph resolves to one source instead of building duplicate copies of the
+# shared DSP crates (sonora-common-audio, sonora-fft, sonora-simd).
+[patch.crates-io]
+sonora = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
+sonora-aec3 = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
+sonora-agc2 = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
+sonora-common-audio = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
+sonora-fft = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
+sonora-ns = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
+sonora-simd = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
+
 [profile.release]
 strip = true
 lto = true
