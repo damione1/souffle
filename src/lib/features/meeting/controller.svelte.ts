@@ -665,6 +665,7 @@ function createMeetingControllerInstance() {
     scope: "turn" | "meeting";
     toSpeakerId: number | null;
     newSpeakerName: string | null;
+    remember: boolean;
   }) {
     if (!meeting?.id) return;
     try {
@@ -674,6 +675,7 @@ function createMeetingControllerInstance() {
         sort_orders: options.scope === "turn" ? options.segmentSortOrders : [],
         to_speaker_id: options.toSpeakerId,
         new_speaker_name: options.newSpeakerName,
+        remember: options.remember,
       });
       allSpeakers = await listSpeakers().catch(() => []);
     } catch (e) {

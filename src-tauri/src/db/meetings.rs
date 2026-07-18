@@ -319,7 +319,9 @@ impl Database {
     /// embeddings this meeting recorded for `from_persistent_id` move to the
     /// resolved target too, so future matching benefits from the correction;
     /// when false, the retag only overrides the label shown for this meeting
-    /// and the embeddings stay where they are.
+    /// and the embeddings stay where they are. A remembered retag only moves
+    /// those embeddings once `from_persistent_id` has no segments left in
+    /// this meeting: see the invariant note at the embedding move below.
     pub fn retag_meeting_speaker_labels(
         &self,
         meeting_id: &str,
@@ -383,14 +385,31 @@ impl Database {
             sort_orders,
         )?;
 
+        // A meeting's voice embeddings for a speaker cover every turn that
+        // speaker took in it, not just the retagged ones: they are only
+        // attributable as a block. So a remembered retag may only move them
+        // once the source speaker has no segments left in this meeting
+        // (whole-meeting retags always satisfy this; a single-turn retag
+        // only does when that was the source's sole turn here). Otherwise
+        // the source genuinely spoke elsewhere in the meeting and moving its
+        // embeddings would mis-train the target's voice profile.
         if remember {
-            tx.execute(
-                "UPDATE speaker_embeddings SET speaker_id = ?1
-                 WHERE speaker_id = ?2 AND meeting_id = ?3",
-                params![resolved_to_id, from_persistent_id, meeting_id],
-            )
-            .map_err(|e| format!("Move retagged speaker embeddings: {e}"))?;
-            super::speakers::prune_speaker_embeddings(&tx, resolved_to_id)?;
+            let remaining_for_source: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM segments WHERE meeting_id = ?1 AND speaker = ?2",
+                    params![meeting_id, &from_label],
+                    |row| row.get(0),
+                )
+                .map_err(|e| format!("Count remaining source segments: {e}"))?;
+            if remaining_for_source == 0 {
+                tx.execute(
+                    "UPDATE speaker_embeddings SET speaker_id = ?1
+                     WHERE speaker_id = ?2 AND meeting_id = ?3",
+                    params![resolved_to_id, from_persistent_id, meeting_id],
+                )
+                .map_err(|e| format!("Move retagged speaker embeddings: {e}"))?;
+                super::speakers::prune_speaker_embeddings(&tx, resolved_to_id)?;
+            }
         }
 
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
@@ -1262,6 +1281,62 @@ mod tests {
 
         assert_eq!(db.speaker_embeddings(alice).unwrap(), vec![vec![1u8]]);
         assert!(db.speaker_embeddings(bob).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retag_meeting_speaker_labels_remember_leaves_embeddings_when_source_keeps_other_turns() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        // Alice has two turns in this meeting; only one is retagged, so she
+        // still spoke in the meeting after the correction.
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        meeting.segments[1].speaker = Some(Speaker::Persistent(alice));
+        db.save_meeting(&meeting).unwrap();
+        db.append_speaker_embedding(alice, Some("m1"), &[1u8], 1.0, chrono::Utc::now())
+            .unwrap();
+
+        db.retag_meeting_speaker_labels("m1", alice, Some(bob), None, Some(&[0]), true)
+            .unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Persistent(bob)));
+        assert_eq!(loaded.segments[1].speaker, Some(Speaker::Persistent(alice)));
+
+        // Alice's meeting embeddings stay put: she is still attributable to
+        // segment 1, so moving them would mis-train Bob's voice profile.
+        assert_eq!(db.speaker_embeddings(alice).unwrap(), vec![vec![1u8]]);
+        assert!(db.speaker_embeddings(bob).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retag_meeting_speaker_labels_remember_moves_embeddings_when_turn_retag_fully_delogs_source()
+    {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+
+        // Alice only has a single turn in this meeting (segment 0); segment 1
+        // belongs to Bob. Retagging Alice's sole turn fully delogs her from
+        // the meeting, so the turn-scoped retag behaves like a meeting-scoped
+        // one for embedding purposes.
+        let mut meeting = sample_meeting("m1");
+        meeting.segments[0].speaker = Some(Speaker::Persistent(alice));
+        meeting.segments[1].speaker = Some(Speaker::Persistent(bob));
+        db.save_meeting(&meeting).unwrap();
+        db.append_speaker_embedding(alice, Some("m1"), &[1u8], 1.0, chrono::Utc::now())
+            .unwrap();
+
+        db.retag_meeting_speaker_labels("m1", alice, Some(bob), None, Some(&[0]), true)
+            .unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.segments[0].speaker, Some(Speaker::Persistent(bob)));
+
+        assert!(db.speaker_embeddings(alice).unwrap().is_empty());
+        assert_eq!(db.speaker_embeddings(bob).unwrap(), vec![vec![1u8]]);
     }
 
     #[test]
