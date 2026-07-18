@@ -11,6 +11,15 @@
 //! measures 0.48 to 0.66 in practice, so any one embedding can miss a match
 //! while another recorded on a different day, mic, or vocal tone hits.
 //! Similarity against a stored speaker is the MAX over its embeddings.
+//!
+//! `resolve_session` builds on `match_speakers` to coordinate a single
+//! recording session's mic and system-audio passes: it detects mic clusters
+//! that are just the system audio leaking into the microphone (see its doc
+//! comment for the physical invariant that makes this safe) and folds the
+//! remaining, genuinely independent clusters from both lanes into one
+//! `match_speakers` call, so a claim on a stored speaker can no longer be won
+//! twice by two clusters that are actually the same voice heard through two
+//! taps.
 
 use super::SpeakerCentroid;
 
@@ -37,6 +46,23 @@ pub const MATCH_MARGIN: f32 = 0.05;
 /// second of speech spawning a permanent identity that nothing will ever
 /// match against again.
 pub const MIN_ENROLL_SPEECH_S: f64 = 5.0;
+
+/// Cosine similarity above which a mic cluster is considered the same voice
+/// as a system cluster from the SAME session, i.e. the system audio leaking
+/// acoustically into the microphone, not two different people who happen to
+/// sound alike. Deliberately higher than `MATCH_THRESHOLD` (0.5):
+/// `MATCH_THRESHOLD` calibrates the same voice recorded on different
+/// days/mics/tones (0.48 to 0.66 in practice), a much noisier comparison
+/// than the same voice at the same instant of the same session, only
+/// degraded by one extra speaker-to-mic acoustic path.
+///
+/// The physical invariant that makes this safe: the system audio tap can
+/// never contain the local microphone's own voice (there is no return loop
+/// from mic input back into system output), so a mic cluster that closely
+/// matches a system cluster from the same session cannot be a coincidence of
+/// two different people sounding similar. It IS that system voice, heard
+/// twice.
+pub const CROSS_LANE_ECHO_THRESHOLD: f32 = 0.7;
 
 /// A stored, persistent speaker row as seen by the matcher: its recent
 /// embeddings (see `db::speakers::MAX_EMBEDDINGS_PER_SPEAKER`), decoded to
@@ -252,6 +278,129 @@ pub fn match_speakers(clusters: &[SpeakerCentroid], stored: &[StoredSpeaker]) ->
         });
     }
     decisions
+}
+
+/// What a mic cluster resolved to, once cross-lane echo has been factored
+/// in. See `resolve_session`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MicResolution {
+    /// Not echo (or there was no system lane to compare against): resolved
+    /// on its own merits, exactly as `match_speakers` would in isolation.
+    Own(MatchDecision),
+    /// This mic cluster is the system audio leaking into the microphone,
+    /// heard a second time. `cluster` is its own (mic-lane) cluster id;
+    /// `system_cluster` is the system-lane cluster id (indexing into
+    /// `SessionResolution::system`, matched by `MatchDecision::cluster`) it
+    /// is an echo of. It is never matched, enrolled, or persisted on its
+    /// own: the caller must resolve it to whatever the system cluster
+    /// resolved to (including `Unlabeled`, if the system cluster itself
+    /// didn't resolve to a stored speaker) and must never write an embedding
+    /// for it, since it is a degraded copy of a voice already captured
+    /// cleanly by the system tap.
+    Echo { cluster: usize, system_cluster: usize },
+}
+
+/// One recording session's mic and system-audio clusters, resolved
+/// together. See `resolve_session`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionResolution {
+    /// One decision per system cluster, in no particular order. System
+    /// clusters are never echo: the system tap can never contain the local
+    /// mic's own voice, so nothing about a system cluster ever depends on
+    /// the mic lane.
+    pub system: Vec<MatchDecision>,
+    /// One resolution per mic cluster, index-aligned with the
+    /// `mic_clusters` slice passed to `resolve_session`.
+    pub mic: Vec<MicResolution>,
+}
+
+/// Resolve one session's system and mic clusters together against `stored`
+/// speakers, so a mic cluster that is just the system audio leaking into the
+/// microphone can never spawn a duplicate identity or steal a stored
+/// speaker's claim out from under the real system cluster.
+///
+/// Two steps:
+/// 1. Every mic cluster is compared against every system cluster of the same
+///    session (max cosine similarity, see `max_similarity`'s sibling logic
+///    here). A mic cluster whose best system match is at or above
+///    `CROSS_LANE_ECHO_THRESHOLD` is echo: it is excluded from matching and
+///    instead tagged with the system cluster it echoes.
+/// 2. Every system cluster, plus every non-echo mic cluster, is matched
+///    together in a single `match_speakers` call, so the greedy same-target
+///    conflict resolution there (see its doc comment) now also arbitrates
+///    between the two lanes, not just within one.
+///
+/// Mic and system clusters can carry numerically identical `.speaker` ids
+/// (each lane numbers its own clusters from its own `diarize()` run), so
+/// non-echo mic clusters are re-tagged with an id past every system id
+/// before the combined `match_speakers` call, and untagged again on the way
+/// out; `MicResolution`/`MatchDecision::cluster` always carries the real,
+/// original per-lane id.
+///
+/// A meeting with only one lane (mic-only or system-only) behaves exactly as
+/// `match_speakers` would on that lane alone: an empty other-lane slice
+/// finds no echo and contributes nothing to the combined match.
+pub fn resolve_session(
+    system_clusters: &[SpeakerCentroid],
+    mic_clusters: &[SpeakerCentroid],
+    stored: &[StoredSpeaker],
+) -> SessionResolution {
+    // For each mic cluster (keyed by its real cluster id), the system
+    // cluster id it is an echo of, if any.
+    let echo_of: std::collections::HashMap<usize, usize> = mic_clusters
+        .iter()
+        .filter_map(|mic| {
+            system_clusters
+                .iter()
+                .map(|sys| (sys.speaker, cosine_similarity(&mic.embedding, &sys.embedding)))
+                .filter(|&(_, sim)| sim >= CROSS_LANE_ECHO_THRESHOLD)
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(sys_speaker, _)| (mic.speaker, sys_speaker))
+        })
+        .collect();
+
+    let tag_offset = system_clusters.iter().map(|c| c.speaker).max().map_or(0, |m| m + 1);
+    let mut combined: Vec<SpeakerCentroid> = system_clusters.to_vec();
+    // Maps a tagged (combined-list) id back to the real mic cluster id it
+    // stands in for, so the match result can be untagged on the way out.
+    let mut tag_to_mic_speaker: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for mic in mic_clusters {
+        if echo_of.contains_key(&mic.speaker) {
+            continue;
+        }
+        let tag = tag_offset + mic.speaker;
+        tag_to_mic_speaker.insert(tag, mic.speaker);
+        combined.push(SpeakerCentroid {
+            speaker: tag,
+            embedding: mic.embedding.clone(),
+            speech_seconds: mic.speech_seconds,
+        });
+    }
+
+    let mut system: Vec<MatchDecision> = Vec::with_capacity(system_clusters.len());
+    let mut mic_own: std::collections::HashMap<usize, MatchDecision> = std::collections::HashMap::new();
+    for mut decision in match_speakers(&combined, stored) {
+        if let Some(&mic_speaker) = tag_to_mic_speaker.get(&decision.cluster) {
+            decision.cluster = mic_speaker;
+            mic_own.insert(mic_speaker, decision);
+        } else {
+            system.push(decision);
+        }
+    }
+
+    let mic = mic_clusters
+        .iter()
+        .map(|c| match echo_of.get(&c.speaker) {
+            Some(&system_cluster) => MicResolution::Echo { cluster: c.speaker, system_cluster },
+            None => MicResolution::Own(
+                mic_own
+                    .remove(&c.speaker)
+                    .expect("every non-echo mic cluster was included in the combined match_speakers call"),
+            ),
+        })
+        .collect();
+
+    SessionResolution { system, mic }
 }
 
 #[cfg(test)]
@@ -535,5 +684,165 @@ mod tests {
         let decisions = match_speakers(&clusters, &[]);
         assert_eq!(decisions[0].embedding, embedding);
         assert_eq!(decisions[0].speech_seconds, 7.5);
+    }
+
+    // resolve_session
+
+    #[test]
+    fn resolve_session_near_identical_mic_cluster_is_echo_of_system_cluster() {
+        let sys_emb = unit(4, 0);
+        let mic_emb = normalize(vec![1.0, 0.1, 0.0, 0.0]); // sim ~0.995, well above 0.7
+        let system_clusters = vec![centroid(0, sys_emb, LONG)];
+        let mic_clusters = vec![centroid(0, mic_emb, LONG)];
+        let resolution = resolve_session(&system_clusters, &mic_clusters, &[]);
+
+        assert_eq!(resolution.system.len(), 1);
+        assert_eq!(resolution.mic, vec![MicResolution::Echo { cluster: 0, system_cluster: 0 }]);
+    }
+
+    #[test]
+    fn resolve_session_echo_of_an_unlabeled_system_cluster_stays_tagged_echo() {
+        // Orthogonal to the only stored speaker and too little speech to
+        // enroll: the system cluster itself resolves to Unlabeled.
+        let stored_speakers = vec![stored(10, "Alice", vec![unit(4, 1)])];
+        let sys_emb = unit(4, 0); // sim to Alice = 0.0
+        let mic_emb = normalize(vec![1.0, 0.05, 0.0, 0.0]); // echo of the system cluster
+        let system_clusters = vec![centroid(0, sys_emb, SHORT)];
+        let mic_clusters = vec![centroid(0, mic_emb, LONG)];
+        let resolution = resolve_session(&system_clusters, &mic_clusters, &stored_speakers);
+
+        assert_eq!(resolution.system[0].outcome, MatchOutcome::Unlabeled);
+        assert_eq!(resolution.mic, vec![MicResolution::Echo { cluster: 0, system_cluster: 0 }]);
+    }
+
+    #[test]
+    fn resolve_session_echo_of_a_newly_enrolled_system_cluster_stays_tagged_echo() {
+        let sys_emb = unit(4, 0);
+        let mic_emb = normalize(vec![1.0, 0.05, 0.0, 0.0]); // echo of the system cluster
+        let system_clusters = vec![centroid(0, sys_emb, LONG)]; // no stored speakers: enrolls new
+        let mic_clusters = vec![centroid(0, mic_emb, LONG)];
+        let resolution = resolve_session(&system_clusters, &mic_clusters, &[]);
+
+        assert_eq!(
+            resolution.system[0].outcome,
+            MatchOutcome::NewSpeaker { name: "Speaker 1".to_string() }
+        );
+        assert_eq!(resolution.mic, vec![MicResolution::Echo { cluster: 0, system_cluster: 0 }]);
+    }
+
+    #[test]
+    fn resolve_session_mic_cluster_below_echo_threshold_matches_independently() {
+        // Orthogonal to the system cluster: not echo, resolved on its own.
+        let system_clusters = vec![centroid(0, unit(4, 0), LONG)];
+        let mic_clusters = vec![centroid(0, unit(4, 1), LONG)];
+        let resolution = resolve_session(&system_clusters, &mic_clusters, &[]);
+
+        assert_eq!(
+            resolution.system[0].outcome,
+            MatchOutcome::NewSpeaker { name: "Speaker 1".to_string() }
+        );
+        match &resolution.mic[..] {
+            [MicResolution::Own(decision)] => {
+                assert_eq!(decision.cluster, 0);
+                assert_eq!(decision.outcome, MatchOutcome::NewSpeaker { name: "Speaker 2".to_string() });
+            }
+            other => panic!("expected a single Own resolution, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_session_coordinates_claims_across_lanes() {
+        // Both clusters are well clear of the 0.7 echo threshold against each
+        // other, but each independently clears MATCH_THRESHOLD against the
+        // single stored speaker, with the system cluster the stronger match.
+        // Combined matching must let only one of them win the claim.
+        let alice = unit(5, 0);
+        let system_emb = normalize(vec![1.0, 0.5, 0.0, 0.0, 0.0]); // sim to alice ~0.894
+        let mic_emb = normalize(vec![1.0, -0.5, 0.9, 0.0, 0.0]); // sim to alice ~0.697
+        assert!(
+            cosine_similarity(&system_emb, &mic_emb) < CROSS_LANE_ECHO_THRESHOLD,
+            "test fixture must not be flagged as echo"
+        );
+        let stored_speakers = vec![stored(10, "Alice", vec![alice])];
+        let system_clusters = vec![centroid(0, system_emb, LONG)];
+        let mic_clusters = vec![centroid(0, mic_emb, LONG)];
+        let resolution = resolve_session(&system_clusters, &mic_clusters, &stored_speakers);
+
+        assert_eq!(resolution.system[0].outcome, MatchOutcome::Matched { speaker_id: 10 });
+        match &resolution.mic[..] {
+            [MicResolution::Own(decision)] => {
+                assert_eq!(
+                    decision.outcome,
+                    MatchOutcome::Unlabeled,
+                    "the weaker cross-lane claim on the same stored speaker must lose, not double-map"
+                );
+            }
+            other => panic!("expected a single Own resolution, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_session_identical_cluster_ids_across_lanes_do_not_collide() {
+        // Both lanes number their first cluster "0"; they must not be
+        // conflated by the internal retagging used to combine them.
+        let system_clusters = vec![centroid(0, unit(4, 0), LONG)];
+        let mic_clusters = vec![centroid(0, unit(4, 1), LONG)]; // orthogonal: not echo
+        let resolution = resolve_session(&system_clusters, &mic_clusters, &[]);
+
+        assert_eq!(resolution.system.len(), 1);
+        assert_eq!(resolution.system[0].cluster, 0);
+        match &resolution.mic[..] {
+            [MicResolution::Own(decision)] => assert_eq!(decision.cluster, 0),
+            other => panic!("expected a single Own resolution, got {other:?}"),
+        }
+        // Distinct clusters, so distinct enrolled names, not a single shared one.
+        let names: Vec<String> = std::iter::once(&resolution.system[0])
+            .chain(resolution.mic.iter().map(|m| match m {
+                MicResolution::Own(d) => d,
+                MicResolution::Echo { .. } => panic!("unexpected echo"),
+            }))
+            .map(|d| match &d.outcome {
+                MatchOutcome::NewSpeaker { name } => name.clone(),
+                other => panic!("expected NewSpeaker, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(names, vec!["Speaker 1".to_string(), "Speaker 2".to_string()]);
+    }
+
+    #[test]
+    fn resolve_session_mic_only_matches_exactly_like_match_speakers_alone() {
+        let stored_speakers = vec![stored(10, "Alice", vec![unit(4, 0)])];
+        let mic_clusters = vec![centroid(0, unit(4, 0), LONG), centroid(1, unit(4, 1), LONG)];
+        let resolution = resolve_session(&[], &mic_clusters, &stored_speakers);
+
+        assert!(resolution.system.is_empty());
+        let direct = match_speakers(&mic_clusters, &stored_speakers);
+        let via_resolve: Vec<MatchDecision> = resolution
+            .mic
+            .into_iter()
+            .map(|m| match m {
+                MicResolution::Own(d) => d,
+                MicResolution::Echo { .. } => panic!("empty system lane can never produce echo"),
+            })
+            .collect();
+        assert_eq!(via_resolve, direct);
+    }
+
+    #[test]
+    fn resolve_session_system_only_matches_exactly_like_match_speakers_alone() {
+        let stored_speakers = vec![stored(10, "Alice", vec![unit(4, 0)])];
+        let system_clusters = vec![centroid(0, unit(4, 0), LONG), centroid(1, unit(4, 1), LONG)];
+        let resolution = resolve_session(&system_clusters, &[], &stored_speakers);
+
+        assert!(resolution.mic.is_empty());
+        assert_eq!(resolution.system, match_speakers(&system_clusters, &stored_speakers));
+    }
+
+    #[test]
+    fn resolve_session_both_lanes_empty_returns_empty_resolution() {
+        let stored_speakers = vec![stored(10, "Alice", vec![unit(4, 0)])];
+        let resolution = resolve_session(&[], &[], &stored_speakers);
+        assert!(resolution.system.is_empty());
+        assert!(resolution.mic.is_empty());
     }
 }
