@@ -22,8 +22,13 @@ pub const MATCH_THRESHOLD: f32 = 0.5;
 
 /// Minimum lead a cluster's best-matching stored speaker must have over the
 /// second-best DISTINCT stored speaker for the match to be accepted instead
-/// of treated as ambiguous. An ambiguous cluster is left unlabeled rather
-/// than guessed at: creating a new speaker for it would spawn yet another
+/// of treated as ambiguous. Applies whenever a second stored speaker exists
+/// at all, regardless of whether that second speaker's own similarity clears
+/// `MATCH_THRESHOLD`: intra-voice similarity varies 0.48 to 0.66 in practice,
+/// so a best match of 0.52 against a second-best of 0.47 is well inside that
+/// noise band and must not be silently accepted just because 0.47 falls
+/// under the threshold. An ambiguous cluster is left unlabeled rather than
+/// guessed at: creating a new speaker for it would spawn yet another
 /// duplicate of a voice that already has two candidate rows.
 pub const MATCH_MARGIN: f32 = 0.05;
 
@@ -90,6 +95,15 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     (dot / (norm_a * norm_b)).clamp(-1.0, 1.0)
 }
 
+/// MAX cosine similarity of `embedding` against every embedding in `bag`.
+/// `None` for an empty bag: a stored speaker that has never had an embedding
+/// recorded has nothing to compare against. Shared by `match_speakers` and
+/// the `--diarize-file` CLI calibration report, which both need "how close
+/// is this embedding to this speaker's bag of recent voice samples".
+pub fn max_similarity(embedding: &[f32], bag: &[Vec<f32>]) -> Option<f32> {
+    bag.iter().map(|e| cosine_similarity(embedding, e)).max_by(f32::total_cmp)
+}
+
 /// Encode an embedding as the DB's opaque BLOB format: little-endian f32s,
 /// one per dimension (256 for the WeSpeaker model currently in use, but
 /// nothing here hard-codes that beyond this comment).
@@ -136,9 +150,10 @@ fn next_speaker_name<'a>(taken_names: impl Iterator<Item = &'a str>) -> String {
 /// For a cluster, similarity against a stored speaker is the MAX cosine
 /// similarity over that speaker's embeddings. The best-matching stored
 /// speaker is accepted only if `best >= MATCH_THRESHOLD` AND there is no
-/// second DISTINCT stored speaker also `>= MATCH_THRESHOLD` within
-/// `MATCH_MARGIN` of it (an ambiguous best match never creates a duplicate:
-/// it's left unlabeled for the user to resolve). Below threshold, the
+/// second DISTINCT stored speaker within `MATCH_MARGIN` of it, whether or
+/// not that second speaker itself clears `MATCH_THRESHOLD` (an ambiguous
+/// best match never creates a duplicate: it's left unlabeled for the user to
+/// resolve). Below threshold, the
 /// cluster becomes a new speaker only if it has at least `MIN_ENROLL_SPEECH_S`
 /// of speech; otherwise it's left unlabeled. Because two different clusters
 /// can end up wanting the same stored speaker, accepted candidates are
@@ -166,20 +181,16 @@ pub fn match_speakers(clusters: &[SpeakerCentroid], stored: &[StoredSpeaker]) ->
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, s)| {
-                    s.embeddings
-                        .iter()
-                        .map(|e| cosine_similarity(&cluster.embedding, e))
-                        .max_by(f32::total_cmp)
-                        .map(|max_sim| (idx, max_sim))
+                    max_similarity(&cluster.embedding, &s.embeddings).map(|max_sim| (idx, max_sim))
                 })
                 .collect();
             sims.sort_by(|a, b| b.1.total_cmp(&a.1));
 
             match sims.first() {
                 Some(&(best_idx, best_sim)) if best_sim >= MATCH_THRESHOLD => {
-                    let ambiguous = sims.get(1).is_some_and(|&(_, second_sim)| {
-                        second_sim >= MATCH_THRESHOLD && best_sim - second_sim < MATCH_MARGIN
-                    });
+                    let ambiguous = sims
+                        .get(1)
+                        .is_some_and(|&(_, second_sim)| best_sim - second_sim < MATCH_MARGIN);
                     if ambiguous {
                         Prelim::Ambiguous
                     } else {
@@ -254,12 +265,7 @@ mod tests {
     }
 
     fn normalize(mut v: Vec<f32>) -> Vec<f32> {
-        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 0.0 {
-            for x in &mut v {
-                *x /= norm;
-            }
-        }
+        crate::diarize::clustering::l2_normalize(&mut v);
         v
     }
 
@@ -305,6 +311,19 @@ mod tests {
     #[test]
     fn cosine_similarity_handles_empty_vectors() {
         assert_eq!(cosine_similarity(&[], &[]), 0.0);
+    }
+
+    #[test]
+    fn max_similarity_picks_the_best_of_the_bag() {
+        let far = unit(4, 1);
+        let close = unit(4, 0);
+        let sim = max_similarity(&unit(4, 0), &[far, close]).unwrap();
+        assert!((sim - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn max_similarity_empty_bag_is_none() {
+        assert!(max_similarity(&unit(4, 0), &[]).is_none());
     }
 
     #[test]
@@ -417,6 +436,25 @@ mod tests {
             decisions[0].outcome,
             MatchOutcome::Unlabeled,
             "ambiguous match must never fall back to creating a new speaker"
+        );
+    }
+
+    #[test]
+    fn match_speakers_ambiguous_when_second_is_below_threshold_but_within_margin() {
+        // Best match 0.52 against Alice, second-best 0.47 against Bob: 0.47
+        // is BELOW MATCH_THRESHOLD (0.5), but the 0.05 gap is inside the
+        // documented intra-voice variance (0.48-0.66), so this must still be
+        // ambiguous, not silently matched to Alice.
+        let cluster_embedding = vec![1.0, 0.0, 0.0, 0.0];
+        let a = vec![0.52, (1.0f32 - 0.52 * 0.52).sqrt(), 0.0, 0.0];
+        let b = vec![0.47, 0.0, (1.0f32 - 0.47 * 0.47).sqrt(), 0.0];
+        let clusters = vec![centroid(0, cluster_embedding, LONG)];
+        let stored_speakers = vec![stored(10, "Alice", vec![a]), stored(11, "Bob", vec![b])];
+        let decisions = match_speakers(&clusters, &stored_speakers);
+        assert_eq!(
+            decisions[0].outcome,
+            MatchOutcome::Unlabeled,
+            "a second-best within MATCH_MARGIN must be ambiguous even when itself below MATCH_THRESHOLD"
         );
     }
 

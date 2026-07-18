@@ -122,12 +122,15 @@ pub const CREATE_DICTIONARY: &str = "
 ";
 
 /// Persistent, cross-meeting speaker identities resolved by offline
-/// diarization. `centroid`/`embedding_count` are kept for schema stability
-/// (the MCP sidecar reads this table independently) but are no longer read
-/// or written by the matcher as of v13: matching uses the multi-embedding
-/// `speaker_embeddings` table instead of a single running-mean centroid.
-/// `is_me` flags the speaker who is the app's user; at most one row has it
-/// set (enforced by `Database::set_speaker_is_me`, not by the schema).
+/// diarization. `centroid`/`embedding_count` are no longer populated by
+/// `create_speaker` or read by the matcher as of v13 (matching uses the
+/// multi-embedding `speaker_embeddings` table instead of a single
+/// running-mean centroid), and `db::speakers::SpeakerRecord` doesn't expose
+/// them either. The columns stay in the schema anyway, purely to avoid an
+/// ALTER-driven table rebuild: the MCP sidecar (`souffle-mcp`) only reads
+/// `name` from this table, so it is not a reason to keep them. `is_me` flags
+/// the speaker who is the app's user; at most one row has it set (enforced
+/// by `Database::set_speaker_is_me`, not by the schema).
 pub const CREATE_SPEAKERS: &str = "
     CREATE TABLE IF NOT EXISTS speakers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,6 +163,17 @@ pub const CREATE_SPEAKER_EMBEDDINGS: &str = "
 
 pub const CREATE_SPEAKER_EMBEDDINGS_INDEX: &str = "
     CREATE INDEX IF NOT EXISTS idx_speaker_embeddings_speaker ON speaker_embeddings(speaker_id);
+";
+
+/// Enforces at most one speaker flagged `is_me` at a time at the schema
+/// level, not just by application code (`Database::set_speaker_is_me`
+/// already maintains it transactionally, and `Database::merge_speakers`
+/// orders its statements to avoid a transient double-`is_me` mid-merge, but
+/// the invariant is cheap enough to also guarantee here). A partial index
+/// (`WHERE is_me = 1`) only constrains rows where the flag is set, so any
+/// number of `is_me = 0` rows coexist freely.
+pub const CREATE_SPEAKERS_IS_ME_INDEX: &str = "
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_speakers_is_me ON speakers(is_me) WHERE is_me = 1;
 ";
 
 /// All schema creation statements in order
@@ -467,7 +481,10 @@ pub fn migrate_add_speakers_to_v12(conn: &Connection) -> Result<(), String> {
 /// embeddings over time. Also adds `speakers.is_me`, guarded by a column
 /// check: a database that just went through the v12 step above already has
 /// it (`CREATE_SPEAKERS` includes it), so the `ALTER TABLE` only fires for
-/// databases that were already at v12 before this column existed.
+/// databases that were already at v12 before this column existed. Finally
+/// creates `CREATE_SPEAKERS_IS_ME_INDEX`: this is also where a fresh
+/// database picks it up, since `ensure_schema` runs every versioned step in
+/// order starting from 0 rather than jumping straight to the latest schema.
 pub fn migrate_speaker_embeddings_to_v13(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "DELETE FROM speakers WHERE id NOT IN (
@@ -487,6 +504,8 @@ pub fn migrate_speaker_embeddings_to_v13(conn: &Connection) -> Result<(), String
         .map_err(|e| format!("Create speaker_embeddings table: {e}"))?;
     conn.execute_batch(CREATE_SPEAKER_EMBEDDINGS_INDEX)
         .map_err(|e| format!("Create speaker_embeddings index: {e}"))?;
+    conn.execute_batch(CREATE_SPEAKERS_IS_ME_INDEX)
+        .map_err(|e| format!("Create speakers is_me unique index: {e}"))?;
 
     conn.execute(
         "INSERT INTO speaker_embeddings (speaker_id, meeting_id, embedding, speech_seconds, created_at)

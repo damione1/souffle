@@ -94,6 +94,60 @@ describe("SpeakersListSettingsSection", () => {
     });
   });
 
+  it("drops a stale merge target on refresh instead of merging into it", async () => {
+    const alice = makeProfile({ id: 1, name: "Alice" });
+    const bob = makeProfile({ id: 2, name: "Bob" });
+    const carol = makeProfile({ id: 3, name: "Carol" });
+    mockListSpeakerProfiles.mockResolvedValue([alice, bob]);
+
+    render(SpeakersListSettingsSection);
+    await screen.findByText("Alice");
+
+    const aliceItem = screen.getAllByRole("listitem")[0];
+    await fireEvent.click(within(aliceItem).getByText("Merge"));
+    // Defaults to the only other speaker, Bob, as the merge target.
+    await within(aliceItem).findByText("Merge Alice into:", { exact: false });
+
+    // Bob disappears from a refresh triggered while the panel is still
+    // open (e.g. another row's action); Carol is now the only candidate.
+    mockListSpeakerProfiles.mockResolvedValue([alice, carol]);
+    await fireEvent.click(within(aliceItem).getByText("Mark as me"));
+    await vi.waitFor(() => {
+      expect(mockListSpeakerProfiles).toHaveBeenCalledTimes(2);
+    });
+
+    const refreshedAliceItem = screen.getAllByRole("listitem")[0];
+    await within(refreshedAliceItem).findByText("Merge Alice into:", { exact: false });
+    await fireEvent.click(within(refreshedAliceItem).getByText("Merge"));
+    await fireEvent.click(within(refreshedAliceItem).getByText("Merge"));
+
+    expect(mockMergeSpeakers).toHaveBeenCalledWith(1, 3);
+    expect(mockMergeSpeakers).not.toHaveBeenCalledWith(1, 2);
+  });
+
+  it("closes the merge panel on refresh if its source speaker disappears", async () => {
+    const alice = makeProfile({ id: 1, name: "Alice" });
+    const bob = makeProfile({ id: 2, name: "Bob" });
+    mockListSpeakerProfiles.mockResolvedValue([alice, bob]);
+
+    render(SpeakersListSettingsSection);
+    await screen.findByText("Alice");
+
+    const aliceItem = screen.getAllByRole("listitem")[0];
+    await fireEvent.click(within(aliceItem).getByText("Merge"));
+    await within(aliceItem).findByText("Merge Alice into:", { exact: false });
+
+    // Alice (the merge source) is deleted from elsewhere; the next refresh
+    // must close the panel rather than leave it pointed at a dead source.
+    mockListSpeakerProfiles.mockResolvedValue([bob]);
+    await fireEvent.click(within(aliceItem).getByText("Mark as me"));
+
+    await vi.waitFor(() => {
+      expect(screen.queryByText("Merge Alice into:", { exact: false })).toBeNull();
+    });
+    expect(mockMergeSpeakers).not.toHaveBeenCalled();
+  });
+
   it("does not show a merge action when only one speaker is remembered", async () => {
     mockListSpeakerProfiles.mockResolvedValue([makeProfile({ id: 1, name: "Alice" })]);
 

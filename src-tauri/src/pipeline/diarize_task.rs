@@ -18,6 +18,8 @@
 //! runs under `catch_unwind` so a bug in the ONNX stack can never take the
 //! app down from a background thread.
 
+use std::sync::Mutex;
+
 use tauri::Manager;
 use tauri_specta::Event;
 use tracing::{info, warn};
@@ -77,7 +79,22 @@ pub fn spawn_post_meeting_diarization(app: tauri::AppHandle, meeting_id: String)
     }
 }
 
+/// Serializes diarization runs across meetings. `diarize_session` reads
+/// `list_speakers_with_embeddings`, decides matches, then writes
+/// `create_speaker`/`append_speaker_embedding` with no transaction spanning
+/// that whole read-decide-write sequence, so two runs interleaving it can
+/// both decide "no match" for the same voice and each create their own
+/// "Speaker N" row. Held for the whole `run()` call, which also serializes
+/// the ONNX inference itself: a smaller cost than the duplicate rows.
+static DIARIZE_TASK_LOCK: Mutex<()> = Mutex::new(());
+
 fn run(app: &tauri::AppHandle, meeting_id: &str) {
+    // See DIARIZE_TASK_LOCK's doc comment. A panic from an earlier run under
+    // this lock (caught by catch_unwind in the caller) must not poison it
+    // forever, since diarization for later meetings would then silently stop
+    // being serialized.
+    let _diarize_task_guard = DIARIZE_TASK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
     // Pending WAVs are the trigger: they only exist if this meeting was
     // recorded with speaker recognition enabled and models present.
     let session_files = pending_session_diarize_files(meeting_id);

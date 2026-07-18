@@ -5,16 +5,11 @@ use crate::lock_ext::MutexExt;
 
 use super::Database;
 
-/// A persistent, cross-meeting speaker identity row. `centroid` is an opaque
-/// BLOB from this layer's point of view (the diarization crate encodes it as
-/// 256 little-endian f32s); it is `None` until at least one embedding has
-/// been recorded for this speaker.
+/// A persistent, cross-meeting speaker identity row.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeakerRecord {
     pub id: i64,
     pub name: String,
-    pub centroid: Option<Vec<u8>>,
-    pub embedding_count: i64,
     pub created_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     /// Whether this speaker is flagged as the app's user. At most one
@@ -48,16 +43,16 @@ pub const MAX_EMBEDDINGS_PER_SPEAKER: usize = 20;
 
 impl Database {
     /// Create a new persistent speaker with the given display name. Returns
-    /// the new row's id. `centroid`/`embedding_count` are unused legacy
-    /// columns (kept for schema stability, see `schema::CREATE_SPEAKERS`)
-    /// and stay at their empty defaults; call `append_speaker_embedding`
-    /// once diarization has an embedding for it.
+    /// the new row's id. `centroid`/`embedding_count` are no longer
+    /// populated; see `schema::CREATE_SPEAKERS` for why the columns stay.
+    /// Call `append_speaker_embedding` once diarization has an embedding for
+    /// it.
     pub fn create_speaker(&self, name: &str) -> Result<i64, String> {
         let conn = self.conn.acquire()?;
         let now = Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO speakers (name, centroid, embedding_count, created_at, last_seen_at)
-             VALUES (?1, NULL, 0, ?2, ?2)",
+            "INSERT INTO speakers (name, created_at, last_seen_at)
+             VALUES (?1, ?2, ?2)",
             params![name, now],
         )
         .map_err(|e| format!("Insert speaker: {e}"))?;
@@ -78,7 +73,7 @@ impl Database {
         let conn = self.conn.acquire()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, centroid, embedding_count, created_at, last_seen_at, is_me
+                "SELECT id, name, created_at, last_seen_at, is_me
                  FROM speakers ORDER BY id",
             )
             .map_err(|e| format!("Prepare list speakers: {e}"))?;
@@ -290,6 +285,14 @@ impl Database {
     /// deleted. Used to fix the diarizer creating two speakers for the same
     /// person. One transaction; errors if the two ids are equal or either
     /// speaker doesn't exist.
+    ///
+    /// The source row is deleted BEFORE the target's `is_me` is set, not
+    /// after: SQLite checks a UNIQUE index per statement, not at commit, and
+    /// `idx_speakers_is_me` (see `schema::CREATE_SPEAKERS_IS_ME_INDEX`)
+    /// allows at most one `is_me = 1` row at any point in the transaction,
+    /// not just at the end. Setting the target's flag first would, for a
+    /// moment, leave both the not-yet-deleted source and the freshly-flagged
+    /// target at `is_me = 1` and violate the index mid-transaction.
     pub fn merge_speakers(&self, source_id: i64, target_id: i64) -> Result<(), String> {
         if source_id == target_id {
             return Err("Cannot merge a speaker into itself".into());
@@ -321,6 +324,9 @@ impl Database {
         .map_err(|e| format!("Move merged speaker embeddings: {e}"))?;
         prune_speaker_embeddings(&tx, target_id)?;
 
+        tx.execute("DELETE FROM speakers WHERE id = ?1", params![source_id])
+            .map_err(|e| format!("Delete merged speaker: {e}"))?;
+
         let is_me = source.is_me || target.is_me;
         let last_seen_at = source.last_seen_at.max(target.last_seen_at);
         tx.execute(
@@ -328,9 +334,6 @@ impl Database {
             params![i32::from(is_me), last_seen_at.to_rfc3339(), target_id],
         )
         .map_err(|e| format!("Update merged speaker: {e}"))?;
-
-        tx.execute("DELETE FROM speakers WHERE id = ?1", params![source_id])
-            .map_err(|e| format!("Delete merged speaker: {e}"))?;
 
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
@@ -377,8 +380,6 @@ impl Database {
 struct SpeakerRow {
     id: i64,
     name: String,
-    centroid: Option<Vec<u8>>,
-    embedding_count: i64,
     created_at: String,
     last_seen_at: String,
     is_me: bool,
@@ -389,8 +390,6 @@ impl SpeakerRow {
         Ok(SpeakerRecord {
             id: self.id,
             name: self.name,
-            centroid: self.centroid,
-            embedding_count: self.embedding_count,
             created_at: parse_datetime(&self.created_at)?,
             last_seen_at: parse_datetime(&self.last_seen_at)?,
             is_me: self.is_me,
@@ -402,11 +401,9 @@ fn map_speaker_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SpeakerRow> {
     Ok(SpeakerRow {
         id: row.get(0)?,
         name: row.get(1)?,
-        centroid: row.get(2)?,
-        embedding_count: row.get(3)?,
-        created_at: row.get(4)?,
-        last_seen_at: row.get(5)?,
-        is_me: row.get::<_, i64>(6)? != 0,
+        created_at: row.get(2)?,
+        last_seen_at: row.get(3)?,
+        is_me: row.get::<_, i64>(4)? != 0,
     })
 }
 
@@ -418,7 +415,7 @@ fn fetch_speaker_row(
     id: i64,
 ) -> Result<Option<SpeakerRow>, String> {
     conn.query_row(
-        "SELECT id, name, centroid, embedding_count, created_at, last_seen_at, is_me
+        "SELECT id, name, created_at, last_seen_at, is_me
          FROM speakers WHERE id = ?1",
         params![id],
         map_speaker_row,
@@ -469,8 +466,6 @@ mod tests {
 
         let record = db.get_speaker(id).unwrap().expect("speaker exists");
         assert_eq!(record.name, "Alice");
-        assert_eq!(record.embedding_count, 0);
-        assert!(record.centroid.is_none());
         assert_eq!(record.created_at, record.last_seen_at);
         assert!(!record.is_me);
     }
@@ -725,6 +720,25 @@ mod tests {
     }
 
     #[test]
+    fn speakers_is_me_unique_index_rejects_a_second_true_row() {
+        let (db, _dir) = test_db();
+        let alice = db.create_speaker("Alice").unwrap();
+        let bob = db.create_speaker("Bob").unwrap();
+        db.set_speaker_is_me(alice, true).unwrap();
+
+        // Bypass the app-level guard in `set_speaker_is_me` entirely: a raw
+        // UPDATE flagging a second row must still be rejected by the schema
+        // itself (`schema::CREATE_SPEAKERS_IS_ME_INDEX`), not just by
+        // application code remembering to clear the flag first.
+        let conn = db.conn.lock().unwrap();
+        let result = conn.execute("UPDATE speakers SET is_me = 1 WHERE id = ?1", params![bob]);
+        assert!(
+            result.is_err(),
+            "a second is_me = 1 row must violate the partial unique index"
+        );
+    }
+
+    #[test]
     fn merge_speakers_rejects_same_id() {
         let (db, _dir) = test_db();
         let alice = db.create_speaker("Alice").unwrap();
@@ -807,9 +821,19 @@ mod tests {
         let bob = db.create_speaker("Bob").unwrap();
         db.set_speaker_is_me(alice, true).unwrap();
 
+        // Regression guard for the statement order inside `merge_speakers`:
+        // both rows already exist (source is_me = 1, target is_me = 0)
+        // before the merge starts, which is exactly the shape that would
+        // trip `idx_speakers_is_me` mid-transaction if the target's flag
+        // were set before the source row is deleted.
         db.merge_speakers(alice, bob).unwrap();
 
         assert!(db.get_speaker(bob).unwrap().unwrap().is_me);
+        let conn = db.conn.lock().unwrap();
+        let is_me_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM speakers WHERE is_me = 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(is_me_count, 1, "exactly one speaker must be flagged is_me after the merge");
     }
 
     #[test]

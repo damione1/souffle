@@ -23,8 +23,28 @@
     try {
       profiles = await listSpeakerProfiles();
       error = "";
+      reconcileMergePanel();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // Svelte 5 keeps a bound <select> value even when its backing option
+  // disappears, so a merge panel left open across a refresh (another row's
+  // merge/delete, a background retag) can point at a source or target that
+  // no longer exists. Close the panel if the source is gone; otherwise drop
+  // back to the first remaining candidate if the target is gone or now
+  // equals the source.
+  function reconcileMergePanel() {
+    if (mergingId === null) return;
+    if (!profiles.some((p) => p.id === mergingId)) {
+      cancelMerge();
+      return;
+    }
+    const targetStillValid =
+      mergeTargetId !== null && mergeTargetId !== mergingId && profiles.some((p) => p.id === mergeTargetId);
+    if (!targetStillValid) {
+      mergeTargetId = profiles.find((p) => p.id !== mergingId)?.id ?? null;
     }
   }
 
@@ -78,7 +98,10 @@
   }
 
   async function handleMerge(sourceId: number, targetId: number | null) {
-    if (targetId == null) return;
+    if (targetId == null || targetId === sourceId || !profiles.some((p) => p.id === targetId)) {
+      cancelMerge();
+      return;
+    }
     try {
       await mergeSpeakers(sourceId, targetId);
       cancelMerge();
