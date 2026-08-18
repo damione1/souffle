@@ -268,24 +268,19 @@ pub trait TranscriptionEngine {
     }
 }
 
-/// Who produced a segment in a diarized meeting: the microphone is the local
-/// user (Me), system audio is everyone else (Them), or a persistent speaker
-/// identity resolved by offline diarization (`Persistent`, keyed by the
-/// `speakers.id` row). `None` = single-stream session (dictation, or a
-/// meeting recorded without diarization).
+/// Who produced a segment in a meeting: the microphone is the local user
+/// (`Me`), system audio is everyone else (`Them`). `None` = single-stream
+/// session (dictation, or a meeting recorded without system-audio capture).
 ///
-/// Wire/DB encoding is always a plain string: "me", "them", or "spk:<id>".
-/// Serialize/Deserialize/specta::Type are implemented by hand below (instead
-/// of derived) so the `Persistent` variant's payload still round-trips
-/// through a single string on the wire, and the generated TypeScript type is
-/// a plain `string` rather than a tagged union.
+/// Wire/DB encoding is a plain string: "me" or "them". Unknown values
+/// (including leftover `spk:<id>` labels from the dropped persistent-speaker
+/// feature) parse as `None` so old meetings still load.
+/// Serialize/Deserialize/specta::Type are implemented by hand so the
+/// generated TypeScript type is a plain `string` rather than a tagged union.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Speaker {
     Me,
     Them,
-    /// A persistent, cross-meeting speaker identity. The `i64` is the
-    /// `speakers.id` primary key.
-    Persistent(i64),
 }
 
 impl Speaker {
@@ -293,7 +288,6 @@ impl Speaker {
         match self {
             Speaker::Me => "me".to_string(),
             Speaker::Them => "them".to_string(),
-            Speaker::Persistent(id) => format!("spk:{id}"),
         }
     }
 
@@ -301,10 +295,7 @@ impl Speaker {
         match s {
             "me" => Some(Speaker::Me),
             "them" => Some(Speaker::Them),
-            other => other
-                .strip_prefix("spk:")
-                .and_then(|id| id.parse::<i64>().ok())
-                .map(Speaker::Persistent),
+            _ => None,
         }
     }
 }
@@ -330,7 +321,7 @@ impl<'de> serde::Deserialize<'de> for Speaker {
 }
 
 /// Manual impl (rather than `#[derive(specta::Type)]`) so the generated
-/// TypeScript type is a plain `string` ("me" | "them" | `spk:<id>`), matching
+/// TypeScript type is a plain `string` ("me" | "them"), matching
 /// the hand-written `Serialize`/`Deserialize` above.
 impl specta::Type for Speaker {
     fn inline(
@@ -350,9 +341,17 @@ pub struct TranscriptionSegment {
     pub is_final: bool,
     pub language: Option<String>,
     pub confidence: Option<f32>,
-    /// Set by the pipeline for diarized meetings; `None` otherwise.
-    #[serde(default)]
+    /// Set by the pipeline for meetings with Me/Them lanes; `None` otherwise.
+    #[serde(default, deserialize_with = "deserialize_optional_speaker")]
     pub speaker: Option<Speaker>,
+}
+
+fn deserialize_optional_speaker<'de, D>(deserializer: D) -> Result<Option<Speaker>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Option<String> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(value.as_deref().and_then(Speaker::parse))
 }
 
 /// Collapse runs of whitespace to single spaces and trim.

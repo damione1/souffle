@@ -14,8 +14,6 @@
   import MicrophoneSettingsSection from "../features/settings/components/MicrophoneSettingsSection.svelte";
   import ModelSettingsSection from "../features/settings/components/ModelSettingsSection.svelte";
   import PermissionsSettingsSection from "../features/settings/components/PermissionsSettingsSection.svelte";
-  import SpeakerRecognitionSettingsSection from "../features/settings/components/SpeakerRecognitionSettingsSection.svelte";
-  import SpeakersListSettingsSection from "../features/settings/components/SpeakersListSettingsSection.svelte";
   import SummaryTemplatesSettingsSection from "../features/settings/components/SummaryTemplatesSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
@@ -23,14 +21,13 @@
   import ConfirmAction from "./ui/ConfirmAction.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
-  type SettingsTab = "transcription" | "audio" | "interface" | "meetings" | "speakers" | "system";
+  type SettingsTab = "transcription" | "audio" | "interface" | "meetings" | "system";
 
   const TABS: { id: SettingsTab; labelKey: string }[] = [
     { id: "transcription", labelKey: "settings.tab_transcription" },
     { id: "audio", labelKey: "settings.tab_audio" },
     { id: "interface", labelKey: "settings.tab_interface" },
     { id: "meetings", labelKey: "settings.tab_meetings" },
-    { id: "speakers", labelKey: "settings.tab_speakers" },
     { id: "system", labelKey: "settings.tab_system" },
   ];
 
@@ -263,23 +260,6 @@
         onAdd={controller.addSummaryTemplate}
         onDelete={controller.deleteSummaryTemplate}
       />
-    {:else if activeTab === "speakers"}
-      <SpeakerRecognitionSettingsSection
-        captureSystemAudio={controller.app.settings.capture_system_audio}
-        diarizeEnabled={controller.app.settings.diarize_enabled}
-        diarizeMic={controller.app.settings.diarize_mic}
-        diarizeSystemAudio={controller.app.settings.diarize_system_audio}
-        diarizeMaxSpeakers={controller.app.settings.diarize_max_speakers}
-        diarizeDownloadState={controller.diarizeDownloadState}
-        diarizeDownloadedBytes={controller.diarizeDownloadedBytes}
-        diarizeDownloadTotalBytes={controller.diarizeDownloadTotalBytes}
-        onDiarizeEnabledChange={controller.onDiarizeEnabledChange}
-        onDiarizeMicChange={controller.onDiarizeMicChange}
-        onDiarizeSystemAudioChange={controller.onDiarizeSystemAudioChange}
-        onDiarizeMaxSpeakersChange={controller.onDiarizeMaxSpeakersChange}
-      />
-
-      <SpeakersListSettingsSection />
     {:else}
       <PermissionsSettingsSection />
 

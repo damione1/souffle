@@ -2,15 +2,11 @@
   import { Pencil, RotateCcw } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import CopyButton from "../../../components/ui/CopyButton.svelte";
-  import SpeakerManagePopover from "./SpeakerManagePopover.svelte";
-  import type { MeetingRecordingSession, MeetingSpeaker, Speaker, TranscriptionSegment } from "../../../types";
+  import type { MeetingRecordingSession, Speaker, TranscriptionSegment } from "../../../types";
   import {
     buildMeetingTranscriptBlocks,
-    persistentSpeakerId,
     resolveSpeakerLabel,
-    speakerPillClass,
     speakerPlainLabel,
-    type AnchorRect,
   } from "../../../utils";
   import TranscriptWordLine from "./TranscriptWordLine.svelte";
 
@@ -19,9 +15,6 @@
     recordingSessions,
     liveSessionStartIndex,
     isRecordingMeeting,
-    speakers = [],
-    allSpeakers = [],
-    canManageSpeakers = false,
     hasEditedTranscript = false,
     isEditing = false,
     editedTranscriptDraft = "",
@@ -33,19 +26,11 @@
     onEditDraftChange,
     onParagraphClick,
     onAddDictionaryAlias,
-    onRenameSpeaker,
-    onRetagSpeaker,
   }: {
     segments: TranscriptionSegment[];
     recordingSessions: MeetingRecordingSession[];
     liveSessionStartIndex: number | null;
     isRecordingMeeting: boolean;
-    /** Persistent speakers referenced by this meeting, for resolving
-     * `spk:<id>` labels to a display name; empty for Me/Them-only meetings. */
-    speakers?: MeetingSpeaker[];
-    /** All persistent speakers in the database, for the retag picker. */
-    allSpeakers?: MeetingSpeaker[];
-    canManageSpeakers?: boolean;
     hasEditedTranscript?: boolean;
     isEditing?: boolean;
     editedTranscriptDraft?: string;
@@ -59,24 +44,9 @@
      * paragraph maps to a recorded session (no-op otherwise). */
     onParagraphClick?: (recordingSessionIndex: number | null, startTime: number) => void;
     onAddDictionaryAlias?: (term: string, pronunciation: string | null) => void | Promise<void>;
-    onRenameSpeaker?: (id: number, name: string) => void | Promise<void>;
-    onRetagSpeaker?: (options: {
-      fromSpeakerId: number;
-      segmentSortOrders: number[];
-      scope: "turn" | "meeting";
-      toSpeakerId: number | null;
-      newSpeakerName: string | null;
-      remember: boolean;
-    }) => void | Promise<void>;
   } = $props();
 
   type TranscriptPhase = "has_content" | "recording_empty" | "empty";
-  type OpenSpeakerPopover = {
-    speakerId: number;
-    speakerName: string;
-    segmentSortOrders: number[];
-    anchorRect: AnchorRect;
-  };
 
   const pauseThreshold = 1.5;
   let transcriptBlocks = $derived(
@@ -87,46 +57,16 @@
     if (isRecordingMeeting) return "recording_empty";
     return "empty";
   });
-  let openSpeakerPopover = $state<OpenSpeakerPopover | null>(null);
 
   function copyLinePrefix(speaker: Speaker | null | undefined): string {
-    const label = speakerPlainLabel(speaker, speakers);
+    const label = speakerPlainLabel(speaker);
     return label ? `${label} ` : "";
-  }
-
-  function segmentSortOrdersForRange(start: number, end: number): number[] {
-    return Array.from({ length: end - start }, (_, index) => start + index);
   }
 
   function speakerDisplayText(
     label: NonNullable<ReturnType<typeof resolveSpeakerLabel>>,
   ): string {
-    switch (label.kind) {
-      case "me":
-        return $t("transcript.me");
-      case "them":
-        return $t("transcript.them");
-      case "named":
-        return label.name;
-      case "unknown":
-        return $t("transcript.speaker_fallback", { values: { id: label.id } });
-    }
-  }
-
-  function openSpeakerManage(
-    speakerId: number,
-    speakerName: string,
-    segmentRange: { start: number; end: number },
-    event: MouseEvent,
-  ) {
-    if (!canManageSpeakers) return;
-    const target = event.currentTarget as HTMLElement;
-    openSpeakerPopover = {
-      speakerId,
-      speakerName,
-      segmentSortOrders: segmentSortOrdersForRange(segmentRange.start, segmentRange.end),
-      anchorRect: target.getBoundingClientRect(),
-    };
+    return label.kind === "me" ? $t("transcript.me") : $t("transcript.them");
   }
 
   let copyText = $derived(
@@ -203,49 +143,15 @@
       {#if phase === "has_content"}
         {#each transcriptBlocks as block}
           {#if block.type === "paragraph"}
-            {@const label = resolveSpeakerLabel(block.speaker, speakers)}
+            {@const label = resolveSpeakerLabel(block.speaker)}
             <div class="flex flex-col gap-[3px]">
               <div class="flex items-center gap-2">
                 {#if label}
-                  {#if label.kind === "me" || label.kind === "them"}
-                    <span
-                      class="text-[11.5px] font-semibold"
-                      class:text-accent={label.kind === "me"}
-                      class:text-secondary={label.kind === "them"}
-                    >{speakerDisplayText(label)}</span>
-                  {:else}
-                    {@const speakerId = persistentSpeakerId(block.speaker) ?? (label.kind === "unknown" ? label.id : 0)}
-                    <div class="relative">
-                      {#if canManageSpeakers && speakerId > 0}
-                        <button
-                          type="button"
-                          class="speaker-pill cursor-pointer transition-opacity hover:opacity-85 {speakerPillClass(speakerId)}"
-                          aria-label={$t("speaker_manage.edit_aria", { values: { name: speakerDisplayText(label) } })}
-                          onclick={(event) => openSpeakerManage(speakerId, speakerDisplayText(label), block.segmentRange, event)}
-                        >{speakerDisplayText(label)}</button>
-                      {:else}
-                        <span class="speaker-pill {speakerPillClass(speakerId)}">
-                          {speakerDisplayText(label)}
-                        </span>
-                      {/if}
-                      {#if openSpeakerPopover && openSpeakerPopover.speakerId === speakerId}
-                        <SpeakerManagePopover
-                          speakerId={openSpeakerPopover.speakerId}
-                          speakerName={openSpeakerPopover.speakerName}
-                          meetingSpeakers={speakers}
-                          allSpeakers={allSpeakers}
-                          anchorRect={openSpeakerPopover.anchorRect}
-                          onClose={() => { openSpeakerPopover = null; }}
-                          onRename={(name) => onRenameSpeaker?.(openSpeakerPopover!.speakerId, name)}
-                          onRetag={(options) => onRetagSpeaker?.({
-                            fromSpeakerId: openSpeakerPopover!.speakerId,
-                            segmentSortOrders: openSpeakerPopover!.segmentSortOrders,
-                            ...options,
-                          })}
-                        />
-                      {/if}
-                    </div>
-                  {/if}
+                  <span
+                    class="text-[11.5px] font-semibold"
+                    class:text-accent={label.kind === "me"}
+                    class:text-secondary={label.kind === "them"}
+                  >{speakerDisplayText(label)}</span>
                 {/if}
                 {#if onParagraphClick}
                   <button

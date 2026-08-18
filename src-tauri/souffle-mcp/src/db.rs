@@ -128,15 +128,6 @@ pub struct MeetingSummary {
     pub has_notes: bool,
 }
 
-/// A persistent speaker referenced by a meeting's segments, resolved for
-/// display. Mirrors the app crate's `MeetingSpeaker` DTO (kept independent,
-/// see the module doc comment); empty for Me/Them-only meetings.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct MeetingSpeakerInfo {
-    pub id: i64,
-    pub name: String,
-}
-
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct MeetingMetadata {
     pub calendar_event_id: Option<String>,
@@ -158,10 +149,6 @@ pub struct MeetingDetail {
     pub structured_summary: Option<StructuredSummary>,
     pub notes: Option<String>,
     pub metadata: Option<MeetingMetadata>,
-    /// Persistent speakers referenced by this meeting's segments, for
-    /// resolving `spk:<id>` labels in `transcript`. Empty for Me/Them-only
-    /// meetings, or when neither `transcript` nor `metadata` was requested.
-    pub speakers: Vec<MeetingSpeakerInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -363,17 +350,11 @@ impl McpDb {
         } else {
             Vec::new()
         };
-        let speakers = if need_segments {
-            self.speakers_for_meeting(&row.id)?
-        } else {
-            Vec::new()
-        };
-
         let transcript = if include.transcript {
             Some(
                 row.edited_transcript
                     .clone()
-                    .unwrap_or_else(|| render_transcript(&segments, &speakers)),
+                    .unwrap_or_else(|| render_transcript(&segments)),
             )
         } else {
             None
@@ -409,47 +390,7 @@ impl McpDb {
             structured_summary,
             notes,
             metadata,
-            speakers,
         })
-    }
-
-    /// Persistent speakers referenced by `meeting_id`'s segments (`spk:<id>`
-    /// labels), resolved against the `speakers` table. Mirrors the app
-    /// crate's `Database::speakers_for_meeting`.
-    fn speakers_for_meeting(&self, meeting_id: &str) -> Result<Vec<MeetingSpeakerInfo>, McpDbError> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT DISTINCT speaker FROM segments
-                 WHERE meeting_id = ?1 AND speaker LIKE 'spk:%'",
-            )
-            .map_err(McpDbError::Query)?;
-        let ids: Vec<i64> = stmt
-            .query_map(params![meeting_id], |row| row.get::<_, String>(0))
-            .map_err(McpDbError::Query)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(McpDbError::Query)?
-            .into_iter()
-            .filter_map(|raw| raw.strip_prefix("spk:")?.parse::<i64>().ok())
-            .collect();
-
-        let mut speakers = Vec::with_capacity(ids.len());
-        for id in ids {
-            let name: Option<String> = conn
-                .query_row("SELECT name FROM speakers WHERE id = ?1", params![id], |row| {
-                    row.get(0)
-                })
-                .map(Some)
-                .or_else(|e| match e {
-                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                    other => Err(McpDbError::Query(other)),
-                })?;
-            if let Some(name) = name {
-                speakers.push(MeetingSpeakerInfo { id, name });
-            }
-        }
-        speakers.sort_by_key(|s| s.id);
-        Ok(speakers)
     }
 
     fn load_segments(&self, meeting_id: &str) -> Result<Vec<SegmentRow>, McpDbError> {
@@ -463,11 +404,12 @@ impl McpDb {
 
         let segments = stmt
             .query_map(params![meeting_id], |row| {
+                let speaker: Option<String> = row.get(3)?;
                 Ok(SegmentRow {
                     text: row.get(0)?,
                     start_time: row.get(1)?,
                     end_time: row.get(2)?,
-                    speaker: row.get(3)?,
+                    speaker: normalize_speaker(speaker),
                 })
             })
             .map_err(McpDbError::Query)?
@@ -659,22 +601,22 @@ fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
     turns.into_iter().flat_map(|t| t.segments).collect()
 }
 
-/// Display label for a raw `segments.speaker` value: "me" -> "Me", "them" ->
-/// "Them", "spk:<id>" -> the matching `MeetingSpeakerInfo.name` if resolvable,
-/// else a "Speaker <id>" fallback. An unrecognized raw value (shouldn't
-/// happen) passes through unchanged.
-fn speaker_label(raw: &str, speakers: &[MeetingSpeakerInfo]) -> String {
+/// Keep Me/Them; leftover `spk:<id>` labels (and anything else) become
+/// unlabeled, matching the app's `Speaker::parse`.
+fn normalize_speaker(raw: Option<String>) -> Option<String> {
+    match raw.as_deref() {
+        Some("me") | Some("them") => raw,
+        _ => None,
+    }
+}
+
+/// Display prefix for a raw `segments.speaker` value: "me" -> "Me", "them" ->
+/// "Them". Unlabeled / leftover values get no prefix.
+fn speaker_label(raw: &str) -> Option<&'static str> {
     match raw {
-        "me" => "Me".to_string(),
-        "them" => "Them".to_string(),
-        other => match other.strip_prefix("spk:").and_then(|id| id.parse::<i64>().ok()) {
-            Some(id) => speakers
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| s.name.clone())
-                .unwrap_or_else(|| format!("Speaker {id}")),
-            None => other.to_string(),
-        },
+        "me" => Some("Me"),
+        "them" => Some("Them"),
+        _ => None,
     }
 }
 
@@ -688,7 +630,7 @@ fn speaker_label(raw: &str, speakers: &[MeetingSpeakerInfo]) -> String {
 /// uses for on-screen readability: this is meant to be a faithful, readable
 /// text dump for an AI assistant, not pixel-identical to the app's
 /// transcript view.
-fn render_transcript(segments: &[SegmentRow], speakers: &[MeetingSpeakerInfo]) -> String {
+fn render_transcript(segments: &[SegmentRow]) -> String {
     let diarized = segments.iter().any(|s| s.speaker.is_some());
     let ordered: Vec<&SegmentRow> = if diarized {
         cluster_into_turns(segments)
@@ -716,8 +658,8 @@ fn render_transcript(segments: &[SegmentRow], speakers: &[MeetingSpeakerInfo]) -
         }
 
         if current.is_empty() {
-            if let Some(speaker) = &seg.speaker {
-                current.push_str(&speaker_label(speaker, speakers));
+            if let Some(label) = seg.speaker.as_deref().and_then(speaker_label) {
+                current.push_str(label);
                 current.push_str(": ");
             }
         } else {
@@ -792,27 +734,10 @@ mod tests {
             CREATE VIRTUAL TABLE text_search USING fts5(
                 content, source_type, source_id
             );
-            CREATE TABLE speakers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                centroid BLOB,
-                embedding_count INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL
-            );
             ",
         )
         .unwrap();
         (conn, dir, path)
-    }
-
-    fn insert_speaker(conn: &Connection, id: i64, name: &str) {
-        conn.execute(
-            "INSERT INTO speakers (id, name, embedding_count, created_at, last_seen_at)
-             VALUES (?1, ?2, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
-            params![id, name],
-        )
-        .unwrap();
     }
 
     fn insert_meeting(
@@ -1123,18 +1048,16 @@ mod tests {
     }
 
     #[test]
-    fn get_meeting_resolves_persistent_speaker_names() {
+    fn get_meeting_prefixes_me_them_labels() {
         let (conn, _dir, path) = fixture_db();
-        insert_speaker(&conn, 1, "Alice");
-        insert_speaker(&conn, 2, "Bob");
         insert_meeting(
             &conn,
             "m1",
             "Standup",
             "2026-01-01T10:00:00+00:00",
             &[
-                ("Hi Bob.", 0.0, 1.0, Some("spk:1")),
-                ("Hi Alice.", 1.2, 2.0, Some("spk:2")),
+                ("Hi Bob.", 0.0, 1.0, Some("me")),
+                ("Hi Alice.", 1.2, 2.0, Some("them")),
             ],
             None,
         );
@@ -1143,18 +1066,12 @@ mod tests {
         let db = McpDb::open(&path).unwrap();
         let detail = db.get_meeting("m1", IncludeSet::all()).unwrap();
         let transcript = detail.transcript.unwrap();
-        assert!(transcript.contains("Alice: Hi Bob."));
-        assert!(transcript.contains("Bob: Hi Alice."));
-        assert_eq!(
-            detail.speakers.iter().map(|s| s.id).collect::<Vec<_>>(),
-            vec![1, 2]
-        );
-        assert_eq!(detail.speakers[0].name, "Alice");
-        assert_eq!(detail.speakers[1].name, "Bob");
+        assert!(transcript.contains("Me: Hi Bob."));
+        assert!(transcript.contains("Them: Hi Alice."));
     }
 
     #[test]
-    fn get_meeting_falls_back_to_speaker_id_when_speaker_row_is_missing() {
+    fn leftover_spk_labels_render_as_unlabeled() {
         let (conn, _dir, path) = fixture_db();
         insert_meeting(
             &conn,
@@ -1169,30 +1086,7 @@ mod tests {
         let db = McpDb::open(&path).unwrap();
         let detail = db.get_meeting("m1", IncludeSet::all()).unwrap();
         let transcript = detail.transcript.unwrap();
-        assert!(transcript.contains("Speaker 99: Orphaned reference."));
-        assert!(detail.speakers.is_empty());
-    }
-
-    #[test]
-    fn get_meeting_speakers_empty_when_transcript_and_metadata_excluded() {
-        let (conn, _dir, path) = fixture_db();
-        insert_speaker(&conn, 1, "Alice");
-        insert_meeting(
-            &conn,
-            "m1",
-            "Standup",
-            "2026-01-01T10:00:00+00:00",
-            &[("Hello.", 0.0, 1.0, Some("spk:1"))],
-            None,
-        );
-        drop(conn);
-
-        let db = McpDb::open(&path).unwrap();
-        let names = vec!["summary".to_string()];
-        let detail = db
-            .get_meeting("m1", IncludeSet::from_names(Some(&names)))
-            .unwrap();
-        assert!(detail.speakers.is_empty());
+        assert_eq!(transcript, "Orphaned reference.");
     }
 
     #[test]

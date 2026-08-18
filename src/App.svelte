@@ -15,10 +15,8 @@
   import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
   import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
   import {
-    notifyDiarizationProgress,
-    notifyMeetingAborted,
-    notifyMeetingDiarized,
-    notifyMeetingFinalized,
+  notifyMeetingAborted,
+  notifyMeetingFinalized,
     notifyMeetingIdle,
     notifyMeetingStopRequested,
     notifySystemWokeUp,
@@ -43,8 +41,6 @@
   let unlistenSystemAudio: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
   let unlistenMeetingFinalized: (() => void) | null = null;
-  let unlistenMeetingDiarized: (() => void) | null = null;
-  let unlistenDiarizationProgress: (() => void) | null = null;
   let unlistenUpcomingMeeting: (() => void) | null = null;
   let unlistenMeetingIdle: (() => void) | null = null;
   let unlistenSystemWokeUp: (() => void) | null = null;
@@ -190,18 +186,6 @@
       unlistenMeetingFinalized = fn;
     });
 
-    events.meetingDiarized.listen((event) => {
-      notifyMeetingDiarized(event.payload.meeting_id);
-    }).then((fn) => {
-      unlistenMeetingDiarized = fn;
-    });
-
-    events.diarizationProgress.listen((event) => {
-      notifyDiarizationProgress(event.payload);
-    }).then((fn) => {
-      unlistenDiarizationProgress = fn;
-    });
-
     events.upcomingMeeting.listen((event) => {
       app.upcomingMeeting = event.payload;
     }).then((fn) => {
@@ -239,8 +223,6 @@
       unlistenSystemAudio?.();
       unlistenMeetingStop?.();
       unlistenMeetingFinalized?.();
-      unlistenMeetingDiarized?.();
-      unlistenDiarizationProgress?.();
       unlistenUpcomingMeeting?.();
       unlistenMeetingIdle?.();
       unlistenSystemWokeUp?.();

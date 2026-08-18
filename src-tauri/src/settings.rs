@@ -50,10 +50,6 @@ const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
-const DIARIZE_ENABLED_KEY: &str = "diarize_enabled";
-const DIARIZE_MIC_KEY: &str = "diarize_mic";
-const DIARIZE_SYSTEM_AUDIO_KEY: &str = "diarize_system_audio";
-const DIARIZE_MAX_SPEAKERS_KEY: &str = "diarize_max_speakers";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -201,21 +197,6 @@ pub struct AppSettings {
     pub summary_templates: Vec<SummaryTemplate>,
     /// App version the user has acknowledged (What's New / post-update dialog).
     pub last_seen_version: String,
-    /// Offline speaker recognition after a meeting stops. Off by default
-    /// (extra local inference + on-disk model download). When on, at least
-    /// one of `diarize_mic` / `diarize_system_audio` must be enabled.
-    pub diarize_enabled: bool,
-    /// Run speaker recognition on microphone (Me-lane) audio after a meeting
-    /// stops. On by default when speaker recognition is enabled.
-    pub diarize_mic: bool,
-    /// Run speaker recognition on system-audio (Them-lane) capture after a
-    /// meeting stops. Only meaningful when `capture_system_audio` is on.
-    /// Off by default.
-    pub diarize_system_audio: bool,
-    /// Optional upper bound on how many distinct speakers a single meeting
-    /// can be split into. `None` means unbounded (the clustering stage
-    /// decides on its own).
-    pub diarize_max_speakers: Option<u32>,
 }
 
 /// Allowed values for `model_unload_timeout_minutes`: 0 (never) plus the
@@ -224,7 +205,6 @@ const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
 
 const MEETING_AUTOSTOP_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 3..=60;
 const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 60..=720;
-const DIARIZE_MAX_SPEAKERS_RANGE: std::ops::RangeInclusive<u32> = 1..=20;
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -268,10 +248,6 @@ impl Default for AppSettings {
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: String::new(),
-            diarize_enabled: false,
-            diarize_mic: true,
-            diarize_system_audio: false,
-            diarize_max_speakers: None,
         }
     }
 }
@@ -463,22 +439,6 @@ impl AppSettings {
         if let Some(last_seen_version) = read_json_setting::<String>(db, LAST_SEEN_VERSION_KEY)? {
             settings.last_seen_version = last_seen_version;
         }
-        if let Some(diarize_enabled) = read_json_setting::<bool>(db, DIARIZE_ENABLED_KEY)? {
-            settings.diarize_enabled = diarize_enabled;
-        }
-        if let Some(diarize_mic) = read_json_setting::<bool>(db, DIARIZE_MIC_KEY)? {
-            settings.diarize_mic = diarize_mic;
-        }
-        if let Some(diarize_system_audio) =
-            read_json_setting::<bool>(db, DIARIZE_SYSTEM_AUDIO_KEY)?
-        {
-            settings.diarize_system_audio = diarize_system_audio;
-        }
-        if let Some(diarize_max_speakers) =
-            read_json_setting::<Option<u32>>(db, DIARIZE_MAX_SPEAKERS_KEY)?
-        {
-            settings.diarize_max_speakers = diarize_max_speakers;
-        }
 
         let mut settings = settings.sanitized();
         Self::migrate_audio_device_preferences(&mut settings, db)?;
@@ -659,22 +619,6 @@ impl AppSettings {
         ) {
             normalized.meeting_transcription_language =
                 Self::default().meeting_transcription_language;
-        }
-
-        if let Some(max_speakers) = normalized.diarize_max_speakers
-            && !DIARIZE_MAX_SPEAKERS_RANGE.contains(&max_speakers)
-        {
-            normalized.diarize_max_speakers = None;
-        }
-
-        if !normalized.capture_system_audio {
-            normalized.diarize_system_audio = false;
-        }
-        if normalized.diarize_enabled
-            && !normalized.diarize_mic
-            && !normalized.diarize_system_audio
-        {
-            normalized.diarize_mic = true;
         }
 
         normalized.dictation_polish_template_id = normalized
@@ -878,10 +822,6 @@ impl AppSettings {
         )?;
         write_json_setting(db, SUMMARY_TEMPLATES_KEY, &normalized.summary_templates)?;
         write_json_setting(db, LAST_SEEN_VERSION_KEY, &normalized.last_seen_version)?;
-        write_json_setting(db, DIARIZE_ENABLED_KEY, &normalized.diarize_enabled)?;
-        write_json_setting(db, DIARIZE_MIC_KEY, &normalized.diarize_mic)?;
-        write_json_setting(db, DIARIZE_SYSTEM_AUDIO_KEY, &normalized.diarize_system_audio)?;
-        write_json_setting(db, DIARIZE_MAX_SPEAKERS_KEY, &normalized.diarize_max_speakers)?;
 
         if let Some(audio_device) = normalized.audio_device.as_ref() {
             write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
@@ -1052,10 +992,6 @@ mod tests {
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: "0.0.9".into(),
-            diarize_enabled: true,
-            diarize_mic: true,
-            diarize_system_audio: false,
-            diarize_max_speakers: Some(4),
         };
 
         settings.save(&db).expect("save settings");
@@ -1259,75 +1195,6 @@ mod tests {
     #[test]
     fn meeting_autostop_enabled_defaults_true() {
         assert!(AppSettings::default().meeting_autostop_enabled);
-    }
-
-    #[test]
-    fn diarize_enabled_defaults_false() {
-        assert!(!AppSettings::default().diarize_enabled);
-        assert!(AppSettings::default().diarize_mic);
-        assert!(!AppSettings::default().diarize_system_audio);
-        assert_eq!(AppSettings::default().diarize_max_speakers, None);
-    }
-
-    #[test]
-    fn diarize_sub_options_force_mic_when_both_off() {
-        let s = AppSettings {
-            diarize_enabled: true,
-            diarize_mic: false,
-            diarize_system_audio: false,
-            ..AppSettings::default()
-        };
-        assert!(s.sanitize_for_save().unwrap().diarize_mic);
-    }
-
-    #[test]
-    fn diarize_system_audio_cleared_without_system_capture() {
-        let s = AppSettings {
-            diarize_enabled: true,
-            diarize_system_audio: true,
-            capture_system_audio: false,
-            ..AppSettings::default()
-        };
-        assert!(!s.sanitize_for_save().unwrap().diarize_system_audio);
-    }
-
-    #[test]
-    fn diarize_max_speakers_out_of_range_falls_back_to_none() {
-        let s = AppSettings {
-            diarize_max_speakers: Some(0),
-            ..AppSettings::default()
-        };
-        assert_eq!(s.sanitize_for_save().unwrap().diarize_max_speakers, None);
-
-        let s = AppSettings {
-            diarize_max_speakers: Some(21),
-            ..AppSettings::default()
-        };
-        assert_eq!(s.sanitize_for_save().unwrap().diarize_max_speakers, None);
-
-        let s = AppSettings {
-            diarize_max_speakers: Some(6),
-            ..AppSettings::default()
-        };
-        assert_eq!(s.sanitize_for_save().unwrap().diarize_max_speakers, Some(6));
-    }
-
-    #[test]
-    fn diarize_settings_round_trip() {
-        let (db, _dir) = test_db();
-        let settings = AppSettings {
-            diarize_enabled: true,
-            diarize_mic: true,
-            diarize_system_audio: true,
-            diarize_max_speakers: Some(3),
-            ..AppSettings::default()
-        };
-        settings.save(&db).expect("save settings");
-        let loaded = AppSettings::load(&db).expect("load settings");
-        assert!(loaded.diarize_enabled);
-        assert!(loaded.diarize_mic);
-        assert!(loaded.diarize_system_audio);
-        assert_eq!(loaded.diarize_max_speakers, Some(3));
     }
 
     #[test]

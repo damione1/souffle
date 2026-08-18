@@ -98,10 +98,6 @@ let settings = $state<AppSettings>({
     { id: "brief_overview", name: "Brief overview", prompt: "" },
   ],
   last_seen_version: "",
-  diarize_enabled: false,
-  diarize_mic: true,
-  diarize_system_audio: false,
-  diarize_max_speakers: null,
 });
 
 function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {

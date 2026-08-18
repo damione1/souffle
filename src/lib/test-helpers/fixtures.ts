@@ -152,7 +152,6 @@ export const mockMeeting: MeetingTranscript = {
   notes: null,
   calendar_event_id: null,
   participants: [],
-  speakers: [],
 };
 
 export const mockMeetingList: MeetingListItem[] = [
@@ -226,10 +225,6 @@ export const mockSettings: AppSettings = {
     { id: "brief_overview", name: "Brief overview", prompt: "Brief prompt." },
   ],
   last_seen_version: "",
-  diarize_enabled: false,
-  diarize_mic: true,
-  diarize_system_audio: false,
-  diarize_max_speakers: null,
 }
 
 export const mockShortcuts: ShortcutSettings = {
