@@ -615,4 +615,65 @@ describe("settings controller", () => {
       expect(app.settings.calendar_selected_ids).toEqual([]);
     });
   });
+
+  it("downloadRecommendedOllamaModel pulls then refreshes providers", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "check_summary_providers") {
+        return Promise.resolve({
+          ollama_url: "http://localhost:11434",
+          ollama_available: true,
+          apple_intelligence_available: false,
+          apple_intelligence_is_stub: true,
+          apple_intelligence_unavailable_reason: "stub",
+          models: [],
+        });
+      }
+      if (cmd === "pull_recommended_ollama_model") {
+        return Promise.resolve("qwen2.5:7b");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    expect(ctrl.ollamaAvailable).toBe(true);
+    expect(ctrl.summaryModels).toEqual([]);
+
+    const pull = ctrl.downloadRecommendedOllamaModel();
+    expect(ctrl.ollamaPulling).toBe(true);
+    await pull;
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "pull_recommended_ollama_model",
+      expect.objectContaining({ channel: expect.anything() }),
+    );
+    expect(ctrl.ollamaPulling).toBe(false);
+    expect(ctrl.ollamaPullError).toBe("");
+  });
+
+  it("downloadRecommendedOllamaModel records pull errors", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "check_summary_providers") {
+        return Promise.resolve({
+          ollama_url: "http://localhost:11434",
+          ollama_available: true,
+          apple_intelligence_available: false,
+          apple_intelligence_is_stub: true,
+          apple_intelligence_unavailable_reason: "stub",
+          models: [],
+        });
+      }
+      if (cmd === "pull_recommended_ollama_model") {
+        return Promise.reject("connection refused");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    await ctrl.downloadRecommendedOllamaModel();
+
+    expect(ctrl.ollamaPulling).toBe(false);
+    expect(ctrl.ollamaPullError).toBe("connection refused");
+  });
 });

@@ -1,4 +1,4 @@
-import { getSummaryProvidersStatus } from "../../api/summary";
+import { getSummaryProvidersStatus, pullRecommendedOllamaModel, RECOMMENDED_OLLAMA_MODEL } from "../../api/summary";
 import {
   deleteModel,
   getTranscriptionCatalog,
@@ -65,6 +65,11 @@ export function createSettingsController() {
   let appleIntelligenceAvailable = $state(false);
   let appleIntelligenceUnavailableReason = $state<string | null>(null);
   let ollamaModels = $state<SummaryModelDescriptor[]>([]);
+  let ollamaPulling = $state(false);
+  let ollamaPullStatus = $state("");
+  let ollamaPullDownloaded = $state(0);
+  let ollamaPullTotal = $state<number | null>(null);
+  let ollamaPullError = $state("");
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
 
@@ -278,6 +283,30 @@ export function createSettingsController() {
       appleIntelligenceAvailable = false;
       appleIntelligenceUnavailableReason = null;
       ollamaModels = [];
+    }
+  }
+
+  async function downloadRecommendedOllamaModel() {
+    if (ollamaPulling || !ollamaAvailable) return;
+    ollamaPulling = true;
+    ollamaPullError = "";
+    ollamaPullStatus = "";
+    ollamaPullDownloaded = 0;
+    ollamaPullTotal = null;
+    try {
+      await pullRecommendedOllamaModel((progress) => {
+        ollamaPullStatus = progress.status;
+        ollamaPullDownloaded = progress.downloaded_bytes;
+        ollamaPullTotal = progress.total_bytes;
+        if (progress.error) {
+          ollamaPullError = progress.error;
+        }
+      });
+      await refreshSummaryProviders();
+    } catch (e) {
+      ollamaPullError = errorMessage(e);
+    } finally {
+      ollamaPulling = false;
     }
   }
 
@@ -797,6 +826,12 @@ export function createSettingsController() {
     get ollamaAvailable() { return ollamaAvailable; },
     get ollamaModels() { return ollamaModels; },
     get summaryModels() { return summaryModels; },
+    get recommendedOllamaModel() { return RECOMMENDED_OLLAMA_MODEL; },
+    get ollamaPulling() { return ollamaPulling; },
+    get ollamaPullStatus() { return ollamaPullStatus; },
+    get ollamaPullDownloaded() { return ollamaPullDownloaded; },
+    get ollamaPullTotal() { return ollamaPullTotal; },
+    get ollamaPullError() { return ollamaPullError; },
     get statusMessage() { return statusMessage; },
     get catalog() { return catalog; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },
@@ -828,6 +863,7 @@ export function createSettingsController() {
     onToggleHidden: toggleInputDeviceHidden,
     onAllowBluetoothMicChange,
     refreshSummaryProviders,
+    downloadRecommendedOllamaModel,
     selectModelOption,
     handleDeleteModel,
     onThemeChange,

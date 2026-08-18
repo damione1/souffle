@@ -31,6 +31,7 @@ export type {
   MeetingRecordingSession,
   MeetingTranscript,
   ModelArtifactDescriptor,
+  OllamaPullProgress,
   SummaryModelDescriptor,
   SummaryProvidersStatus,
   SummaryTemplate,

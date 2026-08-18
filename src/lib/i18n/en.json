@@ -163,7 +163,12 @@
     "not_available": "Not available",
     "retry": "Retry",
     "summary_model": "Summarization model",
-    "no_compatible_model": "No compatible model found. Install a model like Llama or Mistral to enable summaries."
+    "no_compatible_model": "No compatible model found. Install a model like Llama or Mistral to enable summaries.",
+    "download_recommended": "Download {model}",
+    "download_recommended_desc": "Recommended for summaries and dictation polish (~4.7 GB).",
+    "recommended_model": "Recommended model",
+    "downloading_model": "Downloading {model}…",
+    "pull_failed": "Could not download the model: {error}"
   },
   "settings_diagnostics": {
     "title": "Diagnostics",

@@ -163,7 +163,12 @@
     "not_available": "Non disponible",
     "retry": "Réessayer",
     "summary_model": "Modèle de résumé",
-    "no_compatible_model": "Aucun modèle compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés."
+    "no_compatible_model": "Aucun modèle compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
+    "download_recommended": "Télécharger {model}",
+    "download_recommended_desc": "Recommandé pour les résumés et le polish de dictée (~4,7 Go).",
+    "recommended_model": "Modèle recommandé",
+    "downloading_model": "Téléchargement de {model}…",
+    "pull_failed": "Impossible de télécharger le modèle : {error}"
   },
   "settings_diagnostics": {
     "title": "Diagnostics",

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
@@ -8,6 +10,21 @@ const REDUCE_NUM_CTX: u32 = 16384;
 const MAP_NUM_CTX: u32 = 8192;
 const CONNECT_TIMEOUT_SECS: u64 = 5;
 const READ_TIMEOUT_SECS: u64 = 120;
+
+/// Default chat model to offer when Ollama is running but empty.
+/// `qwen2.5:7b` is instruction-tuned (~4.7 GB) and ranks first in
+/// [`sorted_summary_capable_models`].
+pub const RECOMMENDED_MODEL: &str = "qwen2.5:7b";
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct OllamaPullProgress {
+    pub model: String,
+    pub status: String,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub done: bool,
+    pub error: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TagsResponse {
@@ -227,6 +244,171 @@ pub fn http_client() -> Result<reqwest::Client, String> {
         .map_err(|e| format!("Ollama client: {e}"))
 }
 
+/// Pulls can idle between layers for minutes; do not apply the generate read timeout.
+fn pull_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("Ollama client: {e}"))
+}
+
+#[derive(Debug, Serialize)]
+struct PullRequest {
+    model: String,
+    stream: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullChunk {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    digest: Option<String>,
+    #[serde(default)]
+    total: Option<u64>,
+    #[serde(default)]
+    completed: Option<u64>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+struct PullAccumulator {
+    model: String,
+    status: String,
+    layers: HashMap<String, (u64, u64)>,
+}
+
+impl PullAccumulator {
+    fn new(model: &str) -> Self {
+        Self {
+            model: model.to_string(),
+            status: String::new(),
+            layers: HashMap::new(),
+        }
+    }
+
+    fn apply(&mut self, chunk: &PullChunk) -> OllamaPullProgress {
+        if let Some(status) = &chunk.status {
+            self.status = status.clone();
+        }
+        if let Some(digest) = &chunk.digest {
+            let completed = chunk.completed.unwrap_or(0);
+            let total = chunk.total.unwrap_or(0).max(completed);
+            self.layers.insert(digest.clone(), (completed, total));
+        }
+        let (downloaded, total) = self.layers.values().fold(
+            (0u64, 0u64),
+            |(downloaded, total), (completed, layer_total)| {
+                (downloaded + completed, total + layer_total)
+            },
+        );
+        let error = chunk
+            .error
+            .clone()
+            .filter(|message| !message.trim().is_empty());
+        let done = error.is_some() || self.status.eq_ignore_ascii_case("success");
+        OllamaPullProgress {
+            model: self.model.clone(),
+            status: self.status.clone(),
+            downloaded_bytes: downloaded,
+            total_bytes: (total > 0).then_some(total),
+            done,
+            error,
+        }
+    }
+}
+
+fn handle_pull_line(
+    line: &[u8],
+    acc: &mut PullAccumulator,
+    on_progress: &impl Fn(OllamaPullProgress),
+) -> Result<(), String> {
+    let Ok(text) = std::str::from_utf8(line) else {
+        return Ok(());
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(());
+    }
+    let Ok(parsed) = serde_json::from_str::<PullChunk>(text) else {
+        return Ok(());
+    };
+    let progress = acc.apply(&parsed);
+    let error = progress.error.clone();
+    on_progress(progress);
+    if let Some(error) = error {
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Stream `POST /api/pull` until the model is on disk (or Ollama errors).
+pub async fn pull_model(
+    url: &str,
+    model: &str,
+    on_progress: impl Fn(OllamaPullProgress),
+) -> Result<(), String> {
+    let model = model.trim();
+    if model.is_empty() {
+        return Err("No Ollama model specified to download".into());
+    }
+    if !is_summary_capable_model(model) {
+        return Err(format!(
+            "Model '{model}' is not suitable for summaries or dictation polish"
+        ));
+    }
+
+    let client = pull_http_client()?;
+    let resp = client
+        .post(format!("{url}/api/pull"))
+        .json(&PullRequest {
+            model: model.to_string(),
+            stream: true,
+        })
+        .send()
+        .await
+        .map_err(|e| format!("Ollama pull request: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        let body = body.trim();
+        return Err(if body.is_empty() {
+            format!("Ollama pull failed ({status})")
+        } else {
+            format!("Ollama pull failed ({status}): {body}")
+        });
+    }
+
+    let mut acc = PullAccumulator::new(model);
+    let mut stream = resp.bytes_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut succeeded = false;
+
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|e| format!("Ollama pull stream: {e}"))?;
+        buf.extend_from_slice(&bytes);
+
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = buf.drain(..=pos).collect();
+            handle_pull_line(&line, &mut acc, &on_progress)?;
+            if acc.status.eq_ignore_ascii_case("success") {
+                succeeded = true;
+            }
+        }
+    }
+    handle_pull_line(&buf, &mut acc, &on_progress)?;
+    if acc.status.eq_ignore_ascii_case("success") {
+        succeeded = true;
+    }
+
+    if succeeded {
+        Ok(())
+    } else {
+        Err("Ollama pull ended without success".into())
+    }
+}
+
 pub const MAP_SYSTEM_PROMPT: &str = OLLAMA_MAP_PROMPT;
 pub const MERGE_SYSTEM_PROMPT: &str = OLLAMA_MERGE_PROMPT;
 pub const STRUCTURED_EXTRACT_SYSTEM_PROMPT: &str = OLLAMA_STRUCTURED_EXTRACT_PROMPT;
@@ -237,7 +419,8 @@ pub const MAP_CONTEXT: u32 = MAP_NUM_CTX;
 #[cfg(test)]
 mod tests {
     use super::{
-        GenerateOptions, GenerateRequest, is_summary_capable_model, sorted_summary_capable_models,
+        GenerateOptions, GenerateRequest, PullAccumulator, PullChunk, PullRequest,
+        RECOMMENDED_MODEL, is_summary_capable_model, sorted_summary_capable_models,
     };
 
     #[test]
@@ -311,5 +494,83 @@ mod tests {
             json.contains(r#""keep_alive":"15m""#),
             "expected keep_alive in {json}"
         );
+    }
+
+    #[test]
+    fn recommended_model_is_summary_capable() {
+        assert!(is_summary_capable_model(RECOMMENDED_MODEL));
+        assert_eq!(
+            sorted_summary_capable_models(&[
+                "mistral:7b".to_string(),
+                RECOMMENDED_MODEL.to_string()
+            ]),
+            vec![RECOMMENDED_MODEL.to_string(), "mistral:7b".to_string()]
+        );
+    }
+
+    #[test]
+    fn pull_request_streams() {
+        let json = serde_json::to_string(&PullRequest {
+            model: RECOMMENDED_MODEL.into(),
+            stream: true,
+        })
+        .expect("PullRequest should serialize");
+        assert!(
+            json.contains(r#""model":"qwen2.5:7b""#),
+            "expected model in {json}"
+        );
+        assert!(
+            json.contains(r#""stream":true"#),
+            "expected stream in {json}"
+        );
+    }
+
+    #[test]
+    fn pull_accumulator_sums_layers_and_flags_success() {
+        let mut acc = PullAccumulator::new(RECOMMENDED_MODEL);
+        let first = acc.apply(&PullChunk {
+            status: Some("downloading".into()),
+            digest: Some("sha256:aaa".into()),
+            total: Some(100),
+            completed: Some(40),
+            error: None,
+        });
+        assert_eq!(first.downloaded_bytes, 40);
+        assert_eq!(first.total_bytes, Some(100));
+        assert!(!first.done);
+
+        let second = acc.apply(&PullChunk {
+            status: Some("downloading".into()),
+            digest: Some("sha256:bbb".into()),
+            total: Some(50),
+            completed: Some(50),
+            error: None,
+        });
+        assert_eq!(second.downloaded_bytes, 90);
+        assert_eq!(second.total_bytes, Some(150));
+
+        let done = acc.apply(&PullChunk {
+            status: Some("success".into()),
+            digest: None,
+            total: None,
+            completed: None,
+            error: None,
+        });
+        assert!(done.done);
+        assert!(done.error.is_none());
+    }
+
+    #[test]
+    fn pull_accumulator_surfaces_error() {
+        let mut acc = PullAccumulator::new(RECOMMENDED_MODEL);
+        let progress = acc.apply(&PullChunk {
+            status: None,
+            digest: None,
+            total: None,
+            completed: None,
+            error: Some("file does not exist".into()),
+        });
+        assert!(progress.done);
+        assert_eq!(progress.error.as_deref(), Some("file does not exist"));
     }
 }

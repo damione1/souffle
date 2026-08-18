@@ -249,9 +249,16 @@
         ollamaModels={controller.ollamaModels}
         summaryModels={controller.summaryModels}
         selectedOllamaModel={controller.app.settings.ollama_model}
+        recommendedOllamaModel={controller.recommendedOllamaModel}
+        ollamaPulling={controller.ollamaPulling}
+        ollamaPullStatus={controller.ollamaPullStatus}
+        ollamaPullDownloaded={controller.ollamaPullDownloaded}
+        ollamaPullTotal={controller.ollamaPullTotal}
+        ollamaPullError={controller.ollamaPullError}
         onOllamaUrlChange={controller.onOllamaUrlChange}
         onOllamaModelChange={controller.onOllamaModelChange}
         onRetrySummaryProviders={controller.refreshSummaryProviders}
+        onDownloadRecommendedOllamaModel={controller.downloadRecommendedOllamaModel}
       />
 
       <SummaryTemplatesSettingsSection

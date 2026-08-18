@@ -381,6 +381,18 @@ async checkSummaryProviders() : Promise<Result<SummaryProvidersStatus, string>> 
 }
 },
 /**
+ * Pull the recommended Ollama chat model (`qwen2.5:7b`) into the configured
+ * server. Progress is streamed back via the Channel API.
+ */
+async pullRecommendedOllamaModel(channel: TAURI_CHANNEL<OllamaPullProgress>) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pull_recommended_ollama_model", { channel }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Summarize a meeting transcript using the selected provider, streaming results back.
  * 
  * `template_id` picks the summary template controlling the final-pass system
@@ -1315,6 +1327,7 @@ participants: MeetingParticipant[] }
 export type MeetingTranscriptionLanguage = "auto" | "en" | "fr"
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
+export type OllamaPullProgress = { model: string; status: string; downloaded_bytes: number; total_bytes: number | null; done: boolean; error: string | null }
 export type PasteMethod = "clipboard" | "type" | 
 /**
  * Set the focused element's selected text via Accessibility.
