@@ -139,9 +139,9 @@ impl MeetingAccumulator {
 }
 
 /// Shared application state, managed by Tauri.
-/// AudioCapture lives on its own thread (cpal Stream is !Send on macOS),
-/// and the transcription engine lives on the engine actor thread —
-/// both are driven via command channels.
+/// AudioCapture lives on its own thread so CoreAudio IO stays off the UI /
+/// async runtime, and the transcription engine lives on the engine actor
+/// thread — both are driven via command channels.
 pub struct AppState {
     pub audio_cmd_sender: Sender<AudioCommand>,
     /// Wrapped in Arc so async commands can clone a handle into a blocking

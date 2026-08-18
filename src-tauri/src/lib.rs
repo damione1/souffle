@@ -198,7 +198,8 @@ pub fn run() {
     // the actor's AudioGone handler.
     let audio_gone_reason = Arc::new(std::sync::Mutex::new(None));
 
-    // Spawn the audio thread before Tauri starts (cpal Stream is !Send on macOS)
+    // Spawn the audio thread before Tauri starts so CoreAudio IO stays off
+    // the UI / async runtime.
     let (cmd_tx, audio_rx) = match AudioCapture::spawn(
         Arc::clone(&audio_rms),
         Arc::clone(&dropped_counter),

@@ -76,7 +76,7 @@ fn play_wav_blocking(path: &Path, volume: f32) -> Result<(), String> {
     let supported = device
         .default_output_config()
         .map_err(|e| format!("Output config: {e}"))?;
-    let sample_rate = supported.sample_rate().0;
+    let sample_rate = supported.sample_rate();
     let channels = supported.channels() as usize;
 
     let scaled: Vec<f32> = samples
