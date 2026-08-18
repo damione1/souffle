@@ -42,7 +42,10 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["e
 tracing-appender = "0.2"
 log = "0.4"
 crossbeam-channel = "0.5"
-cpal = "0.15"
+# 0.16 actually disposes the CoreAudio AudioUnit when a Stream drops. 0.15
+# leaked StreamInner via a disconnect-listener cycle (RustAudio/cpal#771),
+# which left Bluetooth headsets stuck in HFP/mono until process exit.
+cpal = "0.16"
 rubato = "0.16"
 hound = "3.5"
 uuid = { version = "1", features = ["v4"] }

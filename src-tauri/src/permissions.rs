@@ -211,6 +211,10 @@ pub fn probe_microphone() -> PermState {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    // Pause then drop so the probe's AudioUnit is actually disposed. cpal
+    // 0.15 leaked StreamInner on macOS, which would leave a Bluetooth
+    // headset in HFP/mono after the onboarding mic check.
+    let _ = stream.pause();
     drop(stream);
 
     if got.load(Ordering::Relaxed) {
