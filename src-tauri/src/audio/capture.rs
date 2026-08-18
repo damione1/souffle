@@ -12,7 +12,7 @@ use tracing::{debug, error, info, warn};
 use super::mixer::MeetingMixer;
 use super::recorder::MeetingRecorder;
 use super::resampler::Resampler;
-use crate::audio::device::{AudioInputDevice, resolve_device_name, uid_for_device_name};
+use crate::audio::device::AudioInputDevice;
 use crate::audio::priority::{InputPriority, ResolveInputParams, resolve_input};
 use crate::state::AudioCommand;
 
@@ -345,10 +345,26 @@ fn list_input_devices_impl() -> Vec<AudioInputDevice> {
         .collect()
 }
 
+/// CoreAudio UID of a cpal device (`kAudioDevicePropertyDeviceUID`). Cheap
+/// property read — unlike `name()` / `description()`, this does not open
+/// an AudioUnit.
+fn cpal_device_uid(device: &Device) -> Option<String> {
+    device.id().ok().map(|id| id.1)
+}
+
+/// Locate a cpal device by UID without probing supported configs.
+fn find_cpal_device_by_uid(host: &cpal::Host, uid: &str) -> Option<Device> {
+    host.devices()
+        .ok()?
+        .find(|device| cpal_device_uid(device).as_deref() == Some(uid))
+}
+
 /// Manages audio capture from a selected input device.
 /// Sends resampled 24kHz mono f32 chunks over a crossbeam channel.
 ///
-/// This struct lives on a dedicated thread because cpal's Stream is !Send on macOS.
+/// Lives on a dedicated thread so CoreAudio IO and Stream lifecycle stay
+/// off the UI / async runtime. (cpal 0.17's macOS Stream is Send; isolation
+/// is still the right ownership model.)
 pub struct AudioCapture {
     stream: Option<Stream>,
     audio_sender: Sender<AudioMessage>,
@@ -602,34 +618,26 @@ impl AudioCapture {
         let host = cpal::default_host();
 
         if let Some(uid) = self.resolved_input_uid(known_devices) {
-            let target_name = resolve_device_name(known_devices, &uid).or({
-                // Disconnected UID or legacy name not in the current snapshot:
-                // try the stored value as a cpal device name directly.
-                Some(uid.as_str())
-            });
-
-            if let Some(name) = target_name {
-                // Unfiltered `devices()`, not `input_devices()`: the latter's
-                // default filter probes every device's supported input configs
-                // (opens an AudioUnit per device on coreaudio) just to enumerate
-                // them, which can flip a Bluetooth headset into HFP mono. This
-                // runs on every session start and every mic health check
-                // (MIC_CHECK_INTERVAL), so the unfiltered form matters even when
-                // no device is pinned below the fallback. `Device::name`
-                // itself is a cheap property read, safe to call on every device.
-                let devices = host
-                    .devices()
-                    .map_err(|e| format!("Failed to list devices: {e}"))?;
-
-                for device in devices {
-                    if let Ok(n) = device.name()
-                        && n == name
-                    {
-                        return Ok(device);
-                    }
-                }
-                warn!("Input device '{name}' not found, falling back to default");
+            // Unfiltered `devices()` + `Device::id()` (`kAudioDevicePropertyDeviceUID`).
+            // Do not use `input_devices()`, `name()`, or `description()`: in
+            // cpal 0.17 those open an AudioUnit per device (input *and*
+            // output for `description`) just to inspect it, which can flip a
+            // Bluetooth headset into HFP mono. This runs on every session
+            // start and every mic rebuild.
+            if let Some(device) = find_cpal_device_by_uid(&host, &uid) {
+                return Ok(device);
             }
+
+            // Legacy pin stored as a display name: map through our snapshot
+            // (cheap CoreAudio list) then look up by UID. Never cpal name().
+            if let Some(mapped) = known_devices.iter().find(|d| d.name == uid)
+                && mapped.uid != uid
+                && let Some(device) = find_cpal_device_by_uid(&host, &mapped.uid)
+            {
+                return Ok(device);
+            }
+
+            warn!("Input device '{uid}' not found, falling back to default");
         }
 
         // Also reached when `resolve_input` found no auto-eligible device
@@ -678,16 +686,26 @@ impl AudioCapture {
         let known_devices = list_input_devices_impl();
         let device = self.find_device(&known_devices)?;
 
-        let device_name = device.name().unwrap_or_else(|_| "Unknown".into());
-        // Track the UID of the device cpal actually opened, not just what
-        // resolve_input picked: find_device may fall back to the OS default
-        // when the resolved name is missing from the cpal device list.
-        self.mic_device_uid = uid_for_device_name(&known_devices, &device_name);
+        // Track the UID cpal actually opened, not just what resolve_input
+        // picked: find_device may fall back to the OS default. `id()` is a
+        // UID property read; `name()`/`description()` would open AudioUnits.
+        let opened_uid = cpal_device_uid(&device);
+        let device_name = opened_uid
+            .as_deref()
+            .and_then(|uid| {
+                known_devices
+                    .iter()
+                    .find(|d| d.uid == uid)
+                    .map(|d| d.name.clone())
+            })
+            .or_else(|| opened_uid.clone())
+            .unwrap_or_else(|| "Unknown".into());
+        self.mic_device_uid = opened_uid;
         info!("Using input device: {device_name}");
         self.mic_device_name = Some(device_name.clone());
 
         let config = Self::preferred_config(&device)?;
-        let sample_rate = config.sample_rate.0;
+        let sample_rate = config.sample_rate;
         let channels = config.channels;
 
         info!("Audio config: {sample_rate}Hz, {channels}ch");
@@ -875,7 +893,7 @@ impl AudioCapture {
         mic_gain: f32,
         diarize: bool,
     ) -> Result<(), String> {
-        let sample_rate = config.sample_rate.0;
+        let sample_rate = config.sample_rate;
         let channels = config.channels;
 
         // ~2s of headroom per ring; the 5ms tick drains far faster.
@@ -1220,11 +1238,7 @@ impl AudioCapture {
         self.mic_device_name = None;
         self.mic_device_uid = None;
         self.route_attempt_uid = None;
-        let released = self.release_capture_stream();
-        #[cfg(target_os = "macos")]
-        if released {
-            super::output_route::restore_bluetooth_a2dp();
-        }
+        self.release_capture_stream();
         self.resampler.take();
         #[cfg(target_os = "macos")]
         if let Some(mut meeting) = self.meeting.take() {
@@ -1303,10 +1317,6 @@ impl AudioCapture {
         // Stop IO and dispose the AudioUnit — after this, no callback runs
         // and a Bluetooth headset can leave HFP/mono for A2DP stereo.
         let had_stream = self.release_capture_stream();
-        #[cfg(target_os = "macos")]
-        if had_stream {
-            super::output_route::restore_bluetooth_a2dp();
-        }
 
         if let Some(mut meeting) = self.meeting.take() {
             // Tear down the tap first so its ring stops filling; then one

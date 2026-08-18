@@ -42,10 +42,12 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["e
 tracing-appender = "0.2"
 log = "0.4"
 crossbeam-channel = "0.5"
-# 0.16 actually disposes the CoreAudio AudioUnit when a Stream drops. 0.15
-# leaked StreamInner via a disconnect-listener cycle (RustAudio/cpal#771),
-# which left Bluetooth headsets stuck in HFP/mono until process exit.
-cpal = "0.16"
+# 0.16 disposes the CoreAudio AudioUnit on Stream drop (0.15 leaked it and
+# left Bluetooth headsets in HFP/mono). 0.16 also had a release-mode UB in
+# device enumeration (`let data_size = 0` then read it back) that SIGSEGV'd
+# at 0x4 on session start; 0.17 fixed that ("segfaults when enumerating
+# devices").
+cpal = "0.17"
 rubato = "0.16"
 hound = "3.5"
 uuid = { version = "1", features = ["v4"] }
