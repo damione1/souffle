@@ -242,7 +242,7 @@ describe("transcription controller", () => {
 
     const ctrl = createTranscriptionController();
     await ctrl.mount();
-    expect(ctrl.app.settings.dictation_polish_enabled).toBe(false);
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: false };
 
     await ctrl.toggleRecording();
     simulateRecordingStarted(ctrl.app);
@@ -283,7 +283,7 @@ describe("transcription controller", () => {
   it("toggleRecording stop never holds the pill when polish is disabled", async () => {
     const ctrl = createTranscriptionController();
     await ctrl.mount();
-    expect(ctrl.app.settings.dictation_polish_enabled).toBe(false);
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: false };
 
     await ctrl.toggleRecording();
     simulateRecordingStarted(ctrl.app);

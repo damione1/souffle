@@ -16,7 +16,7 @@ use crate::transcript::{MeetingParticipant, StructuredSummary};
 pub use chunking::{ChunkConfig, chunk_transcript, estimate_tokens};
 pub use extract::{extract_structured_summary, parse_structured_summary_response};
 pub use polish::{
-    DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
+    DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
     default_polish_templates, early_polish_dictation_result, merge_polish_templates,
     polish_dictation_text,
 };

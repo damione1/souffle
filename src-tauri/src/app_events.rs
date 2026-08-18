@@ -212,3 +212,25 @@ pub struct InputPinUnavailable {
 pub struct InputPinAvailable {
     pub uid: String,
 }
+
+/// Why an input-route toast was emitted.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum InputRouteReason {
+    /// Resolved capture target changed.
+    Switched,
+    /// New device appeared but is not the capture target.
+    Connected,
+    /// Capture device gone (and maybe no replacement yet).
+    Lost,
+}
+
+/// Live microphone-route change for the FluidVoice-style toast.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type, Event)]
+pub struct InputRouteNotice {
+    pub reason: InputRouteReason,
+    pub from_name: Option<String>,
+    pub to_name: Option<String>,
+    pub to_uid: Option<String>,
+    pub transport: Option<crate::audio::TransportType>,
+}

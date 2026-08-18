@@ -49,6 +49,8 @@ export type {
   HealthStatus,
   InputPriority,
   KnownDevice,
+  InputRouteNotice,
+  InputRouteReason,
   PipelineError,
   TransportType,
   SystemAudioStatus,

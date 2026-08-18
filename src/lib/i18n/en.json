@@ -77,7 +77,7 @@
     "empty": "No custom dictionary entries yet.",
     "pronunciation": "Pronunciation",
     "pronunciation_placeholder": "e.g. vaysix",
-    "pronunciation_desc": "How the term sounds when spoken, spelled out. Helps match terms like V6 said \"vaysix\"."
+    "pronunciation_desc": "How the term sounds, spelled out. Exact matches and similar-sounding words are rewritten to the term. Comma-separate several heard spellings, e.g. vaysix, vee six."
   },
   "settings_calendar": {
     "title": "Calendar",
@@ -124,11 +124,12 @@
   },
   "settings_dictation_polish": {
     "title": "Dictation polish",
-    "description": "Optionally clean up dictation with the same summarization provider (Ollama or Apple Intelligence) before paste.",
-    "enabled": "Polish dictation with AI",
-    "enabled_desc": "Run an LLM pass after transcription to fix tone, formatting, or fillers.",
+    "description": "Clean up dictation with the same summarization provider (Ollama or Apple Intelligence) before paste.",
+    "enabled": "Clean dictation with AI",
+    "enabled_desc": "Run a local LLM pass after transcription to fix punctuation, technical terms, and spoken corrections — without rewriting your meaning.",
     "no_provider": "No summarization provider is available. Configure Ollama or enable Apple Intelligence in Advanced → Summarization.",
     "template": "Style template",
+    "template_clean": "Clean up",
     "template_email": "Professional email",
     "template_bullets": "Bullet points",
     "template_no_fillers": "Remove fillers",
@@ -396,6 +397,20 @@
     "meeting": "Meeting",
     "stop": "Stop recording",
     "polishing": "Reformulating…"
+  },
+  "mic_toast": {
+    "switched": "Microphone changed",
+    "connected": "Microphone connected",
+    "lost": "Microphone unavailable",
+    "switched_detail": "{from}  →  {to}",
+    "connected_detail": "{name}",
+    "lost_detail": "{name} is no longer available",
+    "lost_none": "Connect a microphone in Settings",
+    "switched_hint": "Soufflé is now listening on this microphone.",
+    "connected_hint": "Available — pin it in Settings or turn on Bluetooth mics to use it automatically.",
+    "connected_hint_bt": "Bluetooth mics stay off for automatic selection so headset audio stays stereo. Pin it in Settings to use it.",
+    "lost_hint": "Soufflé will use the next available microphone.",
+    "dismiss": "Dismiss"
   },
   "home": {
     "dictate": "Dictate",

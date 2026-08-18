@@ -77,7 +77,7 @@
     "empty": "Aucune entrée dans le dictionnaire personnalisé.",
     "pronunciation": "Prononciation",
     "pronunciation_placeholder": "ex. vésix",
-    "pronunciation_desc": "Comment le terme se prononce, écrit en toutes lettres. Aide à reconnaître des termes comme V6 dit « vésix »."
+    "pronunciation_desc": "Comment le terme s'entend, orthographié. Les correspondances exactes et les mots proches sont réécrits vers le terme. Séparez plusieurs graphies par des virgules, ex. vésix, vé six."
   },
   "settings_calendar": {
     "title": "Calendrier",
@@ -124,11 +124,12 @@
   },
   "settings_dictation_polish": {
     "title": "Polish de la dictée",
-    "description": "Nettoie optionnellement la dictée avec le même fournisseur de résumés (Ollama ou Apple Intelligence) avant le collage.",
-    "enabled": "Polir la dictée avec l'IA",
-    "enabled_desc": "Passe LLM après transcription pour corriger le ton, le format ou les fillers.",
+    "description": "Nettoie la dictée avec le même fournisseur de résumés (Ollama ou Apple Intelligence) avant le collage.",
+    "enabled": "Nettoyer la dictée avec l'IA",
+    "enabled_desc": "Passe LLM locale après transcription pour corriger ponctuation, termes techniques et autocorrections parlées — sans changer le sens.",
     "no_provider": "Aucun fournisseur de résumés disponible. Configurez Ollama ou activez Apple Intelligence dans Avancé → Résumés.",
     "template": "Modèle de style",
+    "template_clean": "Nettoyage",
     "template_email": "E-mail professionnel",
     "template_bullets": "Puces",
     "template_no_fillers": "Sans fillers",
@@ -396,6 +397,20 @@
     "meeting": "Meeting",
     "stop": "Arrêter l'enregistrement",
     "polishing": "Reformulation…"
+  },
+  "mic_toast": {
+    "switched": "Microphone changé",
+    "connected": "Microphone connecté",
+    "lost": "Microphone indisponible",
+    "switched_detail": "{from}  →  {to}",
+    "connected_detail": "{name}",
+    "lost_detail": "{name} n'est plus disponible",
+    "lost_none": "Branchez un microphone dans les réglages",
+    "switched_hint": "Soufflé écoute maintenant sur ce microphone.",
+    "connected_hint": "Disponible — épinglez-le dans les réglages ou activez les micros Bluetooth pour l'utiliser automatiquement.",
+    "connected_hint_bt": "Les micros Bluetooth restent hors sélection automatique pour garder le casque en stéréo. Épinglez-le dans les réglages pour l'utiliser.",
+    "lost_hint": "Soufflé utilisera le prochain microphone disponible.",
+    "dismiss": "Fermer"
   },
   "home": {
     "dictate": "Dicter",

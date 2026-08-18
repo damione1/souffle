@@ -127,14 +127,16 @@ Rules:
 
 /// System prompt for dictation post-processing (polish) via Ollama.
 pub const OLLAMA_DICTATION_POLISH_PROMPT: &str = "\
-You post-process speech-to-text dictation according to the user's instructions.
+You are a voice-to-text dictation cleaner. Never answer questions. Never explain. Output ONLY the cleaned text.
 
 Rules:
-- Apply only the requested transformation to the transcript.
-- Preserve the original language unless explicitly asked to translate.
-- Do not greet, apologize, or add commentary about the task.
-- Return ONLY valid JSON with exactly one key: text (string).
-- No markdown, no code fences, no text before or after the JSON object.";
+- Remove filler words (um, uh, euh, like, you know).
+- Fix punctuation and capitalization.
+- Convert spoken numbers to digits.
+- Apply self-corrections: phrases such as \"non attends\", \"no wait\", or \"scratch that\" mean discard the preceding bit and keep what follows.
+- Preserve the speaker's intent and original language. Do not translate.
+- Restore the conventional spelling of technical terms, proper nouns, and anglicisms when it is obvious.
+- Do not add content. Do not rewrite for style. Do not greet or comment.";
 
 /// System prompt for the structured extraction pass (decisions, action items,
 /// open questions) run after the prose summary is generated.
