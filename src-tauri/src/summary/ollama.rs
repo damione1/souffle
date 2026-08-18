@@ -27,6 +27,8 @@ struct GenerateRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep_alive: Option<String>,
     options: GenerateOptions,
 }
 
@@ -124,7 +126,11 @@ pub async fn check_available(base_url: Option<&str>) -> (bool, Vec<String>) {
     }
 }
 
-fn handle_ndjson_line(line: &[u8], full_text: &mut String, on_chunk: &impl Fn(super::SummarizeProgress)) {
+fn handle_ndjson_line(
+    line: &[u8],
+    full_text: &mut String,
+    on_chunk: &impl Fn(super::SummarizeProgress),
+) {
     let Ok(text) = std::str::from_utf8(line) else {
         return;
     };
@@ -165,6 +171,7 @@ pub async fn generate_stream(
         system: system.to_string(),
         stream: true,
         format: json_format.then(|| "json".to_string()),
+        keep_alive: Some("15m".into()),
         options: GenerateOptions {
             temperature,
             num_ctx,
@@ -229,7 +236,9 @@ pub const MAP_CONTEXT: u32 = MAP_NUM_CTX;
 
 #[cfg(test)]
 mod tests {
-    use super::{is_summary_capable_model, sorted_summary_capable_models};
+    use super::{
+        GenerateOptions, GenerateRequest, is_summary_capable_model, sorted_summary_capable_models,
+    };
 
     #[test]
     fn rejects_speech_and_embedding_models_for_summary() {
@@ -281,5 +290,26 @@ mod tests {
     #[test]
     fn whitespace_model_rejected() {
         assert!(!is_summary_capable_model("   "));
+    }
+
+    #[test]
+    fn generate_request_serializes_keep_alive() {
+        let body = GenerateRequest {
+            model: "qwen2.5:7b".into(),
+            prompt: "hi".into(),
+            system: "sys".into(),
+            stream: true,
+            format: None,
+            keep_alive: Some("15m".into()),
+            options: GenerateOptions {
+                temperature: 0.1,
+                num_ctx: 1024,
+            },
+        };
+        let json = serde_json::to_string(&body).expect("GenerateRequest should serialize");
+        assert!(
+            json.contains(r#""keep_alive":"15m""#),
+            "expected keep_alive in {json}"
+        );
     }
 }

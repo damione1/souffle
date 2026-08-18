@@ -1,6 +1,7 @@
 mod apple;
 mod chunking;
 mod extract;
+mod formatters;
 mod ollama;
 mod polish;
 mod prompts;
