@@ -9,6 +9,7 @@ pub mod priority;
 pub mod recorder;
 pub mod resampler;
 pub mod retention;
+pub mod route_notice;
 pub mod system_activity;
 pub mod system_tap;
 

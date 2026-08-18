@@ -823,6 +823,7 @@ dictationLiveText: DictationLiveText,
 inputDevicesChanged: InputDevicesChanged,
 inputPinAvailable: InputPinAvailable,
 inputPinUnavailable: InputPinUnavailable,
+inputRouteNotice: InputRouteNotice,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
 meetingStopRequested: MeetingStopRequested,
@@ -844,6 +845,7 @@ dictationLiveText: "dictation-live-text",
 inputDevicesChanged: "input-devices-changed",
 inputPinAvailable: "input-pin-available",
 inputPinUnavailable: "input-pin-unavailable",
+inputRouteNotice: "input-route-notice",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
 meetingStopRequested: "meeting-stop-requested",
@@ -961,7 +963,7 @@ meeting_transcription_language: MeetingTranscriptionLanguage;
  */
 dictation_polish_enabled: boolean; 
 /**
- * Active polish template id (email, bullets, no_fillers).
+ * Active polish template id (clean, email, bullets, no_fillers).
  */
 dictation_polish_template_id: string; 
 /**
@@ -1130,6 +1132,26 @@ hidden: string[];
  * Devices seen before, including ones currently disconnected.
  */
 known: KnownDevice[] }
+/**
+ * Live microphone-route change for the FluidVoice-style toast.
+ */
+export type InputRouteNotice = { reason: InputRouteReason; from_name: string | null; to_name: string | null; to_uid: string | null; transport: TransportType | null }
+/**
+ * Why an input-route toast was emitted.
+ */
+export type InputRouteReason = 
+/**
+ * Resolved capture target changed.
+ */
+"switched" | 
+/**
+ * New device appeared but is not the capture target.
+ */
+"connected" | 
+/**
+ * Capture device gone (and maybe no replacement yet).
+ */
+"lost"
 /**
  * A device remembered across disconnects for display and preference ordering.
  */

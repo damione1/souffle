@@ -170,6 +170,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::InputDevicesChanged,
             app_events::InputPinAvailable,
             app_events::InputPinUnavailable,
+            app_events::InputRouteNotice,
         ])
 }
 
@@ -359,6 +360,7 @@ pub fn run() {
                 std::thread::Builder::new()
                     .name("input-route".into())
                     .spawn(move || {
+                        commands::prime_input_route_snapshot(&route_db);
                         for kind in route_rx {
                             match kind {
                                 ChangeKind::DeviceList | ChangeKind::DefaultInput => {

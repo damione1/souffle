@@ -398,6 +398,20 @@
     "stop": "Stop recording",
     "polishing": "Reformulating…"
   },
+  "mic_toast": {
+    "switched": "Microphone changed",
+    "connected": "Microphone connected",
+    "lost": "Microphone unavailable",
+    "switched_detail": "{from}  →  {to}",
+    "connected_detail": "{name}",
+    "lost_detail": "{name} is no longer available",
+    "lost_none": "Connect a microphone in Settings",
+    "switched_hint": "Soufflé is now listening on this microphone.",
+    "connected_hint": "Available — pin it in Settings or turn on Bluetooth mics to use it automatically.",
+    "connected_hint_bt": "Bluetooth mics stay off for automatic selection so headset audio stays stereo. Pin it in Settings to use it.",
+    "lost_hint": "Soufflé will use the next available microphone.",
+    "dismiss": "Dismiss"
+  },
   "home": {
     "dictate": "Dictate",
     "dictate_hint": "Set a shortcut in Settings",

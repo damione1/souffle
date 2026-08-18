@@ -5,6 +5,7 @@
   import HomeView from "./lib/components/HomeView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
   import StatusChip from "./lib/components/ui/StatusChip.svelte";
+  import Toast from "./lib/components/ui/Toast.svelte";
   import { events } from "./lib/api/generated";
   import { saveSettings } from "./lib/api/settings";
   import { getTranscriptionCatalog, recoverState } from "./lib/api/transcription";
@@ -15,8 +16,8 @@
   import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
   import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
   import {
-  notifyMeetingAborted,
-  notifyMeetingFinalized,
+    notifyMeetingAborted,
+    notifyMeetingFinalized,
     notifyMeetingIdle,
     notifyMeetingStopRequested,
     notifySystemWokeUp,
@@ -27,6 +28,7 @@
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
   import { applyTheme, errorMessage } from "./lib/utils";
+  import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
 
   const app = getAppState();
   // Mounted app-level so the global dictation shortcut works whatever view
@@ -44,6 +46,7 @@
   let unlistenUpcomingMeeting: (() => void) | null = null;
   let unlistenMeetingIdle: (() => void) | null = null;
   let unlistenSystemWokeUp: (() => void) | null = null;
+  let unlistenInputRoute: (() => void) | null = null;
 
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
@@ -52,6 +55,8 @@
   const machineError = $derived(
     app.machineState.state === "error" ? app.machineState.data : null,
   );
+  const routeToast = $derived(micToast.current);
+  const routeToastCopy = $derived(routeToast ? micToastCopy(routeToast, $t) : null);
   let isRecovering = $state(false);
   let showPermissions = $state(false);
   let whatsNew = $state<{ version: string; releaseNotes: string } | null>(null);
@@ -204,6 +209,12 @@
       unlistenSystemWokeUp = fn;
     });
 
+    events.inputRouteNotice.listen((event) => {
+      micToast.show(event.payload);
+    }).then((fn) => {
+      unlistenInputRoute = fn;
+    });
+
     // Belt and braces: the webview itself may have been suspended when the
     // backend's wake event fired (and so missed it), but visibility always
     // flips to visible when the window comes back, so recheck here too.
@@ -226,6 +237,7 @@
       unlistenUpcomingMeeting?.();
       unlistenMeetingIdle?.();
       unlistenSystemWokeUp?.();
+      unlistenInputRoute?.();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   });
@@ -380,4 +392,17 @@
     releaseNotes={whatsNew.releaseNotes}
     onDismiss={dismissWhatsNew}
   />
+{/if}
+
+{#if !app.showOnboarding && routeToast && routeToastCopy}
+  <div class="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+    <div class="pointer-events-auto">
+      <Toast
+        title={routeToastCopy.title}
+        detail={routeToastCopy.detail}
+        hint={routeToastCopy.hint}
+        onDismiss={() => micToast.dismiss()}
+      />
+    </div>
+  </div>
 {/if}

@@ -1,7 +1,8 @@
 use tauri::State;
 
 use crate::audio::capture::list_input_devices;
-use crate::audio::AudioInputDevice;
+use crate::audio::route_notice::observe_and_notices;
+use crate::audio::{AudioInputDevice, InputPriority, ResolveInputParams, resolve_input};
 use crate::db::Database;
 use crate::settings::AppSettings;
 use crate::state::{AppState, AudioCommand};
@@ -34,6 +35,20 @@ pub fn select_audio_device(
     Ok(())
 }
 
+/// Store the current device list so the first real CoreAudio change toasts
+/// instead of being treated as boot.
+pub fn prime_input_route_snapshot(db: &Database) {
+    let Ok((priority, allow_bluetooth_mic)) = AppSettings::sync_input_priority_from_devices(db)
+    else {
+        return;
+    };
+    let devices = list_input_devices();
+    let settings = AppSettings::load(db).ok();
+    let resolved =
+        resolved_capture_uid(&devices, settings.as_ref(), &priority, allow_bluetooth_mic);
+    let _ = observe_and_notices(&devices, resolved);
+}
+
 /// React to CoreAudio device-list or default-input changes: refresh known
 /// devices, push the updated policy to capture, hot-swap when recording, and
 /// notify the frontend.
@@ -45,33 +60,67 @@ pub fn handle_input_route_change(
     let (priority, allow_bluetooth_mic) = AppSettings::sync_input_priority_from_devices(db)?;
     cmd_tx
         .send(AudioCommand::SetInputPolicy {
-            priority,
+            priority: priority.clone(),
             allow_bluetooth_mic,
         })
         .map_err(|e| format!("Failed to push input policy: {e}"))?;
 
     let devices = list_input_devices();
-    let _ = crate::app_events::InputDevicesChanged { devices }.emit(app);
+    let _ = crate::app_events::InputDevicesChanged {
+        devices: devices.clone(),
+    }
+    .emit(app);
 
-    if let Ok(settings) = AppSettings::load(db)
-        && let Some(uid) = settings.audio_device
-    {
-        emit_pin_status(app, &uid);
+    let settings = AppSettings::load(db).ok();
+    let resolved =
+        resolved_capture_uid(&devices, settings.as_ref(), &priority, allow_bluetooth_mic);
+    for notice in observe_and_notices(&devices, resolved) {
+        let _ = notice.emit(app);
+    }
+
+    if let Some(uid) = settings.as_ref().and_then(|s| s.audio_device.as_deref()) {
+        emit_pin_status(app, uid);
     }
     Ok(())
+}
+
+fn resolved_capture_uid(
+    devices: &[AudioInputDevice],
+    settings: Option<&AppSettings>,
+    priority: &InputPriority,
+    allow_bluetooth_mic: bool,
+) -> Option<String> {
+    let pin = settings.and_then(|s| s.audio_device.as_deref());
+    let clamshell_pref = settings.and_then(|s| s.clamshell_audio_device.as_deref());
+    let clamshell_active =
+        pin.is_none() && clamshell_pref.is_some() && crate::power::is_clamshell();
+    resolve_input(
+        devices,
+        ResolveInputParams {
+            pin,
+            clamshell_pref,
+            clamshell_active,
+            priority,
+            allow_bluetooth_mic,
+        },
+    )
 }
 
 fn emit_pin_status(app: &AppHandle, uid: &str) {
     if uid.is_empty() {
         return;
     }
-    let connected = list_input_devices()
-        .iter()
-        .any(|device| device.uid == uid);
+    let connected = list_input_devices().iter().any(|device| device.uid == uid);
     if connected {
-        let _ = crate::app_events::InputPinAvailable { uid: uid.to_string() }.emit(app);
+        let _ = crate::app_events::InputPinAvailable {
+            uid: uid.to_string(),
+        }
+        .emit(app);
     } else {
-        let _ = crate::app_events::InputPinUnavailable { uid: uid.to_string() }.emit(app);
+        let _ = crate::app_events::InputPinUnavailable {
+            uid: uid.to_string(),
+        }
+        .emit(app);
     }
 }
 

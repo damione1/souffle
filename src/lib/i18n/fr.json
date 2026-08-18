@@ -398,6 +398,20 @@
     "stop": "Arrêter l'enregistrement",
     "polishing": "Reformulation…"
   },
+  "mic_toast": {
+    "switched": "Microphone changé",
+    "connected": "Microphone connecté",
+    "lost": "Microphone indisponible",
+    "switched_detail": "{from}  →  {to}",
+    "connected_detail": "{name}",
+    "lost_detail": "{name} n'est plus disponible",
+    "lost_none": "Branchez un microphone dans les réglages",
+    "switched_hint": "Soufflé écoute maintenant sur ce microphone.",
+    "connected_hint": "Disponible — épinglez-le dans les réglages ou activez les micros Bluetooth pour l'utiliser automatiquement.",
+    "connected_hint_bt": "Les micros Bluetooth restent hors sélection automatique pour garder le casque en stéréo. Épinglez-le dans les réglages pour l'utiliser.",
+    "lost_hint": "Soufflé utilisera le prochain microphone disponible.",
+    "dismiss": "Fermer"
+  },
   "home": {
     "dictate": "Dicter",
     "dictate_hint": "Définissez un raccourci dans les réglages",

@@ -6,6 +6,7 @@
   import { getMachineState, pillResize } from "../api/transcription";
   import Spinner from "../components/ui/Spinner.svelte";
   import Waveform from "../components/Waveform.svelte";
+  import { micToast, micToastCopy } from "../features/audio/mic-toast.svelte";
   import type { AppStateMachine, PillHoldKind } from "../types";
 
   // Compact state (idle row only): must match the "pill" window's initial
@@ -29,6 +30,7 @@
   let unlistenState: (() => void) | null = null;
   let unlistenLiveText: (() => void) | null = null;
   let unlistenHold: (() => void) | null = null;
+  let unlistenInputRoute: (() => void) | null = null;
 
   const recordingMode = $derived.by((): "dictation" | "meeting" | null => {
     switch (machineState.state) {
@@ -52,6 +54,8 @@
   });
 
   const showLiveText = $derived(displayMode === "dictation" && liveText.trim().length > 0);
+  const routeToast = $derived(micToast.current);
+  const routeToastCopy = $derived(routeToast ? micToastCopy(routeToast, $t) : null);
 
   function stop() {
     if (recordingMode === "meeting") {
@@ -76,6 +80,9 @@
       const clamped = Math.min(Math.max(measuredHeight, BASE_HEIGHT), MAX_HEIGHT);
       sessionMaxHeight = Math.max(sessionMaxHeight, clamped);
       targetHeight = sessionMaxHeight;
+    } else if (routeToast) {
+      sessionMaxHeight = BASE_HEIGHT;
+      targetHeight = Math.min(Math.max(measuredHeight, BASE_HEIGHT), BASE_HEIGHT + 36);
     } else {
       sessionMaxHeight = BASE_HEIGHT;
     }
@@ -126,10 +133,17 @@
       unlistenHold = fn;
     });
 
+    void events.inputRouteNotice.listen((event) => {
+      micToast.show(event.payload);
+    }).then((fn) => {
+      unlistenInputRoute = fn;
+    });
+
     return () => {
       unlistenState?.();
       unlistenLiveText?.();
       unlistenHold?.();
+      unlistenInputRoute?.();
     };
   });
 </script>
@@ -178,6 +192,14 @@
       data-tauri-drag-region
     >
       {liveText}
+    </p>
+  {/if}
+  {#if routeToast && routeToastCopy}
+    <p class="truncate border-t border-white/10 pt-1 text-[11px] leading-snug text-white/70">
+      {routeToastCopy.title}
+      {#if routeToast.to_name ?? routeToast.from_name}
+        · {routeToast.to_name ?? routeToast.from_name}
+      {/if}
     </p>
   {/if}
 </div>
