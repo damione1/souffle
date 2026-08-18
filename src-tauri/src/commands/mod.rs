@@ -10,7 +10,6 @@ mod model;
 mod permissions;
 mod pill;
 mod settings;
-mod speakers;
 pub(crate) mod transcription;
 
 pub use audio::*;
@@ -25,5 +24,4 @@ pub use model::*;
 pub use permissions::*;
 pub use pill::*;
 pub use settings::*;
-pub use speakers::*;
 pub use transcription::*;

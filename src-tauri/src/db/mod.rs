@@ -5,7 +5,6 @@ pub mod migrate;
 pub mod schema;
 pub mod search;
 pub mod settings;
-pub mod speakers;
 
 use std::path::Path;
 use std::sync::Mutex;

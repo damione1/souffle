@@ -13,8 +13,6 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
-use rusqlite::{Connection, OpenFlags};
-
 use crate::constants::{SAMPLE_RATE_F64, SILENCE_SUFFIX_SAMPLES};
 use crate::engine::{
     TranscriptionEngine, TranscriptionProfile, TranscriptionSegment, collapse_whitespace,
@@ -31,11 +29,6 @@ struct CliArgs {
     /// Transcribe a WAV file through the configured engine and exit.
     #[arg(long, value_name = "WAV")]
     transcribe_file: Option<PathBuf>,
-
-    /// Run offline speaker diarization on a WAV file and exit. Downloads the
-    /// segmentation/embedding models on first use.
-    #[arg(long, value_name = "WAV")]
-    diarize_file: Option<PathBuf>,
 
     /// Override the selected transcription engine id.
     #[arg(long)]
@@ -69,7 +62,7 @@ struct CliArgs {
 
 impl CliArgs {
     fn is_headless(&self) -> bool {
-        self.transcribe_file.is_some() || self.diarize_file.is_some() || self.list_models || self.list_engines
+        self.transcribe_file.is_some() || self.list_models || self.list_engines
     }
 }
 
@@ -108,8 +101,6 @@ fn has_headless_flag(args: &[String]) -> bool {
     args.iter().any(|a| {
         a == "--transcribe-file"
             || a.starts_with("--transcribe-file=")
-            || a == "--diarize-file"
-            || a.starts_with("--diarize-file=")
             || a == "--list-models"
             || a == "--list-engines"
     })
@@ -144,12 +135,8 @@ fn run(cli: CliArgs) -> i32 {
         return list_models(cli.json);
     }
 
-    if let Some(wav_path) = cli.diarize_file.clone() {
-        return run_diarize(&wav_path, cli.json);
-    }
-
     let Some(wav_path) = cli.transcribe_file.clone() else {
-        eprintln!("No action requested. Use --transcribe-file, --diarize-file, --list-models, or --list-engines.");
+        eprintln!("No action requested. Use --transcribe-file, --list-models, or --list-engines.");
         return 1;
     };
 
@@ -204,216 +191,6 @@ fn run(cli: CliArgs) -> i32 {
 
     print_outcome(&cli, &profile, source, &outcome);
     0
-}
-
-/// `--diarize-file`: load/download the two diarization models, resample the
-/// WAV to 16kHz mono, run offline speaker diarization, and print the result.
-fn run_diarize(wav_path: &Path, json: bool) -> i32 {
-    if !crate::diarize::models::models_downloaded()
-        && let Err(e) = crate::diarize::models::download_models(&|progress| {
-            eprintln!(
-                "Downloading {} ({}/{})...",
-                progress.file, progress.completed_files, progress.total_files
-            );
-        })
-    {
-        eprintln!("Error: failed to download diarization models: {e}");
-        return 1;
-    }
-
-    let wav = match load_wav(wav_path) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("Error: {e}");
-            return 1;
-        }
-    };
-
-    let samples = resample_to_engine_rate(wav.samples, wav.sample_rate, crate::diarize::segmentation::SAMPLE_RATE);
-
-    let cfg = crate::diarize::DiarizeConfig::new(
-        crate::diarize::models::segmentation_model_path(),
-        crate::diarize::models::embedding_model_path(),
-    );
-
-    let result = match crate::diarize::diarize(&samples, crate::diarize::segmentation::SAMPLE_RATE, &cfg) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error: diarization failed: {e}");
-            return 2;
-        }
-    };
-
-    let stored = load_stored_speakers_for_calibration();
-    print_diarization_result(&result, &stored, json);
-    0
-}
-
-/// One stored speaker's id, name, and decoded embeddings, loaded for the
-/// `--diarize-file` calibration report.
-struct CalibrationSpeaker {
-    id: i64,
-    name: String,
-    embeddings: Vec<Vec<f32>>,
-}
-
-/// A `load_calibration_speakers` failure, distinguishing "this database
-/// predates the feature" (silent) from every other failure (reported).
-enum CalibrationLoadError {
-    /// `speakers` or `speaker_embeddings` doesn't exist: a pre-v13 (or
-    /// pre-v12) database that has simply never had persistent speakers.
-    MissingTable,
-    Other(rusqlite::Error),
-}
-
-impl From<rusqlite::Error> for CalibrationLoadError {
-    fn from(e: rusqlite::Error) -> Self {
-        let missing_table = matches!(
-            &e,
-            rusqlite::Error::SqliteFailure(_, Some(msg)) if msg.contains("no such table")
-        );
-        if missing_table {
-            CalibrationLoadError::MissingTable
-        } else {
-            CalibrationLoadError::Other(e)
-        }
-    }
-}
-
-/// Stored speakers for the `--diarize-file` calibration report, read
-/// straight from `souffle.db` in read-only mode: this is a diagnostic tool
-/// run against whatever database the app happens to have, not a codepath
-/// that should ever create, migrate, or lock one for writing. Three
-/// outcomes: no database file yet is a silent empty list (the app has never
-/// been launched); a database that predates the `speaker_embeddings` table
-/// (schema v13) is also a silent empty list (there's nothing to have
-/// migrated); any other failure (permissions, corruption, a locked file) is
-/// reported on stderr before falling back to an empty list, since silently
-/// swallowing those would make "No stored speakers" a misleading message.
-fn load_stored_speakers_for_calibration() -> Vec<CalibrationSpeaker> {
-    let db_path = crate::constants::app_data_dir().join("souffle.db");
-    if !db_path.exists() {
-        return Vec::new();
-    }
-    match load_calibration_speakers(&db_path) {
-        Ok(speakers) => speakers,
-        Err(CalibrationLoadError::MissingTable) => Vec::new(),
-        Err(CalibrationLoadError::Other(e)) => {
-            eprintln!(
-                "Warning: could not read stored speakers from '{}': {e}",
-                db_path.display()
-            );
-            Vec::new()
-        }
-    }
-}
-
-fn load_calibration_speakers(db_path: &Path) -> Result<Vec<CalibrationSpeaker>, CalibrationLoadError> {
-    let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-
-    let mut speakers_stmt = conn.prepare("SELECT id, name FROM speakers ORDER BY id")?;
-    let speakers: Vec<(i64, String)> = speakers_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut embeddings_stmt =
-        conn.prepare("SELECT speaker_id, embedding FROM speaker_embeddings ORDER BY speaker_id, id")?;
-    let embedding_rows: Vec<(i64, Vec<u8>)> = embeddings_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(embeddings_stmt);
-
-    let mut by_speaker: std::collections::HashMap<i64, Vec<Vec<f32>>> = std::collections::HashMap::new();
-    for (speaker_id, blob) in embedding_rows {
-        if let Some(decoded) = crate::diarize::persist::decode_embedding(&blob) {
-            by_speaker.entry(speaker_id).or_default().push(decoded);
-        }
-    }
-
-    Ok(speakers
-        .into_iter()
-        .map(|(id, name)| CalibrationSpeaker {
-            id,
-            name,
-            embeddings: by_speaker.remove(&id).unwrap_or_default(),
-        })
-        .collect())
-}
-
-/// Cosine similarity of `embedding` against the MAX-similarity embedding of
-/// each stored speaker, for calibrating `persist::MATCH_THRESHOLD`/
-/// `MATCH_MARGIN` against real recordings. `None` for a stored speaker with
-/// no embeddings recorded yet.
-fn max_similarity_per_speaker<'a>(
-    embedding: &[f32],
-    stored: &'a [CalibrationSpeaker],
-) -> Vec<(i64, &'a str, Option<f32>)> {
-    stored
-        .iter()
-        .map(|s| {
-            (
-                s.id,
-                s.name.as_str(),
-                crate::diarize::persist::max_similarity(embedding, &s.embeddings),
-            )
-        })
-        .collect()
-}
-
-fn print_diarization_result(
-    result: &crate::diarize::DiarizationResult,
-    stored: &[CalibrationSpeaker],
-    json: bool,
-) {
-    if json {
-        let json_value = serde_json::json!({
-            "speaker_count": result.speakers.len(),
-            "segments": result.segments.iter().map(|s| serde_json::json!({
-                "start_ms": s.start_ms,
-                "end_ms": s.end_ms,
-                "speaker": s.speaker,
-            })).collect::<Vec<_>>(),
-            "clusters": result.speakers.iter().map(|c| serde_json::json!({
-                "speaker": c.speaker,
-                "speech_seconds": c.speech_seconds,
-                "similarities": max_similarity_per_speaker(&c.embedding, stored).into_iter()
-                    .map(|(id, name, sim)| serde_json::json!({
-                        "speaker_id": id,
-                        "name": name,
-                        "max_similarity": sim,
-                    }))
-                    .collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-        });
-        println!("{}", serde_json::to_string(&json_value).unwrap_or_default());
-        return;
-    }
-
-    println!("Detected {} speaker(s), {} segment(s)", result.speakers.len(), result.segments.len());
-    for seg in &result.segments {
-        println!(
-            "[{:>8.2}s .. {:>8.2}s] speaker {}",
-            seg.start_ms as f64 / 1000.0,
-            seg.end_ms as f64 / 1000.0,
-            seg.speaker
-        );
-    }
-
-    println!();
-    if stored.is_empty() {
-        println!("No stored speakers in the database; nothing to calibrate against.");
-        return;
-    }
-    println!("Calibration: cluster similarity against stored speakers");
-    for cluster in &result.speakers {
-        println!("  Cluster {} ({:.1}s of speech):", cluster.speaker, cluster.speech_seconds);
-        for (id, name, sim) in max_similarity_per_speaker(&cluster.embedding, stored) {
-            match sim {
-                Some(sim) => println!("    vs speaker {id} '{name}': {sim:.3}"),
-                None => println!("    vs speaker {id} '{name}': no embeddings recorded"),
-            }
-        }
-    }
 }
 
 fn init_cli_logging(quiet: bool) {
@@ -834,18 +611,6 @@ mod tests {
     }
 
     #[test]
-    fn has_headless_flag_detects_diarize_file() {
-        let args = vec!["souffle".to_string(), "--diarize-file".to_string(), "x.wav".to_string()];
-        assert!(has_headless_flag(&args));
-    }
-
-    #[test]
-    fn has_headless_flag_detects_diarize_file_equals_form() {
-        let args = vec!["souffle".to_string(), "--diarize-file=x.wav".to_string()];
-        assert!(has_headless_flag(&args));
-    }
-
-    #[test]
     fn has_headless_flag_detects_list_models() {
         let args = vec!["souffle".to_string(), "--list-models".to_string()];
         assert!(has_headless_flag(&args));
@@ -908,15 +673,6 @@ mod tests {
         assert_eq!(cli.backend.as_deref(), Some("whisper-rs"));
         assert!(cli.json);
         assert_eq!(cli.repeat, 3);
-        assert!(cli.is_headless());
-    }
-
-    #[test]
-    fn parses_diarize_file_with_json() {
-        let args = ["souffle", "--diarize-file", "in.wav", "--json"];
-        let cli = CliArgs::try_parse_from(args).unwrap();
-        assert_eq!(cli.diarize_file, Some(PathBuf::from("in.wav")));
-        assert!(cli.json);
         assert!(cli.is_headless());
     }
 

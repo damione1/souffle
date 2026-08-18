@@ -64,29 +64,6 @@ async loadModel(selection: TranscriptionProfileSelection) : Promise<Result<null,
 }
 },
 /**
- * Whether both offline speaker-diarization models are already on disk.
- * Separate from the transcription-model status: diarization models are not
- * a `TranscriptionProfile` and never touch the state machine.
- */
-async getDiarizeModelsStatus() : Promise<boolean> {
-    return await TAURI_INVOKE("get_diarize_models_status");
-},
-/**
- * Download the two offline speaker-diarization models (~32MB total),
- * streaming progress back via the same Channel API as `download_model`.
- * No state-machine transitions: these models are independent of the
- * transcription engine lifecycle, so a failure only surfaces through the
- * channel's error status.
- */
-async downloadDiarizeModels(channel: TAURI_CHANNEL<DownloadProgress>) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("download_diarize_models", { channel }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Start streaming transcription.
  * 
  * `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
@@ -354,87 +331,6 @@ async exportMeetingFilename(id: string, format: ExportFormat) : Promise<Result<s
 async exportMeetingToFile(id: string, format: ExportFormat, path: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("export_meeting_to_file", { id, format, path }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Rename a persistent speaker. The new name appears everywhere that speaker
- * id is referenced because segment labels stay `spk:<id>`.
- */
-async renameSpeaker(id: number, name: string) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("rename_speaker", { id, name }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * All persistent speakers in the database, for pickers when retagging.
- */
-async listSpeakers() : Promise<Result<MeetingSpeaker[], string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("list_speakers") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * All persistent speakers with usage counts, most recently seen first.
- */
-async listSpeakerProfiles() : Promise<Result<SpeakerProfile[], string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("list_speaker_profiles") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Delete a persistent speaker; every segment that referenced it goes back
- * to unlabeled, and future meetings can no longer match this voice.
- */
-async deleteSpeaker(id: number) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("delete_speaker", { id }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Merge one persistent speaker into another: segments and voice embeddings
- * move to the target, and the source is deleted.
- */
-async mergeSpeakers(sourceId: number, targetId: number) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("merge_speakers", { sourceId, targetId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Flag (or unflag) a persistent speaker as the app's user.
- */
-async setSpeakerIsMe(id: number, isMe: boolean) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("set_speaker_is_me", { id, isMe }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Reassign persistent-speaker labels within one meeting. Me/Them segments
- * are never touched. Returns the reloaded meeting so the UI can refresh.
- */
-async retagMeetingSpeaker(request: RetagMeetingSpeakerRequest) : Promise<Result<MeetingTranscript, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("retag_meeting_speaker", { request }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -923,12 +819,10 @@ async openReleasePage(url: string) : Promise<Result<null, string>> {
 export const events = __makeEvents__<{
 archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
-diarizationProgress: DiarizationProgress,
 dictationLiveText: DictationLiveText,
 inputDevicesChanged: InputDevicesChanged,
 inputPinAvailable: InputPinAvailable,
 inputPinUnavailable: InputPinUnavailable,
-meetingDiarized: MeetingDiarized,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
 meetingStopRequested: MeetingStopRequested,
@@ -946,12 +840,10 @@ upcomingMeeting: UpcomingMeeting
 }>({
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
-diarizationProgress: "diarization-progress",
 dictationLiveText: "dictation-live-text",
 inputDevicesChanged: "input-devices-changed",
 inputPinAvailable: "input-pin-available",
 inputPinUnavailable: "input-pin-unavailable",
-meetingDiarized: "meeting-diarized",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
 meetingStopRequested: "meeting-stop-requested",
@@ -1089,30 +981,7 @@ summary_templates: SummaryTemplate[];
 /**
  * App version the user has acknowledged (What's New / post-update dialog).
  */
-last_seen_version: string; 
-/**
- * Offline speaker recognition after a meeting stops. Off by default
- * (extra local inference + on-disk model download). When on, at least
- * one of `diarize_mic` / `diarize_system_audio` must be enabled.
- */
-diarize_enabled: boolean; 
-/**
- * Run speaker recognition on microphone (Me-lane) audio after a meeting
- * stops. On by default when speaker recognition is enabled.
- */
-diarize_mic: boolean; 
-/**
- * Run speaker recognition on system-audio (Them-lane) capture after a
- * meeting stops. Only meaningful when `capture_system_audio` is on.
- * Off by default.
- */
-diarize_system_audio: boolean; 
-/**
- * Optional upper bound on how many distinct speakers a single meeting
- * can be split into. `None` means unbounded (the clustering stage
- * decides on its own).
- */
-diarize_max_speakers: number | null }
+last_seen_version: string }
 /**
  * Unified application state machine.
  * Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
@@ -1185,14 +1054,6 @@ export type CalendarMeetingNudgeKind =
  */
 export type DataStats = { db_size_bytes: number; meeting_count: number; dictation_count: number; recordings_size_bytes: number }
 export type DiagnosticsBundle = { app_version: string; data_dir: string; log_dir: string; log_file: string | null; db_path: string; models_dir: string; machine_state: string; log_level: string; debug_transcription: boolean }
-/**
- * Coarse progress for the background diarization pass over one meeting's
- * recorded sessions (same shape as `ArchiveExportProgress`): one event when
- * the pass starts, one per session completed, and a final event with
- * `finished: true`. `error` carries a whole-pass failure; a single bad
- * session is non-fatal and only logged.
- */
-export type DiarizationProgress = { meeting_id: string; done_sessions: number; total_sessions: number; finished: boolean; error: string | null }
 /**
  * A dictation history entry
  */
@@ -1313,15 +1174,6 @@ export type MeetingCalendarContext = { event_id: string; participants: MeetingPa
  */
 description?: string | null }
 /**
- * A background diarization pass finished labeling a mic-only meeting's
- * segments with persistent speaker identities. The frontend reloads the
- * meeting if it's currently open, so the labels appear without a manual
- * refresh. Only ever emitted after `MeetingFinalized` for the same meeting
- * (diarization runs strictly after the transcript is saved), and only when
- * at least one segment was actually relabeled.
- */
-export type MeetingDiarized = { meeting_id: string }
-/**
  * Emitted once a stopped meeting has been fully drained and saved in the
  * background, so the detail view can refresh from the now-complete record.
  * `stop_meeting_recording` returns before this work finishes (decoupled stop),
@@ -1357,14 +1209,6 @@ export type MeetingListItem = { id: string; title: string; started_at: string; d
 export type MeetingParticipant = { name: string; email: string | null; is_organizer: boolean; is_current_user: boolean }
 export type MeetingRecordingSession = { id: string; started_at: string; ended_at: string; duration_seconds: number; start_segment_index: number; end_segment_index: number }
 /**
- * A persistent speaker referenced by a meeting's segments, resolved for
- * display. Computed at read time from the `speakers` table joined against
- * the distinct `spk:<id>` labels in the meeting's segments, not itself
- * persisted on the meeting row. Empty for meetings with only Me/Them
- * segments (or no diarization at all).
- */
-export type MeetingSpeaker = { id: number; name: string }
-/**
  * Emitted by the floating recording pill (or the tray) to ask the meeting
  * controller in the main window to stop the active meeting through its
  * normal stop pipeline.
@@ -1387,13 +1231,7 @@ calendar_event_id: string | null;
  * Attendees captured from the calendar event; shown in the UI and fed
  * into the summary prompt.
  */
-participants: MeetingParticipant[]; 
-/**
- * Persistent speakers referenced by this meeting's segments, for
- * resolving `Speaker::Persistent(id)` labels to a display name. Computed
- * at read time (see `MeetingSpeaker`); empty for Me/Them-only meetings.
- */
-speakers: MeetingSpeaker[] }
+participants: MeetingParticipant[] }
 /**
  * How long recorded meeting audio is kept on disk before the startup sweep
  * deletes it. Opt-in: recording itself only happens when this is not `Off`.
@@ -1448,30 +1286,6 @@ export type PipelineErrorScope =
  */
 "session"
 export type RecordingKind = "dictation" | { meeting: { meeting_id: string } }
-export type RetagMeetingSpeakerRequest = { meeting_id: string; 
-/**
- * Persistent speaker id currently on the segments being retagged.
- */
-from_speaker_id: number; 
-/**
- * Retag only these segment indices (`sort_order`). Omit or pass an empty
- * vec to retag every `spk:from_speaker_id` segment in this meeting.
- */
-sort_orders?: number[]; 
-/**
- * Assign to an existing persistent speaker.
- */
-to_speaker_id: number | null; 
-/**
- * Create a new persistent speaker with this name and assign to it.
- */
-new_speaker_name: string | null; 
-/**
- * When true, also move this meeting's voice embeddings for the source
- * speaker to the target, so future matching benefits from the
- * correction. When false, the retag only relabels this meeting.
- */
-remember?: boolean }
 /**
  * Search result from FTS5 full-text search
  */
@@ -1480,14 +1294,6 @@ export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
-/**
- * One remembered voice with usage counts, for the Settings management list.
- */
-export type SpeakerProfile = { id: number; name: string; 
-/**
- * RFC3339 timestamp of the last meeting this voice was recognized in.
- */
-last_seen_at: string; meeting_count: number; segment_count: number; is_me: boolean }
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.
@@ -1598,7 +1404,7 @@ export type TranscriptionRuntimeStatus = { profile: TranscriptionProfile; phase:
  */
 export type TranscriptionSegment = { text: string; start_time: number; end_time: number; is_final: boolean; language: string | null; confidence: number | null; 
 /**
- * Set by the pipeline for diarized meetings; `None` otherwise.
+ * Set by the pipeline for meetings with Me/Them lanes; `None` otherwise.
  */
 speaker?: string | null }
 /**

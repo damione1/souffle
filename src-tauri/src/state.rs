@@ -32,15 +32,6 @@ pub enum AudioCommand {
         /// setting is not off. `None` for dictation and for meetings
         /// recorded with retention off.
         record_path: Option<std::path::PathBuf>,
-        /// Where to tee this session's mic (Me-lane) audio for offline speaker
-        /// diarization. `None` unless speaker recognition on the microphone
-        /// is enabled and its models are downloaded.
-        diarize_mic_capture_path: Option<std::path::PathBuf>,
-        /// Where to tee this session's system-audio (Them-lane) capture for
-        /// offline speaker diarization. `None` unless speaker recognition on
-        /// system audio is enabled, system capture is on, and models are
-        /// downloaded.
-        diarize_system_capture_path: Option<std::path::PathBuf>,
     },
     Stop,
     SelectDevice(String),
@@ -143,10 +134,6 @@ impl MeetingAccumulator {
             notes: self.notes,
             calendar_event_id: self.calendar_event_id,
             participants: self.participants,
-            // Recomputed from segments by `Database::load_meeting`; this
-            // transcript goes through `save_meeting`/`upsert_meeting_header`,
-            // neither of which reads this field.
-            speakers: Vec::new(),
         }
     }
 }

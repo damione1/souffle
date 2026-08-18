@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use crate::engine::{Speaker, TranscriptionSegment};
-use crate::transcript::{MeetingSpeaker, MeetingTranscript, StructuredSummary};
+use crate::transcript::{MeetingTranscript, StructuredSummary};
 
 /// Minimum on-screen duration given to a subtitle cue whose segment has a
 /// zero or inverted end time, so SRT/VTT players never render a cue with
@@ -180,7 +180,7 @@ fn render_markdown(meeting: &MeetingTranscript) -> String {
             );
             let rendered = grouped
                 .iter()
-                .map(|p| render_paragraph_markdown(p, &meeting.speakers))
+                .map(render_paragraph_markdown)
                 .collect::<Vec<_>>()
                 .join("\n\n");
             out.push_str(&rendered);
@@ -241,26 +241,19 @@ fn render_structured_markdown(out: &mut String, structured: &StructuredSummary) 
     }
 }
 
-/// Display name for a speaker label: Me -> "Me", Them -> "Them", a
-/// persistent speaker -> its `MeetingSpeaker.name` if it's in the list
-/// (i.e. still referenced and resolvable), else a "Speaker <id>" fallback.
-fn speaker_display_name(speaker: Speaker, speakers: &[MeetingSpeaker]) -> String {
+/// Display name for a speaker label: Me -> "Me", Them -> "Them".
+fn speaker_display_name(speaker: Speaker) -> &'static str {
     match speaker {
-        Speaker::Me => "Me".to_string(),
-        Speaker::Them => "Them".to_string(),
-        Speaker::Persistent(id) => speakers
-            .iter()
-            .find(|s| s.id == id)
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| format!("Speaker {id}")),
+        Speaker::Me => "Me",
+        Speaker::Them => "Them",
     }
 }
 
-fn render_paragraph_markdown(p: &paragraphs::Paragraph, speakers: &[MeetingSpeaker]) -> String {
+fn render_paragraph_markdown(p: &paragraphs::Paragraph) -> String {
     match p.speaker {
         Some(speaker) => format!(
             "**{}** [{}] {}",
-            speaker_display_name(speaker, speakers),
+            speaker_display_name(speaker),
             p.timestamp,
             p.text
         ),
@@ -292,9 +285,9 @@ fn time_ordered_segments(segments: &[TranscriptionSegment]) -> Vec<&Transcriptio
     ordered
 }
 
-fn speaker_prefix(speaker: Option<Speaker>, text: &str, speakers: &[MeetingSpeaker]) -> String {
+fn speaker_prefix(speaker: Option<Speaker>, text: &str) -> String {
     match speaker {
-        Some(speaker) => format!("{}: {text}", speaker_display_name(speaker, speakers)),
+        Some(speaker) => format!("{}: {text}", speaker_display_name(speaker)),
         None => text.to_string(),
     }
 }
@@ -336,7 +329,7 @@ fn render_srt(meeting: &MeetingTranscript) -> String {
             "{index}\n{} --> {}\n{}\n\n",
             srt_timestamp(start),
             srt_timestamp(end),
-            speaker_prefix(seg.speaker, text, &meeting.speakers),
+            speaker_prefix(seg.speaker, text),
         ));
         index += 1;
     }
@@ -355,7 +348,7 @@ fn render_vtt(meeting: &MeetingTranscript) -> String {
             "{} --> {}\n{}\n\n",
             vtt_timestamp(start),
             vtt_timestamp(end),
-            speaker_prefix(seg.speaker, text, &meeting.speakers),
+            speaker_prefix(seg.speaker, text),
         ));
     }
     finish_cue_block(out)
@@ -867,39 +860,6 @@ mod tests {
         let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
         assert!(rendered.contains("**Me** [0:00] Hi there"));
         assert!(rendered.contains("**Them** [0:02] Hello back"));
-    }
-
-    #[test]
-    fn markdown_paragraphs_resolve_persistent_speaker_name() {
-        let mut meeting = sample_meeting("m1");
-        meeting.segments = vec![diarized_segment("Hi there", 0.0, 1.0, Speaker::Persistent(1))];
-        meeting.speakers = vec![crate::transcript::MeetingSpeaker {
-            id: 1,
-            name: "Alice".to_string(),
-        }];
-        let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
-        assert!(rendered.contains("**Alice** [0:00] Hi there"));
-    }
-
-    #[test]
-    fn markdown_paragraphs_fall_back_to_speaker_id_when_unresolved() {
-        let mut meeting = sample_meeting("m1");
-        meeting.segments = vec![diarized_segment("Hi there", 0.0, 1.0, Speaker::Persistent(99))];
-        // No matching entry in meeting.speakers (deleted, or never resolved).
-        let rendered = render_meeting(&meeting, ExportFormat::Markdown).unwrap();
-        assert!(rendered.contains("**Speaker 99** [0:00] Hi there"));
-    }
-
-    #[test]
-    fn srt_resolves_persistent_speaker_name() {
-        let mut meeting = sample_meeting("m1");
-        meeting.segments = vec![diarized_segment("Hi there", 0.0, 1.0, Speaker::Persistent(7))];
-        meeting.speakers = vec![crate::transcript::MeetingSpeaker {
-            id: 7,
-            name: "Bob".to_string(),
-        }];
-        let rendered = render_meeting(&meeting, ExportFormat::Srt).unwrap();
-        assert!(rendered.contains("Bob: Hi there"));
     }
 
     #[test]

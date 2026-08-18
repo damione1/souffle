@@ -93,10 +93,6 @@ const defaultSettings: AppSettings = {
     { id: "brief_overview", name: "Brief overview", prompt: "Brief prompt." },
   ],
   last_seen_version: "",
-  diarize_enabled: false,
-  diarize_mic: true,
-  diarize_system_audio: false,
-  diarize_max_speakers: null,
 }
 
 const fakeDevices: AudioInputDevice[] = [
