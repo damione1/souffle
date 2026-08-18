@@ -8,12 +8,19 @@ import {
   startStreamingTranscription,
   stopStreamingTranscription,
 } from "../../api/transcription";
+import { learnFromEdit } from "../../api/dictionary";
+import { frontmostAppName, readFocusedText, readSelectedText } from "../../api/focus";
 import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
+
+const LEARN_FROM_EDIT_DELAY_MS = 4000;
+const MAX_LEARN_FROM_EDIT_PAIRS = 8;
+
+type SessionMode = "insert" | "rewrite";
 
 /**
  * Matches the accessibility error clipboard.rs returns when
@@ -29,8 +36,64 @@ function accessibilityPasteFailureMessage(rawMessage: string): string {
   return `Paste failed: ${rawMessage}`;
 }
 
+function tokenizeWords(text: string): string[] {
+  return text
+    .split(/\s+/)
+    .map((token) => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+    .filter((token) => token.length > 0);
+}
+
+/** Word-level pair count aligned with `derive_corrections_from_edit`. */
+function countCorrectionPairs(original: string, corrected: string): number {
+  const origWords = tokenizeWords(original);
+  const corrWords = tokenizeWords(corrected);
+  if (origWords.length === 0 || corrWords.length === 0) return 0;
+
+  let count = 0;
+  let i = 0;
+  let j = 0;
+  const seen = new Set<string>();
+
+  while (i < origWords.length && j < corrWords.length) {
+    if (origWords[i].toLowerCase() === corrWords[j].toLowerCase()) {
+      i += 1;
+      j += 1;
+      continue;
+    }
+    if (j + 1 < corrWords.length && origWords[i].toLowerCase() === corrWords[j + 1].toLowerCase()) {
+      j += 1;
+      continue;
+    }
+    if (i + 1 < origWords.length && origWords[i + 1].toLowerCase() === corrWords[j].toLowerCase()) {
+      i += 1;
+      continue;
+    }
+    const from = origWords[i];
+    const to = corrWords[j];
+    if (
+      from.length >= 3
+      && to.length >= 3
+      && from.toLowerCase() !== to.toLowerCase()
+    ) {
+      const key = `${from.toLowerCase()}\0${to.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        count += 1;
+      }
+    }
+    i += 1;
+    j += 1;
+  }
+
+  return count;
+}
+
 /** Finalize dictation text: invisible-char strip, optional LLM polish, skip-if-blank. */
-async function finalizeDictationText(rawText: string): Promise<{ text: string; warning?: string }> {
+async function finalizeDictationText(
+  rawText: string,
+  focusedApp: string | null,
+  rewriteOf: string | null,
+): Promise<{ text: string; warning?: string }> {
   const trimmed = rawText.trim();
   if (!trimmed) {
     return { text: "" };
@@ -43,7 +106,7 @@ async function finalizeDictationText(rawText: string): Promise<{ text: string; w
 
   try {
     const { polishDictation } = await import("../../api/dictation");
-    const result = await polishDictation(trimmed);
+    const result = await polishDictation(trimmed, focusedApp, rewriteOf);
     return {
       text: result.text.trim(),
       warning: result.warning ?? undefined,
@@ -77,6 +140,10 @@ function createTranscriptionControllerInstance() {
   // Incremented for every session start (and on abort) so segment-channel
   // callbacks from a previous session can never write into a new one.
   let sessionGeneration = 0;
+  let sessionMode: SessionMode = "insert";
+  let focusedApp: string | null = null;
+  let rewriteOf: string | null = null;
+  let learnFromEditTimer: ReturnType<typeof setTimeout> | null = null;
 
   let activeProfileLabel = $derived.by(() => {
     if (!catalog) return "Transcription model";
@@ -88,16 +155,82 @@ function createTranscriptionControllerInstance() {
     ) || "Transcription model";
   });
 
+  function cancelLearnFromEditPoll() {
+    if (learnFromEditTimer != null) {
+      clearTimeout(learnFromEditTimer);
+      learnFromEditTimer = null;
+    }
+  }
+
+  function clearSessionContext() {
+    focusedApp = null;
+    rewriteOf = null;
+    sessionMode = "insert";
+  }
+
+  async function captureStartContext() {
+    try {
+      focusedApp = await frontmostAppName();
+    } catch {
+      focusedApp = null;
+    }
+    if (sessionMode === "rewrite") {
+      try {
+        rewriteOf = await readSelectedText();
+      } catch {
+        rewriteOf = null;
+      }
+    } else {
+      rewriteOf = null;
+    }
+  }
+
+  function scheduleLearnFromEdit(pasted: string) {
+    cancelLearnFromEditPoll();
+    if (!app.settings.dictation_learn_from_edit || !pasted) return;
+
+    learnFromEditTimer = setTimeout(async () => {
+      learnFromEditTimer = null;
+      try {
+        if (!app.settings.dictation_learn_from_edit) return;
+        const focused = (await readFocusedText())?.trim() ?? null;
+        if (!focused || focused === pasted) return;
+        // Whole-field AX reads include pre-existing content around the paste.
+        // Skip those so we don't learn eight unrelated word pairs.
+        const pastedWords = tokenizeWords(pasted);
+        const focusedWords = tokenizeWords(focused);
+        if (focusedWords.length > pastedWords.length + 3) return;
+        if (focused.length > pasted.length * 1.5 + 20) return;
+        if (countCorrectionPairs(pasted, focused) > MAX_LEARN_FROM_EDIT_PAIRS) return;
+        await learnFromEdit(pasted, focused);
+      } catch {
+        // Post-paste AX reads and dictionary writes are best-effort.
+      }
+    }, LEARN_FROM_EDIT_DELAY_MS);
+  }
+
   async function mount() {
     await refreshCatalog();
     await refreshRuntimeStatus();
 
     const unlisten = await Promise.all([
       events.shortcutToggle.listen(() => {
-        if (!isStartingRecording && !isStopping) void toggleRecording(true);
+        if (!isStartingRecording && !isStopping) {
+          if (!app.isRecording) sessionMode = "insert";
+          void toggleRecording(true);
+        }
+      }),
+      events.shortcutRewrite.listen(() => {
+        if (!isStartingRecording && !isStopping) {
+          if (!app.isRecording) sessionMode = "rewrite";
+          void toggleRecording(true);
+        }
       }),
       events.shortcutPttStart.listen(() => {
-        if (!app.isRecording && !isStartingRecording && !isStopping) void toggleRecording(true);
+        if (!app.isRecording && !isStartingRecording && !isStopping) {
+          sessionMode = "insert";
+          void toggleRecording(true);
+        }
       }),
       events.shortcutPttStop.listen(() => {
         if (app.isRecording && !isStopping) void toggleRecording(true);
@@ -143,6 +276,8 @@ function createTranscriptionControllerInstance() {
       // and reopen. Always released below, even on error, so a failed
       // polish or paste never leaves a zombie pill.
       const holdForPolish = app.settings.dictation_polish_enabled;
+      const sessionFocusedApp = focusedApp;
+      const sessionRewriteOf = rewriteOf;
       if (holdForPolish) {
         try {
           await pillHold("polishing");
@@ -154,7 +289,11 @@ function createTranscriptionControllerInstance() {
       try {
         await stopStreamingTranscription();
 
-        const finalized = await finalizeDictationText(transcript);
+        const finalized = await finalizeDictationText(
+          transcript,
+          sessionFocusedApp,
+          sessionRewriteOf,
+        );
         if (finalized.warning) {
           statusMessage = finalized.warning;
         }
@@ -169,6 +308,7 @@ function createTranscriptionControllerInstance() {
                 app.settings.paste_delay_ms,
                 app.settings.paste_method,
               );
+              scheduleLearnFromEdit(finalized.text);
             } catch (e) {
               statusMessage = accessibilityPasteFailureMessage(errorMessage(e));
             }
@@ -183,6 +323,7 @@ function createTranscriptionControllerInstance() {
       } catch (e) {
         statusMessage = errorMessage(e);
       } finally {
+        clearSessionContext();
         if (holdForPolish) {
           try {
             await pillRelease();
@@ -211,6 +352,8 @@ function createTranscriptionControllerInstance() {
       }
     }
 
+    cancelLearnFromEditPoll();
+    if (!fromShortcut) sessionMode = "insert";
     transcript = "";
     statusMessage = "";
     isStartingRecording = true;
@@ -218,6 +361,7 @@ function createTranscriptionControllerInstance() {
     const generation = sessionGeneration;
 
     try {
+      await captureStartContext();
       await startStreamingTranscription((segment: TranscriptionSegment) => {
         if (generation !== sessionGeneration) return; // stale session
         if (segment.is_final) {
@@ -231,6 +375,7 @@ function createTranscriptionControllerInstance() {
       });
     } catch (e) {
       statusMessage = errorMessage(e);
+      clearSessionContext();
     } finally {
       isStartingRecording = false;
     }
@@ -238,11 +383,14 @@ function createTranscriptionControllerInstance() {
 
   /** The backend aborted the recording session (machine went to Error). */
   function handleRecordingAborted() {
+    const sessionFocusedApp = focusedApp;
+    const sessionRewriteOf = rewriteOf;
     sessionGeneration += 1; // cut off in-flight segments from the dead session
     isStartingRecording = false;
     isStopping = false;
+    cancelLearnFromEditPoll();
     if (transcript.trim()) {
-      void finalizeDictationText(transcript).then(({ text, warning }) => {
+      void finalizeDictationText(transcript, sessionFocusedApp, sessionRewriteOf).then(({ text, warning }) => {
         if (warning) statusMessage = warning;
         if (text) {
           void saveToHistory(text);
@@ -254,6 +402,7 @@ function createTranscriptionControllerInstance() {
     } else {
       statusMessage = "Recording was interrupted.";
     }
+    clearSessionContext();
   }
 
   return {

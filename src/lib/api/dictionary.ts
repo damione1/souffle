@@ -36,3 +36,7 @@ export async function addSessionCorrection(
 ): Promise<void> {
   await unwrap(commands.addSessionCorrection(misspelling, term));
 }
+
+export async function learnFromEdit(original: string, corrected: string): Promise<number> {
+  return unwrap(commands.learnFromEdit(original, corrected));
+}
