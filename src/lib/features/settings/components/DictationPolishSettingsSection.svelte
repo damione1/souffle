@@ -5,6 +5,7 @@
   import type { DictationPolishTemplate } from "../../../types";
 
   const builtInLabelKeys: Record<string, string> = {
+    clean: "settings_dictation_polish.template_clean",
     email: "settings_dictation_polish.template_email",
     bullets: "settings_dictation_polish.template_bullets",
     no_fillers: "settings_dictation_polish.template_no_fillers",

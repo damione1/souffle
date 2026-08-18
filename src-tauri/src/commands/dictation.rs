@@ -52,5 +52,6 @@ pub async fn polish_dictation(
     }
 
     let providers = check_providers(&settings.ollama_url).await;
-    Ok(polish_dictation_text(&settings, &text, &providers.models).await)
+    let dictionary = state.db.list_dictionary_entries()?;
+    Ok(polish_dictation_text(&settings, &text, &providers.models, &dictionary).await)
 }

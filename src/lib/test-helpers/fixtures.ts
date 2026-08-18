@@ -211,9 +211,10 @@ export const mockSettings: AppSettings = {
   meeting_max_duration_minutes: 240,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
-  dictation_polish_enabled: false,
-  dictation_polish_template_id: "email",
+  dictation_polish_enabled: true,
+  dictation_polish_template_id: "clean",
   dictation_polish_templates: [
+    { id: "clean", label: "Clean up", prompt: "Clean without rewriting." },
     { id: "email", label: "Professional email", prompt: "Rewrite as email." },
     { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },

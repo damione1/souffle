@@ -1,8 +1,8 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::audio::InputPriority;
+use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::db::Database;
 use crate::engine::{
     CANDLE_BACKEND_ID, KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, resolve_transcription_profile,
@@ -185,7 +185,7 @@ pub struct AppSettings {
     pub meeting_transcription_language: MeetingTranscriptionLanguage,
     /// Optional LLM post-processing applied to dictation before paste/history.
     pub dictation_polish_enabled: bool,
-    /// Active polish template id (email, bullets, no_fillers).
+    /// Active polish template id (clean, email, bullets, no_fillers).
     pub dictation_polish_template_id: String,
     /// User-editable polish prompt templates.
     pub dictation_polish_templates: Vec<DictationPolishTemplate>,
@@ -242,8 +242,8 @@ impl Default for AppSettings {
             meeting_max_duration_minutes: 240,
             meeting_audio_retention: MeetingAudioRetention::default(),
             meeting_transcription_language: MeetingTranscriptionLanguage::default(),
-            dictation_polish_enabled: false,
-            dictation_polish_template_id: crate::summary::TEMPLATE_EMAIL.to_string(),
+            dictation_polish_enabled: true,
+            dictation_polish_template_id: crate::summary::TEMPLATE_CLEAN.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
             summary_templates: crate::summary::default_summary_templates(),
@@ -312,9 +312,7 @@ impl AppSettings {
         if let Some(input_priority) = read_json_setting::<InputPriority>(db, INPUT_PRIORITY_KEY)? {
             settings.input_priority = input_priority;
         }
-        if let Some(allow_bluetooth_mic) =
-            read_json_setting::<bool>(db, ALLOW_BLUETOOTH_MIC_KEY)?
-        {
+        if let Some(allow_bluetooth_mic) = read_json_setting::<bool>(db, ALLOW_BLUETOOTH_MIC_KEY)? {
             settings.allow_bluetooth_mic = allow_bluetooth_mic;
         }
         if let Some(transcription_engine_id) =
@@ -405,9 +403,11 @@ impl AppSettings {
         {
             settings.meeting_audio_retention = meeting_audio_retention;
         }
-        if let Some(meeting_transcription_language) =
-            read_json_setting::<MeetingTranscriptionLanguage>(db, MEETING_TRANSCRIPTION_LANGUAGE_KEY)?
-        {
+        if let Some(meeting_transcription_language) = read_json_setting::<
+            MeetingTranscriptionLanguage,
+        >(
+            db, MEETING_TRANSCRIPTION_LANGUAGE_KEY
+        )? {
             settings.meeting_transcription_language = meeting_transcription_language;
         }
         if let Some(dictation_polish_enabled) =
@@ -529,7 +529,8 @@ impl AppSettings {
             .map(|device| device.trim().to_string())
             .filter(|device| !device.is_empty());
 
-        normalized.input_priority.priorities = sanitize_uid_list(&normalized.input_priority.priorities);
+        normalized.input_priority.priorities =
+            sanitize_uid_list(&normalized.input_priority.priorities);
         normalized.input_priority.hidden = sanitize_uid_list(&normalized.input_priority.hidden);
         normalized.input_priority.known = normalized
             .input_priority
@@ -621,15 +622,14 @@ impl AppSettings {
                 Self::default().meeting_transcription_language;
         }
 
-        normalized.dictation_polish_template_id = normalized
-            .dictation_polish_template_id
-            .trim()
-            .to_string();
+        normalized.dictation_polish_template_id =
+            normalized.dictation_polish_template_id.trim().to_string();
         if normalized.dictation_polish_templates.is_empty() {
             normalized.dictation_polish_templates = crate::summary::default_polish_templates();
         } else {
-            normalized.dictation_polish_templates =
-                crate::summary::merge_polish_templates(normalized.dictation_polish_templates.clone());
+            normalized.dictation_polish_templates = crate::summary::merge_polish_templates(
+                normalized.dictation_polish_templates.clone(),
+            );
         }
         if !normalized
             .dictation_polish_templates
@@ -640,7 +640,7 @@ impl AppSettings {
                 .dictation_polish_templates
                 .first()
                 .map(|template| template.id.clone())
-                .unwrap_or_else(|| crate::summary::TEMPLATE_EMAIL.to_string());
+                .unwrap_or_else(|| crate::summary::TEMPLATE_CLEAN.to_string());
         }
         for template in &mut normalized.dictation_polish_templates {
             template.id = template.id.trim().to_string();
@@ -679,12 +679,14 @@ impl AppSettings {
     /// Refresh `known` from the current connected-device snapshot and persist
     /// only the input-priority JSON. Used when CoreAudio reports a device
     /// list or default-input change.
-    pub fn sync_input_priority_from_devices(db: &Database) -> Result<(InputPriority, bool), String> {
+    pub fn sync_input_priority_from_devices(
+        db: &Database,
+    ) -> Result<(InputPriority, bool), String> {
         let mut settings = Self::load(db)?;
         #[cfg(target_os = "macos")]
         {
-            use crate::audio::touch_known;
             use crate::audio::device_watch::list_devices;
+            use crate::audio::touch_known;
 
             touch_known(&mut settings.input_priority, &list_devices());
         }
@@ -697,8 +699,8 @@ impl AppSettings {
         let mut normalized = self.sanitize_for_save()?;
         #[cfg(target_os = "macos")]
         {
-            use crate::audio::touch_known;
             use crate::audio::device_watch::list_devices;
+            use crate::audio::touch_known;
 
             touch_known(&mut normalized.input_priority, &list_devices());
         }
@@ -945,8 +947,8 @@ where
 mod tests {
     use super::{AppSettings, MeetingAudioRetention, PasteMethod, ShortcutSettings, Theme};
     use crate::audio::InputPriority;
-    use crate::logging::LogLevel;
     use crate::constants::OLLAMA_DEFAULT_URL;
+    use crate::logging::LogLevel;
     use crate::test_helpers::fixtures::test_db;
 
     #[test]
@@ -1028,7 +1030,8 @@ mod tests {
         settings.save(&db).expect("save settings");
 
         assert_eq!(
-            db.get_setting("clamshell_audio_device").expect("get setting"),
+            db.get_setting("clamshell_audio_device")
+                .expect("get setting"),
             None
         );
     }
@@ -1262,7 +1265,7 @@ mod tests {
 
         assert!(loaded.dictation_polish_enabled);
         assert_eq!(loaded.dictation_polish_template_id, "bullets");
-        assert_eq!(loaded.dictation_polish_templates.len(), 3);
+        assert_eq!(loaded.dictation_polish_templates.len(), 4);
         assert_eq!(
             loaded
                 .dictation_polish_templates
@@ -1381,4 +1384,3 @@ mod tests {
         );
     }
 }
-

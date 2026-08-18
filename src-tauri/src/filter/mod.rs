@@ -113,6 +113,18 @@ pub struct DictionaryEntry {
     pub created_at: String,
 }
 
+pub(crate) fn pronunciation_aliases(term: &str, pronunciation: Option<&str>) -> Vec<String> {
+    let term_lower = term.to_lowercase();
+    let Some(raw) = pronunciation.map(str::trim).filter(|p| !p.is_empty()) else {
+        return Vec::new();
+    };
+    raw.split(',')
+        .map(str::trim)
+        .filter(|alias| !alias.is_empty() && alias.to_lowercase() != term_lower)
+        .map(ToString::to_string)
+        .collect()
+}
+
 // ── VAD model path resolution ──────────────────────────
 
 const VAD_MODEL_FILENAME: &str = "silero_vad_v4.onnx";
@@ -162,9 +174,7 @@ pub fn build_text_filters(
         filters.push(Box::new(text_stutter::StutterCollapseFilter::new()));
     }
     if config.dictionary_correction_enabled
-        && (!dictionary.is_empty()
-            || !session_terms.is_empty()
-            || !session_corrections.is_empty())
+        && (!dictionary.is_empty() || !session_terms.is_empty() || !session_corrections.is_empty())
     {
         let filter = if session_corrections.is_empty() {
             text_dictionary::DictionaryFilter::with_session_terms(dictionary, session_terms)
