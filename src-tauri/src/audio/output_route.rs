@@ -14,9 +14,11 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use objc2_core_audio::{
-    AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
-    kAudioDevicePropertyDataSource, kAudioDevicePropertyDeviceUID, kAudioDevicePropertyMute,
+    AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
+    AudioObjectPropertyAddress, AudioObjectSetPropertyData, kAudioDevicePropertyDataSource,
+    kAudioDevicePropertyDataSources, kAudioDevicePropertyDeviceUID, kAudioDevicePropertyMute,
     kAudioDevicePropertyTransportType, kAudioDevicePropertyVolumeScalar,
+    kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
     kAudioDeviceTransportTypeBuiltIn, kAudioHardwarePropertyDefaultOutputDevice,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
     kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
@@ -24,7 +26,10 @@ use objc2_core_audio::{
 use objc2_core_foundation::{CFRetained, CFString};
 
 /// Built-in output data source: internal speaker ('ispk').
-const DATA_SOURCE_INTERNAL_SPEAKER: u32 = 0x6973_706b;
+const DATA_SOURCE_INTERNAL_SPEAKER: u32 = u32::from_be_bytes(*b"ispk");
+/// Bluetooth stereo output ('a2dp') versus hands-free SCO ('hfp ').
+const DATA_SOURCE_A2DP: u32 = u32::from_be_bytes(*b"a2dp");
+const DATA_SOURCE_HFP: u32 = u32::from_be_bytes(*b"hfp ");
 
 fn global_address(selector: u32) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress {
@@ -168,6 +173,117 @@ const AUDIBLE_VOLUME_THRESHOLD: f32 = 0.01;
 /// external devices can't leak regardless of volume or mute state.
 fn can_leak(is_speakers: bool, muted: bool, volume: f32) -> bool {
     is_speakers && !muted && volume > AUDIBLE_VOLUME_THRESHOLD
+}
+
+/// After releasing a Bluetooth microphone, ask Core Audio to put the
+/// headset back on A2DP stereo if it is still advertising HFP.
+///
+/// Disposing the input AudioUnit is what actually frees the SCO link; this
+/// is a nudge for headsets (Bose in particular) that otherwise stay in HFP
+/// until something else retoggles the output profile. No-op when the
+/// default output is not Bluetooth, is already A2DP, or does not list
+/// `a2dp` as a data source.
+pub fn restore_bluetooth_a2dp() {
+    let Ok(device) = default_output_device() else {
+        return;
+    };
+    let mut transport: u32 = 0;
+    if get_property(
+        device,
+        global_address(kAudioDevicePropertyTransportType),
+        &mut transport,
+    )
+    .is_err()
+        || (transport != kAudioDeviceTransportTypeBluetooth
+            && transport != kAudioDeviceTransportTypeBluetoothLE)
+    {
+        return;
+    }
+
+    let mut source: u32 = 0;
+    if get_property(
+        device,
+        output_address(kAudioDevicePropertyDataSource),
+        &mut source,
+    )
+    .is_err()
+        || source != DATA_SOURCE_HFP
+    {
+        return;
+    }
+
+    let sources = u32_property_list(device, output_address(kAudioDevicePropertyDataSources));
+    if !sources.contains(&DATA_SOURCE_A2DP) {
+        return;
+    }
+
+    if set_property(
+        device,
+        output_address(kAudioDevicePropertyDataSource),
+        &DATA_SOURCE_A2DP,
+    )
+    .is_ok()
+    {
+        tracing::info!("Restored Bluetooth output from HFP to A2DP");
+    }
+}
+
+fn set_property<T>(
+    object: AudioObjectID,
+    mut address: AudioObjectPropertyAddress,
+    value: &T,
+) -> Result<(), String> {
+    let status = unsafe {
+        AudioObjectSetPropertyData(
+            object,
+            NonNull::from(&mut address),
+            0,
+            std::ptr::null(),
+            size_of::<T>() as u32,
+            NonNull::new(value as *const T as *mut c_void).expect("non-null in pointer"),
+        )
+    };
+    if status != 0 {
+        return Err(format!(
+            "AudioObjectSetPropertyData({:#x}) failed: {status}",
+            address.mSelector
+        ));
+    }
+    Ok(())
+}
+
+fn u32_property_list(object: AudioObjectID, mut address: AudioObjectPropertyAddress) -> Vec<u32> {
+    let mut size: u32 = 0;
+    let size_status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            object,
+            NonNull::from(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::from(&mut size),
+        )
+    };
+    if size_status != 0 || size == 0 {
+        return Vec::new();
+    }
+    let count = size as usize / size_of::<u32>();
+    let mut values = vec![0u32; count];
+    let mut out_size = size;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            object,
+            NonNull::from(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::from(&mut out_size),
+            NonNull::new(values.as_mut_ptr() as *mut c_void).expect("non-null out pointer"),
+        )
+    };
+    if status != 0 {
+        return Vec::new();
+    }
+    values.truncate(out_size as usize / size_of::<u32>());
+    values
 }
 
 /// Whether the default output can acoustically leak into the microphone

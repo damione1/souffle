@@ -656,7 +656,7 @@ impl AudioCapture {
         // NOT torn down here; see `sync_recorder`, so a mid-session mic
         // rebuild (same session_id) keeps recording to the same file.
         self.active_session_id.store(0, Ordering::Release);
-        self.stream.take();
+        self.release_capture_stream();
         self.meeting.take();
         self.sync_recorder(session_id, record_path.as_deref(), target_sample_rate);
 
@@ -1220,7 +1220,11 @@ impl AudioCapture {
         self.mic_device_name = None;
         self.mic_device_uid = None;
         self.route_attempt_uid = None;
-        self.stream.take();
+        let released = self.release_capture_stream();
+        #[cfg(target_os = "macos")]
+        if released {
+            super::output_route::restore_bluetooth_a2dp();
+        }
         self.resampler.take();
         #[cfg(target_os = "macos")]
         if let Some(mut meeting) = self.meeting.take() {
@@ -1259,6 +1263,26 @@ impl AudioCapture {
         self.teardown_session_state();
     }
 
+    /// Stop IO and dispose the capture AudioUnit.
+    ///
+    /// On macOS, a Bluetooth headset cannot run A2DP stereo output and HFP
+    /// input at once: opening the mic forces HFP/SCO (mono). Stopping the
+    /// unit (`pause`) is not enough — Core Audio keeps the input route until
+    /// `AudioUnitUninitialize` + `AudioComponentInstanceDispose`, which run
+    /// when cpal's `StreamInner` drops. cpal 0.15 leaked that inner via a
+    /// disconnect-listener `Arc` cycle (RustAudio/cpal#771), so the headset
+    /// stayed in HFP until process exit. Pause then drop so both happen here.
+    fn release_capture_stream(&mut self) -> bool {
+        let Some(stream) = self.stream.take() else {
+            return false;
+        };
+        if let Err(e) = stream.pause() {
+            debug!("Audio stream pause on release: {e}");
+        }
+        drop(stream);
+        true
+    }
+
     fn stop(&mut self) {
         let mut session_id = self.active_session_id.swap(0, Ordering::AcqRel);
         // A session whose stream died mid-rebuild has id 0 in the atomic but
@@ -1276,8 +1300,13 @@ impl AudioCapture {
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
 
-        // Dropping the stream is synchronous — after this, no callback runs.
-        let had_stream = self.stream.take().is_some();
+        // Stop IO and dispose the AudioUnit — after this, no callback runs
+        // and a Bluetooth headset can leave HFP/mono for A2DP stereo.
+        let had_stream = self.release_capture_stream();
+        #[cfg(target_os = "macos")]
+        if had_stream {
+            super::output_route::restore_bluetooth_a2dp();
+        }
 
         if let Some(mut meeting) = self.meeting.take() {
             // Tear down the tap first so its ring stops filling; then one

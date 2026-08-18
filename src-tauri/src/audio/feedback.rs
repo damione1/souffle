@@ -127,6 +127,8 @@ fn play_wav_blocking(path: &Path, volume: f32) -> Result<(), String> {
     stream.play().map_err(|e| format!("Play stream: {e}"))?;
     let duration = duration_from_samples(sample_count, channels, sample_rate);
     thread::sleep(duration + std::time::Duration::from_millis(30));
+    let _ = stream.pause();
+    drop(stream);
     Ok(())
 }
 
