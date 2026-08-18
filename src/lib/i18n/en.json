@@ -77,7 +77,7 @@
     "empty": "No custom dictionary entries yet.",
     "pronunciation": "Pronunciation",
     "pronunciation_placeholder": "e.g. vaysix",
-    "pronunciation_desc": "How the term sounds when spoken, spelled out. Helps match terms like V6 said \"vaysix\"."
+    "pronunciation_desc": "How the term sounds, spelled out. Exact matches and similar-sounding words are rewritten to the term. Comma-separate several heard spellings, e.g. vaysix, vee six."
   },
   "settings_calendar": {
     "title": "Calendar",

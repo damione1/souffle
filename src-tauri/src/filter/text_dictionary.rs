@@ -44,8 +44,7 @@ const PROTECTED_STOPWORDS: &[&str] = &[
     "comme", "alors", "aussi", "bien", "bon", "cette", "cet", "ces", "ses", "son", "sa", "ton",
     "leur", "leurs", "nos", "vos", "tout", "tous", "toute", "toutes", "etre", "avoir", "fait",
     "faire", "dit", "dire", "cela", "ceci", "ainsi", "puis", "encore", "toujours", "jamais",
-    "rien", "ici",
-    // English
+    "rien", "ici", // English
     "the", "then", "than", "this", "that", "these", "those", "with", "from", "have", "been",
     "were", "when", "what", "which", "who", "whom", "where", "there", "their", "they", "them",
     "will", "would", "could", "should", "just", "very", "also", "into", "onto", "over", "under",
@@ -58,6 +57,12 @@ fn is_protected_stopword(word_lower: &str) -> bool {
 
 pub struct DictionaryFilter {
     entries: Vec<DictionaryMatch>,
+    exact_aliases: Vec<ExactAlias>,
+}
+
+struct ExactAlias {
+    alias_lower: String,
+    term: String,
 }
 
 struct DictionaryMatch {
@@ -84,7 +89,12 @@ struct DictionaryMatch {
 /// Returns the code plus whether it came from an explicit pronunciation.
 fn derive_phonetic_code(term: &str, pronunciation: Option<&str>) -> (Option<String>, bool) {
     if let Some(p) = pronunciation.map(str::trim).filter(|p| !p.is_empty()) {
-        return (soundex(p), true);
+        let primary = p
+            .split(',')
+            .map(str::trim)
+            .find(|alias| !alias.is_empty())
+            .unwrap_or(p);
+        return (soundex(primary), true);
     }
     if term.chars().any(|c| c.is_ascii_digit()) {
         return (None, false);
@@ -105,21 +115,26 @@ impl DictionaryFilter {
         session_terms: &[String],
         session_corrections: &[super::session_terms::SessionCorrection],
     ) -> Self {
-        let mut matches: Vec<DictionaryMatch> = entries
-            .into_iter()
-            .map(|e| {
-                let term_lower = e.term.to_lowercase();
-                let (phonetic_code, explicit_pronunciation) =
-                    derive_phonetic_code(&e.term, e.pronunciation.as_deref());
-                DictionaryMatch {
-                    term: e.term,
-                    term_lower,
-                    phonetic_code,
-                    phonetic_only: false,
-                    explicit_pronunciation,
-                }
-            })
-            .collect();
+        let mut exact_aliases = Vec::new();
+        let mut matches: Vec<DictionaryMatch> = Vec::with_capacity(entries.len());
+        for e in entries {
+            for alias in super::pronunciation_aliases(&e.term, e.pronunciation.as_deref()) {
+                exact_aliases.push(ExactAlias {
+                    alias_lower: alias.to_lowercase(),
+                    term: e.term.clone(),
+                });
+            }
+            let term_lower = e.term.to_lowercase();
+            let (phonetic_code, explicit_pronunciation) =
+                derive_phonetic_code(&e.term, e.pronunciation.as_deref());
+            matches.push(DictionaryMatch {
+                term: e.term,
+                term_lower,
+                phonetic_code,
+                phonetic_only: false,
+                explicit_pronunciation,
+            });
+        }
         for term in session_terms {
             let term_lower = term.to_lowercase();
             // A user entry for the same term wins over the session variant.
@@ -135,6 +150,13 @@ impl DictionaryFilter {
             });
         }
         for correction in session_corrections {
+            let miss = correction.misspelling.trim();
+            if !miss.is_empty() && miss.to_lowercase() != correction.term.to_lowercase() {
+                exact_aliases.push(ExactAlias {
+                    alias_lower: miss.to_lowercase(),
+                    term: correction.term.clone(),
+                });
+            }
             let term_lower = correction.term.to_lowercase();
             if matches.iter().any(|m| m.term_lower == term_lower) {
                 continue;
@@ -147,7 +169,16 @@ impl DictionaryFilter {
                 explicit_pronunciation: true,
             });
         }
-        Self { entries: matches }
+        exact_aliases.sort_by(|a, b| {
+            b.alias_lower
+                .chars()
+                .count()
+                .cmp(&a.alias_lower.chars().count())
+        });
+        Self {
+            entries: matches,
+            exact_aliases,
+        }
     }
 
     fn find_replacement(&self, word: &str) -> Option<&str> {
@@ -213,27 +244,48 @@ impl DictionaryFilter {
 
         best_match.map(|(term, _)| term)
     }
-}
 
-impl TextFilter for DictionaryFilter {
-    fn kind(&self) -> TextFilterKind {
-        TextFilterKind::DictionaryCorrection
-    }
-
-    fn apply(&self, text: &str) -> String {
-        if self.entries.is_empty() {
+    fn apply_exact_aliases(&self, text: &str) -> String {
+        if self.exact_aliases.is_empty() {
             return text.to_string();
         }
 
+        let mut result = String::with_capacity(text.len());
+        let mut byte_index = 0;
+        while byte_index < text.len() {
+            if at_word_start(text, byte_index) {
+                let mut matched = false;
+                for alias in &self.exact_aliases {
+                    if let Some(end) = match_alias_at(text, byte_index, &alias.alias_lower) {
+                        result.push_str(&alias.term);
+                        byte_index = end;
+                        matched = true;
+                        break;
+                    }
+                }
+                if matched {
+                    continue;
+                }
+            }
+            let ch = text[byte_index..]
+                .chars()
+                .next()
+                .expect("byte_index on char boundary");
+            result.push(ch);
+            byte_index += ch.len_utf8();
+        }
+        result
+    }
+
+    fn apply_fuzzy(&self, text: &str) -> String {
         let mut result = String::with_capacity(text.len());
         let mut chars = text.char_indices().peekable();
 
         while let Some(&(start, ch)) = chars.peek() {
             if ch.is_alphanumeric() {
-                // Collect the full word
                 let mut end = start;
                 while let Some(&(i, c)) = chars.peek() {
-                    if c.is_alphanumeric() || c == '\'' || c == '-' {
+                    if is_word_char(c) {
                         end = i + c.len_utf8();
                         chars.next();
                     } else {
@@ -253,6 +305,65 @@ impl TextFilter for DictionaryFilter {
         }
 
         result
+    }
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '\'' || c == '-'
+}
+
+fn at_word_start(text: &str, byte_index: usize) -> bool {
+    let Some(ch) = text[byte_index..].chars().next() else {
+        return false;
+    };
+    if !is_word_char(ch) {
+        return false;
+    }
+    byte_index == 0
+        || text[..byte_index]
+            .chars()
+            .next_back()
+            .is_none_or(|prev| !is_word_char(prev))
+}
+
+fn match_alias_at(text: &str, byte_start: usize, alias_lower: &str) -> Option<usize> {
+    let mut consumed = 0;
+    let mut text_chars = text[byte_start..].chars();
+    for alias_ch in alias_lower.chars() {
+        let ch = text_chars.next()?;
+        if !char_eq_ignore_case(ch, alias_ch) {
+            return None;
+        }
+        consumed += ch.len_utf8();
+    }
+    if text_chars.next().is_some_and(is_word_char) {
+        return None;
+    }
+    Some(byte_start + consumed)
+}
+
+fn char_eq_ignore_case(text_ch: char, alias_lower_ch: char) -> bool {
+    if text_ch == alias_lower_ch {
+        return true;
+    }
+    let mut lower = text_ch.to_lowercase();
+    lower.next() == Some(alias_lower_ch) && lower.next().is_none()
+}
+
+impl TextFilter for DictionaryFilter {
+    fn kind(&self) -> TextFilterKind {
+        TextFilterKind::DictionaryCorrection
+    }
+
+    fn apply(&self, text: &str) -> String {
+        if self.entries.is_empty() {
+            return text.to_string();
+        }
+        if self.exact_aliases.is_empty() {
+            self.apply_fuzzy(text)
+        } else {
+            self.apply_fuzzy(&self.apply_exact_aliases(text))
+        }
     }
 }
 
@@ -481,5 +592,77 @@ mod tests {
         assert_eq!(soundex("marche"), soundex("Mauriac"));
         assert!(normalized_levenshtein("marche", "mauriac") < PHONETIC_SIMILARITY_FLOOR);
         assert_eq!(f.apply("il marche vite"), "il marche vite");
+    }
+
+    #[test]
+    fn exact_pronunciation_aliases_replace_single_and_multi_word() {
+        let f = DictionaryFilter::with_session_terms(
+            vec![entry_with_pronunciation("V6", "vésix, vee six")],
+            &[],
+        );
+        assert_eq!(f.apply("le vésix arrive"), "le V6 arrive");
+        assert_eq!(f.apply("le vee six arrive"), "le V6 arrive");
+        assert_eq!(f.apply("le VEE SIX arrive"), "le V6 arrive");
+        assert_eq!(f.apply("le vesix arrive"), "le V6 arrive");
+    }
+
+    #[test]
+    fn exact_pronunciation_alias_replaces_multi_word_phrase() {
+        let f = DictionaryFilter::with_session_terms(
+            vec![entry_with_pronunciation("FluidVoice", "fluid boys")],
+            &[],
+        );
+        assert_eq!(f.apply("fluid boys"), "FluidVoice");
+        assert_eq!(f.apply("try fluid boys today"), "try FluidVoice today");
+        assert_eq!(f.apply("FLUID BOYS"), "FluidVoice");
+    }
+
+    #[test]
+    fn exact_alias_ignores_self_equal_and_empty_pieces() {
+        let f = DictionaryFilter::with_session_terms(
+            vec![entry_with_pronunciation("V6", "V6, , vésix")],
+            &[],
+        );
+        assert_eq!(f.apply("le vésix"), "le V6");
+        assert_eq!(f.apply("le V6"), "le V6");
+    }
+
+    #[test]
+    fn exact_alias_respects_word_boundaries() {
+        let f = DictionaryFilter::with_session_terms(
+            vec![entry_with_pronunciation("V6", "vee six")],
+            &[],
+        );
+        assert_eq!(f.apply("vee sixteen"), "vee sixteen");
+    }
+
+    #[test]
+    fn longest_exact_alias_wins_on_overlap() {
+        let f = DictionaryFilter::with_session_terms(
+            vec![
+                entry_with_pronunciation("FluidVoice", "fluid boys"),
+                entry_with_pronunciation("Xbox", "boys"),
+            ],
+            &[],
+        );
+        assert_eq!(f.apply("fluid boys"), "FluidVoice");
+        assert_eq!(f.apply("the boys"), "the Xbox");
+    }
+
+    #[test]
+    fn session_correction_misspelling_is_exact_even_for_known_term() {
+        use crate::filter::session_terms::SessionCorrection;
+        let f = DictionaryFilter::with_session_hints(
+            vec![entry("Kubernetes")],
+            &[],
+            &[SessionCorrection {
+                misspelling: "kube er neties".to_string(),
+                term: "Kubernetes".to_string(),
+            }],
+        );
+        assert_eq!(
+            f.apply("the kube er neties cluster"),
+            "the Kubernetes cluster"
+        );
     }
 }
