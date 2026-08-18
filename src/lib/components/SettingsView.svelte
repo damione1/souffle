@@ -155,6 +155,8 @@
 
       <DictionarySettingsSection
         entries={controller.dictionaryEntries}
+        learnFromEdit={controller.app.settings.dictation_learn_from_edit}
+        onLearnFromEditChange={controller.onLearnFromEditChange}
         onAdd={controller.handleAddDictionaryEntry}
         onDelete={controller.handleDeleteDictionaryEntry}
       />
@@ -206,6 +208,7 @@
         pasteMethod={controller.app.settings.paste_method}
         toggleShortcut={controller.toggleShortcut}
         pttShortcut={controller.pttShortcut}
+        rewriteShortcut={controller.rewriteShortcut}
         recordingField={controller.recordingField}
         shortcutError={controller.shortcutError}
         onThemeChange={controller.onThemeChange}
@@ -246,9 +249,16 @@
         ollamaModels={controller.ollamaModels}
         summaryModels={controller.summaryModels}
         selectedOllamaModel={controller.app.settings.ollama_model}
+        recommendedOllamaModel={controller.recommendedOllamaModel}
+        ollamaPulling={controller.ollamaPulling}
+        ollamaPullStatus={controller.ollamaPullStatus}
+        ollamaPullDownloaded={controller.ollamaPullDownloaded}
+        ollamaPullTotal={controller.ollamaPullTotal}
+        ollamaPullError={controller.ollamaPullError}
         onOllamaUrlChange={controller.onOllamaUrlChange}
         onOllamaModelChange={controller.onOllamaModelChange}
         onRetrySummaryProviders={controller.refreshSummaryProviders}
+        onDownloadRecommendedOllamaModel={controller.downloadRecommendedOllamaModel}
       />
 
       <SummaryTemplatesSettingsSection

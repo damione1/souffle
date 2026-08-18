@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
+  import ProgressBar from "../../../components/ui/ProgressBar.svelte";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { SummaryModelDescriptor } from "../../../types";
@@ -12,9 +13,16 @@
     ollamaModels,
     summaryModels,
     selectedOllamaModel,
+    recommendedOllamaModel,
+    ollamaPulling,
+    ollamaPullStatus,
+    ollamaPullDownloaded,
+    ollamaPullTotal,
+    ollamaPullError,
     onOllamaUrlChange,
     onOllamaModelChange,
     onRetrySummaryProviders,
+    onDownloadRecommendedOllamaModel,
   }: {
     ollamaUrl: string;
     ollamaAvailable: boolean;
@@ -23,9 +31,16 @@
     ollamaModels: SummaryModelDescriptor[];
     summaryModels: SummaryModelDescriptor[];
     selectedOllamaModel: string;
+    recommendedOllamaModel: string;
+    ollamaPulling: boolean;
+    ollamaPullStatus: string;
+    ollamaPullDownloaded: number;
+    ollamaPullTotal: number | null;
+    ollamaPullError: string;
     onOllamaUrlChange: (event: Event) => void;
     onOllamaModelChange: (event: Event) => void;
     onRetrySummaryProviders: () => void | Promise<void>;
+    onDownloadRecommendedOllamaModel: () => void | Promise<void>;
   } = $props();
 
   const KNOWN_REASON_KEYS: Record<string, string> = {
@@ -89,7 +104,7 @@
       <div class="flex gap-2 items-center">
         <span class="status-dot" class:is-online={ollamaAvailable}></span>
         <span class="text-sm text-text-muted">{ollamaAvailable ? $t("settings_intelligence.connected") : $t("settings_intelligence.not_available")}</span>
-        <button onclick={onRetrySummaryProviders} class="btn">{$t("settings_intelligence.retry")}</button>
+        <button onclick={onRetrySummaryProviders} class="btn" disabled={ollamaPulling}>{$t("settings_intelligence.retry")}</button>
       </div>
     {/snippet}
   </SettingsField>
@@ -108,8 +123,31 @@
         {/each}
       </select>
     </div>
-  {:else if ollamaAvailable && ollamaModels.length > 0}
-    <StatusBanner message={$t("settings_intelligence.no_compatible_model")} />
+  {:else if ollamaAvailable}
+    {#if ollamaModels.length > 0}
+      <StatusBanner message={$t("settings_intelligence.no_compatible_model")} />
+    {/if}
+    {#if ollamaPullError}
+      <StatusBanner variant="danger" message={$t("settings_intelligence.pull_failed", { values: { error: ollamaPullError } })} />
+    {/if}
+    {#if ollamaPulling}
+      <ProgressBar
+        value={ollamaPullDownloaded}
+        max={ollamaPullTotal && ollamaPullTotal > 0 ? ollamaPullTotal : 100}
+        label={ollamaPullStatus || $t("settings_intelligence.downloading_model", { values: { model: recommendedOllamaModel } })}
+      />
+    {:else}
+      <SettingsField
+        label={$t("settings_intelligence.recommended_model")}
+        description={$t("settings_intelligence.download_recommended_desc")}
+      >
+        {#snippet control()}
+          <button onclick={onDownloadRecommendedOllamaModel} class="btn btn-primary">
+            {$t("settings_intelligence.download_recommended", { values: { model: recommendedOllamaModel } })}
+          </button>
+        {/snippet}
+      </SettingsField>
+    {/if}
   {/if}
   </div>
 </section>

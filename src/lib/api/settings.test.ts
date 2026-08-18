@@ -46,7 +46,7 @@ describe('settings API', () => {
   });
 
   it('getShortcuts returns shortcut settings', async () => {
-    const shortcuts = { toggle: 'CmdOrCtrl+Shift+S', push_to_talk: 'CmdOrCtrl+Shift+Space' };
+    const shortcuts = { toggle: 'CmdOrCtrl+Shift+S', push_to_talk: 'CmdOrCtrl+Shift+Space', rewrite: '' };
     mockInvoke.mockResolvedValue(shortcuts);
 
     const result = await getShortcuts();
@@ -57,7 +57,7 @@ describe('settings API', () => {
 
   it('saveShortcuts passes shortcuts object', async () => {
     mockInvoke.mockResolvedValue(null);
-    const shortcuts = { toggle: 'CmdOrCtrl+Shift+D', push_to_talk: 'CmdOrCtrl+Space' };
+    const shortcuts = { toggle: 'CmdOrCtrl+Shift+D', push_to_talk: 'CmdOrCtrl+Space', rewrite: '' };
 
     await saveShortcuts(shortcuts);
 

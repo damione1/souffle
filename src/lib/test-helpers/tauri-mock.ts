@@ -137,6 +137,7 @@ export function createSettingsApiMock(
 
 export interface SummaryApiMock {
   getSummaryProvidersStatus: ReturnType<typeof vi.fn<() => Promise<SummaryProvidersStatus>>>;
+  pullRecommendedOllamaModel: ReturnType<typeof vi.fn<(onProgress: (p: unknown) => void) => Promise<string>>>;
 }
 
 export function createSummaryApiMock(
@@ -144,6 +145,7 @@ export function createSummaryApiMock(
 ): SummaryApiMock {
   return {
     getSummaryProvidersStatus: vi.fn<() => Promise<SummaryProvidersStatus>>().mockResolvedValue(mockSummaryProvidersStatus),
+    pullRecommendedOllamaModel: vi.fn<(onProgress: (p: unknown) => void) => Promise<string>>().mockResolvedValue("qwen2.5:7b"),
     ...overrides,
   };
 }

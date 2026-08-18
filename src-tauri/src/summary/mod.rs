@@ -1,6 +1,7 @@
 mod apple;
 mod chunking;
 mod extract;
+mod formatters;
 mod ollama;
 mod polish;
 mod prompts;
@@ -15,6 +16,7 @@ use crate::transcript::{MeetingParticipant, StructuredSummary};
 
 pub use chunking::{ChunkConfig, chunk_transcript, estimate_tokens};
 pub use extract::{extract_structured_summary, parse_structured_summary_response};
+pub use ollama::{OllamaPullProgress, RECOMMENDED_MODEL as RECOMMENDED_OLLAMA_MODEL, pull_model};
 pub use polish::{
     DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
     default_polish_templates, early_polish_dictation_result, merge_polish_templates,
@@ -172,9 +174,7 @@ pub async fn check_providers(ollama_url: &str) -> SummaryProvidersStatus {
     let apple_intelligence_is_stub = apple_intelligence::is_stub_linked();
     let apple_intelligence_available = apple_intelligence_available();
     let apple_intelligence_unavailable_reason = apple_intelligence::unavailable_reason();
-    if !apple_intelligence_available
-        && let Some(reason) = &apple_intelligence_unavailable_reason
-    {
+    if !apple_intelligence_available && let Some(reason) = &apple_intelligence_unavailable_reason {
         tracing::info!(reason = %reason, "Apple Intelligence unavailable");
     }
 
@@ -578,9 +578,7 @@ where
             on_batch_start(i as u32 + 1, total_batches);
             match generate(false, build_reduce_prompt(&batch, None, &[])).await {
                 Ok(merged) => next.push(merged),
-                Err(error)
-                    if overflow_shrink_available && apple::is_context_overflow(&error) =>
-                {
+                Err(error) if overflow_shrink_available && apple::is_context_overflow(&error) => {
                     // Redo the whole round with the tighter budget; merges
                     // already done this round are discarded, which is the
                     // price of a one-time recovery.
@@ -611,8 +609,7 @@ mod tests {
             action_items: vec![],
             open_questions: vec![],
         };
-        let (persisted, warning) =
-            structured_extract_for_persist(Ok(structured.clone()));
+        let (persisted, warning) = structured_extract_for_persist(Ok(structured.clone()));
         assert_eq!(persisted, Some(structured));
         assert!(warning.is_none());
     }
@@ -682,7 +679,10 @@ mod tests {
         );
         if status.apple_intelligence_available {
             assert_eq!(status.models[0].id, APPLE_INTELLIGENCE_MODEL_ID);
-            assert_eq!(status.models[0].provider, SummaryProviderKind::AppleIntelligence);
+            assert_eq!(
+                status.models[0].provider,
+                SummaryProviderKind::AppleIntelligence
+            );
             assert!(!status.apple_intelligence_is_stub);
         }
     }
@@ -794,7 +794,11 @@ mod tests {
             "expected at least one intermediate merge round for 40 oversized parts, got {}",
             merge_calls.get()
         );
-        assert_eq!(final_calls.get(), 1, "exactly one call must be the final pass");
+        assert_eq!(
+            final_calls.get(),
+            1,
+            "exactly one call must be the final pass"
+        );
         assert_eq!(result.matches("## Summary").count(), 1);
         assert_eq!(result.matches("## Topics").count(), 1);
     }
@@ -816,7 +820,9 @@ mod tests {
             |is_final, _prompt| {
                 assert!(is_final, "the only call for a small input must be final");
                 final_calls.set(final_calls.get() + 1);
-                async move { Ok("## Summary\n- one fact\n- another fact\n\n## Topics\n- none\n".to_string()) }
+                async move {
+                    Ok("## Summary\n- one fact\n- another fact\n\n## Topics\n- none\n".to_string())
+                }
             },
         )
         .await
@@ -843,7 +849,12 @@ mod tests {
         let limit = ChunkConfig::APPLE_INTELLIGENCE.reduce_token_limit;
         // Sanity: fits the full budget, does not fit half of it.
         assert!(super::reduce::reduce_prompt_fits(&parts, None, &[], limit));
-        assert!(!super::reduce::reduce_prompt_fits(&parts, None, &[], limit / 2));
+        assert!(!super::reduce::reduce_prompt_fits(
+            &parts,
+            None,
+            &[],
+            limit / 2
+        ));
 
         let final_calls = std::cell::Cell::new(0u32);
         let merge_calls = std::cell::Cell::new(0u32);

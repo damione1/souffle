@@ -249,10 +249,9 @@ pub fn add_session_correction(
         }
     }
 
-    state.engine_actor.add_session_correction(SessionCorrection {
-        misspelling,
-        term,
-    })
+    state
+        .engine_actor
+        .add_session_correction(SessionCorrection { misspelling, term })
 }
 
 fn redistribute_segment_texts(segments: &mut [TranscriptionSegment], new_text: &str) {
@@ -329,6 +328,28 @@ pub async fn check_summary_providers(
 ) -> Result<crate::summary::SummaryProvidersStatus, String> {
     let settings = AppSettings::load(&state.db)?;
     Ok(crate::summary::check_providers(&settings.ollama_url).await)
+}
+
+/// Pull the recommended Ollama chat model (`qwen2.5:7b`) into the configured
+/// server. Progress is streamed back via the Channel API.
+#[tauri::command]
+#[specta::specta]
+pub async fn pull_recommended_ollama_model(
+    state: State<'_, AppState>,
+    channel: Channel<crate::summary::OllamaPullProgress>,
+) -> Result<String, String> {
+    let settings = AppSettings::load(&state.db)?;
+    let url = if settings.ollama_url.trim().is_empty() {
+        crate::constants::OLLAMA_DEFAULT_URL
+    } else {
+        settings.ollama_url.trim()
+    };
+    let model = crate::summary::RECOMMENDED_OLLAMA_MODEL;
+    crate::summary::pull_model(url, model, |progress| {
+        let _ = channel.send(progress);
+    })
+    .await?;
+    Ok(model.to_string())
 }
 
 /// Summarize a meeting transcript using the selected provider, streaming results back.

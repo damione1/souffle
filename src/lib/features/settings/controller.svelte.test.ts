@@ -87,6 +87,7 @@ const defaultSettings: AppSettings = {
     { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
   ],
+  dictation_learn_from_edit: true,
   default_summary_template_id: "default",
   summary_templates: [
     { id: "default", name: "Default", prompt: "Default summary prompt." },
@@ -104,6 +105,7 @@ const fakeDevices: AudioInputDevice[] = [
 const fakeShortcuts: ShortcutSettings = {
   toggle: "CommandOrControl+Shift+Space",
   push_to_talk: "",
+  rewrite: "",
 };
 
 const fakeCatalog: TranscriptionCatalog = {
@@ -410,6 +412,38 @@ describe("settings controller", () => {
     });
   });
 
+  it("shortcut recording flow covers rewrite field", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    expect(ctrl.rewriteShortcut).toBe("");
+
+    ctrl.startRecording("rewrite");
+    expect(ctrl.recordingField).toBe("rewrite");
+
+    const event = new KeyboardEvent("keydown", {
+      key: "r",
+      code: "KeyR",
+      metaKey: true,
+      shiftKey: true,
+    });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
+
+    ctrl.handleKeyDown(event);
+
+    expect(ctrl.rewriteShortcut).toBe("CommandOrControl+Shift+R");
+    expect(ctrl.recordingField).toBeNull();
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_shortcuts", {
+        shortcuts: expect.objectContaining({
+          rewrite: "CommandOrControl+Shift+R",
+          toggle: "CommandOrControl+Shift+Space",
+          push_to_talk: "",
+        }),
+      });
+    });
+  });
+
   it("plain key without modifier shows error", async () => {
     const ctrl = createSettingsController();
     await ctrl.mount();
@@ -580,5 +614,66 @@ describe("settings controller", () => {
     await vi.waitFor(() => {
       expect(app.settings.calendar_selected_ids).toEqual([]);
     });
+  });
+
+  it("downloadRecommendedOllamaModel pulls then refreshes providers", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "check_summary_providers") {
+        return Promise.resolve({
+          ollama_url: "http://localhost:11434",
+          ollama_available: true,
+          apple_intelligence_available: false,
+          apple_intelligence_is_stub: true,
+          apple_intelligence_unavailable_reason: "stub",
+          models: [],
+        });
+      }
+      if (cmd === "pull_recommended_ollama_model") {
+        return Promise.resolve("qwen2.5:7b");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    expect(ctrl.ollamaAvailable).toBe(true);
+    expect(ctrl.summaryModels).toEqual([]);
+
+    const pull = ctrl.downloadRecommendedOllamaModel();
+    expect(ctrl.ollamaPulling).toBe(true);
+    await pull;
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "pull_recommended_ollama_model",
+      expect.objectContaining({ channel: expect.anything() }),
+    );
+    expect(ctrl.ollamaPulling).toBe(false);
+    expect(ctrl.ollamaPullError).toBe("");
+  });
+
+  it("downloadRecommendedOllamaModel records pull errors", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "check_summary_providers") {
+        return Promise.resolve({
+          ollama_url: "http://localhost:11434",
+          ollama_available: true,
+          apple_intelligence_available: false,
+          apple_intelligence_is_stub: true,
+          apple_intelligence_unavailable_reason: "stub",
+          models: [],
+        });
+      }
+      if (cmd === "pull_recommended_ollama_model") {
+        return Promise.reject("connection refused");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    await ctrl.downloadRecommendedOllamaModel();
+
+    expect(ctrl.ollamaPulling).toBe(false);
+    expect(ctrl.ollamaPullError).toBe("connection refused");
   });
 });

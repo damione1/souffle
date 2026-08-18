@@ -1,6 +1,8 @@
 pub mod app_events;
+pub mod apple_intelligence;
 pub mod archive;
 pub mod audio;
+pub mod ax_text;
 pub mod calendar;
 pub mod cli;
 pub mod clipboard;
@@ -13,12 +15,11 @@ pub mod engine;
 pub mod errors;
 pub mod export;
 pub mod filter;
+pub mod frontmost;
 pub mod lid;
 pub mod lock_ext;
 pub mod logging;
 pub mod models;
-pub mod apple_intelligence;
-pub mod summary;
 pub mod ort_runtime;
 pub mod permissions;
 pub mod pill;
@@ -28,6 +29,7 @@ pub mod power;
 pub mod settings;
 pub mod state;
 pub mod state_machine;
+pub mod summary;
 pub mod thread_qos;
 pub mod transcript;
 pub mod tray;
@@ -91,6 +93,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::is_laptop,
             commands::test_transcribe_wav,
             commands::paste_text,
+            commands::frontmost_app_name,
+            commands::read_selected_text,
+            commands::read_focused_text,
             commands::start_meeting_recording,
             commands::resume_meeting_recording,
             commands::stop_meeting_recording,
@@ -108,6 +113,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::export_meeting_filename,
             commands::export_meeting_to_file,
             commands::check_summary_providers,
+            commands::pull_recommended_ollama_model,
             commands::summarize_meeting,
             commands::search_text,
             commands::list_dictation_entries,
@@ -131,6 +137,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::update_dictionary_entry,
             commands::delete_dictionary_entry,
             commands::clear_dictionary,
+            commands::learn_from_edit,
             commands::get_permission_status,
             commands::request_permission,
             commands::repair_accessibility_permission,
@@ -152,6 +159,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             app_events::Navigate,
             app_events::ShortcutToggle,
+            app_events::ShortcutRewrite,
             app_events::ShortcutPttStart,
             app_events::ShortcutPttStop,
             app_events::StateChanged,
@@ -310,18 +318,25 @@ pub fn run() {
                     state
                         .engine_actor
                         .set_unload_timeout(app_settings.model_unload_timeout_minutes);
-                    let _ = state.audio_cmd_sender.send(state::AudioCommand::SetClamshellDevice(
-                        app_settings.clamshell_audio_device,
-                    ));
-                    let _ = state.audio_cmd_sender.send(state::AudioCommand::SetInputPolicy {
-                        priority: app_settings.input_priority,
-                        allow_bluetooth_mic: app_settings.allow_bluetooth_mic,
-                    });
+                    let _ = state
+                        .audio_cmd_sender
+                        .send(state::AudioCommand::SetClamshellDevice(
+                            app_settings.clamshell_audio_device,
+                        ));
+                    let _ = state
+                        .audio_cmd_sender
+                        .send(state::AudioCommand::SetInputPolicy {
+                            priority: app_settings.input_priority,
+                            allow_bluetooth_mic: app_settings.allow_bluetooth_mic,
+                        });
                     // Directory walk over recordings/ can take a moment with
                     // a large history; never block startup on it.
                     let retention = app_settings.meeting_audio_retention;
                     std::thread::spawn(move || {
-                        audio::retention::sweep_expired_recordings(retention, std::time::SystemTime::now());
+                        audio::retention::sweep_expired_recordings(
+                            retention,
+                            std::time::SystemTime::now(),
+                        );
                     });
                 }
                 Err(e) => {
@@ -347,8 +362,8 @@ pub fn run() {
             // lifetime, same as the sleep observer tokens above.
             #[cfg(target_os = "macos")]
             {
-                use std::sync::mpsc::channel;
                 use crate::audio::device_watch::{self, ChangeKind};
+                use std::sync::mpsc::channel;
 
                 let (route_tx, route_rx) = channel::<ChangeKind>();
                 std::mem::forget(device_watch::start(Some(route_tx)));

@@ -77,7 +77,9 @@
     "empty": "Aucune entrée dans le dictionnaire personnalisé.",
     "pronunciation": "Prononciation",
     "pronunciation_placeholder": "ex. vésix",
-    "pronunciation_desc": "Comment le terme s'entend, orthographié. Les correspondances exactes et les mots proches sont réécrits vers le terme. Séparez plusieurs graphies par des virgules, ex. vésix, vé six."
+    "pronunciation_desc": "Comment le terme s'entend, orthographié. Les correspondances exactes et les mots proches sont réécrits vers le terme. Séparez plusieurs graphies par des virgules, ex. vésix, vé six.",
+    "learn_from_edit": "Apprendre des corrections après collage",
+    "learn_from_edit_desc": "Quand le collage auto est actif, mémoriser les corrections mot à mot dans l'app cible pour les dictées suivantes."
   },
   "settings_calendar": {
     "title": "Calendrier",
@@ -108,9 +110,12 @@
     "auto_paste": "Collage automatique après dictée",
     "auto_paste_desc": "Colle automatiquement la transcription à l'arrêt de l'enregistrement.",
     "paste_method": "Méthode de collage",
-    "paste_method_desc": "Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).",
+    "paste_method_desc": "Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).",
     "paste_method_clipboard": "Presse-papiers (⌘V)",
     "paste_method_type": "Frappe simulée",
+    "paste_method_ax": "Champ ciblé",
+    "rewrite": "Réécrire la sélection",
+    "rewrite_desc": "Appuyez pour dicter une réécriture du texte sélectionné. Colle par-dessus la sélection au lieu d'insérer.",
     "paste_delay": "Délai de collage (ms)",
     "paste_delay_desc": "Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.",
     "toggle_recording": "Basculer l'enregistrement",
@@ -158,7 +163,12 @@
     "not_available": "Non disponible",
     "retry": "Réessayer",
     "summary_model": "Modèle de résumé",
-    "no_compatible_model": "Aucun modèle compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés."
+    "no_compatible_model": "Aucun modèle compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
+    "download_recommended": "Télécharger {model}",
+    "download_recommended_desc": "Recommandé pour les résumés et le polish de dictée (~4,7 Go).",
+    "recommended_model": "Modèle recommandé",
+    "downloading_model": "Téléchargement de {model}…",
+    "pull_failed": "Impossible de télécharger le modèle : {error}"
   },
   "settings_diagnostics": {
     "title": "Diagnostics",
