@@ -3,7 +3,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_specta::Event;
 use tracing::info;
 
-use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutToggle};
+use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutRewrite, ShortcutToggle};
 use crate::settings::{AppSettings, ShortcutSettings};
 use crate::state::AppState;
 
@@ -29,13 +29,17 @@ pub fn save_settings(
     state
         .engine_actor
         .set_unload_timeout(settings.model_unload_timeout_minutes);
-    let _ = state.audio_cmd_sender.send(crate::state::AudioCommand::SetClamshellDevice(
-        settings.clamshell_audio_device.clone(),
-    ));
-    let _ = state.audio_cmd_sender.send(crate::state::AudioCommand::SetInputPolicy {
-        priority: settings.input_priority.clone(),
-        allow_bluetooth_mic: settings.allow_bluetooth_mic,
-    });
+    let _ = state
+        .audio_cmd_sender
+        .send(crate::state::AudioCommand::SetClamshellDevice(
+            settings.clamshell_audio_device.clone(),
+        ));
+    let _ = state
+        .audio_cmd_sender
+        .send(crate::state::AudioCommand::SetInputPolicy {
+            priority: settings.input_priority.clone(),
+            allow_bluetooth_mic: settings.allow_bluetooth_mic,
+        });
     // A locale change must relabel the tray menu immediately.
     if let Ok(machine) = state.current_machine_state() {
         crate::tray::sync(&app, &machine);
@@ -58,6 +62,16 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
         })
         .map_err(|e| format!("Register toggle shortcut '{}': {e}", shortcuts.toggle))?;
         info!(shortcut = shortcuts.toggle, "Toggle shortcut registered");
+    }
+
+    if !shortcuts.rewrite.is_empty() {
+        gs.on_shortcut(shortcuts.rewrite.as_str(), move |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                let _ = ShortcutRewrite.emit(app);
+            }
+        })
+        .map_err(|e| format!("Register rewrite shortcut '{}': {e}", shortcuts.rewrite))?;
+        info!(shortcut = shortcuts.rewrite, "Rewrite shortcut registered");
     }
 
     if !shortcuts.push_to_talk.is_empty() {

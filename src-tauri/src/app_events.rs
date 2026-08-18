@@ -17,6 +17,10 @@ pub struct Navigate(pub AppView);
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct ShortcutToggle;
 
+/// Toggle-style rewrite: capture the current selection, dictate, paste over it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct ShortcutRewrite;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct ShortcutPttStart;
 

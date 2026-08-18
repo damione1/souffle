@@ -1,6 +1,7 @@
 pub mod app_events;
 pub mod archive;
 pub mod audio;
+pub mod ax_text;
 pub mod calendar;
 pub mod cli;
 pub mod clipboard;
@@ -13,6 +14,7 @@ pub mod engine;
 pub mod errors;
 pub mod export;
 pub mod filter;
+pub mod frontmost;
 pub mod lid;
 pub mod lock_ext;
 pub mod logging;
@@ -91,6 +93,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::is_laptop,
             commands::test_transcribe_wav,
             commands::paste_text,
+            commands::frontmost_app_name,
+            commands::read_selected_text,
+            commands::read_focused_text,
             commands::start_meeting_recording,
             commands::resume_meeting_recording,
             commands::stop_meeting_recording,
@@ -131,6 +136,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::update_dictionary_entry,
             commands::delete_dictionary_entry,
             commands::clear_dictionary,
+            commands::learn_from_edit,
             commands::get_permission_status,
             commands::request_permission,
             commands::repair_accessibility_permission,
@@ -152,6 +158,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             app_events::Navigate,
             app_events::ShortcutToggle,
+            app_events::ShortcutRewrite,
             app_events::ShortcutPttStart,
             app_events::ShortcutPttStop,
             app_events::StateChanged,

@@ -146,6 +146,39 @@ async pasteText(text: string, delayMs: number, method: PasteMethod) : Promise<Re
 }
 },
 /**
+ * Localized name of the frontmost app at call time.
+ */
+async frontmostAppName() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("frontmost_app_name") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Selected text in the focused accessibility element, if any.
+ */
+async readSelectedText() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_selected_text") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Full value of the focused accessibility element, if readable.
+ */
+async readFocusedText() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_focused_text") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Start meeting recording with live transcription.
  */
 async startMeetingRecording(title: string, calendar: MeetingCalendarContext | null, channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
@@ -420,9 +453,9 @@ async clearDictationHistory() : Promise<Result<null, string>> {
 /**
  * Optional LLM polish pass for dictation text before paste/history.
  */
-async polishDictation(text: string) : Promise<Result<DictationPolishResult, string>> {
+async polishDictation(text: string, focusedApp: string | null, rewriteOf: string | null) : Promise<Result<DictationPolishResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("polish_dictation", { text }) };
+    return { status: "ok", data: await TAURI_INVOKE("polish_dictation", { text, focusedApp, rewriteOf }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -596,6 +629,17 @@ async deleteDictionaryEntry(id: number) : Promise<Result<null, string>> {
 async clearDictionary() : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("clear_dictionary") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Persist word-level misspelling→term pairs from a post-paste edit.
+ */
+async learnFromEdit(original: string, corrected: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("learn_from_edit", { original, corrected }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -832,6 +876,7 @@ pillHoldChanged: PillHoldChanged,
 pipelineError: PipelineError,
 shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
+shortcutRewrite: ShortcutRewrite,
 shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
@@ -854,6 +899,7 @@ pillHoldChanged: "pill-hold-changed",
 pipelineError: "pipeline-error",
 shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
+shortcutRewrite: "shortcut-rewrite",
 shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
 systemAudioStatus: "system-audio-status",
@@ -870,7 +916,8 @@ upcomingMeeting: "upcoming-meeting"
 
 export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; paste_delay_ms: number; 
 /**
- * How dictation text is inserted: clipboard Cmd+V or simulated keystrokes.
+ * How dictation text is inserted: clipboard Cmd+V, simulated keystrokes,
+ * or the focused AX field.
  */
 paste_method: PasteMethod; ollama_url: string; ollama_model: string; debug_transcription: boolean; 
 /**
@@ -970,6 +1017,11 @@ dictation_polish_template_id: string;
  * User-editable polish prompt templates.
  */
 dictation_polish_templates: DictationPolishTemplate[]; 
+/**
+ * After auto-paste, persist word-level edits from the focused field
+ * into the custom dictionary.
+ */
+dictation_learn_from_edit: boolean; 
 /**
  * Active default meeting-summary template id: used by the Generate
  * button when the user doesn't pick another template, and by any
@@ -1263,7 +1315,11 @@ participants: MeetingParticipant[] }
 export type MeetingTranscriptionLanguage = "auto" | "en" | "fr"
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
 export type Navigate = AppView
-export type PasteMethod = "clipboard" | "type"
+export type PasteMethod = "clipboard" | "type" | 
+/**
+ * Set the focused element's selected text via Accessibility.
+ */
+"ax"
 export type PermState = "granted" | "denied" | 
 /**
  * Not yet probed — the user hasn't triggered this one (probing would
@@ -1314,7 +1370,15 @@ export type RecordingKind = "dictation" | { meeting: { meeting_id: string } }
 export type SearchResult = { source_type: string; source_id: string; snippet: string; rank: number }
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
-export type ShortcutSettings = { toggle: string; push_to_talk: string }
+/**
+ * Toggle-style rewrite: capture the current selection, dictate, paste over it.
+ */
+export type ShortcutRewrite = null
+export type ShortcutSettings = { toggle: string; push_to_talk: string; 
+/**
+ * Toggle-style shortcut that rewrites the current selection.
+ */
+rewrite: string }
 export type ShortcutToggle = null
 export type StateChanged = AppStateMachine
 /**

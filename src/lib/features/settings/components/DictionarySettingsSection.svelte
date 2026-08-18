@@ -1,14 +1,19 @@
 <script lang="ts">
   import { Trash2, Plus } from "@lucide/svelte";
   import { t } from "svelte-i18n";
+  import SettingsField from "../../../components/ui/SettingsField.svelte";
   import type { DictionaryEntry } from "../../../types";
 
   let {
     entries,
+    learnFromEdit,
+    onLearnFromEditChange,
     onAdd,
     onDelete,
   }: {
     entries: DictionaryEntry[];
+    learnFromEdit: boolean;
+    onLearnFromEditChange: (event: Event) => void;
     onAdd: (term: string, pronunciation: string | null, category: string | null) => void | Promise<void>;
     onDelete: (id: number) => void | Promise<void>;
   } = $props();
@@ -42,6 +47,21 @@
 <section class="settings-group">
   <h3>{$t("settings_dictionary.title")}</h3>
   <div class="settings-rows">
+  <SettingsField
+    label={$t("settings_dictionary.learn_from_edit")}
+    description={$t("settings_dictionary.learn_from_edit_desc")}
+  >
+    {#snippet control()}
+      <input
+        type="checkbox"
+        checked={learnFromEdit}
+        onchange={onLearnFromEditChange}
+        class="switch"
+        aria-label={$t("settings_dictionary.learn_from_edit")}
+      />
+    {/snippet}
+  </SettingsField>
+
   <div class="flex flex-col gap-3">
   <p class="setting-desc m-0">{$t("settings_dictionary.description")}</p>
 

@@ -77,7 +77,9 @@
     "empty": "No custom dictionary entries yet.",
     "pronunciation": "Pronunciation",
     "pronunciation_placeholder": "e.g. vaysix",
-    "pronunciation_desc": "How the term sounds, spelled out. Exact matches and similar-sounding words are rewritten to the term. Comma-separate several heard spellings, e.g. vaysix, vee six."
+    "pronunciation_desc": "How the term sounds, spelled out. Exact matches and similar-sounding words are rewritten to the term. Comma-separate several heard spellings, e.g. vaysix, vee six.",
+    "learn_from_edit": "Learn from edits after paste",
+    "learn_from_edit_desc": "When auto-paste is on, remember word-level fixes you make in the target app so later dictations match."
   },
   "settings_calendar": {
     "title": "Calendar",
@@ -108,9 +110,12 @@
     "auto_paste": "Auto-paste after dictation",
     "auto_paste_desc": "Automatically pastes the transcript when you stop recording.",
     "paste_method": "Paste method",
-    "paste_method_desc": "Use simulated typing if an app rejects synthetic ⌘V (terminals, secure fields).",
+    "paste_method_desc": "Focused field uses Accessibility to insert into the current selection. Use simulated typing if an app rejects synthetic ⌘V (terminals, secure fields).",
     "paste_method_clipboard": "Clipboard (⌘V)",
     "paste_method_type": "Simulated typing",
+    "paste_method_ax": "Focused field",
+    "rewrite": "Rewrite selection",
+    "rewrite_desc": "Press to dictate a rewrite of the selected text. Pastes over the selection instead of inserting.",
     "paste_delay": "Paste delay (ms)",
     "paste_delay_desc": "Wait time before pasting. Increase if the text lands in the wrong app.",
     "toggle_recording": "Toggle recording",

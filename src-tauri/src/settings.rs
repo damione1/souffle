@@ -48,6 +48,8 @@ const SUMMARY_TEMPLATES_KEY: &str = "summary_templates";
 const LOG_LEVEL_KEY: &str = "log_level";
 const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
+const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
+const SHORTCUT_REWRITE_KEY: &str = "shortcut_rewrite";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
 
@@ -57,6 +59,8 @@ pub enum PasteMethod {
     #[default]
     Clipboard,
     Type,
+    /// Set the focused element's selected text via Accessibility.
+    Ax,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
@@ -122,7 +126,8 @@ pub struct AppSettings {
     pub locale: String,
     pub auto_paste: bool,
     pub paste_delay_ms: u64,
-    /// How dictation text is inserted: clipboard Cmd+V or simulated keystrokes.
+    /// How dictation text is inserted: clipboard Cmd+V, simulated keystrokes,
+    /// or the focused AX field.
     pub paste_method: PasteMethod,
     pub ollama_url: String,
     pub ollama_model: String,
@@ -189,6 +194,9 @@ pub struct AppSettings {
     pub dictation_polish_template_id: String,
     /// User-editable polish prompt templates.
     pub dictation_polish_templates: Vec<DictationPolishTemplate>,
+    /// After auto-paste, persist word-level edits from the focused field
+    /// into the custom dictionary.
+    pub dictation_learn_from_edit: bool,
     /// Active default meeting-summary template id: used by the Generate
     /// button when the user doesn't pick another template, and by any
     /// automatic summarization.
@@ -245,6 +253,7 @@ impl Default for AppSettings {
             dictation_polish_enabled: true,
             dictation_polish_template_id: crate::summary::TEMPLATE_CLEAN.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
+            dictation_learn_from_edit: true,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: String::new(),
@@ -425,6 +434,11 @@ impl AppSettings {
         {
             settings.dictation_polish_templates =
                 crate::summary::merge_polish_templates(dictation_polish_templates);
+        }
+        if let Some(dictation_learn_from_edit) =
+            read_json_setting::<bool>(db, DICTATION_LEARN_FROM_EDIT_KEY)?
+        {
+            settings.dictation_learn_from_edit = dictation_learn_from_edit;
         }
         if let Some(default_summary_template_id) =
             read_json_setting::<String>(db, DEFAULT_SUMMARY_TEMPLATE_ID_KEY)?
@@ -819,6 +833,11 @@ impl AppSettings {
         )?;
         write_json_setting(
             db,
+            DICTATION_LEARN_FROM_EDIT_KEY,
+            &normalized.dictation_learn_from_edit,
+        )?;
+        write_json_setting(
+            db,
             DEFAULT_SUMMARY_TEMPLATE_ID_KEY,
             &normalized.default_summary_template_id,
         )?;
@@ -863,6 +882,8 @@ fn dedupe_known_devices(known: &mut Vec<crate::audio::KnownDevice>) {
 pub struct ShortcutSettings {
     pub toggle: String,
     pub push_to_talk: String,
+    /// Toggle-style shortcut that rewrites the current selection.
+    pub rewrite: String,
 }
 
 impl Default for ShortcutSettings {
@@ -870,6 +891,7 @@ impl Default for ShortcutSettings {
         Self {
             toggle: crate::DEFAULT_TOGGLE_SHORTCUT.to_string(),
             push_to_talk: String::new(),
+            rewrite: String::new(),
         }
     }
 }
@@ -884,6 +906,9 @@ impl ShortcutSettings {
         if let Some(push_to_talk) = read_json_setting::<String>(db, SHORTCUT_PUSH_TO_TALK_KEY)? {
             shortcuts.push_to_talk = push_to_talk;
         }
+        if let Some(rewrite) = read_json_setting::<String>(db, SHORTCUT_REWRITE_KEY)? {
+            shortcuts.rewrite = rewrite;
+        }
 
         Ok(shortcuts.sanitized())
     }
@@ -892,10 +917,14 @@ impl ShortcutSettings {
         let normalized = Self {
             toggle: self.toggle.trim().to_string(),
             push_to_talk: self.push_to_talk.trim().to_string(),
+            rewrite: self.rewrite.trim().to_string(),
         };
 
-        if !normalized.toggle.is_empty() && normalized.toggle == normalized.push_to_talk {
-            return Err("Toggle and push-to-talk shortcuts must be different".into());
+        if conflicting_pair(&normalized.toggle, &normalized.push_to_talk)
+            || conflicting_pair(&normalized.toggle, &normalized.rewrite)
+            || conflicting_pair(&normalized.push_to_talk, &normalized.rewrite)
+        {
+            return Err("Dictation shortcuts must be different".into());
         }
 
         Ok(normalized)
@@ -905,10 +934,16 @@ impl ShortcutSettings {
         let mut normalized = Self {
             toggle: self.toggle.trim().to_string(),
             push_to_talk: self.push_to_talk.trim().to_string(),
+            rewrite: self.rewrite.trim().to_string(),
         };
 
-        if !normalized.toggle.is_empty() && normalized.toggle == normalized.push_to_talk {
+        if conflicting_pair(&normalized.toggle, &normalized.push_to_talk) {
             normalized.push_to_talk.clear();
+        }
+        if conflicting_pair(&normalized.toggle, &normalized.rewrite)
+            || conflicting_pair(&normalized.push_to_talk, &normalized.rewrite)
+        {
+            normalized.rewrite.clear();
         }
 
         normalized
@@ -918,8 +953,13 @@ impl ShortcutSettings {
         let normalized = self.normalize()?;
         write_json_setting(db, SHORTCUT_TOGGLE_KEY, &normalized.toggle)?;
         write_json_setting(db, SHORTCUT_PUSH_TO_TALK_KEY, &normalized.push_to_talk)?;
+        write_json_setting(db, SHORTCUT_REWRITE_KEY, &normalized.rewrite)?;
         Ok(())
     }
+}
+
+fn conflicting_pair(left: &str, right: &str) -> bool {
+    !left.is_empty() && left == right
 }
 
 fn read_json_setting<T>(db: &Database, key: &str) -> Result<Option<T>, String>
@@ -991,6 +1031,7 @@ mod tests {
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
+            dictation_learn_from_edit: true,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: "0.0.9".into(),
@@ -1037,10 +1078,24 @@ mod tests {
     }
 
     #[test]
+    fn shortcut_rewrite_duplicate_is_cleared_on_load() {
+        let (db, _dir) = test_db();
+        db.set_setting("shortcut_toggle", "\"F6\"")
+            .expect("save toggle");
+        db.set_setting("shortcut_rewrite", "\"F6\"")
+            .expect("save rewrite");
+
+        let shortcuts = ShortcutSettings::load(&db).expect("load shortcuts");
+        assert_eq!(shortcuts.toggle, "F6");
+        assert_eq!(shortcuts.rewrite, "");
+    }
+
+    #[test]
     fn shortcut_settings_reject_duplicate_bindings() {
         let shortcuts = ShortcutSettings {
             toggle: "CommandOrControl+Shift+Space".into(),
             push_to_talk: "CommandOrControl+Shift+Space".into(),
+            rewrite: String::new(),
         };
 
         assert!(shortcuts.normalize().is_err());
@@ -1230,6 +1285,7 @@ mod tests {
         let s = ShortcutSettings {
             toggle: String::new(),
             push_to_talk: String::new(),
+            rewrite: String::new(),
         };
         assert!(s.normalize().is_ok());
     }
@@ -1240,6 +1296,7 @@ mod tests {
         let s = ShortcutSettings {
             toggle: "CommandOrControl+Shift+Space".to_string(),
             push_to_talk: "CommandOrControl+Shift+S".to_string(),
+            rewrite: "CommandOrControl+Shift+R".to_string(),
         };
         s.save(&db).unwrap();
         let loaded = ShortcutSettings::load(&db).unwrap();

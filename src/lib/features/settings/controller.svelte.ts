@@ -70,7 +70,8 @@ export function createSettingsController() {
 
   let toggleShortcut = $state("CommandOrControl+Shift+Space");
   let pttShortcut = $state("");
-  let recordingField = $state<"toggle" | "ptt" | null>(null);
+  let rewriteShortcut = $state("");
+  let recordingField = $state<"toggle" | "ptt" | "rewrite" | null>(null);
   let shortcutError = $state("");
 
   let dictionaryEntries = $state<DictionaryEntry[]>([]);
@@ -137,6 +138,7 @@ export function createSettingsController() {
       const shortcuts = await getShortcuts();
       toggleShortcut = shortcuts.toggle;
       pttShortcut = shortcuts.push_to_talk;
+      rewriteShortcut = shortcuts.rewrite;
     } catch (e) {
       console.warn("Failed to load shortcuts:", e);
     }
@@ -378,6 +380,13 @@ export function createSettingsController() {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
       settings.auto_paste = checked;
+    });
+  }
+
+  function onLearnFromEditChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.dictation_learn_from_edit = checked;
     });
   }
 
@@ -717,9 +726,15 @@ export function createSettingsController() {
     return formatShortcutLabel(shortcut) || "Not set";
   }
 
-  function startRecording(field: "toggle" | "ptt") {
+  function startRecording(field: "toggle" | "ptt" | "rewrite") {
     recordingField = field;
     shortcutError = "";
+  }
+
+  function applyShortcutValue(field: "toggle" | "ptt" | "rewrite", value: string) {
+    if (field === "toggle") toggleShortcut = value;
+    else if (field === "ptt") pttShortcut = value;
+    else rewriteShortcut = value;
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -733,8 +748,7 @@ export function createSettingsController() {
     }
 
     if (event.key === "Backspace" || event.key === "Delete") {
-      if (recordingField === "toggle") toggleShortcut = "";
-      else pttShortcut = "";
+      applyShortcutValue(recordingField, "");
       recordingField = null;
       void saveShortcutSettings();
       return;
@@ -748,8 +762,7 @@ export function createSettingsController() {
       return;
     }
 
-    if (recordingField === "toggle") toggleShortcut = shortcut;
-    else pttShortcut = shortcut;
+    applyShortcutValue(recordingField, shortcut);
     recordingField = null;
     void saveShortcutSettings();
   }
@@ -760,15 +773,15 @@ export function createSettingsController() {
       await persistShortcutSettings({
         toggle: toggleShortcut,
         push_to_talk: pttShortcut,
+        rewrite: rewriteShortcut,
       } satisfies ShortcutSettings);
     } catch (e) {
       shortcutError = errorMessage(e);
     }
   }
 
-  async function clearShortcut(field: "toggle" | "ptt") {
-    if (field === "toggle") toggleShortcut = "";
-    else pttShortcut = "";
+  async function clearShortcut(field: "toggle" | "ptt" | "rewrite") {
+    applyShortcutValue(field, "");
     await saveShortcutSettings();
   }
 
@@ -795,6 +808,7 @@ export function createSettingsController() {
     get downloadTotalBytes() { return app.downloadTotalBytes; },
     get toggleShortcut() { return toggleShortcut; },
     get pttShortcut() { return pttShortcut; },
+    get rewriteShortcut() { return rewriteShortcut; },
     get recordingField() { return recordingField; },
     get shortcutError() { return shortcutError; },
     get dictionaryEntries() { return dictionaryEntries; },
@@ -819,6 +833,7 @@ export function createSettingsController() {
     onThemeChange,
     onLocaleChange,
     onAutoPasteChange,
+    onLearnFromEditChange,
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,
     onDictationPolishPromptChange,
