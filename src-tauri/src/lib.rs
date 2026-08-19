@@ -170,6 +170,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::MeetingStopRequested,
             app_events::MeetingFinalized,
             app_events::UpcomingMeeting,
+            app_events::TodayCalendarUpdated,
             app_events::MeetingIdle,
             app_events::SystemWokeUp,
             app_events::ArchiveExportProgress,
@@ -393,6 +394,14 @@ pub fn run() {
                         }
                     })
                     .expect("failed to spawn input-route thread");
+
+                device_watch::destroy_orphaned_souffle_taps();
+            }
+
+            if let Some(pill) = app.get_webview_window("pill") {
+                if let Err(e) = crate::pill::position_top_center(&pill) {
+                    tracing::warn!("Pill overlay configure failed: {e}");
+                }
             }
 
             tray::setup_tray(app.handle())?;

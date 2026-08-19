@@ -6,7 +6,7 @@ use ringbuf::traits::{Producer, Split};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 
 use super::mixer::MeetingMixer;
@@ -43,6 +43,11 @@ const DICTATION_TICK: Duration = LEVEL_EMIT_INTERVAL;
 /// still the system default (closing the laptop lid switches the default
 /// input to a headset or webcam mic — the stream must follow it).
 const MIC_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+
+/// A live input stream delivers callbacks many times a second. If none
+/// arrive for this long the AudioUnit is a zombie (USB dock reboot that
+/// never fires cpal's error callback) and the mic leg must be rebuilt.
+const MIC_STALE_AFTER: Duration = Duration::from_secs(2);
 
 /// Ceiling on how often AudioLevel is pushed to the frontend. Meeting mode's
 /// 5ms tick would otherwise emit at ~200Hz; the dictation tick matches this
@@ -90,6 +95,41 @@ fn decide_mic_loss(
     } else {
         MicLossAction::KeepRetrying
     }
+}
+
+fn unix_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// True when the cpal input callback has been silent longer than `threshold`.
+fn mic_callbacks_stale(last_callback_ms: u64, now_ms: u64, threshold: Duration) -> bool {
+    last_callback_ms > 0 && now_ms.saturating_sub(last_callback_ms) >= threshold.as_millis() as u64
+}
+
+/// USB unplug/replug keeps the device UID and allocates a new CoreAudio
+/// object. `None` current means the UID disappeared from the HAL list.
+fn opened_device_replaced(opened_id: Option<u32>, current_id: Option<u32>) -> bool {
+    match (opened_id, current_id) {
+        (Some(opened), Some(current)) => opened != current,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+/// Whether the capture leg should be torn down and reopened. UID-only
+/// comparison misses dock reboots: the pin still resolves, the stream is
+/// just bound to a dead HAL object.
+fn should_rebuild_mic(
+    stream_failed: bool,
+    callbacks_stale: bool,
+    device_replaced: bool,
+    device_not_alive: bool,
+    resolved_changed: bool,
+) -> bool {
+    stream_failed || callbacks_stale || device_replaced || device_not_alive || resolved_changed
 }
 
 #[cfg(test)]
@@ -148,6 +188,48 @@ mod mic_loss_tests {
         // A caller resets `already_warned_this_episode` to false once a
         // rebuild succeeds; the next loss episode should warn again.
         assert_eq!(decide_mic_loss(1, true, false), MicLossAction::WarnOnce);
+    }
+
+    #[test]
+    fn callbacks_stale_after_threshold_not_before() {
+        let t0 = 1_000;
+        assert!(!mic_callbacks_stale(t0, t0 + 1_999, MIC_STALE_AFTER));
+        assert!(mic_callbacks_stale(t0, t0 + 2_000, MIC_STALE_AFTER));
+        assert!(
+            !mic_callbacks_stale(0, t0 + 10_000, MIC_STALE_AFTER),
+            "unset timestamp must not look stale (pre-start)"
+        );
+    }
+
+    #[test]
+    fn replaced_when_object_id_changes_or_uid_vanishes() {
+        assert!(!opened_device_replaced(Some(42), Some(42)));
+        assert!(opened_device_replaced(Some(42), Some(99)));
+        assert!(opened_device_replaced(Some(42), None));
+        assert!(!opened_device_replaced(None, Some(99)));
+        assert!(!opened_device_replaced(None, None));
+    }
+
+    #[test]
+    fn rebuilds_on_dock_reboot_signals_not_just_uid_change() {
+        assert!(
+            !should_rebuild_mic(false, false, false, false, false),
+            "healthy stream must not rebuild"
+        );
+        assert!(
+            should_rebuild_mic(false, false, true, false, false),
+            "same UID, new HAL object (USB replug)"
+        );
+        assert!(
+            should_rebuild_mic(false, true, false, false, false),
+            "callbacks stopped"
+        );
+        assert!(
+            should_rebuild_mic(false, false, false, true, false),
+            "DeviceIsAlive flipped off"
+        );
+        assert!(should_rebuild_mic(true, false, false, false, false));
+        assert!(should_rebuild_mic(false, false, false, false, true));
     }
 }
 
@@ -256,7 +338,8 @@ impl MeetingState {
         if can_leak != self.aec_active {
             if can_leak {
                 info!("Speakers audible, echo cancellation engaged");
-                self.mixer.set_aec(Some(aec::Aec::new_with_default_delay_hint(mixer::MIX_RATE)));
+                self.mixer
+                    .set_aec(Some(aec::Aec::new_with_default_delay_hint(mixer::MIX_RATE)));
             } else {
                 info!("Output muted or off speakers, echo cancellation disengaged");
                 self.mixer.set_aec(None);
@@ -359,6 +442,30 @@ fn find_cpal_device_by_uid(host: &cpal::Host, uid: &str) -> Option<Device> {
         .find(|device| cpal_device_uid(device).as_deref() == Some(uid))
 }
 
+fn current_mic_object_id(uid: &str) -> Option<u32> {
+    #[cfg(target_os = "macos")]
+    {
+        super::device_watch::object_id_for_uid(uid)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = uid;
+        None
+    }
+}
+
+fn mic_device_is_alive(id: u32) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        super::device_watch::device_is_alive(id)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = id;
+        true
+    }
+}
+
 /// Manages audio capture from a selected input device.
 /// Sends resampled 24kHz mono f32 chunks over a crossbeam channel.
 ///
@@ -401,6 +508,11 @@ pub struct AudioCapture {
     mic_device_name: Option<String>,
     /// UID resolved when the current stream was built (for route hot-swap).
     mic_device_uid: Option<String>,
+    /// CoreAudio object ID of that UID at open. USB replug keeps the UID
+    /// and issues a new ID; comparing them is how we detect a dock reboot.
+    mic_device_object_id: Option<u32>,
+    /// Last cpal input-callback time (unix ms). 0 = never.
+    last_mic_callback_ms: Arc<AtomicU64>,
     /// Resolved target UID of the last route-change rebuild. When the opened
     /// device cannot converge on that target (duplicate device names, or a
     /// resolved device cpal cannot open), this stops the periodic health
@@ -466,6 +578,8 @@ impl AudioCapture {
                     active_params: None,
                     mic_device_name: None,
                     mic_device_uid: None,
+                    mic_device_object_id: None,
+                    last_mic_callback_ms: Arc::new(AtomicU64::new(0)),
                     route_attempt_uid: None,
                     stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     last_mic_check: Instant::now(),
@@ -682,6 +796,9 @@ impl AudioCapture {
             .store(false, std::sync::atomic::Ordering::Relaxed);
         self.mic_device_name = None;
         self.mic_device_uid = None;
+        self.mic_device_object_id = None;
+        self.last_mic_callback_ms
+            .store(unix_now_ms(), Ordering::Relaxed);
 
         let known_devices = list_input_devices_impl();
         let device = self.find_device(&known_devices)?;
@@ -700,7 +817,8 @@ impl AudioCapture {
             })
             .or_else(|| opened_uid.clone())
             .unwrap_or_else(|| "Unknown".into());
-        self.mic_device_uid = opened_uid;
+        self.mic_device_uid = opened_uid.clone();
+        self.mic_device_object_id = opened_uid.as_deref().and_then(current_mic_object_id);
         info!("Using input device: {device_name}");
         self.mic_device_name = Some(device_name.clone());
 
@@ -734,6 +852,7 @@ impl AudioCapture {
         let dropped_counter = Arc::clone(&self.dropped_counter);
 
         let stream_failed = Arc::clone(&self.stream_failed);
+        let last_mic_callback_ms = Arc::clone(&self.last_mic_callback_ms);
         let err_fn = move |err: cpal::StreamError| {
             error!("Audio stream error: {err}");
             stream_failed.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -754,6 +873,7 @@ impl AudioCapture {
                     if active_session_id.load(Ordering::Acquire) != session_id {
                         return;
                     }
+                    last_mic_callback_ms.store(unix_now_ms(), Ordering::Relaxed);
 
                     let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let resampled = match resampler.lock() {
@@ -823,8 +943,16 @@ impl AudioCapture {
     /// A failure to start the recorder is logged and otherwise ignored —
     /// recording is a best-effort opt-in feature, never a reason to fail the
     /// audio session itself.
-    fn sync_recorder(&mut self, session_id: u64, record_path: Option<&std::path::Path>, sample_rate: u32) {
-        let same_session = self.recorder.as_ref().is_some_and(|r| r.session_id() == session_id);
+    fn sync_recorder(
+        &mut self,
+        session_id: u64,
+        record_path: Option<&std::path::Path>,
+        sample_rate: u32,
+    ) {
+        let same_session = self
+            .recorder
+            .as_ref()
+            .is_some_and(|r| r.session_id() == session_id);
         match record_path {
             Some(_) if same_session => {}
             Some(path) => {
@@ -905,6 +1033,7 @@ impl AudioCapture {
         // be held hostage by tap startup (see system_tap.rs module docs).
         let active_session_id = Arc::clone(&self.active_session_id);
         let stream_failed = Arc::clone(&self.stream_failed);
+        let last_mic_callback_ms = Arc::clone(&self.last_mic_callback_ms);
         let err_fn = move |err: cpal::StreamError| {
             error!("Audio stream error: {err}");
             stream_failed.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -916,6 +1045,7 @@ impl AudioCapture {
                     if active_session_id.load(Ordering::Acquire) != session_id {
                         return;
                     }
+                    last_mic_callback_ms.store(unix_now_ms(), Ordering::Relaxed);
                     // Ring full means the mixer is wedged; losing mic samples
                     // here is the only safe option in a realtime callback.
                     let _ = mic_prod.push_slice(data);
@@ -976,7 +1106,9 @@ impl AudioCapture {
             let can_leak = tap.is_some() && super::output_route::output_can_leak_into_mic();
             if can_leak {
                 info!("Speakers audible, echo cancellation engaged");
-                mixer.set_aec(Some(super::aec::Aec::new_with_default_delay_hint(super::mixer::MIX_RATE)));
+                mixer.set_aec(Some(super::aec::Aec::new_with_default_delay_hint(
+                    super::mixer::MIX_RATE,
+                )));
             }
             can_leak
         };
@@ -998,10 +1130,11 @@ impl AudioCapture {
         Ok(())
     }
 
-    /// Rebuild the capture leg when the stream died or the default input
-    /// device changed (lid closed, headset plugged in…). The session keeps
-    /// its id, so the engine actor sees one continuous stream; at most a
-    /// couple of seconds of audio are lost.
+    /// Rebuild the capture leg when the stream died, the HAL object behind
+    /// the same UID was replaced (USB dock reboot), callbacks stopped, or
+    /// the resolved input UID changed (lid closed, headset plugged in).
+    /// The session keeps its id, so the engine actor sees one continuous
+    /// stream; at most a couple of seconds of audio are lost.
     ///
     /// Returns `true` if the microphone is unrecoverable and has no other
     /// audio source to fall back on (dictation): the session has already
@@ -1017,21 +1150,31 @@ impl AudioCapture {
         let failed = self
             .stream_failed
             .swap(false, std::sync::atomic::Ordering::Relaxed);
+        let stale = mic_callbacks_stale(
+            self.last_mic_callback_ms.load(Ordering::Relaxed),
+            unix_now_ms(),
+            MIC_STALE_AFTER,
+        );
+        let current_id = self
+            .mic_device_uid
+            .as_deref()
+            .and_then(current_mic_object_id);
+        let replaced = opened_device_replaced(self.mic_device_object_id, current_id);
+        let not_alive = self
+            .mic_device_object_id
+            .is_some_and(|id| !mic_device_is_alive(id));
 
-        // Rebuild when the resolved input UID changes (lid closed, headset
-        // plugged in, priority policy update) or the stream died. Two guards
-        // keep this from looping every MIC_CHECK_INTERVAL:
+        // Two guards keep UID-change rebuilds from looping every interval:
         // - `None` (no auto-eligible device under the current policy) never
-        //   tears down a healthy stream; a dead one is caught by `failed`.
-        // - A target already attempted without converging (duplicate device
-        //   names, resolved device cpal cannot open) is parked in
+        //   tears down a healthy stream; a dead one is caught above.
+        // - A target already attempted without converging is parked in
         //   `route_attempt_uid` until an explicit route event retries it.
         let resolved = self.resolved_input_uid(&list_input_devices_impl());
         let resolved_changed = resolved.is_some()
             && resolved != self.mic_device_uid
             && resolved != self.route_attempt_uid;
 
-        if !failed && !resolved_changed {
+        if !should_rebuild_mic(failed, stale, replaced, not_alive, resolved_changed) {
             return false;
         }
 
@@ -1039,10 +1182,18 @@ impl AudioCapture {
             self.route_attempt_uid = resolved.clone();
         }
 
-        info!(
-            "Input device {}, rebuilding audio capture",
-            if failed { "failed" } else { "changed" }
-        );
+        let reason = if failed {
+            "failed"
+        } else if stale {
+            "callbacks stalled"
+        } else if replaced {
+            "HAL object replaced (same UID)"
+        } else if not_alive {
+            "device not alive"
+        } else {
+            "changed"
+        };
+        info!("Input device {reason}, rebuilding audio capture");
         match self.start(
             params.session_id,
             params.target_sample_rate,
@@ -1237,7 +1388,9 @@ impl AudioCapture {
         self.active_params = None;
         self.mic_device_name = None;
         self.mic_device_uid = None;
+        self.mic_device_object_id = None;
         self.route_attempt_uid = None;
+        self.last_mic_callback_ms.store(0, Ordering::Relaxed);
         self.release_capture_stream();
         self.resampler.take();
         #[cfg(target_os = "macos")]
@@ -1310,7 +1463,9 @@ impl AudioCapture {
         self.active_params = None;
         self.mic_device_name = None;
         self.mic_device_uid = None;
+        self.mic_device_object_id = None;
         self.route_attempt_uid = None;
+        self.last_mic_callback_ms.store(0, Ordering::Relaxed);
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
 

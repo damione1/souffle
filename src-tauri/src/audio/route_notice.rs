@@ -253,7 +253,15 @@ mod tests {
 
     #[test]
     fn skip_souffle_tap_aggregates() {
-        let tap = device("tap", "Souffle system audio tap", TransportType::Aggregate);
+        let tap = device("tap", "Souffle Tap", TransportType::Aggregate);
+        let previous = snap(&[builtin()], Some("builtin"));
+        let next = snap(&[builtin(), tap], Some("builtin"));
+        assert!(notices_for_change(Some(&previous), &next).is_empty());
+    }
+
+    #[test]
+    fn skip_numbered_souffle_tap_leftovers() {
+        let tap = device("tap-2", "Souffle Tap 2", TransportType::Aggregate);
         let previous = snap(&[builtin()], Some("builtin"));
         let next = snap(&[builtin(), tap], Some("builtin"));
         assert!(notices_for_change(Some(&previous), &next).is_empty());

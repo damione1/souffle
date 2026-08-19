@@ -2,6 +2,7 @@
   import { Search, Settings } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
+  import { events } from "../api/generated";
   import { getShortcuts } from "../api/settings";
   import { formatShortcutLabel } from "../utils";
   import ActionHero from "../features/home/ActionHero.svelte";
@@ -45,6 +46,31 @@
         dictationShortcut = formatShortcutLabel(shortcuts.toggle);
       })
       .catch(() => {});
+
+    let unlistenToday: (() => void) | null = null;
+    void events.todayCalendarUpdated.listen((event) => {
+      calendar.applyToday(event.payload);
+    }).then((fn) => {
+      unlistenToday = fn;
+    });
+
+    // Backend pushes on change every minute; this covers a missed event
+    // (webview throttled overnight) and mid-day invites that EventKit
+    // only surfaces on the next poll.
+    const interval = setInterval(() => {
+      void calendar.refresh();
+    }, 2 * 60 * 1000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void calendar.refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      unlistenToday?.();
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   });
 
   $effect(() => {

@@ -45,6 +45,7 @@ export type {
   SummarizeProgress,
   Theme,
   TodayCalendar,
+  TodayCalendarUpdated,
   UpcomingMeeting,
   CalendarMeetingNudgeKind,
   HealthStatus,

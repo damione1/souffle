@@ -7,7 +7,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, LogicalPosition, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 use tracing::warn;
 
@@ -42,7 +42,9 @@ fn set_hold_state(kind: PillHoldKind) {
 /// Clears the hold, returning whether one was actually active (so callers
 /// only emit a change event when something changed).
 fn clear_hold_state() -> bool {
-    HOLD.lock().map(|mut guard| guard.take().is_some()).unwrap_or(false)
+    HOLD.lock()
+        .map(|mut guard| guard.take().is_some())
+        .unwrap_or(false)
 }
 
 fn is_held() -> bool {
@@ -103,7 +105,11 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
 /// Whether enough time has passed since the last live-text emission to send
 /// another one. Pure decision — the `Instant::now()` call lives at the call
 /// site so this is testable with fixed timestamps.
-pub fn should_emit_live_text(last_emit: Option<Instant>, now: Instant, min_interval: Duration) -> bool {
+pub fn should_emit_live_text(
+    last_emit: Option<Instant>,
+    now: Instant,
+    min_interval: Duration,
+) -> bool {
     match last_emit {
         None => true,
         Some(last) => now.duration_since(last) >= min_interval,
@@ -121,19 +127,15 @@ pub fn live_text_tail(text: &str, max_chars: usize) -> String {
     text.chars().skip(total - max_chars).collect()
 }
 
-/// Recenters the pill horizontally below the menu bar. `pub(crate)` so
-/// `sync` can call it when showing the pill in its compact state.
+/// Recenters the pill horizontally below the menu bar on the active screen.
+/// `pub(crate)` so `sync` can call it when showing the pill in its compact state.
 pub(crate) fn position_top_center(pill: &tauri::WebviewWindow) -> tauri::Result<()> {
-    let Some(monitor) = pill.primary_monitor()? else {
-        return Ok(());
-    };
-    let scale = monitor.scale_factor();
-    let monitor_width = monitor.size().to_logical::<f64>(scale).width;
-    let pill_width = pill.outer_size()?.to_logical::<f64>(scale).width;
-    pill.set_position(LogicalPosition::new(
-        (monitor_width - pill_width) / 2.0,
-        TOP_MARGIN,
-    ))
+    let scale = pill
+        .primary_monitor()?
+        .map(|m| m.scale_factor())
+        .unwrap_or(1.0);
+    let size = pill.outer_size()?.to_logical::<f64>(scale);
+    set_frame_top_center(pill, size.width, size.height)
 }
 
 /// Lower/upper bounds on the pill's size, defensively clamped in
@@ -144,13 +146,21 @@ const MAX_WIDTH: f64 = 600.0;
 const MIN_HEIGHT: f64 = 64.0;
 const MAX_HEIGHT: f64 = 260.0;
 
-/// AppKit frame origin (bottom-left corner, in the primary screen's
-/// coordinate space) that keeps the pill's TOP edge pinned at `top_margin`
-/// below the menu bar and horizontally centered. Pure so the anchoring math
-/// is unit-testable without a live window.
-fn frame_origin(monitor_width: f64, monitor_height: f64, width: f64, height: f64, top_margin: f64) -> (f64, f64) {
-    let x = (monitor_width - width) / 2.0;
-    let y = monitor_height - top_margin - height;
+/// AppKit frame origin (bottom-left corner, global screen coordinates) that
+/// keeps the pill's TOP edge pinned at `top_margin` below the top of
+/// `screen` and horizontally centered on that screen. Pure so the anchoring
+/// math is unit-testable without a live window.
+fn frame_origin(
+    screen_x: f64,
+    screen_y: f64,
+    screen_width: f64,
+    screen_height: f64,
+    width: f64,
+    height: f64,
+    top_margin: f64,
+) -> (f64, f64) {
+    let x = screen_x + (screen_width - width) / 2.0;
+    let y = screen_y + screen_height - top_margin - height;
     (x, y)
 }
 
@@ -171,16 +181,13 @@ fn frame_origin(monitor_width: f64, monitor_height: f64, width: f64, height: f64
 /// mid-animation. At end-of-dictation the pill resizes back to compact at
 /// the same moment the backend hides the window, so an animated call here
 /// can spin forever and deadlock the main thread.
-pub(crate) fn set_frame_top_center(pill: &tauri::WebviewWindow, width: f64, height: f64) -> tauri::Result<()> {
+pub(crate) fn set_frame_top_center(
+    pill: &tauri::WebviewWindow,
+    width: f64,
+    height: f64,
+) -> tauri::Result<()> {
     let width = width.clamp(MIN_WIDTH, MAX_WIDTH);
     let height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
-
-    let Some(monitor) = pill.primary_monitor()? else {
-        return Ok(());
-    };
-    let scale = monitor.scale_factor();
-    let monitor_size = monitor.size().to_logical::<f64>(scale);
-    let (x, y) = frame_origin(monitor_size.width, monitor_size.height, width, height, TOP_MARGIN);
 
     let window = pill.clone();
     pill.run_on_main_thread(move || {
@@ -193,12 +200,65 @@ pub(crate) fn set_frame_top_center(pill: &tauri::WebviewWindow, width: f64, heig
         // alive; we're on the main thread (required for AppKit calls) inside
         // this `run_on_main_thread` closure.
         let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
+        configure_overlay_window(ns_window);
+        let (screen_x, screen_y, screen_width, screen_height) = active_screen_frame();
+        let (x, y) = frame_origin(
+            screen_x,
+            screen_y,
+            screen_width,
+            screen_height,
+            width,
+            height,
+            TOP_MARGIN,
+        );
         let frame = objc2_foundation::NSRect {
             origin: objc2_foundation::NSPoint { x, y },
             size: objc2_foundation::NSSize { width, height },
         };
         ns_window.setFrame_display(frame, true);
     })
+}
+
+/// Make the pill a HUD that follows the user onto any Space — including a
+/// Space created by putting an app fullscreen. Tauri's
+/// `visibleOnAllWorkspaces` only sets `CanJoinAllSpaces`, which does not
+/// cover fullscreen application Spaces; those need `FullScreenAuxiliary`.
+fn configure_overlay_window(ns_window: &objc2_app_kit::NSWindow) {
+    use objc2_app_kit::{NSStatusWindowLevel, NSWindowCollectionBehavior};
+
+    ns_window.setCollectionBehavior(
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::IgnoresCycle,
+    );
+    ns_window.setLevel(NSStatusWindowLevel);
+    ns_window.setHidesOnDeactivate(false);
+}
+
+/// Screen that currently has keyboard focus (`NSScreen.main`), falling back
+/// to the first screen. Fullscreen apps put the key window on that Space's
+/// display, so this is where the HUD belongs — not always the primary
+/// monitor.
+fn active_screen_frame() -> (f64, f64, f64, f64) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return (0.0, 0.0, 0.0, 0.0);
+    };
+    let screen = NSScreen::mainScreen(mtm).or_else(|| NSScreen::screens(mtm).firstObject());
+    match screen {
+        Some(screen) => {
+            let frame = screen.frame();
+            (
+                frame.origin.x,
+                frame.origin.y,
+                frame.size.width,
+                frame.size.height,
+            )
+        }
+        None => (0.0, 0.0, 0.0, 0.0),
+    }
 }
 
 #[cfg(test)]
@@ -218,7 +278,10 @@ mod tests {
         let interval = Duration::from_millis(100);
         let t0 = Instant::now();
 
-        assert!(should_emit_live_text(None, t0, interval), "first sample always emits");
+        assert!(
+            should_emit_live_text(None, t0, interval),
+            "first sample always emits"
+        );
         assert!(
             !should_emit_live_text(Some(t0), t0 + Duration::from_millis(50), interval),
             "under the interval must be throttled"
@@ -258,7 +321,7 @@ mod tests {
 
     #[test]
     fn frame_origin_centers_horizontally() {
-        let (x, _y) = frame_origin(1920.0, 1080.0, 400.0, 100.0, 40.0);
+        let (x, _y) = frame_origin(0.0, 0.0, 1920.0, 1080.0, 400.0, 100.0, 40.0);
         assert_eq!(x, (1920.0 - 400.0) / 2.0);
     }
 
@@ -266,7 +329,7 @@ mod tests {
     fn frame_origin_pins_the_top_edge_at_top_margin() {
         let monitor_height = 1080.0;
         let top_margin = 40.0;
-        let (_x, y) = frame_origin(1920.0, monitor_height, 400.0, 100.0, top_margin);
+        let (_x, y) = frame_origin(0.0, 0.0, 1920.0, monitor_height, 400.0, 100.0, top_margin);
         // AppKit's y is measured from the bottom, so the top edge sits at
         // `y + height`; that must land exactly `top_margin` below the
         // monitor's top (i.e. `monitor_height - top_margin`).
@@ -277,11 +340,19 @@ mod tests {
     fn frame_origin_keeps_top_edge_fixed_as_height_grows() {
         let monitor_height = 1080.0;
         let top_margin = 40.0;
-        let (_x, y_short) = frame_origin(1920.0, monitor_height, 400.0, 100.0, top_margin);
-        let (_x, y_tall) = frame_origin(1920.0, monitor_height, 400.0, 180.0, top_margin);
+        let (_x, y_short) =
+            frame_origin(0.0, 0.0, 1920.0, monitor_height, 400.0, 100.0, top_margin);
+        let (_x, y_tall) = frame_origin(0.0, 0.0, 1920.0, monitor_height, 400.0, 180.0, top_margin);
         // Growing height by 80 must shift y down by exactly 80 to keep the
         // top edge (y + height) fixed.
         assert_eq!(y_short - y_tall, 80.0);
+    }
+
+    #[test]
+    fn frame_origin_offsets_onto_a_secondary_screen() {
+        let (x, y) = frame_origin(1920.0, 0.0, 1512.0, 982.0, 400.0, 100.0, 40.0);
+        assert_eq!(x, 1920.0 + (1512.0 - 400.0) / 2.0);
+        assert_eq!(y + 100.0 + 40.0, 982.0);
     }
 
     /// Exercises the full hold lifecycle against the shared module-level
@@ -293,7 +364,10 @@ mod tests {
         set_hold_state(PillHoldKind::Polishing);
         assert!(is_held());
 
-        assert!(clear_hold_state(), "release reports it actually released something");
+        assert!(
+            clear_hold_state(),
+            "release reports it actually released something"
+        );
         assert!(!is_held());
 
         assert!(

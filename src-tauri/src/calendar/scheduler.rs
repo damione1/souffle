@@ -9,6 +9,9 @@
 //! The fired-reminder set lives in memory only; restarting the app inside
 //! the reminder window can re-fire one reminder for the same occurrence.
 //! That rare duplicate is accepted over persisting scheduler state.
+//!
+//! Each tick also diffs today's events and emits [`crate::app_events::TodayCalendarUpdated`]
+//! so the home list stays current without depending on a webview timer.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -21,7 +24,7 @@ use tauri_specta::Event;
 use tokio::time::MissedTickBehavior;
 use tracing::warn;
 
-use crate::app_events::{CalendarMeetingNudgeKind, UpcomingMeeting};
+use crate::app_events::{CalendarMeetingNudgeKind, TodayCalendarUpdated, UpcomingMeeting};
 use crate::audio::system_activity::{self, SystemAudioProbe};
 use crate::calendar::{self, CalendarEvent};
 use crate::permissions::PermState;
@@ -35,6 +38,12 @@ type OccurrenceKey = (String, i64);
 /// How long after an event starts the auto-start nudge remains eligible.
 const AUTOSTART_WINDOW_MINUTES: u32 = 10;
 
+/// Backoff after a failed system-audio probe start, so a wedged CoreAudio
+/// tap does not spawn a new "Souffle Tap" aggregate every minute.
+const PROBE_RETRY_BACKOFF: Duration = Duration::from_secs(300);
+
+type TodayFingerprint = (PermState, Vec<(String, i64, i64, String)>);
+
 pub fn spawn(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(run(app));
 }
@@ -45,6 +54,8 @@ async fn run(app: tauri::AppHandle) {
     let mut fired_reminders: HashSet<OccurrenceKey> = HashSet::new();
     let mut fired_autostart: HashSet<OccurrenceKey> = HashSet::new();
     let mut probe: Option<SystemAudioProbe> = None;
+    let mut probe_retry_at = std::time::Instant::now();
+    let mut last_today: Option<TodayFingerprint> = None;
 
     loop {
         interval.tick().await;
@@ -63,11 +74,14 @@ async fn run(app: tauri::AppHandle) {
         };
         if !settings.calendar_integration_enabled {
             probe = None;
+            emit_today_if_changed(&app, &mut last_today, PermState::Unknown, &[]);
             continue;
         }
         // Revoked mid-session: go quiet instead of erroring every minute.
-        if calendar::authorization_state() != PermState::Granted {
+        let permission = calendar::authorization_state();
+        if permission != PermState::Granted {
             probe = None;
+            emit_today_if_changed(&app, &mut last_today, permission, &[]);
             continue;
         }
 
@@ -94,6 +108,8 @@ async fn run(app: tauri::AppHandle) {
             }
         };
 
+        emit_today_if_changed(&app, &mut last_today, PermState::Granted, &events);
+
         let now = Utc::now();
         prune_fired(&mut fired_reminders, now);
         prune_fired(&mut fired_autostart, now);
@@ -103,8 +119,11 @@ async fn run(app: tauri::AppHandle) {
             && settings.calendar_autostart_enabled
             && has_in_progress_events(now, &events);
         if should_probe {
-            if probe.is_none() {
+            if probe.is_none() && std::time::Instant::now() >= probe_retry_at {
                 probe = SystemAudioProbe::start(Arc::clone(&activity));
+                if probe.is_none() {
+                    probe_retry_at = std::time::Instant::now() + PROBE_RETRY_BACKOFF;
+                }
             }
         } else {
             probe = None;
@@ -164,7 +183,9 @@ async fn run(app: tauri::AppHandle) {
 }
 
 fn has_in_progress_events(now: DateTime<Utc>, events: &[CalendarEvent]) -> bool {
-    events.iter().any(|event| event.start <= now && now < event.end)
+    events
+        .iter()
+        .any(|event| event.start <= now && now < event.end)
 }
 
 /// Events whose start lies within the reminder window and that have not
@@ -214,6 +235,47 @@ fn prune_fired(fired: &mut HashSet<OccurrenceKey>, now: DateTime<Utc>) {
     fired.retain(|(_, start)| *start >= cutoff);
 }
 
+fn today_fingerprint(permission: PermState, events: &[CalendarEvent]) -> TodayFingerprint {
+    (
+        permission,
+        events
+            .iter()
+            .map(|event| {
+                (
+                    event.id.clone(),
+                    event.start.timestamp(),
+                    event.end.timestamp(),
+                    event.title.clone(),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Push today's events to the frontend when the snapshot actually changed
+/// (new invite, reschedule, midnight rollover). The home view cannot rely
+/// on a webview timer surviving overnight in the background.
+fn emit_today_if_changed(
+    app: &tauri::AppHandle,
+    last: &mut Option<TodayFingerprint>,
+    permission: PermState,
+    events: &[CalendarEvent],
+) {
+    let fingerprint = today_fingerprint(permission, events);
+    if last.as_ref() == Some(&fingerprint) {
+        return;
+    }
+    *last = Some(fingerprint);
+    if let Err(e) = (TodayCalendarUpdated {
+        permission,
+        events: events.to_vec(),
+    })
+    .emit(app)
+    {
+        warn!("Calendar scheduler: today emit failed: {e}");
+    }
+}
+
 /// System notification: informational only. Action buttons and click
 /// callbacks are unreliable on macOS with the notification plugin, so the
 /// actionable path is the in-app banner driven by [`UpcomingMeeting`].
@@ -228,9 +290,7 @@ fn notify(
         CalendarMeetingNudgeKind::Reminder => {
             let minutes = starts_in_seconds.div_ceil(60).max(1);
             if locale.starts_with("fr") {
-                format!(
-                    "Commence dans {minutes} min. Ouvrez Soufflé pour transcrire la réunion."
-                )
+                format!("Commence dans {minutes} min. Ouvrez Soufflé pour transcrire la réunion.")
             } else {
                 format!("Starts in {minutes} min. Open Soufflé to transcribe the meeting.")
             }
@@ -354,5 +414,28 @@ mod tests {
         prune_fired(&mut fired, now);
         assert_eq!(fired.len(), 1);
         assert!(fired.iter().any(|(id, _)| id == "recent"));
+    }
+
+    #[test]
+    fn today_fingerprint_changes_on_new_or_retitled_event() {
+        let now = Utc::now();
+        let first = event("a", now);
+        let retitled = CalendarEvent {
+            title: "Renamed".to_string(),
+            ..first.clone()
+        };
+        let granted = PermState::Granted;
+        assert_eq!(
+            today_fingerprint(granted, &[first.clone()]),
+            today_fingerprint(granted, std::slice::from_ref(&first))
+        );
+        assert_ne!(
+            today_fingerprint(granted, &[first.clone()]),
+            today_fingerprint(granted, &[retitled])
+        );
+        assert_ne!(
+            today_fingerprint(granted, &[first]),
+            today_fingerprint(granted, &[])
+        );
     }
 }
