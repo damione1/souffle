@@ -23,12 +23,30 @@ pub struct AudioInputDevice {
     pub is_default: bool,
 }
 
-/// Name of the private aggregate device created for system-audio capture.
-pub const SOUFFLE_TAP_DEVICE_NAME: &str = "Souffle system audio tap";
+/// Visible name of the private aggregate wrapping the process tap. This is
+/// what CoreAudio (and the Settings device list) report — not the
+/// `CATapDescription` name below. Copies leftover from a crash or a wedged
+/// tap may appear as `"Souffle Tap 2"`, etc.
+pub const SOUFFLE_TAP_AGGREGATE_NAME: &str = "Souffle Tap";
 
-/// Whether `name` refers to Souffle's own system-audio tap aggregate device.
+/// Name set on the `CATapDescription`. Kept for matching in case CoreAudio
+/// ever surfaces the tap object itself rather than the aggregate.
+pub const SOUFFLE_TAP_DESCRIPTION_NAME: &str = "Souffle system audio tap";
+
+/// UID prefix for every aggregate we create, so orphans are identifiable
+/// even if CoreAudio rewrites the display name.
+pub const SOUFFLE_TAP_UID_PREFIX: &str = "com.souffle.tap.";
+
+/// Whether `name` refers to Souffle's own system-audio tap aggregate (or a
+/// numbered leftover like `"Souffle Tap 2"`).
 pub fn is_souffle_tap_device(name: &str) -> bool {
-    name.contains(SOUFFLE_TAP_DEVICE_NAME)
+    let lower = name.to_ascii_lowercase();
+    lower.contains("souffle") && lower.contains("tap")
+}
+
+/// Whether `uid` was issued by Souffle for a process-tap aggregate.
+pub fn is_souffle_tap_uid(uid: &str) -> bool {
+    uid.starts_with(SOUFFLE_TAP_UID_PREFIX)
 }
 
 /// Convert a stored preference (`uid` or legacy `name`) to the device name cpal
@@ -155,7 +173,18 @@ mod tests {
 
     #[test]
     fn souffle_tap_name_is_detected() {
+        assert!(is_souffle_tap_device("Souffle Tap"));
+        assert!(is_souffle_tap_device("Souffle Tap 2"));
         assert!(is_souffle_tap_device("Souffle system audio tap"));
         assert!(!is_souffle_tap_device("MacBook Pro Microphone"));
+        assert!(!is_souffle_tap_device("Souffle Mix"));
+    }
+
+    #[test]
+    fn souffle_tap_uid_matches_prefix() {
+        assert!(is_souffle_tap_uid(
+            "com.souffle.tap.aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        ));
+        assert!(!is_souffle_tap_uid("BuiltInMicUID"));
     }
 }

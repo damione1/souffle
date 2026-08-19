@@ -125,6 +125,15 @@ pub struct UpcomingMeeting {
     pub kind: CalendarMeetingNudgeKind,
 }
 
+/// Pushed by the calendar scheduler whenever today's event list changes
+/// (new invite, reschedule, midnight rollover). The home view listens so it
+/// does not depend on a webview timer surviving overnight.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct TodayCalendarUpdated {
+    pub permission: crate::permissions::PermState,
+    pub events: Vec<crate::calendar::CalendarEvent>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingIdleReason {

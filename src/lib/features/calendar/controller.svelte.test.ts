@@ -110,4 +110,13 @@ describe("calendar controller", () => {
 
     expect(ctrl.statusMessage).not.toBe("");
   });
+
+  it("applyToday replaces events without hitting the backend", () => {
+    const ctrl = createCalendarController();
+    const event = makeEvent({ id: "evt-2", title: "New invite" });
+    ctrl.applyToday({ permission: "granted", events: [event] });
+    expect(ctrl.events).toEqual([event]);
+    expect(ctrl.permission).toBe("granted");
+    expect(mockListTodaysCalendarEvents).not.toHaveBeenCalled();
+  });
 });

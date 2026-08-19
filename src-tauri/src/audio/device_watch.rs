@@ -25,7 +25,7 @@ use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2_core_audio::{
     AudioObjectAddPropertyListenerBlock, AudioObjectGetPropertyData,
     AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress,
-    kAudioDevicePropertyDeviceUID, kAudioDevicePropertyStreams,
+    kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyDeviceUID, kAudioDevicePropertyStreams,
     kAudioDevicePropertyTransportType, kAudioDeviceTransportTypeAggregate,
     kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
     kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeUSB,
@@ -37,7 +37,9 @@ use objc2_core_audio::{
 use objc2_core_foundation::{CFRetained, CFString};
 use tracing::{info, warn};
 
-use crate::audio::device::{AudioInputDevice, TransportType, is_souffle_tap_device};
+use crate::audio::device::{
+    AudioInputDevice, TransportType, is_souffle_tap_device, is_souffle_tap_uid,
+};
 use crate::power::is_clamshell;
 
 type ListenerBlock = RcBlock<dyn Fn(u32, NonNull<AudioObjectPropertyAddress>)>;
@@ -133,7 +135,10 @@ fn add_listener(
         )
     };
     if status != 0 {
-        warn!(selector = format!("{selector:#x}"), status, "Failed to register CoreAudio device listener");
+        warn!(
+            selector = format!("{selector:#x}"),
+            status, "Failed to register CoreAudio device listener"
+        );
     }
     block
 }
@@ -186,13 +191,25 @@ fn log_initial_snapshot(
         info!(device = %info.name, transport = %info.transport, "Audio input device present at startup");
     }
     let (input_device, input_transport) = describe(default_input);
-    info!(device = input_device, transport = input_transport, lid_closed, "Default input device at startup");
+    info!(
+        device = input_device,
+        transport = input_transport,
+        lid_closed,
+        "Default input device at startup"
+    );
     let (output_device, output_transport) = describe(default_output);
-    info!(device = output_device, transport = output_transport, "Default output device at startup");
+    info!(
+        device = output_device,
+        transport = output_transport,
+        "Default output device at startup"
+    );
     info!(lid_closed, "Lid state at startup");
 }
 
-fn log_device_diff(old: &HashMap<AudioObjectID, DeviceInfo>, new: &HashMap<AudioObjectID, DeviceInfo>) {
+fn log_device_diff(
+    old: &HashMap<AudioObjectID, DeviceInfo>,
+    new: &HashMap<AudioObjectID, DeviceInfo>,
+) {
     let diff = diff_devices(old, new);
     if diff.arrived.is_empty() && diff.removed.is_empty() {
         return;
@@ -215,11 +232,7 @@ fn log_default_input_change(old: &Option<DeviceInfo>, new: &Option<DeviceInfo>) 
     let lid_closed = is_clamshell();
     info!(
         old_device,
-        old_transport,
-        new_device,
-        new_transport,
-        lid_closed,
-        "Default input device changed"
+        old_transport, new_device, new_transport, lid_closed, "Default input device changed"
     );
 }
 
@@ -231,10 +244,7 @@ fn log_default_output_change(old: &Option<DeviceInfo>, new: &Option<DeviceInfo>)
     let (new_device, new_transport) = describe(new);
     info!(
         old_device,
-        old_transport,
-        new_device,
-        new_transport,
-        "Default output device changed"
+        old_transport, new_device, new_transport, "Default output device changed"
     );
 }
 
@@ -314,7 +324,11 @@ fn input_scope_address(selector: u32) -> AudioObjectPropertyAddress {
     }
 }
 
-fn get_property<T>(object: AudioObjectID, mut address: AudioObjectPropertyAddress, out: &mut T) -> bool {
+fn get_property<T>(
+    object: AudioObjectID,
+    mut address: AudioObjectPropertyAddress,
+    out: &mut T,
+) -> bool {
     let mut size = size_of::<T>() as u32;
     let status = unsafe {
         AudioObjectGetPropertyData(
@@ -376,7 +390,11 @@ fn device_ids(object: AudioObjectID, address: AudioObjectPropertyAddress) -> Vec
 
 fn device_name(device: AudioObjectID) -> String {
     let mut name_ptr: *const CFString = std::ptr::null();
-    if !get_property(device, global_address(kAudioObjectPropertyName), &mut name_ptr) {
+    if !get_property(
+        device,
+        global_address(kAudioObjectPropertyName),
+        &mut name_ptr,
+    ) {
         return format!("device#{device}");
     }
     match NonNull::new(name_ptr.cast_mut()) {
@@ -388,7 +406,11 @@ fn device_name(device: AudioObjectID) -> String {
 
 fn device_uid(device: AudioObjectID) -> String {
     let mut uid_ptr: *const CFString = std::ptr::null();
-    if !get_property(device, global_address(kAudioDevicePropertyDeviceUID), &mut uid_ptr) {
+    if !get_property(
+        device,
+        global_address(kAudioDevicePropertyDeviceUID),
+        &mut uid_ptr,
+    ) {
         return format!("device#{device}");
     }
     match NonNull::new(uid_ptr.cast_mut()) {
@@ -441,7 +463,11 @@ fn enumerate_input_devices() -> HashMap<AudioObjectID, DeviceInfo> {
 
 fn default_device_id(selector: u32) -> Option<AudioObjectID> {
     let mut device: AudioObjectID = 0;
-    if !get_property(kAudioObjectSystemObject as AudioObjectID, global_address(selector), &mut device) {
+    if !get_property(
+        kAudioObjectSystemObject as AudioObjectID,
+        global_address(selector),
+        &mut device,
+    ) {
         return None;
     }
     (device != 0).then_some(device)
@@ -470,8 +496,69 @@ pub(crate) fn list_devices() -> Vec<AudioInputDevice> {
     .into_iter()
     .filter(|&id| is_input_capable(id))
     .map(|id| input_device(id, Some(id) == default))
-    .filter(|device| !is_souffle_tap_device(&device.name))
+    .filter(|device| !is_souffle_tap_device(&device.name) && !is_souffle_tap_uid(&device.uid))
     .collect()
+}
+
+/// CoreAudio object ID currently bound to `uid`, if that device is still in
+/// the HAL list. A USB dock unplug/replug keeps the UID and allocates a new
+/// ID — callers compare against the ID they opened to know the stream is stale.
+pub(crate) fn object_id_for_uid(uid: &str) -> Option<AudioObjectID> {
+    device_ids(
+        kAudioObjectSystemObject as AudioObjectID,
+        global_address(kAudioHardwarePropertyDevices),
+    )
+    .into_iter()
+    .find(|&id| device_uid(id) == uid)
+}
+
+/// `kAudioDevicePropertyDeviceIsAlive`. A dock reboot often leaves the UID
+/// in the list while this flips to 0; treat a failed read as dead.
+pub(crate) fn device_is_alive(id: AudioObjectID) -> bool {
+    let mut alive: u32 = 0;
+    if !get_property(
+        id,
+        global_address(kAudioDevicePropertyDeviceIsAlive),
+        &mut alive,
+    ) {
+        return false;
+    }
+    alive != 0
+}
+
+/// Destroy leftover "Souffle Tap" aggregates from a previous crash, a
+/// timed-out `spawn_tap`, or an older build that created them as public
+/// devices. Safe at startup, before any session has created a tap.
+pub(crate) fn destroy_orphaned_souffle_taps() {
+    use objc2_core_audio::AudioHardwareDestroyAggregateDevice;
+
+    let orphans: Vec<(AudioObjectID, String)> = device_ids(
+        kAudioObjectSystemObject as AudioObjectID,
+        global_address(kAudioHardwarePropertyDevices),
+    )
+    .into_iter()
+    .filter_map(|id| {
+        if device_transport(id) != TransportType::Aggregate {
+            return None;
+        }
+        let name = device_name(id);
+        let uid = device_uid(id);
+        if is_souffle_tap_device(&name) || is_souffle_tap_uid(&uid) {
+            Some((id, name))
+        } else {
+            None
+        }
+    })
+    .collect();
+
+    for (id, name) in orphans {
+        let status = unsafe { AudioHardwareDestroyAggregateDevice(id) };
+        if status == 0 {
+            info!(device = %name, id, "Destroyed orphaned Souffle tap aggregate");
+        } else {
+            warn!(device = %name, id, status, "Failed to destroy orphaned Souffle tap aggregate");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -549,7 +636,10 @@ mod tests {
 
     #[test]
     fn map_transport_covers_coreaudio_codes() {
-        assert_eq!(map_transport(kAudioDeviceTransportTypeBuiltIn), TransportType::BuiltIn);
+        assert_eq!(
+            map_transport(kAudioDeviceTransportTypeBuiltIn),
+            TransportType::BuiltIn
+        );
         assert_eq!(
             map_transport(kAudioDeviceTransportTypeBluetooth),
             TransportType::Bluetooth

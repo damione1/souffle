@@ -1,6 +1,6 @@
 import { listTodaysCalendarEvents } from "../../api/calendar";
 import { getAppState } from "../../stores/app.svelte";
-import type { CalendarEvent, PermState } from "../../types";
+import type { CalendarEvent, PermState, TodayCalendar } from "../../types";
 import { errorMessage } from "../../utils";
 import { createMeetingController } from "../meeting/controller.svelte";
 
@@ -11,6 +11,12 @@ function createCalendarControllerInstance() {
   let permission = $state<PermState>("unknown");
   let statusMessage = $state("");
 
+  function applyToday(today: TodayCalendar) {
+    permission = today.permission;
+    events = today.events;
+    statusMessage = "";
+  }
+
   /** Refresh today's events. A no-op while the integration is disabled so
    * callers can invoke it unconditionally. */
   async function refresh() {
@@ -19,10 +25,7 @@ function createCalendarControllerInstance() {
       return;
     }
     try {
-      const today = await listTodaysCalendarEvents();
-      permission = today.permission;
-      events = today.events;
-      statusMessage = "";
+      applyToday(await listTodaysCalendarEvents());
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -47,6 +50,7 @@ function createCalendarControllerInstance() {
     get permission() { return permission; },
     get statusMessage() { return statusMessage; },
     get enabled() { return app.settings.calendar_integration_enabled; },
+    applyToday,
     refresh,
     startFromEvent,
   };

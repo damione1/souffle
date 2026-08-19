@@ -159,7 +159,9 @@ impl SystemTap {
             )
         };
         unsafe {
-            description.setName(&NSString::from_str("Souffle system audio tap"));
+            description.setName(&NSString::from_str(
+                crate::audio::device::SOUFFLE_TAP_DESCRIPTION_NAME,
+            ));
             description.setPrivate(true);
         }
 
@@ -366,7 +368,16 @@ fn aggregate_description(
     description: &CATapDescription,
 ) -> Retained<NSDictionary<NSString, AnyObject>> {
     let key = |k: &CStr| NSString::from_str(k.to_str().expect("ASCII key"));
-    let aggregate_uid = NSString::from_str(&uuid::Uuid::new_v4().to_string());
+    // CoreAudio wants CFNumber (int), not CFBoolean, for the private /
+    // autostart flags. `NSNumber::new_bool(true)` is the latter and is
+    // ignored, which is how leftover aggregates leaked into the system
+    // input list as public "Souffle Tap" devices.
+    let one = NSNumber::new_i32(1);
+    let aggregate_uid = NSString::from_str(&format!(
+        "{}{}",
+        crate::audio::device::SOUFFLE_TAP_UID_PREFIX,
+        uuid::Uuid::new_v4()
+    ));
     let tap_uid = unsafe { description.UUID().UUIDString() };
 
     let sub_tap: Retained<NSDictionary<NSString, AnyObject>> = NSDictionary::from_slices(
@@ -374,10 +385,7 @@ fn aggregate_description(
             &*key(kAudioSubTapUIDKey),
             &*key(kAudioSubTapDriftCompensationKey),
         ],
-        &[
-            &*tap_uid as &AnyObject,
-            &*NSNumber::new_bool(true) as &AnyObject,
-        ],
+        &[&*tap_uid as &AnyObject, &*one as &AnyObject],
     );
 
     NSDictionary::from_slices(
@@ -389,10 +397,10 @@ fn aggregate_description(
             &*key(kAudioAggregateDeviceTapListKey),
         ],
         &[
-            &*NSString::from_str("Souffle Tap") as &AnyObject,
+            &*NSString::from_str(crate::audio::device::SOUFFLE_TAP_AGGREGATE_NAME) as &AnyObject,
             &*aggregate_uid as &AnyObject,
-            &*NSNumber::new_bool(true) as &AnyObject,
-            &*NSNumber::new_bool(true) as &AnyObject,
+            &*one as &AnyObject,
+            &*one as &AnyObject,
             &*NSArray::from_slice(&[&*sub_tap]) as &AnyObject,
         ],
     )

@@ -893,6 +893,7 @@ shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
 systemWokeUp: SystemWokeUp,
+todayCalendarUpdated: TodayCalendarUpdated,
 transcriptionHealth: TranscriptionHealth,
 upcomingMeeting: UpcomingMeeting
 }>({
@@ -916,6 +917,7 @@ shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
 systemAudioStatus: "system-audio-status",
 systemWokeUp: "system-woke-up",
+todayCalendarUpdated: "today-calendar-updated",
 transcriptionHealth: "transcription-health",
 upcomingMeeting: "upcoming-meeting"
 })
@@ -1473,6 +1475,12 @@ export type Theme = "dark" | "light" | "system"
  * no-permission case without string-matching errors.
  */
 export type TodayCalendar = { permission: PermState; events: CalendarEvent[] }
+/**
+ * Pushed by the calendar scheduler whenever today's event list changes
+ * (new invite, reschedule, midnight rollover). The home view listens so it
+ * does not depend on a webview timer surviving overnight.
+ */
+export type TodayCalendarUpdated = { permission: PermState; events: CalendarEvent[] }
 export type TranscriptionCapabilities = { supports_streaming: boolean; supports_batch_transcription: boolean; supports_language_auto_detect: boolean; supports_word_timestamps: boolean; supports_partial_results: boolean }
 export type TranscriptionCatalog = { engines: TranscriptionEngineDescriptor[]; selected_engine_id: string; selected_model_id: string; selected_backend_id: string }
 export type TranscriptionEngineDescriptor = { id: string; label: string; description: string; models: TranscriptionModelDescriptor[] }
