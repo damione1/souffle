@@ -159,7 +159,9 @@
   <!-- h-[42px] keeps the compact pill's natural height at exactly
        BASE_HEIGHT (42 + 2x10 padding + 2x1 border = 64). -->
   <div class="flex h-[42px] shrink-0 items-center gap-3">
-    <span class="recording-dot shrink-0" aria-hidden="true"></span>
+    {#if displayMode !== "polishing"}
+      <span class="recording-dot shrink-0" aria-hidden="true"></span>
+    {/if}
     <span class="shrink-0 text-xs font-medium text-white/90" data-tauri-drag-region>
       {#if displayMode === "polishing"}
         {$t("pill.polishing")}
