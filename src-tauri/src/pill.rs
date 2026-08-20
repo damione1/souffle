@@ -5,6 +5,7 @@
 //! and the stop action live in the pill's webview (`src/lib/pill/`).
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
@@ -28,10 +29,16 @@ pub const LIVE_TEXT_MAX_CHARS: usize = 360;
 
 /// Frontend-driven hold on pill visibility, independent of the state
 /// machine (set/cleared via the `pill_hold` / `pill_release` commands).
-/// `sync` clears it on every transition into a recording state, so a hold
+/// `sync` clears it only when *entering* a recording state, so a hold
 /// whose release call was somehow lost (crash, error path) can never leave
-/// a zombie pill once the user starts a new session.
+/// a zombie pill once the user starts a new session — without also wiping
+/// a polish hold that is engaged *before* stop, while still recording.
 static HOLD: Mutex<Option<PillHoldKind>> = Mutex::new(None);
+
+/// Last `recording` value observed by `sync`. Used so the leftover-hold
+/// safety net only fires on a rising edge (idle → recording), not on every
+/// sync while a session is already live.
+static LAST_RECORDING: AtomicBool = AtomicBool::new(false);
 
 fn set_hold_state(kind: PillHoldKind) {
     if let Ok(mut guard) = HOLD.lock() {
@@ -71,10 +78,19 @@ fn should_show_pill(recording: bool, held: bool) -> bool {
     recording || held
 }
 
+/// Drop a leftover hold only when a *new* recording starts. Polish holds
+/// the pill *before* `stop_transcription` while the machine is still in a
+/// recording state; clearing on `recording == true` would drop it on the
+/// same `sync` that is supposed to keep the spinner up.
+fn should_clear_hold_on_sync(was_recording: bool, now_recording: bool) -> bool {
+    now_recording && !was_recording
+}
+
 /// Show the pill while recording (or while held), hide it otherwise. Called
 /// on every state transition; must never steal focus from the app the user
-/// is dictating into (the window is configured with `focus: false` and we
-/// only ever call `show`, never `set_focus`).
+/// is dictating into. We `orderFrontRegardless` a non-activating `NSPanel`
+/// rather than Tauri's `show`/`set_focus`, which activate the app and kick
+/// the user out of another app's fullscreen Space.
 pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
     let Some(pill) = app.get_webview_window("pill") else {
         return;
@@ -88,14 +104,15 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
     // A fresh recording starting is authoritative: any leftover hold from a
     // previous session (e.g. a release call that never landed) must not
     // keep blocking future hides.
-    if recording {
+    let was_recording = LAST_RECORDING.swap(recording, Ordering::SeqCst);
+    if should_clear_hold_on_sync(was_recording, recording) {
         clear_hold(app);
     }
 
     let result = if should_show_pill(recording, is_held()) {
-        position_top_center(&pill).and_then(|()| pill.show())
+        position_top_center(&pill).and_then(|()| order_overlay(&pill, true))
     } else {
-        pill.hide()
+        order_overlay(&pill, false)
     };
     if let Err(e) = result {
         warn!("Recording pill sync failed: {e}");
@@ -200,7 +217,7 @@ pub(crate) fn set_frame_top_center(
         // alive; we're on the main thread (required for AppKit calls) inside
         // this `run_on_main_thread` closure.
         let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
-        configure_overlay_window(ns_window);
+        let overlay = configure_overlay_window(ns_window);
         let (screen_x, screen_y, screen_width, screen_height) = active_screen_frame();
         let (x, y) = frame_origin(
             screen_x,
@@ -215,24 +232,84 @@ pub(crate) fn set_frame_top_center(
             origin: objc2_foundation::NSPoint { x, y },
             size: objc2_foundation::NSSize { width, height },
         };
-        ns_window.setFrame_display(frame, true);
+        overlay.setFrame_display(frame, true);
     })
 }
 
-/// Make the pill a HUD that follows the user onto any Space — including a
-/// Space created by putting an app fullscreen. Tauri's
-/// `visibleOnAllWorkspaces` only sets `CanJoinAllSpaces`, which does not
-/// cover fullscreen application Spaces; those need `FullScreenAuxiliary`.
-fn configure_overlay_window(ns_window: &objc2_app_kit::NSWindow) {
-    use objc2_app_kit::{NSStatusWindowLevel, NSWindowCollectionBehavior};
+/// Show or hide the overlay without activating the app. Tauri's `show` /
+/// `hide` go through NSWindow ordering that can fail to land on another
+/// app's fullscreen Space; FluidVoice uses `orderFrontRegardless` /
+/// `orderOut:` on a non-activating NSPanel instead.
+fn order_overlay(pill: &tauri::WebviewWindow, visible: bool) -> tauri::Result<()> {
+    let window = pill.clone();
+    pill.run_on_main_thread(move || {
+        let Ok(ns_window_ptr) = window.ns_window() else {
+            warn!("Pill overlay: failed to get the native NSWindow handle");
+            return;
+        };
+        // SAFETY: same contract as `set_frame_top_center` — pill NSWindow*,
+        // main thread, window still alive.
+        let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
+        let overlay = configure_overlay_window(ns_window);
+        if visible {
+            overlay.orderFrontRegardless();
+        } else {
+            overlay.orderOut(None);
+        }
+    })
+}
 
-    ns_window.setCollectionBehavior(
-        NSWindowCollectionBehavior::CanJoinAllSpaces
-            | NSWindowCollectionBehavior::FullScreenAuxiliary
-            | NSWindowCollectionBehavior::IgnoresCycle,
-    );
+fn overlay_collection_behavior() -> objc2_app_kit::NSWindowCollectionBehavior {
+    use objc2_app_kit::NSWindowCollectionBehavior;
+    NSWindowCollectionBehavior::CanJoinAllSpaces
+        | NSWindowCollectionBehavior::FullScreenAuxiliary
+        | NSWindowCollectionBehavior::IgnoresCycle
+}
+
+fn overlay_style_mask(
+    current: objc2_app_kit::NSWindowStyleMask,
+) -> objc2_app_kit::NSWindowStyleMask {
+    current | objc2_app_kit::NSWindowStyleMask::NonactivatingPanel
+}
+
+/// Promote the Tauri webview's `NSWindow` to a non-activating `NSPanel`.
+/// `FullScreenAuxiliary` is documented as an auxiliary-panel behavior —
+/// setting it on a regular `NSWindow` (what we did previously) is ignored
+/// by Mission Control, so the HUD stays stuck on the primary desktop Space.
+///
+/// Same `object_setClass` trick as tauri-nspanel / FluidVoice's native
+/// `NSPanel(styleMask: [.borderless, .nonactivatingPanel])`.
+fn configure_overlay_window(ns_window: &objc2_app_kit::NSWindow) -> &objc2_app_kit::NSWindow {
+    use objc2::ClassType;
+    use objc2::runtime::{AnyObject, NSObjectProtocol};
+    use objc2_app_kit::{NSPanel, NSStatusWindowLevel, NSWindowAnimationBehavior};
+
+    if !ns_window.isKindOfClass(NSPanel::class()) {
+        // SAFETY: NSPanel is an NSWindow subclass; wry/tao windows are
+        // NSWindow instances (or same-layout subclasses). Changing the isa
+        // to NSPanel is the established overlay path (tauri-nspanel). The
+        // webview hierarchy is untouched. ffi rather than AnyObject::set_class
+        // because the latter debug-asserts equal instance_size and wry's
+        // NSWindow subclass may not bitwise-match NSPanel.
+        unsafe {
+            let obj = std::ptr::from_ref(ns_window).cast::<AnyObject>().cast_mut();
+            let _ = objc2::ffi::object_setClass(obj, NSPanel::class());
+        }
+    }
+
+    // NSPanel-only bits — after the isa swap these selectors exist.
+    // SAFETY: `ns_window` is now an NSPanel (or was already).
+    let as_panel: &NSPanel = unsafe { &*std::ptr::from_ref(ns_window).cast::<NSPanel>() };
+    as_panel.setFloatingPanel(true);
+    as_panel.setBecomesKeyOnlyIfNeeded(true);
+    as_panel.setWorksWhenModal(true);
+
+    ns_window.setStyleMask(overlay_style_mask(ns_window.styleMask()));
+    ns_window.setCollectionBehavior(overlay_collection_behavior());
     ns_window.setLevel(NSStatusWindowLevel);
     ns_window.setHidesOnDeactivate(false);
+    ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
+    ns_window
 }
 
 /// Screen that currently has keyboard focus (`NSScreen.main`), falling back
@@ -271,6 +348,36 @@ mod tests {
         assert!(should_show_pill(false, true));
         assert!(should_show_pill(true, true));
         assert!(!should_show_pill(false, false));
+    }
+
+    #[test]
+    fn should_clear_hold_only_when_entering_recording() {
+        assert!(
+            should_clear_hold_on_sync(false, true),
+            "new session must drop a leftover hold"
+        );
+        assert!(
+            !should_clear_hold_on_sync(true, true),
+            "polish hold is set while still recording and must survive"
+        );
+        assert!(!should_clear_hold_on_sync(true, false));
+        assert!(!should_clear_hold_on_sync(false, false));
+    }
+
+    #[test]
+    fn overlay_collection_behavior_covers_fullscreen_spaces() {
+        use objc2_app_kit::NSWindowCollectionBehavior;
+        let behavior = overlay_collection_behavior();
+        assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces));
+        assert!(behavior.contains(NSWindowCollectionBehavior::FullScreenAuxiliary));
+        assert!(behavior.contains(NSWindowCollectionBehavior::IgnoresCycle));
+    }
+
+    #[test]
+    fn overlay_style_mask_adds_nonactivating_panel() {
+        use objc2_app_kit::NSWindowStyleMask;
+        let mask = overlay_style_mask(NSWindowStyleMask::Borderless);
+        assert!(mask.contains(NSWindowStyleMask::NonactivatingPanel));
     }
 
     #[test]

@@ -476,9 +476,10 @@ async polishDictation(text: string, focusedApp: string | null, rewriteOf: string
 /**
  * Ask the floating pill to stay visible even though the state machine left
  * a recording state — used while dictation polish reformulates in the
- * background after transcription stops. See `pill::sync` for how a hold
- * combines with state-machine-driven visibility, and its safety net (a hold
- * is auto-released the moment a new recording starts).
+ * background after transcription stops. Called *before* stop, while still
+ * recording; `pill::sync` must not drop a hold just because the machine is
+ * currently in a recording state (it only clears leftover holds when a
+ * *new* session starts).
  * 
  * Takes `AppHandle` directly rather than `State<'_, AppState>`: this command
  * runs on the main thread, and reading `AppState.app_handle` (a mutex) would
