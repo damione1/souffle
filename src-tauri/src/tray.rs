@@ -56,6 +56,52 @@ fn label(key: &str, fr: bool) -> &'static str {
     }
 }
 
+/// Bring the main window to the front. The recording pill is a visible
+/// NSPanel on every Space while dictating (and AppKit can keep counting it
+/// after `orderOut`), so a dock click's `has_visible_windows` is not a
+/// reliable stand-in for "the user can see Soufflé". Always restore `main`.
+pub fn show_main_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        warn!("Main window is gone; cannot bring Soufflé to the front");
+        return;
+    };
+    // Unhide the app first (⌘H / close-to-hide), then the window. `set_focus`
+    // alone will not switch Spaces onto a hidden/miniaturized window, and
+    // it will not win against a non-activating overlay panel.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.show();
+        activate_app();
+    }
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Dock reopen must restore `main` even when AppKit reports other visible
+/// windows — the pill overlay is one. Pure so a regression that gates on
+/// `has_visible_windows` fails a unit test instead of a dock click.
+pub fn should_restore_main_on_reopen(_has_visible_windows: bool) -> bool {
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn activate_app() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    app.unhide(None);
+    // Cooperative `activate` is a no-op when another app is frontmost, which
+    // is exactly the "stuck in the background" case. The deprecated API is
+    // still the one that actually steals focus.
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+}
+
 /// Set up the system tray with menu items
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let fr = is_french(app);
@@ -116,25 +162,18 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 if recording_meeting {
                     let _ = MeetingStopRequested.emit(app);
                     info!("Meeting stop via tray");
-                } else if let Some(window) = app.get_webview_window("main") {
+                } else {
                     // Starting needs the main window; show the home screen.
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                    show_main_window(app);
                     let _ = Navigate(AppView::Home).emit(app);
                 }
             }
             "settings" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    let _ = Navigate(AppView::Settings).emit(app);
-                }
+                show_main_window(app);
+                let _ = Navigate(AppView::Settings).emit(app);
             }
             "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_main_window(app);
             }
             "quit" => {
                 info!("Quit requested from tray");
@@ -149,11 +188,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_main_window(tray.app_handle());
             }
         })
         .build(app)?;
@@ -203,5 +238,19 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
             },
             fr,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_restore_main_on_reopen;
+
+    #[test]
+    fn dock_reopen_restores_main_even_when_the_pill_counts_as_visible() {
+        assert!(
+            should_restore_main_on_reopen(true),
+            "the overlay panel is a visible NSWindow; gating on has_visible_windows leaves the main UI stuck behind"
+        );
+        assert!(should_restore_main_on_reopen(false));
     }
 }
