@@ -267,10 +267,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            tray::show_main_window(app);
         }))
         .manage(AppState::new(
             cmd_tx,
@@ -404,6 +401,19 @@ pub fn run() {
                 }
             }
 
+            // Close hides; it must not destroy. The pill + tray keep the
+            // process alive, so a destroyed `main` leaves Soufflé in the
+            // Dock and menu bar with no window to bring back.
+            if let Some(main) = app.get_webview_window("main") {
+                let window = main.clone();
+                main.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                });
+            }
+
             tray::setup_tray(app.handle())?;
             calendar::scheduler::spawn(app.handle().clone());
             info!("Souffle started");
@@ -415,16 +425,31 @@ pub fn run() {
             std::process::exit(1);
         })
         .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                // Shut down the engine actor before process exit. It unloads
-                // and drops the engine on its own thread — whisper.cpp's Metal
-                // residency sets and Candle's Metal objects must be freed
-                // before the Metal device is destroyed, otherwise C++ static
-                // destructor order causes a ggml_metal_rsets_free SIGABRT.
-                let state = app.state::<AppState>();
-                if let Err(e) = state.engine_actor.shutdown() {
-                    tracing::warn!("Engine actor shutdown failed: {e}");
+            match event {
+                tauri::RunEvent::ExitRequested { .. } => {
+                    // Shut down the engine actor before process exit. It unloads
+                    // and drops the engine on its own thread — whisper.cpp's Metal
+                    // residency sets and Candle's Metal objects must be freed
+                    // before the Metal device is destroyed, otherwise C++ static
+                    // destructor order causes a ggml_metal_rsets_free SIGABRT.
+                    let state = app.state::<AppState>();
+                    if let Err(e) = state.engine_actor.shutdown() {
+                        tracing::warn!("Engine actor shutdown failed: {e}");
+                    }
                 }
+                // Dock click / Cmd-click in the app switcher. The pill overlay
+                // is a visible NSPanel, so `has_visible_windows` is often true
+                // even when `main` is hidden — restore regardless.
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen {
+                    has_visible_windows,
+                    ..
+                } => {
+                    if tray::should_restore_main_on_reopen(has_visible_windows) {
+                        tray::show_main_window(app);
+                    }
+                }
+                _ => {}
             }
         });
 }
