@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { CalendarClock, Play, Users } from "@lucide/svelte";
+  import { CalendarClock, CalendarPlus, Play, Users } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import EmptyState from "../../../components/ui/EmptyState.svelte";
-  import type { CalendarEvent } from "../../../types";
+  import type { CalendarEvent, PermState } from "../../../types";
   import type { createTimelineController } from "../controller.svelte";
   import TimelineItem from "./TimelineItem.svelte";
 
@@ -11,13 +11,26 @@
     upcoming = [],
     canStartEvent = false,
     onStartEvent,
+    calendarEnabled = false,
+    calendarPermission = "unknown",
+    onSetupCalendar,
   }: {
     controller: ReturnType<typeof createTimelineController>;
     /** Today's calendar events, in start order. */
     upcoming?: CalendarEvent[];
     canStartEvent?: boolean;
     onStartEvent?: (event: CalendarEvent) => void;
+    calendarEnabled?: boolean;
+    calendarPermission?: PermState;
+    onSetupCalendar?: () => void;
   } = $props();
+
+  // Show the CTA when nothing today's calendar section could show:
+  // integration off, or on but macOS hasn't granted access.
+  const showCalendarSetupCta = $derived(
+    upcoming.length === 0
+      && (!calendarEnabled || calendarPermission === "denied"),
+  );
 
   // Drives the now/next/past styling of today's events.
   let now = $state(Date.now());
@@ -111,6 +124,21 @@
         {/each}
       </div>
     </section>
+  {:else if showCalendarSetupCta && onSetupCalendar}
+    <button
+      type="button"
+      onclick={onSetupCalendar}
+      class="surface-card flex items-center gap-3 !p-3 text-left transition-colors hover:bg-surface-2"
+    >
+      <span class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-secondary/12 text-secondary" aria-hidden="true">
+        <CalendarPlus size={15} />
+      </span>
+      <span class="min-w-0 flex-1">
+        <span class="block truncate text-[13.5px] text-text-primary">{$t("calendar.setup_cta_title")}</span>
+        <span class="block truncate text-xs text-text-muted">{$t("calendar.setup_cta_desc")}</span>
+      </span>
+      <span class="shrink-0 text-xs font-semibold text-accent">{$t("calendar.setup_cta_action")}</span>
+    </button>
   {/if}
 
   {#if controller.isEmpty}

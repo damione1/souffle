@@ -118,10 +118,20 @@ jobs:
       # cmake builds the sentencepiece tokenizer; it's preinstalled on
       # GitHub's macOS runner images, so no separate setup step is needed.
 
+      # Restore only. GitHub never lets one tag read another tag's cache, and
+      # this job only ever runs on tags, so the ~900 MB it used to save was
+      # unreachable to every later release while still counting against the
+      # 10 GB repo budget. Restoring is kept because a hit on the default
+      # branch's entry is still possible and costs nothing when it misses.
+      # A cache that actually hits here would need a release-profile
+      # `--target aarch64-apple-darwin` warm-up build on develop; the Contracts
+      # entry cannot serve it, since `--target` writes to a different target
+      # subdirectory than the host builds Contracts caches.
       - name: Rust cache
         uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: "./src-tauri -> target"
+          save-if: false
 
       - name: Install frontend dependencies
         run: npm ci

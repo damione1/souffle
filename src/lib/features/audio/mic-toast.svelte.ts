@@ -8,7 +8,7 @@ export type MicToastCopy = {
   hint: string;
 };
 
-type Translate = (key: string, options?: { values?: Record<string, string | number> }) => string;
+export type Translate = (key: string, options?: { values?: Record<string, string | number> }) => string;
 
 export function micToastCopy(notice: InputRouteNotice, t: Translate): MicToastCopy {
   switch (notice.reason) {

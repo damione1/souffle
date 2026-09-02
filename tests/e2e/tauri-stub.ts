@@ -57,6 +57,7 @@ export const DEFAULT_RESPONSES: Record<string, unknown> = {
   list_dictionary: [],
   get_data_stats: { meetings_count: 0, dictation_entries_count: 0, database_bytes: 0 },
   recover_state: { state: "ready", data: { profile: mockRuntimeStatus.profile } },
+  list_audio_devices: [],
   // Recording lifecycle — overridden per test where the flow matters.
   start_meeting_recording: null,
   resume_meeting_recording: null,
@@ -77,12 +78,12 @@ export interface TauriStubOptions {
 export async function installTauriStub(page: Page, options: TauriStubOptions = {}): Promise<void> {
   const responses = { ...DEFAULT_RESPONSES, ...options.responses };
 
-  // Skip the first-run "grant permissions" walkthrough (App.svelte gates it
-  // on this key) — it's a modal overlay unrelated to the flows under test
-  // and would otherwise block every click.
+  // Skip the first-run setup wizard (App.svelte gates it on these keys
+  // plus model status) — it's unrelated to the flows under test.
   await page.addInitScript(() => {
     try {
       window.localStorage.setItem("permissionsOnboarded", "1");
+      window.localStorage.setItem("setupOnboarded", "1");
     } catch {
       // Storage may be unavailable in some contexts; the dialog just shows.
     }

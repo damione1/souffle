@@ -12,6 +12,7 @@
     "generate:types": "cargo test export_typescript_bindings --manifest-path src-tauri/Cargo.toml -- --nocapture",
     "check:generated-types": "npm run generate:types && git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts",
     "tauri": "tauri",
+    "dev:fresh": "./scripts/dev-fresh.sh",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },

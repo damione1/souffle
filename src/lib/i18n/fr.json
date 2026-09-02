@@ -374,11 +374,26 @@
   "onboarding": {
     "tagline": "Transcription vocale locale pour la dictée et les meetings.",
     "local_note": "100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud.",
+    "model_title": "Télécharger le modèle de transcription",
     "model_label": "Modèle de transcription",
     "model_hint": "Téléchargé une seule fois (1–2 Go), puis tout fonctionne hors ligne. Changeable plus tard dans les réglages.",
-    "start_button": "Télécharger et commencer",
+    "model_ready": "Le modèle est prêt à l'emploi.",
+    "start_button": "Télécharger et continuer",
     "downloading": "Téléchargement du modèle…",
-    "loading": "Chargement du modèle…"
+    "loading": "Chargement du modèle…",
+    "mic_title": "Choisir le microphone",
+    "mic_subtitle": "Soufflé écoute cette entrée pour la dictée et les meetings. Automatique suit macOS.",
+    "mic_hint": "Vous pourrez réordonner les appareils et autoriser les micros Bluetooth plus tard dans les réglages.",
+    "shortcut_title": "Raccourci de dictée rapide",
+    "shortcut_subtitle": "Appuyez dessus depuis n'importe quelle app pour démarrer ou arrêter la dictée.",
+    "shortcut_hint": "Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule.",
+    "shortcut_unset": "Non défini",
+    "shortcut_needs_modifier": "Le raccourci doit inclure une touche modificatrice (⌘, Ctrl, Shift, Option) ou être une touche de fonction.",
+    "auto_paste_desc": "À l'arrêt, colle la transcription dans l'app que vous utilisiez. Nécessite Accessibilité.",
+    "continue": "Continuer",
+    "back": "Retour",
+    "finish": "Commencer",
+    "step_progress": "Étape {current} sur {total}"
   },
   "status_chip": {
     "ready": "Prêt",
@@ -444,6 +459,10 @@
     "stopping": "Finalisation…",
     "listening": "À l'écoute…",
     "search_placeholder": "Rechercher transcriptions et réunions",
+    "filter_label": "Filtrer par type",
+    "filter_all": "Tout",
+    "filter_meeting": "Réunions",
+    "filter_dictation": "Dictées",
     "press": "Appuyez sur",
     "autopaste_hint": "Collé automatiquement dans votre dernière app à l’arrêt",
     "live_transcript": "Transcription en direct",
@@ -498,7 +517,10 @@
     "you": "vous",
     "starts_in_minutes": "Commence dans {minutes} min",
     "started_system_audio": "Réunion commencée — audio système actif",
-    "dismiss": "Ignorer"
+    "dismiss": "Ignorer",
+    "setup_cta_title": "Affichez vos réunions du jour ici",
+    "setup_cta_desc": "Connectez le calendrier macOS pour des rappels et un démarrage en un clic.",
+    "setup_cta_action": "Configurer"
   },
   "update_available": {
     "title": "Mise à jour disponible",

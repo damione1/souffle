@@ -77,6 +77,8 @@ export function groupByDay(items: TimelineItem[]): TimelineGroup[] {
   return groups;
 }
 
+export type TimelineKindFilter = "all" | "meeting" | "dictation";
+
 function createTimelineControllerInstance() {
   const app = getAppState();
 
@@ -84,6 +86,7 @@ function createTimelineControllerInstance() {
   let meetings = $state<MeetingListItem[]>([]);
   let statusMessage = $state("");
   let searchQuery = $state("");
+  let kindFilter = $state<TimelineKindFilter>("all");
   let expandedDictationId = $state<string | null>(null);
   const search = createDebouncedSearch(250, 40);
 
@@ -91,12 +94,16 @@ function createTimelineControllerInstance() {
 
   const filteredItems = $derived.by(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return items;
+    const byKind = kindFilter === "all"
+      ? items
+      : items.filter((item) => item.kind === kindFilter);
+
+    if (!query) return byKind;
 
     if (search.results.length > 0) {
       const matchedDictations = matchedIdsForType(search.results, "dictation");
       const matchedMeetings = matchedIdsForType(search.results, "meeting");
-      return items.filter((item) =>
+      return byKind.filter((item) =>
         item.kind === "dictation"
           ? matchedDictations.has(item.id)
           : matchedMeetings.has(item.id),
@@ -104,7 +111,7 @@ function createTimelineControllerInstance() {
     }
 
     // Local fallback while the FTS query is in flight.
-    return items.filter((item) => item.title.toLowerCase().includes(query));
+    return byKind.filter((item) => item.title.toLowerCase().includes(query));
   });
 
   const groups = $derived(groupByDay(filteredItems));
@@ -162,6 +169,8 @@ function createTimelineControllerInstance() {
     get hasMatches() { return filteredItems.length > 0; },
     get searchQuery() { return searchQuery; },
     set searchQuery(value: string) { onSearchQueryChange(value); },
+    get kindFilter() { return kindFilter; },
+    set kindFilter(value: TimelineKindFilter) { kindFilter = value; },
     get searchResults() { return search.results; },
     get isSearching() { return search.isSearching; },
     get expandedDictationId() { return expandedDictationId; },

@@ -12,6 +12,10 @@ import type { TranscriptionModelOperationState } from "../features/transcription
 // Settings sheet visibility (the app is otherwise a single home surface)
 let settingsOpen = $state(false);
 
+// Tab to land on the next time settings opens (e.g. a "set up calendar" CTA
+// deep-linking into the meetings tab). Consumed once by SettingsView.
+let settingsInitialTab = $state<string | null>(null);
+
 // Current meeting ID (when viewing a specific meeting)
 let currentMeetingId = $state<string | null>(null);
 
@@ -36,7 +40,7 @@ let systemAudioStatus = $state<SystemAudioStatus | null>(null);
 // Calendar reminder awaiting the user's decision (drives the home banner)
 let upcomingMeeting = $state<UpcomingMeeting | null>(null);
 
-// First-run onboarding (model not downloaded yet) — derived at bootstrap
+// First-run setup wizard (permissions, mic, model, shortcut)
 let showOnboarding = $state(false);
 
 // Last pipeline error surfaced by the backend (dismissable)
@@ -153,6 +157,9 @@ export function getAppState() {
   return {
     get settingsOpen() { return settingsOpen; },
     set settingsOpen(v: boolean) { settingsOpen = v; },
+
+    get settingsInitialTab() { return settingsInitialTab; },
+    set settingsInitialTab(v: string | null) { settingsInitialTab = v; },
 
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },
