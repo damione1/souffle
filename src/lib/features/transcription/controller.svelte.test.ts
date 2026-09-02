@@ -475,7 +475,7 @@ describe("transcription controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("read_selected_text");
 
     simulateRecordingStarted(ctrl.app);
-    transcriptionChannel?.onmessage?.({
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
       text: "hello world",
       is_final: true,
       start_ms: 0,
@@ -514,7 +514,7 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("read_selected_text");
 
     simulateRecordingStarted(ctrl.app);
-    transcriptionChannel?.onmessage?.({
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
       text: "hello world",
       is_final: true,
       start_ms: 0,
@@ -554,7 +554,7 @@ describe("transcription controller", () => {
 
       await ctrl.toggleRecording(true);
       simulateRecordingStarted(ctrl.app);
-      transcriptionChannel?.onmessage?.({
+      (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
         text: "hello world",
         is_final: true,
         start_ms: 0,
