@@ -3,8 +3,13 @@ name: E2E
 on:
   push:
     branches:
+      - develop
       - master
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   playwright:

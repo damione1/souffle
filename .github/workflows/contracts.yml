@@ -3,8 +3,14 @@ name: Contracts
 on:
   push:
     branches:
+      - develop
       - master
   pull_request:
+
+# A new push to a PR makes the in-flight run obsolete; don't pay for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   generated-contracts:
@@ -15,9 +21,16 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Only the default branch writes the cache. GitHub scopes a cache to the
+      # ref that created it, and a run can read only its own ref, its base, and
+      # the default branch: never a sibling. Saving from PR runs therefore piled
+      # up ~1 GB entries per PR that no other run could reach, against a 10 GB
+      # repo-wide budget that GitHub reclaims by evicting the least recently
+      # used entry.
       - uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: src-tauri -> target
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
 
       - uses: actions/setup-node@v6.1.0
         with:
