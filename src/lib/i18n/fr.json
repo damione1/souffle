@@ -170,6 +170,7 @@
     "not_available": "Non disponible",
     "retry": "Réessayer",
     "summary_model": "Modèle de résumé",
+    "no_model_installed": "Ollama tourne mais aucun modèle n'est installé. Téléchargez le modèle recommandé ci-dessous, ou installez le vôtre avec ollama pull.",
     "no_compatible_model": "Aucun modèle compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
     "download_recommended": "Télécharger {model}",
     "download_recommended_desc": "Recommandé pour les résumés et le polish de dictée (~4,7 Go).",

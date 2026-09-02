@@ -170,6 +170,7 @@
     "not_available": "Not available",
     "retry": "Retry",
     "summary_model": "Summarization model",
+    "no_model_installed": "Ollama is running but has no model installed. Download the recommended one below, or install your own with ollama pull.",
     "no_compatible_model": "No compatible model found. Install a model like Llama or Mistral to enable summaries.",
     "download_recommended": "Download {model}",
     "download_recommended_desc": "Recommended for summaries and dictation polish (~4.7 GB).",

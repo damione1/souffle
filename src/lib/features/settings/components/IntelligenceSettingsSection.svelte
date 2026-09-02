@@ -87,7 +87,12 @@
           : null,
   );
 
-  let showModelPicker = $derived(summaryProvider !== "apple_intelligence" && summaryModels.length > 0);
+  // Ollama only matters when it could actually be used. Picking Apple
+  // Intelligence must not leave the Ollama setup prompts on screen.
+  let ollamaRelevant = $derived(summaryProvider !== "apple_intelligence");
+  let showModelPicker = $derived(ollamaRelevant && summaryModels.length > 0);
+  // Online but with nothing usable: offer the way out rather than a dead end.
+  let showOllamaSetup = $derived(ollamaRelevant && ollamaAvailable && summaryModels.length === 0);
 </script>
 
 <section class="settings-group">
@@ -177,9 +182,13 @@
         {/each}
       </select>
     </div>
-  {:else if ollamaAvailable}
+  {/if}
+
+  {#if showOllamaSetup}
     {#if ollamaModels.length > 0}
       <StatusBanner message={$t("settings_intelligence.no_compatible_model")} />
+    {:else}
+      <StatusBanner message={$t("settings_intelligence.no_model_installed")} />
     {/if}
     {#if ollamaPullError}
       <StatusBanner variant="danger" message={$t("settings_intelligence.pull_failed", { values: { error: ollamaPullError } })} />
