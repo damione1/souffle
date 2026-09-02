@@ -305,6 +305,52 @@
           "speaker": null
         }
       ]
+    },
+    {
+      "name": "same_speaker_timestamp_jitter",
+      "segments": [
+        { "text": "Je", "start_time": 19.28, "end_time": 19.38, "speaker": "them" },
+        { "text": "vous", "start_time": 19.28, "end_time": 19.38, "speaker": "them" },
+        { "text": "la", "start_time": 19.30, "end_time": 19.40, "speaker": "them" },
+        { "text": "mets", "start_time": 19.29, "end_time": 19.39, "speaker": "them" },
+        { "text": "dans", "start_time": 19.32, "end_time": 19.42, "speaker": "them" },
+        { "text": "le", "start_time": 19.31, "end_time": 19.41, "speaker": "them" },
+        { "text": "chat", "start_time": 19.34, "end_time": 19.44, "speaker": "them" }
+      ],
+      "expected": [
+        {
+          "timestamp": "0:19",
+          "text": "Je vous la mets dans le chat",
+          "speaker": "them"
+        }
+      ]
+    },
+    {
+      "name": "unpunctuated_interrupt_hold",
+      "segments": [
+        { "text": "aaaaaaaaaa", "start_time": 0.0, "end_time": 0.5, "speaker": "them" },
+        { "text": "bbbbbbbbbb", "start_time": 0.4, "end_time": 0.9, "speaker": "them" },
+        { "text": "interrupt", "start_time": 0.5, "end_time": 1.0, "speaker": "me" },
+        { "text": "cccccccccc", "start_time": 0.8, "end_time": 1.3, "speaker": "them" },
+        { "text": "dddddddddd", "start_time": 1.6, "end_time": 2.1, "speaker": "them" }
+      ],
+      "expected": [
+        {
+          "timestamp": "0:00",
+          "text": "aaaaaaaaaa bbbbbbbbbb cccccccccc",
+          "speaker": "them"
+        },
+        {
+          "timestamp": "0:00",
+          "text": "interrupt",
+          "speaker": "me"
+        },
+        {
+          "timestamp": "0:01",
+          "text": "dddddddddd",
+          "speaker": "them"
+        }
+      ]
     }
   ]
 }

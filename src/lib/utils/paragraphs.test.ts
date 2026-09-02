@@ -163,6 +163,62 @@ describe('groupIntoParagraphs diarization', () => {
       { speaker: 'me', text: 'Great to hear.' },
     ]);
   });
+
+  it('keeps same-speaker emission order when timestamps overlap or go backwards', () => {
+    // Kyutai KV-refresh can emit a later hypothesis with an earlier or equal
+    // timestamp. Time-sorting the lane would zipper "Je vous la mets dans le
+    // chat" with "En octobre on va commencer".
+    const segments = [
+      dseg('Je', 19.28, 'them'),
+      dseg('vous', 19.28, 'them'),
+      dseg('la', 19.30, 'them'),
+      dseg('mets', 19.29, 'them'),
+      dseg('dans', 19.32, 'them'),
+      dseg('le', 19.31, 'them'),
+      dseg('chat', 19.34, 'them'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe('Je vous la mets dans le chat');
+  });
+
+  it('closes an unpunctuated overlapping turn after the interrupt hold, so the interruption sorts between the two halves', () => {
+    const segments = [
+      dseg('aaaaaaaaaa', 0.0, 'them'),
+      dseg('bbbbbbbbbb', 0.4, 'them'),
+      dseg('interrupt', 0.5, 'me'),
+      dseg('cccccccccc', 0.8, 'them'),
+      dseg('dddddddddd', 1.6, 'them'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    expect(result.map((p) => ({ speaker: p.speaker, text: p.text }))).toEqual([
+      { speaker: 'them', text: 'aaaaaaaaaa bbbbbbbbbb cccccccccc' },
+      { speaker: 'me', text: 'interrupt' },
+      { speaker: 'them', text: 'dddddddddd' },
+    ]);
+  });
+
+  it('interleaves an interruption between length-split paragraphs of a long turn', () => {
+    // One Them turn long enough to split at the soft cap, Me starting during
+    // the first half. Display order is by paragraph start, not "entire turn
+    // then the interrupter".
+    const longSentence = `${'word '.repeat(100).trim()}.`; // ~500 chars
+    const segments = [
+      dseg(longSentence, 0, 'them'),
+      dseg('Short follow-up.', 0.5, 'them'),
+      dseg('quick correction', 0.3, 'me'),
+      dseg('And more after that.', 1.0, 'them'),
+    ];
+    const result = groupIntoParagraphs(segments, 1.5);
+    const speakers = result.map((p) => p.speaker);
+    const meAt = speakers.indexOf('me');
+    expect(meAt).toBeGreaterThan(0);
+    expect(meAt).toBeLessThan(speakers.length - 1);
+    expect(result[meAt].text).toBe('quick correction');
+    expect(result[0].speaker).toBe('them');
+    expect(result[0].startTime).toBeLessThan(result[meAt].startTime);
+    expect(result[meAt].startTime).toBeLessThan(result[result.length - 1].startTime);
+  });
 });
 
 describe('groupIntoParagraphs', () => {

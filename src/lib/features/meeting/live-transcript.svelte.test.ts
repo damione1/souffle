@@ -63,9 +63,10 @@ describe("createLiveTranscript equivalence", () => {
     expect(all).toEqual(groupIntoParagraphs(segments, PAUSE_THRESHOLD));
   });
 
-  it("matches batch grouping for diarized alternating speakers with slight interleave", () => {
+    it("matches batch grouping for diarized alternating speakers with slight interleave", () => {
     // Mic and system audio lanes arrive close together but not perfectly
-    // ordered; the grouper still sorts by start_time before grouping.
+    // ordered; the batch grouper merges lanes without time-sorting within one
+    // speaker, then orders the resulting paragraphs by start.
     const segments = [
       dseg("hi there", 0, "me"),
       dseg("hello back", 2.1, "them"),
@@ -83,31 +84,30 @@ describe("createLiveTranscript equivalence", () => {
     expect(all).toEqual(groupIntoParagraphs(segments, PAUSE_THRESHOLD));
   });
 
-  it("commits paragraphs to `committed` once more than 2 paragraphs are open", () => {
-    const segments = [
-      seg("First paragraph.", 0),
-      seg("Second paragraph.", 2.0),
-      seg("Third paragraph.", 4.0),
-      seg("Fourth paragraph.", 6.0),
-    ];
+  it("commits paragraphs once they fall outside the trailing time window", () => {
+    // 2s gaps: pause break every sentence. Latest start is 12s; horizon is
+    // 12 - 8 = 4s, so paragraphs ending before 4s freeze, later ones stay in
+    // the tail (and the last paragraph is always kept open).
+    const segments = Array.from({ length: 7 }, (_, i) =>
+      seg(`Sentence number ${i + 1}.`, i * 2.0),
+    );
     const live = createLiveTranscript(PAUSE_THRESHOLD);
     feedSegments(live, segments);
 
-    expect(live.tail.length).toBeLessThanOrEqual(2);
-    expect(live.committed.length + live.tail.length).toBe(4);
     expect(live.committed.length).toBeGreaterThan(0);
+    expect(live.tail.length).toBeGreaterThan(0);
+    expect(live.committed.length + live.tail.length).toBe(7);
+    expect(live.committed[live.committed.length - 1].startTime).toBeLessThan(
+      live.tail[0].startTime,
+    );
   });
 });
 
 describe("createLiveTranscript committed immutability", () => {
   it("never mutates a committed paragraph after it is committed", () => {
-    const segments = [
-      seg("First paragraph.", 0),
-      seg("Second paragraph.", 2.0),
-      seg("Third paragraph.", 4.0),
-      seg("Fourth paragraph.", 6.0),
-      seg("Fifth paragraph.", 8.0),
-    ];
+    const segments = Array.from({ length: 8 }, (_, i) =>
+      seg(`Sentence number ${i + 1}.`, i * 2.0),
+    );
     const live = createLiveTranscript(PAUSE_THRESHOLD);
     feedSegments(live, segments);
 
@@ -116,8 +116,8 @@ describe("createLiveTranscript committed immutability", () => {
 
     // Append more segments; already-committed paragraphs must stay identical.
     feedSegments(live, [
-      seg("Sixth paragraph.", 10.0),
-      seg("Seventh paragraph.", 12.0),
+      seg("Ninth paragraph.", 16.0),
+      seg("Tenth paragraph.", 18.0),
     ]);
 
     for (const { ref, copy } of snapshot) {
@@ -221,18 +221,49 @@ describe("createLiveTranscript segment ranges and live edits", () => {
 
   it("editParagraph updates committed text without resetting the stream", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
-    feedSegments(live, [
-      seg("hello", 0),
-      seg("world", 1),
-      seg("First paragraph.", 2.0),
-      seg("Second paragraph.", 4.0),
-      seg("Third paragraph.", 6.0),
-    ]);
+    feedSegments(live, Array.from({ length: 8 }, (_, i) =>
+      seg(`Sentence number ${i + 1}.`, i * 2.0),
+    ));
 
     expect(live.committed.length).toBeGreaterThan(0);
     const target = live.committed[0];
     const updated = live.editParagraph(target.id, "hello universe");
     expect(updated?.text).toBe("hello universe");
     expect(live.committed[0].text).toBe("hello universe");
+  });
+});
+
+describe("createLiveTranscript diarized tail window", () => {
+  it("places a late Me segment by timestamp inside the still-open tail", () => {
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    feedSegments(live, [
+      dseg("Them first.", 10.0, "them"),
+      dseg("Them second.", 12.0, "them"),
+    ]);
+    live.append(dseg("Me interruption.", 11.0, "me"), 2);
+
+    const all = [...live.committed, ...live.tail];
+    expect(all.map((p) => ({ speaker: p.speaker, text: p.text }))).toEqual([
+      { speaker: "them", text: "Them first." },
+      { speaker: "me", text: "Me interruption." },
+      { speaker: "them", text: "Them second." },
+    ]);
+  });
+
+  it("does not zipper same-speaker words that arrive with overlapping timestamps", () => {
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    feedSegments(live, [
+      dseg("Je", 19.28, "them"),
+      dseg("vous", 19.28, "them"),
+      dseg("la", 19.30, "them"),
+      dseg("mets", 19.29, "them"),
+      dseg("dans", 19.32, "them"),
+      dseg("le", 19.31, "them"),
+      dseg("chat", 19.34, "them"),
+    ]);
+
+    const all = [...live.committed, ...live.tail];
+    expect(all).toHaveLength(1);
+    expect(all[0].text).toBe("Je vous la mets dans le chat");
   });
 });

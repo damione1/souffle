@@ -133,10 +133,7 @@ pub enum RefreshKind {
 enum RefreshDecision {
     None,
     Full(RefreshKind),
-    Lane {
-        batch_idx: usize,
-        kind: RefreshKind,
-    },
+    Lane { batch_idx: usize, kind: RefreshKind },
 }
 
 /// Decide proactive KV refresh before the next frame.
@@ -213,6 +210,19 @@ struct LoadedModel {
     vad_pause_streak: Vec<usize>,
     /// Per-lane LID and mismatch streak tracking.
     language_tracker: LanguageTracker,
+    /// Word waiting for its EndWord (or the next Word) before emit, per lane.
+    pending_words: Vec<Option<PendingWord>>,
+    /// Pending words closed by a KV refresh, emitted on the next consume.
+    orphaned_words: Vec<PendingWord>,
+}
+
+/// A decoded word held until moshi emits `EndWord` so `end_time` is real.
+#[derive(Clone)]
+struct PendingWord {
+    text: String,
+    start_time: f64,
+    language: Option<String>,
+    speaker: Option<Speaker>,
 }
 
 /// Kyutai STT engine implementation.
@@ -314,6 +324,8 @@ impl KyutaiEngine {
             refresh_count: 0,
             vad_pause_streak: vec![0; batch_size],
             language_tracker: LanguageTracker::new(batch_size, meeting_language_prior),
+            pending_words: vec![None; batch_size],
+            orphaned_words: Vec::new(),
         })
     }
 
@@ -357,13 +369,52 @@ impl KyutaiEngine {
         (moshi_start - time_offset_seconds + epoch_origin_seconds).max(0.0)
     }
 
+    fn pending_to_segment(pending: PendingWord, end_time: f64) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: pending.text,
+            start_time: pending.start_time,
+            end_time: end_time.max(pending.start_time),
+            is_final: true,
+            language: pending.language,
+            confidence: None,
+            speaker: pending.speaker,
+        }
+    }
+
+    fn emit_pending(
+        pending_words: &mut [Option<PendingWord>],
+        batch_idx: usize,
+        end_time: f64,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        if let Some(pending) = pending_words.get_mut(batch_idx).and_then(Option::take) {
+            segments.push(Self::pending_to_segment(pending, end_time));
+        }
+    }
+
+    fn drain_orphans(model: &mut LoadedModel, segments: &mut Vec<TranscriptionSegment>) {
+        for pending in model.orphaned_words.drain(..) {
+            let end = pending.start_time;
+            segments.push(Self::pending_to_segment(pending, end));
+        }
+    }
+
+    fn drain_all_pending(model: &mut LoadedModel, segments: &mut Vec<TranscriptionSegment>) {
+        Self::drain_orphans(model, segments);
+        for batch_idx in 0..model.pending_words.len() {
+            if let Some(pending) = model.pending_words[batch_idx].take() {
+                let end = pending.start_time;
+                segments.push(Self::pending_to_segment(pending, end));
+            }
+        }
+    }
+
     /// Soft KV-cache clear: empties LM/Mimi/ItemState without rebuilding Metal
     /// devices or remapping weights. Preferred over full `reset_state` mid-session.
     fn refresh_loaded(model: &mut LoadedModel, kind: RefreshKind) -> Result<(), EngineError> {
         let frames = model.frames_since_refresh;
         let context = model.config.context;
-        let real_secs =
-            frames as f64 / MIMI_FRAMES_PER_SECOND - model.time_offset_seconds;
+        let real_secs = frames as f64 / MIMI_FRAMES_PER_SECOND - model.time_offset_seconds;
         model.epoch_origin_seconds += real_secs.max(0.0);
         model
             .state
@@ -374,6 +425,13 @@ impl KyutaiEngine {
         model.frames_since_refresh = 0;
         model.vad_pause_streak = vec![0; model.state.batch_size()];
         model.language_tracker.reset_all();
+        let mut orphaned: Vec<PendingWord> = Vec::new();
+        for pending in &mut model.pending_words {
+            if let Some(word) = pending.take() {
+                orphaned.push(word);
+            }
+        }
+        model.orphaned_words.append(&mut orphaned);
         model.refresh_count = model.refresh_count.saturating_add(1);
         info!(
             kind = ?kind,
@@ -388,7 +446,11 @@ impl KyutaiEngine {
 
     /// Per-lane KV clear via moshi `reset_batch_idx`. Does not rebuild Metal or
     /// re-feed the silence prefix; the other lane keeps decoding uninterrupted.
-    fn refresh_lane(model: &mut LoadedModel, batch_idx: usize, kind: RefreshKind) -> Result<(), EngineError> {
+    fn refresh_lane(
+        model: &mut LoadedModel,
+        batch_idx: usize,
+        kind: RefreshKind,
+    ) -> Result<(), EngineError> {
         model
             .state
             .reset_batch_idx(batch_idx)
@@ -397,6 +459,13 @@ impl KyutaiEngine {
             *streak = 0;
         }
         model.language_tracker.reset_lane(batch_idx);
+        let pending = model
+            .pending_words
+            .get_mut(batch_idx)
+            .and_then(Option::take);
+        if let Some(pending) = pending {
+            model.orphaned_words.push(pending);
+        }
         debug!(
             kind = ?kind,
             batch_idx,
@@ -415,7 +484,9 @@ impl KyutaiEngine {
         ) {
             RefreshDecision::None => {}
             RefreshDecision::Full(kind) => Self::refresh_loaded(model, kind)?,
-            RefreshDecision::Lane { batch_idx, kind } => Self::refresh_lane(model, batch_idx, kind)?,
+            RefreshDecision::Lane { batch_idx, kind } => {
+                Self::refresh_lane(model, batch_idx, kind)?
+            }
         }
         Ok(())
     }
@@ -548,6 +619,7 @@ impl KyutaiEngine {
         debug_enabled: bool,
         segments: &mut Vec<TranscriptionSegment>,
     ) {
+        Self::drain_orphans(model, segments);
         let frame_num = FRAME_COUNT.load(Ordering::Relaxed).saturating_sub(1);
         let diarized = model.state.batch_size() == 2;
 
@@ -614,22 +686,32 @@ impl KyutaiEngine {
                     } else {
                         None
                     };
-                    segments.push(TranscriptionSegment {
+                    // Previous word on this lane never got EndWord: close it
+                    // at this word's start so we don't drop it.
+                    Self::emit_pending(&mut model.pending_words, *batch_idx, start_time, segments);
+                    if *batch_idx >= model.pending_words.len() {
+                        model.pending_words.resize_with(*batch_idx + 1, || None);
+                    }
+                    model.pending_words[*batch_idx] = Some(PendingWord {
                         text,
                         start_time,
-                        end_time: start_time,
-                        is_final: true,
                         language,
-                        confidence: None,
                         speaker,
                     });
                 }
-                moshi::asr::AsrMsg::EndWord { .. } => {}
+                moshi::asr::AsrMsg::EndWord {
+                    stop_time,
+                    batch_idx,
+                } => {
+                    let end_time = Self::word_start_time(model, *stop_time);
+                    Self::emit_pending(&mut model.pending_words, *batch_idx, end_time, segments);
+                }
                 moshi::asr::AsrMsg::Step { prs, .. } => {
                     Self::note_vad_pause(model, prs);
                 }
             }
         }
+        Self::drain_orphans(model, segments);
     }
 
     fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
@@ -847,8 +929,7 @@ impl TranscriptionEngine for KyutaiEngine {
                 chunk
             };
 
-            let asr_msgs =
-                Self::step_pcm_single(model, &device, chunk_data, debug_enabled)?;
+            let asr_msgs = Self::step_pcm_single(model, &device, chunk_data, debug_enabled)?;
             Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments);
         }
 
@@ -856,40 +937,46 @@ impl TranscriptionEngine for KyutaiEngine {
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
-
-        // Words are emitted audio_delay after they are spoken. If the semantic
-        // VAD has reported a pause for longer than that delay (plus margin),
-        // every word has already cleared the pipeline and the silence suffix
-        // would only burn inference time at stop.
-        let delay_frames =
-            (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
-        let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
+        let (delay_frames, suffix_seconds, pause_streak) = {
+            let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+            // Words are emitted audio_delay after they are spoken. If the semantic
+            // VAD has reported a pause for longer than that delay (plus margin),
+            // every word has already cleared the pipeline and the silence suffix
+            // would only burn inference time at stop.
+            let delay_frames =
+                (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
+            let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
+            let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
+            (delay_frames, suffix_seconds, pause_streak)
+        };
         let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
         let diarize = self.diarize;
-        let pause_streak = model
-            .vad_pause_streak
-            .first()
-            .copied()
-            .unwrap_or(0);
 
         if !diarize && pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES {
             info!(
                 streak = pause_streak,
                 delay_frames, "VAD pause covers ASR delay, skipping silence flush"
             );
-            return Ok(Vec::new());
+            let mut segments = Vec::new();
+            if let Some(model) = self.model.as_mut() {
+                Self::drain_all_pending(model, &mut segments);
+            }
+            return Ok(segments);
         }
 
         // Feed silence suffix to push any remaining words out of the model's
         // internal pipeline (audio_delay + 1 second of silence). Both lanes get
         // the same silence in diarized mode.
         let silence = vec![0.0f32; silence_samples];
-        if diarize {
-            self.transcribe_dual(&silence, &silence)
+        let mut segments = if diarize {
+            self.transcribe_dual(&silence, &silence)?
         } else {
-            self.transcribe(&silence, None)
+            self.transcribe(&silence, None)?
+        };
+        if let Some(model) = self.model.as_mut() {
+            Self::drain_all_pending(model, &mut segments);
         }
+        Ok(segments)
     }
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
@@ -1052,5 +1139,33 @@ mod tests {
         assert_eq!(KyutaiEngine::word_start_time_raw(2.0, 1.0, 30.0), 31.0);
         // Prefix still draining: clamp at 0.
         assert_eq!(KyutaiEngine::word_start_time_raw(0.5, 1.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn pending_word_uses_endword_stop_time() {
+        let pending = PendingWord {
+            text: "hello".into(),
+            start_time: 1.2,
+            language: Some("en".into()),
+            speaker: Some(Speaker::Me),
+        };
+        let seg = KyutaiEngine::pending_to_segment(pending, 1.6);
+        assert_eq!(seg.text, "hello");
+        assert_eq!(seg.start_time, 1.2);
+        assert_eq!(seg.end_time, 1.6);
+        assert_eq!(seg.speaker, Some(Speaker::Me));
+        assert!(seg.is_final);
+    }
+
+    #[test]
+    fn pending_word_end_time_never_precedes_start() {
+        let pending = PendingWord {
+            text: "hi".into(),
+            start_time: 2.0,
+            language: None,
+            speaker: None,
+        };
+        let seg = KyutaiEngine::pending_to_segment(pending, 1.5);
+        assert_eq!(seg.end_time, 2.0);
     }
 }

@@ -28,6 +28,17 @@ const SOFT_MAX_CHARS = 480;
 /** Absolute ceiling for streams with no punctuation at all. */
 const HARD_MAX_CHARS = 700;
 
+/** Gap after which a new speaker is treated as a handoff, not crosstalk. */
+const HANDOFF_GAP_S = 0.35;
+/** Overlapping speech closes the interrupted turn this long after the
+ * interrupter started, even without a sentence end. Only applied when the
+ * interrupted turn is long enough to be a monologue — short simultaneous
+ * phrases stay intact. */
+const INTERRUPT_HOLD_S = 1.0;
+/** Turns shorter than this are treated as phrases, not monologues, so a
+ * 1s hold must not peel the last word off word-level crosstalk. */
+const MONOLOGUE_MIN_S = 2.0;
+
 /** Sentence-ending punctuation, allowing closing quotes/brackets after it. */
 const SENTENCE_END = /[.!?…]["»”')\]]*\s*$/;
 
@@ -35,126 +46,191 @@ function countSentenceEnds(text: string): number {
   return (text.match(/[.!?…]+(?=["»”')\]]*(\s|$))/g) ?? []).length;
 }
 
+function segEnd(seg: TranscriptionSegment): number {
+  return seg.end_time || seg.start_time;
+}
+
 /** Half-open index range `[start, end)` into the ordered segment array that a
  * paragraph was built from. */
 export type ParagraphRange = { start: number; end: number };
 
-/**
- * Cluster time-sorted diarized segments into per-speaker turns, then emit
- * them ordered by each turn's start time (turn segments stay contiguous and
- * chronological internally). A segment joins its speaker's currently open
- * turn if the gap since that turn's last segment is under `pauseThreshold`;
- * otherwise that speaker's turn closes and a new one opens.
- *
- * Mic (Me) and system audio (Them) are transcribed on independent lanes, so
- * during crosstalk a naive time-sort interleaves them word by word. Turn
- * clustering keeps each speaker's own words together (one turn = one
- * speaker's contiguous phrase) even while both are talking over each other,
- * so the paragraph loop below breaks on turn boundaries instead of on every
- * single word.
- *
- * Without a pause, a monologue would otherwise absorb everything indefinitely,
- * so a second speaker's interjection would render far below the point in the
- * monologue it actually responded to. Opening a new turn for speaker B:
- * - If B starts clearly after A's last end (sequential handoff, >= 350ms),
- *   A's turn closes immediately so A's later speech opens a fresh line below.
- *   This matters for unpunctuated word streams (Kyutai) that never hit a
- *   sentence end.
- * - If B overlaps A or starts within 350ms (true crosstalk / tight
- *   interjection), A is marked interrupted and keeps absorbing until a
- *   sentence end, so word-level interleaving stays readable as two phrases.
- */
-function clusterIntoTurns(sorted: TranscriptionSegment[], pauseThreshold: number): TranscriptionSegment[] {
-  /** Gap after which a new speaker is treated as a handoff, not crosstalk. */
-  const HANDOFF_GAP_S = 0.35;
-  type Turn = { start: number; lastEnd: number; segments: TranscriptionSegment[]; interrupted: boolean };
-  const openTurns = new Map<Speaker, Turn>();
-  const turns: Turn[] = [];
+type Turn = {
+  start: number;
+  lastEnd: number;
+  speaker: Speaker | null;
+  segments: TranscriptionSegment[];
+};
 
-  for (const seg of sorted) {
+/**
+ * Cluster diarized segments into per-speaker turns.
+ *
+ * Mic (Me) and system audio (Them) are transcribed on independent lanes.
+ * Within a lane, emission order is kept (timestamps can jitter or overlap
+ * after a KV refresh; time-sorting the same speaker zippers two hypotheses
+ * into word salad). Lanes are pause-split, then overlapping turns from
+ * another speaker split the interrupted turn so the interruption can sort
+ * between the two halves:
+ * - Sequential handoff (>= 350ms after the other speaker's last end): close
+ *   immediately.
+ * - Overlap / tight interjection: close at the earlier of the next sentence
+ *   end or `INTERRUPT_HOLD_S` after the interrupter started.
+ */
+function clusterIntoTurns(segments: TranscriptionSegment[], pauseThreshold: number): Turn[] {
+  const lanes = new Map<Speaker, TranscriptionSegment[]>();
+  const untagged: TranscriptionSegment[] = [];
+
+  for (const seg of segments) {
     const speaker = seg.speaker;
     if (speaker == null) {
-      // Non-diarized segment inside an otherwise-diarized stream (shouldn't
-      // normally happen): keep it as its own single-segment turn in place.
-      turns.push({ start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg], interrupted: false });
+      untagged.push(seg);
       continue;
     }
-    const open = openTurns.get(speaker);
-    if (open && seg.start_time - open.lastEnd < pauseThreshold) {
-      open.segments.push(seg);
-      open.lastEnd = Math.max(open.lastEnd, seg.end_time || seg.start_time);
-      if (open.interrupted && SENTENCE_END.test(seg.text.trim())) {
-        // First sentence end at or after the interruption: close now so the
-        // speaker's next segment starts a fresh, later-sorting turn.
-        openTurns.delete(speaker);
-      }
-    } else {
-      const turn: Turn = { start: seg.start_time, lastEnd: seg.end_time || seg.start_time, segments: [seg], interrupted: false };
-      turns.push(turn);
-      openTurns.set(speaker, turn);
-      for (const [otherSpeaker, otherTurn] of [...openTurns.entries()]) {
-        if (otherSpeaker === speaker) continue;
-        if (turn.start >= otherTurn.lastEnd + HANDOFF_GAP_S) {
-          // Sequential handoff: close now so later speech from that speaker
-          // opens a new line below instead of editing the earlier monologue.
-          openTurns.delete(otherSpeaker);
-        } else {
-          otherTurn.interrupted = true;
-        }
-      }
-    }
+    const lane = lanes.get(speaker);
+    if (lane) lane.push(seg);
+    else lanes.set(speaker, [seg]);
   }
 
-  turns.sort((a, b) => a.start - b.start);
-  return turns.flatMap((t) => t.segments);
+  const turns: Turn[] = [];
+  for (const [speaker, segs] of lanes) {
+    turns.push(...pauseSplitLane(segs, speaker, pauseThreshold));
+  }
+  for (const seg of untagged) {
+    turns.push({
+      start: seg.start_time,
+      lastEnd: segEnd(seg),
+      speaker: null,
+      segments: [seg],
+    });
+  }
+
+  return splitInterruptedTurns(turns);
+}
+
+function pauseSplitLane(
+  segs: TranscriptionSegment[],
+  speaker: Speaker,
+  pauseThreshold: number,
+): Turn[] {
+  const turns: Turn[] = [];
+  let current: Turn | null = null;
+  for (const seg of segs) {
+    if (current && seg.start_time - current.lastEnd < pauseThreshold) {
+      current.segments.push(seg);
+      current.lastEnd = Math.max(current.lastEnd, segEnd(seg));
+    } else {
+      current = {
+        start: seg.start_time,
+        lastEnd: segEnd(seg),
+        speaker,
+        segments: [seg],
+      };
+      turns.push(current);
+    }
+  }
+  return turns;
+}
+
+/** Index at which `turn` should split so `interrupter` can sort between the
+ * two halves. `null` when the overlap is too short / has no split point. */
+function interruptSplitIndex(turn: Turn, interrupter: Turn): number | null {
+  const spokenBefore = turn.segments.findIndex((s) => s.start_time >= interrupter.start);
+  const headLen = spokenBefore === -1 ? turn.segments.length : spokenBefore;
+  const lastBeforeEnd = headLen > 0 ? segEnd(turn.segments[headLen - 1]) : turn.start;
+
+  if (interrupter.start >= lastBeforeEnd + HANDOFF_GAP_S) {
+    return headLen > 0 && headLen < turn.segments.length ? headLen : null;
+  }
+
+  const holdAt = interrupter.start + INTERRUPT_HOLD_S;
+  const applyHold = turn.lastEnd - turn.start >= MONOLOGUE_MIN_S;
+  for (let i = headLen; i < turn.segments.length; i++) {
+    const seg = turn.segments[i];
+    if (SENTENCE_END.test(seg.text.trim())) return i + 1;
+    if (applyHold && seg.start_time >= holdAt) return i;
+  }
+  return null;
+}
+
+function splitInterruptedTurns(turns: Turn[]): Turn[] {
+  const remaining = [...turns];
+  const out: Turn[] = [];
+
+  while (remaining.length > 0) {
+    remaining.sort((a, b) => a.start - b.start);
+    const turn = remaining.shift()!;
+    if (turn.speaker == null || turn.segments.length === 0) {
+      out.push(turn);
+      continue;
+    }
+
+    const interrupter = remaining.find(
+      (other) =>
+        other.speaker != null
+        && other.speaker !== turn.speaker
+        && other.start < turn.lastEnd
+        && other.start >= turn.start,
+    );
+
+    if (!interrupter) {
+      out.push(turn);
+      continue;
+    }
+
+    const splitAt = interruptSplitIndex(turn, interrupter);
+    if (splitAt == null || splitAt <= 0 || splitAt >= turn.segments.length) {
+      out.push(turn);
+      continue;
+    }
+
+    const headSegs = turn.segments.slice(0, splitAt);
+    const tailSegs = turn.segments.slice(splitAt);
+    out.push({
+      start: turn.start,
+      lastEnd: Math.max(...headSegs.map(segEnd)),
+      speaker: turn.speaker,
+      segments: headSegs,
+    });
+    remaining.push({
+      start: tailSegs[0].start_time,
+      lastEnd: Math.max(...tailSegs.map(segEnd)),
+      speaker: turn.speaker,
+      segments: tailSegs,
+    });
+  }
+
+  return out;
 }
 
 /**
- * Group segments into flowing paragraphs with a leading timestamp, also
- * returning the source index range (into the returned `ordered` array) each
- * paragraph consumed. Callers that need incremental/streaming regrouping use
- * the ranges to know which segments a completed paragraph consumed, without
- * duplicating the break rules below.
- *
+ * Split a homogeneous (or non-diarized) segment stream into paragraphs.
  * Paragraphs only break at sentence boundaries, triggered by any of:
+ * - a speaker change when `breakOnSpeakerChange` is set
  * - a pause ≥ `pauseThreshold` seconds before the next segment
  * - the paragraph already holds MAX_SENTENCES_PER_PARAGRAPH sentences
  * - the paragraph exceeds SOFT_MAX_CHARS
- * So continuous speech without pauses still yields readable paragraphs.
  * Streams with no punctuation at all fall back to a hard length cap.
  *
- * Works across engines: Kyutai emits one segment per word, Whisper and
- * Parakeet emit sentence/window segments. Negative gaps (legacy data with
- * window-relative timestamps) never trigger a pause break.
+ * Negative gaps (legacy data with window-relative timestamps) never trigger
+ * a pause break.
  */
-export function groupIntoParagraphsWithRanges(
+function paragraphsFromSegments(
   segments: TranscriptionSegment[],
   pauseThreshold: number,
-): { paragraphs: Paragraph[]; ranges: ParagraphRange[]; ordered: TranscriptionSegment[] } {
-  if (segments.length === 0) return { paragraphs: [], ranges: [], ordered: segments };
-
-  // Diarized meetings tag each segment with a speaker. Mic (Me) and system
-  // audio (Them) are transcribed independently, so order by time first, then
-  // cluster into per-speaker turns so crosstalk reads as flowing phrases
-  // instead of breaking on every speaker change. Non-diarized streams are
-  // left exactly as emitted (legacy window-relative timestamps must not be
-  // reordered).
-  const diarized = segments.some((s) => s.speaker != null);
-  const ordered = diarized
-    ? clusterIntoTurns([...segments].sort((a, b) => a.start_time - b.start_time), pauseThreshold)
-    : segments;
+  breakOnSpeakerChange: boolean,
+): { paragraphs: Paragraph[]; ranges: ParagraphRange[] } {
+  if (segments.length === 0) return { paragraphs: [], ranges: [] };
 
   const paragraphs: Paragraph[] = [];
   const ranges: ParagraphRange[] = [];
   let rangeStart = 0;
-  let currentTimestamp = formatTimestamp(ordered[0].start_time);
-  let currentStartTime = ordered[0].start_time;
-  let currentSpeaker: Speaker | null = ordered[0].speaker ?? null;
+  let currentTimestamp = formatTimestamp(segments[0].start_time);
+  let currentStartTime = segments[0].start_time;
+  let currentSpeaker: Speaker | null = segments[0].speaker ?? null;
   let currentWords: string[] = [];
   let currentChars = 0;
   let sentenceCount = 0;
   let endsSentence = false;
-  let lastEnd = ordered[0].start_time;
+  let lastEnd = segments[0].start_time;
 
   const flush = (boundaryIndex: number, nextStart: number, nextSpeaker: Speaker | null) => {
     paragraphs.push({
@@ -174,8 +250,8 @@ export function groupIntoParagraphsWithRanges(
     endsSentence = false;
   };
 
-  for (let i = 0; i < ordered.length; i++) {
-    const seg = ordered[i];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
     const text = seg.text.trim();
     // An empty segment carries no text but still occupies an index; it stays
     // part of whichever paragraph range is currently open (or the next one,
@@ -184,8 +260,7 @@ export function groupIntoParagraphsWithRanges(
     const speaker = seg.speaker ?? null;
 
     if (currentWords.length > 0) {
-      // A speaker change always starts a new paragraph (even mid-sentence).
-      if (diarized && speaker !== currentSpeaker) {
+      if (breakOnSpeakerChange && speaker !== currentSpeaker) {
         flush(i, seg.start_time, speaker);
       } else {
         const gap = seg.start_time - lastEnd;
@@ -208,7 +283,7 @@ export function groupIntoParagraphsWithRanges(
     currentChars += text.length + 1;
     sentenceCount += countSentenceEnds(text);
     endsSentence = SENTENCE_END.test(text);
-    lastEnd = Math.max(lastEnd, seg.end_time || seg.start_time);
+    lastEnd = Math.max(lastEnd, segEnd(seg));
   }
 
   if (currentWords.length > 0) {
@@ -218,7 +293,61 @@ export function groupIntoParagraphsWithRanges(
       text: currentWords.join(" "),
       speaker: currentSpeaker,
     });
-    ranges.push({ start: rangeStart, end: ordered.length });
+    ranges.push({ start: rangeStart, end: segments.length });
+  }
+
+  return { paragraphs, ranges };
+}
+
+/**
+ * Group segments into flowing paragraphs with a leading timestamp, also
+ * returning the source index range (into the returned `ordered` array) each
+ * paragraph consumed. Callers that need incremental/streaming regrouping use
+ * the ranges to know which segments a completed paragraph consumed, without
+ * duplicating the break rules below.
+ *
+ * Diarized meetings: cluster into per-speaker turns (keeping emission order
+ * within a lane), split each turn into readable paragraphs, then order those
+ * paragraphs by start time so an interruption lands between the two halves
+ * of a long turn instead of after every length-split of it.
+ *
+ * Non-diarized streams are left exactly as emitted (legacy window-relative
+ * timestamps must not be reordered).
+ */
+export function groupIntoParagraphsWithRanges(
+  segments: TranscriptionSegment[],
+  pauseThreshold: number,
+): { paragraphs: Paragraph[]; ranges: ParagraphRange[]; ordered: TranscriptionSegment[] } {
+  if (segments.length === 0) return { paragraphs: [], ranges: [], ordered: segments };
+
+  const diarized = segments.some((s) => s.speaker != null);
+  if (!diarized) {
+    const split = paragraphsFromSegments(segments, pauseThreshold, false);
+    return { ...split, ordered: segments };
+  }
+
+  const turns = clusterIntoTurns(segments, pauseThreshold);
+  const pieces: { paragraph: Paragraph; segs: TranscriptionSegment[] }[] = [];
+  for (const turn of turns) {
+    const split = paragraphsFromSegments(turn.segments, pauseThreshold, false);
+    for (let i = 0; i < split.paragraphs.length; i++) {
+      pieces.push({
+        paragraph: split.paragraphs[i],
+        segs: turn.segments.slice(split.ranges[i].start, split.ranges[i].end),
+      });
+    }
+  }
+
+  pieces.sort((a, b) => a.paragraph.startTime - b.paragraph.startTime);
+
+  const paragraphs: Paragraph[] = [];
+  const ranges: ParagraphRange[] = [];
+  const ordered: TranscriptionSegment[] = [];
+  for (const piece of pieces) {
+    const start = ordered.length;
+    ordered.push(...piece.segs);
+    paragraphs.push(piece.paragraph);
+    ranges.push({ start, end: ordered.length });
   }
 
   return { paragraphs, ranges, ordered };
