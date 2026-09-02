@@ -145,6 +145,20 @@
         />
       </label>
 
+      <div class="flex items-center gap-1.5 px-0.5" role="group" aria-label={$t("home.filter_label")}>
+        {#each (["all", "meeting", "dictation"] as const) as kind (kind)}
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost"
+            class:btn-active={timeline.kindFilter === kind}
+            aria-pressed={timeline.kindFilter === kind}
+            onclick={() => { timeline.kindFilter = kind; }}
+          >
+            {$t(`home.filter_${kind}`)}
+          </button>
+        {/each}
+      </div>
+
       {#if timeline.statusMessage}
         <StatusBanner message={timeline.statusMessage} />
       {/if}
@@ -157,6 +171,12 @@
         upcoming={calendar.events}
         canStartEvent={modelReady}
         onStartEvent={(event) => void calendar.startFromEvent(event)}
+        calendarEnabled={calendar.enabled}
+        calendarPermission={calendar.permission}
+        onSetupCalendar={() => {
+          app.settingsInitialTab = "meetings";
+          app.settingsOpen = true;
+        }}
       />
     {:else}
       <!-- During a live session, the session card is the only focus. -->

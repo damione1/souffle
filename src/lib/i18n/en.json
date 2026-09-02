@@ -459,6 +459,10 @@
     "stopping": "Finishing…",
     "listening": "Listening…",
     "search_placeholder": "Search transcripts and meetings",
+    "filter_label": "Filter by type",
+    "filter_all": "All",
+    "filter_meeting": "Meetings",
+    "filter_dictation": "Dictations",
     "press": "Press",
     "autopaste_hint": "Auto-pastes into your last app when you stop",
     "live_transcript": "Live transcript",
@@ -513,7 +517,10 @@
     "you": "you",
     "starts_in_minutes": "Starts in {minutes} min",
     "started_system_audio": "Meeting started — system audio active",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "setup_cta_title": "See today's meetings here",
+    "setup_cta_desc": "Connect the macOS Calendar to get reminders and one-click start.",
+    "setup_cta_action": "Set up"
   },
   "update_available": {
     "title": "Update available",
