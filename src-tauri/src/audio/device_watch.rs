@@ -528,7 +528,11 @@ pub(crate) fn device_is_alive(id: AudioObjectID) -> bool {
 
 /// Destroy leftover "Souffle Tap" aggregates from a previous crash, a
 /// timed-out `spawn_tap`, or an older build that created them as public
-/// devices. Safe at startup, before any session has created a tap.
+/// devices.
+///
+/// This cannot tell a leak from an aggregate in use: it destroys every
+/// Souffle-named one it finds. Only call it with no tap alive in the process
+/// (at startup, or behind the `LIVE_TAPS` check in `system_tap`).
 pub(crate) fn destroy_orphaned_souffle_taps() {
     use objc2_core_audio::AudioHardwareDestroyAggregateDevice;
 

@@ -34,9 +34,6 @@ const CALENDAR_AUTOSTART_ENABLED_KEY: &str = "calendar_autostart_enabled";
 const FEEDBACK_SOUNDS_ENABLED_KEY: &str = "feedback_sounds_enabled";
 const FEEDBACK_SOUNDS_VOLUME_KEY: &str = "feedback_sounds_volume";
 const MODEL_UNLOAD_TIMEOUT_MINUTES_KEY: &str = "model_unload_timeout_minutes";
-/// Marks that the one-time "never unload" correction has run, so a user who
-/// deliberately picks Never afterwards keeps it.
-const MODEL_UNLOAD_DEFAULT_FIXED_KEY: &str = "model_unload_timeout_default_fixed";
 const MEETING_AUTOSTOP_ENABLED_KEY: &str = "meeting_autostop_enabled";
 const MEETING_AUTOSTOP_MINUTES_KEY: &str = "meeting_autostop_minutes";
 const MEETING_MAX_DURATION_MINUTES_KEY: &str = "meeting_max_duration_minutes";
@@ -393,18 +390,7 @@ impl AppSettings {
         if let Some(model_unload_timeout_minutes) =
             read_json_setting::<u32>(db, MODEL_UNLOAD_TIMEOUT_MINUTES_KEY)?
         {
-            settings.model_unload_timeout_minutes =
-                if should_fix_never_unload(db, model_unload_timeout_minutes)? {
-                    write_json_setting(db, MODEL_UNLOAD_DEFAULT_FIXED_KEY, &true)?;
-                    write_json_setting(
-                        db,
-                        MODEL_UNLOAD_TIMEOUT_MINUTES_KEY,
-                        &Self::default().model_unload_timeout_minutes,
-                    )?;
-                    Self::default().model_unload_timeout_minutes
-                } else {
-                    model_unload_timeout_minutes
-                };
+            settings.model_unload_timeout_minutes = model_unload_timeout_minutes;
         }
         if let Some(meeting_autostop_enabled) =
             read_json_setting::<bool>(db, MEETING_AUTOSTOP_ENABLED_KEY)?
@@ -976,22 +962,6 @@ fn conflicting_pair(left: &str, right: &str) -> bool {
     !left.is_empty() && left == right
 }
 
-/// Whether the stored "never unload the model" value is the old shipped
-/// default rather than a deliberate choice.
-///
-/// Every install that has saved its settings once carries an explicit row for
-/// this key, written by the app itself, so the stored value is not evidence of
-/// a user decision. The correction runs once, guarded by a marker, and only
-/// over the exact old default: a stored 5, 15 or 60 was necessarily chosen and
-/// is never touched, and a Never picked after the correction sticks.
-fn should_fix_never_unload(db: &Database, stored: u32) -> Result<bool, String> {
-    const OLD_DEFAULT: u32 = 0;
-    if stored != OLD_DEFAULT {
-        return Ok(false);
-    }
-    Ok(read_json_setting::<bool>(db, MODEL_UNLOAD_DEFAULT_FIXED_KEY)?.is_none())
-}
-
 fn read_json_setting<T>(db: &Database, key: &str) -> Result<Option<T>, String>
 where
     T: DeserializeOwned,
@@ -1216,20 +1186,23 @@ mod tests {
         assert_eq!(settings.calendar_reminder_minutes, 2);
     }
 
+    /// Loading must never rewrite what is stored: the one-time correction of
+    /// the old "never unload" default is a schema migration, not a load-time
+    /// side effect (`load` runs from 19 call sites, the headless CLI included).
     #[test]
-    fn a_stored_never_unload_is_corrected_once() {
-        let (db, _dir) = test_db();
-        db.set_setting("model_unload_timeout_minutes", "0")
-            .expect("save minutes");
-
-        let settings = AppSettings::load(&db).expect("load settings");
-        assert_eq!(settings.model_unload_timeout_minutes, 60);
-
-        // Deliberately choosing Never after the correction must stick.
-        db.set_setting("model_unload_timeout_minutes", "0")
-            .expect("save minutes");
-        let settings = AppSettings::load(&db).expect("reload settings");
-        assert_eq!(settings.model_unload_timeout_minutes, 0);
+    fn loading_never_rewrites_a_stored_unload_timeout() {
+        for minutes in [0u32, 5, 15, 60] {
+            let (db, _dir) = test_db();
+            db.set_setting("model_unload_timeout_minutes", &minutes.to_string())
+                .expect("save minutes");
+            let settings = AppSettings::load(&db).expect("load settings");
+            assert_eq!(settings.model_unload_timeout_minutes, minutes);
+            assert_eq!(
+                db.get_setting("model_unload_timeout_minutes")
+                    .expect("read back"),
+                Some(minutes.to_string())
+            );
+        }
     }
 
     #[test]

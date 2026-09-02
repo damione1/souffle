@@ -29,7 +29,7 @@ use std::ffi::CStr;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
@@ -98,11 +98,14 @@ pub fn spawn_tap(
         .name("system-tap".into())
         .spawn(move || {
             // A teardown that failed may have left an aggregate, and its IO
-            // context, behind. Sweep before adding another one. This runs on
+            // context, behind. Sweep before adding another one, but only with
+            // no tap alive: the sweep cannot tell a leak from a working
+            // aggregate and would destroy a running meeting's. This runs on
             // the thread already covered by the startup timeout below, so a
             // wedged coreaudiod cannot stall the caller.
-            if teardown_left_orphans() {
+            if should_sweep_orphans() {
                 crate::audio::device_watch::destroy_orphaned_souffle_taps();
+                TEARDOWN_SUSPECT.store(false, Ordering::Relaxed);
             }
             match SystemTap::start(producer) {
                 Ok(tap) => {
@@ -257,6 +260,7 @@ impl SystemTap {
             return Err(format!("AudioDeviceStart failed ({status})"));
         }
 
+        LIVE_TAPS.fetch_add(1, Ordering::Relaxed);
         info!("System audio tap started ({sample_rate} Hz)");
         Ok(Self {
             tap_id,
@@ -281,16 +285,23 @@ impl SystemTap {
     }
 }
 
+/// Taps currently alive in this process. The orphan sweep destroys every
+/// Souffle-named aggregate it finds, including ones still in use, so it must
+/// only run when this is zero.
+static LIVE_TAPS: AtomicUsize = AtomicUsize::new(0);
+
 /// Set when a teardown step returned a non-zero OSStatus, meaning an aggregate
 /// device (and with it an IO context, which holds an idle-sleep assertion) may
 /// have survived in coreaudiod. Read by [`teardown_left_orphans`] so the next
 /// tap spawn can sweep, instead of waiting for the next app launch.
 static TEARDOWN_SUSPECT: AtomicBool = AtomicBool::new(false);
 
-/// Whether a previous teardown may have leaked CoreAudio objects. Clears the
-/// flag: the caller is expected to run a sweep.
-fn teardown_left_orphans() -> bool {
-    TEARDOWN_SUSPECT.swap(false, Ordering::Relaxed)
+/// Whether a sweep should run now: a previous teardown may have leaked, and no
+/// tap is alive to be caught in it. The flag is left set when a tap is alive,
+/// and is only cleared once the sweep has actually finished, so a sweep
+/// abandoned on a wedged coreaudiod is retried rather than forgotten.
+fn should_sweep_orphans() -> bool {
+    TEARDOWN_SUSPECT.load(Ordering::Relaxed) && LIVE_TAPS.load(Ordering::Relaxed) == 0
 }
 
 /// The teardown step that failed first, if any. Pure, so the sequencing can be
@@ -332,6 +343,7 @@ impl Drop for SystemTap {
         if dropped > 0 {
             warn!("System tap dropped {dropped} samples (ring buffer full)");
         }
+        LIVE_TAPS.fetch_sub(1, Ordering::Relaxed);
         info!("System audio tap stopped");
     }
 }
@@ -481,14 +493,23 @@ mod tests {
         );
     }
 
+    /// The sweep destroys every Souffle aggregate it finds, so it must stay
+    /// out of the way while a tap is running: a rebuild mid-meeting spawns a
+    /// new tap while the old one is still tearing down.
     #[test]
-    fn the_orphan_flag_is_consumed_once() {
+    fn no_sweep_while_a_tap_is_alive() {
         TEARDOWN_SUSPECT.store(true, Ordering::Relaxed);
-        assert!(teardown_left_orphans(), "first read must see the flag");
-        assert!(
-            !teardown_left_orphans(),
-            "the flag must clear so every later spawn does not re-sweep"
-        );
+        LIVE_TAPS.store(1, Ordering::Relaxed);
+        assert!(!should_sweep_orphans(), "a live tap must block the sweep");
+
+        LIVE_TAPS.store(0, Ordering::Relaxed);
+        assert!(should_sweep_orphans(), "with none alive the sweep may run");
+
+        // The flag is cleared by the caller once the sweep finishes, not by
+        // the check, so a sweep abandoned on a wedged coreaudiod is retried.
+        assert!(should_sweep_orphans(), "checking must not consume the flag");
+        TEARDOWN_SUSPECT.store(false, Ordering::Relaxed);
+        assert!(!should_sweep_orphans());
     }
 
     /// Needs real audio hardware + the system-audio TCC grant; run manually:

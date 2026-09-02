@@ -14,7 +14,6 @@
 //! so the home list stays current without depending on a webview timer.
 
 use std::collections::HashSet;
-
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -163,13 +162,13 @@ async fn run(app: tauri::AppHandle) {
     }
 }
 
-/// Whether a known meeting app is capturing the microphone right now. Runs on
+/// Whether anything is capturing the microphone right now. Runs on
 /// a blocking worker: the CoreAudio property reads are cheap but they talk to
 /// coreaudiod, which can stall.
 async fn meeting_app_is_capturing_mic() -> bool {
-    match tauri::async_runtime::spawn_blocking(mic_capture_probe::meeting_app_capturing_mic).await {
-        Ok(Some(label)) => {
-            tracing::debug!(app = label, "Calendar autostart: meeting app is on the mic");
+    match tauri::async_runtime::spawn_blocking(mic_capture_probe::mic_capture_in_progress).await {
+        Ok(Some(capture)) => {
+            tracing::debug!(?capture, "Calendar autostart: the mic is in use");
             true
         }
         Ok(None) => false,

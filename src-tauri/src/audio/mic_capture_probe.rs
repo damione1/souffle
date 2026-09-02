@@ -25,22 +25,45 @@ pub const KNOWN_MEETING_APPS: &[(&str, &str)] = &[
 ];
 
 /// Human label for a known meeting bundle id, if any.
+///
+/// Matches the helper processes too: Chrome and the Electron apps open the
+/// input from a child process whose bundle id extends the parent's
+/// (`com.google.Chrome.helper`), and that child is the one CoreAudio lists as
+/// running input.
 pub fn meeting_app_label(bundle_id: &str) -> Option<&'static str> {
     KNOWN_MEETING_APPS
         .iter()
-        .find(|(id, _)| *id == bundle_id)
+        .find(|(id, _)| bundle_id == *id || bundle_id.starts_with(&format!("{id}.")))
         .map(|(_, label)| *label)
 }
 
-/// The label of a known meeting app currently capturing the microphone, or
-/// `None` when none is (including when the per-process API is unavailable).
-pub fn meeting_app_capturing_mic() -> Option<&'static str> {
+/// What is holding the microphone open right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MicCapture {
+    /// A known meeting app, by display label.
+    MeetingApp(&'static str),
+    /// Something else has the default input device open. Browsers other than
+    /// Chrome, and every conferencing tool not on the list, land here.
+    OtherApp,
+}
+
+/// What is capturing the microphone right now, or `None` when nothing is.
+///
+/// Callers must not be recording themselves when they ask: Soufflé's own
+/// capture would answer `OtherApp`.
+pub fn mic_capture_in_progress() -> Option<MicCapture> {
     #[cfg(target_os = "macos")]
     {
-        if !crate::platform::system_audio_capture_supported() {
-            return None;
-        }
-        macos::first_meeting_app_capturing_mic()
+        crate::platform::with_autorelease_pool(|| {
+            // Per-process attribution is macOS 14.4+; the device-level answer
+            // works everywhere and is the fallback when it is unavailable.
+            if crate::platform::system_audio_capture_supported()
+                && let Some(label) = macos::first_meeting_app_capturing_mic()
+            {
+                return Some(MicCapture::MeetingApp(label));
+            }
+            macos::default_input_is_running().then_some(MicCapture::OtherApp)
+        })
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -54,7 +77,8 @@ mod macos {
 
     use objc2_app_kit::NSRunningApplication;
     use objc2_core_audio::{
-        AudioObjectID, kAudioHardwarePropertyProcessObjectList, kAudioObjectSystemObject,
+        AudioObjectID, kAudioDevicePropertyDeviceIsRunningSomewhere,
+        kAudioHardwarePropertyProcessObjectList, kAudioObjectSystemObject,
         kAudioProcessPropertyBundleID, kAudioProcessPropertyIsRunningInput,
         kAudioProcessPropertyPID,
     };
@@ -65,9 +89,12 @@ mod macos {
 
     pub(super) fn first_meeting_app_capturing_mic() -> Option<&'static str> {
         let system = kAudioObjectSystemObject as AudioObjectID;
-        audio_object_ids(system, global_address(kAudioHardwarePropertyProcessObjectList))
-            .into_iter()
-            .find_map(meeting_app_for_process)
+        audio_object_ids(
+            system,
+            global_address(kAudioHardwarePropertyProcessObjectList),
+        )
+        .into_iter()
+        .find_map(meeting_app_for_process)
     }
 
     fn meeting_app_for_process(process_id: AudioObjectID) -> Option<&'static str> {
@@ -76,6 +103,20 @@ mod macos {
         }
         let bundle_id = process_bundle_id(process_id).or_else(|| bundle_id_for_pid(process_id))?;
         meeting_app_label(&bundle_id)
+    }
+
+    /// Whether the default input device has a stream running, whoever owns
+    /// it. Answers "someone is on the mic" for apps the allowlist misses.
+    pub(super) fn default_input_is_running() -> bool {
+        let Some(device_id) = crate::audio::device_watch::default_input_device_id() else {
+            return false;
+        };
+        let mut running: u32 = 0;
+        get_property(
+            device_id,
+            global_address(kAudioDevicePropertyDeviceIsRunningSomewhere),
+            &mut running,
+        ) && running != 0
     }
 
     fn process_is_running_input(process_id: AudioObjectID) -> bool {
@@ -119,7 +160,7 @@ mod macos {
 
 #[cfg(test)]
 mod tests {
-    use super::{KNOWN_MEETING_APPS, meeting_app_capturing_mic, meeting_app_label};
+    use super::{KNOWN_MEETING_APPS, meeting_app_label, mic_capture_in_progress};
 
     #[test]
     fn known_bundles_resolve_to_labels() {
@@ -128,19 +169,39 @@ mod tests {
         assert_eq!(meeting_app_label("com.apple.Safari"), None);
     }
 
+    /// The process CoreAudio reports as running input is usually a helper,
+    /// not the app itself.
+    #[test]
+    fn helper_processes_resolve_to_their_parent_app() {
+        assert_eq!(
+            meeting_app_label("com.google.Chrome.helper"),
+            Some("Google Chrome")
+        );
+        assert_eq!(
+            meeting_app_label("com.tinyspeck.slackmacgap.helper.renderer"),
+            Some("Slack")
+        );
+        // A different app that merely shares a prefix must not match.
+        assert_eq!(meeting_app_label("com.google.ChromeCanary"), None);
+    }
+
     #[test]
     fn known_meeting_apps_have_no_duplicate_bundle_ids() {
         let mut ids: Vec<&str> = KNOWN_MEETING_APPS.iter().map(|(id, _)| *id).collect();
         ids.sort_unstable();
         let before = ids.len();
         ids.dedup();
-        assert_eq!(before, ids.len(), "duplicate bundle id in KNOWN_MEETING_APPS");
+        assert_eq!(
+            before,
+            ids.len(),
+            "duplicate bundle id in KNOWN_MEETING_APPS"
+        );
     }
 
     /// The probe must be callable from any thread and never panic, whatever
     /// the machine is doing: the scheduler calls it on a blocking worker.
     #[test]
     fn probe_is_callable_and_total() {
-        let _ = meeting_app_capturing_mic();
+        let _ = mic_capture_in_progress();
     }
 }
