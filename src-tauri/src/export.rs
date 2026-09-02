@@ -449,6 +449,7 @@ mod paragraphs {
     #[derive(Debug, Clone, PartialEq)]
     pub struct Paragraph {
         pub timestamp: String,
+        pub start_time: f64,
         pub text: String,
         pub speaker: Option<Speaker>,
     }
@@ -505,147 +506,246 @@ mod paragraphs {
         count
     }
 
-    /// Cluster time-sorted diarized segments into per-speaker turns, then
-    /// emit them ordered by each turn's start time (turn segments stay
-    /// contiguous and chronological internally). A segment joins its
-    /// speaker's currently open turn if the gap since that turn's last
-    /// segment is under `pause_threshold`; otherwise that speaker's turn
-    /// closes and a new one opens. Port of `clusterIntoTurns` in
-    /// `src/lib/utils/paragraphs.ts`; a `HashMap<Speaker, usize>` of open
-    /// turn indices stands in for the TS `Map`, generalizing to any number of
-    /// speakers (not just Me/Them).
-    ///
-    /// Without a pause, a monologue would otherwise absorb everything
-    /// indefinitely. Opening a new turn for speaker B:
-    /// - If B starts clearly after A's last end (>= 350ms handoff), A's turn
-    ///   closes immediately so A's later speech opens a fresh line below.
-    /// - If B overlaps A or starts within 350ms (crosstalk / tight
-    ///   interjection), A is marked interrupted and keeps absorbing until a
-    ///   sentence end.
-    fn cluster_into_turns<'a>(
-        sorted: Vec<&'a TranscriptionSegment>,
-        pause_threshold: f64,
-    ) -> Vec<&'a TranscriptionSegment> {
-        const HANDOFF_GAP_S: f64 = 0.35;
-        struct Turn<'a> {
-            start: f64,
-            last_end: f64,
-            segments: Vec<&'a TranscriptionSegment>,
-            interrupted: bool,
+    fn seg_end(seg: &TranscriptionSegment) -> f64 {
+        if seg.end_time != 0.0 {
+            seg.end_time
+        } else {
+            seg.start_time
         }
+    }
 
-        let mut open_turns: std::collections::HashMap<Speaker, usize> =
+    struct Turn<'a> {
+        start: f64,
+        last_end: f64,
+        speaker: Option<Speaker>,
+        segments: Vec<&'a TranscriptionSegment>,
+    }
+
+    /// Cluster diarized segments into per-speaker turns. Port of
+    /// `clusterIntoTurns` in `src/lib/utils/paragraphs.ts`.
+    ///
+    /// Within a lane, emission order is kept (timestamps can jitter after a
+    /// KV refresh; time-sorting the same speaker zippers two hypotheses).
+    /// Overlapping turns from another speaker split the interrupted turn
+    /// so the interruption can sort between the two halves:
+    /// - Sequential handoff (>= 350ms after the other speaker's last end):
+    ///   close immediately.
+    /// - Overlap: close at the earlier of the next sentence end or 1s after
+    ///   the interrupter started, but only when the interrupted turn is long
+    ///   enough to be a monologue.
+    fn cluster_into_turns(
+        segments: &[TranscriptionSegment],
+        pause_threshold: f64,
+    ) -> Vec<Turn<'_>> {
+        const HANDOFF_GAP_S: f64 = 0.35;
+        const INTERRUPT_HOLD_S: f64 = 1.0;
+        const MONOLOGUE_MIN_S: f64 = 2.0;
+
+        let mut lane_order: Vec<Speaker> = Vec::new();
+        let mut lanes: std::collections::HashMap<Speaker, Vec<&TranscriptionSegment>> =
             std::collections::HashMap::new();
-        let mut turns: Vec<Turn<'a>> = Vec::new();
+        let mut untagged: Vec<&TranscriptionSegment> = Vec::new();
 
-        for seg in sorted {
-            let end = if seg.end_time != 0.0 {
-                seg.end_time
-            } else {
-                seg.start_time
-            };
-            let Some(speaker) = seg.speaker else {
-                turns.push(Turn {
-                    start: seg.start_time,
-                    last_end: end,
-                    segments: vec![seg],
-                    interrupted: false,
-                });
-                continue;
-            };
-
-            let open_idx = open_turns.get(&speaker).copied();
-            let joins = match open_idx {
-                Some(idx) => seg.start_time - turns[idx].last_end < pause_threshold,
-                None => false,
-            };
-            if let Some(idx) = open_idx.filter(|_| joins) {
-                turns[idx].segments.push(seg);
-                turns[idx].last_end = turns[idx].last_end.max(end);
-                if turns[idx].interrupted && ends_sentence(seg.text.trim()) {
-                    // First sentence end at or after the interruption: close
-                    // now so the speaker's next segment starts a fresh,
-                    // later-sorting turn.
-                    open_turns.remove(&speaker);
-                }
-            } else {
-                turns.push(Turn {
-                    start: seg.start_time,
-                    last_end: end,
-                    segments: vec![seg],
-                    interrupted: false,
-                });
-                let new_idx = turns.len() - 1;
-                open_turns.insert(speaker, new_idx);
-                let handoffs: Vec<(Speaker, usize)> = open_turns
-                    .iter()
-                    .filter(|(other, _)| **other != speaker)
-                    .map(|(&other, &idx)| (other, idx))
-                    .collect();
-                for (other_speaker, idx) in handoffs {
-                    if turns[new_idx].start >= turns[idx].last_end + HANDOFF_GAP_S {
-                        open_turns.remove(&other_speaker);
-                    } else {
-                        turns[idx].interrupted = true;
+        for seg in segments {
+            match seg.speaker {
+                Some(speaker) => {
+                    if !lanes.contains_key(&speaker) {
+                        lane_order.push(speaker);
+                        lanes.insert(speaker, Vec::new());
                     }
+                    lanes.get_mut(&speaker).unwrap().push(seg);
                 }
+                None => untagged.push(seg),
             }
         }
 
-        turns.sort_by(|a, b| {
-            a.start
-                .partial_cmp(&b.start)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        turns.into_iter().flat_map(|t| t.segments).collect()
+        let mut turns: Vec<Turn<'_>> = Vec::new();
+        for speaker in lane_order {
+            let segs = lanes.get(&speaker).map(Vec::as_slice).unwrap_or(&[]);
+            turns.extend(pause_split_lane(segs, speaker, pause_threshold));
+        }
+        for seg in untagged {
+            turns.push(Turn {
+                start: seg.start_time,
+                last_end: seg_end(seg),
+                speaker: None,
+                segments: vec![seg],
+            });
+        }
+
+        split_interrupted_turns(turns, HANDOFF_GAP_S, INTERRUPT_HOLD_S, MONOLOGUE_MIN_S)
+    }
+
+    fn pause_split_lane<'a>(
+        segs: &[&'a TranscriptionSegment],
+        speaker: Speaker,
+        pause_threshold: f64,
+    ) -> Vec<Turn<'a>> {
+        let mut turns: Vec<Turn<'a>> = Vec::new();
+        for &seg in segs {
+            let end = seg_end(seg);
+            if let Some(current) = turns.last_mut()
+                && seg.start_time - current.last_end < pause_threshold
+            {
+                current.segments.push(seg);
+                current.last_end = current.last_end.max(end);
+            } else {
+                turns.push(Turn {
+                    start: seg.start_time,
+                    last_end: end,
+                    speaker: Some(speaker),
+                    segments: vec![seg],
+                });
+            }
+        }
+        turns
+    }
+
+    fn interrupt_split_index(
+        turn: &Turn<'_>,
+        interrupter: &Turn<'_>,
+        handoff_gap_s: f64,
+        interrupt_hold_s: f64,
+        monologue_min_s: f64,
+    ) -> Option<usize> {
+        let spoken_before = turn
+            .segments
+            .iter()
+            .position(|s| s.start_time >= interrupter.start)
+            .unwrap_or(turn.segments.len());
+        let last_before_end = if spoken_before > 0 {
+            seg_end(turn.segments[spoken_before - 1])
+        } else {
+            turn.start
+        };
+
+        if interrupter.start >= last_before_end + handoff_gap_s {
+            return if spoken_before > 0 && spoken_before < turn.segments.len() {
+                Some(spoken_before)
+            } else {
+                None
+            };
+        }
+
+        let hold_at = interrupter.start + interrupt_hold_s;
+        let apply_hold = turn.last_end - turn.start >= monologue_min_s;
+        for i in spoken_before..turn.segments.len() {
+            let seg = turn.segments[i];
+            if ends_sentence(seg.text.trim()) {
+                return Some(i + 1);
+            }
+            if apply_hold && seg.start_time >= hold_at {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn split_interrupted_turns<'a>(
+        mut remaining: Vec<Turn<'a>>,
+        handoff_gap_s: f64,
+        interrupt_hold_s: f64,
+        monologue_min_s: f64,
+    ) -> Vec<Turn<'a>> {
+        let mut out: Vec<Turn<'a>> = Vec::new();
+        while !remaining.is_empty() {
+            remaining.sort_by(|a, b| {
+                a.start
+                    .partial_cmp(&b.start)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let turn = remaining.remove(0);
+            if turn.speaker.is_none() || turn.segments.is_empty() {
+                out.push(turn);
+                continue;
+            }
+
+            let interrupter_idx = remaining.iter().position(|other| {
+                other.speaker.is_some()
+                    && other.speaker != turn.speaker
+                    && other.start < turn.last_end
+                    && other.start >= turn.start
+            });
+
+            let Some(interrupter_idx) = interrupter_idx else {
+                out.push(turn);
+                continue;
+            };
+
+            let split_at = interrupt_split_index(
+                &turn,
+                &remaining[interrupter_idx],
+                handoff_gap_s,
+                interrupt_hold_s,
+                monologue_min_s,
+            );
+            let Some(split_at) = split_at else {
+                out.push(turn);
+                continue;
+            };
+            if split_at == 0 || split_at >= turn.segments.len() {
+                out.push(turn);
+                continue;
+            }
+
+            let tail_segs = turn.segments[split_at..].to_vec();
+            let head_segs = turn.segments[..split_at].to_vec();
+            let head_end = head_segs.iter().map(|s| seg_end(s)).fold(0.0, f64::max);
+            let tail_end = tail_segs.iter().map(|s| seg_end(s)).fold(0.0, f64::max);
+            let tail_start = tail_segs[0].start_time;
+            let speaker = turn.speaker;
+            out.push(Turn {
+                start: turn.start,
+                last_end: head_end,
+                speaker,
+                segments: head_segs,
+            });
+            remaining.push(Turn {
+                start: tail_start,
+                last_end: tail_end,
+                speaker,
+                segments: tail_segs,
+            });
+        }
+        out
     }
 
     fn flush_paragraph(
         paragraphs: &mut Vec<Paragraph>,
         timestamp: &str,
+        start_time: f64,
         speaker: Option<Speaker>,
         words: &mut Vec<String>,
     ) {
         paragraphs.push(Paragraph {
             timestamp: timestamp.to_string(),
+            start_time,
             text: words.join(" "),
             speaker,
         });
         words.clear();
     }
 
-    /// Group segments into flowing paragraphs with a leading timestamp. See
-    /// `groupIntoParagraphs` in `src/lib/utils/paragraphs.ts` for the
-    /// authoritative rule set (pause threshold, sentence/char caps, diarized
-    /// sort-then-cluster-into-turns): this is a line-for-line port,
-    /// including its quirk of seeding the first paragraph's timestamp from
-    /// `ordered[0]` even if that segment's text turns out to be empty.
-    pub fn group_into_paragraphs(
-        segments: &[TranscriptionSegment],
+    fn paragraphs_from_refs(
+        segments: &[&TranscriptionSegment],
         pause_threshold: f64,
+        break_on_speaker_change: bool,
     ) -> Vec<Paragraph> {
         if segments.is_empty() {
             return Vec::new();
         }
 
-        let diarized = segments.iter().any(|s| s.speaker.is_some());
-        let time_ordered = super::time_ordered_segments(segments);
-        let ordered = if diarized {
-            cluster_into_turns(time_ordered, pause_threshold)
-        } else {
-            time_ordered
-        };
-
         let mut paragraphs: Vec<Paragraph> = Vec::new();
-        let mut current_timestamp = format_timestamp(ordered[0].start_time);
-        let mut current_speaker: Option<Speaker> = ordered[0].speaker;
+        let mut current_timestamp = format_timestamp(segments[0].start_time);
+        let mut current_start = segments[0].start_time;
+        let mut current_speaker: Option<Speaker> = segments[0].speaker;
         let mut current_words: Vec<String> = Vec::new();
         let mut current_chars: usize = 0;
         let mut sentence_count: usize = 0;
         let mut ends_sentence_flag = false;
-        let mut last_end = ordered[0].start_time;
+        let mut last_end = segments[0].start_time;
 
-        for seg in &ordered {
+        for seg in segments {
             let text = seg.text.trim();
             if text.is_empty() {
                 continue;
@@ -654,10 +754,11 @@ mod paragraphs {
 
             if !current_words.is_empty() {
                 let mut broke = false;
-                if diarized && speaker != current_speaker {
+                if break_on_speaker_change && speaker != current_speaker {
                     flush_paragraph(
                         &mut paragraphs,
                         &current_timestamp,
+                        current_start,
                         current_speaker,
                         &mut current_words,
                     );
@@ -674,6 +775,7 @@ mod paragraphs {
                         flush_paragraph(
                             &mut paragraphs,
                             &current_timestamp,
+                            current_start,
                             current_speaker,
                             &mut current_words,
                         );
@@ -683,11 +785,10 @@ mod paragraphs {
 
                 if broke {
                     current_timestamp = format_timestamp(seg.start_time);
+                    current_start = seg.start_time;
                     current_speaker = speaker;
                     current_chars = 0;
                     sentence_count = 0;
-                    // ends_sentence_flag is unconditionally recomputed below
-                    // from this segment's text, so no reset needed here.
                 }
             } else {
                 current_speaker = speaker;
@@ -697,23 +798,51 @@ mod paragraphs {
             current_chars += text.chars().count() + 1;
             sentence_count += count_sentence_ends(text);
             ends_sentence_flag = ends_sentence(text);
-            let end = if seg.end_time != 0.0 {
-                seg.end_time
-            } else {
-                seg.start_time
-            };
-            last_end = last_end.max(end);
+            last_end = last_end.max(seg_end(seg));
         }
 
         if !current_words.is_empty() {
             paragraphs.push(Paragraph {
                 timestamp: current_timestamp,
+                start_time: current_start,
                 text: current_words.join(" "),
                 speaker: current_speaker,
             });
         }
 
         paragraphs
+    }
+
+    /// Group segments into flowing paragraphs with a leading timestamp. See
+    /// `groupIntoParagraphs` in `src/lib/utils/paragraphs.ts` for the
+    /// authoritative rule set. Diarized meetings cluster into per-speaker
+    /// turns (emission order within a lane), split each turn into readable
+    /// paragraphs, then order those paragraphs by start time.
+    pub fn group_into_paragraphs(
+        segments: &[TranscriptionSegment],
+        pause_threshold: f64,
+    ) -> Vec<Paragraph> {
+        if segments.is_empty() {
+            return Vec::new();
+        }
+
+        let diarized = segments.iter().any(|s| s.speaker.is_some());
+        if !diarized {
+            let refs: Vec<&TranscriptionSegment> = segments.iter().collect();
+            return paragraphs_from_refs(&refs, pause_threshold, false);
+        }
+
+        let turns = cluster_into_turns(segments, pause_threshold);
+        let mut pieces: Vec<Paragraph> = Vec::new();
+        for turn in &turns {
+            pieces.extend(paragraphs_from_refs(&turn.segments, pause_threshold, false));
+        }
+        pieces.sort_by(|a, b| {
+            a.start_time
+                .partial_cmp(&b.start_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        pieces
     }
 }
 
@@ -1268,6 +1397,46 @@ mod tests {
                     Some(Speaker::Me),
                     "about moving the launch date to next quarter"
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn same_speaker_keeps_emission_order_when_timestamps_jitter() {
+        let segments = vec![
+            diarized_segment("Je", 19.28, 19.38, Speaker::Them),
+            diarized_segment("vous", 19.28, 19.38, Speaker::Them),
+            diarized_segment("la", 19.30, 19.40, Speaker::Them),
+            diarized_segment("mets", 19.29, 19.39, Speaker::Them),
+            diarized_segment("dans", 19.32, 19.42, Speaker::Them),
+            diarized_segment("le", 19.31, 19.41, Speaker::Them),
+            diarized_segment("chat", 19.34, 19.44, Speaker::Them),
+        ];
+        let result = paragraphs::group_into_paragraphs(&segments, 1.5);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "Je vous la mets dans le chat");
+    }
+
+    #[test]
+    fn unpunctuated_overlap_closes_after_interrupt_hold() {
+        let segments = vec![
+            diarized_segment("aaaaaaaaaa", 0.0, 0.5, Speaker::Them),
+            diarized_segment("bbbbbbbbbb", 0.4, 0.9, Speaker::Them),
+            diarized_segment("interrupt", 0.5, 1.0, Speaker::Me),
+            diarized_segment("cccccccccc", 0.8, 1.3, Speaker::Them),
+            diarized_segment("dddddddddd", 1.6, 2.1, Speaker::Them),
+        ];
+        let result = paragraphs::group_into_paragraphs(&segments, 1.5);
+        let texts: Vec<(Option<Speaker>, &str)> = result
+            .iter()
+            .map(|p| (p.speaker, p.text.as_str()))
+            .collect();
+        assert_eq!(
+            texts,
+            vec![
+                (Some(Speaker::Them), "aaaaaaaaaa bbbbbbbbbb cccccccccc"),
+                (Some(Speaker::Me), "interrupt"),
+                (Some(Speaker::Them), "dddddddddd"),
             ]
         );
     }

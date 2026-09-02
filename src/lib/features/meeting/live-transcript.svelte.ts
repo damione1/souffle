@@ -14,33 +14,46 @@ export type LiveParagraph = Paragraph & {
 
 type IndexedSegment = { segment: TranscriptionSegment; index: number };
 
+/** Keep paragraphs whose last word is newer than this many seconds before
+ * the latest segment. Covers dual-lane ASR delay so a late Me word can
+ * still land between Them paragraphs instead of freezing at the tail. */
+const TAIL_WINDOW_S = 8;
+/** Safety cap so a burst of tiny fragments cannot keep the tail unbounded. */
+const MAX_TAIL_PARAGRAPHS = 16;
+
+function segEnd(seg: TranscriptionSegment): number {
+  return seg.end_time || seg.start_time;
+}
+
+function paragraphEndTime(
+  ordered: TranscriptionSegment[],
+  range: ParagraphRange,
+): number {
+  let end = 0;
+  for (let i = range.start; i < range.end; i++) {
+    end = Math.max(end, segEnd(ordered[i]));
+  }
+  return end;
+}
+
 /**
  * Incremental paragraph grouper for a live transcript stream.
  *
  * Batch grouping (`groupIntoParagraphs`) re-scans every segment on every
  * call, which is O(n) per call and O(n^2) over a whole meeting. This grouper
- * instead freezes paragraphs as soon as a later segment proves they are
- * closed (a new paragraph started after them) and only re-groups the small
- * "tail" of still-open paragraphs on each `append`.
+ * instead freezes paragraphs once they sit outside a trailing time window
+ * (and only re-groups the small "tail" of still-open paragraphs on each
+ * `append`).
  *
- * Correctness: paragraph state (sentence count, char count, pause gap) only
- * ever depends on segments at or after the paragraph's own start, so once a
- * later paragraph has started, earlier paragraphs can never change. For an
- * in-order stream this makes `[...committed, ...tail]` byte-identical to
- * `groupIntoParagraphs(allSegments, pauseThreshold)`.
+ * Correctness: for an in-order stream this makes `[...committed, ...tail]`
+ * byte-identical to `groupIntoParagraphs(allSegments, pauseThreshold)`.
  *
- * The one caveat is diarization: mic and system audio are transcribed on
- * independent lanes and merged by timestamp, so a final segment can arrive
- * slightly out of order relative to a lane that's already been committed. In
- * that rare case the late segment is simply inserted at the tail (bounded
- * staleness) rather than reopening an already-frozen paragraph. This is
- * acceptable for the live view; the post-stop transcript regroups everything
- * from the database, so nothing is lost.
+ * Diarization: mic and system audio are transcribed on independent lanes.
+ * Segments are kept in emission order (the batch grouper owns lane merge);
+ * the time window, not a 2-paragraph cap, is what keeps a late lane from
+ * landing after already-frozen speech.
  */
 export function createLiveTranscript(pauseThreshold: number) {
-  /** At most this many trailing paragraphs are kept open (not yet frozen). */
-  const MAX_TAIL_PARAGRAPHS = 2;
-
   let committed = $state<LiveParagraph[]>([]);
   let tail = $state<LiveParagraph[]>([]);
   let tentative = $state("");
@@ -52,66 +65,75 @@ export function createLiveTranscript(pauseThreshold: number) {
   let tailSegments: IndexedSegment[] = [];
   let nextParagraphId = 0;
 
-  function insertByStartTime(entry: IndexedSegment) {
-    const seg = entry.segment;
-    if (
-      tailSegments.length === 0
-      || seg.start_time >= tailSegments[tailSegments.length - 1].segment.start_time
-    ) {
-      tailSegments.push(entry);
-      return;
+  function globalRange(
+    range: ParagraphRange,
+    ordered: TranscriptionSegment[],
+  ): ParagraphRange {
+    const indices: number[] = [];
+    for (let i = range.start; i < range.end; i++) {
+      const found = tailSegments.find((item) => item.segment === ordered[i]);
+      if (found) indices.push(found.index);
     }
-    let lo = 0;
-    let hi = tailSegments.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (tailSegments[mid].segment.start_time <= seg.start_time) lo = mid + 1;
-      else hi = mid;
+    if (indices.length === 0) {
+      return range;
     }
-    tailSegments.splice(lo, 0, entry);
+    return { start: Math.min(...indices), end: Math.max(...indices) + 1 };
   }
 
-  function globalRange(range: ParagraphRange): ParagraphRange {
-    const startIndex = tailSegments[range.start]?.index;
-    const endIndex = tailSegments[range.end - 1]?.index;
-    return {
-      start: startIndex ?? range.start,
-      end: endIndex == null ? range.end : endIndex + 1,
-    };
+  function assignIds(paragraphs: Paragraph[], prev: LiveParagraph[]): number[] {
+    const unused = [...prev];
+    return paragraphs.map((paragraph) => {
+      const matchAt = unused.findIndex(
+        (old) =>
+          old.speaker === paragraph.speaker
+          && Math.abs(old.startTime - paragraph.startTime) < 0.05,
+      );
+      if (matchAt >= 0) {
+        const [match] = unused.splice(matchAt, 1);
+        return match.id;
+      }
+      return nextParagraphId++;
+    });
   }
 
   function regroupTail() {
-    const ordered = tailSegments.map((entry) => entry.segment);
-    const { paragraphs, ranges } = groupIntoParagraphsWithRanges(ordered, pauseThreshold);
+    const input = tailSegments.map((entry) => entry.segment);
+    const { paragraphs, ranges, ordered } = groupIntoParagraphsWithRanges(input, pauseThreshold);
     const prevTail = tail;
-    const numToCommit = Math.max(0, paragraphs.length - MAX_TAIL_PARAGRAPHS);
+
+    const latestStart = input.reduce((max, seg) => Math.max(max, seg.start_time), 0);
+    const horizon = latestStart - TAIL_WINDOW_S;
+    let numToCommit = 0;
+    for (let i = 0; i < paragraphs.length; i++) {
+      if (paragraphEndTime(ordered, ranges[i]) < horizon) numToCommit = i + 1;
+      else break;
+    }
+    numToCommit = Math.max(numToCommit, paragraphs.length - MAX_TAIL_PARAGRAPHS);
+    if (numToCommit === paragraphs.length && paragraphs.length > 0) {
+      numToCommit -= 1;
+    }
+
+    const ids = assignIds(paragraphs, prevTail);
 
     for (let i = 0; i < numToCommit; i++) {
-      const id = i < prevTail.length ? prevTail[i].id : nextParagraphId++;
       committed.push({
         ...paragraphs[i],
-        id,
-        segmentRange: globalRange(ranges[i]),
+        id: ids[i],
+        segmentRange: globalRange(ranges[i], ordered),
       });
     }
     if (numToCommit > 0) {
-      const cutIndex = ranges[numToCommit - 1].end;
-      tailSegments = tailSegments.slice(cutIndex);
+      const consumed = new Set(ordered.slice(0, ranges[numToCommit - 1].end));
+      tailSegments = tailSegments.filter((entry) => !consumed.has(entry.segment));
     }
 
     const remaining = paragraphs.slice(numToCommit);
     const remainingRanges = ranges.slice(numToCommit);
-    const survivingOldCount = Math.max(0, prevTail.length - numToCommit);
-    tail = remaining.map((paragraph, i) => {
-      const id = i < survivingOldCount
-        ? prevTail[numToCommit + i].id
-        : nextParagraphId++;
-      return {
-        ...paragraph,
-        id,
-        segmentRange: globalRange(remainingRanges[i]),
-      };
-    });
+    tail = remaining.map((paragraph, i) => ({
+      ...paragraph,
+      id: ids[numToCommit + i],
+      segmentRange: globalRange(remainingRanges[i], ordered),
+    }));
   }
 
   function append(segment: TranscriptionSegment, segmentIndex: number) {
@@ -122,12 +144,7 @@ export function createLiveTranscript(pauseThreshold: number) {
     tentative = "";
     segmentCount++;
 
-    const entry = { segment, index: segmentIndex };
-    const diarizedSoFar =
-      segment.speaker != null || tailSegments.some((item) => item.segment.speaker != null);
-    if (diarizedSoFar) insertByStartTime(entry);
-    else tailSegments.push(entry);
-
+    tailSegments.push({ segment, index: segmentIndex });
     regroupTail();
   }
 
