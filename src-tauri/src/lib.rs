@@ -395,10 +395,10 @@ pub fn run() {
                 device_watch::destroy_orphaned_souffle_taps();
             }
 
-            if let Some(pill) = app.get_webview_window("pill") {
-                if let Err(e) = crate::pill::position_top_center(&pill) {
-                    tracing::warn!("Pill overlay configure failed: {e}");
-                }
+            if let Some(pill) = app.get_webview_window("pill")
+                && let Err(e) = crate::pill::position_top_center(&pill)
+            {
+                tracing::warn!("Pill overlay configure failed: {e}");
             }
 
             // Close hides; it must not destroy. The pill + tray keep the
