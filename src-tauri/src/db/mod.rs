@@ -190,6 +190,12 @@ impl Database {
                     .map_err(|e| format!("Update schema version v13: {e}"))?;
             }
 
+            if current_version < 14 {
+                schema::migrate_model_unload_default_to_v14(&conn)?;
+                conn.execute("UPDATE schema_version SET version = 14", [])
+                    .map_err(|e| format!("Update schema version v14: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

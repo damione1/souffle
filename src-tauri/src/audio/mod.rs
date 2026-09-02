@@ -3,6 +3,7 @@ pub mod capture;
 pub mod device;
 pub mod device_watch;
 pub mod feedback;
+pub mod mic_capture_probe;
 pub mod mixer;
 pub mod output_route;
 pub mod priority;
@@ -10,7 +11,6 @@ pub mod recorder;
 pub mod resampler;
 pub mod retention;
 pub mod route_notice;
-pub mod system_activity;
 pub mod system_tap;
 
 pub use capture::{AudioCapture, AudioChunk, AudioMessage};

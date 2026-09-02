@@ -78,7 +78,7 @@ let settings = $state<AppSettings>({
   calendar_autostart_enabled: true,
   feedback_sounds_enabled: true,
   feedback_sounds_volume: 70,
-  model_unload_timeout_minutes: 0,
+  model_unload_timeout_minutes: 60,
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,

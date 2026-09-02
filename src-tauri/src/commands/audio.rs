@@ -154,13 +154,16 @@ fn record_system_audio_wav(seconds: u32) -> Result<String, String> {
     use ringbuf::HeapRb;
     use ringbuf::traits::{Consumer, Split};
 
-    use crate::audio::system_tap::SystemTap;
+    use crate::audio::system_tap::spawn_tap;
 
     let seconds = seconds.clamp(1, 60);
     // 1s of headroom at 48kHz; the drain loop below empties it every 50ms.
     let (producer, mut consumer) = HeapRb::<f32>::new(48_000 * 2).split();
-    let tap = SystemTap::start(producer)?;
-    let sample_rate = tap.sample_rate() as u32;
+    // Through spawn_tap rather than SystemTap::start directly: a wedged
+    // coreaudiod must time out instead of parking this worker indefinitely,
+    // and this path gets the orphan sweep like every other tap.
+    let tap = spawn_tap(producer, std::time::Duration::from_secs(8))?;
+    let sample_rate = tap.sample_rate;
 
     let mut samples: Vec<f32> = Vec::with_capacity(sample_rate as usize * seconds as usize);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds as u64);

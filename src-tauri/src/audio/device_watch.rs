@@ -308,7 +308,7 @@ fn transport_name(transport: TransportType) -> String {
     }
 }
 
-fn global_address(selector: u32) -> AudioObjectPropertyAddress {
+pub(crate) fn global_address(selector: u32) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress {
         mSelector: selector,
         mScope: kAudioObjectPropertyScopeGlobal,
@@ -324,7 +324,7 @@ fn input_scope_address(selector: u32) -> AudioObjectPropertyAddress {
     }
 }
 
-fn get_property<T>(
+pub(crate) fn get_property<T>(
     object: AudioObjectID,
     mut address: AudioObjectPropertyAddress,
     out: &mut T,
@@ -360,9 +360,9 @@ fn property_data_size(object: AudioObjectID, mut address: AudioObjectPropertyAdd
     if status == 0 { size } else { 0 }
 }
 
-/// The device ID list for a variable-length `AudioObjectID` array property
-/// (e.g. `kAudioHardwarePropertyDevices`).
-fn device_ids(object: AudioObjectID, address: AudioObjectPropertyAddress) -> Vec<AudioObjectID> {
+/// The object ID list for a variable-length `AudioObjectID` array property
+/// (e.g. `kAudioHardwarePropertyDevices`, `kAudioHardwarePropertyProcessObjectList`).
+pub(crate) fn audio_object_ids(object: AudioObjectID, address: AudioObjectPropertyAddress) -> Vec<AudioObjectID> {
     let size = property_data_size(object, address);
     let count = size as usize / size_of::<AudioObjectID>();
     if count == 0 {
@@ -451,7 +451,7 @@ fn input_device(device: AudioObjectID, is_default: bool) -> AudioInputDevice {
 }
 
 fn enumerate_input_devices() -> HashMap<AudioObjectID, DeviceInfo> {
-    device_ids(
+    audio_object_ids(
         kAudioObjectSystemObject as AudioObjectID,
         global_address(kAudioHardwarePropertyDevices),
     )
@@ -489,7 +489,7 @@ pub(crate) fn default_input_device_id() -> Option<AudioObjectID> {
 /// force a Bluetooth headset out of A2DP. Used for the Settings device list.
 pub(crate) fn list_devices() -> Vec<AudioInputDevice> {
     let default = default_input_device_id();
-    device_ids(
+    audio_object_ids(
         kAudioObjectSystemObject as AudioObjectID,
         global_address(kAudioHardwarePropertyDevices),
     )
@@ -504,7 +504,7 @@ pub(crate) fn list_devices() -> Vec<AudioInputDevice> {
 /// the HAL list. A USB dock unplug/replug keeps the UID and allocates a new
 /// ID — callers compare against the ID they opened to know the stream is stale.
 pub(crate) fn object_id_for_uid(uid: &str) -> Option<AudioObjectID> {
-    device_ids(
+    audio_object_ids(
         kAudioObjectSystemObject as AudioObjectID,
         global_address(kAudioHardwarePropertyDevices),
     )
@@ -528,11 +528,15 @@ pub(crate) fn device_is_alive(id: AudioObjectID) -> bool {
 
 /// Destroy leftover "Souffle Tap" aggregates from a previous crash, a
 /// timed-out `spawn_tap`, or an older build that created them as public
-/// devices. Safe at startup, before any session has created a tap.
+/// devices.
+///
+/// This cannot tell a leak from an aggregate in use: it destroys every
+/// Souffle-named one it finds. Only call it with no tap alive in the process
+/// (at startup, or behind the `LIVE_TAPS` check in `system_tap`).
 pub(crate) fn destroy_orphaned_souffle_taps() {
     use objc2_core_audio::AudioHardwareDestroyAggregateDevice;
 
-    let orphans: Vec<(AudioObjectID, String)> = device_ids(
+    let orphans: Vec<(AudioObjectID, String)> = audio_object_ids(
         kAudioObjectSystemObject as AudioObjectID,
         global_address(kAudioHardwarePropertyDevices),
     )

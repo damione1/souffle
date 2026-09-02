@@ -29,7 +29,7 @@ use std::ffi::CStr;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
@@ -96,19 +96,31 @@ pub fn spawn_tap(
 
     std::thread::Builder::new()
         .name("system-tap".into())
-        .spawn(move || match SystemTap::start(producer) {
-            Ok(tap) => {
-                if event_tx.send(Ok(tap.sample_rate() as u32)).is_err() {
-                    // Caller timed out and gave up; tear down immediately.
-                    return;
-                }
-                // Park until the handle is dropped (recv errors when the
-                // sender side closes).
-                let _ = stop_rx.recv();
-                drop(tap);
+        .spawn(move || {
+            // A teardown that failed may have left an aggregate, and its IO
+            // context, behind. Sweep before adding another one, but only with
+            // no tap alive: the sweep cannot tell a leak from a working
+            // aggregate and would destroy a running meeting's. This runs on
+            // the thread already covered by the startup timeout below, so a
+            // wedged coreaudiod cannot stall the caller.
+            if should_sweep_orphans() {
+                crate::audio::device_watch::destroy_orphaned_souffle_taps();
+                TEARDOWN_SUSPECT.store(false, Ordering::Relaxed);
             }
-            Err(e) => {
-                let _ = event_tx.send(Err(e));
+            match SystemTap::start(producer) {
+                Ok(tap) => {
+                    if event_tx.send(Ok(tap.sample_rate() as u32)).is_err() {
+                        // Caller timed out and gave up; tear down immediately.
+                        return;
+                    }
+                    // Park until the handle is dropped (recv errors when the
+                    // sender side closes).
+                    let _ = stop_rx.recv();
+                    drop(tap);
+                }
+                Err(e) => {
+                    let _ = event_tx.send(Err(e));
+                }
             }
         })
         .map_err(|e| format!("Failed to spawn tap thread: {e}"))?;
@@ -248,6 +260,7 @@ impl SystemTap {
             return Err(format!("AudioDeviceStart failed ({status})"));
         }
 
+        LIVE_TAPS.fetch_add(1, Ordering::Relaxed);
         info!("System audio tap started ({sample_rate} Hz)");
         Ok(Self {
             tap_id,
@@ -272,20 +285,65 @@ impl SystemTap {
     }
 }
 
+/// Taps currently alive in this process. The orphan sweep destroys every
+/// Souffle-named aggregate it finds, including ones still in use, so it must
+/// only run when this is zero.
+static LIVE_TAPS: AtomicUsize = AtomicUsize::new(0);
+
+/// Set when a teardown step returned a non-zero OSStatus, meaning an aggregate
+/// device (and with it an IO context, which holds an idle-sleep assertion) may
+/// have survived in coreaudiod. Read by [`teardown_left_orphans`] so the next
+/// tap spawn can sweep, instead of waiting for the next app launch.
+static TEARDOWN_SUSPECT: AtomicBool = AtomicBool::new(false);
+
+/// Whether a sweep should run now: a previous teardown may have leaked, and no
+/// tap is alive to be caught in it. The flag is left set when a tap is alive,
+/// and is only cleared once the sweep has actually finished, so a sweep
+/// abandoned on a wedged coreaudiod is retried rather than forgotten.
+fn should_sweep_orphans() -> bool {
+    TEARDOWN_SUSPECT.load(Ordering::Relaxed) && LIVE_TAPS.load(Ordering::Relaxed) == 0
+}
+
+/// The teardown step that failed first, if any. Pure, so the sequencing can be
+/// checked without CoreAudio.
+fn first_teardown_failure(statuses: [(&'static str, i32); 4]) -> Option<(&'static str, i32)> {
+    statuses.into_iter().find(|(_, status)| *status != 0)
+}
+
 impl Drop for SystemTap {
     fn drop(&mut self) {
-        unsafe {
-            AudioDeviceStop(self.aggregate_id, self.proc_id);
+        // Every step runs even when an earlier one fails: destroying the
+        // aggregate stops the IO context whether or not the explicit stop was
+        // accepted, and that context is what holds the sleep assertion.
+        let statuses = unsafe {
+            let stop = AudioDeviceStop(self.aggregate_id, self.proc_id);
             // After this returns no further IO blocks are dispatched; any
             // in-flight one only touches the Arc'd shared state.
-            AudioDeviceDestroyIOProcID(self.aggregate_id, self.proc_id);
-            AudioHardwareDestroyAggregateDevice(self.aggregate_id);
-            AudioHardwareDestroyProcessTap(self.tap_id);
+            let destroy_proc = AudioDeviceDestroyIOProcID(self.aggregate_id, self.proc_id);
+            let destroy_aggregate = AudioHardwareDestroyAggregateDevice(self.aggregate_id);
+            let destroy_tap = AudioHardwareDestroyProcessTap(self.tap_id);
+            [
+                ("AudioDeviceStop", stop),
+                ("AudioDeviceDestroyIOProcID", destroy_proc),
+                ("AudioHardwareDestroyAggregateDevice", destroy_aggregate),
+                ("AudioHardwareDestroyProcessTap", destroy_tap),
+            ]
+        };
+        if let Some((step, status)) = first_teardown_failure(statuses) {
+            TEARDOWN_SUSPECT.store(true, Ordering::Relaxed);
+            warn!(
+                step,
+                status,
+                aggregate_id = self.aggregate_id,
+                tap_id = self.tap_id,
+                "System tap teardown failed; CoreAudio objects may have leaked"
+            );
         }
         let dropped = self.shared.dropped.load(Ordering::Relaxed);
         if dropped > 0 {
             warn!("System tap dropped {dropped} samples (ring buffer full)");
         }
+        LIVE_TAPS.fetch_sub(1, Ordering::Relaxed);
         info!("System audio tap stopped");
     }
 }
@@ -412,6 +470,47 @@ mod tests {
     use ringbuf::traits::{Observer, Split};
 
     use super::*;
+
+    #[test]
+    fn a_clean_teardown_reports_no_failure() {
+        assert_eq!(
+            first_teardown_failure([("a", 0), ("b", 0), ("c", 0), ("d", 0)]),
+            None
+        );
+    }
+
+    #[test]
+    fn teardown_reports_the_first_failing_step() {
+        // A failed stop must not mask a later failure being recorded, and the
+        // first one is the one worth naming: the rest usually follow from it.
+        assert_eq!(
+            first_teardown_failure([("stop", -66748), ("proc", -66748), ("agg", 0), ("tap", 0)]),
+            Some(("stop", -66748))
+        );
+        assert_eq!(
+            first_teardown_failure([("stop", 0), ("proc", 0), ("agg", -1), ("tap", 0)]),
+            Some(("agg", -1))
+        );
+    }
+
+    /// The sweep destroys every Souffle aggregate it finds, so it must stay
+    /// out of the way while a tap is running: a rebuild mid-meeting spawns a
+    /// new tap while the old one is still tearing down.
+    #[test]
+    fn no_sweep_while_a_tap_is_alive() {
+        TEARDOWN_SUSPECT.store(true, Ordering::Relaxed);
+        LIVE_TAPS.store(1, Ordering::Relaxed);
+        assert!(!should_sweep_orphans(), "a live tap must block the sweep");
+
+        LIVE_TAPS.store(0, Ordering::Relaxed);
+        assert!(should_sweep_orphans(), "with none alive the sweep may run");
+
+        // The flag is cleared by the caller once the sweep finishes, not by
+        // the check, so a sweep abandoned on a wedged coreaudiod is retried.
+        assert!(should_sweep_orphans(), "checking must not consume the flag");
+        TEARDOWN_SUSPECT.store(false, Ordering::Relaxed);
+        assert!(!should_sweep_orphans());
+    }
 
     /// Needs real audio hardware + the system-audio TCC grant; run manually:
     /// cargo test --lib tap_delivers_samples -- --ignored --nocapture

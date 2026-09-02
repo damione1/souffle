@@ -6,7 +6,7 @@ use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_p
 
 /// Schema version 13: `speaker_embeddings` table for multi-embedding speaker
 /// matching, replacing the single running-mean centroid on `speakers`.
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 14;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -469,6 +469,28 @@ pub fn migrate_add_speakers_to_v12(conn: &Connection) -> Result<(), String> {
 /// creates `CREATE_SPEAKERS_IS_ME_INDEX`: this is also where a fresh
 /// database picks it up, since `ensure_schema` runs every versioned step in
 /// order starting from 0 rather than jumping straight to the latest schema.
+/// Correct the old "never unload the transcription model" default.
+///
+/// `model_unload_timeout_minutes` shipped as 0, and `AppSettings::save` writes
+/// every key, so an install that has saved settings once carries an explicit 0
+/// that the app wrote from its own default rather than one the user picked.
+/// Only an exact 0 is rewritten, so a stored 5, 15 or 60 was necessarily chosen
+/// and survives. This runs once, as a migration, which is also how a Never
+/// selected after the upgrade stays put: the schema version has already moved
+/// past this step by then.
+///
+/// A user who had deliberately selected Never does lose it, once. That is the
+/// accepted cost of the correction: the stored value cannot distinguish the
+/// two cases.
+pub fn migrate_model_unload_default_to_v14(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "UPDATE settings SET value = '60' WHERE key = 'model_unload_timeout_minutes' AND value = '0'",
+        [],
+    )
+    .map_err(|e| format!("Correct never-unload default: {e}"))?;
+    Ok(())
+}
+
 pub fn migrate_speaker_embeddings_to_v13(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "DELETE FROM speakers WHERE id NOT IN (
@@ -778,6 +800,68 @@ mod tests {
                 columns.iter().any(|column| column == expected),
                 "speakers table should have column {expected}"
             );
+        }
+    }
+
+    #[test]
+    fn v14_corrects_only_a_stored_never_unload() {
+        let dir = TempDir::new().unwrap();
+        let conn = Connection::open(dir.path().join("test.db")).unwrap();
+        conn.execute_batch(CREATE_SETTINGS).unwrap();
+        for (key, value) in [
+            ("model_unload_timeout_minutes", "0"),
+            ("other_setting", "0"),
+        ] {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)",
+                rusqlite::params![key, value],
+            )
+            .unwrap();
+        }
+
+        super::migrate_model_unload_default_to_v14(&conn).unwrap();
+
+        let corrected: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'model_unload_timeout_minutes'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(corrected, "60");
+
+        let untouched: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'other_setting'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, "0", "the migration must key on the setting name");
+    }
+
+    #[test]
+    fn v14_leaves_a_chosen_unload_timeout_alone() {
+        for chosen in ["5", "15", "60"] {
+            let dir = TempDir::new().unwrap();
+            let conn = Connection::open(dir.path().join("test.db")).unwrap();
+            conn.execute_batch(CREATE_SETTINGS).unwrap();
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('model_unload_timeout_minutes', ?1)",
+                rusqlite::params![chosen],
+            )
+            .unwrap();
+
+            super::migrate_model_unload_default_to_v14(&conn).unwrap();
+
+            let value: String = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key = 'model_unload_timeout_minutes'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(value, chosen);
         }
     }
 

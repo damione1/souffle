@@ -14,7 +14,6 @@
 //! so the home list stays current without depending on a webview timer.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -25,7 +24,7 @@ use tokio::time::MissedTickBehavior;
 use tracing::warn;
 
 use crate::app_events::{CalendarMeetingNudgeKind, TodayCalendarUpdated, UpcomingMeeting};
-use crate::audio::system_activity::{self, SystemAudioProbe};
+use crate::audio::mic_capture_probe;
 use crate::calendar::{self, CalendarEvent};
 use crate::permissions::PermState;
 use crate::settings::AppSettings;
@@ -38,10 +37,6 @@ type OccurrenceKey = (String, i64);
 /// How long after an event starts the auto-start nudge remains eligible.
 const AUTOSTART_WINDOW_MINUTES: u32 = 10;
 
-/// Backoff after a failed system-audio probe start, so a wedged CoreAudio
-/// tap does not spawn a new "Souffle Tap" aggregate every minute.
-const PROBE_RETRY_BACKOFF: Duration = Duration::from_secs(300);
-
 type TodayFingerprint = (PermState, Vec<(String, i64, i64, String)>);
 
 pub fn spawn(app: tauri::AppHandle) {
@@ -53,8 +48,6 @@ async fn run(app: tauri::AppHandle) {
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut fired_reminders: HashSet<OccurrenceKey> = HashSet::new();
     let mut fired_autostart: HashSet<OccurrenceKey> = HashSet::new();
-    let mut probe: Option<SystemAudioProbe> = None;
-    let mut probe_retry_at = std::time::Instant::now();
     let mut last_today: Option<TodayFingerprint> = None;
 
     loop {
@@ -73,14 +66,12 @@ async fn run(app: tauri::AppHandle) {
             }
         };
         if !settings.calendar_integration_enabled {
-            probe = None;
             emit_today_if_changed(&app, &mut last_today, PermState::Unknown, &[]);
             continue;
         }
         // Revoked mid-session: go quiet instead of erroring every minute.
         let permission = calendar::authorization_state();
         if permission != PermState::Granted {
-            probe = None;
             emit_today_if_changed(&app, &mut last_today, permission, &[]);
             continue;
         }
@@ -114,21 +105,6 @@ async fn run(app: tauri::AppHandle) {
         prune_fired(&mut fired_reminders, now);
         prune_fired(&mut fired_autostart, now);
 
-        let activity = Arc::clone(&app.state::<AppState>().system_audio_activity);
-        let should_probe = !recording
-            && settings.calendar_autostart_enabled
-            && has_in_progress_events(now, &events);
-        if should_probe {
-            if probe.is_none() && std::time::Instant::now() >= probe_retry_at {
-                probe = SystemAudioProbe::start(Arc::clone(&activity));
-                if probe.is_none() {
-                    probe_retry_at = std::time::Instant::now() + PROBE_RETRY_BACKOFF;
-                }
-            }
-        } else {
-            probe = None;
-        }
-
         for event in due_reminders(
             now,
             &events,
@@ -155,11 +131,15 @@ async fn run(app: tauri::AppHandle) {
             }
         }
 
-        if !recording
-            && settings.calendar_autostart_enabled
-            && activity.is_recently_active(system_activity::ACTIVITY_RECENCY)
-        {
-            for event in due_autostart_nudges(now, &events, &fired_autostart) {
+        let due_autostart = if recording || !settings.calendar_autostart_enabled {
+            Vec::new()
+        } else {
+            due_autostart_nudges(now, &events, &fired_autostart)
+        };
+        // The mic-capture read only happens with a nudge already pending, so
+        // an ordinary event costs nothing beyond the tick itself.
+        if !due_autostart.is_empty() && meeting_app_is_capturing_mic().await {
+            for event in due_autostart {
                 fired_autostart.insert((event.id.clone(), event.start.timestamp()));
                 notify(
                     &app,
@@ -182,10 +162,21 @@ async fn run(app: tauri::AppHandle) {
     }
 }
 
-fn has_in_progress_events(now: DateTime<Utc>, events: &[CalendarEvent]) -> bool {
-    events
-        .iter()
-        .any(|event| event.start <= now && now < event.end)
+/// Whether anything is capturing the microphone right now. Runs on
+/// a blocking worker: the CoreAudio property reads are cheap but they talk to
+/// coreaudiod, which can stall.
+async fn meeting_app_is_capturing_mic() -> bool {
+    match tauri::async_runtime::spawn_blocking(mic_capture_probe::mic_capture_in_progress).await {
+        Ok(Some(capture)) => {
+            tracing::debug!(?capture, "Calendar autostart: the mic is in use");
+            true
+        }
+        Ok(None) => false,
+        Err(e) => {
+            warn!("Calendar scheduler: mic-capture probe failed: {e}");
+            false
+        }
+    }
 }
 
 /// Events whose start lies within the reminder window and that have not
@@ -390,13 +381,6 @@ mod tests {
         fired.insert(("a".to_string(), started.start.timestamp()));
         let due = due_autostart_nudges(now, &[started], &fired);
         assert!(due.is_empty());
-    }
-
-    #[test]
-    fn has_in_progress_events_true_while_event_runs() {
-        let now = Utc::now();
-        let running = event("a", now - chrono::Duration::minutes(5));
-        assert!(has_in_progress_events(now, &[running]));
     }
 
     #[test]

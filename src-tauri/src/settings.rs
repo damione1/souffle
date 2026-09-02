@@ -244,7 +244,7 @@ impl Default for AppSettings {
             calendar_autostart_enabled: true,
             feedback_sounds_enabled: true,
             feedback_sounds_volume: 70,
-            model_unload_timeout_minutes: 0,
+            model_unload_timeout_minutes: 60,
             meeting_autostop_enabled: true,
             meeting_autostop_minutes: 10,
             meeting_max_duration_minutes: 240,
@@ -1186,13 +1186,46 @@ mod tests {
         assert_eq!(settings.calendar_reminder_minutes, 2);
     }
 
+    /// Loading must never rewrite what is stored: the one-time correction of
+    /// the old "never unload" default is a schema migration, not a load-time
+    /// side effect (`load` runs from 19 call sites, the headless CLI included).
+    #[test]
+    fn loading_never_rewrites_a_stored_unload_timeout() {
+        for minutes in [0u32, 5, 15, 60] {
+            let (db, _dir) = test_db();
+            db.set_setting("model_unload_timeout_minutes", &minutes.to_string())
+                .expect("save minutes");
+            let settings = AppSettings::load(&db).expect("load settings");
+            assert_eq!(settings.model_unload_timeout_minutes, minutes);
+            assert_eq!(
+                db.get_setting("model_unload_timeout_minutes")
+                    .expect("read back"),
+                Some(minutes.to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn a_chosen_unload_timeout_is_never_corrected() {
+        for minutes in [5u32, 15, 60] {
+            let (db, _dir) = test_db();
+            db.set_setting("model_unload_timeout_minutes", &minutes.to_string())
+                .expect("save minutes");
+            let settings = AppSettings::load(&db).expect("load settings");
+            assert_eq!(settings.model_unload_timeout_minutes, minutes);
+        }
+    }
+
     #[test]
     fn model_unload_timeout_minutes_rejects_unlisted_values() {
         let (db, _dir) = test_db();
         db.set_setting("model_unload_timeout_minutes", "7")
             .expect("save minutes");
         let settings = AppSettings::load(&db).expect("load settings");
-        assert_eq!(settings.model_unload_timeout_minutes, 0);
+        assert_eq!(
+            settings.model_unload_timeout_minutes,
+            AppSettings::default().model_unload_timeout_minutes
+        );
 
         for minutes in [0, 5, 15, 60] {
             let s = AppSettings {
