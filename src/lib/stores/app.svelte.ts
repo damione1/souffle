@@ -12,6 +12,10 @@ import type { TranscriptionModelOperationState } from "../features/transcription
 // Settings sheet visibility (the app is otherwise a single home surface)
 let settingsOpen = $state(false);
 
+// Tab to land on the next time settings opens (e.g. a "set up calendar" CTA
+// deep-linking into the meetings tab). Consumed once by SettingsView.
+let settingsInitialTab = $state<string | null>(null);
+
 // Current meeting ID (when viewing a specific meeting)
 let currentMeetingId = $state<string | null>(null);
 
@@ -153,6 +157,9 @@ export function getAppState() {
   return {
     get settingsOpen() { return settingsOpen; },
     set settingsOpen(v: boolean) { settingsOpen = v; },
+
+    get settingsInitialTab() { return settingsInitialTab; },
+    set settingsInitialTab(v: string | null) { settingsInitialTab = v; },
 
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },

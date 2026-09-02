@@ -32,7 +32,11 @@
   ];
 
   const controller = createSettingsController();
-  let activeTab = $state<SettingsTab>("transcription");
+  let activeTab = $state<SettingsTab>(
+    (controller.app.settingsInitialTab as SettingsTab | null) ?? "transcription",
+  );
+  // Deep-link is one-shot: don't stick future normal opens to this tab.
+  controller.app.settingsInitialTab = null;
 
   let selectedTranscriptionLabel = $derived(
     formatSelectedTranscriptionLabel(
