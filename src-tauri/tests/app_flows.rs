@@ -46,7 +46,6 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tempfile::TempDir;
 
 use souffle_lib::audio::{AudioChunk, AudioMessage};
-use souffle_lib::audio::system_activity::SystemAudioActivity;
 use souffle_lib::commands;
 use souffle_lib::constants::MIMI_FRAME_SIZE;
 use souffle_lib::db::Database;
@@ -139,14 +138,12 @@ fn build_harness(mock: MockEngine) -> Harness {
 
     let (audio_cmd_tx, audio_cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
     let audio_rms = Arc::new(AtomicU32::new(0f32.to_bits()));
-    let system_audio_activity = Arc::new(SystemAudioActivity::default());
 
     let app_state = AppState::new(
         audio_cmd_tx,
         Arc::clone(&actor),
         Arc::clone(&db),
         audio_rms,
-        system_audio_activity,
     );
     bring_to_ready(&app_state, &actor);
 

@@ -41,7 +41,6 @@ pub mod test_helpers;
 use std::sync::Arc;
 
 use audio::AudioCapture;
-use audio::system_activity::SystemAudioActivity;
 use state::AppState;
 use tauri::Manager;
 use tauri_specta::{Builder, collect_commands, collect_events};
@@ -191,7 +190,6 @@ pub fn run() {
 
     // Create the shared audio RMS level
     let audio_rms = Arc::new(std::sync::atomic::AtomicU32::new(0f32.to_bits()));
-    let system_audio_activity = Arc::new(SystemAudioActivity::default());
     // Chunks dropped by the capture callback — read by the actor for health reporting
     let dropped_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
     // Reason the capture thread sets right before it exits after an
@@ -274,7 +272,6 @@ pub fn run() {
             engine_actor,
             database,
             audio_rms,
-            system_audio_activity,
         ))
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
