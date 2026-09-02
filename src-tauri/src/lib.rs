@@ -179,6 +179,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::InputPinAvailable,
             app_events::InputPinUnavailable,
             app_events::InputRouteNotice,
+            app_events::UpdateAvailable,
         ])
 }
 
@@ -413,6 +414,7 @@ pub fn run() {
 
             tray::setup_tray(app.handle())?;
             calendar::scheduler::spawn(app.handle().clone());
+            update_check::scheduler::spawn(app.handle().clone());
             info!("Souffle started");
             Ok(())
         })

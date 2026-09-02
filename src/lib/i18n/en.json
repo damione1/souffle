@@ -232,7 +232,9 @@
     "checking": "Checking…",
     "up_to_date": "You're on the latest release.",
     "update_available": "Version {version} is available.",
-    "download_update": "Download on GitHub"
+    "download_update": "Download on GitHub",
+    "auto_check": "Check daily for updates",
+    "auto_check_desc": "Ask GitHub once a day whether a newer version exists, and show a dialog when there is one. Nothing is downloaded or installed."
   },
   "whats_new": {
     "title": "What's New",
@@ -488,5 +490,11 @@
     "starts_in_minutes": "Starts in {minutes} min",
     "started_system_audio": "Meeting started — system audio active",
     "dismiss": "Dismiss"
+  },
+  "update_available": {
+    "title": "Update available",
+    "subtitle": "Soufflé v{version} is out.",
+    "later": "Later",
+    "download": "Download"
   }
 }

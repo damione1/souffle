@@ -135,3 +135,141 @@ mod tests {
         assert_eq!(version_tag_for_api("v0.1.1"), "v0.1.1");
     }
 }
+
+/// Background daily check.
+///
+/// Deliberately the same request the About button makes: ask GitHub for the
+/// latest release, compare versions, show a dialog when ours is older. It
+/// never downloads or installs anything.
+pub mod scheduler {
+    use std::time::Duration;
+
+    use tauri::Manager;
+    use tauri_specta::Event;
+    use tracing::{info, warn};
+
+    use crate::app_events::UpdateAvailable;
+    use crate::settings::{AppSettings, LAST_UPDATE_CHECK_AT_KEY};
+    use crate::state::AppState;
+
+    /// How often the task wakes to decide whether a check is due.
+    const TICK: Duration = Duration::from_secs(60 * 60);
+
+    /// Minimum gap between two checks. Under a day on purpose: at exactly 24h
+    /// a machine woken at a slightly earlier hour each day would skip a day.
+    const MIN_GAP_SECONDS: i64 = 20 * 60 * 60;
+
+    /// Grace period after launch, so the check never competes with startup.
+    const STARTUP_DELAY: Duration = Duration::from_secs(90);
+
+    pub fn spawn(app: tauri::AppHandle) {
+        tauri::async_runtime::spawn(run(app));
+    }
+
+    /// Whether a check is due, given the last recorded time. `None` means
+    /// never checked, which is due.
+    fn check_is_due(now: i64, last: Option<i64>) -> bool {
+        match last {
+            // A clock moved backwards leaves a future timestamp; check anyway
+            // rather than going quiet until it catches up.
+            Some(last) => now - last >= MIN_GAP_SECONDS || last > now,
+            None => true,
+        }
+    }
+
+    async fn run(app: tauri::AppHandle) {
+        tokio::time::sleep(STARTUP_DELAY).await;
+        let mut interval = tokio::time::interval(TICK);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // One dialog per launch per version: a user who dismissed it should not
+        // meet it again an hour later.
+        let mut announced: Option<String> = None;
+
+        loop {
+            interval.tick().await;
+
+            let db = app.state::<AppState>().db.clone();
+            let settings = match AppSettings::load(&db) {
+                Ok(settings) => settings,
+                Err(e) => {
+                    warn!("Update check: settings load failed: {e}");
+                    continue;
+                }
+            };
+            if !settings.auto_update_check_enabled {
+                continue;
+            }
+
+            let now = chrono::Utc::now().timestamp();
+            let last = db
+                .get_setting(LAST_UPDATE_CHECK_AT_KEY)
+                .ok()
+                .flatten()
+                .and_then(|raw| raw.trim().parse::<i64>().ok());
+            if !check_is_due(now, last) {
+                continue;
+            }
+
+            let result = match tauri::async_runtime::spawn_blocking(super::check_for_updates).await
+            {
+                Ok(result) => result,
+                Err(e) => {
+                    warn!("Update check: task failed: {e}");
+                    continue;
+                }
+            };
+            // Recorded even when the request failed, so a machine offline for a
+            // week does not retry every hour.
+            if let Err(e) = db.set_setting(LAST_UPDATE_CHECK_AT_KEY, &now.to_string()) {
+                warn!("Update check: could not record the check time: {e}");
+            }
+            if let Some(error) = &result.check_error {
+                info!("Update check: {error}");
+                continue;
+            }
+            let Some(latest) = result.latest_version.clone() else {
+                continue;
+            };
+            if !result.update_available || announced.as_deref() == Some(latest.as_str()) {
+                continue;
+            }
+
+            info!(latest = %latest, "Update check: newer release available");
+            announced = Some(latest.clone());
+            if let Err(e) = (UpdateAvailable {
+                latest_version: latest,
+                release_notes: result.release_notes,
+                release_url: result.release_url,
+            })
+            .emit(&app)
+            {
+                warn!("Update check: emit failed: {e}");
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{MIN_GAP_SECONDS, check_is_due};
+
+        #[test]
+        fn a_first_run_is_due() {
+            assert!(check_is_due(1_000_000, None));
+        }
+
+        #[test]
+        fn a_recent_check_is_not_due() {
+            let now = 1_000_000;
+            assert!(!check_is_due(now, Some(now - MIN_GAP_SECONDS + 1)));
+            assert!(check_is_due(now, Some(now - MIN_GAP_SECONDS)));
+        }
+
+        /// A timestamp in the future means the clock moved, not that we checked
+        /// tomorrow. Going quiet until it catches up would be worse.
+        #[test]
+        fn a_future_timestamp_still_checks() {
+            let now = 1_000_000;
+            assert!(check_is_due(now, Some(now + 86_400)));
+        }
+    }
+}

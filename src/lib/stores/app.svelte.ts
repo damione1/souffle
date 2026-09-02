@@ -92,6 +92,7 @@ let settings = $state<AppSettings>({
     { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
   ],
+  auto_update_check_enabled: true,
   dictation_learn_from_edit: true,
   default_summary_template_id: "default",
   summary_templates: [

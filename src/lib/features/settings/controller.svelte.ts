@@ -419,6 +419,13 @@ export function createSettingsController() {
     });
   }
 
+  function onAutoUpdateCheckChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.auto_update_check_enabled = checked;
+    });
+  }
+
   function onDictationPolishEnabledChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -870,6 +877,7 @@ export function createSettingsController() {
     onLocaleChange,
     onAutoPasteChange,
     onLearnFromEditChange,
+    onAutoUpdateCheckChange,
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,
     onDictationPolishPromptChange,

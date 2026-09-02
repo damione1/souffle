@@ -110,7 +110,7 @@ Settings > Permissions shows the current state of each and links straight to the
 The privacy claim above is worth checking rather than believing, so here is every outbound connection the app makes:
 
 - **huggingface.co**, to download a speech model the first time you select it. Nothing is sent, and once the model is on disk transcription works offline forever.
-- **api.github.com**, only when you press *Check for updates* in Settings > About. There is no timer and no automatic check.
+- **api.github.com**, once a day to ask whether a newer release exists, and whenever you press *Check for updates* in Settings > About. The daily check sends nothing but the request itself: no identifier, no account, no usage data. It shows a dialog when there is an update and never downloads or installs anything. Turn it off in Settings > About.
 - **Your Ollama instance**, `http://localhost:11434` by default, if you enable summaries with Ollama. It is your machine unless you point it elsewhere.
 
 Your audio, transcripts, notes and summaries are never sent anywhere. They live in a local SQLite database, and Settings > Data exports or deletes the lot.

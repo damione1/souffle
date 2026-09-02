@@ -304,6 +304,8 @@
       <AboutSettingsSection
         selectedTranscriptionLabel={selectedTranscriptionLabel}
         selectedOllamaModelLabel={selectedOllamaModelLabel}
+        autoUpdateCheck={controller.app.settings.auto_update_check_enabled}
+        onAutoUpdateCheckChange={controller.onAutoUpdateCheckChange}
       />
     {/if}
   </div>

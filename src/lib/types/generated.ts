@@ -896,7 +896,8 @@ systemAudioStatus: SystemAudioStatus,
 systemWokeUp: SystemWokeUp,
 todayCalendarUpdated: TodayCalendarUpdated,
 transcriptionHealth: TranscriptionHealth,
-upcomingMeeting: UpcomingMeeting
+upcomingMeeting: UpcomingMeeting,
+updateAvailable: UpdateAvailable
 }>({
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
@@ -920,7 +921,8 @@ systemAudioStatus: "system-audio-status",
 systemWokeUp: "system-woke-up",
 todayCalendarUpdated: "today-calendar-updated",
 transcriptionHealth: "transcription-health",
-upcomingMeeting: "upcoming-meeting"
+upcomingMeeting: "upcoming-meeting",
+updateAvailable: "update-available"
 })
 
 /** user-defined constants **/
@@ -981,6 +983,11 @@ calendar_reminder_minutes: number;
  * starting a meeting transcription (nudge only, never auto-records).
  */
 calendar_autostart_enabled: boolean; 
+/**
+ * Ask GitHub once a day whether a newer release exists, and show a
+ * dialog when there is one. Never downloads or installs anything.
+ */
+auto_update_check_enabled: boolean; 
 /**
  * Audible start/stop cues for dictation sessions.
  */
@@ -1526,6 +1533,11 @@ export type TransportType = "built_in" | "usb" | "bluetooth" | "bluetooth_le" | 
  * banner (notification clicks are not reliably delivered on macOS).
  */
 export type UpcomingMeeting = { event: CalendarEvent; starts_in_seconds: number; kind?: CalendarMeetingNudgeKind }
+/**
+ * A newer GitHub release exists. Emitted by the daily check, never more than
+ * once per launch for the same version.
+ */
+export type UpdateAvailable = { latest_version: string; release_notes: string | null; release_url: string | null }
 export type UpdateCheckResult = { current_version: string; latest_version: string | null; update_available: boolean; release_notes: string | null; release_url: string | null; check_error: string | null }
 
 /** tauri-specta globals **/
