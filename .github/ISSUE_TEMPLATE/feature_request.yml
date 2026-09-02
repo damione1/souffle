@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest something Soufflé should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The situation you are in, rather than the solution you have in mind. It usually leads somewhere better.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you had in mind
+    validations:
+      required: false
+  - type: checkboxes
+    id: local
+    attributes:
+      label: Constraint
+      options:
+        - label: I understand Soufflé runs entirely on-device, and this suggestion does not require a cloud service.
+          required: false
