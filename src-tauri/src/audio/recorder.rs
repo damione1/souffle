@@ -74,6 +74,33 @@ pub fn session_path(meeting_id: &str, session_index: usize) -> PathBuf {
     meeting_recordings_dir(meeting_id).join(format!("{session_index}.ogg"))
 }
 
+/// Recorded session files in `dir`, sorted by session index. Ignores
+/// anything that isn't `{index}.ogg`.
+pub fn list_session_files_in(dir: &std::path::Path) -> Vec<(usize, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut sessions: Vec<(usize, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("ogg") {
+                return None;
+            }
+            let session_index = path.file_stem()?.to_str()?.parse::<usize>().ok()?;
+            Some((session_index, path))
+        })
+        .collect();
+    sessions.sort_by_key(|(index, _)| *index);
+    sessions
+}
+
+/// Recorded session files for a meeting (empty if recording was never
+/// enabled, the directory is missing, or nothing survived retention).
+pub fn list_session_files(meeting_id: &str) -> Vec<(usize, PathBuf)> {
+    list_session_files_in(&meeting_recordings_dir(meeting_id))
+}
+
 fn opus_head(pre_skip: u16, input_rate: u32) -> Vec<u8> {
     let mut v = Vec::with_capacity(19);
     v.extend_from_slice(b"OpusHead");
@@ -153,7 +180,11 @@ impl<W: Write> OggOpusWriter<W> {
         })
     }
 
-    fn encode_and_write(&mut self, frame: &[f32], end_info: PacketWriteEndInfo) -> Result<(), String> {
+    fn encode_and_write(
+        &mut self,
+        frame: &[f32],
+        end_info: PacketWriteEndInfo,
+    ) -> Result<(), String> {
         let mut out_buf = [0u8; MAX_OPUS_PACKET_BYTES];
         let len = self
             .encoder
@@ -161,7 +192,12 @@ impl<W: Write> OggOpusWriter<W> {
             .map_err(|e| format!("Opus encode: {e}"))?;
         self.granule_position += (self.frame_samples as u64) * 48_000 / u64::from(self.input_rate);
         self.packet_writer
-            .write_packet(out_buf[..len].to_vec(), STREAM_SERIAL, end_info, self.granule_position)
+            .write_packet(
+                out_buf[..len].to_vec(),
+                STREAM_SERIAL,
+                end_info,
+                self.granule_position,
+            )
             .map_err(|e| format!("Write Opus packet: {e}"))?;
         self.packets_written += 1;
         Ok(())
@@ -232,7 +268,8 @@ impl MeetingRecorder {
         }
         let encode_rate = nearest_opus_rate(sample_rate);
 
-        let file = std::fs::File::create(&path).map_err(|e| format!("Create recording file: {e}"))?;
+        let file =
+            std::fs::File::create(&path).map_err(|e| format!("Create recording file: {e}"))?;
         let mut writer = OggOpusWriter::new(std::io::BufWriter::new(file), encode_rate)?;
 
         let (tx, rx) = sync_channel::<RecorderMsg>(CHANNEL_CAPACITY);
@@ -292,7 +329,9 @@ impl MeetingRecorder {
             return;
         }
         if let Some(sender) = &self.sender
-            && sender.try_send(RecorderMsg::Chunk(samples.to_vec())).is_err()
+            && sender
+                .try_send(RecorderMsg::Chunk(samples.to_vec()))
+                .is_err()
         {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
@@ -326,7 +365,10 @@ mod tests {
     fn sine(seconds: f64, rate: u32) -> Vec<f32> {
         let n = (seconds * f64::from(rate)) as usize;
         (0..n)
-            .map(|i| ((2.0 * std::f64::consts::PI * 440.0 * i as f64 / f64::from(rate)).sin() * 0.3) as f32)
+            .map(|i| {
+                ((2.0 * std::f64::consts::PI * 440.0 * i as f64 / f64::from(rate)).sin() * 0.3)
+                    as f32
+            })
             .collect()
     }
 
@@ -337,6 +379,27 @@ mod tests {
         assert_eq!(nearest_opus_rate(16_000), 16_000);
         assert_eq!(nearest_opus_rate(44_100), 48_000);
         assert_eq!(nearest_opus_rate(22_050), 24_000);
+    }
+
+    #[test]
+    fn list_session_files_in_skips_non_ogg_and_sorts_by_index() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("1.ogg"), b"b").unwrap();
+        std::fs::write(dir.path().join("0.ogg"), b"a").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"nope").unwrap();
+        std::fs::write(dir.path().join("not-an-index.ogg"), b"skip").unwrap();
+
+        let listed = list_session_files_in(dir.path());
+        assert_eq!(
+            listed.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn list_session_files_in_missing_dir_is_empty() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(list_session_files_in(&dir.path().join("missing")).is_empty());
     }
 
     #[test]
@@ -368,7 +431,10 @@ mod tests {
         writer.finish().expect("finish once");
         let granule_after_first = writer.granule_position;
         writer.finish().expect("finish twice must not error");
-        assert_eq!(writer.granule_position, granule_after_first, "second finish must be a no-op");
+        assert_eq!(
+            writer.granule_position, granule_after_first,
+            "second finish must be a no-op"
+        );
     }
 
     #[test]

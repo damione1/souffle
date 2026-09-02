@@ -1,11 +1,64 @@
-use tauri::State;
+use std::path::PathBuf;
+
 use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::db::search::SearchResult;
 use crate::engine::TranscriptionSegment;
 use crate::export::{self, ExportFormat};
 use crate::settings::AppSettings;
 use crate::state::AppState;
+
+/// Native save panel, parented to `main` after bringing the app forward.
+///
+/// The JS dialog plugin parents to whichever webview invoked it. The pill
+/// overlay is a non-activating `NSPanel`, and WKWebView swallows OS surfaces
+/// the same way it swallows `target="_blank"` (see `open_release_page`):
+/// click, nothing opens. Talk to AppKit from this side of the webview.
+pub(crate) fn pick_save_path(
+    app: &AppHandle,
+    file_name: &str,
+    extension: &str,
+) -> Result<Option<PathBuf>, String> {
+    bring_app_forward(app);
+
+    let Some(main) = app.get_webview_window("main") else {
+        return Err("Main window is gone; cannot show the save dialog".into());
+    };
+
+    let picked = app
+        .dialog()
+        .file()
+        .set_file_name(file_name)
+        .add_filter(extension.to_uppercase(), &[extension])
+        .set_parent(&main)
+        .blocking_save_file();
+
+    match picked {
+        Some(path) => path
+            .into_path()
+            .map(Some)
+            .map_err(|e| format!("Save path: {e}")),
+        None => Ok(None),
+    }
+}
+
+fn bring_app_forward(app: &AppHandle) {
+    let (tx, rx) = std::sync::mpsc::sync_channel(0);
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        #[cfg(target_os = "macos")]
+        crate::tray::activate_app();
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.unminimize();
+            let _ = main.show();
+            let _ = main.set_focus();
+        }
+        let _ = tx.send(());
+    });
+    let _ = rx.recv();
+}
 
 /// List all saved meetings
 #[tauri::command]
@@ -50,29 +103,16 @@ pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), Stri
 pub fn get_meeting_audio(
     meeting_id: String,
 ) -> Result<Vec<crate::transcript::MeetingAudioSession>, String> {
-    let dir = crate::audio::recorder::meeting_recordings_dir(&meeting_id);
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Ok(Vec::new());
-    };
-
-    let mut sessions: Vec<crate::transcript::MeetingAudioSession> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("ogg") {
-                return None;
-            }
-            let session_index = path.file_stem()?.to_str()?.parse::<usize>().ok()?;
-            Some(crate::transcript::MeetingAudioSession {
+    Ok(crate::audio::recorder::list_session_files(&meeting_id)
+        .into_iter()
+        .map(
+            |(session_index, path)| crate::transcript::MeetingAudioSession {
                 session_index,
                 path: path.to_string_lossy().to_string(),
                 duration_seconds: None,
-            })
-        })
-        .collect();
-
-    sessions.sort_by_key(|session| session.session_index);
-    Ok(sessions)
+            },
+        )
+        .collect())
 }
 
 /// Save the user's live meeting notes. Targets the in-memory accumulator
@@ -318,6 +358,87 @@ pub fn export_meeting_to_file(
     let meeting = state.db.load_meeting(&id)?;
     let rendered = export::render_meeting(&meeting, format)?;
     std::fs::write(&path, rendered).map_err(|e| format!("Write export file: {e}"))
+}
+
+/// Show a native save dialog and write the meeting export. Runs off the
+/// webview (see [`pick_save_path`]); cancel is a no-op, not an error.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_meeting_export(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    format: ExportFormat,
+) -> Result<(), String> {
+    let meeting = state.db.load_meeting(&id)?;
+    let filename = export::export_default_filename(&meeting, format);
+    let extension = export::export_extension(format).to_string();
+    let rendered = export::render_meeting(&meeting, format)?;
+
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || pick_save_path(&app, &filename, &extension))
+            .await
+            .map_err(|e| format!("Save dialog task failed: {e}"))??;
+
+    let Some(path) = picked else {
+        return Ok(());
+    };
+    std::fs::write(&path, rendered).map_err(|e| format!("Write export file: {e}"))
+}
+
+/// Suggested filename for a meeting audio export (e.g. `2026-07-09-weekly-sync.ogg`).
+#[tauri::command]
+#[specta::specta]
+pub fn export_meeting_audio_filename(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<String, String> {
+    let meeting = state.db.load_meeting(&id)?;
+    Ok(export::export_audio_filename(&meeting))
+}
+
+/// Copy recorded audio for a meeting to `path`. One session writes that
+/// file; several sessions write `{stem}-1.ogg`, `{stem}-2.ogg`, … next to it.
+#[tauri::command]
+#[specta::specta]
+pub fn export_meeting_audio_to_file(id: String, path: String) -> Result<(), String> {
+    let sources: Vec<_> = crate::audio::recorder::list_session_files(&id)
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect();
+    export::copy_audio_sessions(&sources, std::path::Path::new(&path))?;
+    Ok(())
+}
+
+/// Show a native save dialog and copy recorded audio. Same webview
+/// parenting issue as [`save_meeting_export`]; cancel is a no-op.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_meeting_audio_export(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    let meeting = state.db.load_meeting(&id)?;
+    let filename = export::export_audio_filename(&meeting);
+    let sources: Vec<_> = crate::audio::recorder::list_session_files(&id)
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect();
+    if sources.is_empty() {
+        return Err("No recorded audio for this meeting".into());
+    }
+
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || pick_save_path(&app, &filename, "ogg"))
+            .await
+            .map_err(|e| format!("Save dialog task failed: {e}"))??;
+
+    let Some(path) = picked else {
+        return Ok(());
+    };
+    export::copy_audio_sessions(&sources, &path)?;
+    Ok(())
 }
 
 /// List available summary providers and models (Ollama + Apple Intelligence).

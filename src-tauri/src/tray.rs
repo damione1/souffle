@@ -86,7 +86,7 @@ pub fn should_restore_main_on_reopen(_has_visible_windows: bool) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn activate_app() {
+pub(crate) fn activate_app() {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;
 

@@ -265,7 +265,8 @@
     "export_markdown": "Markdown (.md)",
     "export_json": "JSON (.json)",
     "export_srt": "Sous-titres (.srt)",
-    "export_vtt": "Sous-titres (.vtt)"
+    "export_vtt": "Sous-titres (.vtt)",
+    "export_audio": "Audio (.ogg)"
   },
   "meeting_transcript": {
     "title": "Transcription",

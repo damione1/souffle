@@ -110,3 +110,23 @@ export async function exportMeetingPreview(id: string, format: ExportFormat): Pr
 export async function exportMeetingToFile(id: string, format: ExportFormat, path: string): Promise<void> {
   await unwrap(commands.exportMeetingToFile(id, format, path));
 }
+
+/** Suggested filename for a meeting audio export (e.g. "2026-07-09-weekly-sync.ogg"). */
+export async function exportMeetingAudioFilename(id: string): Promise<string> {
+  return unwrap(commands.exportMeetingAudioFilename(id));
+}
+
+/** Copy recorded audio for a meeting to `path` (or `{stem}-N.ogg` next to it). */
+export async function exportMeetingAudioToFile(id: string, path: string): Promise<void> {
+  await unwrap(commands.exportMeetingAudioToFile(id, path));
+}
+
+/** Native save dialog + write markdown/subtitles. Cancel is a no-op. */
+export async function saveMeetingExport(id: string, format: ExportFormat): Promise<void> {
+  await unwrap(commands.saveMeetingExport(id, format));
+}
+
+/** Native save dialog + copy recorded audio. Cancel is a no-op. */
+export async function saveMeetingAudioExport(id: string): Promise<void> {
+  await unwrap(commands.saveMeetingAudioExport(id));
+}

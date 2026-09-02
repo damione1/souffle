@@ -25,6 +25,10 @@ import {
   exportMeetingFilename,
   exportMeetingPreview,
   exportMeetingToFile,
+  exportMeetingAudioFilename,
+  exportMeetingAudioToFile,
+  saveMeetingExport,
+  saveMeetingAudioExport,
 } from './meetings';
 
 describe('meetings API', () => {
@@ -163,5 +167,38 @@ describe('meetings API', () => {
     await exportMeetingToFile('meeting-1', 'vtt', '/tmp/export.vtt');
 
     expect(mockInvoke).toHaveBeenCalledWith('export_meeting_to_file', expect.objectContaining({ id: 'meeting-1', format: 'vtt', path: '/tmp/export.vtt' }), undefined);
+  });
+
+  it('exportMeetingAudioFilename passes id, returns the suggested ogg name', async () => {
+    mockInvoke.mockResolvedValue('2026-07-09-weekly-sync.ogg');
+
+    const result = await exportMeetingAudioFilename('meeting-1');
+
+    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_audio_filename', expect.objectContaining({ id: 'meeting-1' }), undefined);
+    expect(result).toBe('2026-07-09-weekly-sync.ogg');
+  });
+
+  it('exportMeetingAudioToFile passes id and path', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await exportMeetingAudioToFile('meeting-1', '/tmp/weekly-sync.ogg');
+
+    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_audio_to_file', expect.objectContaining({ id: 'meeting-1', path: '/tmp/weekly-sync.ogg' }), undefined);
+  });
+
+  it('saveMeetingExport passes id and format', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await saveMeetingExport('meeting-1', 'markdown');
+
+    expect(mockInvoke).toHaveBeenCalledWith('save_meeting_export', expect.objectContaining({ id: 'meeting-1', format: 'markdown' }), undefined);
+  });
+
+  it('saveMeetingAudioExport passes id', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await saveMeetingAudioExport('meeting-1');
+
+    expect(mockInvoke).toHaveBeenCalledWith('save_meeting_audio_export', expect.objectContaining({ id: 'meeting-1' }), undefined);
   });
 });

@@ -15,11 +15,13 @@
     sessionCount,
     canResumeRecording,
     isExporting,
+    hasAudio,
     onBack,
     onRename,
     onResumeRecording,
     onStopRecording,
     onExport,
+    onExportAudio,
   }: {
     meeting: MeetingTranscript;
     isRecordingMeeting: boolean;
@@ -30,11 +32,13 @@
     sessionCount: number;
     canResumeRecording: boolean;
     isExporting: boolean;
+    hasAudio: boolean;
     onBack: () => void;
     onRename: (title: string) => void;
     onResumeRecording: () => void | Promise<void>;
     onStopRecording: () => void | Promise<void>;
     onExport: (format: ExportFormat) => void | Promise<void>;
+    onExportAudio: () => void | Promise<void>;
   } = $props();
 
   let isEditingTitle = $state(false);
@@ -52,6 +56,11 @@
   function pickExport(format: ExportFormat) {
     showExportMenu = false;
     onExport(format);
+  }
+
+  function pickExportAudio() {
+    showExportMenu = false;
+    onExportAudio();
   }
 
   function startTitleEdit() {
@@ -208,6 +217,14 @@
                 {$t(labelKey)}
               </button>
             {/each}
+            {#if hasAudio}
+              <button
+                onclick={pickExportAudio}
+                class="block w-full cursor-pointer rounded-[8px] px-2.5 py-1.5 text-left text-[12.5px] text-text-primary transition-colors hover:bg-surface-2"
+              >
+                {$t("meeting_header.export_audio")}
+              </button>
+            {/if}
           </div>
         {/if}
       </div>
