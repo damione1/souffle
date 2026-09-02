@@ -21,7 +21,7 @@ const SPOKEN_COMMANDS: &[(&str, &str)] = &[
 /// Conservative post-LLM spoken-command replacements, then squeeze spaces/tabs
 /// without collapsing newlines. Do not use the STT whitespace filter here.
 pub fn apply_post_polish_formatters(text: &str) -> String {
-    let mut commands: Vec<_> = SPOKEN_COMMANDS.iter().copied().collect();
+    let mut commands: Vec<_> = SPOKEN_COMMANDS.to_vec();
     commands.sort_by_key(|(phrase, _)| std::cmp::Reverse(phrase.chars().count()));
 
     let mut out = text.to_string();

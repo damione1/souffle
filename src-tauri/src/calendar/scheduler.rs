@@ -426,11 +426,11 @@ mod tests {
         };
         let granted = PermState::Granted;
         assert_eq!(
-            today_fingerprint(granted, &[first.clone()]),
+            today_fingerprint(granted, std::slice::from_ref(&first)),
             today_fingerprint(granted, std::slice::from_ref(&first))
         );
         assert_ne!(
-            today_fingerprint(granted, &[first.clone()]),
+            today_fingerprint(granted, std::slice::from_ref(&first)),
             today_fingerprint(granted, &[retitled])
         );
         assert_ne!(
