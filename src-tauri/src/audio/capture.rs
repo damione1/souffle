@@ -24,15 +24,18 @@ fn emit_system_audio_status(app: Option<&tauri::AppHandle>, active: bool, reason
     }
 }
 
-/// Mixer cadence while a meeting session is active. Rings hold ~2s, so the
-/// 5ms tick has plenty of slack; it only exists to pace the mixer, the
-/// real-time callbacks never wait on it.
-const MEETING_TICK: Duration = Duration::from_millis(5);
+/// Mixer cadence while a meeting session is active. It only paces the mixer;
+/// the real-time callbacks never wait on it, and the rings they fill hold
+/// ~2s. Audio arrives in 10ms frames, so waking twice per frame is already
+/// generous, and every wake-up here lands on a UserInteractive thread that
+/// would otherwise let the CPU idle.
+const MEETING_TICK: Duration = Duration::from_millis(20);
 
-/// How often the meeting tick re-checks the default output route
-/// (~2s at the 5ms tick). Property reads are a handful of cheap HAL calls;
-/// polling keeps everything on this thread instead of a listener callback.
-const ROUTE_CHECK_TICKS: u32 = 400;
+/// How often the meeting tick re-checks the default output route. Property
+/// reads are a handful of cheap HAL calls; polling keeps everything on this
+/// thread instead of a listener callback.
+const ROUTE_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+const ROUTE_CHECK_TICKS: u32 = (ROUTE_CHECK_INTERVAL.as_millis() / MEETING_TICK.as_millis()) as u32;
 
 /// Wake-up cadence during dictation sessions: fast enough to feed the
 /// AudioLevel stream for the waveform (the mic health check keeps its own
@@ -49,9 +52,9 @@ const MIC_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 /// never fires cpal's error callback) and the mic leg must be rebuilt.
 const MIC_STALE_AFTER: Duration = Duration::from_secs(2);
 
-/// Ceiling on how often AudioLevel is pushed to the frontend. Meeting mode's
-/// 5ms tick would otherwise emit at ~200Hz; the dictation tick matches this
-/// interval so both modes stream levels at ~15Hz.
+/// Ceiling on how often AudioLevel is pushed to the frontend. The meeting
+/// tick is faster than this; the dictation tick matches this interval, so both
+/// modes stream levels at ~15Hz.
 const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(66);
 
 /// Consecutive rebuild failures after which a dictation session (mic is the
@@ -265,6 +268,17 @@ impl AudioLevelThrottle {
 #[cfg(test)]
 mod level_throttle_tests {
     use super::*;
+
+    /// The route check is expressed in seconds; if the tick changes, the
+    /// derived counter must still land on that interval.
+    #[test]
+    fn route_check_counter_matches_its_interval() {
+        assert_eq!(
+            MEETING_TICK * ROUTE_CHECK_TICKS,
+            ROUTE_CHECK_INTERVAL,
+            "ROUTE_CHECK_TICKS no longer divides evenly into the tick"
+        );
+    }
 
     #[test]
     fn emits_immediately_then_suppresses_within_interval() {
