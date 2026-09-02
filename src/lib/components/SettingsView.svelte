@@ -248,6 +248,7 @@
         appleIntelligenceUnavailableReason={controller.appleIntelligenceUnavailableReason}
         ollamaModels={controller.ollamaModels}
         summaryModels={controller.summaryModels}
+        summaryProvider={controller.app.settings.summary_provider}
         selectedOllamaModel={controller.app.settings.ollama_model}
         recommendedOllamaModel={controller.recommendedOllamaModel}
         ollamaPulling={controller.ollamaPulling}
@@ -257,6 +258,7 @@
         ollamaPullError={controller.ollamaPullError}
         onOllamaUrlChange={controller.onOllamaUrlChange}
         onOllamaModelChange={controller.onOllamaModelChange}
+        onSummaryProviderChange={controller.onSummaryProviderChange}
         onRetrySummaryProviders={controller.refreshSummaryProviders}
         onDownloadRecommendedOllamaModel={controller.downloadRecommendedOllamaModel}
       />

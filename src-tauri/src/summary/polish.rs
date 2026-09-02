@@ -4,8 +4,8 @@ use crate::filter::{DictionaryEntry, pronunciation_aliases};
 use crate::settings::{AppSettings, DictationPolishTemplate};
 
 use super::{
-    SummarizeProgress, SummaryProviderKind, extract::extract_json_payload, generate_with_provider,
-    pick_summary_model, resolve_provider,
+    SummarizeProgress, SummaryProviderKind, choose_summary_model, extract::extract_json_payload,
+    generate_with_provider, resolve_provider,
 };
 
 pub const TEMPLATE_CLEAN: &str = "clean";
@@ -411,20 +411,24 @@ pub async fn polish_dictation_text(
         };
     };
 
-    let Some(model) = pick_summary_model(settings, available_models) else {
-        return DictationPolishResult {
-            text: stripped.trim().to_string(),
-            skipped: true,
-            warning: Some(
-                "No summarization provider available — install Ollama or enable Apple Intelligence"
-                    .into(),
-            ),
-        };
+    let model = match choose_summary_model(settings, available_models) {
+        Ok(model) => model,
+        Err(err) => {
+            // Silence here is what made this look like a broken feature: polish
+            // was on, nothing happened, and nothing was written down.
+            tracing::warn!(reason = err.message(), "Dictation polish skipped");
+            return DictationPolishResult {
+                text: stripped.trim().to_string(),
+                skipped: true,
+                warning: Some(err.message().to_string()),
+            };
+        }
     };
 
     let provider = match resolve_provider(&model) {
         Ok(provider) => provider,
         Err(err) => {
+            tracing::warn!(model = %model, error = %err, "Dictation polish provider unusable");
             return DictationPolishResult {
                 text: stripped.trim().to_string(),
                 skipped: true,
@@ -467,6 +471,7 @@ pub async fn polish_dictation_text(
     {
         Ok(raw) => raw,
         Err(err) => {
+            tracing::warn!(model = %model, error = %err, "Dictation polish request failed");
             return DictationPolishResult {
                 text: stripped.trim().to_string(),
                 skipped: false,

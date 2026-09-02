@@ -57,6 +57,7 @@ let settings = $state<AppSettings>({
   paste_delay_ms: 100,
   paste_method: "clipboard",
   ollama_url: "http://localhost:11434",
+  summary_provider: "auto",
   ollama_model: "",
   debug_transcription: false,
   log_level: "info",

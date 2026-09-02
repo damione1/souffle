@@ -29,6 +29,7 @@ import type {
   DictionaryEntry,
   PermState,
   SummaryModelDescriptor,
+  SummaryProviderChoice,
   ShortcutSettings,
   Theme,
   TranscriptionCatalog,
@@ -544,6 +545,13 @@ export function createSettingsController() {
     });
   }
 
+  function onSummaryProviderChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value as SummaryProviderChoice;
+    void persistSettings((settings) => {
+      settings.summary_provider = value;
+    });
+  }
+
   function onVadEnabledChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -892,6 +900,7 @@ export function createSettingsController() {
     onLogLevelChange,
     onOllamaUrlChange,
     onOllamaModelChange,
+    onSummaryProviderChange,
     get systemAudioSupported() { return systemAudioSupported; },
     get isLaptop() { return isLaptop; },
     onCaptureSystemAudioChange,

@@ -94,6 +94,68 @@ pub enum SummaryProviderKind {
     AppleIntelligence,
 }
 
+/// Which provider the user wants summaries and dictation polish to use.
+///
+/// Before this existed the provider was inferred from the selected model id,
+/// so a stale Ollama model name silently decided the provider, and an
+/// unavailable one silently handed the work to whatever else was around.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SummaryProviderChoice {
+    /// Apple Intelligence when this Mac offers it, Ollama otherwise.
+    #[default]
+    Auto,
+    AppleIntelligence,
+    Ollama,
+}
+
+impl SummaryProviderChoice {
+    /// Before this setting existed, a non-empty `ollama_model` *was* the
+    /// provider choice. Infer Ollama so an upgrade does not silently switch
+    /// those users onto Apple Intelligence under the new Auto default.
+    ///
+    /// A stored `"auto"` is left alone: the user (or a later save) picked it
+    /// on purpose. Only a missing key is inferred.
+    pub fn from_stored(stored: Option<Self>, ollama_model: &str) -> Self {
+        if let Some(choice) = stored {
+            return choice;
+        }
+        let model = ollama_model.trim();
+        if !model.is_empty() && model != APPLE_INTELLIGENCE_MODEL_ID {
+            Self::Ollama
+        } else {
+            Self::Auto
+        }
+    }
+}
+
+/// Why no model could be selected, so the caller can say so instead of
+/// quietly doing nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelChoiceError {
+    /// The user asked for Apple Intelligence and this Mac cannot provide it.
+    AppleIntelligenceUnavailable,
+    /// The user asked for Ollama and it has no model this app can use.
+    NoOllamaModel,
+    /// Nothing at all is available, under `Auto`.
+    NoProvider,
+}
+
+impl ModelChoiceError {
+    pub fn message(&self) -> &'static str {
+        match self {
+            Self::AppleIntelligenceUnavailable => {
+                "Apple Intelligence is selected but is not available on this Mac"
+            }
+            Self::NoOllamaModel => "Ollama is selected but has no usable model installed",
+            Self::NoProvider => {
+                "No summary provider is available: Apple Intelligence is unavailable \
+                 and Ollama has no usable model"
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SummaryModelDescriptor {
     pub id: String,
@@ -224,18 +286,45 @@ fn chunk_config(provider: SummaryProviderKind) -> ChunkConfig {
     }
 }
 
+/// The model to run, honouring the user's provider choice.
+///
+/// An explicit choice is never silently traded for the other provider: asking
+/// for Apple Intelligence and being served an Ollama model, or the reverse, is
+/// how a stale setting turned into "the feature does nothing and says nothing".
+pub fn choose_summary_model(
+    settings: &crate::settings::AppSettings,
+    models: &[SummaryModelDescriptor],
+) -> Result<String, ModelChoiceError> {
+    let apple = models
+        .iter()
+        .find(|model| model.provider == SummaryProviderKind::AppleIntelligence)
+        .map(|model| model.id.clone());
+
+    let preferred = settings.ollama_model.trim();
+    let ollama = models
+        .iter()
+        .filter(|model| model.provider == SummaryProviderKind::Ollama);
+    let ollama: Vec<&SummaryModelDescriptor> = ollama.collect();
+    let ollama_choice = ollama
+        .iter()
+        .find(|model| model.id == preferred)
+        .or_else(|| ollama.first())
+        .map(|model| model.id.clone());
+
+    match settings.summary_provider {
+        SummaryProviderChoice::AppleIntelligence => {
+            apple.ok_or(ModelChoiceError::AppleIntelligenceUnavailable)
+        }
+        SummaryProviderChoice::Ollama => ollama_choice.ok_or(ModelChoiceError::NoOllamaModel),
+        SummaryProviderChoice::Auto => apple.or(ollama_choice).ok_or(ModelChoiceError::NoProvider),
+    }
+}
+
 pub fn pick_summary_model(
     settings: &crate::settings::AppSettings,
     models: &[SummaryModelDescriptor],
 ) -> Option<String> {
-    if models.is_empty() {
-        return None;
-    }
-    let preferred = settings.ollama_model.trim();
-    if !preferred.is_empty() && models.iter().any(|model| model.id == preferred) {
-        return Some(preferred.to_string());
-    }
-    models.first().map(|model| model.id.clone())
+    choose_summary_model(settings, models).ok()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -596,7 +685,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        APPLE_INTELLIGENCE_MODEL_ID, ChunkConfig, SummaryProviderKind, apple, check_providers,
+        APPLE_INTELLIGENCE_MODEL_ID, ChunkConfig, ModelChoiceError, SummaryModelDescriptor,
+        SummaryProviderChoice, SummaryProviderKind, apple, check_providers, choose_summary_model,
         ollama, reduce_call_system_prompt, resolve_provider, run_reduce_tree, sanitize_summary,
         structured_extract_for_persist,
     };
@@ -649,6 +739,139 @@ mod tests {
         let input = "Here is a summary of the meeting.\n## Summary\nKey points are listed below.";
         let result = sanitize_summary(input);
         assert_eq!(result, "## Summary\nKey points are listed below.");
+    }
+
+    fn model(id: &str, provider: SummaryProviderKind) -> SummaryModelDescriptor {
+        SummaryModelDescriptor {
+            id: id.to_string(),
+            label: id.to_string(),
+            provider,
+            can_summarize: true,
+        }
+    }
+
+    fn settings_with(
+        provider: SummaryProviderChoice,
+        ollama_model: &str,
+    ) -> crate::settings::AppSettings {
+        crate::settings::AppSettings {
+            summary_provider: provider,
+            ollama_model: ollama_model.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// The bug this replaced: a stored Ollama model that is not installed used
+    /// to fall through to whatever was first in the list, so the app quietly
+    /// ran a provider the user had not chosen, or nothing at all.
+    #[test]
+    fn an_unavailable_stored_model_does_not_change_provider() {
+        let available = [model(
+            "apple-intelligence",
+            SummaryProviderKind::AppleIntelligence,
+        )];
+        let settings = settings_with(SummaryProviderChoice::Ollama, "codellama:latest");
+        assert_eq!(
+            choose_summary_model(&settings, &available),
+            Err(ModelChoiceError::NoOllamaModel),
+            "asking for Ollama must not be served Apple Intelligence"
+        );
+    }
+
+    #[test]
+    fn apple_intelligence_is_refused_rather_than_swapped_for_ollama() {
+        let available = [model("qwen2.5:7b", SummaryProviderKind::Ollama)];
+        let settings = settings_with(SummaryProviderChoice::AppleIntelligence, "");
+        assert_eq!(
+            choose_summary_model(&settings, &available),
+            Err(ModelChoiceError::AppleIntelligenceUnavailable)
+        );
+    }
+
+    #[test]
+    fn auto_prefers_apple_intelligence_then_falls_back_to_ollama() {
+        let both = [
+            model("apple-intelligence", SummaryProviderKind::AppleIntelligence),
+            model("qwen2.5:7b", SummaryProviderKind::Ollama),
+        ];
+        let settings = settings_with(SummaryProviderChoice::Auto, "");
+        assert_eq!(
+            choose_summary_model(&settings, &both).unwrap(),
+            "apple-intelligence"
+        );
+
+        let ollama_only = [model("qwen2.5:7b", SummaryProviderKind::Ollama)];
+        assert_eq!(
+            choose_summary_model(&settings, &ollama_only).unwrap(),
+            "qwen2.5:7b"
+        );
+
+        assert_eq!(
+            choose_summary_model(&settings, &[]),
+            Err(ModelChoiceError::NoProvider)
+        );
+    }
+
+    #[test]
+    fn the_stored_ollama_model_wins_when_it_is_installed() {
+        let available = [
+            model("llama3.1:8b", SummaryProviderKind::Ollama),
+            model("qwen2.5:7b", SummaryProviderKind::Ollama),
+        ];
+        let settings = settings_with(SummaryProviderChoice::Ollama, "qwen2.5:7b");
+        assert_eq!(
+            choose_summary_model(&settings, &available).unwrap(),
+            "qwen2.5:7b"
+        );
+    }
+
+    /// Explicit Auto is Apple first even when a stored Ollama model is
+    /// installed. Existing users who had picked that model are migrated to
+    /// the Ollama provider by `from_stored`; they never land in this branch.
+    #[test]
+    fn auto_with_a_stored_ollama_model_still_prefers_apple() {
+        let both = [
+            model("apple-intelligence", SummaryProviderKind::AppleIntelligence),
+            model("qwen2.5:7b", SummaryProviderKind::Ollama),
+        ];
+        let settings = settings_with(SummaryProviderChoice::Auto, "qwen2.5:7b");
+        assert_eq!(
+            choose_summary_model(&settings, &both).unwrap(),
+            "apple-intelligence"
+        );
+    }
+
+    #[test]
+    fn a_missing_provider_setting_with_an_ollama_model_is_ollama() {
+        assert_eq!(
+            SummaryProviderChoice::from_stored(None, "qwen2.5:7b"),
+            SummaryProviderChoice::Ollama
+        );
+        assert_eq!(
+            SummaryProviderChoice::from_stored(None, "  "),
+            SummaryProviderChoice::Auto
+        );
+        assert_eq!(
+            SummaryProviderChoice::from_stored(None, APPLE_INTELLIGENCE_MODEL_ID),
+            SummaryProviderChoice::Auto
+        );
+        assert_eq!(
+            SummaryProviderChoice::from_stored(Some(SummaryProviderChoice::Auto), "qwen2.5:7b"),
+            SummaryProviderChoice::Auto,
+            "an explicit Auto must not be rewritten because an Ollama model is stored"
+        );
+    }
+
+    /// Choosing Ollama without naming a model is not an error while one is
+    /// installed: the first available stands in.
+    #[test]
+    fn ollama_without_a_stored_model_uses_the_first_available() {
+        let available = [model("llama3.1:8b", SummaryProviderKind::Ollama)];
+        let settings = settings_with(SummaryProviderChoice::Ollama, "");
+        assert_eq!(
+            choose_summary_model(&settings, &available).unwrap(),
+            "llama3.1:8b"
+        );
     }
 
     #[test]
