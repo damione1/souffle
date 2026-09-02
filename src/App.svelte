@@ -14,6 +14,7 @@
   import { getSelectedTranscriptionModel } from "./lib/features/transcription/catalog";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
   import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
+  import UpdateAvailableDialog from "./lib/features/onboarding/UpdateAvailableDialog.svelte";
   import {
     notifyMeetingAborted,
     notifyMeetingFinalized,
@@ -36,6 +37,7 @@
   const transcription = createTranscriptionController();
 
   let unlistenNav: (() => void) | null = null;
+  let unlistenUpdate: (() => void) | null = null;
   let unlistenState: (() => void) | null = null;
   let unlistenHealth: (() => void) | null = null;
   let unlistenPipelineError: (() => void) | null = null;
@@ -59,6 +61,11 @@
   const routeToastCopy = $derived(routeToast ? micToastCopy(routeToast, $t) : null);
   let isRecovering = $state(false);
   let whatsNew = $state<{ version: string; releaseNotes: string } | null>(null);
+  let updateAvailable = $state<{
+    version: string;
+    releaseNotes: string | null;
+    releaseUrl: string | null;
+  } | null>(null);
   let modelLabel = $state("");
 
   const isLightTheme = $derived(
@@ -132,6 +139,18 @@
         // Header chip simply omits the model name.
       }
     })();
+
+    events.updateAvailable.listen((event) => {
+      // The backend emits at most once per launch per version, so this never
+      // reopens a dialog the user has dismissed.
+      updateAvailable = {
+        version: event.payload.latest_version,
+        releaseNotes: event.payload.release_notes,
+        releaseUrl: event.payload.release_url,
+      };
+    }).then((fn) => {
+      unlistenUpdate = fn;
+    });
 
     events.navigate.listen((event) => {
       if (event.payload === "settings") {
@@ -222,6 +241,7 @@
     return () => {
       cleanupTranscription();
       unlistenNav?.();
+      unlistenUpdate?.();
       unlistenState?.();
       unlistenHealth?.();
       unlistenPipelineError?.();
@@ -381,6 +401,15 @@
     version={whatsNew.version}
     releaseNotes={whatsNew.releaseNotes}
     onDismiss={dismissWhatsNew}
+  />
+{/if}
+
+{#if updateAvailable && !app.showOnboarding}
+  <UpdateAvailableDialog
+    version={updateAvailable.version}
+    releaseNotes={updateAvailable.releaseNotes}
+    releaseUrl={updateAvailable.releaseUrl}
+    onDismiss={() => (updateAvailable = null)}
   />
 {/if}
 
