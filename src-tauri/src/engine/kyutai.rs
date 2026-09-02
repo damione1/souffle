@@ -591,7 +591,7 @@ impl KyutaiEngine {
                         .decode_piece_ids(tokens)
                         .unwrap_or_default();
                     if debug_enabled {
-                        debug!(tokens = ?tokens, text = ?text, t = format!("{start_time:.2}"), "WORD emitted");
+                        debug!(target: crate::logging::TRANSCRIPT_TARGET, tokens = ?tokens, text = ?text, t = format!("{start_time:.2}"), "WORD emitted");
                     }
                     if text.is_empty() {
                         continue;

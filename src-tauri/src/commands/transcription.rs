@@ -526,7 +526,9 @@ pub async fn start_meeting_recording(
     calendar: Option<MeetingCalendarContext>,
     channel: Channel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
-    info!(title = %title, "Starting meeting recording");
+    // The title is not logged: started from a calendar event it is the event
+    // title, which routinely carries a client or a colleague's name.
+    info!("Starting meeting recording");
 
     let machine = state.current_machine_state()?;
     if !machine.is_model_ready() {
