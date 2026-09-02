@@ -38,13 +38,11 @@ const mockSummarizeMeeting = vi.fn<
     onProgress: (p: SummarizeProgress) => void,
   ) => Promise<void>
 >();
-const mockExportMeetingFilename = vi.fn<
-  (id: string, format: import("../../types").ExportFormat) => Promise<string>
+const mockSaveMeetingExport = vi.fn<
+  (id: string, format: import("../../types").ExportFormat) => Promise<void>
 >();
-const mockExportMeetingToFile = vi.fn<
-  (id: string, format: import("../../types").ExportFormat, path: string) => Promise<void>
->();
-const mockShowSaveDialog = vi.fn<(opts: unknown) => Promise<string | null>>();
+const mockSaveMeetingAudioExport = vi.fn<(id: string) => Promise<void>>();
+const mockGetMeetingAudio = vi.fn<(id: string) => Promise<import("../../types").MeetingAudioSession[]>>();
 
 vi.mock("../../api/meetings", () => ({
   startMeetingRecording: (...a: unknown[]) =>
@@ -65,14 +63,11 @@ vi.mock("../../api/meetings", () => ({
     mockSummarizeMeeting(
       ...(a as [string, string, string | null, (p: SummarizeProgress) => void]),
     ),
-  exportMeetingFilename: (...a: unknown[]) =>
-    mockExportMeetingFilename(...(a as [string, import("../../types").ExportFormat])),
-  exportMeetingToFile: (...a: unknown[]) =>
-    mockExportMeetingToFile(...(a as [string, import("../../types").ExportFormat, string])),
-}));
-
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  save: (...a: unknown[]) => mockShowSaveDialog(...(a as [unknown])),
+  saveMeetingExport: (...a: unknown[]) =>
+    mockSaveMeetingExport(...(a as [string, import("../../types").ExportFormat])),
+  saveMeetingAudioExport: (...a: unknown[]) =>
+    mockSaveMeetingAudioExport(...(a as [string])),
+  getMeetingAudio: (...a: unknown[]) => mockGetMeetingAudio(...(a as [string])),
 }));
 
 vi.mock("../../api/summary", () => ({
@@ -231,6 +226,7 @@ describe("MeetingController", () => {
     vi.clearAllMocks();
     resetMeetingControllerForTest();
     mockApp = createMockAppState();
+    mockGetMeetingAudio.mockResolvedValue([]);
   });
 
   it("mount checks ollama and loads transcription catalog", async () => {
@@ -531,13 +527,11 @@ describe("MeetingController", () => {
     expect(mockApp.currentMeetingId).toBeNull();
   });
 
-  it("exportMeeting looks up the filename, opens the save dialog, and writes the file", async () => {
+  it("exportMeeting asks the backend to show the save dialog and write the file", async () => {
     mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
-    mockExportMeetingFilename.mockResolvedValue("2026-07-09-standup.md");
-    mockShowSaveDialog.mockResolvedValue("/Users/damien/Downloads/2026-07-09-standup.md");
-    mockExportMeetingToFile.mockResolvedValue(undefined);
+    mockSaveMeetingExport.mockResolvedValue(undefined);
 
     const ctrl = createMeetingController();
     await ctrl.mount();
@@ -545,43 +539,15 @@ describe("MeetingController", () => {
 
     await ctrl.exportMeeting("markdown");
 
-    expect(mockExportMeetingFilename).toHaveBeenCalledWith("meet-1", "markdown");
-    expect(mockShowSaveDialog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        defaultPath: "2026-07-09-standup.md",
-        filters: [{ name: "MD", extensions: ["md"] }],
-      }),
-    );
-    expect(mockExportMeetingToFile).toHaveBeenCalledWith(
-      "meet-1",
-      "markdown",
-      "/Users/damien/Downloads/2026-07-09-standup.md",
-    );
+    expect(mockSaveMeetingExport).toHaveBeenCalledWith("meet-1", "markdown");
     expect(ctrl.isExporting).toBe(false);
-  });
-
-  it("exportMeeting does not write a file when the save dialog is cancelled", async () => {
-    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
-    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
-    mockGetMeeting.mockResolvedValue(makeMeeting());
-    mockExportMeetingFilename.mockResolvedValue("2026-07-09-standup.srt");
-    mockShowSaveDialog.mockResolvedValue(null);
-
-    const ctrl = createMeetingController();
-    await ctrl.mount();
-    await ctrl.onMeetingSelectionChange("meet-1");
-
-    await ctrl.exportMeeting("srt");
-
-    expect(mockShowSaveDialog).toHaveBeenCalledOnce();
-    expect(mockExportMeetingToFile).not.toHaveBeenCalled();
   });
 
   it("exportMeeting surfaces backend errors via statusMessage", async () => {
     mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
     mockGetMeeting.mockResolvedValue(makeMeeting());
-    mockExportMeetingFilename.mockRejectedValue(new Error("meeting not found"));
+    mockSaveMeetingExport.mockRejectedValue(new Error("meeting not found"));
 
     const ctrl = createMeetingController();
     await ctrl.mount();
@@ -590,7 +556,6 @@ describe("MeetingController", () => {
     await ctrl.exportMeeting("json");
 
     expect(ctrl.statusMessage).toContain("meeting not found");
-    expect(mockShowSaveDialog).not.toHaveBeenCalled();
     expect(ctrl.isExporting).toBe(false);
   });
 
@@ -613,8 +578,40 @@ describe("MeetingController", () => {
 
     await ctrl.exportMeeting("vtt");
 
-    expect(mockExportMeetingFilename).not.toHaveBeenCalled();
-    expect(mockShowSaveDialog).not.toHaveBeenCalled();
+    expect(mockSaveMeetingExport).not.toHaveBeenCalled();
+  });
+
+  it("exportMeetingAudio asks the backend to show the save dialog and copy the file", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockGetMeeting.mockResolvedValue(makeMeeting());
+    mockGetMeetingAudio.mockResolvedValue([
+      { session_index: 0, path: "/recordings/meet-1/0.ogg", duration_seconds: null },
+    ]);
+    mockSaveMeetingAudioExport.mockResolvedValue(undefined);
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    await ctrl.onMeetingSelectionChange("meet-1");
+
+    await ctrl.exportMeetingAudio();
+
+    expect(mockSaveMeetingAudioExport).toHaveBeenCalledWith("meet-1");
+    expect(ctrl.isExporting).toBe(false);
+  });
+
+  it("exportMeetingAudio is a no-op when the meeting has no recorded audio", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockGetMeeting.mockResolvedValue(makeMeeting());
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+    await ctrl.onMeetingSelectionChange("meet-1");
+
+    await ctrl.exportMeetingAudio();
+
+    expect(mockSaveMeetingAudioExport).not.toHaveBeenCalled();
   });
 
   it("notes autosave debounces and targets the live accumulator id", async () => {

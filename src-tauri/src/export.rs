@@ -74,6 +74,13 @@ pub fn export_default_filename(meeting: &MeetingTranscript, format: ExportFormat
     format!("{date}-{slug}.{}", export_extension(format))
 }
 
+/// Suggested filename for a meeting audio export, e.g. `2026-07-09-weekly-sync.ogg`.
+pub fn export_audio_filename(meeting: &MeetingTranscript) -> String {
+    let date = meeting.started_at.format("%Y-%m-%d");
+    let slug = slugify(&meeting.title);
+    format!("{date}-{slug}.ogg")
+}
+
 /// Base folder name for a full data archive, e.g. `souffle-export-2026-07-09`.
 /// Callers that need a name guaranteed not to collide with an existing
 /// directory should pass this into [`unique_dir`].
@@ -98,6 +105,63 @@ pub fn unique_dir(parent: &Path, base: &str) -> PathBuf {
         }
         suffix += 1;
     }
+}
+
+/// `path`, or `stem-2.ext`, `stem-3.ext`, ... if that path already exists.
+/// Same collision probe as [`unique_dir`], for files rather than folders.
+pub fn unique_file(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("meeting");
+    let ext = path.extension().and_then(|s| s.to_str());
+    let mut suffix = 2;
+    loop {
+        let name = match ext {
+            Some(ext) => format!("{stem}-{suffix}.{ext}"),
+            None => format!("{stem}-{suffix}"),
+        };
+        let candidate = parent.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+/// Copy recorded session files to `dest` (the user-chosen `.ogg` path).
+///
+/// One session writes `dest`. Several sessions write `{stem}-1.ogg`,
+/// `{stem}-2.ogg`, … next to it, probing with [`unique_file`] so a leftover
+/// file from a previous export isn't overwritten.
+pub fn copy_audio_sessions(sources: &[PathBuf], dest: &Path) -> Result<Vec<PathBuf>, String> {
+    if sources.is_empty() {
+        return Err("No recorded audio for this meeting".into());
+    }
+
+    let mut written = Vec::with_capacity(sources.len());
+    if sources.len() == 1 {
+        std::fs::copy(&sources[0], dest).map_err(|e| format!("Copy recording: {e}"))?;
+        written.push(dest.to_path_buf());
+        return Ok(written);
+    }
+
+    let parent = dest.parent().unwrap_or(Path::new("."));
+    let stem = dest
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("meeting");
+    for (index, src) in sources.iter().enumerate() {
+        let candidate = parent.join(format!("{}-{}.ogg", stem, index + 1));
+        let out = unique_file(&candidate);
+        std::fs::copy(src, &out).map_err(|e| format!("Copy recording: {e}"))?;
+        written.push(out);
+    }
+    Ok(written)
 }
 
 /// Render a meeting into the requested export format.
@@ -475,9 +539,18 @@ mod paragraphs {
         let mut turns: Vec<Turn<'a>> = Vec::new();
 
         for seg in sorted {
-            let end = if seg.end_time != 0.0 { seg.end_time } else { seg.start_time };
+            let end = if seg.end_time != 0.0 {
+                seg.end_time
+            } else {
+                seg.start_time
+            };
             let Some(speaker) = seg.speaker else {
-                turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
+                turns.push(Turn {
+                    start: seg.start_time,
+                    last_end: end,
+                    segments: vec![seg],
+                    interrupted: false,
+                });
                 continue;
             };
 
@@ -496,7 +569,12 @@ mod paragraphs {
                     open_turns.remove(&speaker);
                 }
             } else {
-                turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
+                turns.push(Turn {
+                    start: seg.start_time,
+                    last_end: end,
+                    segments: vec![seg],
+                    interrupted: false,
+                });
                 let new_idx = turns.len() - 1;
                 open_turns.insert(speaker, new_idx);
                 let handoffs: Vec<(Speaker, usize)> = open_turns
@@ -514,7 +592,11 @@ mod paragraphs {
             }
         }
 
-        turns.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+        turns.sort_by(|a, b| {
+            a.start
+                .partial_cmp(&b.start)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         turns.into_iter().flat_map(|t| t.segments).collect()
     }
 
@@ -638,8 +720,8 @@ mod paragraphs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::StructuredActionItem;
     use crate::test_helpers::fixtures::{sample_meeting, sample_segment};
+    use crate::transcript::StructuredActionItem;
 
     fn diarized_segment(
         text: &str,
@@ -754,6 +836,79 @@ mod tests {
 
         let result = unique_dir(dir.path(), "weekly-sync");
         assert_eq!(result, dir.path().join("weekly-sync-2"));
+    }
+
+    #[test]
+    fn export_audio_filename_uses_ogg_extension() {
+        let mut meeting = sample_meeting("m1");
+        meeting.title = "Weekly Sync".to_string();
+        meeting.started_at = "2026-07-09T10:00:00Z".parse().unwrap();
+        assert_eq!(
+            export_audio_filename(&meeting),
+            "2026-07-09-weekly-sync.ogg"
+        );
+    }
+
+    #[test]
+    fn unique_file_returns_path_when_free() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("weekly-sync.ogg");
+        assert_eq!(unique_file(&path), path);
+    }
+
+    #[test]
+    fn unique_file_appends_suffix_on_collision() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("weekly-sync.ogg"), b"taken").unwrap();
+        assert_eq!(
+            unique_file(&dir.path().join("weekly-sync.ogg")),
+            dir.path().join("weekly-sync-2.ogg")
+        );
+    }
+
+    #[test]
+    fn copy_audio_sessions_rejects_empty_sources() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let err = copy_audio_sessions(&[], &dir.path().join("out.ogg")).unwrap_err();
+        assert!(err.contains("No recorded audio"));
+    }
+
+    #[test]
+    fn copy_audio_sessions_writes_a_single_file_to_dest() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src = dir.path().join("0.ogg");
+        std::fs::write(&src, b"ogg-bytes").unwrap();
+        let dest = dir.path().join("export").join("weekly-sync.ogg");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+
+        let written = copy_audio_sessions(&[src], &dest).unwrap();
+        assert_eq!(written, vec![dest.clone()]);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"ogg-bytes");
+    }
+
+    #[test]
+    fn copy_audio_sessions_suffixes_multiple_files() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src0 = dir.path().join("0.ogg");
+        let src1 = dir.path().join("1.ogg");
+        std::fs::write(&src0, b"session-0").unwrap();
+        std::fs::write(&src1, b"session-1").unwrap();
+        let dest = dir.path().join("weekly-sync.ogg");
+
+        let written = copy_audio_sessions(&[src0, src1], &dest).unwrap();
+        assert_eq!(
+            written,
+            vec![
+                dir.path().join("weekly-sync-1.ogg"),
+                dir.path().join("weekly-sync-2.ogg"),
+            ]
+        );
+        assert_eq!(std::fs::read(&written[0]).unwrap(), b"session-0");
+        assert_eq!(std::fs::read(&written[1]).unwrap(), b"session-1");
+        assert!(
+            !dest.exists(),
+            "unsuffixed dest is not written for multi-session"
+        );
     }
 
     // ── markdown ─────────────────────────────────────────────────────────
@@ -1040,12 +1195,17 @@ mod tests {
             diarized_segment("So let's start now", 3.0, 3.5, Speaker::Me),
         ];
         let result = paragraphs::group_into_paragraphs(&segments, 1.5);
-        let texts: Vec<(Option<Speaker>, &str)> =
-            result.iter().map(|p| (p.speaker, p.text.as_str())).collect();
+        let texts: Vec<(Option<Speaker>, &str)> = result
+            .iter()
+            .map(|p| (p.speaker, p.text.as_str()))
+            .collect();
         assert_eq!(
             texts,
             vec![
-                (Some(Speaker::Me), "Let me explain the whole plan in detail because it's complicated."),
+                (
+                    Some(Speaker::Me),
+                    "Let me explain the whole plan in detail because it's complicated."
+                ),
                 (Some(Speaker::Them), "wait"),
                 (Some(Speaker::Me), "So let's start now"),
             ]
@@ -1065,12 +1225,17 @@ mod tests {
             diarized_segment("New topic starts", 3.0, 3.5, Speaker::Me),
         ];
         let result = paragraphs::group_into_paragraphs(&segments, 1.5);
-        let texts: Vec<(Option<Speaker>, &str)> =
-            result.iter().map(|p| (p.speaker, p.text.as_str())).collect();
+        let texts: Vec<(Option<Speaker>, &str)> = result
+            .iter()
+            .map(|p| (p.speaker, p.text.as_str()))
+            .collect();
         assert_eq!(
             texts,
             vec![
-                (Some(Speaker::Me), "First point. Second part continues and concludes."),
+                (
+                    Some(Speaker::Me),
+                    "First point. Second part continues and concludes."
+                ),
                 (Some(Speaker::Them), "quick question"),
                 (Some(Speaker::Me), "New topic starts"),
             ]
@@ -1090,14 +1255,19 @@ mod tests {
             diarized_segment("to next quarter", 2.8, 3.3, Speaker::Me),
         ];
         let result = paragraphs::group_into_paragraphs(&segments, 1.5);
-        let texts: Vec<(Option<Speaker>, &str)> =
-            result.iter().map(|p| (p.speaker, p.text.as_str())).collect();
+        let texts: Vec<(Option<Speaker>, &str)> = result
+            .iter()
+            .map(|p| (p.speaker, p.text.as_str()))
+            .collect();
         assert_eq!(
             texts,
             vec![
                 (Some(Speaker::Me), "so basically we were thinking"),
                 (Some(Speaker::Them), "right"),
-                (Some(Speaker::Me), "about moving the launch date to next quarter"),
+                (
+                    Some(Speaker::Me),
+                    "about moving the launch date to next quarter"
+                ),
             ]
         );
     }

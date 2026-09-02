@@ -54,11 +54,13 @@
       sessionCount={sessionCount}
       canResumeRecording={controller.canResumeRecording}
       isExporting={controller.isExporting}
+      hasAudio={controller.audioSessions.length > 0}
       onBack={() => controller.closeMeeting()}
       onRename={(title) => void controller.renameMeeting(title)}
       onResumeRecording={controller.resumeRecording}
       onStopRecording={controller.stopRecording}
       onExport={(format) => controller.exportMeeting(format)}
+      onExportAudio={() => controller.exportMeetingAudio()}
     />
 
     <!-- Notes are the focus: what the user wrote, front and center. -->

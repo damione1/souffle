@@ -370,6 +370,53 @@ async exportMeetingToFile(id: string, format: ExportFormat, path: string) : Prom
 }
 },
 /**
+ * Show a native save dialog and write the meeting export. Runs off the
+ * webview (see [`pick_save_path`]); cancel is a no-op, not an error.
+ */
+async saveMeetingExport(id: string, format: ExportFormat) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_meeting_export", { id, format }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Suggested filename for a meeting audio export (e.g. `2026-07-09-weekly-sync.ogg`).
+ */
+async exportMeetingAudioFilename(id: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_meeting_audio_filename", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Copy recorded audio for a meeting to `path`. One session writes that
+ * file; several sessions write `{stem}-1.ogg`, `{stem}-2.ogg`, … next to it.
+ */
+async exportMeetingAudioToFile(id: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_meeting_audio_to_file", { id, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Show a native save dialog and copy recorded audio. Same webview
+ * parenting issue as [`save_meeting_export`]; cancel is a no-op.
+ */
+async saveMeetingAudioExport(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_meeting_audio_export", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List available summary providers and models (Ollama + Apple Intelligence).
  */
 async checkSummaryProviders() : Promise<Result<SummaryProvidersStatus, string>> {
