@@ -33,6 +33,7 @@ export type {
   ModelArtifactDescriptor,
   OllamaPullProgress,
   SummaryModelDescriptor,
+  SummaryProviderChoice,
   SummaryProvidersStatus,
   SummaryTemplate,
   PermState,

@@ -69,15 +69,23 @@ pub fn is_summary_capable_model(model: &str) -> bool {
 
     let lower = model.to_ascii_lowercase();
 
-    let blocked_substrings = ["whisper", "speech", "wav2vec", "embed", "minilm"];
-    if blocked_substrings
+    // Speech and embedding models cannot follow a prose instruction at all.
+    // Code models can, badly: they are tuned for completion, and asked to clean
+    // a dictation they tend to echo it back or comment on it. Offering one is
+    // worse than offering nothing, because the feature then looks broken
+    // instead of unconfigured.
+    let speech_or_embedding = ["whisper", "speech", "wav2vec", "embed", "minilm"];
+    // "coder" alone covers starcoder, sqlcoder, deepseek-coder and qwen-coder.
+    let code_models = ["coder", "codellama", "codegemma", "codestral", "code-"];
+    if speech_or_embedding
         .iter()
+        .chain(code_models.iter())
         .any(|keyword| lower.contains(keyword))
     {
         return false;
     }
 
-    let blocked_tokens = ["stt", "asr", "e5", "bge", "gte"];
+    let blocked_tokens = ["stt", "asr", "e5", "bge", "gte", "code"];
     let tokens = lower.split(|c: char| !c.is_alphanumeric());
     !tokens
         .into_iter()
@@ -439,6 +447,19 @@ mod tests {
     fn accepts_models_where_short_keyword_is_only_a_substring() {
         assert!(is_summary_capable_model("faste5ish:latest"));
         assert!(is_summary_capable_model("vgte-model:latest"));
+    }
+
+    /// A code model can follow the polish prompt just enough to look like it
+    /// is working, and then echoes the dictation back unchanged. Offering one
+    /// makes the feature look broken rather than unconfigured.
+    #[test]
+    fn rejects_code_models_for_summary() {
+        assert!(!is_summary_capable_model("codellama:latest"));
+        assert!(!is_summary_capable_model("qwen2.5-coder:7b"));
+        assert!(!is_summary_capable_model("deepseek-coder-v2:16b"));
+        assert!(!is_summary_capable_model("starcoder2:3b"));
+        assert!(!is_summary_capable_model("codegemma:7b"));
+        assert!(!is_summary_capable_model("codestral:22b"));
     }
 
     #[test]

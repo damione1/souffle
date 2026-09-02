@@ -144,6 +144,13 @@
   "settings_intelligence": {
     "title": "Résumés",
     "description": "Les résumés utilisent Apple Intelligence sur les Mac compatibles, ou un serveur Ollama local.",
+    "provider": "Moteur",
+    "provider_desc": "Le moteur qui rédige les résumés et nettoie la dictée.",
+    "provider_auto": "Automatique",
+    "provider_ollama": "Ollama",
+    "provider_apple_unusable": "Apple Intelligence est sélectionné mais indisponible sur ce Mac : les résumés et le nettoyage de la dictée ne s'exécuteront pas.",
+    "provider_ollama_unusable": "Ollama est sélectionné mais aucun modèle utilisable n'est installé : les résumés et le nettoyage de la dictée ne s'exécuteront pas. Installez un modèle de conversation, par exemple qwen2.5:7b-instruct.",
+    "provider_none_usable": "Aucun moteur disponible : Apple Intelligence est indisponible et Ollama n'a aucun modèle utilisable. Les résumés et le nettoyage de la dictée ne s'exécuteront pas.",
     "apple_intelligence": "Apple Intelligence",
     "apple_intelligence_desc": "Résumés on-device sur Apple Silicon avec macOS 26+ et Apple Intelligence activé.",
     "apple_available": "Disponible",

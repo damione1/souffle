@@ -3,7 +3,7 @@
   import ProgressBar from "../../../components/ui/ProgressBar.svelte";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
-  import type { SummaryModelDescriptor } from "../../../types";
+  import type { SummaryModelDescriptor, SummaryProviderChoice } from "../../../types";
 
   let {
     ollamaUrl,
@@ -12,6 +12,8 @@
     appleIntelligenceUnavailableReason = null,
     ollamaModels,
     summaryModels,
+    summaryProvider,
+    onSummaryProviderChange,
     selectedOllamaModel,
     recommendedOllamaModel,
     ollamaPulling,
@@ -30,6 +32,8 @@
     appleIntelligenceUnavailableReason?: string | null;
     ollamaModels: SummaryModelDescriptor[];
     summaryModels: SummaryModelDescriptor[];
+    summaryProvider: SummaryProviderChoice;
+    onSummaryProviderChange: (event: Event) => void;
     selectedOllamaModel: string;
     recommendedOllamaModel: string;
     ollamaPulling: boolean;
@@ -57,11 +61,61 @@
       ? (KNOWN_REASON_KEYS[appleIntelligenceUnavailableReason] ?? "settings_intelligence.ai_reason_unknown")
       : null,
   );
+
+  // Which provider would actually run, mirroring choose_summary_model in Rust.
+  let effectiveProvider = $derived(
+    summaryProvider === "auto"
+      ? appleIntelligenceAvailable
+        ? "apple_intelligence"
+        : summaryModels.length > 0
+          ? "ollama"
+          : "none"
+      : summaryProvider,
+  );
+
+  // The chosen provider cannot run. Saying so here is the whole point: the old
+  // behaviour was to fall back in silence, so summaries and dictation polish
+  // just did nothing.
+  let unusableKey = $derived(
+    (summaryProvider === "apple_intelligence" || effectiveProvider === "apple_intelligence")
+    && !appleIntelligenceAvailable
+      ? "settings_intelligence.provider_apple_unusable"
+      : (summaryProvider === "ollama" || effectiveProvider === "ollama") && summaryModels.length === 0
+        ? "settings_intelligence.provider_ollama_unusable"
+        : effectiveProvider === "none"
+          ? "settings_intelligence.provider_none_usable"
+          : null,
+  );
+
+  let showModelPicker = $derived(summaryProvider !== "apple_intelligence" && summaryModels.length > 0);
 </script>
 
 <section class="settings-group">
   <h3>{$t("settings_intelligence.title")}</h3>
   <div class="settings-rows">
+  <SettingsField
+    label={$t("settings_intelligence.provider")}
+    description={$t("settings_intelligence.provider_desc")}
+    htmlFor="summary-provider"
+  >
+    {#snippet control()}
+      <select
+        id="summary-provider"
+        value={summaryProvider}
+        onchange={onSummaryProviderChange}
+        class="field-select max-w-64"
+      >
+        <option value="auto">{$t("settings_intelligence.provider_auto")}</option>
+        <option value="apple_intelligence">{$t("settings_intelligence.apple_intelligence")}</option>
+        <option value="ollama">{$t("settings_intelligence.provider_ollama")}</option>
+      </select>
+    {/snippet}
+  </SettingsField>
+
+  {#if unusableKey}
+    <StatusBanner variant="danger" message={$t(unusableKey)} />
+  {/if}
+
   <SettingsField
     label={$t("settings_intelligence.apple_intelligence")}
     description={$t("settings_intelligence.apple_intelligence_desc")}
@@ -109,7 +163,7 @@
     {/snippet}
   </SettingsField>
 
-  {#if ollamaAvailable && summaryModels.length > 0}
+  {#if showModelPicker}
     <div class="flex items-center justify-between gap-4">
       <label for="summary-model" class="setting-label shrink-0">{$t("settings_intelligence.summary_model")}</label>
       <select

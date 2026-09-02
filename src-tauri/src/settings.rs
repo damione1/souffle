@@ -8,12 +8,14 @@ use crate::engine::{
     CANDLE_BACKEND_ID, KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, resolve_transcription_profile,
 };
 use crate::logging::LogLevel;
+use crate::summary::SummaryProviderChoice;
 
 const THEME_KEY: &str = "theme";
 const AUTO_PASTE_KEY: &str = "auto_paste";
 const PASTE_DELAY_MS_KEY: &str = "paste_delay_ms";
 const OLLAMA_URL_KEY: &str = "ollama_url";
 const OLLAMA_MODEL_KEY: &str = "ollama_model";
+const SUMMARY_PROVIDER_KEY: &str = "summary_provider";
 const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
 const AUDIO_DEVICE_KEY: &str = "audio_device";
 const CLAMSHELL_AUDIO_DEVICE_KEY: &str = "clamshell_audio_device";
@@ -130,6 +132,9 @@ pub struct AppSettings {
     /// or the focused AX field.
     pub paste_method: PasteMethod,
     pub ollama_url: String,
+    /// Which provider runs summaries and dictation polish. `ollama_model` only
+    /// applies when this resolves to Ollama.
+    pub summary_provider: SummaryProviderChoice,
     pub ollama_model: String,
     pub debug_transcription: bool,
     /// Global tracing verbosity for the `souffle` crate.
@@ -223,6 +228,7 @@ impl Default for AppSettings {
             paste_delay_ms: 100,
             paste_method: PasteMethod::default(),
             ollama_url: OLLAMA_DEFAULT_URL.to_string(),
+            summary_provider: SummaryProviderChoice::default(),
             ollama_model: String::new(),
             debug_transcription: false,
             log_level: LogLevel::default(),
@@ -300,6 +306,11 @@ impl AppSettings {
             && !ollama_url.trim().is_empty()
         {
             settings.ollama_url = ollama_url;
+        }
+        if let Some(summary_provider) =
+            read_json_setting::<SummaryProviderChoice>(db, SUMMARY_PROVIDER_KEY)?
+        {
+            settings.summary_provider = summary_provider;
         }
         if let Some(ollama_model) = read_json_setting::<String>(db, OLLAMA_MODEL_KEY)? {
             settings.ollama_model = ollama_model;
@@ -725,6 +736,7 @@ impl AppSettings {
         write_json_setting(db, PASTE_DELAY_MS_KEY, &normalized.paste_delay_ms)?;
         write_json_setting(db, PASTE_METHOD_KEY, &normalized.paste_method)?;
         write_json_setting(db, OLLAMA_URL_KEY, &normalized.ollama_url)?;
+        write_json_setting(db, SUMMARY_PROVIDER_KEY, &normalized.summary_provider)?;
         write_json_setting(db, OLLAMA_MODEL_KEY, &normalized.ollama_model)?;
         write_json_setting(
             db,
@@ -985,7 +997,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, MeetingAudioRetention, PasteMethod, ShortcutSettings, Theme};
+    use super::{
+        AppSettings, MeetingAudioRetention, PasteMethod, ShortcutSettings, SummaryProviderChoice,
+        Theme,
+    };
     use crate::audio::InputPriority;
     use crate::constants::OLLAMA_DEFAULT_URL;
     use crate::logging::LogLevel;
@@ -1001,6 +1016,7 @@ mod tests {
             paste_delay_ms: 250,
             paste_method: PasteMethod::Type,
             ollama_url: "http://example.test:11434".into(),
+            summary_provider: SummaryProviderChoice::Ollama,
             ollama_model: "qwen2.5".into(),
             debug_transcription: true,
             log_level: LogLevel::Debug,

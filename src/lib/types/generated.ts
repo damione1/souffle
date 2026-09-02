@@ -934,7 +934,12 @@ export type AppSettings = { theme: Theme; locale: string; auto_paste: boolean; p
  * How dictation text is inserted: clipboard Cmd+V, simulated keystrokes,
  * or the focused AX field.
  */
-paste_method: PasteMethod; ollama_url: string; ollama_model: string; debug_transcription: boolean; 
+paste_method: PasteMethod; ollama_url: string; 
+/**
+ * Which provider runs summaries and dictation polish. `ollama_model` only
+ * applies when this resolves to Ollama.
+ */
+summary_provider: SummaryProviderChoice; ollama_model: string; debug_transcription: boolean; 
 /**
  * Global tracing verbosity for the `souffle` crate.
  */
@@ -1436,6 +1441,18 @@ export type SummarizeStage =
  */
 "extract"
 export type SummaryModelDescriptor = { id: string; label: string; provider: SummaryProviderKind; can_summarize: boolean }
+/**
+ * Which provider the user wants summaries and dictation polish to use.
+ * 
+ * Before this existed the provider was inferred from the selected model id,
+ * so a stale Ollama model name silently decided the provider, and an
+ * unavailable one silently handed the work to whatever else was around.
+ */
+export type SummaryProviderChoice = 
+/**
+ * Apple Intelligence when this Mac offers it, Ollama otherwise.
+ */
+"auto" | "apple_intelligence" | "ollama"
 export type SummaryProviderKind = "ollama" | "apple_intelligence"
 export type SummaryProvidersStatus = { ollama_url: string; ollama_available: boolean; apple_intelligence_available: boolean; 
 /**

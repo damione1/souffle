@@ -144,6 +144,13 @@
   "settings_intelligence": {
     "title": "Summarization",
     "description": "Summaries use Apple Intelligence on supported Macs, or a local Ollama server.",
+    "provider": "Provider",
+    "provider_desc": "Which engine writes summaries and cleans up dictation.",
+    "provider_auto": "Automatic",
+    "provider_ollama": "Ollama",
+    "provider_apple_unusable": "Apple Intelligence is selected but not available on this Mac, so summaries and dictation polish will not run.",
+    "provider_ollama_unusable": "Ollama is selected but has no usable model installed, so summaries and dictation polish will not run. Install a chat model such as qwen2.5:7b-instruct.",
+    "provider_none_usable": "No provider is available: Apple Intelligence is unavailable and Ollama has no usable model. Summaries and dictation polish will not run.",
     "apple_intelligence": "Apple Intelligence",
     "apple_intelligence_desc": "On-device summaries on Apple Silicon with macOS 26+ and Apple Intelligence enabled.",
     "apple_available": "Available",
