@@ -101,6 +101,42 @@ pub fn collect_bundle(state: &AppState, settings: &crate::settings::AppSettings)
     }
 }
 
+/// Replace the user's home directory with `~` so a pasted diagnostic does not
+/// carry their account name. Every path in the bundle sits under it.
+pub fn redact_home(text: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() && home != "/" => {
+            text.replace(home.trim_end_matches('/'), "~")
+        }
+        _ => text.to_string(),
+    }
+}
+
+/// Drop every log line emitted on the transcript target.
+///
+/// The tail is what the README asks people to paste into a public issue, and
+/// with "Detailed transcription logs" on those lines hold what the user said.
+/// Returns the surviving text and how many lines were removed, so the caller
+/// can say so rather than silently shortening the log. The user's own file on
+/// disk is untouched.
+pub fn strip_transcript_lines(tail: &str) -> (String, usize) {
+    let marker = format!(" {}", crate::logging::TRANSCRIPT_TARGET);
+    let mut kept = Vec::new();
+    let mut dropped = 0usize;
+    for line in tail.lines() {
+        if line.contains(&marker) {
+            dropped += 1;
+        } else {
+            kept.push(line);
+        }
+    }
+    let mut out = kept.join("\n");
+    if tail.ends_with('\n') && !out.is_empty() {
+        out.push('\n');
+    }
+    (out, dropped)
+}
+
 pub fn format_bundle_text(bundle: &DiagnosticsBundle, log_tail: &str) -> String {
     let mut out = String::new();
     out.push_str("Soufflé diagnostics\n");
@@ -119,14 +155,20 @@ pub fn format_bundle_text(bundle: &DiagnosticsBundle, log_tail: &str) -> String 
     if let Some(log_file) = &bundle.log_file {
         out.push_str(&format!("Log file: {log_file}\n"));
     }
-    if !log_tail.is_empty() {
+    let (tail, dropped) = strip_transcript_lines(log_tail);
+    if dropped > 0 {
+        out.push_str(&format!(
+            "Transcript lines removed from the tail below: {dropped}\n"
+        ));
+    }
+    if !tail.is_empty() {
         out.push_str("\n--- Recent log tail ---\n");
-        out.push_str(log_tail);
-        if !log_tail.ends_with('\n') {
+        out.push_str(&tail);
+        if !tail.ends_with('\n') {
             out.push('\n');
         }
     }
-    out
+    redact_home(&out)
 }
 
 #[cfg(test)]
@@ -155,5 +197,72 @@ mod tests {
         let path = dir.path().join("souffle.log");
         fs::File::create(&path).expect("create");
         assert_eq!(tail_file(&path, 5).expect("tail"), "");
+    }
+
+    /// The stripper keys on the target as the `fmt` layer prints it, so this
+    /// emits a real event through a real layer rather than trusting a
+    /// hand-written fixture to match the format.
+    #[test]
+    fn strip_removes_a_genuinely_emitted_transcript_line() {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::layer::SubscriberExt;
+
+        #[derive(Clone)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("buffer lock").extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let sink = Arc::new(Mutex::new(Vec::new()));
+        let buffer = Buffer(Arc::clone(&sink));
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(move || buffer.clone()),
+        );
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: crate::logging::TRANSCRIPT_TARGET, text = "my private sentence", "WORD emitted");
+            tracing::info!("Database opened");
+        });
+
+        let captured = String::from_utf8(sink.lock().expect("sink lock").clone()).expect("utf8");
+        assert!(
+            captured.contains("my private sentence"),
+            "the event must reach the writer for this test to mean anything"
+        );
+
+        let (cleaned, dropped) = strip_transcript_lines(&captured);
+        assert_eq!(dropped, 1);
+        assert!(
+            !cleaned.contains("my private sentence"),
+            "speech survived the strip: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("Database opened"),
+            "ordinary lines must stay"
+        );
+    }
+
+    #[test]
+    fn strip_keeps_everything_when_no_transcript_lines() {
+        let tail = "line one\nline two\n";
+        let (cleaned, dropped) = strip_transcript_lines(tail);
+        assert_eq!(dropped, 0);
+        assert_eq!(cleaned, tail);
+    }
+
+    #[test]
+    fn redact_home_replaces_the_account_path() {
+        let home = std::env::var("HOME").expect("HOME set in tests");
+        let text = format!("Log dir: {home}/Library/Logs/souffle");
+        let redacted = redact_home(&text);
+        assert_eq!(redacted, "Log dir: ~/Library/Logs/souffle");
+        assert!(!redacted.contains(&home));
     }
 }

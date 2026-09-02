@@ -75,6 +75,7 @@ impl ParakeetEngine {
 
         if crate::debug::transcription_debug_enabled() {
             debug!(
+                target: crate::logging::TRANSCRIPT_TARGET,
                 sentences = result.tokens.len(),
                 text = %result.text,
                 "Parakeet inference complete"

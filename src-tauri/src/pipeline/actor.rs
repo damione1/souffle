@@ -1289,7 +1289,7 @@ fn run_session_loop(
                             consecutive_errors = 0;
                             for seg in segments {
                                 if crate::debug::transcription_debug_enabled() {
-                                    debug!("Segment: {:?} final={}", seg.text, seg.is_final);
+                                    debug!(target: crate::logging::TRANSCRIPT_TARGET, "Segment: {:?} final={}", seg.text, seg.is_final);
                                 }
                                 segments_emitted += 1;
                                 if emit_filtered(engine, text_filters, seg, on_segment)
@@ -1384,7 +1384,7 @@ fn finish_session(
             Ok(segments) => {
                 for seg in segments {
                     if crate::debug::transcription_debug_enabled() {
-                        debug!("Drain segment: {:?} final={}", seg.text, seg.is_final);
+                        debug!(target: crate::logging::TRANSCRIPT_TARGET, "Drain segment: {:?} final={}", seg.text, seg.is_final);
                     }
                     emit_filtered(engine, text_filters, seg, on_segment);
                 }

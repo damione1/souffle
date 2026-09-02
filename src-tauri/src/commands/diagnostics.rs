@@ -10,7 +10,11 @@ use crate::update_check::UpdateCheckResult;
 #[specta::specta]
 pub fn get_log_tail(max_lines: u32) -> Result<String, String> {
     let lines = max_lines.clamp(1, 500) as usize;
-    tail_log_file(lines)
+    // Transcript lines are stripped and paths redacted here rather than in the
+    // panel: this is the text the README tells people to paste into an issue.
+    let tail = tail_log_file(lines)?;
+    let (tail, _dropped) = crate::diagnostics::strip_transcript_lines(&tail);
+    Ok(crate::diagnostics::redact_home(&tail))
 }
 
 /// Paths and runtime snapshot for the copy-diagnostics action.

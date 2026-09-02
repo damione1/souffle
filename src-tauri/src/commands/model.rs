@@ -305,7 +305,14 @@ pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String>
         .map(|s| s.text.as_str())
         .collect::<Vec<_>>()
         .join(" ");
-    info!(segments = result.len(), text = %text, "Test transcription result");
+    info!(
+        segments = result.len(),
+        chars = text.len(),
+        "Test transcription result"
+    );
+    if crate::debug::transcription_debug_enabled() {
+        info!(target: crate::logging::TRANSCRIPT_TARGET, text = %text, "Test transcription result");
+    }
 
     if text.is_empty() {
         Ok("No words detected (model produced 0 segments)".into())

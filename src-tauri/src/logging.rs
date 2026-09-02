@@ -48,6 +48,17 @@ impl LogLevel {
     }
 }
 
+/// Tracing target for events that carry transcribed speech. It is a child of
+/// `souffle`, so the level filter reaches it, and naming it apart lets the
+/// diagnostics tail drop those lines before anyone pastes them into an issue.
+/// Emitters must still check [`crate::debug::transcription_debug_enabled`]:
+/// this target marks the lines, it does not gate them.
+pub const TRANSCRIPT_TARGET: &str = "souffle::transcript";
+
+/// Daily log files kept on disk. Rotation had no cap, so files accumulated for
+/// the life of the install.
+const MAX_LOG_FILES: usize = 14;
+
 pub fn log_dir() -> std::path::PathBuf {
     crate::constants::app_data_dir().join("logs")
 }
@@ -62,16 +73,21 @@ pub fn init(default_level: LogLevel) {
     let _ = FILTER_HANDLE.set(handle);
 
     let log_dir = log_dir();
-    let file_layer = if std::fs::create_dir_all(&log_dir).is_ok() {
-        let (writer, guard) = tracing_appender::non_blocking(tracing_appender::rolling::daily(
-            &log_dir,
-            "souffle.log",
-        ));
-        let _ = LOG_GUARD.set(guard);
-        Some(fmt::layer().with_ansi(false).with_writer(writer))
+    let appender = if std::fs::create_dir_all(&log_dir).is_ok() {
+        tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("souffle.log")
+            .max_log_files(MAX_LOG_FILES)
+            .build(&log_dir)
+            .ok()
     } else {
         None
     };
+    let file_layer = appender.map(|appender| {
+        let (writer, guard) = tracing_appender::non_blocking(appender);
+        let _ = LOG_GUARD.set(guard);
+        fmt::layer().with_ansi(false).with_writer(writer)
+    });
 
     let _ = tracing_subscriber::registry()
         .with(filter_layer)
