@@ -35,12 +35,13 @@ pub fn default_polish_templates() -> Vec<DictationPolishTemplate> {
         DictationPolishTemplate {
             id: TEMPLATE_CLEAN.to_string(),
             label: "Clean up".to_string(),
-            prompt: "Clean this dictation without rewriting it. Discard self-corrections \
-                      (\"non attends\", \"no wait\", \"scratch that\" and similar: drop the \
-                      old bit, keep what follows). Honor spoken commands (new line, period, \
-                      comma). Restore conventional spelling of technical terms, proper nouns, \
-                      and anglicisms. Preserve the original language (French or English). \
-                      Never add content that was not dictated."
+            prompt: "Clean this dictation. Repair words the recognizer misheard, using \
+                      the surrounding sentence to tell what was meant. Discard \
+                      self-corrections (\"non attends\", \"no wait\", \"scratch that\" and \
+                      similar: drop the old bit, keep what follows). Honor spoken commands \
+                      (new line, period, comma). Restore conventional spelling of technical \
+                      terms, proper nouns, and anglicisms. Preserve the original language \
+                      (French or English). Never add content that was not dictated."
                 .to_string(),
         },
         DictationPolishTemplate {
@@ -68,8 +69,29 @@ pub fn default_polish_templates() -> Vec<DictationPolishTemplate> {
     ]
 }
 
+/// Built-in prompt texts shipped by earlier versions. A stored template whose
+/// prompt still matches one of these was never edited by the user, so an
+/// upgrade can replace it with the current default instead of pinning the old
+/// wording forever (built-in ids are always present in the stored list once
+/// settings have been saved once).
+const SUPERSEDED_CLEAN_PROMPTS: &[&str] = &[
+    "Clean this dictation without rewriting it. Discard self-corrections \
+     (\"non attends\", \"no wait\", \"scratch that\" and similar: drop the old bit, keep \
+     what follows). Honor spoken commands (new line, period, comma). Restore \
+     conventional spelling of technical terms, proper nouns, and anglicisms. Preserve \
+     the original language (French or English). Never add content that was not dictated.",
+];
+
+fn superseded_default_prompts(id: &str) -> &'static [&'static str] {
+    match id {
+        TEMPLATE_CLEAN => SUPERSEDED_CLEAN_PROMPTS,
+        _ => &[],
+    }
+}
+
 /// Merge persisted templates with defaults so new built-ins appear after upgrades
-/// while keeping user-edited prompts for known ids.
+/// while keeping user-edited prompts for known ids. A stored prompt that still
+/// matches a superseded built-in is treated as unedited and upgraded.
 pub fn merge_polish_templates(
     stored: Vec<DictationPolishTemplate>,
 ) -> Vec<DictationPolishTemplate> {
@@ -80,10 +102,13 @@ pub fn merge_polish_templates(
 
     let mut merged = Vec::with_capacity(defaults.len());
     for default in defaults {
-        if let Some(existing) = stored.iter().find(|t| t.id == default.id) {
-            merged.push(existing.clone());
-        } else {
-            merged.push(default);
+        match stored.iter().find(|t| t.id == default.id) {
+            Some(existing)
+                if !superseded_default_prompts(&default.id).contains(&existing.prompt.trim()) =>
+            {
+                merged.push(existing.clone())
+            }
+            _ => merged.push(default),
         }
     }
     merged
@@ -467,10 +492,11 @@ pub async fn polish_dictation_text(
 #[cfg(test)]
 mod tests {
     use super::{
-        TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
-        build_polish_user_prompt, default_polish_templates, early_polish_dictation_result,
-        effective_template_prompt, is_blank_for_polish, merge_polish_templates,
-        parse_polish_response, strip_invisible_chars,
+        SUPERSEDED_CLEAN_PROMPTS, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL,
+        TEMPLATE_NO_FILLERS, build_polish_user_prompt, default_polish_templates,
+        early_polish_dictation_result, effective_template_prompt, is_blank_for_polish,
+        merge_polish_templates, parse_polish_response, strip_invisible_chars,
+        superseded_default_prompts,
     };
     use crate::filter::DictionaryEntry;
     use crate::settings::{AppSettings, DictationPolishTemplate};
@@ -562,6 +588,44 @@ mod tests {
                 TEMPLATE_NO_FILLERS
             ]
         );
+    }
+
+    #[test]
+    fn merge_polish_templates_upgrades_an_unedited_superseded_builtin() {
+        let stored = vec![DictationPolishTemplate {
+            id: TEMPLATE_CLEAN.to_string(),
+            label: "Clean up".to_string(),
+            prompt: SUPERSEDED_CLEAN_PROMPTS[0].to_string(),
+        }];
+        let merged = merge_polish_templates(stored);
+        let current = default_polish_templates();
+        assert_eq!(merged[0].prompt, current[0].prompt);
+        assert!(
+            merged[0].prompt.contains("misheard"),
+            "the upgraded prompt must carry the repair instruction"
+        );
+    }
+
+    #[test]
+    fn merge_polish_templates_keeps_an_edited_clean_template() {
+        let stored = vec![DictationPolishTemplate {
+            id: TEMPLATE_CLEAN.to_string(),
+            label: "Clean up".to_string(),
+            prompt: "My own cleanup rules".to_string(),
+        }];
+        let merged = merge_polish_templates(stored);
+        assert_eq!(merged[0].prompt, "My own cleanup rules");
+    }
+
+    #[test]
+    fn no_current_default_is_listed_as_superseded() {
+        for template in default_polish_templates() {
+            assert!(
+                !superseded_default_prompts(&template.id).contains(&template.prompt.as_str()),
+                "{} lists its current prompt as superseded, so merge would churn forever",
+                template.id
+            );
+        }
     }
 
     #[test]
