@@ -25,6 +25,7 @@ import {
   exportMeetingFilename,
   exportMeetingPreview,
   exportMeetingToFile,
+  saveMeetingExport,
 } from './meetings';
 
 describe('meetings API', () => {
@@ -163,5 +164,13 @@ describe('meetings API', () => {
     await exportMeetingToFile('meeting-1', 'vtt', '/tmp/export.vtt');
 
     expect(mockInvoke).toHaveBeenCalledWith('export_meeting_to_file', expect.objectContaining({ id: 'meeting-1', format: 'vtt', path: '/tmp/export.vtt' }), undefined);
+  });
+
+  it('saveMeetingExport passes id and format', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await saveMeetingExport('meeting-1', 'markdown');
+
+    expect(mockInvoke).toHaveBeenCalledWith('save_meeting_export', expect.objectContaining({ id: 'meeting-1', format: 'markdown' }), undefined);
   });
 });

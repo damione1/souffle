@@ -358,12 +358,23 @@ async exportMeetingFilename(id: string, format: ExportFormat) : Promise<Result<s
 }
 },
 /**
- * Render a meeting export and write it to `path`. The save dialog itself
- * (picking `path`) runs frontend-side via the dialog plugin.
+ * Render a meeting export and write it to `path`.
  */
 async exportMeetingToFile(id: string, format: ExportFormat, path: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("export_meeting_to_file", { id, format, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Show a native save dialog and write the meeting export. Runs off the
+ * webview (see [`pick_save_path`]); cancel is a no-op, not an error.
+ */
+async saveMeetingExport(id: string, format: ExportFormat) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_meeting_export", { id, format }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

@@ -1,9 +1,7 @@
-import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
 import { addDictionaryEntry, addSessionCorrection } from "../../api/dictionary";
 import {
   deleteMeeting as removeMeeting,
-  exportMeetingFilename,
-  exportMeetingToFile,
+  saveMeetingExport,
   getMeeting,
   getMeetingAudio,
   renameMeeting as applyMeetingRename,
@@ -650,25 +648,16 @@ function createMeetingControllerInstance() {
   }
 
   /**
-   * Export the current meeting to a file the user picks via the native save
-   * dialog. The suggested filename (and its extension) come from the
-   * backend (`export_meeting_filename`) so the slugify/date-formatting rules
-   * live in exactly one place; the dialog plugin only needs the extension
-   * for its filter, which we read back off that filename.
+   * Export the current meeting via a native save dialog. The dialog is
+   * shown by the backend (not the webview) so WKWebView / the overlay
+   * panel cannot swallow it.
    */
   async function exportMeeting(format: ExportFormat) {
     if (!meeting || !meeting.id || isRecordingMeeting) return;
     isExporting = true;
     statusMessage = "";
     try {
-      const filename = await exportMeetingFilename(meeting.id, format);
-      const extension = filename.split(".").pop() ?? format;
-      const path = await showSaveDialog({
-        defaultPath: filename,
-        filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
-      });
-      if (!path) return; // user cancelled the dialog
-      await exportMeetingToFile(meeting.id, format, path);
+      await saveMeetingExport(meeting.id, format);
     } catch (e) {
       statusMessage = errorMessage(e);
     } finally {

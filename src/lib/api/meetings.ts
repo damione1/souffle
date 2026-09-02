@@ -110,3 +110,8 @@ export async function exportMeetingPreview(id: string, format: ExportFormat): Pr
 export async function exportMeetingToFile(id: string, format: ExportFormat, path: string): Promise<void> {
   await unwrap(commands.exportMeetingToFile(id, format, path));
 }
+
+/** Native save dialog + write. Cancel is a no-op. */
+export async function saveMeetingExport(id: string, format: ExportFormat): Promise<void> {
+  await unwrap(commands.saveMeetingExport(id, format));
+}

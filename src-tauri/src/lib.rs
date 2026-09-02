@@ -111,6 +111,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::export_meeting_preview,
             commands::export_meeting_filename,
             commands::export_meeting_to_file,
+            commands::save_meeting_export,
             commands::check_summary_providers,
             commands::pull_recommended_ollama_model,
             commands::summarize_meeting,
