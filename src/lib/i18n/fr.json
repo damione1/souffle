@@ -232,7 +232,9 @@
     "checking": "Vérification…",
     "up_to_date": "Vous utilisez la dernière version.",
     "update_available": "La version {version} est disponible.",
-    "download_update": "Télécharger sur GitHub"
+    "download_update": "Télécharger sur GitHub",
+    "auto_check": "Vérifier les mises à jour chaque jour",
+    "auto_check_desc": "Demande à GitHub une fois par jour si une version plus récente existe, et affiche une fenêtre le cas échéant. Rien n'est téléchargé ni installé."
   },
   "whats_new": {
     "title": "Nouveautés",
@@ -488,5 +490,11 @@
     "starts_in_minutes": "Commence dans {minutes} min",
     "started_system_audio": "Réunion commencée — audio système actif",
     "dismiss": "Ignorer"
+  },
+  "update_available": {
+    "title": "Mise à jour disponible",
+    "subtitle": "Soufflé v{version} est disponible.",
+    "later": "Plus tard",
+    "download": "Télécharger"
   }
 }

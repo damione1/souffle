@@ -34,6 +34,10 @@ const CALENDAR_AUTOSTART_ENABLED_KEY: &str = "calendar_autostart_enabled";
 const FEEDBACK_SOUNDS_ENABLED_KEY: &str = "feedback_sounds_enabled";
 const FEEDBACK_SOUNDS_VOLUME_KEY: &str = "feedback_sounds_volume";
 const MODEL_UNLOAD_TIMEOUT_MINUTES_KEY: &str = "model_unload_timeout_minutes";
+const AUTO_UPDATE_CHECK_ENABLED_KEY: &str = "auto_update_check_enabled";
+/// Unix seconds of the last completed check. Not part of `AppSettings`: it is
+/// bookkeeping, not a preference, and nothing in the UI shows it.
+pub const LAST_UPDATE_CHECK_AT_KEY: &str = "last_update_check_at";
 const MEETING_AUTOSTOP_ENABLED_KEY: &str = "meeting_autostop_enabled";
 const MEETING_AUTOSTOP_MINUTES_KEY: &str = "meeting_autostop_minutes";
 const MEETING_MAX_DURATION_MINUTES_KEY: &str = "meeting_max_duration_minutes";
@@ -165,6 +169,9 @@ pub struct AppSettings {
     /// When a calendar event starts and system audio is active, suggest
     /// starting a meeting transcription (nudge only, never auto-records).
     pub calendar_autostart_enabled: bool,
+    /// Ask GitHub once a day whether a newer release exists, and show a
+    /// dialog when there is one. Never downloads or installs anything.
+    pub auto_update_check_enabled: bool,
     /// Audible start/stop cues for dictation sessions.
     pub feedback_sounds_enabled: bool,
     /// Feedback sound volume (0-100).
@@ -242,6 +249,7 @@ impl Default for AppSettings {
             calendar_selected_ids: Vec::new(),
             calendar_reminder_minutes: 2,
             calendar_autostart_enabled: true,
+            auto_update_check_enabled: true,
             feedback_sounds_enabled: true,
             feedback_sounds_volume: 70,
             model_unload_timeout_minutes: 60,
@@ -386,6 +394,11 @@ impl AppSettings {
             read_json_setting::<u32>(db, FEEDBACK_SOUNDS_VOLUME_KEY)?
         {
             settings.feedback_sounds_volume = feedback_sounds_volume;
+        }
+        if let Some(auto_update_check_enabled) =
+            read_json_setting::<bool>(db, AUTO_UPDATE_CHECK_ENABLED_KEY)?
+        {
+            settings.auto_update_check_enabled = auto_update_check_enabled;
         }
         if let Some(model_unload_timeout_minutes) =
             read_json_setting::<u32>(db, MODEL_UNLOAD_TIMEOUT_MINUTES_KEY)?
@@ -788,6 +801,11 @@ impl AppSettings {
         )?;
         write_json_setting(
             db,
+            AUTO_UPDATE_CHECK_ENABLED_KEY,
+            &normalized.auto_update_check_enabled,
+        )?;
+        write_json_setting(
+            db,
             MODEL_UNLOAD_TIMEOUT_MINUTES_KEY,
             &normalized.model_unload_timeout_minutes,
         )?;
@@ -995,6 +1013,7 @@ mod tests {
     fn app_settings_round_trip() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
+            auto_update_check_enabled: false,
             theme: Theme::Light,
             locale: "fr".into(),
             auto_paste: true,

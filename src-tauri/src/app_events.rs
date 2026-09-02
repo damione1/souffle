@@ -247,3 +247,12 @@ pub struct InputRouteNotice {
     pub to_uid: Option<String>,
     pub transport: Option<crate::audio::TransportType>,
 }
+
+/// A newer GitHub release exists. Emitted by the daily check, never more than
+/// once per launch for the same version.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct UpdateAvailable {
+    pub latest_version: String,
+    pub release_notes: Option<String>,
+    pub release_url: Option<String>,
+}

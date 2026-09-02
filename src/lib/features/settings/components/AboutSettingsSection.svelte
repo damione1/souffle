@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
+  import SettingsField from "../../../components/ui/SettingsField.svelte";
   import { checkForUpdates, getAppVersion, openReleasePage } from "../../../api/diagnostics";
   import type { UpdateCheckResult } from "../../../types";
   import { errorMessage } from "../../../utils";
@@ -8,9 +9,13 @@
   let {
     selectedTranscriptionLabel,
     selectedOllamaModelLabel,
+    autoUpdateCheck,
+    onAutoUpdateCheckChange,
   }: {
     selectedTranscriptionLabel: string;
     selectedOllamaModelLabel: string;
+    autoUpdateCheck: boolean;
+    onAutoUpdateCheckChange: (event: Event) => void;
   } = $props();
 
   let appVersion = $state("");
@@ -89,6 +94,20 @@
         {/if}
       </div>
     </div>
+    <SettingsField
+      label={$t("settings_about.auto_check")}
+      description={$t("settings_about.auto_check_desc")}
+    >
+      {#snippet control()}
+        <input
+          type="checkbox"
+          checked={autoUpdateCheck}
+          onchange={onAutoUpdateCheckChange}
+          class="switch"
+          aria-label={$t("settings_about.auto_check")}
+        />
+      {/snippet}
+    </SettingsField>
     {#if statusMessage}
       <p class={`text-xs ${statusIsError ? "text-danger-soft" : "text-text-muted"}`}>
         {statusMessage}

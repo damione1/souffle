@@ -46,6 +46,7 @@ import type {
 // --- Test fixtures ---
 
 const defaultSettings: AppSettings = {
+  auto_update_check_enabled: true,
   theme: "dark",
   locale: "",
   auto_paste: false,
@@ -288,6 +289,21 @@ describe("settings controller", () => {
     await vi.waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
         settings: expect.objectContaining({ theme: "light" }),
+      }));
+    });
+  });
+
+  it("onAutoUpdateCheckChange persists the daily check toggle", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    ctrl.onAutoUpdateCheckChange({
+      target: { checked: false },
+    } as unknown as Event);
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+        settings: expect.objectContaining({ auto_update_check_enabled: false }),
       }));
     });
   });
