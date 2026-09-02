@@ -157,10 +157,11 @@ pub(crate) fn position_top_center(pill: &tauri::WebviewWindow) -> tauri::Result<
 
 /// Lower/upper bounds on the pill's size, defensively clamped in
 /// `set_frame_top_center` against whatever the frontend's live-text
-/// measurement comes up with.
-const MIN_WIDTH: f64 = 280.0;
+/// measurement comes up with. The floor is the compact *meeting* HUD
+/// (dot + stop); dictation compact is larger and is requested explicitly.
+const MIN_WIDTH: f64 = 88.0;
 const MAX_WIDTH: f64 = 600.0;
-const MIN_HEIGHT: f64 = 64.0;
+const MIN_HEIGHT: f64 = 40.0;
 const MAX_HEIGHT: f64 = 260.0;
 
 /// AppKit frame origin (bottom-left corner, global screen coordinates) that
@@ -272,6 +273,13 @@ fn overlay_style_mask(
     current | objc2_app_kit::NSWindowStyleMask::NonactivatingPanel
 }
 
+/// Exclude the HUD from screenshots and screen sharing. The user still sees
+/// it on their display; Zoom / Meet / ScreenCaptureKit do not. `None` is
+/// the documented AppKit opt-out (`NSWindowSharingNone`).
+fn overlay_sharing_type() -> objc2_app_kit::NSWindowSharingType {
+    objc2_app_kit::NSWindowSharingType::None
+}
+
 /// Promote the Tauri webview's `NSWindow` to a non-activating `NSPanel`.
 /// `FullScreenAuxiliary` is documented as an auxiliary-panel behavior —
 /// setting it on a regular `NSWindow` (what we did previously) is ignored
@@ -306,6 +314,7 @@ fn configure_overlay_window(ns_window: &objc2_app_kit::NSWindow) -> &objc2_app_k
 
     ns_window.setStyleMask(overlay_style_mask(ns_window.styleMask()));
     ns_window.setCollectionBehavior(overlay_collection_behavior());
+    ns_window.setSharingType(overlay_sharing_type());
     ns_window.setLevel(NSStatusWindowLevel);
     ns_window.setHidesOnDeactivate(false);
     ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
@@ -378,6 +387,12 @@ mod tests {
         use objc2_app_kit::NSWindowStyleMask;
         let mask = overlay_style_mask(NSWindowStyleMask::Borderless);
         assert!(mask.contains(NSWindowStyleMask::NonactivatingPanel));
+    }
+
+    #[test]
+    fn overlay_is_excluded_from_screen_capture() {
+        use objc2_app_kit::NSWindowSharingType;
+        assert_eq!(overlay_sharing_type(), NSWindowSharingType::None);
     }
 
     #[test]

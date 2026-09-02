@@ -9,10 +9,15 @@
   import { micToast, micToastCopy } from "../features/audio/mic-toast.svelte";
   import type { AppStateMachine, PillHoldKind } from "../types";
 
-  // Compact state (idle row only): must match the "pill" window's initial
-  // size in tauri.conf.json.
+  // Compact dictation (idle row only): must match the "pill" window's
+  // initial size in tauri.conf.json.
   const PILL_WIDTH = 280;
   const BASE_HEIGHT = 64;
+  // Compact meeting: just the recording dot + stop. Screen capture already
+  // skips this window (`NSWindowSharingNone`); shrinking it also keeps it
+  // out of the way on the user's own display during a call.
+  const MEETING_WIDTH = 96;
+  const MEETING_HEIGHT = 44;
   // Expanded state (live-text preview showing): wide immediately; height is
   // measured from the rounded container's natural content instead, so it
   // grows line by line as the live-text tail fills in.
@@ -56,6 +61,7 @@
   const showLiveText = $derived(displayMode === "dictation" && liveText.trim().length > 0);
   const routeToast = $derived(micToast.current);
   const routeToastCopy = $derived(routeToast ? micToastCopy(routeToast, $t) : null);
+  const compactMeeting = $derived(displayMode === "meeting" && !routeToast);
 
   function stop() {
     if (recordingMode === "meeting") {
@@ -71,8 +77,8 @@
   let appliedHeight = 0;
 
   $effect(() => {
-    const targetWidth = showLiveText ? EXPANDED_WIDTH : PILL_WIDTH;
-    let targetHeight = BASE_HEIGHT;
+    let targetWidth = showLiveText ? EXPANDED_WIDTH : compactMeeting ? MEETING_WIDTH : PILL_WIDTH;
+    let targetHeight = compactMeeting ? MEETING_HEIGHT : BASE_HEIGHT;
     if (showLiveText) {
       // measuredHeight tracks the auto-height container, so it only moves
       // when the wrapped line count changes. Monotonic within a session: a
@@ -83,6 +89,8 @@
     } else if (routeToast) {
       sessionMaxHeight = BASE_HEIGHT;
       targetHeight = Math.min(Math.max(measuredHeight, BASE_HEIGHT), BASE_HEIGHT + 36);
+    } else if (compactMeeting) {
+      sessionMaxHeight = MEETING_HEIGHT;
     } else {
       sessionMaxHeight = BASE_HEIGHT;
     }
@@ -154,37 +162,43 @@
 <div
   data-tauri-drag-region
   bind:offsetHeight={measuredHeight}
-  class="flex w-full flex-col gap-1 rounded-[28px] border border-white/10 bg-black/75 px-4 py-2.5 shadow-lg backdrop-blur-md"
+  class="flex w-full flex-col gap-1 border border-white/10 bg-black/75 shadow-lg backdrop-blur-md {compactMeeting
+    ? 'rounded-[22px] px-2.5 py-1.5'
+    : 'rounded-[28px] px-4 py-2.5'}"
 >
-  <!-- h-[42px] keeps the compact pill's natural height at exactly
-       BASE_HEIGHT (42 + 2x10 padding + 2x1 border = 64). -->
-  <div class="flex h-[42px] shrink-0 items-center gap-3">
+  <!-- Compact dictation: h-[42px] + 2x10 padding + 2x1 border = BASE_HEIGHT.
+       Compact meeting: h-[30px] + 2x6 padding + 2x1 border = MEETING_HEIGHT. -->
+  <div class="flex shrink-0 items-center {compactMeeting ? 'h-[30px] justify-between gap-2' : 'h-[42px] gap-3'}">
     {#if displayMode !== "polishing"}
       <span class="recording-dot shrink-0" aria-hidden="true"></span>
     {/if}
-    <span class="shrink-0 text-xs font-medium text-white/90" data-tauri-drag-region>
-      {#if displayMode === "polishing"}
-        {$t("pill.polishing")}
-      {:else}
-        {displayMode === "meeting" ? $t("pill.meeting") : $t("pill.dictation")}
-      {/if}
-    </span>
-    <div class="min-w-0 flex-1">
-      {#if displayMode === "polishing"}
-        <div class="flex items-center justify-center text-accent">
-          <Spinner />
-        </div>
-      {:else}
-        <Waveform active variant="pill" />
-      {/if}
-    </div>
+    {#if !compactMeeting}
+      <span class="shrink-0 text-xs font-medium text-white/90" data-tauri-drag-region>
+        {#if displayMode === "polishing"}
+          {$t("pill.polishing")}
+        {:else}
+          {$t("pill.dictation")}
+        {/if}
+      </span>
+      <div class="min-w-0 flex-1">
+        {#if displayMode === "polishing"}
+          <div class="flex items-center justify-center text-accent">
+            <Spinner />
+          </div>
+        {:else}
+          <Waveform active variant="pill" />
+        {/if}
+      </div>
+    {/if}
     {#if displayMode !== "polishing"}
       <button
         onclick={stop}
-        class="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-red-500/90 text-white transition-colors hover:bg-red-500"
+        class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-red-500/90 text-white transition-colors hover:bg-red-500 {compactMeeting
+          ? 'h-6 w-6'
+          : 'h-7 w-7'}"
         aria-label={$t("pill.stop")}
       >
-        <Square size={12} fill="currentColor" aria-hidden="true" />
+        <Square size={compactMeeting ? 10 : 12} fill="currentColor" aria-hidden="true" />
       </button>
     {/if}
   </div>
