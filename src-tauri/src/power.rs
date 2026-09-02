@@ -9,7 +9,7 @@
 //! All AppKit interop lives here behind a narrow safe API; callers never
 //! touch objc2 types directly.
 
-use tracing::{info, warn};
+use tracing::info;
 
 /// Install `NSWorkspace` observers for system sleep/wake on the current
 /// thread. Must be called once, from the Tauri setup closure (main thread) —
@@ -75,22 +75,15 @@ pub fn install_sleep_observers(
 }
 
 /// Whether the lid is currently closed with an external display attached
-/// (clamshell mode), read from the IORegistry. Shells out to `ioreg`, so
-/// callers should only probe this at a coarse cadence (the mic health check
-/// already runs on a multi-second timer).
+/// (clamshell mode), read from the IORegistry.
+///
+/// The mic health check calls this every 2s for the whole of a session when a
+/// clamshell microphone is configured, so it reads the property in-process
+/// rather than forking `ioreg`.
 pub fn is_clamshell() -> bool {
     #[cfg(target_os = "macos")]
     {
-        match std::process::Command::new("ioreg")
-            .args(["-r", "-k", "AppleClamshellState", "-d", "4"])
-            .output()
-        {
-            Ok(output) => parse_clamshell(&String::from_utf8_lossy(&output.stdout)),
-            Err(e) => {
-                warn!("ioreg clamshell probe failed: {e}");
-                false
-            }
-        }
+        iokit::bool_property("IOPMrootDomain", "AppleClamshellState").unwrap_or(false)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -98,28 +91,13 @@ pub fn is_clamshell() -> bool {
     }
 }
 
-/// Pure parse of `ioreg -r -k AppleClamshellState -d 4` output: true only
-/// when the key's line ends in `Yes`.
-fn parse_clamshell(ioreg_output: &str) -> bool {
-    ioreg_output
-        .lines()
-        .find(|line| line.contains("\"AppleClamshellState\""))
-        .is_some_and(|line| line.trim_end().ends_with("Yes"))
-}
-
-/// Whether this Mac has a battery (i.e. is a laptop), read via `pmset`. Used
-/// to gate the clamshell-microphone setting in the UI — it's meaningless on
-/// a desktop Mac.
+/// Whether this Mac has a battery (i.e. is a laptop). Used to gate the
+/// clamshell-microphone setting in the UI, which is meaningless on a desktop
+/// Mac.
 pub fn is_laptop() -> bool {
     #[cfg(target_os = "macos")]
     {
-        match std::process::Command::new("pmset").args(["-g", "batt"]).output() {
-            Ok(output) => parse_is_laptop(&String::from_utf8_lossy(&output.stdout)),
-            Err(e) => {
-                warn!("pmset laptop probe failed: {e}");
-                false
-            }
-        }
+        iokit::service_exists("AppleSmartBattery")
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -127,50 +105,117 @@ pub fn is_laptop() -> bool {
     }
 }
 
-/// Pure parse of `pmset -g batt` output: a battery-equipped Mac reports an
-/// `InternalBattery` power source.
-fn parse_is_laptop(pmset_output: &str) -> bool {
-    pmset_output.contains("InternalBattery")
+/// Minimal IOKit bindings. The framework is linked directly instead of pulling
+/// a binding crate: four entry points, matching the `extern "C"` block already
+/// used for the accessibility API in `permissions.rs`.
+#[cfg(target_os = "macos")]
+mod iokit {
+    use std::ffi::{CString, c_char, c_void};
+    use std::ptr::NonNull;
+
+    use objc2_core_foundation::{CFBoolean, CFRetained, CFString, CFType};
+
+    /// `io_object_t`, itself a `mach_port_t`.
+    type IoObject = u32;
+
+    /// `kIOMainPortDefault`: zero selects the default port for every entry
+    /// point used here.
+    const MAIN_PORT_DEFAULT: u32 = 0;
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOServiceMatching(name: *const c_char) -> *mut c_void;
+        fn IOServiceGetMatchingService(main_port: u32, matching: *mut c_void) -> IoObject;
+        fn IORegistryEntryCreateCFProperty(
+            entry: IoObject,
+            key: *const CFString,
+            allocator: *const c_void,
+            options: u32,
+        ) -> *const CFType;
+        fn IOObjectRelease(object: IoObject) -> i32;
+    }
+
+    /// The first service matching `class_name`, or `None` when the class is
+    /// absent (e.g. `AppleSmartBattery` on a desktop Mac). The caller owns the
+    /// returned object and must release it.
+    fn matching_service(class_name: &str) -> Option<IoObject> {
+        let name = CString::new(class_name).ok()?;
+        // IOServiceGetMatchingService consumes the dictionary reference, so
+        // this must not be released on the success path or the failure one.
+        let matching = unsafe { IOServiceMatching(name.as_ptr()) };
+        if matching.is_null() {
+            return None;
+        }
+        let service = unsafe { IOServiceGetMatchingService(MAIN_PORT_DEFAULT, matching) };
+        (service != 0).then_some(service)
+    }
+
+    pub(super) fn service_exists(class_name: &str) -> bool {
+        match matching_service(class_name) {
+            Some(service) => {
+                unsafe { IOObjectRelease(service) };
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// A boolean IORegistry property, or `None` when the service or the key is
+    /// absent, or the value is not a boolean.
+    pub(super) fn bool_property(class_name: &str, key: &str) -> Option<bool> {
+        let service = matching_service(class_name)?;
+        let cf_key = CFString::from_str(key);
+        let raw = unsafe {
+            IORegistryEntryCreateCFProperty(
+                service,
+                CFRetained::as_ptr(&cf_key).as_ptr(),
+                std::ptr::null(),
+                0,
+            )
+        };
+        unsafe { IOObjectRelease(service) };
+        // Create-rule: we own the returned value.
+        let value = unsafe { CFRetained::from_raw(NonNull::new(raw.cast_mut())?) };
+        value.downcast_ref::<CFBoolean>().map(CFBoolean::value)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_clamshell, parse_is_laptop};
+    use super::{is_clamshell, is_laptop};
 
+    /// Both probes read live hardware state, so the value cannot be asserted
+    /// here. What can be: they never panic, and repeated calls agree. A
+    /// mismanaged CFRetained or a double IOObjectRelease would show up as a
+    /// crash under these, which is the risk of hand-written IOKit bindings.
     #[test]
-    fn clamshell_yes_is_detected() {
-        let output = "+-o AppleClamshellState  <class ...>\n    | {\n    |   \"AppleClamshellState\" = Yes\n    | }\n";
-        assert!(parse_clamshell(output));
+    fn probes_are_total_and_stable() {
+        assert_eq!(is_clamshell(), is_clamshell());
+        assert_eq!(is_laptop(), is_laptop());
+    }
+
+    /// The lid cannot be closed on a machine with no lid.
+    #[test]
+    fn clamshell_implies_laptop() {
+        if is_clamshell() {
+            assert!(is_laptop(), "clamshell reported on a machine with no battery");
+        }
+    }
+
+    /// `is_clamshell` returning false is ambiguous: lid open, or a binding
+    /// that silently reads nothing. Assert the property was actually found.
+    /// Every Mac publishes AppleClamshellState on IOPMrootDomain.
+    #[test]
+    fn clamshell_property_is_actually_read() {
+        assert!(
+            super::iokit::bool_property("IOPMrootDomain", "AppleClamshellState").is_some(),
+            "AppleClamshellState could not be read: the IOKit binding is broken"
+        );
     }
 
     #[test]
-    fn clamshell_no_is_not_detected() {
-        let output = "    | {\n    |   \"AppleClamshellState\" = No\n    | }\n";
-        assert!(!parse_clamshell(output));
-    }
-
-    #[test]
-    fn clamshell_garbage_output_defaults_false() {
-        assert!(!parse_clamshell(""));
-        assert!(!parse_clamshell("not even close to ioreg output"));
-        assert!(!parse_clamshell("\"SomeOtherKey\" = Yes"));
-    }
-
-    #[test]
-    fn laptop_detected_from_internal_battery() {
-        let output = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=123)\t100%; charged; 0:00 remaining present: true\n";
-        assert!(parse_is_laptop(output));
-    }
-
-    #[test]
-    fn desktop_has_no_internal_battery() {
-        let output = "Now drawing from 'AC Power'\n";
-        assert!(!parse_is_laptop(output));
-    }
-
-    #[test]
-    fn laptop_garbage_output_defaults_false() {
-        assert!(!parse_is_laptop(""));
-        assert!(!parse_is_laptop("nonsense"));
+    fn an_absent_service_class_is_reported_absent() {
+        assert!(!super::iokit::service_exists("NoSuchServiceClassExists"));
     }
 }
+
