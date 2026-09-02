@@ -29,12 +29,11 @@ import type {
   DictionaryEntry,
   PermState,
   SummaryModelDescriptor,
-  SummaryProviderChoice,
   ShortcutSettings,
   Theme,
   TranscriptionCatalog,
 } from "../../types";
-import { applyTheme, errorMessage, formatShortcutLabel } from "../../utils";
+import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, shortcutMissingModifier } from "../../utils";
 import {
   buildMicrophoneList,
   reorderMicrophoneList,
@@ -420,13 +419,6 @@ export function createSettingsController() {
     });
   }
 
-  function onAutoUpdateCheckChange(event: Event) {
-    const checked = (event.target as HTMLInputElement).checked;
-    void persistSettings((settings) => {
-      settings.auto_update_check_enabled = checked;
-    });
-  }
-
   function onDictationPolishEnabledChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -542,13 +534,6 @@ export function createSettingsController() {
     const value = (event.target as HTMLSelectElement).value;
     void persistSettings((settings) => {
       settings.ollama_model = value;
-    });
-  }
-
-  function onSummaryProviderChange(event: Event) {
-    const value = (event.target as HTMLSelectElement).value as SummaryProviderChoice;
-    void persistSettings((settings) => {
-      settings.summary_provider = value;
     });
   }
 
@@ -738,34 +723,6 @@ export function createSettingsController() {
     dictionaryEntries = dictionaryEntries.filter((e) => e.id !== id);
   }
 
-  function keyEventToShortcut(event: KeyboardEvent): string | null {
-    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return null;
-    const parts: string[] = [];
-    if (event.metaKey || event.ctrlKey) parts.push("CommandOrControl");
-    if (event.shiftKey) parts.push("Shift");
-    if (event.altKey) parts.push("Alt");
-    const key = mapKey(event.code, event.key);
-    if (!key) return null;
-    parts.push(key);
-    return parts.join("+");
-  }
-
-  function mapKey(code: string, key: string): string | null {
-    if (/^F\d{1,2}$/.test(key)) return key;
-    if (code.startsWith("Key")) return code.slice(3);
-    if (code.startsWith("Digit")) return code.slice(5);
-    const keyMap: Record<string, string> = {
-      Space: "Space", Enter: "Enter", Escape: "Escape", Backspace: "Backspace",
-      Tab: "Tab", ArrowUp: "ArrowUp", ArrowDown: "ArrowDown", ArrowLeft: "ArrowLeft",
-      ArrowRight: "ArrowRight", Delete: "Delete", Home: "Home", End: "End",
-      PageUp: "PageUp", PageDown: "PageDown", Backquote: "Backquote", Minus: "Minus",
-      Equal: "Equal", BracketLeft: "BracketLeft", BracketRight: "BracketRight",
-      Backslash: "Backslash", Semicolon: "Semicolon", Quote: "Quote",
-      Comma: "Comma", Period: "Period", Slash: "Slash",
-    };
-    return keyMap[code] || null;
-  }
-
   function formatShortcut(shortcut: string): string {
     return formatShortcutLabel(shortcut) || "Not set";
   }
@@ -801,7 +758,7 @@ export function createSettingsController() {
     const shortcut = keyEventToShortcut(event);
     if (!shortcut) return;
 
-    if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !/^F\d{1,2}$/.test(event.key)) {
+    if (shortcutMissingModifier(event)) {
       shortcutError = "Shortcut must include a modifier key (Cmd, Ctrl, Shift, Alt) or be a function key";
       return;
     }
@@ -885,7 +842,6 @@ export function createSettingsController() {
     onLocaleChange,
     onAutoPasteChange,
     onLearnFromEditChange,
-    onAutoUpdateCheckChange,
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,
     onDictationPolishPromptChange,
@@ -900,7 +856,6 @@ export function createSettingsController() {
     onLogLevelChange,
     onOllamaUrlChange,
     onOllamaModelChange,
-    onSummaryProviderChange,
     get systemAudioSupported() { return systemAudioSupported; },
     get isLaptop() { return isLaptop; },
     onCaptureSystemAudioChange,

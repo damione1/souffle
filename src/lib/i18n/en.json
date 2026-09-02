@@ -144,13 +144,6 @@
   "settings_intelligence": {
     "title": "Summarization",
     "description": "Summaries use Apple Intelligence on supported Macs, or a local Ollama server.",
-    "provider": "Provider",
-    "provider_desc": "Which engine writes summaries and cleans up dictation.",
-    "provider_auto": "Automatic",
-    "provider_ollama": "Ollama",
-    "provider_apple_unusable": "Apple Intelligence is selected but not available on this Mac, so summaries and dictation polish will not run.",
-    "provider_ollama_unusable": "Ollama is selected but has no usable model installed, so summaries and dictation polish will not run. Install a chat model such as qwen2.5:7b-instruct.",
-    "provider_none_usable": "No provider is available: Apple Intelligence is unavailable and Ollama has no usable model. Summaries and dictation polish will not run.",
     "apple_intelligence": "Apple Intelligence",
     "apple_intelligence_desc": "On-device summaries on Apple Silicon with macOS 26+ and Apple Intelligence enabled.",
     "apple_available": "Available",
@@ -170,7 +163,6 @@
     "not_available": "Not available",
     "retry": "Retry",
     "summary_model": "Summarization model",
-    "no_model_installed": "Ollama is running but has no model installed. Download the recommended one below, or install your own with ollama pull.",
     "no_compatible_model": "No compatible model found. Install a model like Llama or Mistral to enable summaries.",
     "download_recommended": "Download {model}",
     "download_recommended_desc": "Recommended for summaries and dictation polish (~4.7 GB).",
@@ -240,9 +232,7 @@
     "checking": "Checking…",
     "up_to_date": "You're on the latest release.",
     "update_available": "Version {version} is available.",
-    "download_update": "Download on GitHub",
-    "auto_check": "Check daily for updates",
-    "auto_check_desc": "Ask GitHub once a day whether a newer version exists, and show a dialog when there is one. Nothing is downloaded or installed."
+    "download_update": "Download on GitHub"
   },
   "whats_new": {
     "title": "What's New",
@@ -265,8 +255,7 @@
     "export_markdown": "Markdown (.md)",
     "export_json": "JSON (.json)",
     "export_srt": "Subtitles (.srt)",
-    "export_vtt": "Subtitles (.vtt)",
-    "export_audio": "Audio (.ogg)"
+    "export_vtt": "Subtitles (.vtt)"
   },
   "meeting_transcript": {
     "title": "Transcript",
@@ -374,11 +363,26 @@
   "onboarding": {
     "tagline": "Local speech-to-text for dictation and meetings.",
     "local_note": "100% local — nothing ever leaves your Mac. No account, no cloud.",
+    "model_title": "Download the transcription model",
     "model_label": "Transcription model",
     "model_hint": "Downloaded once (1–2 GB), then everything runs offline. You can switch models later in Settings.",
-    "start_button": "Download and get started",
+    "model_ready": "The model is ready to use.",
+    "start_button": "Download and continue",
     "downloading": "Downloading the model…",
-    "loading": "Loading the model…"
+    "loading": "Loading the model…",
+    "mic_title": "Choose your microphone",
+    "mic_subtitle": "Soufflé listens to this input for dictation and meetings. Automatic follows macOS.",
+    "mic_hint": "You can reorder devices and allow Bluetooth mics later in Settings.",
+    "shortcut_title": "Quick dictation shortcut",
+    "shortcut_subtitle": "Press this from any app to start or stop dictation.",
+    "shortcut_hint": "Click the shortcut, then press the keys you want. Escape cancels.",
+    "shortcut_unset": "Not set",
+    "shortcut_needs_modifier": "Shortcut must include a modifier key (⌘, Ctrl, Shift, Option) or be a function key.",
+    "auto_paste_desc": "When you stop, paste the transcript into the app you were using. Needs Accessibility.",
+    "continue": "Continue",
+    "back": "Back",
+    "finish": "Get started",
+    "step_progress": "Step {current} of {total}"
   },
   "status_chip": {
     "ready": "Ready",
@@ -499,11 +503,5 @@
     "starts_in_minutes": "Starts in {minutes} min",
     "started_system_audio": "Meeting started — system audio active",
     "dismiss": "Dismiss"
-  },
-  "update_available": {
-    "title": "Update available",
-    "subtitle": "Soufflé v{version} is out.",
-    "later": "Later",
-    "download": "Download"
   }
 }

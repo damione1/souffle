@@ -36,7 +36,7 @@ let systemAudioStatus = $state<SystemAudioStatus | null>(null);
 // Calendar reminder awaiting the user's decision (drives the home banner)
 let upcomingMeeting = $state<UpcomingMeeting | null>(null);
 
-// First-run onboarding (model not downloaded yet) — derived at bootstrap
+// First-run setup wizard (permissions, mic, model, shortcut)
 let showOnboarding = $state(false);
 
 // Last pipeline error surfaced by the backend (dismissable)
@@ -57,7 +57,6 @@ let settings = $state<AppSettings>({
   paste_delay_ms: 100,
   paste_method: "clipboard",
   ollama_url: "http://localhost:11434",
-  summary_provider: "auto",
   ollama_model: "",
   debug_transcription: false,
   log_level: "info",
@@ -79,7 +78,7 @@ let settings = $state<AppSettings>({
   calendar_autostart_enabled: true,
   feedback_sounds_enabled: true,
   feedback_sounds_volume: 70,
-  model_unload_timeout_minutes: 60,
+  model_unload_timeout_minutes: 0,
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
@@ -93,7 +92,6 @@ let settings = $state<AppSettings>({
     { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
   ],
-  auto_update_check_enabled: true,
   dictation_learn_from_edit: true,
   default_summary_template_id: "default",
   summary_templates: [

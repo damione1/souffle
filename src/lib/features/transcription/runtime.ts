@@ -8,6 +8,12 @@ import {
 import type { DownloadProgress, TranscriptionCatalog } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfileSelection } from "./catalog";
+import {
+  decideShowSetupWizard,
+  markSetupComplete,
+  readSetupFlags,
+  shouldMigrateSetupComplete,
+} from "../onboarding/setup";
 
 type AppState = ReturnType<typeof getAppState>;
 
@@ -118,6 +124,14 @@ export function decideStartupModelAction(
   return "none";
 }
 
+function applySetupWizardVisibility(app: AppState): void {
+  const flags = readSetupFlags();
+  if (shouldMigrateSetupComplete(app.transcriptionRuntimePhase, flags)) {
+    markSetupComplete();
+  }
+  app.showOnboarding = decideShowSetupWizard(app.transcriptionRuntimePhase, readSetupFlags());
+}
+
 /** Startup flow: auto-load the last-selected model, or surface onboarding
  * when nothing is downloaded yet. Fire-and-forget from bootstrap; progress
  * reaches the UI through StateChanged events. */
@@ -126,6 +140,7 @@ export async function runStartupModelFlow(app: AppState): Promise<void> {
   try {
     catalog = await getTranscriptionCatalog();
   } catch {
+    applySetupWizardVisibility(app);
     return; // Backend unavailable; StateChanged events will catch us up.
   }
   app.settings = {
@@ -138,19 +153,20 @@ export async function runStartupModelFlow(app: AppState): Promise<void> {
   try {
     await refreshTranscriptionRuntimeStatus(app, catalog);
   } catch {
+    applySetupWizardVisibility(app);
     return;
   }
 
   switch (decideStartupModelAction(app.transcriptionRuntimePhase, app.machineState.state)) {
-    case "onboarding":
-      app.showOnboarding = true;
-      break;
     case "load":
       void startTranscriptionModelLoad(app, catalog, () => {});
       break;
+    case "onboarding":
     case "none":
       break;
   }
+
+  applySetupWizardVisibility(app);
 }
 
 // Indirection so TypeScript re-reads the getter after the `await` below

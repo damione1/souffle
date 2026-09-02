@@ -13,9 +13,7 @@
   import { bootstrapAppState } from "./lib/bootstrap";
   import { getSelectedTranscriptionModel } from "./lib/features/transcription/catalog";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
-  import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
   import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
-  import UpdateAvailableDialog from "./lib/features/onboarding/UpdateAvailableDialog.svelte";
   import {
     notifyMeetingAborted,
     notifyMeetingFinalized,
@@ -30,6 +28,7 @@
   import { getAppState } from "./lib/stores/app.svelte";
   import { applyTheme, errorMessage } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
+  import { decideShowSetupWizard, readSetupFlags } from "./lib/features/onboarding/setup";
 
   const app = getAppState();
   // Mounted app-level so the global dictation shortcut works whatever view
@@ -37,7 +36,6 @@
   const transcription = createTranscriptionController();
 
   let unlistenNav: (() => void) | null = null;
-  let unlistenUpdate: (() => void) | null = null;
   let unlistenState: (() => void) | null = null;
   let unlistenHealth: (() => void) | null = null;
   let unlistenPipelineError: (() => void) | null = null;
@@ -60,13 +58,7 @@
   const routeToast = $derived(micToast.current);
   const routeToastCopy = $derived(routeToast ? micToastCopy(routeToast, $t) : null);
   let isRecovering = $state(false);
-  let showPermissions = $state(false);
   let whatsNew = $state<{ version: string; releaseNotes: string } | null>(null);
-  let updateAvailable = $state<{
-    version: string;
-    releaseNotes: string | null;
-    releaseUrl: string | null;
-  } | null>(null);
   let modelLabel = $state("");
 
   const isLightTheme = $derived(
@@ -123,7 +115,10 @@
           });
         }
       } catch {
-        // First run, no settings yet.
+        // First run, no settings yet — still offer the setup wizard.
+        if (decideShowSetupWizard("download_required", readSetupFlags())) {
+          app.showOnboarding = true;
+        }
       }
       cleanupTranscription = (await transcription.mount()) ?? (() => {});
       try {
@@ -137,26 +132,6 @@
         // Header chip simply omits the model name.
       }
     })();
-
-    // First-run permissions walkthrough (mic, system audio, accessibility) so
-    // the user grants everything up front instead of hitting prompts piecemeal.
-    try {
-      showPermissions = localStorage.getItem("permissionsOnboarded") !== "1";
-    } catch {
-      showPermissions = false;
-    }
-
-    events.updateAvailable.listen((event) => {
-      // The backend emits at most once per launch per version, so this never
-      // reopens a dialog the user has dismissed.
-      updateAvailable = {
-        version: event.payload.latest_version,
-        releaseNotes: event.payload.release_notes,
-        releaseUrl: event.payload.release_url,
-      };
-    }).then((fn) => {
-      unlistenUpdate = fn;
-    });
 
     events.navigate.listen((event) => {
       if (event.payload === "settings") {
@@ -247,7 +222,6 @@
     return () => {
       cleanupTranscription();
       unlistenNav?.();
-      unlistenUpdate?.();
       unlistenState?.();
       unlistenHealth?.();
       unlistenPipelineError?.();
@@ -402,24 +376,11 @@
 
 {/if}
 
-{#if showPermissions}
-  <PermissionsOnboarding onClose={() => (showPermissions = false)} />
-{/if}
-
-{#if whatsNew}
+{#if whatsNew && !app.showOnboarding}
   <WhatsNewDialog
     version={whatsNew.version}
     releaseNotes={whatsNew.releaseNotes}
     onDismiss={dismissWhatsNew}
-  />
-{/if}
-
-{#if updateAvailable}
-  <UpdateAvailableDialog
-    version={updateAvailable.version}
-    releaseNotes={updateAvailable.releaseNotes}
-    releaseUrl={updateAvailable.releaseUrl}
-    onDismiss={() => (updateAvailable = null)}
   />
 {/if}
 
