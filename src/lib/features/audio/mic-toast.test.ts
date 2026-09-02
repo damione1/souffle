@@ -2,10 +2,9 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { get } from "svelte/store";
 import { t } from "svelte-i18n";
 import type { InputRouteNotice } from "../../types";
-import { createMicToast, micToastCopy } from "./mic-toast.svelte";
+import { createMicToast, micToastCopy, type Translate } from "./mic-toast.svelte";
 
-const translate = (key: string, options?: { values?: Record<string, string> }) =>
-  get(t)(key, options);
+const translate: Translate = (key, options) => get(t)(key, options);
 
 function notice(partial: Partial<InputRouteNotice> & Pick<InputRouteNotice, "reason">): InputRouteNotice {
   return {
