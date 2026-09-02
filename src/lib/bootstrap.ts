@@ -2,6 +2,7 @@ import { getSettings, saveSettings, selectAudioDevice } from "./api/settings";
 import { getAppVersion } from "./api/diagnostics";
 import { getMachineState } from "./api/transcription";
 import { runStartupModelFlow } from "./features/transcription/runtime";
+import { readSetupFlags } from "./features/onboarding/setup";
 import { setLocale } from "./i18n";
 import { getAppState } from "./stores/app.svelte";
 import { applyTheme } from "./utils/theme";
@@ -35,17 +36,22 @@ export async function bootstrapAppState(
   }
 
   // Zero-ceremony startup: auto-load the last-selected model, or show
-  // first-run onboarding when no model is downloaded yet.
+  // the first-run setup wizard when the user hasn't finished onboarding
+  // (or when no model is downloaded yet).
   await runStartupModelFlow(app);
 
   const currentVersion = await getAppVersion();
-  const previousVersion = settings.last_seen_version.trim();
+  const previousVersion = app.settings.last_seen_version.trim();
+  const setupDone = readSetupFlags().setupDone;
 
-  if (!previousVersion) {
-    // Brand-new install: record version silently, no What's New dialog.
-    if (settings.last_seen_version !== currentVersion) {
-      await saveSettings({ ...settings, last_seen_version: currentVersion });
-      app.settings = { ...app.settings, last_seen_version: currentVersion };
+  // First launch and unfinished setup: stamp the version silently so the
+  // changelog never stacks on the wizard, and so finishing setup doesn't
+  // immediately pop it either.
+  if (!previousVersion || !setupDone) {
+    if (app.settings.last_seen_version !== currentVersion) {
+      const next = { ...app.settings, last_seen_version: currentVersion };
+      await saveSettings(next);
+      app.settings = next;
     }
     return { whatsNew: null };
   }

@@ -144,13 +144,6 @@
   "settings_intelligence": {
     "title": "Résumés",
     "description": "Les résumés utilisent Apple Intelligence sur les Mac compatibles, ou un serveur Ollama local.",
-    "provider": "Moteur",
-    "provider_desc": "Le moteur qui rédige les résumés et nettoie la dictée.",
-    "provider_auto": "Automatique",
-    "provider_ollama": "Ollama",
-    "provider_apple_unusable": "Apple Intelligence est sélectionné mais indisponible sur ce Mac : les résumés et le nettoyage de la dictée ne s'exécuteront pas.",
-    "provider_ollama_unusable": "Ollama est sélectionné mais aucun modèle utilisable n'est installé : les résumés et le nettoyage de la dictée ne s'exécuteront pas. Installez un modèle de conversation, par exemple qwen2.5:7b-instruct.",
-    "provider_none_usable": "Aucun moteur disponible : Apple Intelligence est indisponible et Ollama n'a aucun modèle utilisable. Les résumés et le nettoyage de la dictée ne s'exécuteront pas.",
     "apple_intelligence": "Apple Intelligence",
     "apple_intelligence_desc": "Résumés on-device sur Apple Silicon avec macOS 26+ et Apple Intelligence activé.",
     "apple_available": "Disponible",
@@ -170,7 +163,6 @@
     "not_available": "Non disponible",
     "retry": "Réessayer",
     "summary_model": "Modèle de résumé",
-    "no_model_installed": "Ollama tourne mais aucun modèle n'est installé. Téléchargez le modèle recommandé ci-dessous, ou installez le vôtre avec ollama pull.",
     "no_compatible_model": "Aucun modèle compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
     "download_recommended": "Télécharger {model}",
     "download_recommended_desc": "Recommandé pour les résumés et le polish de dictée (~4,7 Go).",
@@ -240,9 +232,7 @@
     "checking": "Vérification…",
     "up_to_date": "Vous utilisez la dernière version.",
     "update_available": "La version {version} est disponible.",
-    "download_update": "Télécharger sur GitHub",
-    "auto_check": "Vérifier les mises à jour chaque jour",
-    "auto_check_desc": "Demande à GitHub une fois par jour si une version plus récente existe, et affiche une fenêtre le cas échéant. Rien n'est téléchargé ni installé."
+    "download_update": "Télécharger sur GitHub"
   },
   "whats_new": {
     "title": "Nouveautés",
@@ -265,8 +255,7 @@
     "export_markdown": "Markdown (.md)",
     "export_json": "JSON (.json)",
     "export_srt": "Sous-titres (.srt)",
-    "export_vtt": "Sous-titres (.vtt)",
-    "export_audio": "Audio (.ogg)"
+    "export_vtt": "Sous-titres (.vtt)"
   },
   "meeting_transcript": {
     "title": "Transcription",
@@ -374,11 +363,26 @@
   "onboarding": {
     "tagline": "Transcription vocale locale pour la dictée et les meetings.",
     "local_note": "100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud.",
+    "model_title": "Télécharger le modèle de transcription",
     "model_label": "Modèle de transcription",
     "model_hint": "Téléchargé une seule fois (1–2 Go), puis tout fonctionne hors ligne. Changeable plus tard dans les réglages.",
-    "start_button": "Télécharger et commencer",
+    "model_ready": "Le modèle est prêt à l'emploi.",
+    "start_button": "Télécharger et continuer",
     "downloading": "Téléchargement du modèle…",
-    "loading": "Chargement du modèle…"
+    "loading": "Chargement du modèle…",
+    "mic_title": "Choisir le microphone",
+    "mic_subtitle": "Soufflé écoute cette entrée pour la dictée et les meetings. Automatique suit macOS.",
+    "mic_hint": "Vous pourrez réordonner les appareils et autoriser les micros Bluetooth plus tard dans les réglages.",
+    "shortcut_title": "Raccourci de dictée rapide",
+    "shortcut_subtitle": "Appuyez dessus depuis n'importe quelle app pour démarrer ou arrêter la dictée.",
+    "shortcut_hint": "Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule.",
+    "shortcut_unset": "Non défini",
+    "shortcut_needs_modifier": "Le raccourci doit inclure une touche modificatrice (⌘, Ctrl, Shift, Option) ou être une touche de fonction.",
+    "auto_paste_desc": "À l'arrêt, colle la transcription dans l'app que vous utilisiez. Nécessite Accessibilité.",
+    "continue": "Continuer",
+    "back": "Retour",
+    "finish": "Commencer",
+    "step_progress": "Étape {current} sur {total}"
   },
   "status_chip": {
     "ready": "Prêt",
@@ -499,11 +503,5 @@
     "starts_in_minutes": "Commence dans {minutes} min",
     "started_system_audio": "Réunion commencée — audio système actif",
     "dismiss": "Ignorer"
-  },
-  "update_available": {
-    "title": "Mise à jour disponible",
-    "subtitle": "Soufflé v{version} est disponible.",
-    "later": "Plus tard",
-    "download": "Télécharger"
   }
 }
