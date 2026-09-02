@@ -230,7 +230,10 @@ impl SystemTap {
                   _input_time: NonNull<AudioTimeStamp>,
                   _output_data: NonNull<AudioBufferList>,
                   _output_time: NonNull<AudioTimeStamp>| {
-                forward_input(&block_shared, input_data);
+                // Unwinding across the HAL C boundary is UB. A bad buffer
+                // or a poisoned-then-recovered producer must not take the
+                // process down; the mixer treats a silent tap as zeros.
+                swallow_io_panic(|| forward_input(&block_shared, input_data));
             },
         );
 
@@ -346,6 +349,10 @@ impl Drop for SystemTap {
         LIVE_TAPS.fetch_sub(1, Ordering::Relaxed);
         info!("System audio tap stopped");
     }
+}
+
+fn swallow_io_panic(f: impl FnOnce()) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
 }
 
 /// Forward the tap's input buffers into the ring buffer. Runs on the tap's
@@ -496,6 +503,11 @@ mod tests {
     /// The sweep destroys every Souffle aggregate it finds, so it must stay
     /// out of the way while a tap is running: a rebuild mid-meeting spawns a
     /// new tap while the old one is still tearing down.
+    #[test]
+    fn io_callback_panic_must_not_propagate() {
+        swallow_io_panic(|| panic!("malformed AudioBufferList"));
+    }
+
     #[test]
     fn no_sweep_while_a_tap_is_alive() {
         TEARDOWN_SUSPECT.store(true, Ordering::Relaxed);

@@ -135,6 +135,25 @@ fn should_rebuild_mic(
     stream_failed || callbacks_stale || device_replaced || device_not_alive || resolved_changed
 }
 
+/// Keep the meeting tap/mixer across a mic rebuild of the same session.
+/// Tearing them down first meant a failed reopen also killed system audio,
+/// after which the `capture_system_audio` *setting* still counted as a
+/// fallback and the session recorded silence.
+fn should_reuse_meeting(
+    existing_session: Option<u64>,
+    new_session: u64,
+    capture_system_audio: bool,
+) -> bool {
+    capture_system_audio && existing_session == Some(new_session)
+}
+
+/// The mic-loss ladder's "other source" is a tap that is actually running,
+/// not the user's setting. A meeting that requested system audio but never
+/// got a tap (or lost it) is dictation: abort rather than fake-record.
+fn has_fallback_audio(tap_live: bool) -> bool {
+    tap_live
+}
+
 #[cfg(test)]
 mod mic_loss_tests {
     use super::*;
@@ -233,6 +252,47 @@ mod mic_loss_tests {
         );
         assert!(should_rebuild_mic(true, false, false, false, false));
         assert!(should_rebuild_mic(false, false, false, false, true));
+    }
+
+    #[test]
+    fn reuses_meeting_only_for_same_session_with_system_audio() {
+        assert!(should_reuse_meeting(Some(7), 7, true));
+        assert!(
+            !should_reuse_meeting(Some(7), 8, true),
+            "a new session must tear the old tap down"
+        );
+        assert!(
+            !should_reuse_meeting(Some(7), 7, false),
+            "dictation must not keep a leftover meeting tap"
+        );
+        assert!(!should_reuse_meeting(None, 7, true));
+    }
+
+    #[test]
+    fn fallback_is_a_live_tap_not_the_system_audio_setting() {
+        // The setting alone used to keep a meeting alive after a rebuild
+        // had already dropped the tap — UI still "recording", no audio.
+        assert!(
+            !has_fallback_audio(false),
+            "tap missing → abort like dictation"
+        );
+        assert!(has_fallback_audio(true));
+        assert_eq!(
+            decide_mic_loss(
+                DICTATION_ABORT_AFTER_FAILURES,
+                has_fallback_audio(false),
+                false
+            ),
+            MicLossAction::Abort
+        );
+        assert_eq!(
+            decide_mic_loss(
+                DICTATION_ABORT_AFTER_FAILURES,
+                has_fallback_audio(true),
+                false
+            ),
+            MicLossAction::WarnOnce
+        );
     }
 }
 
@@ -685,7 +745,9 @@ impl AudioCapture {
                                 info!("Selected input device UID: {uid}");
                                 capture.selected_device = Some(uid);
                             }
-                            capture.refresh_input_route();
+                            if capture.refresh_input_route() {
+                                break;
+                            }
                         }
                         AudioCommand::SetClamshellDevice(uid) => {
                             if let Some(ref uid) = uid {
@@ -694,7 +756,9 @@ impl AudioCapture {
                                 info!("Clamshell-mode microphone preference cleared");
                             }
                             capture.clamshell_device = uid;
-                            capture.refresh_input_route();
+                            if capture.refresh_input_route() {
+                                break;
+                            }
                         }
                         AudioCommand::SetInputPolicy {
                             priority,
@@ -702,13 +766,17 @@ impl AudioCapture {
                         } => {
                             capture.input_priority = priority;
                             capture.allow_bluetooth_mic = allow_bluetooth_mic;
-                            capture.refresh_input_route();
+                            if capture.refresh_input_route() {
+                                break;
+                            }
                         }
                         AudioCommand::AttachApp(app) => {
                             capture.app = Some(app);
                         }
                         AudioCommand::RefreshInputRoute => {
-                            capture.refresh_input_route();
+                            if capture.refresh_input_route() {
+                                break;
+                            }
                         }
                     }
                 }
@@ -787,13 +855,20 @@ impl AudioCapture {
         diarize: bool,
         record_path: Option<PathBuf>,
     ) -> Result<(), String> {
-        // Ensure any previous callback stops emitting immediately, and tear
-        // down any leftover meeting state (tap included). The recorder is
-        // NOT torn down here; see `sync_recorder`, so a mid-session mic
-        // rebuild (same session_id) keeps recording to the same file.
+        // Ensure any previous callback stops emitting immediately. The
+        // recorder is NOT torn down here; see `sync_recorder`, so a
+        // mid-session mic rebuild (same session_id) keeps recording to the
+        // same file. The meeting tap/mixer stay too: dropping them here
+        // made a failed mic reopen also lose system audio.
         self.active_session_id.store(0, Ordering::Release);
         self.release_capture_stream();
-        self.meeting.take();
+        if !should_reuse_meeting(
+            self.meeting.as_ref().map(|m| m.session_id),
+            session_id,
+            capture_system_audio,
+        ) {
+            self.meeting.take();
+        }
         self.sync_recorder(session_id, record_path.as_deref(), target_sample_rate);
 
         // Stored before any fallible step so a failed (re)build is retried
@@ -852,6 +927,9 @@ impl AudioCapture {
                 diarize,
             );
         }
+
+        // Dictation: never keep a leftover meeting tap from a prior session.
+        self.meeting.take();
 
         let resampler = Arc::new(Mutex::new(Resampler::new(
             sample_rate,
@@ -1038,10 +1116,9 @@ impl AudioCapture {
         let sample_rate = config.sample_rate;
         let channels = config.channels;
 
-        // ~2s of headroom per ring; the 5ms tick drains far faster.
+        // ~2s of headroom per ring; the 20ms tick drains far faster.
         let mic_capacity = (sample_rate as usize * channels as usize) * 2;
         let (mut mic_prod, mic_cons) = HeapRb::<f32>::new(mic_capacity).split();
-        let (tap_prod, tap_cons) = HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
 
         // Mic stream first: it's the session's pacing clock and must never
         // be held hostage by tap startup (see system_tap.rs module docs).
@@ -1082,6 +1159,19 @@ impl AudioCapture {
         // bounds how much of a slow tap's wait it can retain, but that beats
         // discarding all of it outright.
         self.active_session_id.store(session_id, Ordering::Release);
+
+        if let Some(meeting) = self.meeting.as_mut() {
+            meeting
+                .mixer
+                .replace_mic(mic_cons, sample_rate, channels, mic_gain);
+            meeting.session_id = session_id;
+            meeting.diarize = diarize;
+            self.stream = Some(stream);
+            info!("Meeting microphone rebuilt; system-audio tap kept");
+            return Ok(());
+        }
+
+        let (tap_prod, tap_cons) = HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
 
         #[cfg(target_os = "macos")]
         let (tap, tap_rate) = match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
@@ -1237,7 +1327,7 @@ impl AudioCapture {
                 );
                 match decide_mic_loss(
                     self.mic_rebuild_failures,
-                    params.capture_system_audio,
+                    has_fallback_audio(self.tap_is_live()),
                     self.mic_loss_warned,
                 ) {
                     MicLossAction::KeepRetrying => false,
@@ -1265,7 +1355,13 @@ impl AudioCapture {
     /// Called on explicit route events (device pick, policy change, CoreAudio
     /// device-list or default-input change), so a previously non-converged
     /// target is fair game again.
-    fn refresh_input_route(&mut self) {
+    ///
+    /// Returns `true` when the microphone is unrecoverable and the session
+    /// has been torn down: the caller must break the audio thread so the
+    /// actor observes AudioGone. Returning without exiting left the actor
+    /// waiting on a channel that never closed, and `Stop` could no longer
+    /// send EndOfStream (`active_params` was already cleared).
+    fn refresh_input_route(&mut self) -> bool {
         self.route_attempt_uid = None;
         if self.active_params.is_some() {
             self.last_mic_check = Instant::now();
@@ -1273,7 +1369,22 @@ impl AudioCapture {
                 tracing::error!(
                     "Microphone unrecoverable after input route change; ending session"
                 );
+                return true;
             }
+        }
+        false
+    }
+
+    /// A process tap that is still owned by this session. The system-audio
+    /// *setting* is not enough: a rebuild may have already dropped the tap.
+    fn tap_is_live(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.meeting.as_ref().is_some_and(|m| m.tap.is_some())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
         }
     }
 
@@ -1281,6 +1392,7 @@ impl AudioCapture {
     fn meeting_tick(&mut self) {
         // Do all mixer work inside this borrow, then release it before calling
         // &self/&mut self helpers (sending, RMS) to satisfy the borrow checker.
+        let tap_clock = self.stream.is_none();
         let (session_id, diarize, mixed, me, them) = {
             let Some(meeting) = self.meeting.as_mut() else {
                 return;
@@ -1290,10 +1402,18 @@ impl AudioCapture {
                 meeting.check_output_route(self.app.as_ref());
             }
             if meeting.diarize {
-                let (me, them) = meeting.mixer.tick_split();
+                let (me, them) = if tap_clock {
+                    meeting.mixer.tick_split_on_tap_clock()
+                } else {
+                    meeting.mixer.tick_split()
+                };
                 (meeting.session_id, true, Vec::new(), me, them)
             } else {
-                let mixed = meeting.mixer.tick();
+                let mixed = if tap_clock {
+                    meeting.mixer.tick_on_tap_clock()
+                } else {
+                    meeting.mixer.tick()
+                };
                 (meeting.session_id, false, mixed, Vec::new(), Vec::new())
             }
         };

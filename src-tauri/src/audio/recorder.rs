@@ -282,16 +282,23 @@ impl MeetingRecorder {
                     .then(|| super::resampler::Resampler::new(sample_rate, 1, encode_rate, 1.0));
 
                 while let Ok(RecorderMsg::Chunk(samples)) = rx.recv() {
-                    let owned;
-                    let encode_samples: &[f32] = match resampler.as_mut() {
-                        Some(r) => {
-                            owned = r.process(&samples);
-                            &owned
-                        }
-                        None => &samples,
-                    };
-                    if let Err(e) = writer.write_chunk(encode_samples) {
-                        tracing::warn!("Meeting recorder encode error: {e}");
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let owned;
+                        let encode_samples: &[f32] = match resampler.as_mut() {
+                            Some(r) => {
+                                owned = r.process(&samples);
+                                &owned
+                            }
+                            None => &samples,
+                        };
+                        writer.write_chunk(encode_samples)
+                    }));
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => tracing::warn!("Meeting recorder encode error: {e}"),
+                        Err(_) => tracing::warn!(
+                            "Meeting recorder panicked on a chunk; skipping it and keeping the file"
+                        ),
                     }
                 }
 
