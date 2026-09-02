@@ -1,0 +1,65 @@
+name: Bug report
+description: Something does not work as described
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most bugs so far have come from audio hardware the app had never met:
+        a dock, a Bluetooth headset, an unusual default input. The fields below
+        are the ones that make those reproducible.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu > About This Mac. Meetings capture other participants only on 14.4 and newer.
+      placeholder: "15.3"
+    validations:
+      required: true
+  - type: input
+    id: mac-model
+    attributes:
+      label: Mac model
+      placeholder: "MacBook Pro M4, 16 GB"
+    validations:
+      required: true
+  - type: input
+    id: audio
+    attributes:
+      label: Microphone and output in use
+      description: Including anything between the Mac and them, such as a dock or a Bluetooth headset.
+      placeholder: "Bose 700 over Bluetooth, external display via CalDigit dock"
+    validations:
+      required: false
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Where
+      options:
+        - Dictation
+        - Meeting recording
+        - Summaries
+        - Speech models or downloads
+        - Settings, permissions or onboarding
+        - Export, search or MCP
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Settings > Diagnostics, copy the bundle and the log tail. No transcript
+        text is included; the paths do contain your user name, so redact them if
+        you would rather not share it.
+      render: text
+    validations:
+      required: false
