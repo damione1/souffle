@@ -29,6 +29,7 @@ import type {
   DictionaryEntry,
   PermState,
   SummaryModelDescriptor,
+  SummaryProviderChoice,
   ShortcutSettings,
   Theme,
   TranscriptionCatalog,
@@ -419,6 +420,13 @@ export function createSettingsController() {
     });
   }
 
+  function onAutoUpdateCheckChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.auto_update_check_enabled = checked;
+    });
+  }
+
   function onDictationPolishEnabledChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -534,6 +542,13 @@ export function createSettingsController() {
     const value = (event.target as HTMLSelectElement).value;
     void persistSettings((settings) => {
       settings.ollama_model = value;
+    });
+  }
+
+  function onSummaryProviderChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value as SummaryProviderChoice;
+    void persistSettings((settings) => {
+      settings.summary_provider = value;
     });
   }
 
@@ -842,6 +857,7 @@ export function createSettingsController() {
     onLocaleChange,
     onAutoPasteChange,
     onLearnFromEditChange,
+    onAutoUpdateCheckChange,
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,
     onDictationPolishPromptChange,
@@ -856,6 +872,7 @@ export function createSettingsController() {
     onLogLevelChange,
     onOllamaUrlChange,
     onOllamaModelChange,
+    onSummaryProviderChange,
     get systemAudioSupported() { return systemAudioSupported; },
     get isLaptop() { return isLaptop; },
     onCaptureSystemAudioChange,
