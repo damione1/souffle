@@ -248,6 +248,93 @@ describe("MeetingController", () => {
     expect(ctrl.summaryModels[0].id).toBe("llama3");
   });
 
+  function makeBothProvidersStatus(): SummaryProvidersStatus {
+    return makeSummaryProvidersStatus({
+      apple_intelligence_available: true,
+      apple_intelligence_is_stub: false,
+      apple_intelligence_unavailable_reason: null,
+      models: [
+        {
+          id: "apple-intelligence",
+          label: "Apple Intelligence",
+          provider: "apple_intelligence",
+          can_summarize: true,
+        },
+        { id: "qwen2.5:7b", label: "qwen2.5:7b", provider: "ollama", can_summarize: true },
+        { id: "codellama", label: "Code Llama", provider: "ollama", can_summarize: false },
+      ],
+    });
+  }
+
+  it("auto keeps both providers and defaults to Apple Intelligence", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeBothProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockApp.settings.summary_provider = "auto";
+    mockApp.settings.ollama_model = "qwen2.5:7b";
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+
+    expect(ctrl.summaryModels.map((model) => model.id)).toEqual([
+      "apple-intelligence",
+      "qwen2.5:7b",
+    ]);
+    expect(ctrl.selectedModel).toBe("apple-intelligence");
+  });
+
+  it("an explicit Ollama choice hides Apple Intelligence from the picker", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeBothProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockApp.settings.summary_provider = "ollama";
+    mockApp.settings.ollama_model = "qwen2.5:7b";
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+
+    expect(ctrl.summaryModels.map((model) => model.id)).toEqual(["qwen2.5:7b"]);
+    expect(ctrl.selectedModel).toBe("qwen2.5:7b");
+  });
+
+  it("an explicit Apple Intelligence choice hides Ollama from the picker", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeBothProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockApp.settings.summary_provider = "apple_intelligence";
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+
+    expect(ctrl.summaryModels.map((model) => model.id)).toEqual(["apple-intelligence"]);
+    expect(ctrl.selectedModel).toBe("apple-intelligence");
+  });
+
+  it("explicit Ollama with only Apple available offers no model", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(
+      makeSummaryProvidersStatus({
+        apple_intelligence_available: true,
+        apple_intelligence_is_stub: false,
+        apple_intelligence_unavailable_reason: null,
+        ollama_available: false,
+        models: [
+          {
+            id: "apple-intelligence",
+            label: "Apple Intelligence",
+            provider: "apple_intelligence",
+            can_summarize: true,
+          },
+        ],
+      }),
+    );
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockApp.settings.summary_provider = "ollama";
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+
+    expect(ctrl.summaryModels).toEqual([]);
+    expect(ctrl.selectedModel).toBe("");
+    expect(ctrl.summaryAvailable).toBe(false);
+  });
+
   it("startRecording starts with a dated default title", async () => {
     mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
@@ -606,7 +693,7 @@ describe("MeetingController", () => {
     expect(ctrl.selectedModel).toBe("llama3");
   });
 
-  it("syncSelectedModel prefers saved ollama_model over apple when both available", async () => {
+  it("under Auto, Apple Intelligence wins over a stored Ollama model", async () => {
     mockGetSummaryProvidersStatus.mockResolvedValue(
       makeSummaryProvidersStatus({
         apple_intelligence_available: true,
@@ -622,12 +709,13 @@ describe("MeetingController", () => {
       }),
     );
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockApp.settings.summary_provider = "auto";
     mockApp.settings.ollama_model = "llama3";
 
     const ctrl = createMeetingController();
     await ctrl.mount();
 
-    expect(ctrl.selectedModel).toBe("llama3");
+    expect(ctrl.selectedModel).toBe("apple-intelligence");
   });
 
   describe("notifyMeetingIdle", () => {

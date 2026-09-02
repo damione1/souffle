@@ -109,6 +109,26 @@ pub enum SummaryProviderChoice {
     Ollama,
 }
 
+impl SummaryProviderChoice {
+    /// Before this setting existed, a non-empty `ollama_model` *was* the
+    /// provider choice. Infer Ollama so an upgrade does not silently switch
+    /// those users onto Apple Intelligence under the new Auto default.
+    ///
+    /// A stored `"auto"` is left alone: the user (or a later save) picked it
+    /// on purpose. Only a missing key is inferred.
+    pub fn from_stored(stored: Option<Self>, ollama_model: &str) -> Self {
+        if let Some(choice) = stored {
+            return choice;
+        }
+        let model = ollama_model.trim();
+        if !model.is_empty() && model != APPLE_INTELLIGENCE_MODEL_ID {
+            Self::Ollama
+        } else {
+            Self::Auto
+        }
+    }
+}
+
 /// Why no model could be selected, so the caller can say so instead of
 /// quietly doing nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -802,6 +822,43 @@ mod tests {
         assert_eq!(
             choose_summary_model(&settings, &available).unwrap(),
             "qwen2.5:7b"
+        );
+    }
+
+    /// Explicit Auto is Apple first even when a stored Ollama model is
+    /// installed. Existing users who had picked that model are migrated to
+    /// the Ollama provider by `from_stored`; they never land in this branch.
+    #[test]
+    fn auto_with_a_stored_ollama_model_still_prefers_apple() {
+        let both = [
+            model("apple-intelligence", SummaryProviderKind::AppleIntelligence),
+            model("qwen2.5:7b", SummaryProviderKind::Ollama),
+        ];
+        let settings = settings_with(SummaryProviderChoice::Auto, "qwen2.5:7b");
+        assert_eq!(
+            choose_summary_model(&settings, &both).unwrap(),
+            "apple-intelligence"
+        );
+    }
+
+    #[test]
+    fn a_missing_provider_setting_with_an_ollama_model_is_ollama() {
+        assert_eq!(
+            SummaryProviderChoice::from_stored(None, "qwen2.5:7b"),
+            SummaryProviderChoice::Ollama
+        );
+        assert_eq!(
+            SummaryProviderChoice::from_stored(None, "  "),
+            SummaryProviderChoice::Auto
+        );
+        assert_eq!(
+            SummaryProviderChoice::from_stored(None, APPLE_INTELLIGENCE_MODEL_ID),
+            SummaryProviderChoice::Auto
+        );
+        assert_eq!(
+            SummaryProviderChoice::from_stored(Some(SummaryProviderChoice::Auto), "qwen2.5:7b"),
+            SummaryProviderChoice::Auto,
+            "an explicit Auto must not be rewritten because an Ollama model is stored"
         );
     }
 

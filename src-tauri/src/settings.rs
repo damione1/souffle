@@ -307,14 +307,12 @@ impl AppSettings {
         {
             settings.ollama_url = ollama_url;
         }
-        if let Some(summary_provider) =
-            read_json_setting::<SummaryProviderChoice>(db, SUMMARY_PROVIDER_KEY)?
-        {
-            settings.summary_provider = summary_provider;
-        }
         if let Some(ollama_model) = read_json_setting::<String>(db, OLLAMA_MODEL_KEY)? {
             settings.ollama_model = ollama_model;
         }
+        let stored_provider = read_json_setting::<SummaryProviderChoice>(db, SUMMARY_PROVIDER_KEY)?;
+        settings.summary_provider =
+            SummaryProviderChoice::from_stored(stored_provider, &settings.ollama_model);
         if let Some(debug_transcription) = read_json_setting::<bool>(db, DEBUG_TRANSCRIPTION_KEY)? {
             settings.debug_transcription = debug_transcription;
         }
@@ -1463,6 +1461,39 @@ mod tests {
         assert_eq!(settings.ollama_url, OLLAMA_DEFAULT_URL);
         assert_eq!(shortcuts.toggle, "F6");
         assert_eq!(shortcuts.push_to_talk, "");
+    }
+
+    /// Pre-provider-setting installs stored the engine in `ollama_model`.
+    /// Loading that row with no `summary_provider` key must not default to
+    /// Auto, or those users would silently start hitting Apple Intelligence.
+    #[test]
+    fn missing_summary_provider_with_an_ollama_model_migrates_to_ollama() {
+        let (db, _dir) = test_db();
+        db.set_setting("ollama_model", "\"qwen2.5:7b\"")
+            .expect("save model");
+
+        let settings = AppSettings::load(&db).expect("load settings");
+        assert_eq!(settings.summary_provider, SummaryProviderChoice::Ollama);
+        assert_eq!(settings.ollama_model, "qwen2.5:7b");
+    }
+
+    #[test]
+    fn missing_summary_provider_without_a_model_stays_auto() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings::load(&db).expect("load settings");
+        assert_eq!(settings.summary_provider, SummaryProviderChoice::Auto);
+    }
+
+    #[test]
+    fn explicit_auto_is_kept_even_with_a_stored_ollama_model() {
+        let (db, _dir) = test_db();
+        db.set_setting("summary_provider", "\"auto\"")
+            .expect("save provider");
+        db.set_setting("ollama_model", "\"qwen2.5:7b\"")
+            .expect("save model");
+
+        let settings = AppSettings::load(&db).expect("load settings");
+        assert_eq!(settings.summary_provider, SummaryProviderChoice::Auto);
     }
 
     /// `Keep7d`/`Keep30d` pin an explicit `#[serde(rename)]` because serde's

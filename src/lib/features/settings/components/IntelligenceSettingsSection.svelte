@@ -87,9 +87,14 @@
           : null,
   );
 
-  // Ollama only matters when it could actually be used. Picking Apple
-  // Intelligence must not leave the Ollama setup prompts on screen.
-  let ollamaRelevant = $derived(summaryProvider !== "apple_intelligence");
+  // Ollama's model picker and setup prompts only belong on screen when
+  // Ollama would actually run. Auto + Apple Intelligence available used to
+  // leave the dropdown up, so changing the model looked like it did something
+  // while polish kept using Apple. Explicit Ollama still shows both, even
+  // when Apple is around — that choice is a lock, not a fallback.
+  let ollamaRelevant = $derived(
+    summaryProvider === "ollama" || (summaryProvider === "auto" && !appleIntelligenceAvailable),
+  );
   let showModelPicker = $derived(ollamaRelevant && summaryModels.length > 0);
   // Online but with nothing usable: offer the way out rather than a dead end.
   let showOllamaSetup = $derived(ollamaRelevant && ollamaAvailable && summaryModels.length === 0);

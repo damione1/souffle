@@ -19,7 +19,7 @@ import {
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummaryProviderChoice, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -33,6 +33,24 @@ function defaultMeetingTitle(): string {
 /** Extra silence tolerated after the banner first appears before auto-stop
  * kicks in, on top of the configured silence threshold. */
 const SILENCE_AUTOSTOP_GRACE_SECONDS = 120;
+
+/** Honour the Settings provider so the meeting picker cannot run Apple
+ * Intelligence when the user locked Ollama, or the reverse. Auto keeps
+ * both; the default selection still prefers Apple, matching
+ * `choose_summary_model`. */
+function modelsForSummaryProvider(
+  models: SummaryModelDescriptor[],
+  provider: SummaryProviderChoice,
+): SummaryModelDescriptor[] {
+  const capable = models.filter((model) => model.can_summarize);
+  if (provider === "apple_intelligence") {
+    return capable.filter((model) => model.provider === "apple_intelligence");
+  }
+  if (provider === "ollama") {
+    return capable.filter((model) => model.provider === "ollama");
+  }
+  return capable;
+}
 
 function createMeetingControllerInstance() {
   const app = getAppState();
@@ -143,11 +161,17 @@ function createMeetingControllerInstance() {
       selectedModel = preferredModel;
       return;
     }
+    if (selectedModel && summaryModels.some((model) => model.id === selectedModel)) return;
+
+    const apple = summaryModels.find((model) => model.provider === "apple_intelligence");
+    if (app.settings.summary_provider !== "ollama" && apple) {
+      selectedModel = apple.id;
+      return;
+    }
     if (app.settings.ollama_model && summaryModels.some((model) => model.id === app.settings.ollama_model)) {
       selectedModel = app.settings.ollama_model;
       return;
     }
-    if (selectedModel && summaryModels.some((model) => model.id === selectedModel)) return;
     selectedModel = summaryModels[0].id;
   }
 
@@ -222,7 +246,7 @@ function createMeetingControllerInstance() {
       const status = await getSummaryProvidersStatus();
       ollamaAvailable = status.ollama_available;
       appleIntelligenceAvailable = status.apple_intelligence_available;
-      summaryModels = status.models.filter((model) => model.can_summarize);
+      summaryModels = modelsForSummaryProvider(status.models, app.settings.summary_provider);
       syncSelectedModel(meeting?.summary_model);
     } catch {
       ollamaAvailable = false;
@@ -536,6 +560,7 @@ function createMeetingControllerInstance() {
   }
 
   async function summarizeMeeting() {
+    syncSelectedModel(meeting?.summary_model);
     if (!selectedModel || !meeting || !meeting.id) return;
     const meetingId = meeting.id;
     isSummarizing = true;
