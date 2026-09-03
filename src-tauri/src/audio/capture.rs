@@ -177,6 +177,19 @@ fn count_rebuild_failure(
     }
 }
 
+/// The abort ladder is per-session. A meeting that KeepRetrying-ed on a
+/// live tap can leave the counter at 50; the next dictation must not
+/// Abort on its first transient SetInputPolicy.
+fn reset_mic_loss_ladder(
+    failures: &mut u32,
+    last_counted: &mut Option<Instant>,
+    warned: &mut bool,
+) {
+    *failures = 0;
+    *last_counted = None;
+    *warned = false;
+}
+
 /// The mic-loss ladder's "other source" is a tap that is actually running,
 /// not the user's setting. A meeting that requested system audio but never
 /// got a tap (or lost it) is dictation: abort rather than fake-record.
@@ -330,6 +343,24 @@ mod mic_loss_tests {
         let (n3, _) =
             count_rebuild_failure(n2, Some(t1), t0 + MIC_CHECK_INTERVAL, MIC_CHECK_INTERVAL);
         assert_eq!(n3, 2);
+    }
+
+    #[test]
+    fn mic_loss_ladder_resets_between_sessions() {
+        let mut failures = 50;
+        let mut last = Some(Instant::now());
+        let mut warned = true;
+        reset_mic_loss_ladder(&mut failures, &mut last, &mut warned);
+        assert_eq!(failures, 0);
+        assert_eq!(last, None);
+        assert!(!warned);
+        let (n, _) = count_rebuild_failure(failures, last, Instant::now(), MIC_CHECK_INTERVAL);
+        assert_eq!(n, 1, "first failure of the new session counts from zero");
+        assert_eq!(
+            decide_mic_loss(n, false, false),
+            MicLossAction::KeepRetrying,
+            "a leftover meeting counter must not abort the next dictation"
+        );
     }
 
     #[test]
@@ -927,6 +958,13 @@ impl AudioCapture {
         diarize: bool,
         record_path: Option<PathBuf>,
     ) -> Result<(), String> {
+        let is_new_session = self
+            .active_params
+            .as_ref()
+            .is_none_or(|p| p.session_id != session_id);
+        if is_new_session {
+            self.clear_mic_loss_ladder();
+        }
         // Ensure any previous callback stops emitting immediately. The
         // recorder is NOT torn down here; see `sync_recorder`, so a
         // mid-session mic rebuild (same session_id) keeps recording to the
@@ -1382,9 +1420,7 @@ impl AudioCapture {
             params.record_path.clone(),
         ) {
             Ok(()) => {
-                self.mic_rebuild_failures = 0;
-                self.last_counted_failure = None;
-                self.mic_loss_warned = false;
+                self.clear_mic_loss_ladder();
                 if resolved_changed && resolved != self.mic_device_uid {
                     warn!(
                         "Input route did not converge on the resolved device \
@@ -1456,6 +1492,14 @@ impl AudioCapture {
             }
         }
         false
+    }
+
+    fn clear_mic_loss_ladder(&mut self) {
+        reset_mic_loss_ladder(
+            &mut self.mic_rebuild_failures,
+            &mut self.last_counted_failure,
+            &mut self.mic_loss_warned,
+        );
     }
 
     /// A process tap that is still owned by this session. The system-audio
@@ -1654,6 +1698,7 @@ impl AudioCapture {
         self.finish_recording();
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
+        self.clear_mic_loss_ladder();
     }
 
     fn abort_after_panic(&mut self) {
@@ -1715,6 +1760,7 @@ impl AudioCapture {
         self.last_mic_callback_ms.store(0, Ordering::Relaxed);
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
+        self.clear_mic_loss_ladder();
 
         // Stop IO and dispose the AudioUnit — after this, no callback runs
         // and a Bluetooth headset can leave HFP/mono for A2DP stereo.
