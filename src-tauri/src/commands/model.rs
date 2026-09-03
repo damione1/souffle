@@ -111,13 +111,21 @@ pub fn download_model(
         return Ok(());
     }
 
-    // Switching to a different, not-yet-downloaded model while one is loaded:
-    // drop the current engine first so the state machine can move out of
-    // Ready (it tracks a single profile through download → load → ready).
     let machine = state.current_machine_state()?;
     if machine.is_recording() {
         return Err("Cannot switch models while recording".into());
     }
+
+    // Auto-recover from a previous failure so picking another model works
+    // without restarting the app (mirrors `load_model`).
+    if matches!(machine, AppStateMachine::Error { .. }) {
+        state.apply_transition(StateAction::Recover)?;
+    }
+
+    // Switching to a different, not-yet-downloaded model while one is loaded:
+    // drop the current engine first so the state machine can move out of
+    // Ready (it tracks a single profile through download → load → ready).
+    let machine = state.current_machine_state()?;
     if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
         state.apply_transition(StateAction::Unload { next_profile: None })?;
         state.engine_actor.unload_model()?;
@@ -232,7 +240,9 @@ pub fn load_model(
             state.apply_transition(StateAction::DownloadComplete)?;
         }
 
-        state.apply_transition(StateAction::StartLoad)?;
+        state.apply_transition(StateAction::StartLoad {
+            profile: profile.clone(),
+        })?;
     }
 
     info!(path = %model_dir.display(), "Loading model");

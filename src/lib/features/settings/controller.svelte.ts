@@ -133,9 +133,10 @@ export function createSettingsController() {
 
   async function refreshRuntimeStatus() {
     try {
-      await refreshTranscriptionRuntimeStatus(app, catalog);
+      return await refreshTranscriptionRuntimeStatus(app, catalog);
     } catch (e) {
       statusMessage = errorMessage(e);
+      return null;
     }
   }
 
@@ -323,14 +324,19 @@ export function createSettingsController() {
       settings.transcription_backend_id = option.backendId;
     });
 
-    if (app.transcriptionRuntimePhase === "download_required") {
+    // Branch on the phase the backend just reported for the newly selected
+    // model, never on stored state a StateChanged event may have overwritten
+    // with the previous model's phase.
+    const phase = await refreshRuntimeStatus();
+
+    if (phase === "download_required") {
       await startTranscriptionModelDownload(
         app,
         catalog,
         (message) => { statusMessage = message; },
         { autoLoad: true },
       );
-    } else if (app.transcriptionRuntimePhase === "load_required") {
+    } else if (phase === "load_required") {
       await startTranscriptionModelLoad(app, catalog, (message) => {
         statusMessage = message;
       });

@@ -30,6 +30,7 @@
   import { applyTheme, errorMessage } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
   import { decideShowSetupWizard, readSetupFlags } from "./lib/features/onboarding/setup";
+  import type { TranscriptionCatalog } from "./lib/types";
 
   const app = getAppState();
   // Mounted app-level so the global dictation shortcut works whatever view
@@ -66,7 +67,18 @@
     releaseNotes: string | null;
     releaseUrl: string | null;
   } | null>(null);
-  let modelLabel = $state("");
+  // Catalog is static; the label follows the *current* selection so the chip
+  // updates as soon as the user switches model (no app restart needed).
+  let transcriptionCatalog = $state<TranscriptionCatalog | null>(null);
+  const modelLabel = $derived(
+    app.settings.transcription_model_id
+      ? getSelectedTranscriptionModel(
+          transcriptionCatalog,
+          app.settings.transcription_engine_id,
+          app.settings.transcription_model_id,
+        )?.label ?? ""
+      : "",
+  );
 
   const isLightTheme = $derived(
     app.settings.theme === "light" ||
@@ -129,12 +141,7 @@
       }
       cleanupTranscription = (await transcription.mount()) ?? (() => {});
       try {
-        const catalog = await getTranscriptionCatalog();
-        modelLabel = getSelectedTranscriptionModel(
-          catalog,
-          app.settings.transcription_engine_id,
-          app.settings.transcription_model_id,
-        )?.label ?? "";
+        transcriptionCatalog = await getTranscriptionCatalog();
       } catch {
         // Header chip simply omits the model name.
       }
