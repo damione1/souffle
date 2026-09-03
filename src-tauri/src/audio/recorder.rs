@@ -247,6 +247,42 @@ enum RecorderMsg {
     Chunk(Vec<f32>),
 }
 
+/// Flush then finish, each under `catch_unwind`, so a poisoned resampler
+/// cannot skip the Ogg EndStream page.
+#[cfg(test)]
+fn run_guarded_finalize(flush: impl FnOnce(), finish: impl FnOnce()) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(flush)).is_err() {
+        tracing::warn!("Meeting recorder panicked on resampler flush; still finalizing the file");
+    }
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(finish)).is_err() {
+        tracing::warn!("Meeting recorder panicked while finishing the file");
+    }
+}
+
+fn finalize_recorder_writer<W: Write>(
+    resampler: &mut Option<super::resampler::Resampler>,
+    writer: &mut OggOpusWriter<W>,
+) {
+    if let Some(r) = resampler.as_mut() {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.flush())) {
+            Ok(tail) if !tail.is_empty() => {
+                if let Err(e) = writer.write_chunk(&tail) {
+                    tracing::warn!("Meeting recorder tail flush error: {e}");
+                }
+            }
+            Ok(_) => {}
+            Err(_) => tracing::warn!(
+                "Meeting recorder panicked on resampler flush; still finalizing the file"
+            ),
+        }
+    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| writer.finish())) {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::warn!("Meeting recorder finalize error: {e}"),
+        Err(_) => tracing::warn!("Meeting recorder panicked while finishing the file"),
+    }
+}
+
 /// Feeds mono f32 PCM to a background writer thread that encodes it to an
 /// Ogg Opus file. One instance per recording session (see
 /// `capture::AudioCapture`'s recorder field — it survives mid-session
@@ -282,30 +318,27 @@ impl MeetingRecorder {
                     .then(|| super::resampler::Resampler::new(sample_rate, 1, encode_rate, 1.0));
 
                 while let Ok(RecorderMsg::Chunk(samples)) = rx.recv() {
-                    let owned;
-                    let encode_samples: &[f32] = match resampler.as_mut() {
-                        Some(r) => {
-                            owned = r.process(&samples);
-                            &owned
-                        }
-                        None => &samples,
-                    };
-                    if let Err(e) = writer.write_chunk(encode_samples) {
-                        tracing::warn!("Meeting recorder encode error: {e}");
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let owned;
+                        let encode_samples: &[f32] = match resampler.as_mut() {
+                            Some(r) => {
+                                owned = r.process(&samples);
+                                &owned
+                            }
+                            None => &samples,
+                        };
+                        writer.write_chunk(encode_samples)
+                    }));
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => tracing::warn!("Meeting recorder encode error: {e}"),
+                        Err(_) => tracing::warn!(
+                            "Meeting recorder panicked on a chunk; skipping it and keeping the file"
+                        ),
                     }
                 }
 
-                if let Some(r) = resampler.as_mut() {
-                    let tail = r.flush();
-                    if !tail.is_empty()
-                        && let Err(e) = writer.write_chunk(&tail)
-                    {
-                        tracing::warn!("Meeting recorder tail flush error: {e}");
-                    }
-                }
-                if let Err(e) = writer.finish() {
-                    tracing::warn!("Meeting recorder finalize error: {e}");
-                }
+                finalize_recorder_writer(&mut resampler, &mut writer);
             })
             .map_err(|e| format!("Spawn meeting recorder thread: {e}"))?;
 
@@ -418,6 +451,20 @@ mod tests {
         assert_eq!(&bytes[0..4], b"OggS", "file must start with an Ogg page");
         // Granule position should reflect ~2s at 48kHz-equivalent samples.
         assert!(writer.granule_position >= 95_000 && writer.granule_position <= 97_000);
+    }
+
+    #[test]
+    fn finalize_still_runs_after_flush_panic() {
+        use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+        let finished = AtomicBool::new(false);
+        run_guarded_finalize(
+            || panic!("poisoned resampler"),
+            || finished.store(true, AtomicOrdering::Relaxed),
+        );
+        assert!(
+            finished.load(AtomicOrdering::Relaxed),
+            "EndStream must still run after a flush panic"
+        );
     }
 
     #[test]

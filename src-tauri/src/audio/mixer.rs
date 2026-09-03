@@ -78,15 +78,46 @@ impl MeetingMixer {
         self.aec = aec;
     }
 
+    /// Swap the microphone ring after a mid-session rebuild. The tap ring,
+    /// its resampler, and AEC stay put so a USB/BT mic flip does not tear
+    /// down a live process tap (and lose system audio if the new tap fails).
+    pub fn replace_mic(
+        &mut self,
+        mic: HeapCons<f32>,
+        mic_rate: u32,
+        mic_channels: u16,
+        mic_gain: f32,
+    ) {
+        self.mic = mic;
+        self.mic_to_mix = Resampler::new(mic_rate, mic_channels, MIX_RATE, mic_gain);
+        self.mic_fifo.clear();
+    }
+
     /// Drain both rings, mix every complete 10ms frame, and return the
     /// resulting engine-rate samples (possibly empty).
     pub fn tick(&mut self) -> Vec<f32> {
-        self.ingest();
+        self.tick_inner(false)
+    }
+
+    /// Like [`tick`], but when the mic fifo has no full frame, pace on the
+    /// tap so a dead mic does not discard system audio as "lead".
+    pub fn tick_on_tap_clock(&mut self) -> Vec<f32> {
+        self.tick_inner(true)
+    }
+
+    fn tick_inner(&mut self, tap_clock: bool) -> Vec<f32> {
+        self.ingest(!tap_clock);
 
         let mut out = Vec::new();
         while self.mic_fifo.len() >= FRAME_SAMPLES {
             let frame = self.mix_frame(FRAME_SAMPLES);
             out.extend(self.to_engine.process(&frame));
+        }
+        if tap_clock {
+            while self.tap_fifo.len() >= FRAME_SAMPLES {
+                let frame = self.tap_only_frame(FRAME_SAMPLES);
+                out.extend(self.to_engine.process(&frame));
+            }
         }
         out
     }
@@ -94,7 +125,7 @@ impl MeetingMixer {
     /// Final drain when the session stops: both producers are gone, so
     /// everything left in the rings, FIFOs, and resampler tails comes out.
     pub fn flush(&mut self) -> Vec<f32> {
-        let mut out = self.tick();
+        let mut out = self.tick_on_tap_clock();
 
         let mic_tail = self.mic_to_mix.flush();
         self.mic_fifo.extend(mic_tail);
@@ -122,7 +153,16 @@ impl MeetingMixer {
     /// system audio). Each leg has its own engine resampler so their stream
     /// states don't interfere.
     pub fn tick_split(&mut self) -> (Vec<f32>, Vec<f32>) {
-        self.ingest();
+        self.tick_split_inner(false)
+    }
+
+    /// Diarized counterpart of [`tick_on_tap_clock`].
+    pub fn tick_split_on_tap_clock(&mut self) -> (Vec<f32>, Vec<f32>) {
+        self.tick_split_inner(true)
+    }
+
+    fn tick_split_inner(&mut self, tap_clock: bool) -> (Vec<f32>, Vec<f32>) {
+        self.ingest(!tap_clock);
 
         let (mut me, mut them) = (Vec::new(), Vec::new());
         while self.mic_fifo.len() >= FRAME_SAMPLES {
@@ -130,12 +170,18 @@ impl MeetingMixer {
             me.extend(self.to_engine.process(&mic));
             them.extend(self.tap_to_engine.process(&tap));
         }
+        if tap_clock {
+            while self.tap_fifo.len() >= FRAME_SAMPLES {
+                let tap: Vec<f32> = self.tap_fifo.drain(..FRAME_SAMPLES).collect();
+                them.extend(self.tap_to_engine.process(&tap));
+            }
+        }
         (me, them)
     }
 
     /// Diarized counterpart of `flush`.
     pub fn flush_split(&mut self) -> (Vec<f32>, Vec<f32>) {
-        let (mut me, mut them) = self.tick_split();
+        let (mut me, mut them) = self.tick_split_on_tap_clock();
 
         let mic_tail = self.mic_to_mix.flush();
         self.mic_fifo.extend(mic_tail);
@@ -164,7 +210,7 @@ impl MeetingMixer {
         self.tap_discarded
     }
 
-    fn ingest(&mut self) {
+    fn ingest(&mut self, bound_tap_lead: bool) {
         loop {
             let n = self.mic.pop_slice(&mut self.scratch);
             if n == 0 {
@@ -182,13 +228,16 @@ impl MeetingMixer {
             self.tap_fifo.extend(resampled);
         }
 
-        // Bound how far the tap leg can run ahead of the mic (clock drift,
-        // or a stalled mic device): drop the oldest excess.
-        let max_len = self.mic_fifo.len() + MAX_TAP_LEAD_SAMPLES;
-        if self.tap_fifo.len() > max_len {
-            let excess = self.tap_fifo.len() - max_len;
-            self.tap_fifo.drain(..excess);
-            self.tap_discarded += excess as u64;
+        // Bound how far the tap leg can run ahead of the mic (clock drift).
+        // Skip this when pacing on the tap: a dead mic would otherwise make
+        // us discard the only remaining source as "lead".
+        if bound_tap_lead {
+            let max_len = self.mic_fifo.len() + MAX_TAP_LEAD_SAMPLES;
+            if self.tap_fifo.len() > max_len {
+                let excess = self.tap_fifo.len() - max_len;
+                self.tap_fifo.drain(..excess);
+                self.tap_discarded += excess as u64;
+            }
         }
     }
 
@@ -201,6 +250,15 @@ impl MeetingMixer {
             *sample = (*sample + *tap).clamp(-1.0, 1.0);
         }
         mic
+    }
+
+    /// System-audio frame with no mic to pair. Used when the mic stream is
+    /// down and the tap is the session's only live source.
+    fn tap_only_frame(&mut self, n: usize) -> Vec<f32> {
+        let tap_n = n.min(self.tap_fifo.len());
+        let mut tap: Vec<f32> = self.tap_fifo.drain(..tap_n).collect();
+        tap.resize(n, 0.0);
+        tap
     }
 
     /// Drain one frame from each leg and echo-cancel the mic, but return the
@@ -301,6 +359,73 @@ mod tests {
             "excess tap lead should be dropped"
         );
         assert!(mixer.tap_fifo.len() <= MAX_TAP_LEAD_SAMPLES + FRAME_SAMPLES);
+    }
+
+    #[test]
+    fn tap_clock_emits_system_audio_when_mic_is_empty() {
+        let (_mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        tap.push_slice(&vec![0.4f32; 4_800]);
+        assert!(
+            mixer.tick().is_empty(),
+            "mic clock must not invent frames from tap alone"
+        );
+        let out = mixer.tick_on_tap_clock();
+        assert!(
+            !out.is_empty(),
+            "a dead mic must still deliver the live tap, not discard it as lead"
+        );
+        let mid = out[out.len() / 2];
+        assert!((mid - 0.4).abs() < 0.05, "expected ~0.4, got {mid}");
+    }
+
+    #[test]
+    fn tap_clock_does_not_discard_lead_when_mic_is_empty() {
+        let (_mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+        // More than MAX_TAP_LEAD_SAMPLES (12_000): mic-clock ingest would drop it.
+        tap.push_slice(&vec![0.4f32; 24_000]);
+        let out = mixer.tick_on_tap_clock();
+        assert!(!out.is_empty());
+        assert_eq!(
+            mixer.tap_discarded(),
+            0,
+            "a dead mic must not treat the live tap as clock-drift lead"
+        );
+    }
+
+    #[test]
+    fn tap_clock_split_puts_system_audio_on_them_only() {
+        let (_mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        tap.push_slice(&vec![0.3f32; 4_800]);
+        let (me, them) = mixer.tick_split_on_tap_clock();
+        assert!(me.is_empty(), "no mic frames to emit");
+        assert!(!them.is_empty(), "them must carry the tap");
+        let mid = them[them.len() / 2];
+        assert!((mid - 0.3).abs() < 0.05, "expected ~0.3, got {mid}");
+    }
+
+    #[test]
+    fn replace_mic_keeps_buffered_tap() {
+        let (old_mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+        tap.push_slice(&vec![0.2f32; FRAME_SAMPLES]);
+        // Ingest the tap into the fifo without a mic frame so it stays put.
+        assert!(mixer.tick().is_empty());
+        drop(old_mic);
+
+        let (mut new_mic, new_cons) = HeapRb::<f32>::new(48_000 * 2).split();
+        mixer.replace_mic(new_cons, 48_000, 1, 1.0);
+        new_mic.push_slice(&vec![0.1f32; FRAME_SAMPLES]);
+        let mut out = mixer.tick();
+        out.extend(mixer.flush());
+
+        assert!(!out.is_empty());
+        // Cross-rate FFT buffering plus the flush pad means the mix may not
+        // sit at the midpoint; any sample near 0.3 proves the tap survived.
+        assert!(
+            out.iter().any(|s| (*s - 0.3).abs() < 0.05),
+            "replaced mic must still mix with the tap that survived the rebuild"
+        );
     }
 
     #[test]
@@ -409,7 +534,13 @@ mod aec_bench {
     /// Sum of sinusoids at `freqs` plus a touch of low-pass-filtered noise,
     /// so the signal has broadband content like real speech/video audio
     /// rather than a single tone.
-    fn synth_wideband(len: usize, sample_rate: u32, freqs: &[(f32, f32)], noise_amp: f32, seed: u64) -> Vec<f32> {
+    fn synth_wideband(
+        len: usize,
+        sample_rate: u32,
+        freqs: &[(f32, f32)],
+        noise_amp: f32,
+        seed: u64,
+    ) -> Vec<f32> {
         let mut rng = Xorshift(seed);
         let mut noise_state = 0.0f32;
         (0..len)
@@ -471,7 +602,15 @@ mod aec_bench {
         let (mut tap_prod, tap_cons) = HeapRb::<f32>::new(sample_rate as usize).split();
         // engine_rate == MIX_RATE: no cross-resampling, so the bench measures
         // the AEC's contribution in isolation from resampler artifacts.
-        let mut mixer = MeetingMixer::new(mic_cons, sample_rate, 1, 1.0, tap_cons, sample_rate, sample_rate);
+        let mut mixer = MeetingMixer::new(
+            mic_cons,
+            sample_rate,
+            1,
+            1.0,
+            tap_cons,
+            sample_rate,
+            sample_rate,
+        );
         let mut aec = Aec::new(sample_rate);
         if let Some(hint) = expected_delay_hint_ms {
             aec.set_expected_delay_ms(hint);
@@ -523,7 +662,9 @@ mod aec_bench {
         let mut converge_frame = None;
         for i in 0..n_frames.saturating_sub(sustain_frames) {
             let window_pre: f32 = echo_energy_per_frame[i..i + sustain_frames].iter().sum();
-            let window_post: f32 = residual_energy_per_frame[i..i + sustain_frames].iter().sum();
+            let window_post: f32 = residual_energy_per_frame[i..i + sustain_frames]
+                .iter()
+                .sum();
             if window_post < window_pre * 0.1 {
                 converge_frame = Some(i);
                 break;
@@ -553,7 +694,9 @@ mod aec_bench {
         println!(
             "AEC bench (no stream_delay_ms hint, 50ms acoustic delay): ERLE post-convergence = \
              {erle_db:.1} dB, convergence at ~{}ms",
-            converge_frame.map(|f| f * 10).map_or("never".to_string(), |ms| ms.to_string())
+            converge_frame
+                .map(|f| f * 10)
+                .map_or("never".to_string(), |ms| ms.to_string())
         );
         assert!(
             erle_db > DOUBLE_TALK_ERLE_FLOOR_DB,
@@ -568,7 +711,9 @@ mod aec_bench {
         println!(
             "AEC bench (50ms stream_delay_ms hint, 50ms acoustic delay): ERLE post-convergence = \
              {erle_db:.1} dB, convergence at ~{}ms",
-            converge_frame.map(|f| f * 10).map_or("never".to_string(), |ms| ms.to_string())
+            converge_frame
+                .map(|f| f * 10)
+                .map_or("never".to_string(), |ms| ms.to_string())
         );
         assert!(
             erle_db > DOUBLE_TALK_ERLE_FLOOR_DB,
@@ -587,8 +732,9 @@ mod aec_bench {
         println!(
             "AEC bench (echo only, no voice, 50ms hint, 50ms acoustic delay): ERLE \
              post-convergence = {erle_db:.1} dB, convergence at ~{}ms",
-            converge_frame.map(|f| f * 10).map_or("never".to_string(), |ms| ms.to_string())
+            converge_frame
+                .map(|f| f * 10)
+                .map_or("never".to_string(), |ms| ms.to_string())
         );
     }
-
 }
