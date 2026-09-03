@@ -60,8 +60,15 @@ const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(66);
 /// Consecutive rebuild failures after which a dictation session (mic is the
 /// only source) gives up and ends itself, rather than retrying forever
 /// while the UI still claims to be recording. ~10s at the `MIC_CHECK_INTERVAL`
-/// cadence.
+/// cadence — failures closer together than that interval do not increment
+/// the counter (a BT/dock DeviceList burst must not burn the 5 slots in ms
+/// and then kill the capture thread for the process lifetime).
 const DICTATION_ABORT_AFTER_FAILURES: u32 = 5;
+
+/// `spawn_tap` can block this thread for up to 5s. A missing tap is retried
+/// on the next mic rebuild, but not more often than this, so a flapping
+/// mic does not stall the mixer every `MIC_CHECK_INTERVAL`.
+const TAP_RETRY_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Decision for one mic-loss episode in `check_mic_health`, given how many
 /// rebuilds have failed in a row, whether the session has another audio
@@ -139,12 +146,35 @@ fn should_rebuild_mic(
 /// Tearing them down first meant a failed reopen also killed system audio,
 /// after which the `capture_system_audio` *setting* still counted as a
 /// fallback and the session recorded silence.
+///
+/// `tap_owned` is a live `TapHandle`, not the setting. A `MeetingState`
+/// whose `spawn_tap` failed (`tap: None`) must fall through and retry —
+/// unless `tap_retry_ready` is false, which rate-limits the 5s spawn.
 fn should_reuse_meeting(
     existing_session: Option<u64>,
     new_session: u64,
     capture_system_audio: bool,
+    tap_owned: bool,
+    tap_retry_ready: bool,
 ) -> bool {
-    capture_system_audio && existing_session == Some(new_session)
+    if !(capture_system_audio && existing_session == Some(new_session)) {
+        return false;
+    }
+    tap_owned || !tap_retry_ready
+}
+
+/// Count a rebuild failure only when `min_interval` has elapsed since the
+/// last counted one. Returns the new (count, timestamp-of-this-count).
+fn count_rebuild_failure(
+    failures: u32,
+    last_counted: Option<Instant>,
+    now: Instant,
+    min_interval: Duration,
+) -> (u32, Instant) {
+    match last_counted {
+        Some(t) if now.saturating_duration_since(t) < min_interval => (failures, t),
+        _ => (failures.saturating_add(1), now),
+    }
 }
 
 /// The mic-loss ladder's "other source" is a tap that is actually running,
@@ -256,16 +286,50 @@ mod mic_loss_tests {
 
     #[test]
     fn reuses_meeting_only_for_same_session_with_system_audio() {
-        assert!(should_reuse_meeting(Some(7), 7, true));
+        assert!(should_reuse_meeting(Some(7), 7, true, true, false));
         assert!(
-            !should_reuse_meeting(Some(7), 8, true),
+            !should_reuse_meeting(Some(7), 8, true, true, false),
             "a new session must tear the old tap down"
         );
         assert!(
-            !should_reuse_meeting(Some(7), 7, false),
+            !should_reuse_meeting(Some(7), 7, false, true, false),
             "dictation must not keep a leftover meeting tap"
         );
-        assert!(!should_reuse_meeting(None, 7, true));
+        assert!(!should_reuse_meeting(None, 7, true, true, false));
+    }
+
+    #[test]
+    fn missing_tap_is_retried_once_the_window_opens() {
+        assert!(
+            should_reuse_meeting(Some(7), 7, true, false, false),
+            "a just-failed spawn_tap must not be retried on the next 2s tick"
+        );
+        assert!(
+            !should_reuse_meeting(Some(7), 7, true, false, true),
+            "a MeetingState with tap: None must fall through to spawn_tap"
+        );
+        assert!(
+            should_reuse_meeting(Some(7), 7, true, true, true),
+            "an owned tap is never torn down just because the retry window opened"
+        );
+    }
+
+    #[test]
+    fn rebuild_failures_are_not_counted_inside_the_check_interval() {
+        let t0 = Instant::now();
+        let (n1, t1) = count_rebuild_failure(0, None, t0, MIC_CHECK_INTERVAL);
+        assert_eq!(n1, 1);
+        let (n2, t2) = count_rebuild_failure(
+            n1,
+            Some(t1),
+            t0 + Duration::from_millis(10),
+            MIC_CHECK_INTERVAL,
+        );
+        assert_eq!(n2, 1, "a DeviceList burst must not burn the abort ladder");
+        assert_eq!(t2, t1);
+        let (n3, _) =
+            count_rebuild_failure(n2, Some(t1), t0 + MIC_CHECK_INTERVAL, MIC_CHECK_INTERVAL);
+        assert_eq!(n3, 2);
     }
 
     #[test]
@@ -398,6 +462,9 @@ struct MeetingState {
     /// instead of one mixed stream.
     diarize: bool,
     ticks: u32,
+    /// Last `spawn_tap` attempt (success or fail). Caps retries so a
+    /// flapping mic rebuild cannot block this thread for 5s every 2s.
+    last_tap_attempt: Instant,
 }
 
 impl MeetingState {
@@ -605,6 +672,10 @@ pub struct AudioCapture {
     /// Whether the current mic-loss episode already surfaced its one-time
     /// warning (meeting mode only); re-armed on the next successful rebuild.
     mic_loss_warned: bool,
+    /// When the last rebuild failure was counted toward `mic_rebuild_failures`.
+    /// Bursts of CoreAudio DeviceList / DefaultInput notifications must not
+    /// increment the counter faster than `MIC_CHECK_INTERVAL`.
+    last_counted_failure: Option<Instant>,
     /// Shared with the engine actor. Set right before this thread exits
     /// after giving up on an unrecoverable microphone, so the actor's
     /// AudioGone handler can surface a mic-specific message instead of its
@@ -660,6 +731,7 @@ impl AudioCapture {
                     level_throttle: AudioLevelThrottle::new(),
                     mic_rebuild_failures: 0,
                     mic_loss_warned: false,
+                    last_counted_failure: None,
                     audio_gone_reason,
                 };
 
@@ -866,6 +938,8 @@ impl AudioCapture {
             self.meeting.as_ref().map(|m| m.session_id),
             session_id,
             capture_system_audio,
+            self.tap_owned_for_reuse(),
+            self.tap_retry_ready(),
         ) {
             self.meeting.take();
         }
@@ -1228,6 +1302,7 @@ impl AudioCapture {
             aec_active,
             diarize,
             ticks: 0,
+            last_tap_attempt: Instant::now(),
         });
 
         info!("Meeting audio capture started (mic + system audio)");
@@ -1308,6 +1383,7 @@ impl AudioCapture {
         ) {
             Ok(()) => {
                 self.mic_rebuild_failures = 0;
+                self.last_counted_failure = None;
                 self.mic_loss_warned = false;
                 if resolved_changed && resolved != self.mic_device_uid {
                     warn!(
@@ -1320,7 +1396,14 @@ impl AudioCapture {
                 false
             }
             Err(e) => {
-                self.mic_rebuild_failures += 1;
+                let (n, counted_at) = count_rebuild_failure(
+                    self.mic_rebuild_failures,
+                    self.last_counted_failure,
+                    Instant::now(),
+                    MIC_CHECK_INTERVAL,
+                );
+                self.mic_rebuild_failures = n;
+                self.last_counted_failure = Some(counted_at);
                 warn!(
                     "Capture rebuild failed ({} in a row): {e}",
                     self.mic_rebuild_failures
@@ -1377,10 +1460,40 @@ impl AudioCapture {
 
     /// A process tap that is still owned by this session. The system-audio
     /// *setting* is not enough: a rebuild may have already dropped the tap.
+    /// Ownership, not IOProc liveness — a zombie handle still counts.
     fn tap_is_live(&self) -> bool {
         #[cfg(target_os = "macos")]
         {
             self.meeting.as_ref().is_some_and(|m| m.tap.is_some())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// Whether `should_reuse_meeting` may keep the current mixer. On macOS
+    /// this is a tap handle; elsewhere there is nothing to recover so a
+    /// same-session meeting mixer is always reusable.
+    fn tap_owned_for_reuse(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.tap_is_live()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.meeting.is_some()
+        }
+    }
+
+    /// Missing tap + retry window elapsed. `spawn_tap` blocks up to 5s, so
+    /// this must stay false on the 2s health cadence after a failed spawn.
+    fn tap_retry_ready(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.meeting.as_ref().is_some_and(|m| {
+                m.tap.is_none() && m.last_tap_attempt.elapsed() >= TAP_RETRY_INTERVAL
+            })
         }
         #[cfg(not(target_os = "macos"))]
         {

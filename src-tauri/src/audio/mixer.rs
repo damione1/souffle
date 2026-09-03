@@ -380,6 +380,20 @@ mod tests {
     }
 
     #[test]
+    fn tap_clock_does_not_discard_lead_when_mic_is_empty() {
+        let (_mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+        // More than MAX_TAP_LEAD_SAMPLES (12_000): mic-clock ingest would drop it.
+        tap.push_slice(&vec![0.4f32; 24_000]);
+        let out = mixer.tick_on_tap_clock();
+        assert!(!out.is_empty());
+        assert_eq!(
+            mixer.tap_discarded(),
+            0,
+            "a dead mic must not treat the live tap as clock-drift lead"
+        );
+    }
+
+    #[test]
     fn tap_clock_split_puts_system_audio_on_them_only() {
         let (_mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
 
