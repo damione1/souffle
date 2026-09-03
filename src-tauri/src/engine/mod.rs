@@ -1,3 +1,4 @@
+pub mod batch_windows;
 pub mod kyutai;
 pub mod parakeet;
 pub mod whisper;
@@ -247,7 +248,11 @@ pub trait TranscriptionEngine {
 
     /// Heuristic meeting-language prior for LID and lane resets (Kyutai only).
     /// Never passed to the engine as a forced decode language.
-    fn set_meeting_language_prior(&mut self, _prior: crate::settings::MeetingTranscriptionLanguage) {}
+    fn set_meeting_language_prior(
+        &mut self,
+        _prior: crate::settings::MeetingTranscriptionLanguage,
+    ) {
+    }
 
     /// Transcribe one paired frame from both streams (mic = Me, system = Them),
     /// returning segments already tagged with their speaker. Only valid after
