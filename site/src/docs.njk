@@ -32,7 +32,7 @@ isDocs: true
         {%- elif b.table %}
         <div class="docs-table">
           {%- for row in b.table %}
-          <div class="docs-row"><span class="docs-k">{{ row[0] }}</span><span class="docs-v">{{ row[1] | safe }}</span></div>
+          <div class="docs-row"><span class="docs-k">{{ row[0] | safe }}</span><span class="docs-v">{{ row[1] | safe }}</span></div>
           {%- endfor %}
         </div>
         {%- endif %}

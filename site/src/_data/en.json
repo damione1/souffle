@@ -32,7 +32,7 @@
       "mock": "home",
       "flip": false,
       "title": "Meetings that know who is talking.",
-      "body": "System-audio capture separates <em class=\"me\">Me</em> from <em class=\"them\">Them</em> in the live transcript, with no virtual audio device to install. Recording stays hands-off: it offers to start when a calendar meeting begins, notices when the meeting seems over, and survives a closed lid.",
+      "body": "System-audio capture separates <em class=\"me\">Me</em> from <em class=\"them\">Them</em> in the live transcript, with no virtual audio device to install. Recording stays hands-off: it offers to start when a calendar meeting begins, notices when the meeting seems over, and picks back up where it left off when your Mac wakes.",
       "bullets": [
         "Optional Opus audio with a retention policy, replayable by clicking the transcript",
         "Recovers or salvages the session if the engine stalls or the mic disappears",
@@ -47,9 +47,11 @@
       "mock": "dictation",
       "flip": true,
       "title": "Speak a paragraph, get a paragraph.",
-      "body": "The text streams in while you are still talking, punctuated and capitalised. A local pass can tidy the phrasing before you use it, and the default model handles French and English without you switching anything.",
+      "body": "With the default model the text streams in while you are still talking, punctuated and capitalised. A local pass can tidy the phrasing before you use it, and that same model handles French and English without you switching anything.",
       "bullets": [
         "Text appears as you speak, not once you stop",
+        "Press once to start and stop, or hold to talk",
+        "Fix a misheard name by hand once, and it stays fixed",
         "A local LLM pass can polish the wording, with editable prompts",
         "French and English on the same model, no switching"
       ],
@@ -90,33 +92,36 @@
   "models": {
     "eyebrow": "Speech models",
     "title": "Pick the trade-off you want.",
-    "sub": "All four run locally, downloaded on first use. Switch whenever you like.",
+    "sub": "All four run locally, downloaded on first use. The two Kyutai models stream text as you speak; the other two transcribe once you stop.",
     "cards": [
       {
         "name": "Kyutai STT 1B",
         "tag": "Default",
         "featured": true,
-        "desc": "French and English streaming transcription, the one most people should stay on.",
+        "desc": "French and English, streaming as you talk. The one most people should stay on.",
         "chips": [
           "2.4 GB",
+          "Streaming",
           "Metal · Candle",
           "FR + EN"
         ]
       },
       {
         "name": "Kyutai STT 2.6B",
-        "desc": "English only, noticeably higher quality, if you have the disk and the patience.",
+        "desc": "English only, streaming, noticeably higher quality if you have the disk and the patience.",
         "chips": [
           "5.6 GB",
+          "Streaming",
           "Metal · Candle",
           "EN"
         ]
       },
       {
         "name": "Whisper Large V3 Turbo",
-        "desc": "Multilingual and familiar, through whisper.cpp on the GPU.",
+        "desc": "Multilingual and familiar, through whisper.cpp on the GPU. Transcribes once you stop.",
         "chips": [
           "1.6 GB",
+          "On stop",
           "Metal · whisper.cpp",
           "Multilingual"
         ]
@@ -124,9 +129,10 @@
       {
         "name": "Parakeet TDT 0.6B v3",
         "tag": "Smallest",
-        "desc": "25 languages with punctuation and capitalization, fast on the CPU alone.",
+        "desc": "25 languages with punctuation and capitalization, fast on the CPU alone. Transcribes once you stop.",
         "chips": [
           "670 MB int8",
+          "On stop",
           "CPU · ONNX",
           "25 languages"
         ]
@@ -173,7 +179,7 @@
       },
       {
         "k": "Summaries",
-        "v": "Apple Intelligence or a local Ollama<br>(transcription needs neither)"
+        "v": "Apple Intelligence (macOS 26+)<br>or a local Ollama"
       }
     ],
     "permTitle": "Permissions, asked when needed",
@@ -196,8 +202,8 @@
         "v": "Lists today's events, optional"
       }
     ],
-    "statusTitle": "Early and actively developed.",
-    "status": "Every release is signed and notarized and the engineering is covered by a large test suite, but the app has run on very few machines, and the fragile parts are the ones that vary most from one Mac to another: audio routing, Bluetooth headsets, docks, permission prompts. Expect rough edges there, and please report them."
+    "statusTitle": "Open source, actively developed.",
+    "status": "Every release is signed and notarized, and the engineering is covered by a large test suite. Macs differ enormously in audio hardware and routing, so if something does not behave on yours, please open an issue with the details."
   },
   "cta": {
     "title": "Try it on your next meeting.",
@@ -404,7 +410,7 @@
   "docs": {
     "eyebrow": "Documentation",
     "title": "Everything Soufflé does, and what it needs to do it.",
-    "intro": "Short pages, written for someone who has just downloaded the app. Nothing here requires an account, a key, or a network connection beyond the first model download.",
+    "intro": "What Soufflé does, what it needs, and where it keeps things. Nothing here requires an account, an API key, or a network connection beyond the first model download.",
     "groups": [
       {
         "label": "Getting started",
@@ -435,6 +441,10 @@
             "Dictation"
           ],
           [
+            "shortcuts",
+            "Shortcuts"
+          ],
+          [
             "overlay",
             "The overlay"
           ],
@@ -449,6 +459,10 @@
           [
             "models",
             "Speech models"
+          ],
+          [
+            "settings",
+            "Settings reference"
           ]
         ]
       },
@@ -458,6 +472,10 @@
           [
             "privacy",
             "What touches the network"
+          ],
+          [
+            "data-location",
+            "Where your data lives"
           ],
           [
             "export",
@@ -474,8 +492,16 @@
         ]
       },
       {
-        "label": "Contributing",
+        "label": "Help",
         "items": [
+          [
+            "troubleshooting",
+            "Troubleshooting"
+          ],
+          [
+            "uninstall",
+            "Uninstall"
+          ],
           [
             "build",
             "Build from source"
@@ -503,7 +529,10 @@
             "code": "brew install --cask damione1/tap/souffle"
           },
           {
-            "p": "Or download the <code>.dmg</code> from the <a href=\"https://github.com/damione1/souffle/releases/latest\">latest release</a> and drag Soufflé into Applications. Every build is signed and notarized."
+            "p": "Or download the <code>.dmg</code> from the <a href=\"https://github.com/damione1/souffle/releases/latest\">latest release</a> and drag Soufflé into Applications. Every build is signed and notarized, so it opens normally: no right-click detour, no Gatekeeper warning."
+          },
+          {
+            "p": "On first launch the setup wizard downloads a speech model, between 670 MB and 5.6 GB depending on which one you pick. That download is the only moment Soufflé needs the network in order to transcribe."
           }
         ]
       },
@@ -519,11 +548,11 @@
               ],
               [
                 "macOS 13+",
-                "Dictation, meetings with your microphone only."
+                "Dictation, and meetings recorded from your microphone."
               ],
               [
                 "macOS 14.4+",
-                "Meetings that capture the other participants. System-audio capture uses the Core Audio process tap, which does not exist before 14.4. On macOS 13 a meeting still records, and the app shows <em>Mic only</em>."
+                "Meetings that also capture the other participants. System-audio capture uses the Core Audio process tap, which does not exist before 14.4. On macOS 13 a meeting still records, and the transcript is labelled <em>Mic only</em>."
               ],
               [
                 "Disk",
@@ -531,7 +560,7 @@
               ],
               [
                 "Summaries",
-                "Apple Intelligence, when your Mac offers it, or a local <a href=\"https://ollama.com/\">Ollama</a>. Transcription needs neither."
+                "Apple Intelligence, which needs macOS 26 or newer, or a local <a href=\"https://ollama.com/\">Ollama</a> on any supported version. Transcription needs neither."
               ]
             ]
           }
@@ -542,7 +571,7 @@
         "h": "Permissions",
         "blocks": [
           {
-            "p": "Soufflé asks for each of these as you use the feature that needs it, never up front. Settings → Permissions shows the current state of each and links straight to the matching System Settings pane."
+            "p": "Soufflé asks for each of these as you use the feature that needs it, never up front. Settings → System → Permissions shows the current state of each and links straight to the matching System Settings pane."
           },
           {
             "table": [
@@ -556,13 +585,16 @@
               ],
               [
                 "Accessibility",
-                "Pastes into the app you were using, and reads back your corrections when “learn from edits” is on."
+                "Inserts the text into the app you were using, and reads back your corrections when “learn from edits” is on."
               ],
               [
                 "Calendar",
-                "Reads today's events to list them and offer to start recording. Optional."
+                "Reads today's events to list them and offer to start recording. Optional, and off until you turn it on."
               ]
             ]
+          },
+          {
+            "p": "Refusing one disables only the feature that needs it. Without System Audio a meeting still records your microphone and the transcript is labelled <em>Mic only</em>. Without Accessibility the dictated text is copied to the clipboard instead of being inserted for you."
           }
         ]
       },
@@ -571,7 +603,10 @@
         "h": "First run",
         "blocks": [
           {
-            "p": "A setup wizard walks through the three things that matter: picking a speech model and downloading it, granting the microphone permission, and choosing the dictation shortcut. The default shortcut is <kbd>⌘⇧Space</kbd>, and it can be rebound in Settings."
+            "p": "A setup wizard covers four things: the permissions Soufflé needs, which microphone to use, the speech model to download, and the dictation shortcut. The default shortcut is <kbd>⌘⇧Space</kbd>."
+          },
+          {
+            "p": "The last step also offers auto-paste, on by default: when you stop dictating, the text goes straight into the app you were in. Turn it off and the text is put on the clipboard instead. Everything here can be changed later in Settings."
           }
         ]
       },
@@ -580,10 +615,37 @@
         "h": "Dictation",
         "blocks": [
           {
-            "p": "Press the shortcut anywhere, talk, press it again. The text pastes itself into whatever app had focus. Apps that reject a synthetic paste (terminals, secure fields) can receive simulated keystrokes instead; the switch is in Settings."
+            "p": "Press the shortcut anywhere, talk, press it again. The text is inserted into whatever app had focus, or copied to the clipboard if you turned auto-paste off."
           },
           {
-            "p": "Optional start and stop sounds confirm the shortcut landed. Dictation polish, also optional, runs the text through a local LLM with an editable prompt template before it is pasted."
+            "p": "Apps that reject a synthetic paste (terminals, secure fields) can receive simulated keystrokes instead. Settings → Interface offers three insertion methods: the clipboard and ⌘V, simulated typing, or a direct write to the focused field through Accessibility."
+          },
+          {
+            "p": "Two optional passes run on the way out. <strong>Dictation polish</strong> sends the raw transcript through a local LLM with an editable prompt template (clean up, professional email, bullet points, remove fillers) and needs Apple Intelligence or Ollama. <strong>Learn from edits</strong>, on by default, watches the field just after insertion: correct a misheard name by hand once and Soufflé keeps that spelling for next time, in the custom dictionary under Settings → Transcription."
+          },
+          {
+            "p": "Optional start and stop sounds confirm the shortcut landed."
+          }
+        ]
+      },
+      {
+        "id": "shortcuts",
+        "h": "Shortcuts",
+        "blocks": [
+          {
+            "p": "Both dictation shortcuts are set in Settings → Interface. Each must include a modifier key, and the two cannot share a combination."
+          },
+          {
+            "table": [
+              [
+                "Toggle dictation",
+                "Press once to start, once to stop. <kbd>⌘⇧Space</kbd> by default."
+              ],
+              [
+                "Push-to-talk",
+                "Hold to record, release to stop. Not set by default; bind it if you prefer holding."
+              ]
+            ]
           }
         ]
       },
@@ -592,10 +654,10 @@
         "h": "The overlay",
         "blocks": [
           {
-            "p": "Dictation does not open a window. A small overlay, the pill, appears above whatever you are working in: a recording dot, the label, a live waveform, and a stop button. It stays 280&nbsp;px wide until there is text to show, then widens to 440&nbsp;px and grows line by line as you talk."
+            "p": "Dictation does not open a window. A small overlay, the pill, appears above whatever you are working in: a recording dot, the label, a live waveform and a stop button. It stays compact until there is text to show, then widens and grows line by line as you talk."
           },
           {
-            "p": "When you stop, the pill switches to <em>Reformulating…</em> while the local polish pass runs, then disappears as the text lands in the field you were already using. The window is excluded from screen recording, so it does not show up in the meeting you are in."
+            "p": "When you stop, the pill switches to <em>Reformulating…</em> while the local polish pass runs, then disappears as the text lands in the field you were already using. The window is excluded from screen capture, so it does not turn up in the meeting you are in."
           }
         ]
       },
@@ -607,10 +669,13 @@
             "p": "A meeting records your microphone and, on macOS 14.4+, the system audio, so the live transcript separates <em>Me</em> from <em>Them</em> as it goes."
           },
           {
-            "p": "The lifecycle is meant to be hands-off: the app offers to start when a calendar meeting begins, detects when the meeting seems over and stops on its own after warning you, pauses and resumes across lid-close and system sleep, and recovers or salvages the session if the engine stalls or the microphone disappears."
+            "p": "The lifecycle is meant to be hands-off: the app offers to start when a calendar meeting begins, detects when the meeting seems over and stops on its own after warning you, and recovers or salvages the session if the engine stalls or the microphone disappears. When the Mac goes to sleep the recording is closed cleanly, and Soufflé offers to resume it on wake."
           },
           {
-            "p": "Audio recording is off by default. Turn it on and the meeting sound is kept as compact Opus files under a retention policy you set, replayable with click-to-seek from any line of the transcript."
+            "p": "A meeting stops on its own after 10 minutes without speech, with a 4-hour failsafe behind it. Both are adjustable in Settings → Audio, along with the microphone Soufflé should prefer."
+          },
+          {
+            "p": "Audio recording is off by default. Turn it on in Settings → System → Data and the meeting sound is kept as compact Opus files, for 7 days, 30 days or until you delete them, replayable with click-to-seek from any line of the transcript."
           }
         ]
       },
@@ -619,10 +684,19 @@
         "h": "Summaries",
         "blocks": [
           {
-            "p": "Summaries are generated on-device, by Apple Intelligence when your Mac offers it (no setup), otherwise by a local Ollama you point the app at. Alongside the summary, Soufflé extracts decisions, action items with owners, and open questions."
+            "p": "Summaries are generated on-device: by Apple Intelligence on macOS 26 or newer, with nothing to install, and otherwise by a local Ollama. Alongside the prose summary, Soufflé extracts decisions, action items with owners, and open questions."
           },
           {
-            "p": "Nothing about a summary is sent anywhere. If you use Ollama, the only request is to your own instance, <code>http://localhost:11434</code> by default."
+            "p": "Setting up Ollama takes two commands:"
+          },
+          {
+            "code": "brew install ollama\nollama pull qwen2.5:7b"
+          },
+          {
+            "p": "Then, in Settings → Meetings → Summarization, leave the server at <code>http://localhost:11434</code> and pick the model. Any general-purpose chat model works; <code>qwen2.5:7b</code> is the one Soufflé recommends. The same provider is what dictation polish uses."
+          },
+          {
+            "p": "Nothing about a summary is sent anywhere. With Ollama the only request is to your own instance."
           }
         ]
       },
@@ -637,19 +711,86 @@
             "table": [
               [
                 "Kyutai STT 1B",
-                "Default. French + English streaming, ~2.4 GB, Metal GPU via Candle."
+                "Default. French and English, ~2.4 GB, Metal GPU via Candle. Streams text while you speak."
               ],
               [
                 "Kyutai STT 2.6B",
-                "English, higher quality, ~5.6 GB."
+                "English only, higher quality, ~5.6 GB. Streams text while you speak."
               ],
               [
                 "Whisper Large V3 Turbo",
-                "Multilingual, ~1.6 GB, Metal via whisper.cpp."
+                "Multilingual, ~1.6 GB, Metal via whisper.cpp. Transcribes once you stop."
               ],
               [
                 "Parakeet TDT 0.6B v3",
-                "25 languages with punctuation and capitalization, ~670 MB int8, fast CPU inference via ONNX Runtime."
+                "25 languages with punctuation and capitalization, ~670 MB int8, fast CPU inference via ONNX Runtime. Transcribes once you stop."
+              ]
+            ]
+          },
+          {
+            "p": "The two Kyutai models are the streaming ones: text appears while you are still talking. Whisper and Parakeet transcribe the whole recording once you stop, which is fine for a meeting you read afterwards but changes how dictation feels."
+          },
+          {
+            "p": "A loaded model is unloaded after an hour of inactivity to give the RAM back, and reloaded on the next recording. Change or disable that in Settings → Audio."
+          }
+        ]
+      },
+      {
+        "id": "settings",
+        "h": "Settings reference",
+        "blocks": [
+          {
+            "p": "Five tabs. The settings worth knowing about:"
+          },
+          {
+            "table": [
+              [
+                "Insertion method<br><span class=\"docs-tab\">Interface</span>",
+                "Clipboard and ⌘V, simulated typing, or a direct Accessibility write. Change it when an app refuses the paste."
+              ],
+              [
+                "Auto-paste<br><span class=\"docs-tab\">Interface</span>",
+                "On: the text goes into the app you were using. Off: it is copied to the clipboard."
+              ],
+              [
+                "Feedback sounds<br><span class=\"docs-tab\">Interface</span>",
+                "Start and stop cues, with a volume."
+              ],
+              [
+                "Dictation polish<br><span class=\"docs-tab\">Transcription</span>",
+                "The local LLM pass and its prompt templates, which you can edit. Needs Apple Intelligence or Ollama."
+              ],
+              [
+                "Custom dictionary<br><span class=\"docs-tab\">Transcription</span>",
+                "Proper nouns and technical terms to spell correctly, filled in by hand or learned from your corrections."
+              ],
+              [
+                "Microphone priority<br><span class=\"docs-tab\">Audio</span>",
+                "An ordered list of preferred inputs, a separate choice for clamshell mode, and a switch that keeps Bluetooth headsets from being used as microphones so they stay in stereo."
+              ],
+              [
+                "Meeting auto-stop<br><span class=\"docs-tab\">Audio</span>",
+                "Stop after 5, 10, 15 or 30 minutes without speech, with a hard failsafe behind it."
+              ],
+              [
+                "Model unload<br><span class=\"docs-tab\">Audio</span>",
+                "Free the model's RAM after 5, 15 or 60 idle minutes, or never."
+              ],
+              [
+                "Calendar<br><span class=\"docs-tab\">Meetings</span>",
+                "Off until you turn it on. Lists today's events and offers to start recording when one begins."
+              ],
+              [
+                "Summarization<br><span class=\"docs-tab\">Meetings</span>",
+                "Provider, Ollama server and model, and the summary templates."
+              ],
+              [
+                "Meeting audio<br><span class=\"docs-tab\">System</span>",
+                "Off, keep 7 days, keep 30 days, or keep until you delete it."
+              ],
+              [
+                "Update check<br><span class=\"docs-tab\">System</span>",
+                "Asks GitHub once a day whether a newer release exists. Turn it off in About."
               ]
             ]
           }
@@ -679,7 +820,39 @@
             ]
           },
           {
-            "p": "Your audio, transcripts, notes and summaries are never sent anywhere. They live in a local SQLite database, and Settings → Data exports or deletes the lot."
+            "p": "Your audio, transcripts, notes and summaries are never sent anywhere. They live in a local SQLite database, and Settings → System → Data exports or deletes the lot."
+          }
+        ]
+      },
+      {
+        "id": "data-location",
+        "h": "Where your data lives",
+        "blocks": [
+          {
+            "p": "Everything sits in one folder, <code>~/Library/Application&nbsp;Support/com.souffle.desktop/</code>. Settings → System → Data has a button that reveals it in Finder."
+          },
+          {
+            "table": [
+              [
+                "<code>souffle.db</code>",
+                "SQLite: meetings, transcripts, notes, summaries, dictation history, the custom dictionary and your settings."
+              ],
+              [
+                "<code>models/</code>",
+                "Downloaded speech models, filed by engine and backend. Deleting one frees the disk; it is downloaded again if you select that model later."
+              ],
+              [
+                "<code>recordings/</code>",
+                "Meeting audio as Ogg/Opus, one folder per meeting. Empty unless you turned recording on."
+              ],
+              [
+                "<code>logs/</code>",
+                "Rotating application logs. This is what to attach when you report a problem."
+              ]
+            ]
+          },
+          {
+            "p": "Backing that folder up backs up everything. Deleting it returns the app to a first launch."
           }
         ]
       },
@@ -688,7 +861,7 @@
         "h": "Export",
         "blocks": [
           {
-            "p": "Any meeting exports as Markdown, JSON, or SRT/VTT subtitles. The whole archive exports as a plain folder of Markdown and JSON. No proprietary container, nothing to migrate out of later."
+            "p": "Any meeting exports as Markdown, JSON, or SRT/VTT subtitles, with its recorded audio alongside if you kept any. The whole archive exports as a plain folder of Markdown and JSON. No proprietary container, nothing to migrate out of later."
           }
         ]
       },
@@ -697,7 +870,22 @@
         "h": "MCP server",
         "blocks": [
           {
-            "p": "The bundled <code>souffle-mcp</code> sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. It is read-only, fully local, and works even when the app is closed. Ready-made configuration snippets live in Settings → Data."
+            "p": "The bundled <code>souffle-mcp</code> sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. It is read-only, fully local, and works even when the app is closed."
+          },
+          {
+            "p": "For Claude Code:"
+          },
+          {
+            "code": "claude mcp add souffle \"/Applications/Soufflé.app/Contents/MacOS/souffle-mcp\""
+          },
+          {
+            "p": "For Claude Desktop, in <code>claude_desktop_config.json</code>:"
+          },
+          {
+            "code": "{\n  \"mcpServers\": {\n    \"souffle\": {\n      \"command\": \"/Applications/Soufflé.app/Contents/MacOS/souffle-mcp\"\n    }\n  }\n}"
+          },
+          {
+            "p": "Five tools are exposed: <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>latest_meeting</code> and <code>list_dictations</code>. Settings → System → Data carries the same snippets with the path already filled in, plus a button that tests the connection."
           }
         ]
       },
@@ -712,7 +900,97 @@
             "code": "# Run directly\n\"/Applications/Soufflé.app/Contents/MacOS/souffle\" --list-engines\n\n# Or expose it as a `souffle` command\nln -s \"/Applications/Soufflé.app/Contents/MacOS/souffle\" /usr/local/bin/souffle\n\n# Transcribe a file, JSON on stdout\nsouffle --transcribe-file audio.wav --json"
           },
           {
-            "p": "<code>--repeat N</code> runs the same file N times, which doubles as a benchmark harness for comparing models on your machine."
+            "table": [
+              [
+                "<code>--transcribe-file &lt;WAV&gt;</code>",
+                "Transcribe a WAV file and exit."
+              ],
+              [
+                "<code>--json</code>",
+                "Emit one machine-readable JSON object instead of text."
+              ],
+              [
+                "<code>--repeat N</code>",
+                "Run the same file N times. The model loads once, so this doubles as a benchmark harness for comparing models on your machine."
+              ],
+              [
+                "<code>--list-engines</code>",
+                "List the available engines."
+              ],
+              [
+                "<code>--list-models</code>",
+                "List every engine, model and backend combination with its install status."
+              ],
+              [
+                "<code>--engine, --model, --backend</code>",
+                "Override what is saved in Settings for this run."
+              ]
+            ]
+          },
+          {
+            "p": "It reads the same database and the same downloaded models as the app, so anything already installed is reused."
+          }
+        ]
+      },
+      {
+        "id": "troubleshooting",
+        "h": "Troubleshooting",
+        "blocks": [
+          {
+            "p": "Symptom first, then the usual cause."
+          },
+          {
+            "table": [
+              [
+                "The other participants are missing from the transcript",
+                "System-audio capture needs macOS 14.4 or later and the System Audio permission. When it is unavailable the transcript is labelled <em>Mic only</em> and records your microphone alone."
+              ],
+              [
+                "The dictated text is not inserted",
+                "Auto-paste may be off, in which case the text is waiting on the clipboard. Otherwise it is the Accessibility permission. If Soufflé is already listed and ticked there, the entry can be a stale one left by an update: remove it with the minus button and add it back, or use Settings → System → Permissions → Repair permission."
+              ],
+              [
+                "One app refuses the paste",
+                "Terminals and secure fields often reject a synthetic ⌘V. Switch the insertion method to simulated typing in Settings → Interface."
+              ],
+              [
+                "The wrong microphone is picked",
+                "Pin an input, and a separate one for clamshell mode, in Settings → Audio. Bluetooth headsets are left out of automatic selection by default: using one as a microphone switches it to HFP and costs you stereo sound."
+              ],
+              [
+                "Polish or summaries do nothing",
+                "Both need a provider. Without Apple Intelligence (macOS 26+), install Ollama and pick a model in Settings → Meetings. The reason a pass was skipped is shown in the status message and written to the log."
+              ],
+              [
+                "A model download stopped part way",
+                "Select the model again; the download resumes. Deleting its folder under <code>models/</code> forces a clean re-download."
+              ],
+              [
+                "Anything else",
+                "Settings → System → Data reveals the data folder. <code>logs/</code> holds the recent logs, which are what an issue needs."
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "id": "uninstall",
+        "h": "Uninstall",
+        "blocks": [
+          {
+            "p": "Installed with Homebrew:"
+          },
+          {
+            "code": "brew uninstall --cask souffle"
+          },
+          {
+            "p": "Otherwise, drag Soufflé out of Applications."
+          },
+          {
+            "p": "Either way your data stays. To remove it too, delete <code>~/Library/Application&nbsp;Support/com.souffle.desktop/</code> — or, before uninstalling, use Settings → System → Data, which clears meetings, dictations and recorded audio in one action."
+          },
+          {
+            "p": "To reclaim disk without uninstalling, delete the speech models you no longer use from Settings → Transcription."
           }
         ]
       },
@@ -733,10 +1011,7 @@
         "h": "Reporting a problem",
         "blocks": [
           {
-            "p": "Soufflé is early and actively developed. Every release is signed and notarized and the engineering is covered by a large test suite, but the app has been run on very few machines, and the fragile parts are the ones that vary most from one Mac to another: audio routing, Bluetooth headsets, docks, and permission prompts."
-          },
-          {
-            "p": "If something breaks there, <a href=\"https://github.com/damione1/souffle/issues\">open an issue</a> with your macOS version, your Mac model, and the audio devices involved."
+            "p": "If something does not work the way this documentation describes, <a href=\"https://github.com/damione1/souffle/issues\">open an issue</a>. Include your macOS version, your Mac model, the audio devices involved, and a log from the <code>logs/</code> folder."
           }
         ]
       },
