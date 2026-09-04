@@ -309,7 +309,7 @@
     "outcomeActions": [
       {
         "text": "Changer les clés de chiffrement",
-        "owner": "Damien"
+        "owner": "Elliot Alderson"
       },
       {
         "text": "Prévenir Darlene que ça décale de deux jours",
@@ -317,7 +317,7 @@
       },
       {
         "text": "Refaire le test à blanc de sécurité sur staging",
-        "owner": "Damien"
+        "owner": "Elliot Alderson"
       },
       {
         "text": "Fixer le suivi à mardi prochain",
@@ -374,8 +374,8 @@
       "topic": "Checklist de livraison et blocages pour la 4.2",
       "members": "9",
       "me": {
-        "name": "Damien",
-        "initials": "D",
+        "name": "Elliot Alderson",
+        "initials": "E",
         "colour": "#5b5bd6",
         "at": "10:04"
       },

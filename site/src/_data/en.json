@@ -309,7 +309,7 @@
     "outcomeActions": [
       {
         "text": "Rotate the encryption keys",
-        "owner": "Damien"
+        "owner": "Elliot Alderson"
       },
       {
         "text": "Tell Darlene the timeline moved by two days",
@@ -317,7 +317,7 @@
       },
       {
         "text": "Re-run the security dry run on staging",
-        "owner": "Damien"
+        "owner": "Elliot Alderson"
       },
       {
         "text": "Book the follow-up for next Tuesday",
@@ -374,8 +374,8 @@
       "topic": "Ship checklist and blockers for 4.2",
       "members": "9",
       "me": {
-        "name": "Damien",
-        "initials": "D",
+        "name": "Elliot Alderson",
+        "initials": "E",
         "colour": "#5b5bd6",
         "at": "10:04"
       },
