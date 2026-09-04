@@ -8,8 +8,12 @@
   <link rel="icon" href="/souffle-logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/site.css">
   <link rel="stylesheet" href="/css/mocks.css">
-  <link rel="alternate" hreflang="en" href="/">
-  <link rel="alternate" hreflang="fr" href="/fr/">
+  {% set altEn = "/docs/" if isDocs else "/" %}
+  {% set altFr = "/fr/docs/" if isDocs else "/fr/" %}
+  <link rel="canonical" href="{{ site.url }}{{ page.url }}">
+  <link rel="alternate" hreflang="en" href="{{ site.url }}{{ altEn }}">
+  <link rel="alternate" hreflang="fr" href="{{ site.url }}{{ altFr }}">
+  <link rel="alternate" hreflang="x-default" href="{{ site.url }}{{ altEn }}">
   <meta property="og:title" content="{{ pageTitle or t.meta.title }}">
   <meta property="og:description" content="{{ t.meta.description }}">
   <meta property="og:type" content="website">
@@ -22,6 +26,23 @@
   <meta name="twitter:title" content="{{ pageTitle or t.meta.title }}">
   <meta name="twitter:description" content="{{ t.meta.description }}">
   <meta name="twitter:image" content="{{ site.url }}/og-{{ t.htmlLang }}.png">
+  {%- if not isDocs %}
+  {% set app = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": site.name,
+    "description": t.meta.description,
+    "url": site.url + page.url,
+    "image": site.url + "/og-" + t.htmlLang + ".png",
+    "operatingSystem": "macOS 13.0 or later",
+    "processorRequirements": "Apple Silicon (ARM64)",
+    "license": site.license,
+    "downloadUrl": site.latest,
+    "author": { "@type": "Person", "name": site.author },
+    "inLanguage": t.htmlLang
+  } %}
+  <script type="application/ld+json">{{ app | jsonld | safe }}</script>
+  {%- endif %}
 </head>
 <body>
   {% include "partials/nav.njk" %}

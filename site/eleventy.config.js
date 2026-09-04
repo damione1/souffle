@@ -12,10 +12,17 @@ export default function (eleventyConfig) {
   eleventyConfig.addPassthroughCopy({ "src/og-en.png": "og-en.png" });
   eleventyConfig.addPassthroughCopy({ "src/og-fr.png": "og-fr.png" });
   eleventyConfig.addPassthroughCopy({ "src/_headers": "_headers" });
+  eleventyConfig.addPassthroughCopy({ "src/robots.txt": "robots.txt" });
 
   // `t.some.key` inside a template, resolved against the page's locale bundle.
   eleventyConfig.addFilter("get", (obj, path) =>
     String(path).split(".").reduce((acc, k) => (acc == null ? acc : acc[k]), obj),
+  );
+
+  // Serializes a plain object to a JSON-LD-safe string (escapes "<" so a
+  // stray "</script>" inside copy can't break out of the script tag).
+  eleventyConfig.addFilter("jsonld", (obj) =>
+    JSON.stringify(obj).replace(/</g, "\\u003c"),
   );
 
   return {
