@@ -46,12 +46,12 @@
       "icon": "mic",
       "mock": "dictation",
       "flip": true,
-      "title": "Dictate into anything, and it pastes itself back.",
-      "body": "One global shortcut starts it from wherever you are, and the text lands in the app you were already in when you stop. Terminals and secure fields that refuse a synthetic paste can get simulated keystrokes instead.",
+      "title": "Speak a paragraph, get a paragraph.",
+      "body": "The text streams in while you are still talking, punctuated and capitalised. A local pass can tidy the phrasing before you use it, and the default model handles French and English without you switching anything.",
       "bullets": [
-        "Optional start and stop sounds, so you know the shortcut landed",
-        "A local LLM pass can polish the text before it lands, with editable prompts",
-        "French and English out of the box on the default model"
+        "Text appears as you speak, not once you stop",
+        "A local LLM pass can polish the wording, with editable prompts",
+        "French and English on the same model, no switching"
       ],
       "overlayAfter": true
     },
@@ -71,12 +71,13 @@
     }
   ],
   "overlay": {
-    "eyebrow": "The overlay",
-    "title": "It works on top of whatever you are in.",
-    "body": "Soufflé is not a window you type into. Press the shortcut and a small overlay appears above your current app. The text streams into it as you talk, a local pass tidies it up, and it lands in the field you were already using. Chat, mail, an editor, a terminal: the overlay does not care which.",
+    "eyebrow": "Anywhere you type",
+    "title": "The same dictation, in every app you use.",
+    "body": "Soufflé is not a window you type into. Press the shortcut and a small overlay appears above whatever you are in, then the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the overlay does not care which, and it never turns up in a screen recording.",
     "bullets": [
-      "The pill floats over every app and is excluded from screen recording",
-      "It grows as you talk and shrinks back when it has nothing to show"
+      "The text lands where your cursor already was, with no copy and paste",
+      "Terminals and secure fields can get simulated keystrokes instead",
+      "Optional start and stop sounds, so you know the shortcut landed"
     ],
     "steps": [
       "Shortcut",

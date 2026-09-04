@@ -193,6 +193,17 @@
     wrap.appendChild(meta); wrap.appendChild(p);
     return wrap;
   };
+  /* The transcript grows by three paragraphs as it streams, which pushed
+     everything below it down each time. Render the finished transcript once,
+     measure it, and hold that height from the start. */
+  Meeting.prototype.reserve = function () {
+    this.body.style.minHeight = "";
+    var restore = this.body.innerHTML;
+    this.renderAll();
+    var h = this.body.getBoundingClientRect().height;
+    this.body.innerHTML = restore;
+    if (h > 0) this.body.style.minHeight = Math.ceil(h) + "px";
+  };
   Meeting.prototype.play = function () {
     var self = this;
     this.run.clear();
@@ -256,6 +267,16 @@
     this.timer = timerEl ? new Timer(timerEl) : null;
     this.run = new Runner();
   }
+  Dictation.prototype.reserve = function () {
+    var p = this.target.parentNode;
+    if (!p) return;
+    p.style.minHeight = "";
+    var restore = this.target.textContent;
+    this.target.textContent = this.text;
+    var h = p.getBoundingClientRect().height;
+    this.target.textContent = restore;
+    if (h > 0) p.style.minHeight = Math.ceil(h) + "px";
+  };
   Dictation.prototype.play = function () {
     var self = this;
     this.run.clear(); this.run.stopped = false;
@@ -451,6 +472,15 @@
   document.querySelectorAll('[data-mock="dictation"]').forEach(function (el) { scenes.push(new Dictation(el)); });
   document.querySelectorAll('[data-mock="overlay"]').forEach(function (el) { scenes.push(new Overlay(el)); });
 
+  function reserveAll() {
+    scenes.forEach(function (s) { if (s.reserve) s.reserve(); });
+  }
+  reserveAll();
+  // Webfont metrics change the wrapping, so measure again once they land.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(reserveAll).catch(function () {});
+  }
+
   if (REDUCED || !("IntersectionObserver" in window)) {
     scenes.forEach(function (s) { s.still(); });
     return;
@@ -472,6 +502,7 @@
     clearTimeout(resizeId);
     resizeId = setTimeout(function () {
       scenes.forEach(function (s) { if (s.wave) s.wave.resize(); });
+      reserveAll();
     }, 150);
   });
 

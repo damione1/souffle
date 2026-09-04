@@ -46,12 +46,12 @@
       "icon": "mic",
       "mock": "dictation",
       "flip": true,
-      "title": "Dictez n'importe où, le texte se colle tout seul.",
-      "body": "Un raccourci global démarre la dictée où que vous soyez, et le texte atterrit dans l'app où vous étiez déjà quand vous arrêtez. Les terminaux et les champs sécurisés qui refusent un collage synthétique peuvent recevoir des frappes simulées à la place.",
+      "title": "Dites un paragraphe, obtenez un paragraphe.",
+      "body": "Le texte arrive pendant que vous parlez encore, ponctué et avec les majuscules. Un passage local peut en polir la formulation avant que vous l'utilisiez, et le modèle par défaut gère le français et l'anglais sans que vous changiez quoi que ce soit.",
       "bullets": [
-        "Sons de départ et d'arrêt optionnels, pour savoir que le raccourci a été capté",
-        "Un passage LLM local peut polir le texte avant qu'il n'arrive, avec des gabarits modifiables",
-        "Français et anglais d'emblée sur le modèle par défaut"
+        "Le texte apparaît au fil de la parole, pas à l'arrêt",
+        "Un passage LLM local peut polir la formulation, avec des gabarits modifiables",
+        "Français et anglais sur le même modèle, sans bascule"
       ],
       "overlayAfter": true
     },
@@ -71,12 +71,13 @@
     }
   ],
   "overlay": {
-    "eyebrow": "L'overlay",
-    "title": "Ça marche par-dessus ce que vous utilisez.",
-    "body": "Soufflé n'est pas une fenêtre dans laquelle on tape. Appuyez sur le raccourci et un petit overlay apparaît au-dessus de votre app. Le texte y arrive au fil de la parole, un passage local le remet au propre, et il atterrit dans le champ où vous étiez déjà. Chat, courriel, éditeur, terminal : l'overlay s'en moque.",
+    "eyebrow": "Partout où vous tapez",
+    "title": "La même dictée, dans toutes vos apps.",
+    "body": "Soufflé n'est pas une fenêtre dans laquelle on tape. Appuyez sur le raccourci et un petit overlay apparaît au-dessus de ce que vous utilisez, puis le texte atterrit dans le champ où votre curseur était déjà. Chat, courriel, éditeur, terminal : l'overlay s'en moque, et il n'apparaît jamais dans une capture d'écran.",
     "bullets": [
-      "La pastille flotte au-dessus de toutes les apps et reste hors des captures d'écran",
-      "Elle grandit pendant que vous parlez et se rétracte quand elle n'a rien à montrer"
+      "Le texte atterrit là où votre curseur était déjà, sans copier-coller",
+      "Les terminaux et les champs sécurisés peuvent recevoir des frappes simulées",
+      "Sons de départ et d'arrêt optionnels, pour savoir que le raccourci a été capté"
     ],
     "steps": [
       "Raccourci",
