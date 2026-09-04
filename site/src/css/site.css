@@ -269,7 +269,7 @@ button { font: inherit; border: 0; background: none; color: inherit; }
   footer { padding-left: 24px !important; padding-right: 24px !important; }
   .docs { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 40px 24px 80px; }
   .docs-side { position: static; }
-  .feature, .feature.is-flipped { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .feature, .feature.is-flipped, .feature.is-overlay { grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .feature.is-flipped > div:first-child { order: 2; }
 }
 @media (max-width: 860px) {
@@ -288,24 +288,12 @@ button { font: inherit; border: 0; background: none; color: inherit; }
   .copy code { font-size: 12px; }
 }
 
-/* ─── Two-column section heads ───
-   Both columns start at the top. The right column carries a paragraph and
-   sometimes a bullet list, so it is taller than the heading; bottom-aligning
-   them pushed the title down and left a hole above it. */
-.split-head {
-  display: grid; grid-template-columns: minmax(0, 1fr) 380px;
-  gap: 48px; align-items: start; margin-bottom: 34px;
-}
-.overlay-head {
-  display: grid; grid-template-columns: minmax(0, 1fr) 400px;
-  gap: 48px; align-items: start; margin-bottom: 40px;
-}
-.overlay-head-aside { display: flex; flex-direction: column; gap: 14px; }
-.overlay-block { display: flex; flex-direction: column; }
-.overlay-figure { max-width: 900px; margin: 0 auto; width: 100%; }
+/* ─── The overlay row ───
+   A feature row mirrored against the dictation one: text left, mock right.
+   Slightly narrower text column so the chat window has room. */
+.feature.is-overlay { grid-template-columns: 380px minmax(0, 1fr); align-items: center; }
+.overlay-figure { width: 100%; min-width: 0; }
 
-@media (max-width: 1100px) {
-  .split-head, .overlay-head { grid-template-columns: minmax(0, 1fr); gap: 20px; }
 }
 
 /* The nav is sticky, so anchored sections need to stop below it. */

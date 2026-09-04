@@ -227,8 +227,12 @@
           </div>
           {%- endfor %}
         </div>
-        <div class="chat-composer" data-composer>
-          <div class="chat-input" data-input data-placeholder="{{ c.placeholder }}"></div>
+        {# Focused from the start: the whole point is that the text lands where
+           the cursor already was, so the field cannot come alive afterwards. #}
+        <div class="chat-composer is-focused" data-composer>
+          <div class="chat-field">
+            <span class="chat-typed" data-input></span><span class="chat-caret" aria-hidden="true"></span><span class="chat-ph" data-ph>{{ c.placeholder }}</span>
+          </div>
           <span class="chat-send" data-send>{{ icon("send", 15) }}</span>
         </div>
       </div>

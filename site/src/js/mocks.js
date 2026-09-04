@@ -317,6 +317,7 @@
     this.textEl = root.querySelector("[data-pill-text]");
     this.composer = root.querySelector("[data-composer]");
     this.input = root.querySelector("[data-input]");
+    this.placeholder = root.querySelector("[data-ph]");
     this.send = root.querySelector("[data-send]");
     this.thread = root.querySelector("[data-thread]");
     this.steps = Array.prototype.slice.call(root.querySelectorAll("[data-step]"));
@@ -337,6 +338,10 @@
     this.run = new Runner();
     this.sent = null;
   }
+  Overlay.prototype.setDraft = function (text) {
+    this.input.textContent = text;
+    if (this.placeholder) this.placeholder.hidden = text.length > 0;
+  };
   Overlay.prototype.step = function (n) {
     this.steps.forEach(function (el, i) { el.classList.toggle("is-active", i === n); });
   };
@@ -349,8 +354,8 @@
     this.stopBtn.hidden = false;
     this.label.textContent = this.labels.dictating;
     if (this.keycast) this.keycast.classList.remove("is-on", "is-pressed");
-    this.input.textContent = "";
-    this.composer.classList.remove("is-focused");
+    this.setDraft("");
+    this.composer.classList.add("is-focused");
     this.send.classList.remove("is-ready");
     if (this.sent && this.sent.parentNode) this.sent.parentNode.removeChild(this.sent);
     this.sent = null;
@@ -430,7 +435,6 @@
           self.run.after(2400, function () {
             self.step(3);
             self.pill.classList.remove("is-visible");
-            self.composer.classList.add("is-focused");
             var out = words(self.polished), j = 0;
             var tid = self.run.every(28, function () {
               if (j >= out.length) {
@@ -438,15 +442,14 @@
                 self.send.classList.add("is-ready");
                 self.run.after(900, function () {
                   self.appendSent(self.polished);
-                  self.input.textContent = "";
+                  self.setDraft("");
                   self.send.classList.remove("is-ready");
-                  self.composer.classList.remove("is-focused");
                   self.run.after(3200, function () { self.play(); });
                 });
                 return;
               }
               j += 1;
-              self.input.textContent = out.slice(0, j).join("");
+              self.setDraft(out.slice(0, j).join(""));
             });
           });
           return;
@@ -461,7 +464,7 @@
   };
   Overlay.prototype.still = function () {
     this.reset();
-    this.input.textContent = this.polished;
+    this.setDraft(this.polished);
     this.send.classList.add("is-ready");
     this.step(3);
   };
