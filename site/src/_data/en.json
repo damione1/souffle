@@ -222,7 +222,7 @@
     "winHome": "Soufflé",
     "winDictation": "Soufflé · Dictating",
     "winOutcomes": "Soufflé · Product sync",
-    "winChat": "Halyard",
+    "winChat": "E Corp Chat",
     "liveMeeting": "Live meeting",
     "liveDictation": "Dictating",
     "stop": "Stop",
@@ -329,8 +329,8 @@
       "Who signs off on the disclosure?"
     ],
     "chat": {
-      "app": "Halyard",
-      "workspace": "Northwind",
+      "app": "E Corp Chat",
+      "workspace": "E Corp",
       "channelsLabel": "Channels",
       "dmsLabel": "Direct messages",
       "channels": [

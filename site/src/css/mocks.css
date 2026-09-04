@@ -197,23 +197,23 @@
 /* ─────────────── Overlay demo: chat app + the pill on top ─────────────── */
 .overlay-stage { position: relative; }
 
-/* ── "Halyard": the fictional chat client the pill floats over ──
-   Its own cool palette on purpose. On the app's warm cream the mock read
-   as another Soufflé screen, which defeats the point of the section: the
-   overlay works on top of somebody else's software. */
+/* ── "E Corp Chat": the fictional chat client the pill floats over ──
+   Its own cold corporate palette on purpose. On the app's warm cream the
+   mock read as another Soufflé screen, which defeats the point of the
+   section: the overlay works on top of somebody else's software. */
 .chat {
-  --c-side: #241f3d;
-  --c-side-dim: rgba(255, 255, 255, 0.58);
+  --c-side: #1a1c1f;
+  --c-side-dim: rgba(255, 255, 255, 0.55);
   --c-side-strong: #ffffff;
-  --c-side-hover: rgba(255, 255, 255, 0.07);
-  --c-side-active: rgba(255, 255, 255, 0.14);
+  --c-side-hover: rgba(255, 255, 255, 0.06);
+  --c-side-active: rgba(196, 30, 58, 0.18);
   --c-bg: #ffffff;
-  --c-border: #e6e8ef;
-  --c-text: #1c2033;
-  --c-dim: #6b7288;
-  --c-accent: #5b5bd6;
-  --c-input: #f4f5f9;
-  --c-badge: #e14b6a;
+  --c-border: #e3e4e6;
+  --c-text: #1a1c1f;
+  --c-dim: #6b6f76;
+  --c-accent: #c41e3a;
+  --c-input: #f2f3f4;
+  --c-badge: #c41e3a;
   display: grid; grid-template-columns: 184px minmax(0, 1fr);
   min-height: 396px; background: var(--c-bg);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;

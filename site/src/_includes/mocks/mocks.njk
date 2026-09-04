@@ -157,9 +157,9 @@
 {% endmacro %}
 
 {# ── The overlay demo ──
-   The chat client is a fictional product, "Halyard", with its own cool
-   palette so it cannot be mistaken for part of Soufflé: the whole point is
-   that the pill is floating over somebody else's app. #}
+   The chat client is a fictional product, "E Corp Chat", with its own
+   cold corporate palette so it cannot be mistaken for part of Soufflé:
+   the whole point is that the pill is floating over somebody else's app. #}
 {% macro overlay(t) %}
 {% set c = t.mock.chat %}
 <div class="overlay-stage" data-mock="overlay" data-polishing="{{ t.mock.pillPolishing }}"
@@ -174,8 +174,8 @@
       <aside class="chat-side">
         <div class="chat-ws">
           <span class="chat-ws-mark" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 3v18"/><path d="M12 7l7 3.5"/><path d="M12 13l7 3.5"/><path d="M12 7L5 10.5"/>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 5h10M7 5v14M7 12h8M7 19h10"/>
             </svg>
           </span>
           <span class="chat-ws-name">{{ c.workspace }}</span>

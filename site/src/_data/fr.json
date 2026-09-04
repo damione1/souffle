@@ -222,7 +222,7 @@
     "winHome": "Soufflé",
     "winDictation": "Soufflé · Dictée",
     "winOutcomes": "Soufflé · Point produit",
-    "winChat": "Halyard",
+    "winChat": "E Corp Chat",
     "liveMeeting": "Réunion en direct",
     "liveDictation": "Dictée en cours",
     "stop": "Arrêter",
@@ -329,8 +329,8 @@
       "Qui valide la divulgation ?"
     ],
     "chat": {
-      "app": "Halyard",
-      "workspace": "Northwind",
+      "app": "E Corp Chat",
+      "workspace": "E Corp",
       "channelsLabel": "Canaux",
       "dmsLabel": "Messages directs",
       "channels": [
