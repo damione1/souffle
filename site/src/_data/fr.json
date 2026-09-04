@@ -330,7 +330,7 @@
     ],
     "chat": {
       "app": "E Corp Chat",
-      "workspace": "E Corp",
+      "workspace": "Corp",
       "channelsLabel": "Canaux",
       "dmsLabel": "Messages directs",
       "channels": [
