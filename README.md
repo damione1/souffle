@@ -29,7 +29,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/screenshots/meeting-live.png" width="820" alt="Live meeting transcription running fully on-device, separating Me from Them in real time">
+  <img src="docs/demo/meeting.gif" width="820" alt="Live meeting transcription running fully on-device, separating Me from Them in real time">
 </p>
 
 Everything runs on-device:
@@ -40,29 +40,38 @@ Everything runs on-device:
 
 ## Transcribe
 
-- **Dictation**, with auto-paste into whatever app you were using and a global shortcut to start it from anywhere. Apps that reject synthetic paste (terminals, secure fields) can receive simulated keystrokes instead. Optional start/stop sounds confirm the shortcut landed.
-- **Meeting transcription**, with a live transcript and system-audio capture that separates Me from Them. Optional audio recording keeps the meeting sound as compact Opus files with a retention policy, replayable with click-to-seek from the transcript.
-- **Hands-off recording lifecycle**: the app offers to start when a calendar meeting begins, detects when the meeting seems over and stops on its own after warning you, survives lid-close and system sleep by pausing and resuming, and recovers or salvages the session if the engine stalls or the microphone disappears.
+- **Dictation**, from a global shortcut that works anywhere. Press once to start and stop, or bind a push-to-talk key and hold it instead. The text is inserted into whatever app you were using; apps that reject a synthetic paste (terminals, secure fields) can receive simulated keystrokes instead. Optional start/stop sounds confirm the shortcut landed.
+- **Meeting transcription**, with a live transcript and system-audio capture that separates Me from Them, with no virtual audio device to install. Optional audio recording keeps the meeting sound as compact Opus files under a retention policy, replayable with click-to-seek from the transcript.
+- **Hands-off recording lifecycle**: the app offers to start when a calendar meeting begins, detects when the meeting seems over and stops on its own after warning you, closes the recording cleanly when the Mac sleeps and offers to resume it on wake, and recovers or salvages the session if the engine stalls or the microphone disappears.
+- **Corrections that stick**: fix a misheard name by hand once and Soufflé keeps that spelling, in a custom dictionary you can also edit yourself.
 
 | Dictate into any app | Your timeline, grouped by day |
 | :---: | :---: |
-| ![Live dictation view with the transcript as the whole surface and auto-paste on stop](docs/screenshots/dictation.png) | ![Home timeline grouping meetings and dictations by day](docs/screenshots/timeline.png) |
+| ![Dictation with the transcript as the whole surface, streaming in as you speak](docs/demo/dictation.gif) | ![Home timeline grouping meetings and dictations by day](docs/demo/timeline.png) |
+
+## The overlay
+
+Dictation does not open a window. Press the shortcut and a small pill appears above whatever you are working in, then the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the pill does not care which, and it is excluded from screen capture, so it never turns up in the meeting you are in.
+
+<p align="center">
+  <img src="docs/demo/overlay.gif" width="820" alt="The pill floating over a chat app: shortcut, dictation, reformulation, and the tidied text landing in the composer">
+</p>
 
 ## Understand
 
-- **Meeting summaries**, generated on-device by Ollama or Apple Intelligence (no setup when Apple Intelligence is available).
+- **Meeting summaries**, generated on-device by Apple Intelligence on macOS 26 or newer, with nothing to install, and otherwise by a local [Ollama](https://ollama.com/).
 - **Structured outcomes**: decisions, action items with owners, and open questions extracted alongside the summary.
-- **Dictation polish** (optional): a local LLM pass cleans up dictated text with editable prompt templates before pasting.
+- **Dictation polish** (optional): a local LLM pass cleans up dictated text with editable prompt templates before it is inserted. Same provider as the summaries.
 - **Full-text search** across every transcript and dictation entry.
 
-| Transcript, notes, and participants | On-device summary and outcomes |
-| :---: | :---: |
-| ![Meeting detail with editable notes and a Me/Them transcript](docs/screenshots/meeting-detail.png) | ![Generated decisions, action items with owners, and open questions](docs/screenshots/summary.png) |
+<p align="center">
+  <img src="docs/demo/outcomes.png" width="820" alt="Generated decisions, action items with owners, and open questions">
+</p>
 
 ## Own your data
 
 - **Export any meeting** as Markdown, JSON, or SRT/VTT subtitles, or the **whole archive** as a plain folder of Markdown and JSON.
-- **MCP server**: the bundled `souffle-mcp` sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. Read-only, fully local, works even when the app is closed. Setup snippets live in Settings > Data.
+- **MCP server**: the bundled `souffle-mcp` sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. Read-only, fully local, works even when the app is closed. Setup snippets live in Settings > System > Data.
 - **Headless CLI**: `souffle --transcribe-file audio.wav --json` transcribes a file without launching the app, and `--repeat N` doubles as a benchmark harness.
 
   The `souffle` binary ships inside the app bundle and is not added to your `PATH`, so it is not a global command. Invoke it by full path, or symlink it once:
@@ -79,10 +88,12 @@ Everything runs on-device:
 
 All models run locally and are downloaded on first use from HuggingFace:
 
-- [Kyutai STT 1B](https://huggingface.co/kyutai/stt-1b-en_fr-candle) (default): French + English streaming transcription, ~2.4 GB, Metal GPU via Candle
-- [Kyutai STT 2.6B](https://huggingface.co/kyutai/stt-2.6b-en-candle): English, higher quality, ~5.6 GB
-- [Whisper Large V3 Turbo](https://huggingface.co/ggerganov/whisper.cpp): multilingual, ~1.6 GB, Metal via whisper.cpp
-- [Parakeet TDT 0.6B v3](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx): 25 languages with punctuation and capitalization, ~670 MB int8, fast CPU inference via ONNX Runtime
+- [Kyutai STT 1B](https://huggingface.co/kyutai/stt-1b-en_fr-candle) (default): French + English, ~2.4 GB, Metal GPU via Candle. Streams text while you speak.
+- [Kyutai STT 2.6B](https://huggingface.co/kyutai/stt-2.6b-en-candle): English only, higher quality, ~5.6 GB. Streams text while you speak.
+- [Whisper Large V3 Turbo](https://huggingface.co/ggerganov/whisper.cpp): multilingual, ~1.6 GB, Metal via whisper.cpp. Transcribes once you stop.
+- [Parakeet TDT 0.6B v3](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx): 25 languages with punctuation and capitalization, ~670 MB int8, fast CPU inference via ONNX Runtime. Transcribes once you stop.
+
+The two Kyutai models are the streaming ones: text appears while you are still talking. The other two transcribe the whole recording once you stop, which suits a meeting you read afterwards but changes how dictation feels.
 
 ## Requirements
 
@@ -90,7 +101,7 @@ All models run locally and are downloaded on first use from HuggingFace:
 - **macOS 13 or newer** for dictation.
 - **macOS 14.4 or newer** for meetings that capture the other participants. System-audio capture uses the Core Audio process tap, which does not exist before 14.4; on macOS 13 a meeting still records, but only your microphone, and the app shows *Mic only*.
 - **Disk space for the speech model**, downloaded on first use: ~670 MB for the smallest, ~2.4 GB for the default. See [Speech models](#speech-models).
-- **Summaries** need either Apple Intelligence, when your Mac offers it, or a local [Ollama](https://ollama.com/). Transcription itself needs neither.
+- **Summaries** need either Apple Intelligence, which requires macOS 26 or newer, or a local [Ollama](https://ollama.com/) on any supported version. Transcription itself needs neither.
 
 ## Permissions
 
@@ -103,23 +114,23 @@ Soufflé asks for these as you use the features that need them, never up front:
 | Accessibility | Pastes into the app you were using, and reads back your corrections when "learn from edits" is on | Auto-paste, dictation polish |
 | Calendar | Reads today's events to list them and offer to start recording | Calendar integration (optional) |
 
-Settings > Permissions shows the current state of each and links straight to the matching System Settings pane.
+Settings > System > Permissions shows the current state of each and links straight to the matching System Settings pane.
 
 ## What touches the network
 
 The privacy claim above is worth checking rather than believing, so here is every outbound connection the app makes:
 
 - **huggingface.co**, to download a speech model the first time you select it. Nothing is sent, and once the model is on disk transcription works offline forever.
-- **api.github.com**, once a day to ask whether a newer release exists, and whenever you press *Check for updates* in Settings > About. The daily check sends nothing but the request itself: no identifier, no account, no usage data. It shows a dialog when there is an update and never downloads or installs anything. Turn it off in Settings > About.
+- **api.github.com**, once a day to ask whether a newer release exists, and whenever you press *Check for updates* in Settings > System > About. The daily check sends nothing but the request itself: no identifier, no account, no usage data. It shows a dialog when there is an update and never downloads or installs anything. Turn it off in Settings > System > About.
 - **Your Ollama instance**, `http://localhost:11434` by default, if you enable summaries with Ollama. It is your machine unless you point it elsewhere.
 
-Your audio, transcripts, notes and summaries are never sent anywhere. They live in a local SQLite database, and Settings > Data exports or deletes the lot.
+Your audio, transcripts, notes and summaries are never sent anywhere. They live in a local SQLite database, and Settings > System > Data exports or deletes the lot.
 
 ## Status
 
-Early and actively developed. The engineering is covered by a large test suite and every release is signed and notarized, but the app has been run on very few machines, and the fragile parts are the ones that vary most from one Mac to another: audio routing, Bluetooth headsets, docks, and permission prompts. Expect rough edges there, and please report them.
+Open source and actively developed. Every release is signed and notarized, and the engineering is covered by a large test suite. Macs differ enormously in audio hardware and routing, so if something does not behave on yours, a report is genuinely useful.
 
-The fastest useful bug report is Settings > Diagnostics, which copies the app version, the current pipeline state and the log settings and paths, plus a live tail of the log. Paste that into a [new issue](https://github.com/damione1/souffle/issues/new/choose) with your macOS version, your Mac model and what you were doing. None of it contains transcript text, though the paths do include your user name.
+The fastest useful bug report is Settings > System > Diagnostics, which copies the app version, the current pipeline state and the log settings and paths, plus a live tail of the log. Paste that into a [new issue](https://github.com/damione1/souffle/issues/new/choose) with your macOS version, your Mac model and what you were doing. None of it contains transcript text, though the paths do include your user name.
 
 ## Download
 
