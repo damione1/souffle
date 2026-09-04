@@ -1,0 +1,441 @@
+/* ─────────────────────────────────────────────────────────────
+   Reproductions of the real app screens.
+   Every value here is lifted from the Svelte components and
+   src/app.css `.light`, so the mocks behave and measure like the
+   app rather than merely resembling it:
+     LiveSessionCard · ActionHero · TimelineSection · TimelineItem
+     MeetingNotesSection · MeetingStructuredSummarySection · PillApp
+   ───────────────────────────────────────────────────────────── */
+
+.mock { font-family: var(--font-body); text-align: left; --wave-accent: var(--m-accent); }
+
+/* ─── Window chrome ─── */
+.win {
+  border-radius: 14px; overflow: hidden;
+  background: var(--m-canvas);
+  outline: 1px solid rgba(150, 115, 70, 0.18);
+  box-shadow: 0 44px 110px -34px rgba(0, 0, 0, 0.78), 0 0 90px -60px rgba(233, 174, 85, 0.3);
+}
+.win-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 14px;
+  background: rgba(255, 250, 240, 0.72);
+  border-bottom: 1px solid var(--m-ghost);
+}
+.win-dot { width: 11px; height: 11px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.1); }
+.win-dot.red { background: #ff5f57; }
+.win-dot.amber { background: #febc2e; }
+.win-dot.green { background: #28c840; }
+.win-title { margin-left: 8px; font-size: 11.5px; color: var(--m-t5); }
+.win-body { padding: 22px 26px 26px; }
+
+/* ─── Live session header (LiveSessionCard) ─── */
+.live-head { display: flex; align-items: center; gap: 14px; }
+.live-badge {
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  padding: 6px 13px; border-radius: 9999px;
+  background: rgba(184, 80, 60, 0.13); outline: 1px solid rgba(184, 80, 60, 0.28);
+  font-size: 12.5px; font-weight: 600; color: var(--m-danger);
+}
+.rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--m-danger); animation: pulse-soft 1.2s ease-in-out infinite; }
+.live-time { flex-shrink: 0; font-size: 14px; color: var(--m-t3); font-variant-numeric: tabular-nums; }
+.live-stop {
+  display: inline-flex; flex-shrink: 0; align-items: center; gap: 8px;
+  padding: 9px 16px; border-radius: 11px;
+  background: var(--m-danger); font-size: 13.5px; font-weight: 600; color: var(--m-on-danger);
+}
+.wave { min-width: 0; flex: 1; }
+.wave canvas { display: block; width: 100%; height: 46px; }
+
+/* ─── Cards ─── */
+.m-card {
+  border-radius: 18px; background: var(--m-surface-1);
+  outline: 1px solid var(--m-ghost); box-shadow: var(--m-shadow);
+}
+.m-card-sm { border-radius: 16px; background: var(--m-surface-1); outline: 1px solid var(--m-ghost); box-shadow: var(--m-shadow); }
+.m-stack { display: flex; flex-direction: column; gap: 18px; }
+
+/* ─── Live transcript ─── */
+.tr-card { display: flex; flex-direction: column; gap: 18px; padding: 22px 24px; }
+.tr-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tr-head h3 { font-family: var(--font-body); font-size: 14px; font-weight: 600; color: var(--m-t1); }
+.tr-audio { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--m-t4); }
+.tr-audio i { width: 6px; height: 6px; border-radius: 50%; background: var(--m-accent); }
+.tr-hint { font-size: 11.5px; color: var(--m-t4); }
+/* LiveSessionCard caps the live transcript at 250px and scrolls it, which is
+   also why nothing here has to grow: the box is a fixed size from the start. */
+.tr-body {
+  display: flex; flex-direction: column; gap: 16px;
+  height: 250px; overflow-y: auto; padding-right: 6px;
+}
+.tr-body::-webkit-scrollbar { width: 8px; }
+.tr-body::-webkit-scrollbar-track { background: transparent; }
+.tr-body::-webkit-scrollbar-thumb { background: var(--m-surface-3); border-radius: 9999px; }
+.tr-para { display: flex; flex-direction: column; gap: 3px; animation: rise-in 240ms ease; }
+.tr-meta { display: flex; align-items: center; gap: 8px; }
+.tr-who { font-size: 11.5px; font-weight: 600; }
+.tr-who.me { color: var(--m-accent); }
+.tr-who.them { color: var(--m-secondary); }
+.tr-at { font-size: 10.5px; color: var(--m-t5); }
+.tr-text { font-size: 15px; line-height: 1.75; color: var(--m-t2); }
+.tr-tentative { opacity: 0.5; }
+
+/* ─── Notes (MeetingNotesSection, compact variant) ─── */
+.notes { display: flex; flex-direction: column; gap: 10px; padding: 16px 20px; }
+.notes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notes-head h3 {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--m-t3);
+}
+.notes-state { font-size: 11.5px; color: var(--m-t4); }
+.notes-field {
+  min-height: 60px; padding: 11px 14px; border-radius: 11px;
+  background: var(--m-input); outline: 1px solid var(--m-ghost);
+  font-size: 13.5px; line-height: 1.65; color: var(--m-t2);
+}
+
+/* ─── Dictation surface ─── */
+.dict-card { display: flex; min-height: 250px; flex-direction: column; padding: 30px 32px; }
+.dict-text { font-size: 19px; font-weight: 400; line-height: 1.85; color: var(--m-t2); }
+.caret {
+  display: inline-block; width: 2px; height: 20px; margin-left: 2px;
+  vertical-align: -3px; background: var(--m-accent);
+  animation: blink 1s step-end infinite;
+}
+.dict-foot {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 20px; padding-top: 20px;
+  border-top: 1px solid var(--m-ghost); font-size: 12.5px; color: var(--m-t4);
+}
+
+/* ─── Home: action hero, search, timeline ─── */
+.hero-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.action {
+  display: flex; align-items: center; gap: 15px; padding: 20px; border-radius: 16px;
+  background: var(--m-surface-1); outline: 1px solid var(--m-ghost); box-shadow: var(--m-shadow);
+}
+.action-icon {
+  display: flex; flex-shrink: 0; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 12px;
+}
+.action-icon.accent { background: rgba(181, 121, 31, 0.13); color: var(--m-accent); }
+.action-icon.secondary { background: rgba(168, 90, 46, 0.12); color: var(--m-secondary); }
+.action-body { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.action-title { font-family: var(--font-heading); font-size: 15px; font-weight: 600; color: var(--m-t1); }
+.action-sub { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--m-t4); }
+.kbd {
+  padding: 1.5px 6px; border-radius: 5px; background: var(--m-surface-3);
+  font-family: var(--font-mono); font-size: 11px; color: var(--m-t3);
+}
+.m-search {
+  display: flex; align-items: center; gap: 11px; padding: 11px 15px; border-radius: 12px;
+  background: var(--m-input); outline: 1px solid var(--m-ghost);
+  font-size: 13.5px; color: var(--m-t4);
+}
+.m-section { display: flex; flex-direction: column; gap: 10px; }
+.m-section h4 {
+  padding: 0 4px; font-family: var(--font-body); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.15em; text-transform: uppercase; color: var(--m-t4);
+}
+.m-list {
+  display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 16px;
+  background: var(--m-surface-1); outline: 1px solid var(--m-ghost); box-shadow: var(--m-shadow);
+}
+.m-row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 11px; }
+.m-row.is-now { background: rgba(181, 121, 31, 0.07); }
+.m-row-icon {
+  display: flex; flex-shrink: 0; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 9px;
+}
+.m-row-icon.accent { background: rgba(181, 121, 31, 0.13); color: var(--m-accent); }
+.m-row-icon.secondary { background: rgba(168, 90, 46, 0.12); color: var(--m-secondary); }
+.m-row-icon.muted { background: var(--m-surface-2); color: var(--m-t4); }
+.m-row-title {
+  min-width: 0; flex: 1; font-size: 13.5px; color: var(--m-t1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.m-row-title.dim { color: var(--m-t2); }
+.m-row-meta { display: flex; flex-shrink: 0; align-items: center; gap: 11px; color: var(--m-t4); font-size: 12px; }
+.m-row-meta .mono { font-size: 11.5px; }
+.now-tag {
+  flex-shrink: 0; padding: 2px 8px; border-radius: 9999px;
+  background: rgba(181, 121, 31, 0.13); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--m-accent);
+}
+.m-play {
+  display: flex; flex-shrink: 0; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 9px;
+  background: rgba(181, 121, 31, 0.1); outline: 1px solid rgba(181, 121, 31, 0.25); color: var(--m-accent);
+}
+
+/* ─── Outcomes (MeetingStructuredSummarySection) ─── */
+.out { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; }
+.out h3 {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-body); font-size: 14px; font-weight: 600; color: var(--m-t1);
+}
+.out h4 {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 600; color: var(--m-t3);
+}
+.out-group { display: flex; flex-direction: column; gap: 8px; }
+.out-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.out-chip {
+  padding: 6px 12px; border-radius: 9999px;
+  font-size: 12.5px; line-height: 1.4; color: var(--m-t2);
+}
+.out-chip.decision { background: rgba(181, 121, 31, 0.12); outline: 1px solid rgba(181, 121, 31, 0.2); }
+.out-chip.question { background: var(--m-input); outline: 1px solid var(--m-ghost); }
+.out-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.out-item {
+  display: flex; flex-direction: column; gap: 4px; padding: 13px 14px; border-radius: 12px;
+  background: var(--m-input); outline: 1px solid var(--m-ghost);
+}
+.out-item p { font-size: 12.5px; line-height: 1.55; color: var(--m-t2); }
+.out-owner { font-size: 11px; color: var(--m-t4); }
+
+/* ─────────────── Overlay demo: chat app + the pill on top ─────────────── */
+.overlay-stage { position: relative; }
+
+/* ── "Halyard": the fictional chat client the pill floats over ──
+   Its own cool palette on purpose. On the app's warm cream the mock read
+   as another Soufflé screen, which defeats the point of the section: the
+   overlay works on top of somebody else's software. */
+.chat {
+  --c-side: #241f3d;
+  --c-side-dim: rgba(255, 255, 255, 0.58);
+  --c-side-strong: #ffffff;
+  --c-side-hover: rgba(255, 255, 255, 0.07);
+  --c-side-active: rgba(255, 255, 255, 0.14);
+  --c-bg: #ffffff;
+  --c-border: #e6e8ef;
+  --c-text: #1c2033;
+  --c-dim: #6b7288;
+  --c-accent: #5b5bd6;
+  --c-input: #f4f5f9;
+  --c-badge: #e14b6a;
+  display: grid; grid-template-columns: 184px minmax(0, 1fr);
+  min-height: 396px; background: var(--c-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+.chat-win { outline-color: #d8dbe6; }
+.chat-bar { background: #eef0f5; border-bottom-color: var(--c-border, #e6e8ef); }
+.chat-bar .win-title { color: #6b7288; font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+
+.chat-side { background: var(--c-side); padding: 0 8px 14px; display: flex; flex-direction: column; gap: 16px; }
+.chat-ws {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0 -8px; padding: 13px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+.chat-ws-mark {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 7px;
+  background: var(--c-accent); color: #fff; flex-shrink: 0;
+}
+.chat-ws-name { font-size: 14px; font-weight: 600; color: var(--c-side-strong); flex: 1; min-width: 0; }
+.chat-ws-chev { color: var(--c-side-dim); flex-shrink: 0; }
+
+.chat-group { display: flex; flex-direction: column; gap: 1px; }
+.chat-group-h {
+  padding: 2px 8px 6px; font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.4);
+}
+.chat-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px;
+  font-size: 13px; color: var(--c-side-dim);
+}
+.chat-item:hover { background: var(--c-side-hover); }
+.chat-item.is-active { background: var(--c-side-active); color: var(--c-side-strong); font-weight: 500; }
+.chat-item-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-hash { flex-shrink: 0; opacity: 0.55; font-weight: 400; }
+.chat-badge {
+  flex-shrink: 0; min-width: 18px; padding: 1px 5px; border-radius: 9999px;
+  background: var(--c-badge); color: #fff;
+  font-size: 10.5px; font-weight: 700; text-align: center;
+}
+.chat-dm-avatar {
+  position: relative; flex-shrink: 0;
+  width: 20px; height: 20px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 600; color: #fff;
+}
+.chat-presence {
+  position: absolute; right: -3px; bottom: -3px;
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 2px solid var(--c-side);
+}
+.chat-presence.is-online { background: #3fb27f; }
+.chat-presence.is-away { background: #d9a13a; }
+
+.chat-main { display: flex; flex-direction: column; min-width: 0; background: var(--c-bg); }
+.chat-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 18px; border-bottom: 1px solid var(--c-border);
+}
+.chat-head-title {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 14px; font-weight: 600; color: var(--c-text);
+}
+.chat-head-meta { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.chat-members { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--c-dim); }
+.chat-topic {
+  font-size: 12px; color: var(--c-dim); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-thread { flex: 1; display: flex; flex-direction: column; gap: 15px; padding: 18px; }
+.chat-msg { display: flex; gap: 10px; }
+.chat-avatar {
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12.5px; font-weight: 600; color: #fff;
+}
+.chat-body { min-width: 0; }
+.chat-name { font-size: 13px; font-weight: 600; color: var(--c-text); }
+.chat-at { margin-left: 7px; font-size: 11px; color: var(--c-dim); }
+.chat-text { font-size: 13.5px; line-height: 1.55; color: #333a52; }
+.chat-composer {
+  margin: 0 18px 18px; padding: 10px 12px; border-radius: 10px;
+  background: var(--c-input); border: 1px solid var(--c-border);
+  display: flex; align-items: center; gap: 10px; min-height: 44px;
+}
+.chat-composer.is-focused { border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(91, 91, 214, 0.14); }
+.chat-field {
+  flex: 1; min-width: 0; display: flex; align-items: center;
+  font-size: 13.5px; line-height: 1.45;
+}
+.chat-typed { color: var(--c-text); white-space: pre-wrap; }
+.chat-ph { color: var(--c-dim); }
+/* The insertion point, so "already focused" is visible rather than implied. */
+.chat-caret {
+  width: 1.5px; height: 16px; flex-shrink: 0;
+  background: var(--c-accent); opacity: 0;
+}
+.chat-composer.is-focused .chat-caret { opacity: 1; animation: blink 1.1s step-end infinite; }
+.chat-send {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;
+  background: #e8eaf2; color: #9aa1b5;
+}
+.chat-send.is-ready { background: var(--c-accent); color: #fff; }
+
+/* ── Keycast: the shortcut, shown for a beat ──
+   Without it the pill just appears and the trigger is invisible. */
+.keycast {
+  position: absolute; top: 46%; left: 50%;
+  transform: translate(-50%, -50%) scale(0.92);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 20px 26px 16px; border-radius: 20px;
+  background: rgba(16, 12, 9, 0.74);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.7);
+  opacity: 0; pointer-events: none; z-index: 4;
+  transition: opacity 220ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.keycast.is-on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.keycast-keys { display: flex; align-items: flex-end; gap: 8px; }
+.keycap {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 50px; height: 50px; padding: 0 14px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+  color: #f7f1e7;
+  font-family: var(--font-body); font-size: 19px; font-weight: 600;
+  transition: transform 90ms ease, box-shadow 90ms ease, background-color 90ms ease, color 90ms ease;
+}
+.keycap.is-wide { min-width: 104px; font-size: 15px; letter-spacing: 0.02em; }
+.keycast.is-pressed .keycap {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0.45), 0 6px 18px -8px rgba(0, 0, 0, 0.7);
+  background: rgba(233, 174, 85, 0.92);
+  color: #2c1c0c;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.keycast-caption {
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 500;
+  letter-spacing: 0.01em; color: rgba(255, 255, 255, 0.72);
+}
+
+/* The pill window itself. PillApp.svelte, floating over everything. */
+.pill-overlay {
+  /* Below the window bar and the channel header (about 87px together), so
+     the mock still reads as a chat window with something floating over it. */
+  position: absolute; top: 98px; left: 50%;
+  width: 280px; transform: translateX(-50%) translateY(-10px);
+  opacity: 0; pointer-events: none;
+  transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 200ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 3;
+}
+.pill-overlay.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.pill-overlay.is-expanded { width: min(440px, calc(100% - 32px)); }
+.pill-shell {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 16px; border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+}
+.pill-row { display: flex; flex-shrink: 0; align-items: center; gap: 12px; height: 42px; }
+.pill-label { flex-shrink: 0; font-size: 12px; font-weight: 500; color: rgba(255, 255, 255, 0.9); }
+.pill-wave { min-width: 0; flex: 1; }
+.pill-wave { --wave-accent: #e9ae55; }
+.pill-wave canvas { display: block; width: 100%; height: 32px; }
+.pill-dot { width: 7px; height: 7px; border-radius: 50%; background: #f2685a; flex-shrink: 0; animation: pulse-soft 1.2s ease-in-out infinite; }
+.pill-stop {
+  display: flex; flex-shrink: 0; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 9999px;
+  background: rgba(239, 68, 68, 0.9); color: #fff;
+}
+.pill-text {
+  border-top: 1px solid rgba(233, 174, 85, 0.15);
+  padding: 8px 0 4px 19px;
+  font-size: 13px; line-height: 1.375; color: rgba(255, 255, 255, 0.7);
+}
+.pill-spinner {
+  display: flex; align-items: center; justify-content: center; color: #e9ae55;
+}
+.pill-spinner i {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor; animation: spin 0.7s linear infinite;
+}
+
+/* Caption strip under a mock, explaining what it is doing right now. */
+.mock-caption {
+  margin-top: 18px; font-size: 13px; color: var(--m-t5, #5e5344);
+  text-align: center;
+}
+.stage-steps {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 22px;
+}
+.stage-step {
+  padding: 5px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600;
+  background: var(--surface-2); color: var(--t4); outline: 1px solid var(--ghost);
+  transition: background-color 200ms ease, color 200ms ease, outline-color 200ms ease;
+}
+.stage-step.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent); outline-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* ─── Narrow: the mocks collapse the same way the app's own layout does ─── */
+@media (max-width: 900px) {
+  /* The waveform would collapse to a sliver between the badge and the clock,
+     so drop the canvas but keep its box: it is the flexible spacer that holds
+     the badge left and the clock and stop button right. */
+  .wave canvas { display: none; }
+  .hero-grid, .out-grid { grid-template-columns: minmax(0, 1fr); }
+  .chat { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .chat-side { display: none; }
+  .win-body { padding: 14px 12px 16px; }
+  .tr-card { padding: 16px 14px; }
+  .dict-card { padding: 20px 18px; min-height: 190px; }
+  .dict-text { font-size: 16px; line-height: 1.8; }
+  .pill-overlay, .pill-overlay.is-expanded { width: calc(100% - 24px); }
+}
