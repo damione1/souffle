@@ -233,7 +233,7 @@
     "them": "Them",
     "notesTitle": "Notes",
     "notesSaved": "Saved",
-    "notesText": "Sarah owns the support comms. Dry run passed on staging. Marc still has to sign off on the onboarding copy.",
+    "notesText": "Angela owns the client comms. The dry run passed on staging. Tyrell still has to sign off on the disclosure.",
     "dictate": "Dictate",
     "press": "Press",
     "meeting": "Meeting",
@@ -254,20 +254,20 @@
       {
         "who": "them",
         "at": "12:41",
-        "text": "So the migration is the blocker. We can't ship the new onboarding until the accounts table is split."
+        "text": "Okay, the encrypted backup is the blocker. We can't ship the E Corp migration until the key rotation is done."
       },
       {
         "who": "me",
         "at": "12:44",
-        "text": "Right. I can take the split this week if we push the onboarding copy review to Thursday."
+        "text": "Got it. I can rotate the keys tonight if we push the pentest review to Thursday."
       },
       {
         "who": "them",
         "at": "12:47",
-        "text": "Works for me. Let's hold the release branch until the split lands, and I'll tell support the date moved by two days."
+        "text": "Works for me. We'll hold the deploy until the rotation lands, and I'll tell Darlene the timeline moved by two days."
       }
     ],
-    "dictationText": "Reply to the pricing thread. I think we should hold at the current tier until the migration is done, then revisit in the new quarter.",
+    "dictationText": "Reply to the security audit thread. I think we should hold the current access tier until the migration is done, then revisit in the new quarter.",
     "events": [
       {
         "title": "Product sync",
@@ -276,7 +276,7 @@
         "now": true
       },
       {
-        "title": "1:1 with Sarah",
+        "title": "1:1 with Angela",
         "time": "14:30–15:00"
       }
     ],
@@ -289,7 +289,7 @@
         "at": "10:00"
       },
       {
-        "title": "Reply to the pricing thread. I think we should hold at the current tier until…",
+        "title": "Reply to the security audit thread. I think we should hold the current access tier until…",
         "kind": "dictation",
         "duration": "00:41",
         "at": "09:12"
@@ -303,30 +303,30 @@
       }
     ],
     "outcomeDecisions": [
-      "Hold the release branch until the accounts split lands",
-      "Onboarding copy review moves to Thursday"
+      "Hold the deploy until the key rotation lands",
+      "Pentest review moves to Thursday"
     ],
     "outcomeActions": [
       {
-        "text": "Split the accounts table",
+        "text": "Rotate the encryption keys",
         "owner": "Damien"
       },
       {
-        "text": "Tell support the date moved by two days",
-        "owner": "Sarah"
+        "text": "Tell Darlene the timeline moved by two days",
+        "owner": "Angela"
       },
       {
-        "text": "Re-run the migration dry run on staging",
+        "text": "Re-run the security dry run on staging",
         "owner": "Damien"
       },
       {
         "text": "Book the follow-up for next Tuesday",
-        "owner": "Marc"
+        "owner": "Tyrell"
       }
     ],
     "outcomeQuestions": [
-      "Do we need a fallback if the split runs long?",
-      "Who signs off on the new onboarding copy?"
+      "Do we need a fallback if the rotation runs long?",
+      "Who signs off on the disclosure?"
     ],
     "chat": {
       "app": "Halyard",
@@ -351,21 +351,21 @@
       ],
       "dms": [
         {
-          "name": "Sarah Okonjo",
-          "initials": "S",
+          "name": "Angela Moss",
+          "initials": "A",
           "colour": "#c2557a",
           "presence": "online"
         },
         {
-          "name": "Marc Lefebvre",
-          "initials": "M",
+          "name": "Tyrell Wellick",
+          "initials": "T",
           "colour": "#4d7ea8",
           "presence": "away",
           "unread": "1"
         },
         {
-          "name": "Priya Raman",
-          "initials": "P",
+          "name": "Shama Biswas",
+          "initials": "S",
           "colour": "#6a7f4a",
           "presence": "online"
         }
@@ -381,23 +381,23 @@
       },
       "messages": [
         {
-          "from": "Sarah Okonjo",
-          "initials": "S",
+          "from": "Angela Moss",
+          "initials": "A",
           "colour": "#c2557a",
           "at": "09:58",
-          "text": "Support is asking when they can announce the new onboarding. What do I tell them?"
+          "text": "The client is asking when we can announce the disclosure. What do I tell them?"
         },
         {
-          "from": "Marc Lefebvre",
-          "initials": "M",
+          "from": "Tyrell Wellick",
+          "initials": "T",
           "colour": "#4d7ea8",
           "at": "10:02",
-          "text": "Depends on the accounts split, no? I'd rather not commit to a date we then move."
+          "text": "Depends on the key rotation, no? I'd rather not commit to a date we then move."
         }
       ],
       "placeholder": "Message #release-4-2",
-      "raw": "yeah so tell them its blocked on the migration um the accounts table split and then we can announce once thats done probably two days later",
-      "polished": "It's blocked on the accounts-table split. Once that lands we can announce, realistically about two days later."
+      "raw": "yeah so tell them its blocked on the migration um the key rotation and then we can announce once thats done probably two days later",
+      "polished": "It's blocked on the key rotation. Once that lands we can announce, realistically about two days later."
     },
     "shortcutKeys": [
       "⌘",
@@ -409,7 +409,7 @@
   },
   "docs": {
     "eyebrow": "Documentation",
-    "title": "Everything Soufflé does, and what it needs to do it.",
+    "title": "Everything Soufflé does, and what it needs.",
     "intro": "What Soufflé does, what it needs, and where it keeps things. Nothing here requires an account, an API key, or a network connection beyond the first model download.",
     "groups": [
       {
