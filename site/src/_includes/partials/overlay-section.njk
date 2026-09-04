@@ -1,0 +1,26 @@
+{% from "icons.njk" import icon %}
+{% from "mocks/mocks.njk" import overlay %}
+{#
+  The overlay belongs with dictation, so it renders inside the feature
+  column rather than as its own padded section. The two-column head is a
+  grid aligned to the top: the right column carries a paragraph plus
+  bullets and is taller than the heading, so bottom-aligning them left a
+  gap above the title.
+#}
+<div id="overlay" class="overlay-block reveal">
+  <div class="overlay-head">
+    <div>
+      <span class="eyebrow">{{ t.overlay.eyebrow }}</span>
+      <h2 class="h2">{{ t.overlay.title }}</h2>
+    </div>
+    <div class="overlay-head-aside">
+      <p class="lead" style="font-size:15px">{{ t.overlay.body }}</p>
+      <div class="checks">
+        {%- for b in t.overlay.bullets %}
+        <div class="check">{{ icon("check", 17, 2.2) }}<span>{{ b }}</span></div>
+        {%- endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="overlay-figure">{{ overlay(t) }}</div>
+</div>

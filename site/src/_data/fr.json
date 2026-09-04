@@ -52,7 +52,8 @@
         "Sons de départ et d'arrêt optionnels, pour savoir que le raccourci a été capté",
         "Un passage LLM local peut polir le texte avant qu'il n'arrive, avec des gabarits modifiables",
         "Français et anglais d'emblée sur le modèle par défaut"
-      ]
+      ],
+      "overlayAfter": true
     },
     {
       "id": "summaries",

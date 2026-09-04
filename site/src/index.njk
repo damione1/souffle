@@ -49,28 +49,8 @@ layout: layouts/base.njk
         {%- if f.mock == "home" %}{{ home(t) }}{% elif f.mock == "dictation" %}{{ dictation(t) }}{% else %}{{ outcomes(t) }}{% endif %}
       </div>{% endif %}
     </div>
+    {%- if f.overlayAfter %}{% include "partials/overlay-section.njk" %}{% endif %}
     {%- endfor %}
-  </div>
-</section>
-
-{# ── OVERLAY ── #}
-<section id="overlay" class="section">
-  <div class="wrap">
-    <div class="reveal" style="display:flex;align-items:flex-end;justify-content:space-between;gap:48px;margin-bottom:40px;flex-wrap:wrap">
-      <div style="max-width:660px">
-        <span class="eyebrow">{{ t.overlay.eyebrow }}</span>
-        <h2 class="h2">{{ t.overlay.title }}</h2>
-      </div>
-      <div style="max-width:400px;display:flex;flex-direction:column;gap:14px">
-        <p class="lead" style="font-size:15px">{{ t.overlay.body }}</p>
-        <div class="checks">
-          {%- for b in t.overlay.bullets %}
-          <div class="check">{{ icon("check", 17, 2.2) }}<span>{{ b }}</span></div>
-          {%- endfor %}
-        </div>
-      </div>
-    </div>
-    <div class="reveal" style="max-width:900px;margin:0 auto">{{ overlay(t) }}</div>
   </div>
 </section>
 
@@ -102,12 +82,12 @@ layout: layouts/base.njk
 {# ── NETWORK / PRIVACY ── #}
 <section id="privacy" class="section">
   <div class="wrap">
-    <div class="reveal" style="display:flex;align-items:flex-end;justify-content:space-between;gap:48px;margin-bottom:34px;flex-wrap:wrap">
-      <div style="max-width:660px">
+    <div class="reveal split-head">
+      <div>
         <span class="eyebrow">{{ t.network.eyebrow }}</span>
         <h2 class="h2">{{ t.network.title | safe }}</h2>
       </div>
-      <p style="max-width:380px;font-size:15px;line-height:1.65;color:var(--t4)">{{ t.network.sub }}</p>
+      <p style="font-size:15px;line-height:1.65;color:var(--t4)">{{ t.network.sub }}</p>
     </div>
     <div class="reveal" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px">
       {%- for n in t.network.cards %}

@@ -52,7 +52,8 @@
         "Optional start and stop sounds, so you know the shortcut landed",
         "A local LLM pass can polish the text before it lands, with editable prompts",
         "French and English out of the box on the default model"
-      ]
+      ],
+      "overlayAfter": true
     },
     {
       "id": "summaries",
