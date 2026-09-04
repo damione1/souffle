@@ -9,6 +9,8 @@ export default function (eleventyConfig) {
   eleventyConfig.addPassthroughCopy({ "src/js": "js" });
   eleventyConfig.addPassthroughCopy({ "src/fonts": "fonts" });
   eleventyConfig.addPassthroughCopy({ "src/souffle-logo.svg": "souffle-logo.svg" });
+  eleventyConfig.addPassthroughCopy({ "src/og-en.png": "og-en.png" });
+  eleventyConfig.addPassthroughCopy({ "src/og-fr.png": "og-fr.png" });
   eleventyConfig.addPassthroughCopy({ "src/_headers": "_headers" });
 
   // `t.some.key` inside a template, resolved against the page's locale bundle.
