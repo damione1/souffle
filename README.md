@@ -20,8 +20,9 @@
 
 <p>
   <a href="#download"><strong>Download</strong></a> ·
+  <a href="#meetings-that-know-who-is-talking">Meetings</a> ·
+  <a href="#dictation-straight-into-the-app-you-are-already-in">Dictation</a> ·
   <a href="#requirements">Requirements</a> ·
-  <a href="#permissions">Permissions</a> ·
   <a href="#speech-models">Speech models</a> ·
   <a href="#build-from-source">Build from source</a>
 </p>
@@ -32,41 +33,44 @@
   <img src="docs/demo/meeting.gif" width="820" alt="Live meeting transcription running fully on-device, separating Me from Them in real time">
 </p>
 
-Everything runs on-device:
+## Meetings that know who is talking
 
-- 🔒 **Fully private.** Transcription, summaries, and audio all stay on your Mac. Nothing is uploaded, and it works offline.
-- 🎙️ **Dictation and meetings.** Talk into any app with a global shortcut and auto-paste, or capture a meeting with a live transcript that tells you apart from everyone else.
-- 🧠 **Understand and own.** On-device summaries with decisions and action items, full-text search, and export to Markdown, JSON, or subtitles.
+System-audio capture separates **Me** from **Them** in the live transcript, with no virtual audio device to install. The recording looks after itself: it offers to start when a calendar meeting begins, notices when the meeting seems over and stops on its own after warning you, closes cleanly when the Mac sleeps and offers to resume on wake, and recovers or salvages the session if the engine stalls or the microphone disappears.
 
-## Transcribe
-
-- **Dictation**, from a global shortcut that works anywhere. Press once to start and stop, or bind a push-to-talk key and hold it instead. The text is inserted into whatever app you were using; apps that reject a synthetic paste (terminals, secure fields) can receive simulated keystrokes instead. Optional start/stop sounds confirm the shortcut landed.
-- **Meeting transcription**, with a live transcript and system-audio capture that separates Me from Them, with no virtual audio device to install. Optional audio recording keeps the meeting sound as compact Opus files under a retention policy, replayable with click-to-seek from the transcript.
-- **Hands-off recording lifecycle**: the app offers to start when a calendar meeting begins, detects when the meeting seems over and stops on its own after warning you, closes the recording cleanly when the Mac sleeps and offers to resume it on wake, and recovers or salvages the session if the engine stalls or the microphone disappears.
+- **Live transcript** with editable notes and participants beside it, and full-text search across every word you have ever recorded.
+- **Optional audio**, kept as compact Opus files for 7 days, 30 days or until you delete them, replayable with click-to-seek from any line.
 - **Corrections that stick**: fix a misheard name by hand once and Soufflé keeps that spelling, in a custom dictionary you can also edit yourself.
 
-| Dictate into any app | Your timeline, grouped by day |
-| :---: | :---: |
-| ![Dictation with the transcript as the whole surface, streaming in as you speak](docs/demo/dictation.gif) | ![Home timeline grouping meetings and dictations by day](docs/demo/timeline.png) |
+## Dictation, straight into the app you are already in
 
-## The overlay
-
-Dictation does not open a window. Press the shortcut and a small pill appears above whatever you are working in, then the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the pill does not care which, and it is excluded from screen capture, so it never turns up in the meeting you are in.
+Soufflé is not a window you type into. Press the shortcut and a small pill appears above whatever you are working in; when you stop, the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the pill does not care which, and it is excluded from screen capture, so it never turns up in the meeting you are in.
 
 <p align="center">
   <img src="docs/demo/overlay.gif" width="820" alt="The pill floating over a chat app: shortcut, dictation, reformulation, and the tidied text landing in the composer">
 </p>
 
-## Understand
+- **Press once to start and stop**, or bind a push-to-talk key and hold it instead.
+- **Insertion that fits the app**: the clipboard and ⌘V, simulated typing for terminals and secure fields that reject a synthetic paste, or a direct write through Accessibility.
+- **Polish before it lands** (optional): a local LLM pass tidies the phrasing, with editable prompt templates — clean up, professional email, bullet points, remove fillers.
+- **Optional start/stop sounds**, so you know the shortcut landed.
 
-- **Meeting summaries**, generated on-device by Apple Intelligence on macOS 26 or newer, with nothing to install, and otherwise by a local [Ollama](https://ollama.com/).
-- **Structured outcomes**: decisions, action items with owners, and open questions extracted alongside the summary.
-- **Dictation polish** (optional): a local LLM pass cleans up dictated text with editable prompt templates before it is inserted. Same provider as the summaries.
-- **Full-text search** across every transcript and dictation entry.
+| The dictation view | Your timeline, grouped by day |
+| :---: | :---: |
+| ![Dictation with the transcript as the whole surface, streaming in as you speak](docs/demo/dictation.gif) | ![Home timeline grouping meetings and dictations by day](docs/demo/timeline.png) |
+
+## Summaries you can act on
+
+Generated on-device by Apple Intelligence on macOS 26 or newer, with nothing to install, and otherwise by a local [Ollama](https://ollama.com/). Alongside the prose summary, Soufflé pulls out the decisions, the action items with their owners, and the questions nobody answered.
 
 <p align="center">
   <img src="docs/demo/outcomes.png" width="820" alt="Generated decisions, action items with owners, and open questions">
 </p>
+
+## Private by design
+
+- 🔒 **Nothing is uploaded.** Transcription, summaries and audio all stay on your Mac, in one local database you can export or delete whenever you like.
+- ✈️ **Works offline.** Once the speech model is on disk, transcription keeps working with the Wi-Fi off.
+- 🙅 **No account, ever.** No sign-up, no subscription, no API key to paste in. Every outbound connection the app makes is listed [below](#what-touches-the-network).
 
 ## Own your data
 
