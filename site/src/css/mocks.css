@@ -230,7 +230,7 @@
 }
 .chat-ws-mark {
   display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; border-radius: 7px;
+  width: 26px; height: 26px; border-radius: 7px;
   background: var(--c-accent); color: #fff; flex-shrink: 0;
 }
 .chat-ws-name { font-size: 14px; font-weight: 600; color: var(--c-side-strong); flex: 1; min-width: 0; }
