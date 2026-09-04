@@ -215,7 +215,7 @@
     "winHome": "Soufflé",
     "winDictation": "Soufflé · Dictating",
     "winOutcomes": "Soufflé · Product sync",
-    "winChat": "Chat",
+    "winChat": "Halyard",
     "liveMeeting": "Live meeting",
     "liveDictation": "Dictating",
     "stop": "Stop",
@@ -322,33 +322,82 @@
       "Who signs off on the new onboarding copy?"
     ],
     "chat": {
-      "workspace": "Channels",
+      "app": "Halyard",
+      "workspace": "Northwind",
+      "channelsLabel": "Channels",
+      "dmsLabel": "Direct messages",
       "channels": [
-        "# general",
-        "# release-4-2",
-        "# design"
+        {
+          "name": "general"
+        },
+        {
+          "name": "release-4-2",
+          "active": true
+        },
+        {
+          "name": "design"
+        },
+        {
+          "name": "support",
+          "unread": "3"
+        }
       ],
-      "active": "# release-4-2",
+      "dms": [
+        {
+          "name": "Sarah Okonjo",
+          "initials": "S",
+          "colour": "#c2557a",
+          "presence": "online"
+        },
+        {
+          "name": "Marc Lefebvre",
+          "initials": "M",
+          "colour": "#4d7ea8",
+          "presence": "away",
+          "unread": "1"
+        },
+        {
+          "name": "Priya Raman",
+          "initials": "P",
+          "colour": "#6a7f4a",
+          "presence": "online"
+        }
+      ],
+      "active": "release-4-2",
+      "topic": "Ship checklist and blockers for 4.2",
+      "members": "9",
+      "me": {
+        "name": "Damien",
+        "initials": "D",
+        "colour": "#5b5bd6",
+        "at": "10:04"
+      },
       "messages": [
         {
-          "from": "Sarah",
+          "from": "Sarah Okonjo",
           "initials": "S",
-          "colour": "#a85a2e",
+          "colour": "#c2557a",
           "at": "09:58",
           "text": "Support is asking when they can announce the new onboarding. What do I tell them?"
         },
         {
-          "from": "Marc",
+          "from": "Marc Lefebvre",
           "initials": "M",
-          "colour": "#6b5638",
+          "colour": "#4d7ea8",
           "at": "10:02",
           "text": "Depends on the accounts split, no? I'd rather not commit to a date we then move."
         }
       ],
-      "placeholder": "Message # release-4-2",
+      "placeholder": "Message #release-4-2",
       "raw": "yeah so tell them its blocked on the migration um the accounts table split and then we can announce once thats done probably two days later",
       "polished": "It's blocked on the accounts-table split. Once that lands we can announce, realistically about two days later."
-    }
+    },
+    "shortcutKeys": [
+      "⌘",
+      "⇧",
+      "Space"
+    ],
+    "shortcutCaption": "Press the shortcut"
   },
   "docs": {
     "eyebrow": "Documentation",

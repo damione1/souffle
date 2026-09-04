@@ -156,24 +156,66 @@
 {% endcall %}
 {% endmacro %}
 
-{# ── The overlay demo: a chat client with the pill floating over it ── #}
+{# ── The overlay demo ──
+   The chat client is a fictional product, "Halyard", with its own cool
+   palette so it cannot be mistaken for part of Soufflé: the whole point is
+   that the pill is floating over somebody else's app. #}
 {% macro overlay(t) %}
 {% set c = t.mock.chat %}
-<div class="overlay-stage" data-mock="overlay" data-polishing="{{ t.mock.pillPolishing }}">
-  <div class="mock win">
-    <div class="win-bar">
+<div class="overlay-stage" data-mock="overlay" data-polishing="{{ t.mock.pillPolishing }}"
+     data-me="{{ c.me.name }}" data-me-initials="{{ c.me.initials }}"
+     data-me-colour="{{ c.me.colour }}" data-me-at="{{ c.me.at }}">
+  <div class="mock chat-win">
+    <div class="win-bar chat-bar">
       <span class="win-dot red"></span><span class="win-dot amber"></span><span class="win-dot green"></span>
-      <span class="win-title">{{ t.mock.winChat }}</span>
+      <span class="win-title">{{ c.app }}</span>
     </div>
     <div class="chat">
       <aside class="chat-side">
-        <div class="chat-side-h">{{ c.workspace }}</div>
-        {%- for ch in c.channels %}
-        <div class="chat-channel{% if ch == c.active %} is-active{% endif %}">{{ ch }}</div>
-        {%- endfor %}
+        <div class="chat-ws">
+          <span class="chat-ws-mark" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v18"/><path d="M12 7l7 3.5"/><path d="M12 13l7 3.5"/><path d="M12 7L5 10.5"/>
+            </svg>
+          </span>
+          <span class="chat-ws-name">{{ c.workspace }}</span>
+          <svg class="chat-ws-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+
+        <div class="chat-group">
+          <span class="chat-group-h">{{ c.channelsLabel }}</span>
+          {%- for ch in c.channels %}
+          <div class="chat-item{% if ch.active %} is-active{% endif %}">
+            <span class="chat-hash">#</span>
+            <span class="chat-item-name">{{ ch.name }}</span>
+            {%- if ch.unread %}<span class="chat-badge">{{ ch.unread }}</span>{% endif %}
+          </div>
+          {%- endfor %}
+        </div>
+
+        <div class="chat-group">
+          <span class="chat-group-h">{{ c.dmsLabel }}</span>
+          {%- for d in c.dms %}
+          <div class="chat-item">
+            <span class="chat-dm-avatar" style="background:{{ d.colour }}">{{ d.initials }}<i class="chat-presence is-{{ d.presence }}"></i></span>
+            <span class="chat-item-name">{{ d.name }}</span>
+            {%- if d.unread %}<span class="chat-badge">{{ d.unread }}</span>{% endif %}
+          </div>
+          {%- endfor %}
+        </div>
       </aside>
+
       <div class="chat-main">
-        <div class="chat-head">{{ c.active }}</div>
+        <div class="chat-head">
+          <div class="chat-head-title"><span class="chat-hash">#</span>{{ c.active }}</div>
+          <div class="chat-head-meta">
+            <span class="chat-members">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-2.8 2.7-4.5 6-4.5s6 1.7 6 4.5"/><path d="M17 5.5a2.8 2.8 0 0 1 0 5.5"/></svg>
+              {{ c.members }}
+            </span>
+            <span class="chat-topic">{{ c.topic }}</span>
+          </div>
+        </div>
         <div class="chat-thread" data-thread>
           {%- for m in c.messages %}
           <div class="chat-msg">
@@ -191,6 +233,17 @@
         </div>
       </div>
     </div>
+  </div>
+
+  {# The shortcut, flashed for a beat so the trigger is legible before the
+     pill shows up. #}
+  <div class="keycast" data-keycast aria-hidden="true">
+    <div class="keycast-keys">
+      {%- for k in t.mock.shortcutKeys %}
+      <kbd class="keycap{% if k == 'Space' %} is-wide{% endif %}">{{ k }}</kbd>
+      {%- endfor %}
+    </div>
+    <span class="keycast-caption">{{ t.mock.shortcutCaption }}</span>
   </div>
 
   {# PillApp.svelte: 280px compact, 440px once there is live text. #}

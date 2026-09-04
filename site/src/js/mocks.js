@@ -299,11 +299,18 @@
     this.send = root.querySelector("[data-send]");
     this.thread = root.querySelector("[data-thread]");
     this.steps = Array.prototype.slice.call(root.querySelectorAll("[data-step]"));
+    this.keycast = root.querySelector("[data-keycast]");
     this.raw = root.querySelector("[data-raw]").textContent.trim();
     this.polished = root.querySelector("[data-polished]").textContent.trim();
     this.labels = {
       dictating: this.label.textContent.trim(),
       polishing: root.getAttribute("data-polishing") || ""
+    };
+    this.me = {
+      name: root.getAttribute("data-me") || "",
+      initials: root.getAttribute("data-me-initials") || "",
+      colour: root.getAttribute("data-me-colour") || "#5b5bd6",
+      at: root.getAttribute("data-me-at") || ""
     };
     this.wave = new Wave(root.querySelector("[data-pill-wave] [data-wave]"));
     this.run = new Runner();
@@ -320,6 +327,7 @@
     this.dot.hidden = false;
     this.stopBtn.hidden = false;
     this.label.textContent = this.labels.dictating;
+    if (this.keycast) this.keycast.classList.remove("is-on", "is-pressed");
     this.input.textContent = "";
     this.composer.classList.remove("is-focused");
     this.send.classList.remove("is-ready");
@@ -331,11 +339,25 @@
     var msg = document.createElement("div");
     msg.className = "chat-msg";
     msg.style.animation = "rise-in 240ms ease";
-    msg.innerHTML =
-      '<span class="chat-avatar" style="background:#b5791f">D</span>' +
-      '<div class="chat-body"><div><span class="chat-name">Damien</span>' +
-      '<span class="chat-at">10:04</span></div><p class="chat-text"></p></div>';
-    msg.querySelector(".chat-text").textContent = text;
+    var avatar = document.createElement("span");
+    avatar.className = "chat-avatar";
+    avatar.style.background = this.me.colour;
+    avatar.textContent = this.me.initials;
+    var body = document.createElement("div");
+    body.className = "chat-body";
+    var head = document.createElement("div");
+    var who = document.createElement("span");
+    who.className = "chat-name";
+    who.textContent = this.me.name;
+    var at = document.createElement("span");
+    at.className = "chat-at";
+    at.textContent = this.me.at;
+    head.appendChild(who); head.appendChild(at);
+    var p = document.createElement("p");
+    p.className = "chat-text";
+    p.textContent = text;
+    body.appendChild(head); body.appendChild(p);
+    msg.appendChild(avatar); msg.appendChild(body);
     this.thread.appendChild(msg);
     this.sent = msg;
   };
@@ -344,15 +366,26 @@
     this.run.clear(); this.run.stopped = false;
     this.reset();
 
-    // 1. the shortcut lands: the pill appears, compact.
-    this.run.after(900, function () {
+    // 1. the shortcut: flash the keys, depress them, and only then does the
+    //    pill appear, so the trigger is legible rather than implied.
+    this.run.after(300, function () {
       self.step(0);
+      if (self.keycast) self.keycast.classList.add("is-on");
+    });
+    this.run.after(950, function () {
+      if (self.keycast) self.keycast.classList.add("is-pressed");
+    });
+    this.run.after(1250, function () {
+      if (self.keycast) self.keycast.classList.remove("is-on");
       self.pill.classList.add("is-visible");
       self.wave.start(true);
     });
+    this.run.after(1600, function () {
+      if (self.keycast) self.keycast.classList.remove("is-pressed");
+    });
 
     // 2. speech arrives: the pill widens and the live text fills in.
-    this.run.after(1900, function () {
+    this.run.after(2150, function () {
       self.step(1);
       self.pill.classList.add("is-expanded");
       self.textEl.hidden = false;

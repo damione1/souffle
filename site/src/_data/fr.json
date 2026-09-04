@@ -215,7 +215,7 @@
     "winHome": "Soufflé",
     "winDictation": "Soufflé · Dictée",
     "winOutcomes": "Soufflé · Point produit",
-    "winChat": "Chat",
+    "winChat": "Halyard",
     "liveMeeting": "Réunion en direct",
     "liveDictation": "Dictée en cours",
     "stop": "Arrêter",
@@ -322,33 +322,82 @@
       "Qui approuve les nouveaux textes d'accueil ?"
     ],
     "chat": {
-      "workspace": "Canaux",
+      "app": "Halyard",
+      "workspace": "Northwind",
+      "channelsLabel": "Canaux",
+      "dmsLabel": "Messages directs",
       "channels": [
-        "# général",
-        "# release-4-2",
-        "# design"
+        {
+          "name": "général"
+        },
+        {
+          "name": "release-4-2",
+          "active": true
+        },
+        {
+          "name": "design"
+        },
+        {
+          "name": "support",
+          "unread": "3"
+        }
       ],
-      "active": "# release-4-2",
+      "dms": [
+        {
+          "name": "Sarah Okonjo",
+          "initials": "S",
+          "colour": "#c2557a",
+          "presence": "online"
+        },
+        {
+          "name": "Marc Lefebvre",
+          "initials": "M",
+          "colour": "#4d7ea8",
+          "presence": "away",
+          "unread": "1"
+        },
+        {
+          "name": "Priya Raman",
+          "initials": "P",
+          "colour": "#6a7f4a",
+          "presence": "online"
+        }
+      ],
+      "active": "release-4-2",
+      "topic": "Checklist de livraison et blocages pour la 4.2",
+      "members": "9",
+      "me": {
+        "name": "Damien",
+        "initials": "D",
+        "colour": "#5b5bd6",
+        "at": "10:04"
+      },
       "messages": [
         {
-          "from": "Sarah",
+          "from": "Sarah Okonjo",
           "initials": "S",
-          "colour": "#a85a2e",
+          "colour": "#c2557a",
           "at": "09:58",
           "text": "Le support demande quand ils peuvent annoncer le nouvel accueil. Je leur dis quoi ?"
         },
         {
-          "from": "Marc",
+          "from": "Marc Lefebvre",
           "initials": "M",
-          "colour": "#6b5638",
+          "colour": "#4d7ea8",
           "at": "10:02",
           "text": "Ça dépend de la séparation des comptes, non ? J'aimerais éviter d'annoncer une date qu'on repousse ensuite."
         }
       ],
-      "placeholder": "Message # release-4-2",
+      "placeholder": "Message #release-4-2",
       "raw": "ouais donc dis leur que c'est bloqué sur la migration euh la séparation de la table des comptes et après on pourra annoncer une fois que c'est fait probablement deux jours plus tard",
       "polished": "C'est bloqué sur la séparation de la table des comptes. Une fois que c'est fait, on pourra annoncer, réalistement environ deux jours plus tard."
-    }
+    },
+    "shortcutKeys": [
+      "⌘",
+      "⇧",
+      "Space"
+    ],
+    "shortcutCaption": "Appuyez sur le raccourci"
   },
   "docs": {
     "eyebrow": "Documentation",
