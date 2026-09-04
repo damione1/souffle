@@ -1,0 +1,744 @@
+{
+  "htmlLang": "fr",
+  "meta": {
+    "title": "Soufflé : reconnaissance vocale privée pour macOS",
+    "description": "Dictez dans n'importe quelle app, transcrivez vos réunions en distinguant votre voix de celle des autres, et obtenez des résumés en local. Pas de nuage, pas de compte, pas de clé d'API.",
+    "docsTitle": "Documentation Soufflé"
+  },
+  "nav": {
+    "features": "Fonctions",
+    "models": "Modèles",
+    "privacy": "Confidentialité",
+    "docs": "Docs",
+    "github": "GitHub",
+    "home": "Accueil",
+    "releases": "Versions",
+    "download": "Télécharger"
+  },
+  "hero": {
+    "badge": "macOS 13+ · APPLE SILICON",
+    "title": "Votre voix ne quitte<br>jamais votre Mac.",
+    "sub": "Soufflé dicte dans n'importe quelle app, transcrit vos réunions en distinguant votre voix de celle des autres, et rédige le résumé, tout ça en local sur votre Mac. Pas de nuage, pas de compte, pas de clé d'API.",
+    "cta": "Télécharger pour macOS",
+    "note": "Libre et open source",
+    "caption": "Une transcription de réunion en direct qui vous distingue de tous les autres. Sans pilote audio virtuel, sans rien envoyer."
+  },
+  "features": [
+    {
+      "id": "meetings",
+      "badge": "Réunions",
+      "tone": "secondary",
+      "icon": "users",
+      "mock": "home",
+      "flip": false,
+      "title": "Des réunions qui savent qui parle.",
+      "body": "La capture de l'audio système sépare <em class=\"me\">Moi</em> de <em class=\"them\">Eux</em> dans la transcription en direct, sans pilote audio virtuel à installer. L'enregistrement reste mains libres : il propose de démarrer quand une réunion du calendrier commence, remarque quand elle semble terminée, et survit à un écran rabattu.",
+      "bullets": [
+        "Audio Opus optionnel avec politique de rétention, rejouable en cliquant dans la transcription",
+        "Récupère ou sauve la session si le moteur cale ou si le micro disparaît",
+        "Tout regroupé par jour, avec recherche plein texte sur chaque mot"
+      ]
+    },
+    {
+      "id": "dictation",
+      "badge": "Dictée",
+      "tone": "accent",
+      "icon": "mic",
+      "mock": "dictation",
+      "flip": true,
+      "title": "Dictez n'importe où, le texte se colle tout seul.",
+      "body": "Un raccourci global démarre la dictée où que vous soyez, et le texte atterrit dans l'app où vous étiez déjà quand vous arrêtez. Les terminaux et les champs sécurisés qui refusent un collage synthétique peuvent recevoir des frappes simulées à la place.",
+      "bullets": [
+        "Sons de départ et d'arrêt optionnels, pour savoir que le raccourci a été capté",
+        "Un passage LLM local peut polir le texte avant qu'il n'arrive, avec des gabarits modifiables",
+        "Français et anglais d'emblée sur le modèle par défaut"
+      ]
+    },
+    {
+      "id": "summaries",
+      "badge": "Résumés",
+      "tone": "accent",
+      "icon": "bulb",
+      "mock": "outcomes",
+      "flip": false,
+      "title": "Le résumé s'écrit aussi sur votre machine.",
+      "body": "Décisions, tâches avec responsables, et les questions restées sans réponse, extraites en même temps que le résumé par Apple Intelligence, ou par un Ollama local quand votre Mac ne l'offre pas. La transcription, elle, n'a besoin d'aucun des deux.",
+      "bullets": [
+        "Notes et participants modifiables à côté de la transcription",
+        "Aucune configuration quand Apple Intelligence est disponible"
+      ]
+    }
+  ],
+  "overlay": {
+    "eyebrow": "L'overlay",
+    "title": "Ça marche par-dessus ce que vous utilisez.",
+    "body": "Soufflé n'est pas une fenêtre dans laquelle on tape. Appuyez sur le raccourci et un petit overlay apparaît au-dessus de votre app. Le texte y arrive au fil de la parole, un passage local le remet au propre, et il atterrit dans le champ où vous étiez déjà. Chat, courriel, éditeur, terminal : l'overlay s'en moque.",
+    "bullets": [
+      "La pastille flotte au-dessus de toutes les apps et reste hors des captures d'écran",
+      "Elle grandit pendant que vous parlez et se rétracte quand elle n'a rien à montrer"
+    ],
+    "steps": [
+      "Raccourci",
+      "Dictée",
+      "Reformulation",
+      "Collé"
+    ],
+    "caption": "Appuyez sur le raccourci n'importe où, parlez, et le texte propre atterrit là où votre curseur était déjà."
+  },
+  "models": {
+    "eyebrow": "Modèles de reconnaissance",
+    "title": "Choisissez le compromis qui vous va.",
+    "sub": "Les quatre tournent en local, téléchargés à la première utilisation. Changez quand vous voulez.",
+    "cards": [
+      {
+        "name": "Kyutai STT 1B",
+        "tag": "Par défaut",
+        "featured": true,
+        "desc": "Transcription en continu français et anglais, celui sur lequel la plupart des gens devraient rester.",
+        "chips": [
+          "2,4 Go",
+          "Metal · Candle",
+          "FR + EN"
+        ]
+      },
+      {
+        "name": "Kyutai STT 2.6B",
+        "desc": "Anglais seulement, qualité nettement meilleure, si vous avez le disque et la patience.",
+        "chips": [
+          "5,6 Go",
+          "Metal · Candle",
+          "EN"
+        ]
+      },
+      {
+        "name": "Whisper Large V3 Turbo",
+        "desc": "Multilingue et familier, via whisper.cpp sur le GPU.",
+        "chips": [
+          "1,6 Go",
+          "Metal · whisper.cpp",
+          "Multilingue"
+        ]
+      },
+      {
+        "name": "Parakeet TDT 0.6B v3",
+        "tag": "Le plus léger",
+        "desc": "25 langues avec ponctuation et majuscules, rapide sur le CPU seul.",
+        "chips": [
+          "670 Mo int8",
+          "CPU · ONNX",
+          "25 langues"
+        ]
+      }
+    ]
+  },
+  "network": {
+    "eyebrow": "Ce qui touche au réseau",
+    "title": "Trois connexions sortantes.<br>C'est toute la liste.",
+    "sub": "Une promesse de confidentialité, ça se vérifie plutôt que ça se croit : voici chaque requête que l'app peut faire.",
+    "cards": [
+      {
+        "host": "huggingface.co",
+        "icon": "download",
+        "desc": "Télécharge le modèle de reconnaissance la première fois que vous le choisissez. Rien n'est envoyé. Une fois sur le disque, la transcription marche hors ligne pour toujours."
+      },
+      {
+        "host": "api.github.com",
+        "icon": "clock",
+        "desc": "Demande une fois par jour s'il existe une version plus récente. Aucun identifiant, aucun compte, aucune donnée d'usage, et rien n'est jamais téléchargé. Désactivable dans les Réglages."
+      },
+      {
+        "host": "localhost:11434",
+        "icon": "server",
+        "desc": "Votre propre Ollama, et seulement si vous activez les résumés. C'est votre machine, sauf si vous la pointez ailleurs."
+      }
+    ],
+    "footnote": "Vos enregistrements, transcriptions, notes et résumés ne quittent jamais la machine. Ils vivent dans une base SQLite locale que les Réglages exportent ou effacent en entier."
+  },
+  "owndata": {
+    "eyebrow": "Vos données restent à vous",
+    "title": "Des fichiers ordinaires, et une porte pour vos propres outils.",
+    "body": "Exportez une réunion en Markdown, JSON ou sous-titres SRT/VTT, ou toute l'archive comme un dossier ordinaire que vous pouvez grep. Le sidecar <code>souffle-mcp</code> fourni laisse Claude Desktop, Claude Code ou n'importe quel client MCP chercher et lire vos transcriptions : lecture seule, local, et ça marche même l'app fermée.",
+    "bullets": [
+      "Markdown, JSON, SRT et VTT, par réunion ou en lot",
+      "Une seule base SQLite locale, exportée ou effacée en entier depuis les Réglages",
+      "Un CLI sans interface qui transcrit un fichier sans lancer l'app"
+    ],
+    "terminal": [
+      {
+        "comment": "# Transcrire un fichier, sans fenêtre, sortie JSON"
+      },
+      {
+        "cmd": "souffle --transcribe-file audio.wav --json"
+      },
+      {
+        "gap": true
+      },
+      {
+        "comment": "# Le binaire est livré dans le bundle de l'app"
+      },
+      {
+        "cmd": "ln -s \\"
+      },
+      {
+        "cont": "\"/Applications/Soufflé.app/Contents/MacOS/souffle\" \\"
+      },
+      {
+        "cont": "/usr/local/bin/souffle"
+      },
+      {
+        "gap": true
+      },
+      {
+        "comment": "# Liste les moteurs disponibles sur ce Mac"
+      },
+      {
+        "cmd": "souffle --list-engines"
+      }
+    ]
+  },
+  "requirements": {
+    "title": "Ce qu'il vous faut",
+    "rows": [
+      {
+        "k": "Mac",
+        "v": "Apple Silicon. Il n'y a pas de version Intel."
+      },
+      {
+        "k": "macOS",
+        "v": "13+ pour la dictée, 14.4+ pour capter<br>les autres participants"
+      },
+      {
+        "k": "Disque",
+        "v": "670 Mo à 5,6 Go, selon le modèle choisi"
+      },
+      {
+        "k": "Résumés",
+        "v": "Apple Intelligence ou un Ollama local<br>(la transcription n'en a besoin d'aucun)"
+      }
+    ],
+    "permTitle": "Permissions, demandées au besoin",
+    "permSub": "Jamais à l'avance, et les Réglages montrent l'état de chacune avec un lien direct vers le bon panneau des Réglages système.",
+    "perms": [
+      {
+        "k": "Microphone",
+        "v": "Enregistre votre voix"
+      },
+      {
+        "k": "Audio système",
+        "v": "Capte ce que disent les autres"
+      },
+      {
+        "k": "Accessibilité",
+        "v": "Colle dans l'app que vous utilisiez"
+      },
+      {
+        "k": "Calendrier",
+        "v": "Liste les événements du jour, optionnel"
+      }
+    ],
+    "statusTitle": "Jeune et en développement actif.",
+    "status": "Chaque version est signée et notarisée et l'ingénierie est couverte par une large suite de tests, mais l'app a tourné sur très peu de machines, et les parties fragiles sont celles qui varient le plus d'un Mac à l'autre : routage audio, casques Bluetooth, stations d'accueil, demandes de permission. Attendez-vous à des aspérités de ce côté, et signalez-les."
+  },
+  "cta": {
+    "title": "Essayez-la à votre prochaine réunion.",
+    "sub": "Téléchargez le <code>.dmg</code>, choisissez un modèle une fois, et le reste se passe sur votre Mac.",
+    "primary": "Télécharger pour macOS",
+    "secondary": "Code source sur GitHub"
+  },
+  "footer": {
+    "docs": "Documentation",
+    "releases": "Versions",
+    "issues": "Signaler un problème",
+    "github": "GitHub"
+  },
+  "mock": {
+    "winMeeting": "Soufflé · Réunion en direct",
+    "winHome": "Soufflé",
+    "winDictation": "Soufflé · Dictée",
+    "winOutcomes": "Soufflé · Point produit",
+    "winChat": "Chat",
+    "liveMeeting": "Réunion en direct",
+    "liveDictation": "Dictée en cours",
+    "stop": "Arrêter",
+    "liveTranscript": "Transcription en direct",
+    "systemAudio": "Audio système actif",
+    "editHint": "Double-cliquez sur un paragraphe pour corriger un mot mal entendu. Les occurrences suivantes se corrigent toutes seules.",
+    "me": "Moi",
+    "them": "Eux",
+    "notesTitle": "Notes",
+    "notesSaved": "Enregistré",
+    "notesText": "Sarah s'occupe des communications au support. L'essai est passé sur staging. Marc doit encore approuver les textes d'accueil.",
+    "dictate": "Dictée",
+    "press": "Appuyez sur",
+    "meeting": "Réunion",
+    "meetingHint": "Transcription en direct · capte l'audio système",
+    "search": "Chercher dans les transcriptions et les réunions",
+    "upcoming": "Aujourd'hui",
+    "today": "Aujourd'hui",
+    "now": "En cours",
+    "autopaste": "Se colle dans votre app précédente à l'arrêt",
+    "outcomes": "Résultats",
+    "decisions": "Décisions",
+    "actionItems": "Tâches",
+    "openQuestions": "Questions ouvertes",
+    "owner": "Responsable",
+    "pillDictation": "Dictée",
+    "pillPolishing": "Reformulation…",
+    "transcript": [
+      {
+        "who": "them",
+        "at": "00:12:04",
+        "text": "Donc la migration est le blocage. On ne peut pas livrer le nouvel accueil tant que la table des comptes n'est pas séparée."
+      },
+      {
+        "who": "me",
+        "at": "00:12:19",
+        "text": "Exact. Je peux m'occuper de la séparation cette semaine si on repousse la relecture des textes à jeudi."
+      },
+      {
+        "who": "them",
+        "at": "00:12:38",
+        "text": "Ça me va. On gèle la branche de release jusqu'à ce que la séparation soit faite, et je préviens le support que la date recule de deux jours."
+      }
+    ],
+    "dictationText": "Répondre au fil sur les prix. Je pense qu'on devrait rester au palier actuel jusqu'à la fin de la migration, puis réévaluer au prochain trimestre.",
+    "events": [
+      {
+        "title": "Point produit",
+        "time": "10:00–10:45",
+        "people": "4",
+        "now": true
+      },
+      {
+        "title": "Rencontre avec Sarah",
+        "time": "14:30–15:00"
+      }
+    ],
+    "timeline": [
+      {
+        "title": "Point produit",
+        "kind": "meeting",
+        "summary": true,
+        "duration": "32:10",
+        "at": "10:00"
+      },
+      {
+        "title": "Répondre au fil sur les prix. Je pense qu'on devrait rester au palier actuel jusqu'à…",
+        "kind": "dictation",
+        "duration": "00:41",
+        "at": "09:12"
+      },
+      {
+        "title": "Revue de design",
+        "kind": "meeting",
+        "summary": true,
+        "duration": "18:44",
+        "at": "08:30"
+      }
+    ],
+    "outcomeDecisions": [
+      "Geler la branche de release jusqu'à la séparation des comptes",
+      "La relecture des textes d'accueil passe à jeudi"
+    ],
+    "outcomeActions": [
+      {
+        "text": "Séparer la table des comptes",
+        "owner": "Damien"
+      },
+      {
+        "text": "Prévenir le support du report de deux jours",
+        "owner": "Sarah"
+      },
+      {
+        "text": "Refaire l'essai de migration sur staging",
+        "owner": "Damien"
+      },
+      {
+        "text": "Fixer le suivi à mardi prochain",
+        "owner": "Marc"
+      }
+    ],
+    "outcomeQuestions": [
+      "Faut-il un plan B si la séparation traîne ?",
+      "Qui approuve les nouveaux textes d'accueil ?"
+    ],
+    "chat": {
+      "workspace": "Canaux",
+      "channels": [
+        "# général",
+        "# release-4-2",
+        "# design"
+      ],
+      "active": "# release-4-2",
+      "messages": [
+        {
+          "from": "Sarah",
+          "initials": "S",
+          "colour": "#a85a2e",
+          "at": "09:58",
+          "text": "Le support demande quand ils peuvent annoncer le nouvel accueil. Je leur dis quoi ?"
+        },
+        {
+          "from": "Marc",
+          "initials": "M",
+          "colour": "#6b5638",
+          "at": "10:02",
+          "text": "Ça dépend de la séparation des comptes, non ? J'aimerais éviter d'annoncer une date qu'on repousse ensuite."
+        }
+      ],
+      "placeholder": "Message # release-4-2",
+      "raw": "ouais donc dis leur que c'est bloqué sur la migration euh la séparation de la table des comptes et après on pourra annoncer une fois que c'est fait probablement deux jours plus tard",
+      "polished": "C'est bloqué sur la séparation de la table des comptes. Une fois que c'est fait, on pourra annoncer, réalistement environ deux jours plus tard."
+    }
+  },
+  "docs": {
+    "eyebrow": "Documentation",
+    "title": "Tout ce que Soufflé fait, et ce qu'il lui faut pour le faire.",
+    "intro": "Des pages courtes, écrites pour quelqu'un qui vient de télécharger l'app. Rien ici ne demande de compte, de clé, ni de connexion au-delà du premier téléchargement de modèle.",
+    "groups": [
+      {
+        "label": "Démarrer",
+        "items": [
+          [
+            "install",
+            "Installation"
+          ],
+          [
+            "requirements",
+            "Prérequis"
+          ],
+          [
+            "permissions",
+            "Permissions"
+          ],
+          [
+            "first-run",
+            "Première utilisation"
+          ]
+        ]
+      },
+      {
+        "label": "Utilisation",
+        "items": [
+          [
+            "dictation",
+            "Dictée"
+          ],
+          [
+            "overlay",
+            "L'overlay"
+          ],
+          [
+            "meetings",
+            "Réunions"
+          ],
+          [
+            "summaries",
+            "Résumés"
+          ],
+          [
+            "models",
+            "Modèles"
+          ]
+        ]
+      },
+      {
+        "label": "Vos données",
+        "items": [
+          [
+            "privacy",
+            "Ce qui touche au réseau"
+          ],
+          [
+            "export",
+            "Export"
+          ],
+          [
+            "mcp",
+            "Serveur MCP"
+          ],
+          [
+            "cli",
+            "CLI sans interface"
+          ]
+        ]
+      },
+      {
+        "label": "Contribuer",
+        "items": [
+          [
+            "build",
+            "Compiler depuis les sources"
+          ],
+          [
+            "issues",
+            "Signaler un problème"
+          ],
+          [
+            "license",
+            "Licence"
+          ]
+        ]
+      }
+    ],
+    "sections": [
+      {
+        "id": "install",
+        "h": "Installation",
+        "blocks": [
+          {
+            "p": "Avec Homebrew :"
+          },
+          {
+            "code": "brew install --cask damione1/tap/souffle"
+          },
+          {
+            "p": "Ou téléchargez le <code>.dmg</code> depuis la <a href=\"https://github.com/damione1/souffle/releases/latest\">dernière version</a> et glissez Soufflé dans Applications. Chaque build est signé et notarisé."
+          }
+        ]
+      },
+      {
+        "id": "requirements",
+        "h": "Prérequis",
+        "blocks": [
+          {
+            "table": [
+              [
+                "Mac",
+                "Apple Silicon. Il n'y a pas de version Intel."
+              ],
+              [
+                "macOS 13+",
+                "Dictée, et réunions avec votre micro seulement."
+              ],
+              [
+                "macOS 14.4+",
+                "Réunions qui captent les autres participants. La capture de l'audio système passe par le process tap de Core Audio, qui n'existe pas avant 14.4. Sur macOS 13 la réunion s'enregistre quand même, et l'app affiche <em>Mic only</em>."
+              ],
+              [
+                "Disque",
+                "670 Mo à 5,6 Go pour le modèle, téléchargé à la première utilisation."
+              ],
+              [
+                "Résumés",
+                "Apple Intelligence, quand votre Mac l'offre, ou un <a href=\"https://ollama.com/\">Ollama</a> local. La transcription n'a besoin d'aucun des deux."
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "id": "permissions",
+        "h": "Permissions",
+        "blocks": [
+          {
+            "p": "Soufflé demande chacune d'elles au moment où vous utilisez la fonction qui en a besoin, jamais à l'avance. Réglages → Permissions montre l'état de chacune avec un lien direct vers le bon panneau des Réglages système."
+          },
+          {
+            "table": [
+              [
+                "Microphone",
+                "Enregistre votre voix pour la transcrire. Nécessaire à tout."
+              ],
+              [
+                "Audio système",
+                "Capte ce que disent les autres participants, sans pilote audio virtuel. Réunions sur macOS 14.4+."
+              ],
+              [
+                "Accessibilité",
+                "Colle dans l'app que vous utilisiez, et relit vos corrections quand « apprendre des modifications » est activé."
+              ],
+              [
+                "Calendrier",
+                "Lit les événements du jour pour les lister et proposer de démarrer l'enregistrement. Optionnel."
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "id": "first-run",
+        "h": "Première utilisation",
+        "blocks": [
+          {
+            "p": "Un assistant fait le tour des trois choses qui comptent : choisir un modèle et le télécharger, accorder la permission micro, et choisir le raccourci de dictée. Le raccourci par défaut est <kbd>⌘⇧Space</kbd>, et il se change dans les Réglages."
+          }
+        ]
+      },
+      {
+        "id": "dictation",
+        "h": "Dictée",
+        "blocks": [
+          {
+            "p": "Appuyez sur le raccourci n'importe où, parlez, appuyez à nouveau. Le texte se colle dans l'app qui avait le focus. Les apps qui refusent un collage synthétique (terminaux, champs sécurisés) peuvent recevoir des frappes simulées à la place ; l'option est dans les Réglages."
+          },
+          {
+            "p": "Des sons de départ et d'arrêt optionnels confirment que le raccourci a été capté. Le polissage de dictée, optionnel lui aussi, fait passer le texte par un LLM local avec un gabarit de prompt modifiable avant de le coller."
+          }
+        ]
+      },
+      {
+        "id": "overlay",
+        "h": "L'overlay",
+        "blocks": [
+          {
+            "p": "La dictée n'ouvre pas de fenêtre. Un petit overlay, la pastille, apparaît au-dessus de ce sur quoi vous travaillez : un point d'enregistrement, le libellé, une waveform en direct, et un bouton d'arrêt. Elle reste large de 280&nbsp;px tant qu'il n'y a rien à montrer, puis passe à 440&nbsp;px et grandit ligne par ligne pendant que vous parlez."
+          },
+          {
+            "p": "À l'arrêt, la pastille passe en <em>Reformulation…</em> pendant le passage de polissage local, puis disparaît quand le texte atterrit dans le champ que vous utilisiez déjà. La fenêtre est exclue des captures d'écran, donc elle n'apparaît pas dans la réunion où vous êtes."
+          }
+        ]
+      },
+      {
+        "id": "meetings",
+        "h": "Réunions",
+        "blocks": [
+          {
+            "p": "Une réunion enregistre votre micro et, sur macOS 14.4+, l'audio système, donc la transcription en direct sépare <em>Moi</em> de <em>Eux</em> au fil de l'eau."
+          },
+          {
+            "p": "Le cycle de vie se veut mains libres : l'app propose de démarrer quand une réunion du calendrier commence, détecte quand la réunion semble terminée et s'arrête d'elle-même après vous avoir prévenu, met en pause et reprend à la fermeture de l'écran et à la veille, et récupère ou sauve la session si le moteur cale ou si le micro disparaît."
+          },
+          {
+            "p": "L'enregistrement audio est désactivé par défaut. Activez-le et le son de la réunion est conservé en fichiers Opus compacts, sous une politique de rétention que vous choisissez, rejouables en cliquant sur n'importe quelle ligne de la transcription."
+          }
+        ]
+      },
+      {
+        "id": "summaries",
+        "h": "Résumés",
+        "blocks": [
+          {
+            "p": "Les résumés sont générés en local, par Apple Intelligence quand votre Mac l'offre (aucune configuration), sinon par un Ollama local que vous indiquez à l'app. À côté du résumé, Soufflé extrait les décisions, les tâches avec responsables, et les questions ouvertes."
+          },
+          {
+            "p": "Rien d'un résumé n'est envoyé où que ce soit. Avec Ollama, la seule requête va à votre propre instance, <code>http://localhost:11434</code> par défaut."
+          }
+        ]
+      },
+      {
+        "id": "models",
+        "h": "Modèles de reconnaissance",
+        "blocks": [
+          {
+            "p": "Tous les modèles tournent en local et sont téléchargés à la première utilisation depuis HuggingFace. Changez quand vous voulez dans Réglages → Transcription."
+          },
+          {
+            "table": [
+              [
+                "Kyutai STT 1B",
+                "Par défaut. Français + anglais en continu, ~2,4 Go, GPU Metal via Candle."
+              ],
+              [
+                "Kyutai STT 2.6B",
+                "Anglais, meilleure qualité, ~5,6 Go."
+              ],
+              [
+                "Whisper Large V3 Turbo",
+                "Multilingue, ~1,6 Go, Metal via whisper.cpp."
+              ],
+              [
+                "Parakeet TDT 0.6B v3",
+                "25 langues avec ponctuation et majuscules, ~670 Mo int8, inférence CPU rapide via ONNX Runtime."
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "id": "privacy",
+        "h": "Ce qui touche au réseau",
+        "blocks": [
+          {
+            "p": "La promesse de confidentialité se vérifie plutôt qu'elle ne se croit : voici chaque connexion sortante que l'app établit."
+          },
+          {
+            "table": [
+              [
+                "huggingface.co",
+                "Télécharge un modèle la première fois que vous le sélectionnez. Rien n'est envoyé, et une fois le modèle sur le disque la transcription marche hors ligne pour toujours."
+              ],
+              [
+                "api.github.com",
+                "Une fois par jour, et chaque fois que vous appuyez sur <em>Vérifier les mises à jour</em>, demande s'il existe une version plus récente. N'envoie rien d'autre que la requête : aucun identifiant, aucun compte, aucune donnée d'usage. Affiche une boîte de dialogue et ne télécharge ni n'installe jamais rien. Désactivable dans Réglages → À propos."
+              ],
+              [
+                "localhost:11434",
+                "Votre instance Ollama, seulement si vous activez les résumés avec Ollama. C'est votre machine, sauf si vous la pointez ailleurs."
+              ]
+            ]
+          },
+          {
+            "p": "Vos enregistrements, transcriptions, notes et résumés ne sont jamais envoyés nulle part. Ils vivent dans une base SQLite locale, et Réglages → Données exporte ou efface le tout."
+          }
+        ]
+      },
+      {
+        "id": "export",
+        "h": "Export",
+        "blocks": [
+          {
+            "p": "N'importe quelle réunion s'exporte en Markdown, JSON, ou sous-titres SRT/VTT. Toute l'archive s'exporte en un simple dossier de Markdown et de JSON. Pas de format propriétaire, rien dont il faudra migrer plus tard."
+          }
+        ]
+      },
+      {
+        "id": "mcp",
+        "h": "Serveur MCP",
+        "blocks": [
+          {
+            "p": "Le sidecar <code>souffle-mcp</code> fourni laisse Claude Desktop, Claude Code ou n'importe quel client MCP chercher et lire vos transcriptions. En lecture seule, entièrement local, et il marche même l'app fermée. Les extraits de configuration prêts à l'emploi sont dans Réglages → Données."
+          }
+        ]
+      },
+      {
+        "id": "cli",
+        "h": "CLI sans interface",
+        "blocks": [
+          {
+            "p": "Le binaire <code>souffle</code> transcrit un fichier sans lancer l'app. Il est livré dans le bundle et n'est pas ajouté à votre <code>PATH</code> : appelez-le par son chemin complet, ou faites un lien symbolique une fois pour toutes."
+          },
+          {
+            "code": "# Appel direct\n\"/Applications/Soufflé.app/Contents/MacOS/souffle\" --list-engines\n\n# Ou l'exposer comme commande `souffle`\nln -s \"/Applications/Soufflé.app/Contents/MacOS/souffle\" /usr/local/bin/souffle\n\n# Transcrire un fichier, JSON sur stdout\nsouffle --transcribe-file audio.wav --json"
+          },
+          {
+            "p": "<code>--repeat N</code> relance le même fichier N fois, ce qui sert aussi de banc d'essai pour comparer les modèles sur votre machine."
+          }
+        ]
+      },
+      {
+        "id": "build",
+        "h": "Compiler depuis les sources",
+        "blocks": [
+          {
+            "p": "Nécessite un Mac Apple Silicon, <a href=\"https://rustup.rs/\">Rust</a>, <a href=\"https://nodejs.org/\">Node.js</a> 18+, et cmake (<code>brew install cmake</code>)."
+          },
+          {
+            "code": "git clone https://github.com/damione1/souffle.git\ncd souffle\nnpm install\nnpm run tauri dev"
+          }
+        ]
+      },
+      {
+        "id": "issues",
+        "h": "Signaler un problème",
+        "blocks": [
+          {
+            "p": "Soufflé est jeune et en développement actif. Chaque version est signée et notarisée et l'ingénierie est couverte par une large suite de tests, mais l'app a tourné sur très peu de machines, et les parties fragiles sont celles qui varient le plus d'un Mac à l'autre : routage audio, casques Bluetooth, stations d'accueil, demandes de permission."
+          },
+          {
+            "p": "Si ça casse de ce côté, <a href=\"https://github.com/damione1/souffle/issues\">ouvrez un ticket</a> avec votre version de macOS, votre modèle de Mac, et les périphériques audio concernés."
+          }
+        ]
+      },
+      {
+        "id": "license",
+        "h": "Licence",
+        "blocks": [
+          {
+            "p": "Copyright © 2026 Damien Goehrig. Publié sous la licence GNU General Public License v3.0 ou ultérieure. Vous êtes libre de l'utiliser, l'étudier, le modifier et le redistribuer, à condition que les travaux dérivés soient publiés sous la même licence."
+          }
+        ]
+      }
+    ]
+  }
+}

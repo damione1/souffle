@@ -1,0 +1,207 @@
+---
+pagination: { data: locales, size: 1, alias: loc }
+permalink: "{{ loc.dir }}index.html"
+layout: layouts/base.njk
+---
+{% from "icons.njk" import icon %}
+{% from "mocks/mocks.njk" import meeting, dictation, home, outcomes, overlay %}
+
+{# ── HERO ── #}
+<section class="hero">
+  <div class="hero-glow" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <p class="hero-badge reveal"><span class="ready-dot"></span>{{ t.hero.badge }}</p>
+    <h1 class="reveal">{{ t.hero.title | safe }}</h1>
+    <p class="hero-sub reveal">{{ t.hero.sub }}</p>
+    <div class="reveal" style="display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap;justify-content:center">
+      <a class="btn btn-primary" href="{{ site.latest }}">{{ icon("download", 18) }}{{ t.hero.cta }}</a>
+      <button class="copy" data-copy="{{ site.brew }}" type="button">
+        <code>{{ site.brew }}</code><span class="copy-icon">{{ icon("copy", 14) }}</span>
+      </button>
+    </div>
+    <p class="reveal" style="font-size:13.5px;color:var(--t4)">{{ t.hero.note }}</p>
+  </div>
+  <div class="reveal" style="margin:66px auto 0;max-width:940px">
+    {{ meeting(t) }}
+    <p class="mock-caption" style="color:var(--t5)">{{ t.hero.caption }}</p>
+  </div>
+</section>
+
+{# ── FEATURES ── #}
+<section id="features" class="section">
+  <div class="wrap" style="display:flex;flex-direction:column;gap:104px">
+    {%- for f in t.features %}
+    <div class="feature reveal{% if f.flip %} is-flipped{% endif %}">
+      {%- if f.flip %}<div style="min-width:0">
+        {%- if f.mock == "home" %}{{ home(t) }}{% elif f.mock == "dictation" %}{{ dictation(t) }}{% else %}{{ outcomes(t) }}{% endif %}
+      </div>{% endif %}
+      <div class="feature-text">
+        <span class="pill pill-{{ f.tone }}" style="align-self:flex-start">{{ icon(f.icon, 13) }}{{ f.badge }}</span>
+        <h2>{{ f.title }}</h2>
+        <p class="lead">{{ f.body | safe }}</p>
+        <div class="checks">
+          {%- for b in f.bullets %}
+          <div class="check">{{ icon("check", 17, 2.2) }}<span>{{ b }}</span></div>
+          {%- endfor %}
+        </div>
+      </div>
+      {%- if not f.flip %}<div style="min-width:0">
+        {%- if f.mock == "home" %}{{ home(t) }}{% elif f.mock == "dictation" %}{{ dictation(t) }}{% else %}{{ outcomes(t) }}{% endif %}
+      </div>{% endif %}
+    </div>
+    {%- endfor %}
+  </div>
+</section>
+
+{# ── OVERLAY ── #}
+<section id="overlay" class="section">
+  <div class="wrap">
+    <div class="reveal" style="display:flex;align-items:flex-end;justify-content:space-between;gap:48px;margin-bottom:40px;flex-wrap:wrap">
+      <div style="max-width:660px">
+        <span class="eyebrow">{{ t.overlay.eyebrow }}</span>
+        <h2 class="h2">{{ t.overlay.title }}</h2>
+      </div>
+      <div style="max-width:400px;display:flex;flex-direction:column;gap:14px">
+        <p class="lead" style="font-size:15px">{{ t.overlay.body }}</p>
+        <div class="checks">
+          {%- for b in t.overlay.bullets %}
+          <div class="check">{{ icon("check", 17, 2.2) }}<span>{{ b }}</span></div>
+          {%- endfor %}
+        </div>
+      </div>
+    </div>
+    <div class="reveal" style="max-width:900px;margin:0 auto">{{ overlay(t) }}</div>
+  </div>
+</section>
+
+{# ── MODELS ── #}
+<section id="models" class="section">
+  <div class="wrap">
+    <div class="reveal" style="text-align:center;margin-bottom:40px">
+      <span class="eyebrow">{{ t.models.eyebrow }}</span>
+      <h2 class="h2">{{ t.models.title }}</h2>
+      <p class="lead" style="max-width:560px;margin:16px auto 0;color:var(--t4)">{{ t.models.sub }}</p>
+    </div>
+    <div class="reveal" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px">
+      {%- for m in t.models.cards %}
+      <div class="card" style="padding:24px 26px{% if m.featured %};outline-color:color-mix(in srgb, var(--accent) 22%, transparent){% endif %}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px">
+          <h3 style="font-size:20px;font-weight:600;color:var(--t1)">{{ m.name }}</h3>
+          {%- if m.tag %}<span class="pill {{ 'pill-accent' if m.featured }}" style="font-size:11.5px{% if not m.featured %};background:var(--surface-2);color:var(--t3);outline:1px solid var(--ghost){% endif %}">{{ m.tag }}</span>{% endif %}
+        </div>
+        <p style="font-size:15px;line-height:1.6;color:var(--t3);margin-bottom:16px">{{ m.desc }}</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          {%- for c in m.chips %}<span class="mono" style="padding:4px 10px;border-radius:9999px;background:var(--surface-2);font-size:12px;color:var(--t3)">{{ c }}</span>{% endfor %}
+        </div>
+      </div>
+      {%- endfor %}
+    </div>
+  </div>
+</section>
+
+{# ── NETWORK / PRIVACY ── #}
+<section id="privacy" class="section">
+  <div class="wrap">
+    <div class="reveal" style="display:flex;align-items:flex-end;justify-content:space-between;gap:48px;margin-bottom:34px;flex-wrap:wrap">
+      <div style="max-width:660px">
+        <span class="eyebrow">{{ t.network.eyebrow }}</span>
+        <h2 class="h2">{{ t.network.title | safe }}</h2>
+      </div>
+      <p style="max-width:380px;font-size:15px;line-height:1.65;color:var(--t4)">{{ t.network.sub }}</p>
+    </div>
+    <div class="reveal" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px">
+      {%- for n in t.network.cards %}
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;color:var(--accent)">
+          {{ icon(n.icon, 19, 1.8) }}<span class="mono" style="font-size:13.5px;font-weight:500;color:var(--t1)">{{ n.host }}</span>
+        </div>
+        <p style="font-size:14.5px;line-height:1.62;color:var(--t3)">{{ n.desc }}</p>
+      </div>
+      {%- endfor %}
+    </div>
+    <div class="reveal" style="display:flex;align-items:center;gap:12px;margin-top:20px;padding:18px 24px;border-radius:14px;background:color-mix(in srgb, var(--accent) 6%, transparent);outline:1px solid color-mix(in srgb, var(--accent) 16%, transparent);color:var(--accent)">
+      {{ icon("shield", 18, 1.8) }}<p style="font-size:14.5px;color:var(--t2)">{{ t.network.footnote }}</p>
+    </div>
+  </div>
+</section>
+
+{# ── OWN YOUR DATA ── #}
+<section class="section">
+  <div class="wrap reveal" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:64px;align-items:start">
+    <div>
+      <span class="eyebrow">{{ t.owndata.eyebrow }}</span>
+      <h2 class="h2" style="margin-bottom:20px">{{ t.owndata.title }}</h2>
+      <p class="lead" style="margin-bottom:26px">{{ t.owndata.body | safe }}</p>
+      <div class="checks">
+        {%- for b in t.owndata.bullets %}
+        <div class="check">{{ icon("check", 17, 2.2) }}<span>{{ b }}</span></div>
+        {%- endfor %}
+      </div>
+    </div>
+    <div style="padding:22px 24px;border-radius:16px;background:var(--input);outline:1px solid var(--ghost)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px">
+        <span style="width:10px;height:10px;border-radius:50%;background:var(--surface-3)"></span>
+        <span style="width:10px;height:10px;border-radius:50%;background:var(--surface-3)"></span>
+        <span style="width:10px;height:10px;border-radius:50%;background:var(--surface-3)"></span>
+        <span class="mono" style="margin-left:8px;font-size:12px;color:var(--t5)">zsh</span>
+      </div>
+      <div class="mono" style="display:flex;flex-direction:column;gap:9px;font-size:13.5px;line-height:1.6">
+        {%- for l in t.owndata.terminal %}
+          {%- if l.gap %}<span style="height:8px"></span>
+          {%- elif l.comment %}<span style="color:var(--t5)">{{ l.comment }}</span>
+          {%- elif l.cmd %}<span style="color:var(--t2)"><span style="color:var(--accent)">$</span> {{ l.cmd }}</span>
+          {%- else %}<span style="color:var(--t2);padding-left:20px">{{ l.cont }}</span>{% endif %}
+        {%- endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ── REQUIREMENTS + PERMISSIONS ── #}
+<section class="section">
+  <div class="wrap">
+    <div class="reveal" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px">
+      <div class="card" style="padding:28px 30px">
+        <h3 style="font-size:22px;font-weight:600;color:var(--t1);margin-bottom:20px">{{ t.requirements.title }}</h3>
+        {%- for r in t.requirements.rows %}
+        <div style="display:flex;justify-content:space-between;gap:20px;padding:13px 0{% if not loop.last %};border-bottom:1px solid var(--divider){% endif %}">
+          <span style="font-size:15px;color:var(--t3)">{{ r.k }}</span>
+          <span style="font-size:15px;color:var(--t2);text-align:right">{{ r.v | safe }}</span>
+        </div>
+        {%- endfor %}
+      </div>
+      <div class="card" style="padding:28px 30px">
+        <h3 style="font-size:22px;font-weight:600;color:var(--t1);margin-bottom:8px">{{ t.requirements.permTitle }}</h3>
+        <p style="font-size:14.5px;line-height:1.6;color:var(--t4);margin-bottom:14px">{{ t.requirements.permSub }}</p>
+        {%- for p in t.requirements.perms %}
+        <div style="display:flex;justify-content:space-between;gap:20px;padding:12px 0{% if not loop.last %};border-bottom:1px solid var(--divider){% endif %}">
+          <span style="font-size:15px;color:var(--t3)">{{ p.k }}</span>
+          <span style="font-size:15px;color:var(--t2);text-align:right">{{ p.v }}</span>
+        </div>
+        {%- endfor %}
+      </div>
+    </div>
+    <div class="reveal" style="display:flex;align-items:flex-start;gap:13px;margin-top:18px;padding:20px 26px;border-radius:14px;background:color-mix(in srgb, var(--warning) 6%, transparent);outline:1px solid color-mix(in srgb, var(--warning) 18%, transparent);color:var(--warning)">
+      {{ icon("warning", 19, 1.9) }}
+      <p style="font-size:15px;line-height:1.62;color:var(--t2)"><strong style="font-weight:600;color:var(--t1)">{{ t.requirements.statusTitle }}</strong> {{ t.requirements.status }}</p>
+    </div>
+  </div>
+</section>
+
+{# ── DOWNLOAD ── #}
+<section id="download" class="section">
+  <div class="wrap reveal" style="position:relative;padding:76px 60px;background:var(--surface-1);border-radius:24px;outline:1px solid color-mix(in srgb, var(--accent) 18%, transparent);text-align:center;overflow:hidden">
+    <div aria-hidden="true" style="position:absolute;top:-220px;left:50%;transform:translateX(-50%);width:800px;height:440px;background:radial-gradient(ellipse at center, rgba(233,174,85,0.18), rgba(233,174,85,0) 70%);pointer-events:none"></div>
+    <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:22px">
+      <h2 style="max-width:760px;font-size:46px;font-weight:600;line-height:1.1;color:var(--t1)">{{ t.cta.title }}</h2>
+      <p style="max-width:580px;font-size:17px;line-height:1.62;color:var(--t3)">{{ t.cta.sub | safe }}</p>
+      <div style="display:flex;align-items:center;gap:14px;margin-top:8px;flex-wrap:wrap;justify-content:center">
+        <a class="btn btn-primary" href="{{ site.latest }}">{{ icon("download", 18) }}{{ t.cta.primary }}</a>
+        <a class="btn btn-secondary" href="{{ site.repo }}">{{ icon("github", 18) }}{{ t.cta.secondary }}</a>
+      </div>
+      <button class="copy" data-copy="{{ site.brew }}" type="button" style="margin-top:6px">
+        <code>{{ site.brew }}</code><span class="copy-icon">{{ icon("copy", 14) }}</span>
+      </button>
+    </div>
+  </div>
+</section>

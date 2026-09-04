@@ -1,0 +1,218 @@
+{% from "icons.njk" import icon %}
+
+{# Window chrome. `anim` names the behaviour mocks.js drives inside it. #}
+{% macro win(title, anim = "") %}
+<div class="mock win"{% if anim %} data-mock="{{ anim }}"{% endif %}>
+  <div class="win-bar">
+    <span class="win-dot red"></span><span class="win-dot amber"></span><span class="win-dot green"></span>
+    <span class="win-title">{{ title }}</span>
+  </div>
+  <div class="win-body">{{ caller() }}</div>
+</div>
+{% endmacro %}
+
+{# LiveSessionCard's header row: badge + pulsing dot, waveform, running clock, stop. #}
+{% macro liveHead(label, stop, start) %}
+<div class="live-head">
+  <span class="live-badge"><span class="rec-dot"></span>{{ label }}</span>
+  <div class="wave"><canvas data-wave height="46" aria-hidden="true"></canvas></div>
+  <span class="live-time mono" data-timer data-start="{{ start }}">{{ start }}</span>
+  <span class="live-stop">{{ icon("square", 13) }}{{ stop }}</span>
+</div>
+{% endmacro %}
+
+{# ── Live meeting: transcript streams in, then the notes card ── #}
+{% macro meeting(t) %}
+{% call win(t.mock.winMeeting, "meeting") %}
+  <div class="m-stack">
+    {{ liveHead(t.mock.liveMeeting, t.mock.stop, "14:22") }}
+    <div class="m-card tr-card">
+      <div class="tr-head">
+        <h3>{{ t.mock.liveTranscript }}</h3>
+        <span class="tr-audio"><i></i>{{ t.mock.systemAudio }}</span>
+      </div>
+      <p class="tr-hint">{{ t.mock.editHint }}</p>
+      <div class="tr-body" data-transcript>
+        {%- for p in t.mock.transcript %}
+        <template data-para data-who="{{ p.who }}" data-at="{{ p.at }}"
+                  data-label="{{ t.mock.me if p.who == 'me' else t.mock.them }}">{{ p.text }}</template>
+        {%- endfor %}
+      </div>
+    </div>
+    <section class="m-card-sm notes">
+      <div class="notes-head">
+        <h3>{{ icon("pencil", 14) }}{{ t.mock.notesTitle }}</h3>
+        <span class="notes-state">{{ t.mock.notesSaved }}</span>
+      </div>
+      <div class="notes-field">{{ t.mock.notesText }}</div>
+    </section>
+  </div>
+{% endcall %}
+{% endmacro %}
+
+{# ── Dictation: text types itself in, caret blinks, auto-paste footer ── #}
+{% macro dictation(t) %}
+{% call win(t.mock.winDictation, "dictation") %}
+  <div class="m-stack">
+    {{ liveHead(t.mock.liveDictation, t.mock.stop, "0:00") }}
+    <div class="m-card dict-card">
+      <p class="dict-text"><span data-typed data-text="{{ t.mock.dictationText }}"></span><span class="caret"></span></p>
+      <div style="flex:1"></div>
+      <div class="dict-foot">{{ icon("clipboard", 15) }}{{ t.mock.autopaste }}</div>
+    </div>
+  </div>
+{% endcall %}
+{% endmacro %}
+
+{# ── Home: action cards, search, today's calendar, the timeline ── #}
+{% macro home(t) %}
+{% call win(t.mock.winHome) %}
+  <div style="display:flex;flex-direction:column;gap:26px">
+    <div class="hero-grid">
+      <div class="action">
+        <span class="action-icon accent">{{ icon("mic", 20) }}</span>
+        <span class="action-body">
+          <span class="action-title">{{ t.mock.dictate }}</span>
+          <span class="action-sub">{{ t.mock.press }}<span class="kbd">⌘⇧Space</span></span>
+        </span>
+      </div>
+      <div class="action">
+        <span class="action-icon secondary">{{ icon("users", 20) }}</span>
+        <span class="action-body">
+          <span class="action-title">{{ t.mock.meeting }}</span>
+          <span class="action-sub">{{ t.mock.meetingHint }}</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="m-search">{{ icon("search", 16) }}{{ t.mock.search }}</div>
+
+    <section class="m-section">
+      <h4>{{ t.mock.upcoming }}</h4>
+      <div class="m-list">
+        {%- for e in t.mock.events %}
+        <div class="m-row{% if e.now %} is-now{% endif %}">
+          <span class="m-row-icon secondary">{{ icon("calendar", 15) }}</span>
+          <span style="display:flex;min-width:0;flex:1;align-items:center;gap:9px">
+            <span class="m-row-title">{{ e.title }}</span>
+            {%- if e.now %}<span class="now-tag">{{ t.mock.now }}</span>{% endif %}
+          </span>
+          {%- if e.people %}<span class="m-row-meta">{{ icon("users", 13) }}{{ e.people }}</span>{% endif %}
+          <span class="m-row-meta"><span class="mono">{{ e.time }}</span></span>
+          <span class="m-play">{{ icon("play", 13) }}</span>
+        </div>
+        {%- endfor %}
+      </div>
+    </section>
+
+    <section class="m-section">
+      <h4>{{ t.mock.today }}</h4>
+      <div class="m-list">
+        {%- for i in t.mock.timeline %}
+        <div class="m-row">
+          <span class="m-row-icon {{ 'accent' if i.kind == 'meeting' else 'muted' }}">
+            {{ icon("users", 15) if i.kind == "meeting" else icon("file", 15) }}
+          </span>
+          <span class="m-row-title dim">{{ i.title }}</span>
+          <span class="m-row-meta">
+            {%- if i.summary %}<span style="display:flex;color:var(--m-accent)">{{ icon("sparkle", 14) }}</span>{% endif %}
+            <span class="mono">{{ i.duration }}</span><span class="mono">{{ i.at }}</span>
+            {%- if i.kind == "meeting" %}{{ icon("chevron", 15) }}{% endif %}
+          </span>
+        </div>
+        {%- endfor %}
+      </div>
+    </section>
+  </div>
+{% endcall %}
+{% endmacro %}
+
+{# ── Outcomes ── #}
+{% macro outcomes(t) %}
+{% call win(t.mock.winOutcomes) %}
+  <div class="m-card-sm out">
+    <h3>{{ icon("checks", 15) }}{{ t.mock.outcomes }}</h3>
+    <div class="out-group">
+      <h4>{{ icon("target", 13) }}{{ t.mock.decisions }}</h4>
+      <div class="out-wrap">
+        {%- for d in t.mock.outcomeDecisions %}<span class="out-chip decision">{{ d }}</span>{% endfor %}
+      </div>
+    </div>
+    <div class="out-group">
+      <h4>{{ t.mock.actionItems }}</h4>
+      <div class="out-grid">
+        {%- for a in t.mock.outcomeActions %}
+        <div class="out-item"><p>{{ a.text }}</p><span class="out-owner mono">{{ t.mock.owner }}: {{ a.owner }}</span></div>
+        {%- endfor %}
+      </div>
+    </div>
+    <div class="out-group">
+      <h4>{{ icon("help", 13) }}{{ t.mock.openQuestions }}</h4>
+      <div class="out-wrap">
+        {%- for q in t.mock.outcomeQuestions %}<span class="out-chip question">{{ q }}</span>{% endfor %}
+      </div>
+    </div>
+  </div>
+{% endcall %}
+{% endmacro %}
+
+{# ── The overlay demo: a chat client with the pill floating over it ── #}
+{% macro overlay(t) %}
+{% set c = t.mock.chat %}
+<div class="overlay-stage" data-mock="overlay" data-polishing="{{ t.mock.pillPolishing }}">
+  <div class="mock win">
+    <div class="win-bar">
+      <span class="win-dot red"></span><span class="win-dot amber"></span><span class="win-dot green"></span>
+      <span class="win-title">{{ t.mock.winChat }}</span>
+    </div>
+    <div class="chat">
+      <aside class="chat-side">
+        <div class="chat-side-h">{{ c.workspace }}</div>
+        {%- for ch in c.channels %}
+        <div class="chat-channel{% if ch == c.active %} is-active{% endif %}">{{ ch }}</div>
+        {%- endfor %}
+      </aside>
+      <div class="chat-main">
+        <div class="chat-head">{{ c.active }}</div>
+        <div class="chat-thread" data-thread>
+          {%- for m in c.messages %}
+          <div class="chat-msg">
+            <span class="chat-avatar" style="background:{{ m.colour }}">{{ m.initials }}</span>
+            <div class="chat-body">
+              <div><span class="chat-name">{{ m.from }}</span><span class="chat-at">{{ m.at }}</span></div>
+              <p class="chat-text">{{ m.text }}</p>
+            </div>
+          </div>
+          {%- endfor %}
+        </div>
+        <div class="chat-composer" data-composer>
+          <div class="chat-input" data-input data-placeholder="{{ c.placeholder }}"></div>
+          <span class="chat-send" data-send>{{ icon("send", 15) }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# PillApp.svelte: 280px compact, 440px once there is live text. #}
+  <div class="pill-overlay" data-pill aria-hidden="true">
+    <div class="pill-shell">
+      <div class="pill-row">
+        <span class="pill-dot" data-pill-dot></span>
+        <span class="pill-label" data-pill-label>{{ t.mock.pillDictation }}</span>
+        <div class="pill-wave" data-pill-wave><canvas data-wave height="32"></canvas></div>
+        <div class="pill-spinner" data-pill-spinner hidden><i></i></div>
+        <span class="pill-stop" data-pill-stop>{{ icon("square", 12) }}</span>
+      </div>
+      <p class="pill-text" data-pill-text hidden></p>
+    </div>
+  </div>
+
+  <div class="stage-steps" data-steps>
+    {%- for s in t.overlay.steps %}<span class="stage-step" data-step="{{ loop.index0 }}">{{ s }}</span>{% endfor %}
+  </div>
+  <p class="mock-caption">{{ t.overlay.caption }}</p>
+
+  <span hidden data-raw>{{ c.raw }}</span>
+  <span hidden data-polished>{{ c.polished }}</span>
+</div>
+{% endmacro %}

@@ -41,3 +41,6 @@ app-icon.png
 .cursor/
 AGENTS.md
 CLAUDE.md
+
+# Marketing site build output
+site/_site/

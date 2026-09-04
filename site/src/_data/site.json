@@ -1,0 +1,13 @@
+{
+  "name": "Soufflé",
+  "repo": "https://github.com/damione1/souffle",
+  "releases": "https://github.com/damione1/souffle/releases",
+  "latest": "https://github.com/damione1/souffle/releases/latest",
+  "issues": "https://github.com/damione1/souffle/issues",
+  "brew": "brew install --cask damione1/tap/souffle",
+  "author": "Damien Goehrig",
+  "license": "GPL-3.0-or-later",
+  "ollama": "https://ollama.com/",
+  "rust": "https://rustup.rs/",
+  "node": "https://nodejs.org/"
+}

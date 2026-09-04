@@ -1,0 +1,307 @@
+/* ─────────────────────────────────────────────────────────────
+   Reproductions of the real app screens.
+   Every value here is lifted from the Svelte components and
+   src/app.css `.light`, so the mocks behave and measure like the
+   app rather than merely resembling it:
+     LiveSessionCard · ActionHero · TimelineSection · TimelineItem
+     MeetingNotesSection · MeetingStructuredSummarySection · PillApp
+   ───────────────────────────────────────────────────────────── */
+
+.mock { font-family: var(--font-body); text-align: left; --wave-accent: var(--m-accent); }
+
+/* ─── Window chrome ─── */
+.win {
+  border-radius: 14px; overflow: hidden;
+  background: var(--m-canvas);
+  outline: 1px solid rgba(150, 115, 70, 0.18);
+  box-shadow: 0 44px 110px -34px rgba(0, 0, 0, 0.78), 0 0 90px -60px rgba(233, 174, 85, 0.3);
+}
+.win-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 14px;
+  background: rgba(255, 250, 240, 0.72);
+  border-bottom: 1px solid var(--m-ghost);
+}
+.win-dot { width: 11px; height: 11px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.1); }
+.win-dot.red { background: #ff5f57; }
+.win-dot.amber { background: #febc2e; }
+.win-dot.green { background: #28c840; }
+.win-title { margin-left: 8px; font-size: 11.5px; color: var(--m-t5); }
+.win-body { padding: 22px 26px 26px; }
+
+/* ─── Live session header (LiveSessionCard) ─── */
+.live-head { display: flex; align-items: center; gap: 14px; }
+.live-badge {
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  padding: 6px 13px; border-radius: 9999px;
+  background: rgba(184, 80, 60, 0.13); outline: 1px solid rgba(184, 80, 60, 0.28);
+  font-size: 12.5px; font-weight: 600; color: var(--m-danger);
+}
+.rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--m-danger); animation: pulse-soft 1.2s ease-in-out infinite; }
+.live-time { flex-shrink: 0; font-size: 14px; color: var(--m-t3); font-variant-numeric: tabular-nums; }
+.live-stop {
+  display: inline-flex; flex-shrink: 0; align-items: center; gap: 8px;
+  padding: 9px 16px; border-radius: 11px;
+  background: var(--m-danger); font-size: 13.5px; font-weight: 600; color: var(--m-on-danger);
+}
+.wave { min-width: 0; flex: 1; }
+.wave canvas { display: block; width: 100%; height: 46px; }
+
+/* ─── Cards ─── */
+.m-card {
+  border-radius: 18px; background: var(--m-surface-1);
+  outline: 1px solid var(--m-ghost); box-shadow: var(--m-shadow);
+}
+.m-card-sm { border-radius: 16px; background: var(--m-surface-1); outline: 1px solid var(--m-ghost); box-shadow: var(--m-shadow); }
+.m-stack { display: flex; flex-direction: column; gap: 18px; }
+
+/* ─── Live transcript ─── */
+.tr-card { display: flex; flex-direction: column; gap: 18px; padding: 22px 24px; }
+.tr-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tr-head h3 { font-family: var(--font-body); font-size: 14px; font-weight: 600; color: var(--m-t1); }
+.tr-audio { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--m-t4); }
+.tr-audio i { width: 6px; height: 6px; border-radius: 50%; background: var(--m-accent); }
+.tr-hint { font-size: 11.5px; color: var(--m-t4); }
+.tr-body { display: flex; flex-direction: column; gap: 16px; min-height: 168px; }
+.tr-para { display: flex; flex-direction: column; gap: 3px; animation: rise-in 240ms ease; }
+.tr-meta { display: flex; align-items: center; gap: 8px; }
+.tr-who { font-size: 11.5px; font-weight: 600; }
+.tr-who.me { color: var(--m-accent); }
+.tr-who.them { color: var(--m-secondary); }
+.tr-at { font-size: 10.5px; color: var(--m-t5); }
+.tr-text { font-size: 15px; line-height: 1.75; color: var(--m-t2); }
+.tr-tentative { opacity: 0.5; }
+
+/* ─── Notes (MeetingNotesSection, compact variant) ─── */
+.notes { display: flex; flex-direction: column; gap: 10px; padding: 16px 20px; }
+.notes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notes-head h3 {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--m-t3);
+}
+.notes-state { font-size: 11.5px; color: var(--m-t4); }
+.notes-field {
+  min-height: 60px; padding: 11px 14px; border-radius: 11px;
+  background: var(--m-input); outline: 1px solid var(--m-ghost);
+  font-size: 13.5px; line-height: 1.65; color: var(--m-t2);
+}
+
+/* ─── Dictation surface ─── */
+.dict-card { display: flex; min-height: 250px; flex-direction: column; padding: 30px 32px; }
+.dict-text { font-size: 19px; font-weight: 400; line-height: 1.85; color: var(--m-t2); }
+.caret {
+  display: inline-block; width: 2px; height: 20px; margin-left: 2px;
+  vertical-align: -3px; background: var(--m-accent);
+  animation: blink 1s step-end infinite;
+}
+.dict-foot {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 20px; padding-top: 20px;
+  border-top: 1px solid var(--m-ghost); font-size: 12.5px; color: var(--m-t4);
+}
+
+/* ─── Home: action hero, search, timeline ─── */
+.hero-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.action {
+  display: flex; align-items: center; gap: 15px; padding: 20px; border-radius: 16px;
+  background: var(--m-surface-1); outline: 1px solid var(--m-ghost); box-shadow: var(--m-shadow);
+}
+.action-icon {
+  display: flex; flex-shrink: 0; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 12px;
+}
+.action-icon.accent { background: rgba(181, 121, 31, 0.13); color: var(--m-accent); }
+.action-icon.secondary { background: rgba(168, 90, 46, 0.12); color: var(--m-secondary); }
+.action-body { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.action-title { font-family: var(--font-heading); font-size: 15px; font-weight: 600; color: var(--m-t1); }
+.action-sub { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--m-t4); }
+.kbd {
+  padding: 1.5px 6px; border-radius: 5px; background: var(--m-surface-3);
+  font-family: var(--font-mono); font-size: 11px; color: var(--m-t3);
+}
+.m-search {
+  display: flex; align-items: center; gap: 11px; padding: 11px 15px; border-radius: 12px;
+  background: var(--m-input); outline: 1px solid var(--m-ghost);
+  font-size: 13.5px; color: var(--m-t4);
+}
+.m-section { display: flex; flex-direction: column; gap: 10px; }
+.m-section h4 {
+  padding: 0 4px; font-family: var(--font-body); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.15em; text-transform: uppercase; color: var(--m-t4);
+}
+.m-list {
+  display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 16px;
+  background: var(--m-surface-1); outline: 1px solid var(--m-ghost); box-shadow: var(--m-shadow);
+}
+.m-row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 11px; }
+.m-row.is-now { background: rgba(181, 121, 31, 0.07); }
+.m-row-icon {
+  display: flex; flex-shrink: 0; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 9px;
+}
+.m-row-icon.accent { background: rgba(181, 121, 31, 0.13); color: var(--m-accent); }
+.m-row-icon.secondary { background: rgba(168, 90, 46, 0.12); color: var(--m-secondary); }
+.m-row-icon.muted { background: var(--m-surface-2); color: var(--m-t4); }
+.m-row-title {
+  min-width: 0; flex: 1; font-size: 13.5px; color: var(--m-t1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.m-row-title.dim { color: var(--m-t2); }
+.m-row-meta { display: flex; flex-shrink: 0; align-items: center; gap: 11px; color: var(--m-t4); font-size: 12px; }
+.m-row-meta .mono { font-size: 11.5px; }
+.now-tag {
+  flex-shrink: 0; padding: 2px 8px; border-radius: 9999px;
+  background: rgba(181, 121, 31, 0.13); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--m-accent);
+}
+.m-play {
+  display: flex; flex-shrink: 0; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 9px;
+  background: rgba(181, 121, 31, 0.1); outline: 1px solid rgba(181, 121, 31, 0.25); color: var(--m-accent);
+}
+
+/* ─── Outcomes (MeetingStructuredSummarySection) ─── */
+.out { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; }
+.out h3 {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-body); font-size: 14px; font-weight: 600; color: var(--m-t1);
+}
+.out h4 {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 600; color: var(--m-t3);
+}
+.out-group { display: flex; flex-direction: column; gap: 8px; }
+.out-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.out-chip {
+  padding: 6px 12px; border-radius: 9999px;
+  font-size: 12.5px; line-height: 1.4; color: var(--m-t2);
+}
+.out-chip.decision { background: rgba(181, 121, 31, 0.12); outline: 1px solid rgba(181, 121, 31, 0.2); }
+.out-chip.question { background: var(--m-input); outline: 1px solid var(--m-ghost); }
+.out-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.out-item {
+  display: flex; flex-direction: column; gap: 4px; padding: 13px 14px; border-radius: 12px;
+  background: var(--m-input); outline: 1px solid var(--m-ghost);
+}
+.out-item p { font-size: 12.5px; line-height: 1.55; color: var(--m-t2); }
+.out-owner { font-size: 11px; color: var(--m-t4); }
+
+/* ─────────────── Overlay demo: chat app + the pill on top ─────────────── */
+.overlay-stage { position: relative; }
+
+/* A generic chat client, deliberately nobody's product in particular. */
+.chat { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 420px; background: var(--m-canvas); }
+.chat-side { border-right: 1px solid var(--m-ghost); padding: 14px 10px; display: flex; flex-direction: column; gap: 4px; }
+.chat-side-h { padding: 4px 8px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--m-t4); }
+.chat-channel {
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px;
+  font-size: 13px; color: var(--m-t3);
+}
+.chat-channel.is-active { background: var(--m-surface-2); color: var(--m-t1); font-weight: 500; }
+.chat-main { display: flex; flex-direction: column; min-width: 0; }
+.chat-head {
+  padding: 13px 18px; border-bottom: 1px solid var(--m-ghost);
+  font-size: 13.5px; font-weight: 600; color: var(--m-t1);
+}
+.chat-thread { flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 18px; }
+.chat-msg { display: flex; gap: 10px; }
+.chat-avatar {
+  flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: var(--m-on-danger);
+}
+.chat-body { min-width: 0; }
+.chat-name { font-size: 12.5px; font-weight: 600; color: var(--m-t1); }
+.chat-at { margin-left: 7px; font-size: 11px; color: var(--m-t5); }
+.chat-text { font-size: 13.5px; line-height: 1.6; color: var(--m-t2); }
+.chat-composer {
+  margin: 0 18px 18px; padding: 11px 14px; border-radius: 12px;
+  background: var(--m-input); outline: 1px solid var(--m-ghost);
+  display: flex; align-items: center; gap: 10px; min-height: 44px;
+}
+.chat-composer.is-focused { outline: 1px solid rgba(181, 121, 31, 0.5); }
+.chat-input { flex: 1; min-width: 0; font-size: 13.5px; color: var(--m-t2); }
+.chat-input:empty::before { content: attr(data-placeholder); color: var(--m-t4); }
+.chat-send {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  background: var(--m-surface-2); color: var(--m-t4);
+}
+.chat-send.is-ready { background: rgba(181, 121, 31, 0.13); color: var(--m-accent); }
+
+/* The pill window itself. PillApp.svelte, floating over everything. */
+.pill-overlay {
+  position: absolute; top: 16px; left: 50%;
+  width: 280px; transform: translateX(-50%) translateY(-10px);
+  opacity: 0; pointer-events: none;
+  transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 200ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 3;
+}
+.pill-overlay.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.pill-overlay.is-expanded { width: 440px; }
+.pill-shell {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 16px; border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+}
+.pill-row { display: flex; flex-shrink: 0; align-items: center; gap: 12px; height: 42px; }
+.pill-label { flex-shrink: 0; font-size: 12px; font-weight: 500; color: rgba(255, 255, 255, 0.9); }
+.pill-wave { min-width: 0; flex: 1; }
+.pill-wave { --wave-accent: #e9ae55; }
+.pill-wave canvas { display: block; width: 100%; height: 32px; }
+.pill-dot { width: 7px; height: 7px; border-radius: 50%; background: #f2685a; flex-shrink: 0; animation: pulse-soft 1.2s ease-in-out infinite; }
+.pill-stop {
+  display: flex; flex-shrink: 0; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 9999px;
+  background: rgba(239, 68, 68, 0.9); color: #fff;
+}
+.pill-text {
+  border-top: 1px solid rgba(233, 174, 85, 0.15);
+  padding: 8px 0 4px 19px;
+  font-size: 13px; line-height: 1.375; color: rgba(255, 255, 255, 0.7);
+}
+.pill-spinner {
+  display: flex; align-items: center; justify-content: center; color: #e9ae55;
+}
+.pill-spinner i {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor; animation: spin 0.7s linear infinite;
+}
+
+/* Caption strip under a mock, explaining what it is doing right now. */
+.mock-caption {
+  margin-top: 18px; font-size: 13px; color: var(--m-t5, #5e5344);
+  text-align: center;
+}
+.stage-steps {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 22px;
+}
+.stage-step {
+  padding: 5px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600;
+  background: var(--surface-2); color: var(--t4); outline: 1px solid var(--ghost);
+  transition: background-color 200ms ease, color 200ms ease, outline-color 200ms ease;
+}
+.stage-step.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent); outline-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* ─── Narrow: the mocks collapse the same way the app's own layout does ─── */
+@media (max-width: 900px) {
+  /* The waveform would collapse to a sliver between the badge and the
+     clock; the app drops it on a narrow pill too. */
+  .wave { display: none; }
+  .hero-grid, .out-grid { grid-template-columns: minmax(0, 1fr); }
+  .chat { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .chat-side { display: none; }
+  .win-body { padding: 14px 12px 16px; }
+  .tr-card { padding: 16px 14px; }
+  .dict-card { padding: 20px 18px; min-height: 190px; }
+  .dict-text { font-size: 16px; line-height: 1.8; }
+  .pill-overlay, .pill-overlay.is-expanded { width: calc(100% - 24px); }
+}

@@ -1,0 +1,15 @@
+{% set docs = "/docs/" if loc.code == "en" else "/fr/docs/" %}
+<footer style="margin-top:118px;padding:44px 160px;border-top:1px solid var(--ghost)">
+  <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;gap:40px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:12px">
+      <span style="font-family:var(--font-heading);font-size:15px;font-weight:600;color:var(--t3)">{{ site.name }}</span>
+      <span style="font-size:13.5px;color:var(--t5)">© 2026 {{ site.author }} · {{ site.license }}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:26px;flex-wrap:wrap">
+      <a href="{{ docs }}" style="font-size:13.5px;color:var(--t4)">{{ t.footer.docs }}</a>
+      <a href="{{ site.releases }}" style="font-size:13.5px;color:var(--t4)">{{ t.footer.releases }}</a>
+      <a href="{{ site.issues }}" style="font-size:13.5px;color:var(--t4)">{{ t.footer.issues }}</a>
+      <a href="{{ site.repo }}" style="font-size:13.5px;color:var(--t4)">{{ t.footer.github }}</a>
+    </div>
+  </div>
+</footer>
