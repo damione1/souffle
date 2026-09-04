@@ -222,12 +222,12 @@
       var i = 0;
       // The tail arrives tentative (half opacity) and commits a few
       // words behind, the way the live transcript store does.
-      var id = self.run.every(105, function () {
+      var id = self.run.every(55, function () {
         if (i >= all.length) {
           clearInterval(id);
           p.textContent = all.join("");
           index += 1;
-          self.run.after(650, nextParagraph);
+          self.run.after(400, nextParagraph);
           return;
         }
         i += 1;
@@ -280,7 +280,7 @@
     if (this.timer) { this.timer.reset(); this.timer.start(); }
     this.wave.start(true);
     var all = words(this.text), i = 0;
-    var id = this.run.every(95, function () {
+    var id = this.run.every(50, function () {
       if (i >= all.length) {
         clearInterval(id);
         if (self.timer) self.timer.stop();
