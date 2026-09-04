@@ -4,7 +4,31 @@ permalink: "{{ loc.dir }}index.html"
 layout: layouts/base.njk
 ---
 {% from "icons.njk" import icon %}
-{% from "mocks/mocks.njk" import meeting, dictation, home, outcomes, overlay %}
+{% from "mocks/mocks.njk" import meeting, dictation, home, outcomes %}
+
+{#
+  Both of the reassurance blocks read the same way: a heading, three
+  plain-language points, and one link to the page that carries the
+  detail. The specifics (hostnames, export formats, the MCP server, the
+  command line) live in the docs instead of on the landing page.
+#}
+{% macro plainBlock(b, href) %}
+<div class="plain-head">
+  <span class="eyebrow">{{ b.eyebrow }}</span>
+  <h2 class="h2">{{ b.title }}</h2>
+  <p class="lead">{{ b.sub }}</p>
+</div>
+<div class="plain-grid">
+  {%- for p in b.points %}
+  <div class="plain-point">
+    <span class="plain-icon">{{ icon(p.icon, 20, 1.8) }}</span>
+    <h3>{{ p.h }}</h3>
+    <p>{{ p.d }}</p>
+  </div>
+  {%- endfor %}
+</div>
+<a class="plain-more" href="{{ href }}">{{ b.more }}{{ icon("arrow", 15) }}</a>
+{% endmacro %}
 
 {# ── HERO ── #}
 <section class="hero">
@@ -79,61 +103,18 @@ layout: layouts/base.njk
   </div>
 </section>
 
-{# ── NETWORK / PRIVACY ── #}
+{# ── PRIVACY ── #}
+{% set docs = "/docs/" if loc.code == "en" else "/fr/docs/" %}
 <section id="privacy" class="section">
-  <div class="wrap">
-    <div class="reveal split-head">
-      <div>
-        <span class="eyebrow">{{ t.network.eyebrow }}</span>
-        <h2 class="h2">{{ t.network.title | safe }}</h2>
-      </div>
-      <p style="font-size:15px;line-height:1.65;color:var(--t4)">{{ t.network.sub }}</p>
-    </div>
-    <div class="reveal" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px">
-      {%- for n in t.network.cards %}
-      <div class="card">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;color:var(--accent)">
-          {{ icon(n.icon, 19, 1.8) }}<span class="mono" style="font-size:13.5px;font-weight:500;color:var(--t1)">{{ n.host }}</span>
-        </div>
-        <p style="font-size:14.5px;line-height:1.62;color:var(--t3)">{{ n.desc }}</p>
-      </div>
-      {%- endfor %}
-    </div>
-    <div class="reveal" style="display:flex;align-items:center;gap:12px;margin-top:20px;padding:18px 24px;border-radius:14px;background:color-mix(in srgb, var(--accent) 6%, transparent);outline:1px solid color-mix(in srgb, var(--accent) 16%, transparent);color:var(--accent)">
-      {{ icon("shield", 18, 1.8) }}<p style="font-size:14.5px;color:var(--t2)">{{ t.network.footnote }}</p>
-    </div>
+  <div class="wrap reveal">
+    {{ plainBlock(t.privacy, docs + "#privacy") }}
   </div>
 </section>
 
-{# ── OWN YOUR DATA ── #}
+{# ── YOUR DATA ── #}
 <section class="section">
-  <div class="wrap reveal" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:64px;align-items:start">
-    <div>
-      <span class="eyebrow">{{ t.owndata.eyebrow }}</span>
-      <h2 class="h2" style="margin-bottom:20px">{{ t.owndata.title }}</h2>
-      <p class="lead" style="margin-bottom:26px">{{ t.owndata.body | safe }}</p>
-      <div class="checks">
-        {%- for b in t.owndata.bullets %}
-        <div class="check">{{ icon("check", 17, 2.2) }}<span>{{ b }}</span></div>
-        {%- endfor %}
-      </div>
-    </div>
-    <div style="padding:22px 24px;border-radius:16px;background:var(--input);outline:1px solid var(--ghost)">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px">
-        <span style="width:10px;height:10px;border-radius:50%;background:var(--surface-3)"></span>
-        <span style="width:10px;height:10px;border-radius:50%;background:var(--surface-3)"></span>
-        <span style="width:10px;height:10px;border-radius:50%;background:var(--surface-3)"></span>
-        <span class="mono" style="margin-left:8px;font-size:12px;color:var(--t5)">zsh</span>
-      </div>
-      <div class="mono" style="display:flex;flex-direction:column;gap:9px;font-size:13.5px;line-height:1.6">
-        {%- for l in t.owndata.terminal %}
-          {%- if l.gap %}<span style="height:8px"></span>
-          {%- elif l.comment %}<span style="color:var(--t5)">{{ l.comment }}</span>
-          {%- elif l.cmd %}<span style="color:var(--t2)"><span style="color:var(--accent)">$</span> {{ l.cmd }}</span>
-          {%- else %}<span style="color:var(--t2);padding-left:20px">{{ l.cont }}</span>{% endif %}
-        {%- endfor %}
-      </div>
-    </div>
+  <div class="wrap reveal">
+    {{ plainBlock(t.owndata, docs + "#export") }}
   </div>
 </section>
 

@@ -132,70 +132,28 @@
       }
     ]
   },
-  "network": {
-    "eyebrow": "What touches the network",
-    "title": "Three outbound connections.<br>That is the entire list.",
-    "sub": "A privacy claim is worth checking rather than believing, so here is every request the app can make.",
-    "cards": [
-      {
-        "host": "huggingface.co",
-        "icon": "download",
-        "desc": "Downloads the speech model the first time you pick one. Nothing is sent up. Once it is on disk, transcription works offline forever."
-      },
-      {
-        "host": "api.github.com",
-        "icon": "clock",
-        "desc": "Asks once a day whether a newer release exists. No identifier, no account, no usage data, and it never downloads anything. Switch it off in Settings."
-      },
-      {
-        "host": "localhost:11434",
-        "icon": "server",
-        "desc": "Your own Ollama, and only if you turn on summaries. It is your machine unless you point it somewhere else."
-      }
-    ],
-    "footnote": "Your audio, transcripts, notes and summaries never leave the machine. They live in a local SQLite database that Settings can export or delete in full."
-  },
   "owndata": {
-    "eyebrow": "Own your data",
-    "title": "Plain files, and a way in for your own tools.",
-    "body": "Export one meeting as Markdown, JSON or SRT/VTT subtitles, or the whole archive as an ordinary folder you can grep. The bundled <code>souffle-mcp</code> sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts: read-only, local, and it works with the app closed.",
-    "bullets": [
-      "Markdown, JSON, SRT and VTT, per meeting or in bulk",
-      "One local SQLite database, exported or deleted in full from Settings",
-      "A headless CLI that transcribes a file without launching the app"
-    ],
-    "terminal": [
+    "eyebrow": "Your data",
+    "title": "Everything stays yours to take with you.",
+    "sub": "No proprietary format, no export fee, nothing holding you in.",
+    "points": [
       {
-        "comment": "# Transcribe a file, no window, JSON out"
+        "icon": "folder",
+        "h": "Export anything",
+        "d": "One meeting or the whole archive, as ordinary files you can open in anything."
       },
       {
-        "cmd": "souffle --transcribe-file audio.wav --json"
+        "icon": "trash",
+        "h": "Delete it just as easily",
+        "d": "Settings clears the lot in one action, recorded audio included."
       },
       {
-        "gap": true
-      },
-      {
-        "comment": "# The binary ships inside the app bundle"
-      },
-      {
-        "cmd": "ln -s \\"
-      },
-      {
-        "cont": "\"/Applications/Soufflé.app/Contents/MacOS/souffle\" \\"
-      },
-      {
-        "cont": "/usr/local/bin/souffle"
-      },
-      {
-        "gap": true
-      },
-      {
-        "comment": "# List the engines available on this Mac"
-      },
-      {
-        "cmd": "souffle --list-engines"
+        "icon": "plug",
+        "h": "Plug in your own tools",
+        "d": "Your transcripts can be searched and read by tools you already use, read-only and on your machine."
       }
-    ]
+    ],
+    "more": "Export formats, the MCP server and the command line are in the docs."
   },
   "requirements": {
     "title": "What you need",
@@ -741,5 +699,28 @@
         ]
       }
     ]
+  },
+  "privacy": {
+    "eyebrow": "Privacy",
+    "title": "Private by design, not by promise.",
+    "sub": "Transcription, summaries and audio all happen on your Mac. There is no server to send them to.",
+    "points": [
+      {
+        "icon": "shield",
+        "h": "Nothing is uploaded",
+        "d": "Your audio, transcripts, notes and summaries stay on your Mac, in one local database you can export or delete whenever you like."
+      },
+      {
+        "icon": "cloudoff",
+        "h": "Works offline",
+        "d": "Once the speech model is on disk, transcription keeps working with the Wi-Fi off, on a plane, anywhere."
+      },
+      {
+        "icon": "person",
+        "h": "No account, ever",
+        "d": "No sign-up, no subscription, no API key to paste in. You download it and it works."
+      }
+    ],
+    "more": "The app makes exactly three outbound requests. See what they are, and why."
   }
 }

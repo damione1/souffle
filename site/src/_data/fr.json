@@ -132,70 +132,28 @@
       }
     ]
   },
-  "network": {
-    "eyebrow": "Ce qui touche au réseau",
-    "title": "Trois connexions sortantes.<br>C'est toute la liste.",
-    "sub": "Une promesse de confidentialité, ça se vérifie plutôt que ça se croit : voici chaque requête que l'app peut faire.",
-    "cards": [
-      {
-        "host": "huggingface.co",
-        "icon": "download",
-        "desc": "Télécharge le modèle de reconnaissance la première fois que vous le choisissez. Rien n'est envoyé. Une fois sur le disque, la transcription marche hors ligne pour toujours."
-      },
-      {
-        "host": "api.github.com",
-        "icon": "clock",
-        "desc": "Demande une fois par jour s'il existe une version plus récente. Aucun identifiant, aucun compte, aucune donnée d'usage, et rien n'est jamais téléchargé. Désactivable dans les Réglages."
-      },
-      {
-        "host": "localhost:11434",
-        "icon": "server",
-        "desc": "Votre propre Ollama, et seulement si vous activez les résumés. C'est votre machine, sauf si vous la pointez ailleurs."
-      }
-    ],
-    "footnote": "Vos enregistrements, transcriptions, notes et résumés ne quittent jamais la machine. Ils vivent dans une base SQLite locale que les Réglages exportent ou effacent en entier."
-  },
   "owndata": {
-    "eyebrow": "Vos données restent à vous",
-    "title": "Des fichiers ordinaires, et une porte pour vos propres outils.",
-    "body": "Exportez une réunion en Markdown, JSON ou sous-titres SRT/VTT, ou toute l'archive comme un dossier ordinaire que vous pouvez grep. Le sidecar <code>souffle-mcp</code> fourni laisse Claude Desktop, Claude Code ou n'importe quel client MCP chercher et lire vos transcriptions : lecture seule, local, et ça marche même l'app fermée.",
-    "bullets": [
-      "Markdown, JSON, SRT et VTT, par réunion ou en lot",
-      "Une seule base SQLite locale, exportée ou effacée en entier depuis les Réglages",
-      "Un CLI sans interface qui transcrit un fichier sans lancer l'app"
-    ],
-    "terminal": [
+    "eyebrow": "Vos données",
+    "title": "Tout reste à vous, et vous pouvez tout emporter.",
+    "sub": "Pas de format propriétaire, pas de frais d'export, rien qui vous retienne.",
+    "points": [
       {
-        "comment": "# Transcrire un fichier, sans fenêtre, sortie JSON"
+        "icon": "folder",
+        "h": "Exportez tout",
+        "d": "Une réunion ou toute l'archive, en fichiers ordinaires que vous ouvrez avec n'importe quoi."
       },
       {
-        "cmd": "souffle --transcribe-file audio.wav --json"
+        "icon": "trash",
+        "h": "Effacez aussi facilement",
+        "d": "Les Réglages vident tout en une action, l'audio enregistré compris."
       },
       {
-        "gap": true
-      },
-      {
-        "comment": "# Le binaire est livré dans le bundle de l'app"
-      },
-      {
-        "cmd": "ln -s \\"
-      },
-      {
-        "cont": "\"/Applications/Soufflé.app/Contents/MacOS/souffle\" \\"
-      },
-      {
-        "cont": "/usr/local/bin/souffle"
-      },
-      {
-        "gap": true
-      },
-      {
-        "comment": "# Liste les moteurs disponibles sur ce Mac"
-      },
-      {
-        "cmd": "souffle --list-engines"
+        "icon": "plug",
+        "h": "Branchez vos propres outils",
+        "d": "Vos transcriptions peuvent être cherchées et lues par les outils que vous utilisez déjà, en lecture seule et sur votre machine."
       }
-    ]
+    ],
+    "more": "Les formats d'export, le serveur MCP et la ligne de commande sont dans la doc."
   },
   "requirements": {
     "title": "Ce qu'il vous faut",
@@ -741,5 +699,28 @@
         ]
       }
     ]
+  },
+  "privacy": {
+    "eyebrow": "Confidentialité",
+    "title": "Privé par construction, pas par promesse.",
+    "sub": "La transcription, les résumés et l'audio se passent sur votre Mac. Il n'y a pas de serveur où les envoyer.",
+    "points": [
+      {
+        "icon": "shield",
+        "h": "Rien n'est envoyé",
+        "d": "Vos enregistrements, transcriptions, notes et résumés restent sur votre Mac, dans une seule base locale que vous exportez ou effacez quand vous voulez."
+      },
+      {
+        "icon": "cloudoff",
+        "h": "Marche hors ligne",
+        "d": "Une fois le modèle sur le disque, la transcription continue sans Wi-Fi, en avion, n'importe où."
+      },
+      {
+        "icon": "person",
+        "h": "Jamais de compte",
+        "d": "Pas d'inscription, pas d'abonnement, pas de clé d'API à coller. Vous téléchargez et ça marche."
+      }
+    ],
+    "more": "L'app fait exactement trois requêtes sortantes. Voir lesquelles, et pourquoi."
   }
 }
