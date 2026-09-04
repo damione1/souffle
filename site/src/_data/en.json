@@ -247,17 +247,17 @@
     "transcript": [
       {
         "who": "them",
-        "at": "00:12:04",
+        "at": "12:41",
         "text": "So the migration is the blocker. We can't ship the new onboarding until the accounts table is split."
       },
       {
         "who": "me",
-        "at": "00:12:19",
+        "at": "12:44",
         "text": "Right. I can take the split this week if we push the onboarding copy review to Thursday."
       },
       {
         "who": "them",
-        "at": "00:12:38",
+        "at": "12:47",
         "text": "Works for me. Let's hold the release branch until the split lands, and I'll tell support the date moved by two days."
       }
     ],
@@ -398,7 +398,8 @@
       "⇧",
       "Space"
     ],
-    "shortcutCaption": "Press the shortcut"
+    "shortcutCaption": "Press the shortcut",
+    "meetingElapsed": "12:40"
   },
   "docs": {
     "eyebrow": "Documentation",

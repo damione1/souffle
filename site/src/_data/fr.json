@@ -247,17 +247,17 @@
     "transcript": [
       {
         "who": "them",
-        "at": "00:12:04",
+        "at": "12:41",
         "text": "Donc la migration est le blocage. On ne peut pas livrer le nouvel accueil tant que la table des comptes n'est pas séparée."
       },
       {
         "who": "me",
-        "at": "00:12:19",
+        "at": "12:44",
         "text": "Exact. Je peux m'occuper de la séparation cette semaine si on repousse la relecture des textes à jeudi."
       },
       {
         "who": "them",
-        "at": "00:12:38",
+        "at": "12:47",
         "text": "Ça me va. On gèle la branche de release jusqu'à ce que la séparation soit faite, et je préviens le support que la date recule de deux jours."
       }
     ],
@@ -398,7 +398,8 @@
       "⇧",
       "Space"
     ],
-    "shortcutCaption": "Appuyez sur le raccourci"
+    "shortcutCaption": "Appuyez sur le raccourci",
+    "meetingElapsed": "12:40"
   },
   "docs": {
     "eyebrow": "Documentation",

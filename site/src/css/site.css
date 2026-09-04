@@ -199,6 +199,11 @@ button { font: inherit; border: 0; background: none; color: inherit; }
 .feature h2 { font-size: 38px; font-weight: 600; line-height: 1.14; color: var(--t1); }
 .feature-text { display: flex; flex-direction: column; gap: 20px; }
 .checks { display: flex; flex-direction: column; gap: 11px; margin-top: 2px; }
+/* The overlay row is a feature row mirrored against the dictation one:
+   text left, mock right, with a slightly narrower text column so the chat
+   window has room. Must stay above the collapse rules below. */
+.feature.is-overlay { grid-template-columns: 380px minmax(0, 1fr); align-items: center; }
+.overlay-figure { width: 100%; min-width: 0; }
 .check { display: flex; align-items: flex-start; gap: 11px; font-size: 15px; line-height: 1.55; color: var(--t2); }
 .check svg { margin-top: 3px; flex-shrink: 0; }
 
@@ -288,11 +293,6 @@ button { font: inherit; border: 0; background: none; color: inherit; }
   .copy code { font-size: 12px; }
 }
 
-/* ─── The overlay row ───
-   A feature row mirrored against the dictation one: text left, mock right.
-   Slightly narrower text column so the chat window has room. */
-.feature.is-overlay { grid-template-columns: 380px minmax(0, 1fr); align-items: center; }
-.overlay-figure { width: 100%; min-width: 0; }
 
 }
 

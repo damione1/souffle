@@ -25,7 +25,7 @@
 {% macro meeting(t) %}
 {% call win(t.mock.winMeeting, "meeting") %}
   <div class="m-stack">
-    {{ liveHead(t.mock.liveMeeting, t.mock.stop, "14:22") }}
+    {{ liveHead(t.mock.liveMeeting, t.mock.stop, t.mock.meetingElapsed) }}
     <div class="m-card tr-card">
       <div class="tr-head">
         <h3>{{ t.mock.liveTranscript }}</h3>

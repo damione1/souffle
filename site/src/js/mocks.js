@@ -169,7 +169,10 @@
     this.body.innerHTML = "";
     this.paras.forEach(function (tpl) { self.body.appendChild(self.node(tpl, tpl.innerHTML.trim(), "")); });
   };
-  Meeting.prototype.node = function (tpl, committed, tentative) {
+  Meeting.prototype.follow = function () {
+    this.body.scrollTop = this.body.scrollHeight;
+  };
+  Meeting.prototype.node = function (tpl, committed, tentative, stamp) {
     var wrap = document.createElement("div");
     wrap.className = "tr-para";
     var meta = document.createElement("div");
@@ -179,7 +182,7 @@
     who.textContent = tpl.getAttribute("data-label");
     var at = document.createElement("span");
     at.className = "tr-at mono";
-    at.textContent = tpl.getAttribute("data-at");
+    at.textContent = stamp || tpl.getAttribute("data-at");
     meta.appendChild(who); meta.appendChild(at);
     var p = document.createElement("p");
     p.className = "tr-text";
@@ -192,17 +195,6 @@
     }
     wrap.appendChild(meta); wrap.appendChild(p);
     return wrap;
-  };
-  /* The transcript grows by three paragraphs as it streams, which pushed
-     everything below it down each time. Render the finished transcript once,
-     measure it, and hold that height from the start. */
-  Meeting.prototype.reserve = function () {
-    this.body.style.minHeight = "";
-    var restore = this.body.innerHTML;
-    this.renderAll();
-    var h = this.body.getBoundingClientRect().height;
-    this.body.innerHTML = restore;
-    if (h > 0) this.body.style.minHeight = Math.ceil(h) + "px";
   };
   Meeting.prototype.play = function () {
     var self = this;
@@ -221,8 +213,11 @@
       }
       var tpl = self.paras[index];
       var all = words(tpl.innerHTML.trim());
-      var node = self.node(tpl, "", "");
+      // The line is stamped with the running clock, so the transcript and the
+      // elapsed time can never disagree.
+      var node = self.node(tpl, "", "", self.timer ? formatClock(self.timer.seconds) : null);
       self.body.appendChild(node);
+      self.follow();
       var p = node.querySelector(".tr-text");
       var i = 0;
       // The tail arrives tentative (half opacity) and commits a few
@@ -242,6 +237,7 @@
         tail.className = "tr-tentative";
         tail.textContent = all.slice(commitTo, i).join("");
         p.appendChild(tail);
+        self.follow();
       });
     }
     nextParagraph();

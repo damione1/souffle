@@ -62,7 +62,15 @@
 .tr-audio { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--m-t4); }
 .tr-audio i { width: 6px; height: 6px; border-radius: 50%; background: var(--m-accent); }
 .tr-hint { font-size: 11.5px; color: var(--m-t4); }
-.tr-body { display: flex; flex-direction: column; gap: 16px; min-height: 168px; }
+/* LiveSessionCard caps the live transcript at 250px and scrolls it, which is
+   also why nothing here has to grow: the box is a fixed size from the start. */
+.tr-body {
+  display: flex; flex-direction: column; gap: 16px;
+  height: 250px; overflow-y: auto; padding-right: 6px;
+}
+.tr-body::-webkit-scrollbar { width: 8px; }
+.tr-body::-webkit-scrollbar-track { background: transparent; }
+.tr-body::-webkit-scrollbar-thumb { background: var(--m-surface-3); border-radius: 9999px; }
 .tr-para { display: flex; flex-direction: column; gap: 3px; animation: rise-in 240ms ease; }
 .tr-meta { display: flex; align-items: center; gap: 8px; }
 .tr-who { font-size: 11.5px; font-weight: 600; }
@@ -418,9 +426,10 @@
 
 /* ─── Narrow: the mocks collapse the same way the app's own layout does ─── */
 @media (max-width: 900px) {
-  /* The waveform would collapse to a sliver between the badge and the
-     clock; the app drops it on a narrow pill too. */
-  .wave { display: none; }
+  /* The waveform would collapse to a sliver between the badge and the clock,
+     so drop the canvas but keep its box: it is the flexible spacer that holds
+     the badge left and the clock and stop button right. */
+  .wave canvas { display: none; }
   .hero-grid, .out-grid { grid-template-columns: minmax(0, 1fr); }
   .chat { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .chat-side { display: none; }
