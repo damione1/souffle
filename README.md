@@ -37,9 +37,10 @@
 
 System-audio capture separates **Me** from **Them** in the live transcript, with no virtual audio device to install. The recording looks after itself: it offers to start when a calendar meeting begins, notices when the meeting seems over and stops on its own after warning you, closes cleanly when the Mac sleeps and offers to resume on wake, and recovers or salvages the session if the engine stalls or the microphone disappears.
 
-- **Live transcript** with editable notes and participants beside it, and full-text search across every word you have ever recorded.
+- **Live transcript** with editable notes and participants beside it.
 - **Optional audio**, kept as compact Opus files for 7 days, 30 days or until you delete them, replayable with click-to-seek from any line.
 - **Corrections that stick**: fix a misheard name by hand once and Soufflé keeps that spelling, in a custom dictionary you can also edit yourself.
+- **A summary when you want one**, written on-device by Apple Intelligence on macOS 26 or newer, or by a local [Ollama](https://ollama.com/), with the decisions, the action items and their owners, and the questions nobody answered pulled out alongside it.
 
 ## Dictation, straight into the app you are already in
 
@@ -54,16 +55,20 @@ Soufflé is not a window you type into. Press the shortcut and a small pill appe
 - **Polish before it lands** (optional): a local LLM pass tidies the phrasing, with editable prompt templates — clean up, professional email, bullet points, remove fillers.
 - **Optional start/stop sounds**, so you know the shortcut landed.
 
-| The dictation view | Your timeline, grouped by day |
-| :---: | :---: |
-| ![Dictation with the transcript as the whole surface, streaming in as you speak](docs/demo/dictation.gif) | ![Home timeline grouping meetings and dictations by day](docs/demo/timeline.png) |
+## Text arrives while you are still talking
 
-## Summaries you can act on
-
-Generated on-device by Apple Intelligence on macOS 26 or newer, with nothing to install, and otherwise by a local [Ollama](https://ollama.com/). Alongside the prose summary, Soufflé pulls out the decisions, the action items with their owners, and the questions nobody answered.
+With the default model the transcript streams in, punctuated and capitalised, instead of appearing all at once when you stop. French and English on the same model, with no language to switch.
 
 <p align="center">
-  <img src="docs/demo/outcomes.png" width="820" alt="Generated decisions, action items with owners, and open questions">
+  <img src="docs/demo/dictation.gif" width="820" alt="The dictation view, with the transcript as the whole surface and text streaming in as you speak">
+</p>
+
+## Everything you record, grouped by day
+
+Meetings and dictations land on one timeline, with today's calendar above it and full-text search across every word you have ever recorded.
+
+<p align="center">
+  <img src="docs/demo/timeline.png" width="820" alt="Home timeline grouping meetings and dictations by day, with today's calendar above it">
 </p>
 
 ## Private by design
