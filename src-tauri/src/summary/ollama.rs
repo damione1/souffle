@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use crate::lock_ext::MutexExt;
 
@@ -11,6 +12,11 @@ use crate::constants::{
 
 const CONNECT_TIMEOUT_SECS: u64 = 5;
 const READ_TIMEOUT_SECS: u64 = 120;
+/// Whole-request deadline for `/api/show`. The shared client only has a
+/// recurring `read_timeout`, which resets on every successful read, so a slow
+/// trickle of bytes could hold up the summary path indefinitely. This lookup
+/// must fail fast and fall back to the stage budget.
+const SHOW_TIMEOUT_SECS: u64 = 5;
 
 /// Bounds one `/api/generate` call. `num_ctx` is the combined prompt and
 /// response window; `num_predict` caps how many tokens the model may emit.
@@ -127,7 +133,8 @@ fn context_length_from_model_info(model_info: &serde_json::Value) -> Option<u32>
         if !key.ends_with(".context_length") {
             return None;
         }
-        u32::try_from(value.as_u64()?).ok()
+        let length = u32::try_from(value.as_u64()?).ok()?;
+        (length > 0).then_some(length)
     })
 }
 
@@ -148,27 +155,52 @@ fn resolve_num_ctx(native: Option<u32>, requested: u32, needed: u32) -> u32 {
     }
 }
 
-type ModelContextCache = Mutex<HashMap<String, Option<u32>>>;
+/// `num_ctx` is prompt plus response. After the window is resolved (and
+/// possibly pinned to a small native size), the requested generation bound
+/// can still exceed what remains. Cap it so generation cannot scroll the
+/// prompt out of the window.
+fn cap_num_predict(num_ctx: u32, prompt_tokens: u32, requested: u32) -> u32 {
+    requested.min(num_ctx.saturating_sub(prompt_tokens).max(1))
+}
+
+type ModelContextCache = Mutex<HashMap<(String, String), Option<u32>>>;
 static MODEL_CONTEXT_CACHE: OnceLock<ModelContextCache> = OnceLock::new();
 
 fn model_context_cache() -> &'static ModelContextCache {
     MODEL_CONTEXT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// One `/api/show` call per model name, cached for the process lifetime so
-/// this runs once per model rather than once per chunk.
+fn context_cache_key(url: &str, model: &str) -> (String, String) {
+    (url.trim_end_matches('/').to_string(), model.to_string())
+}
+
+/// A completed `/api/show` (window known or advertised as absent) is cached
+/// for the process lifetime. A failed lookup is not: a show that raced a
+/// still-loading model must not pin every later call to the stage budget.
+enum NativeContextLookup {
+    Cached(Option<u32>),
+    Failed,
+}
+
+/// One `/api/show` call per (server, model), cached for the process lifetime
+/// so this runs once per model rather than once per chunk.
 async fn native_context_length(client: &reqwest::Client, url: &str, model: &str) -> Option<u32> {
+    let key = context_cache_key(url, model);
     if let Ok(cache) = model_context_cache().acquire()
-        && let Some(cached) = cache.get(model)
+        && let Some(cached) = cache.get(&key)
     {
         return *cached;
     }
 
-    let native = fetch_native_context_length(client, url, model).await;
-    if let Ok(mut cache) = model_context_cache().acquire() {
-        cache.insert(model.to_string(), native);
+    match fetch_native_context_length(client, url, model).await {
+        NativeContextLookup::Cached(native) => {
+            if let Ok(mut cache) = model_context_cache().acquire() {
+                cache.insert(key, native);
+            }
+            native
+        }
+        NativeContextLookup::Failed => None,
     }
-    native
 }
 
 /// Failure here (network, missing field, unexpected shape) is not fatal: the
@@ -178,9 +210,10 @@ async fn fetch_native_context_length(
     client: &reqwest::Client,
     url: &str,
     model: &str,
-) -> Option<u32> {
+) -> NativeContextLookup {
     let resp = match client
         .post(format!("{url}/api/show"))
+        .timeout(Duration::from_secs(SHOW_TIMEOUT_SECS))
         .json(&serde_json::json!({ "model": model }))
         .send()
         .await
@@ -188,21 +221,21 @@ async fn fetch_native_context_length(
         Ok(resp) => resp,
         Err(e) => {
             tracing::debug!(model, error = %e, "Ollama /api/show request failed");
-            return None;
+            return NativeContextLookup::Failed;
         }
     };
     if !resp.status().is_success() {
         tracing::debug!(model, status = %resp.status(), "Ollama /api/show returned an error status");
-        return None;
+        return NativeContextLookup::Failed;
     }
     let body: ShowResponse = match resp.json().await {
         Ok(body) => body,
         Err(e) => {
             tracing::debug!(model, error = %e, "Ollama /api/show response did not parse");
-            return None;
+            return NativeContextLookup::Failed;
         }
     };
-    context_length_from_model_info(&body.model_info)
+    NativeContextLookup::Cached(context_length_from_model_info(&body.model_info))
 }
 
 pub fn is_summary_capable_model(model: &str) -> bool {
@@ -348,12 +381,13 @@ pub async fn generate_stream(
     json_format: bool,
 ) -> Result<String, String> {
     let native = native_context_length(client, url, model).await;
-    let needed = super::estimate_tokens(system)
+    let prompt_tokens = super::estimate_tokens(system)
         .saturating_add(super::estimate_tokens(&prompt))
-        .saturating_add(budget.num_predict as usize)
         .try_into()
         .unwrap_or(u32::MAX);
+    let needed = prompt_tokens.saturating_add(budget.num_predict);
     let num_ctx = resolve_num_ctx(native, budget.num_ctx, needed);
+    let num_predict = cap_num_predict(num_ctx, prompt_tokens, budget.num_predict);
     if needed > num_ctx {
         tracing::warn!(
             model,
@@ -375,7 +409,7 @@ pub async fn generate_stream(
         options: GenerateOptions {
             temperature,
             num_ctx,
-            num_predict: budget.num_predict,
+            num_predict,
         },
     };
     let resp = client
@@ -602,8 +636,9 @@ pub const DICTATION_POLISH_SYSTEM_PROMPT: &str = crate::constants::OLLAMA_DICTAT
 mod tests {
     use super::{
         GenerateOptions, GenerateRequest, PullAccumulator, PullChunk, PullRequest,
-        RECOMMENDED_MODEL, REDUCE_BUDGET, context_length_from_model_info, is_summary_capable_model,
-        polish_budget, resolve_num_ctx, sorted_summary_capable_models,
+        RECOMMENDED_MODEL, REDUCE_BUDGET, cap_num_predict, context_cache_key,
+        context_length_from_model_info, is_summary_capable_model, polish_budget, resolve_num_ctx,
+        sorted_summary_capable_models,
     };
 
     #[test]
@@ -727,7 +762,8 @@ mod tests {
 
     #[test]
     fn context_length_key_matches_any_architecture_prefix() {
-        let info = serde_json::json!({ "qwen2.context_length": 32768, "qwen2.embedding_length": 1 });
+        let info =
+            serde_json::json!({ "qwen2.context_length": 32768, "qwen2.embedding_length": 1 });
         assert_eq!(context_length_from_model_info(&info), Some(32768));
 
         let info = serde_json::json!({ "llama.context_length": 4096 });
@@ -744,6 +780,38 @@ mod tests {
     fn context_length_value_not_a_number_returns_none() {
         let info = serde_json::json!({ "qwen2.context_length": "a lot" });
         assert_eq!(context_length_from_model_info(&info), None);
+    }
+
+    #[test]
+    fn context_length_zero_is_treated_as_missing() {
+        let info = serde_json::json!({ "qwen2.context_length": 0 });
+        assert_eq!(context_length_from_model_info(&info), None);
+    }
+
+    #[test]
+    fn context_cache_key_includes_the_normalized_server() {
+        assert_eq!(
+            context_cache_key("http://127.0.0.1:11434/", "qwen2.5:7b"),
+            context_cache_key("http://127.0.0.1:11434", "qwen2.5:7b")
+        );
+        assert_ne!(
+            context_cache_key("http://127.0.0.1:11434", "qwen2.5:7b"),
+            context_cache_key("http://192.168.0.11:11434", "qwen2.5:7b")
+        );
+    }
+
+    #[test]
+    fn cap_num_predict_leaves_room_for_the_prompt() {
+        // A 4096-native model asked to emit 4096 tokens would otherwise
+        // overflow the window and scroll the prompt mid-response.
+        assert_eq!(cap_num_predict(4096, 500, 4096), 3596);
+        assert_eq!(cap_num_predict(16384, 1000, 700), 700);
+    }
+
+    #[test]
+    fn cap_num_predict_keeps_a_floor_when_the_prompt_already_fills_the_window() {
+        assert_eq!(cap_num_predict(4096, 4096, 4096), 1);
+        assert_eq!(cap_num_predict(4096, 5000, 4096), 1);
     }
 
     #[test]
