@@ -115,6 +115,18 @@ struct GenerateChunk {
     /// `num_ctx - 1` the prompt was truncated (see `generate_stream`).
     #[serde(default)]
     prompt_eval_count: Option<u32>,
+    /// Present only on the final chunk. Used by the map-stage empty-output
+    /// net: qwen2.5:7b returns literally "-" with `eval_count` 2.
+    #[serde(default)]
+    eval_count: Option<u32>,
+}
+
+/// One `/api/generate` completion, including the generation-token count
+/// when Ollama reported it (final NDJSON line only).
+#[derive(Debug, Clone)]
+pub struct GenerateOutput {
+    pub text: String,
+    pub eval_count: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -331,6 +343,7 @@ pub async fn check_available(base_url: Option<&str>) -> (bool, Vec<String>) {
 fn handle_ndjson_line(
     line: &[u8],
     full_text: &mut String,
+    eval_count: &mut Option<u32>,
     on_chunk: &impl Fn(super::SummarizeProgress),
     model: &str,
     num_ctx: u32,
@@ -353,6 +366,9 @@ fn handle_ndjson_line(
                 "Ollama prompt was truncated from the left: the system prompt and \
                  the start of the input were dropped before the model saw them"
             );
+        }
+        if let Some(count) = parsed.eval_count {
+            *eval_count = Some(count);
         }
         full_text.push_str(&parsed.response);
         // Real generation tokens only ever flow through the caller's on_chunk
@@ -379,7 +395,7 @@ pub async fn generate_stream(
     temperature: f32,
     on_chunk: &impl Fn(super::SummarizeProgress),
     json_format: bool,
-) -> Result<String, String> {
+) -> Result<GenerateOutput, String> {
     let native = native_context_length(client, url, model).await;
     let prompt_tokens = super::estimate_tokens(system)
         .saturating_add(super::estimate_tokens(&prompt))
@@ -423,6 +439,7 @@ pub async fn generate_stream(
     }
 
     let mut full_text = String::new();
+    let mut eval_count = None;
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
 
@@ -433,12 +450,29 @@ pub async fn generate_stream(
 
         while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = buf.drain(..=pos).collect();
-            handle_ndjson_line(&line, &mut full_text, on_chunk, model, num_ctx);
+            handle_ndjson_line(
+                &line,
+                &mut full_text,
+                &mut eval_count,
+                on_chunk,
+                model,
+                num_ctx,
+            );
         }
     }
-    handle_ndjson_line(&buf, &mut full_text, on_chunk, model, num_ctx);
+    handle_ndjson_line(
+        &buf,
+        &mut full_text,
+        &mut eval_count,
+        on_chunk,
+        model,
+        num_ctx,
+    );
 
-    Ok(full_text)
+    Ok(GenerateOutput {
+        text: full_text,
+        eval_count,
+    })
 }
 
 pub fn validate_model(model: &str) -> Result<(), String> {
@@ -704,6 +738,17 @@ mod tests {
     #[test]
     fn whitespace_model_rejected() {
         assert!(!is_summary_capable_model("   "));
+    }
+
+    #[test]
+    fn generate_chunk_reads_eval_count_from_the_final_line() {
+        let parsed: super::GenerateChunk = serde_json::from_str(
+            r#"{"response":"-","done":true,"eval_count":2,"prompt_eval_count":1800}"#,
+        )
+        .expect("final generate line");
+        assert_eq!(parsed.response, "-");
+        assert_eq!(parsed.eval_count, Some(2));
+        assert_eq!(parsed.prompt_eval_count, Some(1800));
     }
 
     #[test]

@@ -2,6 +2,7 @@ mod apple;
 mod chunking;
 mod extract;
 mod formatters;
+mod map;
 mod ollama;
 mod polish;
 mod prompts;
@@ -354,6 +355,7 @@ pub(crate) async fn generate_with_provider(
                 json_format,
             )
             .await
+            .map(|output| output.text)
         }
         SummaryProviderKind::AppleIntelligence => {
             let system = system.to_string();
@@ -453,23 +455,35 @@ pub async fn summarize_stream(
                     Some(i as u32 + 1),
                     Some(n as u32),
                 ));
-                let user = format!(
-                    "Part {} of {}.\n\nTranscript excerpt:\n---\n{}\n---",
-                    i + 1,
-                    n,
-                    chunk
-                );
-                ollama::generate_stream(
-                    &client,
-                    ollama_url,
-                    model,
-                    ollama::MAP_SYSTEM_PROMPT,
-                    user,
-                    ollama::MAP_BUDGET,
-                    0.2,
-                    &no_op,
-                    false,
-                )
+                let client = client.clone();
+                let ollama_url = ollama_url.to_string();
+                let model = model.to_string();
+                async move {
+                    map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
+                        let client = client.clone();
+                        let ollama_url = ollama_url.clone();
+                        let model = model.clone();
+                        async move {
+                            ollama::generate_stream(
+                                &client,
+                                &ollama_url,
+                                &model,
+                                ollama::MAP_SYSTEM_PROMPT,
+                                user,
+                                ollama::MAP_BUDGET,
+                                temperature,
+                                &|_| {},
+                                false,
+                            )
+                            .await
+                            .map(|output| map::MapOutput {
+                                text: output.text,
+                                eval_count: output.eval_count,
+                            })
+                        }
+                    })
+                    .await
+                }
             })
             .buffered(config.map_concurrency)
             .try_collect()
@@ -481,23 +495,24 @@ pub async fn summarize_stream(
                 Some(i as u32 + 1),
                 Some(n as u32),
             ));
-            let user = format!(
-                "Part {} of {}.\n\nTranscript excerpt:\n---\n{}\n---",
-                i + 1,
-                n,
-                chunk
-            );
-            let part = generate_with_provider(
-                provider,
-                model,
-                ollama_url,
-                apple::MAP_SYSTEM_PROMPT,
-                user,
-                0.2,
-                ollama::MAP_BUDGET,
-                &no_op,
-                false,
-            )
+            let part = map::map_one_chunk(i + 1, n, &chunk, |user, temperature| async move {
+                generate_with_provider(
+                    provider,
+                    model,
+                    ollama_url,
+                    apple::MAP_SYSTEM_PROMPT,
+                    user,
+                    temperature,
+                    ollama::MAP_BUDGET,
+                    &no_op,
+                    false,
+                )
+                .await
+                .map(|text| map::MapOutput {
+                    text,
+                    eval_count: None,
+                })
+            })
             .await?;
             part_summaries.push(part);
         }
