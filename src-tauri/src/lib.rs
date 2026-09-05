@@ -272,12 +272,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
-        .manage(AppState::new(
-            cmd_tx,
-            engine_actor,
-            database,
-            audio_rms,
-        ))
+        .manage(AppState::new(cmd_tx, engine_actor, database, audio_rms))
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);
@@ -316,6 +311,7 @@ pub fn run() {
                     if let Err(e) = logging::set_level(app_settings.log_level) {
                         tracing::warn!("Failed to apply log level: {e}");
                     }
+                    crate::pill::restore_from_db(&state.db, app_settings.pill_hidden);
                     state
                         .engine_actor
                         .set_unload_timeout(app_settings.model_unload_timeout_minutes);
@@ -397,10 +393,20 @@ pub fn run() {
                 device_watch::destroy_orphaned_souffle_taps();
             }
 
-            if let Some(pill) = app.get_webview_window("pill")
-                && let Err(e) = crate::pill::position_top_center(&pill)
-            {
-                tracing::warn!("Pill overlay configure failed: {e}");
+            if let Some(pill) = app.get_webview_window("pill") {
+                if let Err(e) = crate::pill::apply_current_frame(&pill) {
+                    tracing::warn!("Pill overlay configure failed: {e}");
+                }
+                let pill_events = pill.clone();
+                pill.on_window_event(move |event| match event {
+                    tauri::WindowEvent::Moved(_) => crate::pill::note_user_moved(&pill_events),
+                    tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                        if let Err(e) = crate::pill::apply_current_frame(&pill_events) {
+                            tracing::warn!("Pill overlay rescale failed: {e}");
+                        }
+                    }
+                    _ => {}
+                });
             }
 
             // Close hides; it must not destroy. The pill + tray keep the

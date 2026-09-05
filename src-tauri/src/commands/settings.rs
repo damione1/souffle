@@ -40,8 +40,11 @@ pub fn save_settings(
             priority: settings.input_priority.clone(),
             allow_bluetooth_mic: settings.allow_bluetooth_mic,
         });
-    // A locale change must relabel the tray menu immediately.
+    crate::pill::set_hidden(settings.pill_hidden);
+    // A locale change must relabel the tray menu immediately. Hide/show of
+    // the recording overlay is applied on the same pass.
     if let Ok(machine) = state.current_machine_state() {
+        crate::pill::sync(&app, &machine);
         crate::tray::sync(&app, &machine);
     }
     Ok(())

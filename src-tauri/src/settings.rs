@@ -34,12 +34,16 @@ const CALENDAR_SELECTED_IDS_KEY: &str = "calendar_selected_ids";
 const CALENDAR_REMINDER_MINUTES_KEY: &str = "calendar_reminder_minutes";
 const CALENDAR_AUTOSTART_ENABLED_KEY: &str = "calendar_autostart_enabled";
 const FEEDBACK_SOUNDS_ENABLED_KEY: &str = "feedback_sounds_enabled";
+const PILL_HIDDEN_KEY: &str = "pill_hidden";
 const FEEDBACK_SOUNDS_VOLUME_KEY: &str = "feedback_sounds_volume";
 const MODEL_UNLOAD_TIMEOUT_MINUTES_KEY: &str = "model_unload_timeout_minutes";
 const AUTO_UPDATE_CHECK_ENABLED_KEY: &str = "auto_update_check_enabled";
 /// Unix seconds of the last completed check. Not part of `AppSettings`: it is
 /// bookkeeping, not a preference, and nothing in the UI shows it.
 pub const LAST_UPDATE_CHECK_AT_KEY: &str = "last_update_check_at";
+/// Last user-dragged pill origin (JSON `[x, y]` in AppKit points). Not a
+/// preference: the overlay re-clamps it when the screen changes.
+pub const PILL_POSITION_KEY: &str = "pill_position";
 const MEETING_AUTOSTOP_ENABLED_KEY: &str = "meeting_autostop_enabled";
 const MEETING_AUTOSTOP_MINUTES_KEY: &str = "meeting_autostop_minutes";
 const MEETING_MAX_DURATION_MINUTES_KEY: &str = "meeting_max_duration_minutes";
@@ -179,6 +183,8 @@ pub struct AppSettings {
     pub auto_update_check_enabled: bool,
     /// Audible start/stop cues for dictation sessions.
     pub feedback_sounds_enabled: bool,
+    /// When true, the floating recording HUD is not shown.
+    pub pill_hidden: bool,
     /// Feedback sound volume (0-100).
     pub feedback_sounds_volume: u32,
     /// Unload the transcription model after this many idle minutes to
@@ -257,6 +263,7 @@ impl Default for AppSettings {
             calendar_autostart_enabled: true,
             auto_update_check_enabled: true,
             feedback_sounds_enabled: true,
+            pill_hidden: false,
             feedback_sounds_volume: 70,
             model_unload_timeout_minutes: 60,
             meeting_autostop_enabled: true,
@@ -398,6 +405,9 @@ impl AppSettings {
             read_json_setting::<bool>(db, FEEDBACK_SOUNDS_ENABLED_KEY)?
         {
             settings.feedback_sounds_enabled = feedback_sounds_enabled;
+        }
+        if let Some(pill_hidden) = read_json_setting::<bool>(db, PILL_HIDDEN_KEY)? {
+            settings.pill_hidden = pill_hidden;
         }
         if let Some(feedback_sounds_volume) =
             read_json_setting::<u32>(db, FEEDBACK_SOUNDS_VOLUME_KEY)?
@@ -804,6 +814,7 @@ impl AppSettings {
             FEEDBACK_SOUNDS_ENABLED_KEY,
             &normalized.feedback_sounds_enabled,
         )?;
+        write_json_setting(db, PILL_HIDDEN_KEY, &normalized.pill_hidden)?;
         write_json_setting(
             db,
             FEEDBACK_SOUNDS_VOLUME_KEY,
@@ -1054,6 +1065,7 @@ mod tests {
             calendar_reminder_minutes: 5,
             calendar_autostart_enabled: true,
             feedback_sounds_enabled: false,
+            pill_hidden: true,
             feedback_sounds_volume: 40,
             model_unload_timeout_minutes: 15,
             meeting_autostop_enabled: false,

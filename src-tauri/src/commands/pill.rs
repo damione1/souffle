@@ -35,12 +35,11 @@ pub fn pill_release(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Resize the pill window to `width` x `height` (logical pixels), keeping
-/// its top edge pinned below the menu bar and staying horizontally
-/// centered. The frontend calls this as the live transcript grows/shrinks
-/// (e.g. switching between the compact and expanded live-text layouts): a
-/// single native frame change avoids the top-edge drift that a separate
-/// resize-then-recenter pair produces.
+/// Resize the pill window to `width` x `height` (logical pixels). A
+/// dragged position is kept (and clamped on-screen); otherwise the pill
+/// stays top-centered. The frontend calls this as the live transcript
+/// grows/shrinks. A single native frame change avoids the top-edge drift
+/// that a separate resize-then-recenter pair produces.
 #[tauri::command]
 #[specta::specta]
 pub fn pill_resize(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
