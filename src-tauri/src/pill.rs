@@ -338,7 +338,8 @@ fn set_frame(pill: &tauri::WebviewWindow, width: f64, height: f64) -> tauri::Res
         // this `run_on_main_thread` closure.
         let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
         let overlay = configure_overlay_window(ns_window);
-        let (screen_x, screen_y, screen_width, screen_height) = active_screen_frame();
+        let (screen_x, screen_y, screen_width, screen_height) =
+            placement_screen_frame(custom_origin());
         let (x, y) = origin_for_frame(
             screen_x,
             screen_y,
@@ -502,10 +503,57 @@ fn configure_overlay_window(ns_window: &objc2_app_kit::NSWindow) -> &objc2_app_k
     ns_window
 }
 
+fn ns_rect_to_frame(frame: objc2_foundation::NSRect) -> (f64, f64, f64, f64) {
+    (
+        frame.origin.x,
+        frame.origin.y,
+        frame.size.width,
+        frame.size.height,
+    )
+}
+
+/// Display whose frame contains `(x, y)` in AppKit global points.
+pub(crate) fn screen_containing_point(
+    screens: &[(f64, f64, f64, f64)],
+    x: f64,
+    y: f64,
+) -> Option<(f64, f64, f64, f64)> {
+    screens
+        .iter()
+        .copied()
+        .find(|&(sx, sy, sw, sh)| x >= sx && x < sx + sw && y >= sy && y < sy + sh)
+}
+
+/// Screen to place/clamp against: the display that holds a dragged origin,
+/// otherwise the focused screen. An origin that sits on no display (unplugged
+/// monitor, shrink) falls back to the focused screen so `clamp_origin` can
+/// pull the HUD back on-screen.
+fn placement_screen_frame(origin: Option<(f64, f64)>) -> (f64, f64, f64, f64) {
+    if let Some((x, y)) = origin {
+        if let Some(frame) = screen_containing_point(&all_screen_frames(), x, y) {
+            return frame;
+        }
+    }
+    active_screen_frame()
+}
+
+fn all_screen_frames() -> Vec<(f64, f64, f64, f64)> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return Vec::new();
+    };
+    NSScreen::screens(mtm)
+        .iter()
+        .map(|screen| ns_rect_to_frame(screen.frame()))
+        .collect()
+}
+
 /// Screen that currently has keyboard focus (`NSScreen.main`), falling back
-/// to the first screen. Fullscreen apps put the key window on that Space's
-/// display, so this is where the HUD belongs — not always the primary
-/// monitor.
+/// to the first screen. Default (undragged) placement follows this so the
+/// HUD sits on the Space the user is dictating into — not always the
+/// primary monitor.
 fn active_screen_frame() -> (f64, f64, f64, f64) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSScreen;
@@ -515,15 +563,7 @@ fn active_screen_frame() -> (f64, f64, f64, f64) {
     };
     let screen = NSScreen::mainScreen(mtm).or_else(|| NSScreen::screens(mtm).firstObject());
     match screen {
-        Some(screen) => {
-            let frame = screen.frame();
-            (
-                frame.origin.x,
-                frame.origin.y,
-                frame.size.width,
-                frame.size.height,
-            )
-        }
+        Some(screen) => ns_rect_to_frame(screen.frame()),
         None => (0.0, 0.0, 0.0, 0.0),
     }
 }
@@ -685,6 +725,20 @@ mod tests {
     #[test]
     fn compact_logical_size_is_the_configured_pill_window() {
         assert_eq!((COMPACT_WIDTH, COMPACT_HEIGHT), (280.0, 64.0));
+    }
+
+    #[test]
+    fn screen_containing_point_keeps_a_dragged_origin_on_the_secondary() {
+        let screens = [(0.0, 0.0, 1920.0, 1080.0), (1920.0, 0.0, 1512.0, 982.0)];
+        assert_eq!(
+            screen_containing_point(&screens, 2200.0, 100.0),
+            Some(screens[1])
+        );
+        assert_eq!(
+            screen_containing_point(&screens, 100.0, 100.0),
+            Some(screens[0])
+        );
+        assert_eq!(screen_containing_point(&screens, 4000.0, 100.0), None);
     }
 
     #[test]
