@@ -1,11 +1,18 @@
 {% from "icons.njk" import icon %}
 
-{# Window chrome. `anim` names the behaviour mocks.js drives inside it. #}
-{% macro win(title, anim = "") %}
+{# Window chrome. `anim` names the behaviour mocks.js drives inside it.
+   The right-hand cluster mirrors App.svelte's own header: the model
+   status pill, the theme toggle, and the settings button. #}
+{% macro win(title, t, anim = "") %}
 <div class="mock win"{% if anim %} data-mock="{{ anim }}"{% endif %}>
   <div class="win-bar">
     <span class="win-dot red"></span><span class="win-dot amber"></span><span class="win-dot green"></span>
     <span class="win-title">{{ title }}</span>
+    <span class="win-bar-right">
+      <span class="win-status"><span class="win-status-dot"></span>{{ t.mock.statusReady }}<span class="win-status-model">{{ t.mock.statusModel }}</span></span>
+      <span class="win-icon-btn">{{ icon("moon", 13) }}</span>
+      <span class="win-icon-btn">{{ icon("sliders", 13) }}</span>
+    </span>
   </div>
   <div class="win-body">{{ caller() }}</div>
 </div>
@@ -23,7 +30,7 @@
 
 {# ── Live meeting: transcript streams in, then the notes card ── #}
 {% macro meeting(t) %}
-{% call win(t.mock.winMeeting, "meeting") %}
+{% call win(t.mock.winMeeting, t, "meeting") %}
   <div class="m-stack">
     {{ liveHead(t.mock.liveMeeting, t.mock.stop, t.mock.meetingElapsed) }}
     <div class="m-card tr-card">
@@ -52,7 +59,7 @@
 
 {# ── Dictation: text types itself in, caret blinks, auto-paste footer ── #}
 {% macro dictation(t) %}
-{% call win(t.mock.winDictation, "dictation") %}
+{% call win(t.mock.winDictation, t, "dictation") %}
   <div class="m-stack">
     {{ liveHead(t.mock.liveDictation, t.mock.stop, "0:00") }}
     <div class="m-card dict-card">
@@ -66,7 +73,7 @@
 
 {# ── Home: action cards, search, today's calendar, the timeline ── #}
 {% macro home(t) %}
-{% call win(t.mock.winHome) %}
+{% call win(t.mock.winHome, t) %}
   <div style="display:flex;flex-direction:column;gap:26px">
     <div class="hero-grid">
       <div class="action">
@@ -129,7 +136,7 @@
 
 {# ── Outcomes ── #}
 {% macro outcomes(t) %}
-{% call win(t.mock.winOutcomes) %}
+{% call win(t.mock.winOutcomes, t) %}
   <div class="m-card-sm out">
     <h3>{{ icon("checks", 15) }}{{ t.mock.outcomes }}</h3>
     <div class="out-group">

@@ -26,7 +26,17 @@
 .win-dot.red { background: #ff5f57; }
 .win-dot.amber { background: #febc2e; }
 .win-dot.green { background: #28c840; }
-.win-title { margin-left: 8px; font-size: 11.5px; color: var(--m-t5); }
+.win-title { margin-left: 8px; font-size: 11.5px; color: var(--m-t5); white-space: nowrap; }
+.win-bar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+.win-status {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  padding: 3px 9px; border-radius: 9999px;
+  background: var(--m-surface-2); outline: 1px solid var(--m-ghost);
+  font-size: 9.5px; color: var(--m-t4);
+}
+.win-status-dot { width: 5px; height: 5px; border-radius: 50%; background: #3fb27f; flex-shrink: 0; }
+.win-status-model { font-family: var(--font-mono); font-size: 9px; color: var(--m-t5); }
+.win-icon-btn { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: var(--m-t4); flex-shrink: 0; }
 .win-body { padding: 22px 26px 26px; }
 
 /* ─── Live session header (LiveSessionCard) ─── */
@@ -426,12 +436,18 @@
 
 /* ─── Narrow: the mocks collapse the same way the app's own layout does ─── */
 @media (max-width: 900px) {
-  /* The waveform would collapse to a sliver between the badge and the clock,
-     so drop the canvas but keep its box: it is the flexible spacer that holds
-     the badge left and the clock and stop button right. */
-  .wave canvas { display: none; }
+  /* The waveform used to disappear here (it would collapse to a sliver
+     between the badge and the clock), but a still row reads as broken
+     rather than responsive: shrink it to a fixed sliver instead of hiding
+     it, so there is still something moving even in mobile/tablet portrait. */
+  .wave { flex: 0 1 56px; min-width: 34px; }
+  /* The model name is the first thing to go: dot + "Ready" plus the two
+     icon buttons already crowds a narrow title bar next to the window title. */
+  .win-status-model { display: none; }
+  .win-bar-right { gap: 5px; }
+  .win-icon-btn { width: 18px; height: 18px; }
   .hero-grid, .out-grid { grid-template-columns: minmax(0, 1fr); }
-  .chat { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .chat { grid-template-columns: minmax(0, 1fr); min-height: 280px; }
   .chat-side { display: none; }
   .win-body { padding: 14px 12px 16px; }
   .tr-card { padding: 16px 14px; }

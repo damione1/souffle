@@ -226,6 +226,8 @@
     "liveMeeting": "Live meeting",
     "liveDictation": "Dictating",
     "stop": "Stop",
+    "statusReady": "Ready",
+    "statusModel": "Kyutai STT 1B",
     "liveTranscript": "Live transcript",
     "systemAudio": "System audio active",
     "editHint": "Double-click a paragraph to fix a misheard word. Later occurrences are corrected automatically.",

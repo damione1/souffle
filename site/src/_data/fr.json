@@ -34,7 +34,7 @@
       "title": "On sait toujours qui a dit quoi.",
       "body": "La capture de l'audio système sépare <em class=\"me\">Moi</em> de <em class=\"them\">Eux</em> dans la transcription en direct, sans pilote audio virtuel à installer. L'enregistrement se débrouille seul : il propose de démarrer quand une réunion du calendrier commence, remarque quand elle semble terminée, et reprend là où il en était quand votre Mac se réveille.",
       "bullets": [
-        "L'audio est optionnel : vous choisissez combien de temps le garder, et vous le réécoutez en cliquant dans la transcription",
+        "L'enregistrement audio est optionnel : vous choisissez combien de temps le garder, et vous le réécoutez en cliquant dans la transcription",
         "Si le moteur cale ou que le micro lâche, la réunion n'est pas perdue : Soufflé reprend ou sauve ce qu'il peut",
         "Tout est classé par jour, et vous retrouvez n'importe quel mot prononcé grâce à la recherche"
       ]
@@ -52,7 +52,7 @@
         "Le texte s'affiche pendant que vous parlez, pas à la fin",
         "Un appui pour lancer et arrêter, ou maintenu tant que vous parlez",
         "Corrigez un nom mal entendu une fois : il reste corrigé ensuite",
-        "Une IA sur votre Mac peut aussi améliorer la formulation, avec des instructions que vous pouvez changer",
+        "Une IA locale peut s'occuper de polir la formulation, avec des instructions que vous pouvez changer",
         "Français et anglais sur le même modèle, sans bascule"
       ],
       "overlayAfter": true
@@ -75,7 +75,7 @@
   "overlay": {
     "eyebrow": "Partout où vous tapez",
     "title": "La même dictée, dans toutes vos apps.",
-    "body": "Il n'y a pas de fenêtre où taper : vous appuyez sur le raccourci, une petite pastille apparaît par-dessus ce que vous faites, et le texte arrive directement dans le champ où était votre curseur. Messagerie, courriel, éditeur, terminal : la pastille s'en fiche, et elle n'apparaît jamais dans un enregistrement d'écran.",
+    "body": "Pas besoin de garder une fenêtre ouverte : restez dans votre application habituelle, appuyez sur le raccourci, une petite pastille apparaît par-dessus ce que vous faites, et le texte arrive directement dans le champ où était votre curseur. Messagerie, courriel, éditeur, terminal : la pastille s'en fiche, et elle n'apparaît jamais dans un enregistrement d'écran.",
     "bullets": [
       "Le texte atterrit là où votre curseur était déjà, sans copier-coller",
       "Les terminaux et les champs sécurisés peuvent recevoir des frappes simulées",
@@ -226,6 +226,8 @@
     "liveMeeting": "Réunion en direct",
     "liveDictation": "Dictée en cours",
     "stop": "Arrêter",
+    "statusReady": "Prêt",
+    "statusModel": "Kyutai STT 1B",
     "liveTranscript": "Transcription en direct",
     "systemAudio": "Audio système actif",
     "editHint": "Double-cliquez sur un paragraphe pour corriger un mot mal entendu. Les occurrences suivantes se corrigent toutes seules.",
