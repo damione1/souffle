@@ -50,6 +50,51 @@ impl ChunkConfig {
     };
 }
 
+/// Pack whole turns into overlapping chunks. A turn is never split, even when
+/// it is longer than `chunk_words`. Overlap is whole trailing turns whose
+/// combined word count fits in `chunk_overlap_words`.
+pub fn chunk_turns(turns: &[String], config: ChunkConfig) -> Vec<String> {
+    if turns.is_empty() {
+        return Vec::new();
+    }
+    let words = |text: &str| text.split_whitespace().count();
+    let total: usize = turns.iter().map(|turn| words(turn)).sum();
+    if total <= config.chunk_words {
+        return vec![turns.join("\n")];
+    }
+
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < turns.len() {
+        let mut end = start;
+        let mut count = 0;
+        while end < turns.len() {
+            let turn_words = words(&turns[end]);
+            if count > 0 && count + turn_words > config.chunk_words {
+                break;
+            }
+            count += turn_words;
+            end += 1;
+        }
+        chunks.push(turns[start..end].join("\n"));
+        if end >= turns.len() {
+            break;
+        }
+        let mut next = end;
+        let mut kept = 0;
+        while next > start + 1 {
+            let turn_words = words(&turns[next - 1]);
+            if kept + turn_words > config.chunk_overlap_words {
+                break;
+            }
+            kept += turn_words;
+            next -= 1;
+        }
+        start = next.max(start + 1);
+    }
+    chunks
+}
+
 /// Split a transcript into overlapping word chunks for the map stage.
 pub fn chunk_transcript(text: &str, config: ChunkConfig) -> Vec<String> {
     let words: Vec<&str> = text.split_whitespace().collect();
@@ -75,7 +120,7 @@ pub fn chunk_transcript(text: &str, config: ChunkConfig) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChunkConfig, chunk_transcript, estimate_tokens};
+    use super::{ChunkConfig, chunk_transcript, chunk_turns, estimate_tokens};
 
     #[test]
     fn estimate_tokens_scales_with_words() {
@@ -112,5 +157,68 @@ mod tests {
         let ollama = chunk_transcript(&text, ChunkConfig::OLLAMA);
         let apple = chunk_transcript(&text, ChunkConfig::APPLE_INTELLIGENCE);
         assert!(apple.len() > ollama.len());
+    }
+
+    fn tight(chunk_words: usize, overlap: usize) -> ChunkConfig {
+        ChunkConfig {
+            stuff_token_limit: 6000,
+            reduce_token_limit: 12_000,
+            chunk_words,
+            chunk_overlap_words: overlap,
+            map_concurrency: 1,
+        }
+    }
+
+    #[test]
+    fn short_turns_fit_in_one_chunk() {
+        let turns = vec![
+            "[0:00] Me: hello there".into(),
+            "[0:05] Them: hi back".into(),
+        ];
+        let chunks = chunk_turns(&turns, tight(50, 4));
+        assert_eq!(chunks, vec!["[0:00] Me: hello there\n[0:05] Them: hi back"]);
+    }
+
+    #[test]
+    fn packing_never_splits_a_turn() {
+        let long = format!("[0:00] Me: unique-AAA {}", "pad ".repeat(30).trim());
+        let turns = vec![long.clone(), "[0:40] Them: unique-BBB".into()];
+        let chunks = chunk_turns(&turns, tight(10, 2));
+        let with_aaa: Vec<_> = chunks.iter().filter(|c| c.contains("unique-AAA")).collect();
+        assert_eq!(with_aaa.len(), 1);
+        assert_eq!(*with_aaa[0], long);
+        assert!(chunks.iter().any(|c| c.contains("unique-BBB")));
+        assert!(
+            !chunks
+                .iter()
+                .any(|c| c.contains("unique-AAA") && c.contains("unique-BBB"))
+        );
+    }
+
+    #[test]
+    fn a_turn_longer_than_the_budget_is_its_own_chunk() {
+        let long = format!("[0:00] Me: {}", "word ".repeat(20).trim());
+        let chunks = chunk_turns(&[long.clone(), "[1:00] Them: bye".into()], tight(8, 2));
+        assert_eq!(chunks[0], long);
+        assert_eq!(chunks[1], "[1:00] Them: bye");
+    }
+
+    #[test]
+    fn overlap_is_whole_trailing_turns() {
+        let turns = vec![
+            "[0:00] Me: one two three four".into(),
+            "[0:10] Them: five six seven eight".into(),
+            "[0:20] Me: nine ten eleven twelve".into(),
+        ];
+        // 6 words/turn; pack two per chunk; overlap one turn (6 <= 8).
+        let chunks = chunk_turns(&turns, tight(12, 8));
+        assert!(chunks.len() >= 2);
+        assert!(chunks[0].contains("[0:00] Me:"));
+        assert!(chunks[0].contains("[0:10] Them:"));
+        assert!(
+            chunks[1].contains("[0:10] Them:"),
+            "overlap should keep the trailing turn"
+        );
+        assert!(chunks[1].contains("[0:20] Me:"));
     }
 }
