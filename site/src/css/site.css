@@ -293,7 +293,8 @@ button { font: inherit; border: 0; background: none; color: inherit; }
   .section { padding-top: 72px; }
   #models .wrap > div:last-child,
   #privacy .wrap > div:nth-child(2),
-  .section .wrap[style*="grid-template-columns:repeat(2"] { grid-template-columns: minmax(0, 1fr) !important; }
+  .section .wrap[style*="grid-template-columns:repeat(2"],
+  .req-perm-grid { grid-template-columns: minmax(0, 1fr) !important; }
   .docs-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .btn { width: 100%; }
   .copy { width: 100%; }
