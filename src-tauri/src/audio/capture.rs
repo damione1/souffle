@@ -1,5 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, SampleFormat, Stream, StreamConfig};
+use cpal::{Device, SampleFormat, Stream, StreamConfig, SupportedStreamConfigRange};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use ringbuf::HeapRb;
 use ringbuf::traits::{Producer, Split};
@@ -195,6 +195,138 @@ fn reset_mic_loss_ladder(
 /// got a tap (or lost it) is dictation: abort rather than fake-record.
 fn has_fallback_audio(tap_live: bool) -> bool {
     tap_live
+}
+
+/// Fallback rate when the device's current one can't be read. 48 kHz is what
+/// every conferencing stack negotiates; the device maximum is not, and picking
+/// it is what broke other apps.
+const FALLBACK_INPUT_SAMPLE_RATE: u32 = 48_000;
+
+/// Rate to open a shared input device at.
+///
+/// cpal writes `kAudioDevicePropertyNominalSampleRate` from
+/// `build_input_stream` whenever the requested rate differs from the device's
+/// current one, and that property is machine-wide: opening the built-in mic at
+/// its 96 kHz maximum re-rates it for every other client. Meeting apps that
+/// bring up their own pipeline afterwards (Teams) fail to start on a mic above
+/// 48 kHz, so keep whatever rate the device is already on and let CoreAudio
+/// stay untouched. Souffle resamples to the engine rate regardless, so a
+/// higher device rate buys nothing.
+fn choose_input_sample_rate(current: Option<u32>, min: u32, max: u32) -> u32 {
+    match current {
+        Some(rate) if (min..=max).contains(&rate) => rate,
+        _ => FALLBACK_INPUT_SAMPLE_RATE.clamp(min, max),
+    }
+}
+
+/// Prefer an F32 range that already covers `current`, so we don't fall back
+/// and re-rate the device just because the first listed range is narrower.
+fn pick_input_config_range(
+    supported: &[SupportedStreamConfigRange],
+    current: Option<u32>,
+) -> Option<SupportedStreamConfigRange> {
+    let f32_ranges: Vec<_> = supported
+        .iter()
+        .filter(|c| c.sample_format() == SampleFormat::F32)
+        .cloned()
+        .collect();
+    let candidates: &[SupportedStreamConfigRange] = if f32_ranges.is_empty() {
+        supported
+    } else {
+        &f32_ranges
+    };
+
+    if let Some(rate) = current
+        && let Some(range) = candidates
+            .iter()
+            .find(|c| (c.min_sample_rate()..=c.max_sample_rate()).contains(&rate))
+    {
+        return Some(range.clone());
+    }
+    candidates.first().cloned()
+}
+
+#[cfg(test)]
+mod input_rate_tests {
+    use super::*;
+
+    /// The whole point: never move a rate another app may depend on.
+    #[test]
+    fn keeps_the_rate_the_device_already_runs_at() {
+        assert_eq!(
+            choose_input_sample_rate(Some(96_000), 8_000, 96_000),
+            96_000
+        );
+        assert_eq!(
+            choose_input_sample_rate(Some(48_000), 8_000, 96_000),
+            48_000
+        );
+        assert_eq!(
+            choose_input_sample_rate(Some(16_000), 8_000, 96_000),
+            16_000
+        );
+    }
+
+    #[test]
+    fn falls_back_to_48k_when_the_current_rate_is_unknown() {
+        assert_eq!(choose_input_sample_rate(None, 8_000, 96_000), 48_000);
+    }
+
+    /// A stale reading from another device, or a rate the range no longer
+    /// covers, must not be requested: cpal would reject the whole stream.
+    #[test]
+    fn ignores_a_current_rate_outside_the_supported_range() {
+        assert_eq!(
+            choose_input_sample_rate(Some(192_000), 8_000, 96_000),
+            48_000
+        );
+    }
+
+    #[test]
+    fn clamps_the_fallback_into_a_narrow_range() {
+        assert_eq!(choose_input_sample_rate(None, 16_000, 16_000), 16_000);
+        assert_eq!(choose_input_sample_rate(None, 88_200, 192_000), 88_200);
+    }
+
+    fn f32_range(min: u32, max: u32) -> SupportedStreamConfigRange {
+        SupportedStreamConfigRange::new(
+            1,
+            min,
+            max,
+            cpal::SupportedBufferSize::Unknown,
+            SampleFormat::F32,
+        )
+    }
+
+    #[test]
+    fn picks_later_f32_range_that_covers_current() {
+        let ranges = vec![f32_range(8_000, 44_100), f32_range(48_000, 96_000)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 48_000);
+        assert_eq!(picked.max_sample_rate(), 96_000);
+        let rate = choose_input_sample_rate(
+            Some(48_000),
+            picked.min_sample_rate(),
+            picked.max_sample_rate(),
+        );
+        assert_eq!(rate, 48_000);
+    }
+
+    #[test]
+    fn first_f32_range_still_wins_when_it_covers_current() {
+        let ranges = vec![f32_range(8_000, 96_000), f32_range(48_000, 48_000)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 8_000);
+        assert_eq!(picked.max_sample_rate(), 96_000);
+    }
+
+    #[test]
+    fn falls_back_to_first_f32_when_current_fits_none() {
+        let ranges = vec![f32_range(8_000, 16_000), f32_range(44_100, 44_100)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 8_000);
+        assert_eq!(picked.max_sample_rate(), 16_000);
+    }
 }
 
 #[cfg(test)]
@@ -1043,6 +1175,14 @@ impl AudioCapture {
         // Dictation: never keep a leftover meeting tap from a prior session.
         self.meeting.take();
 
+        // The stream that fed the outgoing resampler is already released, so
+        // its buffered chunk can be emitted without racing samples that came
+        // after it. Only for a rebuild of the running session: a new one must
+        // not inherit the previous session's audio.
+        if !is_new_session {
+            self.emit_resampler_tail(session_id);
+        }
+
         let resampler = Arc::new(Mutex::new(Resampler::new(
             sample_rate,
             channels,
@@ -1722,6 +1862,38 @@ impl AudioCapture {
         self.teardown_session_state();
     }
 
+    /// Emit what the mic resampler still holds before a rebuild replaces it,
+    /// mirroring the flush `stop` does at session end. Without this the
+    /// partial FFT chunk (~20ms of speech) dies with the old stream, on top
+    /// of the gap the teardown already costs.
+    ///
+    /// Callers must have released the capture stream first, so no callback
+    /// can push samples that would end up ordered before this tail.
+    fn emit_resampler_tail(&mut self, session_id: u64) {
+        let Some(resampler) = self.resampler.take() else {
+            return;
+        };
+        let Ok(mut r) = resampler.lock() else {
+            return;
+        };
+        let tail = r.flush();
+        if tail.is_empty() {
+            return;
+        }
+        if self
+            .audio_sender
+            .try_send(AudioMessage::Chunk(AudioChunk {
+                session_id,
+                samples: tail,
+                captured_at: Instant::now(),
+                speaker: None,
+            }))
+            .is_err()
+        {
+            debug!("Dropped the resampler tail on mic rebuild (channel full)");
+        }
+    }
+
     /// Stop IO and dispose the capture AudioUnit.
     ///
     /// On macOS, a Bluetooth headset cannot run A2DP stereo output and HFP
@@ -1842,20 +2014,27 @@ impl AudioCapture {
     }
 
     fn preferred_config(device: &Device) -> Result<StreamConfig, String> {
-        let mut supported = device
+        let supported: Vec<_> = device
             .supported_input_configs()
-            .map_err(|e| format!("Failed to get supported configs: {e}"))?;
+            .map_err(|e| format!("Failed to get supported configs: {e}"))?
+            .collect();
 
-        let config = supported
-            .find(|c| c.sample_format() == SampleFormat::F32)
-            .or_else(|| {
-                device
-                    .supported_input_configs()
-                    .ok()
-                    .and_then(|mut c| c.next())
-            })
+        // `default_input_config` reads the device's *current* stream format,
+        // which is the one rate that opens without re-rating the hardware for
+        // every other process on the machine.
+        let current = device.default_input_config().ok().map(|c| c.sample_rate());
+        let config = pick_input_config_range(&supported, current)
             .ok_or_else(|| "No supported input config found".to_string())?;
 
-        Ok(config.with_max_sample_rate().into())
+        let rate =
+            choose_input_sample_rate(current, config.min_sample_rate(), config.max_sample_rate());
+        if current != Some(rate) {
+            warn!(
+                "Input device current rate unreadable or unsupported ({current:?}); \
+                 opening at {rate}Hz, which re-rates the device system-wide"
+            );
+        }
+
+        Ok(config.with_sample_rate(rate).into())
     }
 }

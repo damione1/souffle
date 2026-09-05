@@ -5,7 +5,11 @@ import {
   getTranscriptionCatalog,
   loadModel,
 } from "../../api/transcription";
-import type { DownloadProgress, TranscriptionCatalog } from "../../types";
+import type {
+  DownloadProgress,
+  TranscriptionCatalog,
+  TranscriptionRuntimePhase,
+} from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfileSelection } from "./catalog";
 import {
@@ -38,10 +42,13 @@ export function currentTranscriptionSelection(
   );
 }
 
+/** Refresh the phase of the *selected* profile and return it, so callers can
+ * act on the fresh value instead of re-reading state a later event may have
+ * moved on. */
 export async function refreshTranscriptionRuntimeStatus(
   app: AppState,
   catalog: TranscriptionCatalog | null,
-) {
+): Promise<TranscriptionRuntimePhase> {
   const status = await getModelStatus(currentTranscriptionSelection(app, catalog));
   app.transcriptionRuntimePhase = status.phase;
   app.settings = {
@@ -50,6 +57,7 @@ export async function refreshTranscriptionRuntimeStatus(
     transcription_model_id: status.profile.model_id,
     transcription_backend_id: status.profile.backend_id ?? app.settings.transcription_backend_id,
   };
+  return status.phase;
 }
 
 export async function startTranscriptionModelDownload(

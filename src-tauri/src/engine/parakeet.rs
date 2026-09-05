@@ -3,24 +3,20 @@ use std::path::Path;
 use parakeet_rs::{ParakeetTDT, TimestampMode, Transcriber};
 use tracing::{debug, info};
 
+use super::batch_windows::{
+    CHUNK_SAMPLES, SAMPLE_RATE as PARAKEET_SAMPLE_RATE, drain_ready_windows,
+};
 use super::{
     AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
     collapse_whitespace,
 };
 
-/// Parakeet sample rate: 16kHz mono f32 (fixed by the model's mel frontend)
-const PARAKEET_SAMPLE_RATE: u32 = 16_000;
-
-/// Chunk size for pipeline delivery: 5 seconds at 16kHz.
-/// Non-overlapping windows, same shape as the Whisper engine — the model
-/// transcribes each window independently (TDT inference is stateless).
-const CHUNK_SAMPLES: usize = PARAKEET_SAMPLE_RATE as usize * 5;
-
 /// Minimum audio worth an inference pass on flush (0.5 second).
 const MIN_INFERENCE_SAMPLES: usize = PARAKEET_SAMPLE_RATE as usize / 2;
 
 /// NVIDIA Parakeet TDT engine via parakeet-rs (ONNX Runtime, CPU).
-/// Batch-oriented: accumulates audio, runs inference every CHUNK_SAMPLES.
+/// Batch-oriented: same silence-gap windows as Whisper ([4 s, 7 s], else 7 s).
+/// Pipeline hop stays [`CHUNK_SAMPLES`] (5 s).
 ///
 /// Uses the bundled ONNX Runtime dylib through ort's load-dynamic mode —
 /// see `crate::ort_runtime` for why static linking is forbidden here.
@@ -148,14 +144,14 @@ impl TranscriptionEngine for ParakeetEngine {
 
         self.audio_buffer.extend_from_slice(audio);
 
-        if self.audio_buffer.len() < CHUNK_SAMPLES {
-            return Ok(vec![]);
+        let mut all_segments = Vec::new();
+        let windows = drain_ready_windows(&mut self.audio_buffer);
+        for to_process in windows {
+            let offset = self.take_window_offset(to_process.len());
+            let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
+            all_segments.extend(Self::run_inference(model, to_process, offset)?);
         }
-
-        let to_process: Vec<f32> = self.audio_buffer.drain(..).collect();
-        let offset = self.take_window_offset(to_process.len());
-        let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
-        Self::run_inference(model, to_process, offset)
+        Ok(all_segments)
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
@@ -223,6 +219,26 @@ mod tests {
         assert_eq!(reqs.sample_rate_hz, 16_000);
         assert_eq!(reqs.channels, 1);
         assert_eq!(reqs.chunk_size_samples, 80_000);
+    }
+
+    #[test]
+    fn five_second_boundary_does_not_cut_mid_phrase() {
+        // Continuous speech through 5 s — the old knife-edge that split
+        // "The next | checkpoint" and made TDT invent a completion.
+        let pcm: Vec<f32> = (0..CHUNK_SAMPLES)
+            .map(|i| (i as f32 * 0.02).sin() * 0.3)
+            .collect();
+        assert_eq!(
+            crate::engine::batch_windows::find_cut_samples(&pcm),
+            None,
+            "must wait past 5 s so 'next checkpoint' stays in one window"
+        );
+
+        let mut longer = pcm;
+        longer.extend((0..CHUNK_SAMPLES).map(|i| (i as f32 * 0.02).sin() * 0.3));
+        let cut = crate::engine::batch_windows::find_cut_samples(&longer).unwrap();
+        assert!(cut > CHUNK_SAMPLES);
+        assert_eq!(cut, 16_000 * 7);
     }
 
     /// End-to-end inference against the real downloaded model. Run with:
