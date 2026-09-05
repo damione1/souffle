@@ -101,8 +101,25 @@ export function createLiveTranscript(pauseThreshold: number) {
     const { paragraphs, ranges, ordered } = groupIntoParagraphsWithRanges(input, pauseThreshold);
     const prevTail = tail;
 
-    const latestStart = input.reduce((max, seg) => Math.max(max, seg.start_time), 0);
-    const horizon = latestStart - TAIL_WINDOW_S;
+    // The horizon is the slowest lane, not the global latest: a paragraph may
+    // only freeze once no lane can still emit something older than it, and a
+    // lane with nothing left in the tail has no such claim to make. Taking the
+    // global max lets a fast lane drag the horizon past a lane that is still
+    // behind, which commits that lane's words one paragraph at a time.
+    const laneLatest = new Map<string | null, number>();
+    for (const segment of input) {
+      const lane = segment.speaker ?? null;
+      const previous = laneLatest.get(lane);
+      if (previous === undefined || segment.start_time > previous) {
+        laneLatest.set(lane, segment.start_time);
+      }
+    }
+    let slowestLaneStart: number | null = null;
+    for (const laneStart of laneLatest.values()) {
+      slowestLaneStart =
+        slowestLaneStart === null ? laneStart : Math.min(slowestLaneStart, laneStart);
+    }
+    const horizon = (slowestLaneStart ?? 0) - TAIL_WINDOW_S;
     let numToCommit = 0;
     for (let i = 0; i < paragraphs.length; i++) {
       if (paragraphEndTime(ordered, ranges[i]) < horizon) numToCommit = i + 1;

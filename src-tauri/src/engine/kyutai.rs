@@ -197,12 +197,21 @@ struct LoadedModel {
     /// Silence prefix (config audio_silence_prefix_seconds) still to be fed
     /// before the first real audio of the current refresh epoch.
     prefix_pending: bool,
-    /// Prefix duration for the current epoch; subtracted from moshi times.
-    time_offset_seconds: f64,
-    /// Wall-clock seconds of real audio attributed to prior refresh epochs,
-    /// so Word timestamps stay monotone across soft KV clears.
-    epoch_origin_seconds: f64,
-    /// LM frames since the last soft/hard refresh (includes this epoch's prefix).
+    /// Prefix duration for the current epoch, per batch lane; subtracted from
+    /// moshi times.
+    time_offset_seconds: Vec<f64>,
+    /// Wall-clock seconds of real audio attributed to prior epochs of each lane,
+    /// so Word timestamps stay monotone across KV clears. Per lane because
+    /// `refresh_lane` restarts one lane's moshi clock and not the other's.
+    epoch_origin_seconds: Vec<f64>,
+    /// LM frames fed to each lane since that lane's last KV clear, full or
+    /// per-lane. This is what a lane's epoch credit is computed from.
+    frames_since_lane_reset: Vec<usize>,
+    /// Last start_time emitted per lane. Guarantees monotonicity even if a
+    /// lane's internal clock restarts (reset_batch_idx).
+    last_emitted_start: Vec<f64>,
+    /// LM frames since the last soft/hard full refresh (includes this epoch's
+    /// prefix). Drives the refresh policy and the hard context deadline.
     frames_since_refresh: usize,
     /// Soft context refreshes performed this session (diagnostics).
     refresh_count: u64,
@@ -318,8 +327,10 @@ impl KyutaiEngine {
             device,
             model_path,
             prefix_pending: true,
-            time_offset_seconds: 0.0,
-            epoch_origin_seconds: 0.0,
+            time_offset_seconds: vec![0.0; batch_size],
+            epoch_origin_seconds: vec![0.0; batch_size],
+            frames_since_lane_reset: vec![0; batch_size],
+            last_emitted_start: vec![0.0; batch_size],
             frames_since_refresh: 0,
             refresh_count: 0,
             vad_pause_streak: vec![0; batch_size],
@@ -353,11 +364,19 @@ impl KyutaiEngine {
 
     /// Map a moshi word timestamp into session wall-clock seconds, accounting
     /// for the current epoch's silence prefix and prior soft-refresh epochs.
-    fn word_start_time(model: &LoadedModel, moshi_start: f64) -> f64 {
+    fn word_start_time(model: &LoadedModel, moshi_start: f64, batch_idx: usize) -> f64 {
         Self::word_start_time_raw(
             moshi_start,
-            model.time_offset_seconds,
-            model.epoch_origin_seconds,
+            model
+                .time_offset_seconds
+                .get(batch_idx)
+                .copied()
+                .unwrap_or(0.0),
+            model
+                .epoch_origin_seconds
+                .get(batch_idx)
+                .copied()
+                .unwrap_or(0.0),
         )
     }
 
@@ -367,6 +386,52 @@ impl KyutaiEngine {
         epoch_origin_seconds: f64,
     ) -> f64 {
         (moshi_start - time_offset_seconds + epoch_origin_seconds).max(0.0)
+    }
+
+    /// Floor an emitted timestamp at the last one emitted for the same lane.
+    /// A regression here can only mean a lane's moshi clock restarted without
+    /// its epoch being credited; the warning is the only signal that would
+    /// surface such a bug, since the UI would just silently rewind.
+    fn monotonic_time(model: &mut LoadedModel, batch_idx: usize, raw: f64) -> f64 {
+        let Some(floor) = model.last_emitted_start.get_mut(batch_idx) else {
+            return raw;
+        };
+        if raw < *floor - 1.0 {
+            warn!(
+                batch_idx,
+                raw = format!("{raw:.2}"),
+                floor = format!("{:.2}", *floor),
+                drop = format!("{:.2}", *floor - raw),
+                "Lane timestamp regressed; clamping to keep the transcript monotone"
+            );
+        }
+        let clamped = raw.max(*floor);
+        *floor = clamped;
+        clamped
+    }
+
+    /// Credit a lane's elapsed audio to its epoch origin and restart its clock.
+    /// Moshi's `reset_batch_idx` zeroes that lane's `step_idx` and
+    /// `last_stop_time`, so without this credit the lane's next word maps back
+    /// onto the start of the epoch and the transcript rewinds by up to a full
+    /// context window.
+    fn credit_lane_epoch(
+        epoch_origin_seconds: &mut [f64],
+        time_offset_seconds: &mut [f64],
+        frames_since_lane_reset: &mut [usize],
+        lane: usize,
+    ) {
+        let (Some(origin), Some(offset), Some(frames)) = (
+            epoch_origin_seconds.get_mut(lane),
+            time_offset_seconds.get_mut(lane),
+            frames_since_lane_reset.get_mut(lane),
+        ) else {
+            return;
+        };
+        let lane_secs = *frames as f64 / MIMI_FRAMES_PER_SECOND - *offset;
+        *origin += lane_secs.max(0.0);
+        *offset = 0.0;
+        *frames = 0;
     }
 
     fn pending_to_segment(pending: PendingWord, end_time: f64) -> TranscriptionSegment {
@@ -414,14 +479,19 @@ impl KyutaiEngine {
     fn refresh_loaded(model: &mut LoadedModel, kind: RefreshKind) -> Result<(), EngineError> {
         let frames = model.frames_since_refresh;
         let context = model.config.context;
-        let real_secs = frames as f64 / MIMI_FRAMES_PER_SECOND - model.time_offset_seconds;
-        model.epoch_origin_seconds += real_secs.max(0.0);
+        for lane in 0..model.epoch_origin_seconds.len() {
+            Self::credit_lane_epoch(
+                &mut model.epoch_origin_seconds,
+                &mut model.time_offset_seconds,
+                &mut model.frames_since_lane_reset,
+                lane,
+            );
+        }
         model
             .state
             .reset()
             .map_err(|e| EngineError::InferenceError(format!("ASR context refresh: {e}")))?;
         model.prefix_pending = true;
-        model.time_offset_seconds = 0.0;
         model.frames_since_refresh = 0;
         model.vad_pause_streak = vec![0; model.state.batch_size()];
         model.language_tracker.reset_all();
@@ -438,7 +508,12 @@ impl KyutaiEngine {
             frames_before_refresh = frames,
             context,
             refresh_count = model.refresh_count,
-            epoch_origin_seconds = format!("{:.2}", model.epoch_origin_seconds),
+            epoch_origin_seconds = model
+                .epoch_origin_seconds
+                .iter()
+                .map(|s| format!("{s:.2}"))
+                .collect::<Vec<_>>()
+                .join(","),
             "ASR context refreshed (soft KV clear)"
         );
         Ok(())
@@ -451,6 +526,14 @@ impl KyutaiEngine {
         batch_idx: usize,
         kind: RefreshKind,
     ) -> Result<(), EngineError> {
+        // This path feeds no silence prefix, so the lane's offset goes to zero
+        // along with its clock.
+        Self::credit_lane_epoch(
+            &mut model.epoch_origin_seconds,
+            &mut model.time_offset_seconds,
+            &mut model.frames_since_lane_reset,
+            batch_idx,
+        );
         model
             .state
             .reset_batch_idx(batch_idx)
@@ -469,6 +552,10 @@ impl KyutaiEngine {
         debug!(
             kind = ?kind,
             batch_idx,
+            epoch_origin_seconds = format!(
+                "{:.2}",
+                model.epoch_origin_seconds.get(batch_idx).copied().unwrap_or(0.0)
+            ),
             "ASR lane context reset (per-batch KV clear)"
         );
         Ok(())
@@ -517,13 +604,17 @@ impl KyutaiEngine {
         let prefix_frames =
             Self::prefix_frame_count(model.config.stt_config.audio_silence_prefix_seconds);
         if prefix_frames == 0 {
-            model.time_offset_seconds = 0.0;
+            model.time_offset_seconds.fill(0.0);
             return Ok(());
         }
-        model.time_offset_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
+        // The prefix is fed to every lane, and its frames also count into
+        // `frames_since_lane_reset`, which is what makes subtracting the offset
+        // when crediting an epoch the right thing to do.
+        let prefix_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
+        model.time_offset_seconds.fill(prefix_seconds);
         info!(
             frames = prefix_frames,
-            seconds = model.time_offset_seconds,
+            seconds = prefix_seconds,
             "Feeding silence prefix before epoch audio"
         );
         let silence = vec![0.0f32; MIMI_FRAME_SIZE];
@@ -590,6 +681,10 @@ impl KyutaiEngine {
                 .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
         })?;
         model.frames_since_refresh = model.frames_since_refresh.saturating_add(1);
+        // One step_pcm advances every lane, so every lane's clock advances.
+        for frames in model.frames_since_lane_reset.iter_mut() {
+            *frames = frames.saturating_add(1);
+        }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
         Ok(asr_msgs)
     }
@@ -609,6 +704,10 @@ impl KyutaiEngine {
                 .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
         })?;
         model.frames_since_refresh = model.frames_since_refresh.saturating_add(1);
+        // One step_pcm advances every lane, so every lane's clock advances.
+        for frames in model.frames_since_lane_reset.iter_mut() {
+            *frames = frames.saturating_add(1);
+        }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
         Ok(asr_msgs)
     }
@@ -669,6 +768,10 @@ impl KyutaiEngine {
                         continue;
                     }
                     let language = detect_word(&text).map(|code| code.as_str().to_string());
+                    // Mapped before the mismatch reset below: this word's moshi
+                    // clock belongs to the epoch that reset is about to close.
+                    let raw_start = Self::word_start_time(model, *start_time, *batch_idx);
+                    let start_time = Self::monotonic_time(model, *batch_idx, raw_start);
                     let mismatch_reset = model.language_tracker.on_word(&text, *batch_idx);
                     if mismatch_reset
                         && let Err(e) =
@@ -676,7 +779,6 @@ impl KyutaiEngine {
                     {
                         warn!(batch_idx, "Language mismatch lane reset failed: {e}");
                     }
-                    let start_time = Self::word_start_time(model, *start_time);
                     let speaker = if diarized {
                         Some(if *batch_idx == 0 {
                             Speaker::Me
@@ -703,7 +805,8 @@ impl KyutaiEngine {
                     stop_time,
                     batch_idx,
                 } => {
-                    let end_time = Self::word_start_time(model, *stop_time);
+                    let raw_end = Self::word_start_time(model, *stop_time, *batch_idx);
+                    let end_time = Self::monotonic_time(model, *batch_idx, raw_end);
                     Self::emit_pending(&mut model.pending_words, *batch_idx, end_time, segments);
                 }
                 moshi::asr::AsrMsg::Step { prs, .. } => {
@@ -1139,6 +1242,45 @@ mod tests {
         assert_eq!(KyutaiEngine::word_start_time_raw(2.0, 1.0, 30.0), 31.0);
         // Prefix still draining: clamp at 0.
         assert_eq!(KyutaiEngine::word_start_time_raw(0.5, 1.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn credit_lane_epoch_keeps_the_reset_lane_monotone() {
+        // Two lanes 24s into an epoch that opened with a 13-frame (1.04s)
+        // silence prefix, 58s of earlier epochs already credited.
+        let mut origin = [58.0f64, 58.0];
+        let mut offset = [1.04f64, 1.04];
+        let mut frames = [300usize, 300];
+
+        let last_emitted =
+            KyutaiEngine::word_start_time_raw((300 - 13) as f64 / 12.5, offset[0], origin[0]);
+
+        KyutaiEngine::credit_lane_epoch(&mut origin, &mut offset, &mut frames, 0);
+
+        // reset_batch_idx restarts the lane's moshi clock at 0: the next word
+        // must not land before the last one emitted on that lane.
+        let after_reset = KyutaiEngine::word_start_time_raw(0.0, offset[0], origin[0]);
+        assert!(
+            after_reset >= last_emitted,
+            "lane 0 rewound: {after_reset} < {last_emitted}"
+        );
+        assert_eq!(frames[0], 0);
+        assert_eq!(offset[0], 0.0);
+    }
+
+    #[test]
+    fn credit_lane_epoch_leaves_the_other_lane_untouched() {
+        let mut origin = [58.0f64, 58.0];
+        let mut offset = [1.04f64, 1.04];
+        let mut frames = [300usize, 300];
+
+        KyutaiEngine::credit_lane_epoch(&mut origin, &mut offset, &mut frames, 0);
+
+        // The lane that kept decoding must keep its clock: crediting it here
+        // would push its words forward by a whole epoch.
+        assert_eq!(origin[1], 58.0);
+        assert_eq!(offset[1], 1.04);
+        assert_eq!(frames[1], 300);
     }
 
     #[test]

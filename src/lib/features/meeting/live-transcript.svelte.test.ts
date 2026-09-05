@@ -250,6 +250,24 @@ describe("createLiveTranscript diarized tail window", () => {
     ]);
   });
 
+  it("does not split a lane into one paragraph per word when its clock regresses", () => {
+    // Them keeps advancing; Me's lane clock restarts far behind it. With a
+    // global horizon, every Me word lands under it, gets committed on its own,
+    // and empties the tail for the next one.
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    const regressed = ["a", "b", "c", "d", "e", "f", "g"];
+    feedSegments(live, [
+      dseg("them one", 40.0, "them"),
+      dseg("them two", 41.0, "them"),
+      dseg("them three", 42.0, "them"),
+      ...regressed.map((word, i) => dseg(word, 1.0 + i * 0.3, "me")),
+    ]);
+
+    const mine = [...live.committed, ...live.tail].filter((p) => p.speaker === "me");
+    expect(mine).toHaveLength(1);
+    expect(mine[0].text).toBe(regressed.join(" "));
+  });
+
   it("does not zipper same-speaker words that arrive with overlapping timestamps", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
     feedSegments(live, [
