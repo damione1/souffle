@@ -136,7 +136,7 @@ pub async fn extract_structured_summary(
         system,
         prompt,
         0.1,
-        super::ollama::REDUCE_CONTEXT,
+        super::ollama::REDUCE_BUDGET,
         &no_op,
         false,
     )

@@ -463,7 +463,7 @@ pub async fn polish_dictation_text(
         polish_system_prompt(provider),
         prompt,
         0.1,
-        super::ollama::REDUCE_CONTEXT,
+        super::ollama::polish_budget(super::estimate_tokens(&stripped)),
         &no_op,
         false,
     )
