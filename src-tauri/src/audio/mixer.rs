@@ -88,9 +88,15 @@ impl MeetingMixer {
         mic_channels: u16,
         mic_gain: f32,
     ) {
+        // Carry the outgoing resampler's buffered chunk into the fifo instead
+        // of dropping it, the same way `flush` does at session end: a rebuild
+        // already costs the teardown gap, and this is another ~20ms of speech
+        // on top. What stays in the fifo is sub-frame, so tap pairing and the
+        // drift bound are unaffected.
+        let tail = self.mic_to_mix.flush();
+        self.mic_fifo.extend(tail);
         self.mic = mic;
         self.mic_to_mix = Resampler::new(mic_rate, mic_channels, MIX_RATE, mic_gain);
-        self.mic_fifo.clear();
     }
 
     /// Drain both rings, mix every complete 10ms frame, and return the
@@ -403,6 +409,38 @@ mod tests {
         assert!(!them.is_empty(), "them must carry the tap");
         let mid = them[them.len() / 2];
         assert!((mid - 0.3).abs() < 0.05, "expected ~0.3, got {mid}");
+    }
+
+    /// A mid-session rebuild must not swallow the speech the mic resampler
+    /// had accumulated but not yet converted.
+    #[test]
+    fn replace_mic_keeps_the_partial_mic_chunk() {
+        // 44.1kHz -> 48kHz needs 1029 input frames per FFT chunk, so 1000
+        // samples sit entirely inside the resampler with nothing emitted.
+        let (mut mic, _tap, mut mixer) = make_mixer(44_100, 48_000, 16_000);
+        mic.push_slice(&vec![0.4f32; 1_000]);
+        assert!(
+            mixer.tick().is_empty(),
+            "a partial chunk must not produce a frame yet"
+        );
+        drop(mic);
+
+        let (_new_mic, new_cons) = HeapRb::<f32>::new(44_100 * 2).split();
+        mixer.replace_mic(new_cons, 44_100, 1, 1.0);
+
+        // No new mic samples: whatever comes out now is the rescued tail.
+        // It still has to clear the engine resampler's own chunking, hence
+        // the flush.
+        let mut out = mixer.tick();
+        out.extend(mixer.flush());
+        assert!(
+            !out.is_empty(),
+            "the buffered chunk must survive the mic rebuild"
+        );
+        assert!(
+            out.iter().any(|s| (*s - 0.4).abs() < 0.05),
+            "the rescued samples must be the ones that were buffered"
+        );
     }
 
     #[test]

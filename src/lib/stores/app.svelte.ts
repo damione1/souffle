@@ -4,6 +4,7 @@ import type {
   PipelineError,
   SystemAudioStatus,
   TranscriptionHealth,
+  TranscriptionProfile,
   TranscriptionRuntimePhase,
   UpcomingMeeting,
 } from "../types";
@@ -152,6 +153,43 @@ function deriveRuntimePhase(state: AppStateMachine): TranscriptionRuntimePhase {
   }
 }
 
+/** The profile the backend is currently busy with, when it tracks one. */
+export function machineProfile(state: AppStateMachine): TranscriptionProfile | null {
+  switch (state.state) {
+    case "idle":
+      return null;
+    case "error": {
+      const recovery = state.data.recovery;
+      if (typeof recovery === "object") {
+        if ("retry_from_downloaded" in recovery) return recovery.retry_from_downloaded.profile;
+        if ("retry_from_ready" in recovery) return recovery.retry_from_ready.profile;
+      }
+      return null;
+    }
+    default:
+      return state.data.profile;
+  }
+}
+
+/** Whether the machine is talking about the model the user has selected.
+ * After a model switch the two diverge (machine still Ready with the old
+ * profile), and the machine's phase must not be applied to the new one. */
+export function machineMatchesSelection(
+  state: AppStateMachine,
+  selection: Pick<
+    AppSettings,
+    "transcription_engine_id" | "transcription_model_id" | "transcription_backend_id"
+  >,
+): boolean {
+  const profile = machineProfile(state);
+  if (!profile) return false;
+  return (
+    profile.engine_id === selection.transcription_engine_id
+    && profile.model_id === selection.transcription_model_id
+    && profile.backend_id === selection.transcription_backend_id
+  );
+}
+
 function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOperationState {
   switch (state.state) {
     case "downloading": return "downloading";
@@ -188,7 +226,10 @@ export function getAppState() {
       }
       // Sync runtime phase from machine when no model operation is in progress.
       // During download/load the phase is managed by runtime.ts callbacks.
-      if (deriveModelOperationState(s) === "idle") {
+      // Only when the machine is talking about the selected model: otherwise a
+      // stray event would report the *old* model's phase (e.g. "ready") for a
+      // model the user just picked and that still needs a download or a load.
+      if (deriveModelOperationState(s) === "idle" && machineMatchesSelection(s, settings)) {
         transcriptionRuntimePhase = deriveRuntimePhase(s);
       }
       // Health snapshots only make sense while recording
