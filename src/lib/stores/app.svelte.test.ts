@@ -80,6 +80,22 @@ describe('app store', () => {
     expect(state.recordingStartedAtMs).toBeNull();
   });
 
+  it('anchors dictation the same way as a meeting', () => {
+    const state = getAppState();
+    state.machineState = { state: "ready", data: { profile } };
+    expect(state.recordingStartedAtMs).toBeNull();
+
+    state.machineState = { state: "recording_dictation", data: { profile, session_id: 1 } };
+    const anchor = state.recordingStartedAtMs;
+    expect(anchor).not.toBeNull();
+
+    state.machineState = { state: "stopping", data: { profile, was_recording: "dictation" } };
+    expect(state.recordingStartedAtMs).toBe(anchor);
+
+    state.machineState = { state: "ready", data: { profile } };
+    expect(state.recordingStartedAtMs).toBeNull();
+  });
+
   it('re-anchors when a meeting is resumed as a new recording session', () => {
     const state = getAppState();
     vi.useFakeTimers();
