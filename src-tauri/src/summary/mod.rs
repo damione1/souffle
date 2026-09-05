@@ -335,7 +335,7 @@ pub(crate) async fn generate_with_provider(
     system: &str,
     prompt: String,
     temperature: f32,
-    num_ctx: u32,
+    budget: ollama::GenerationBudget,
     on_chunk: &impl Fn(SummarizeProgress),
     json_format: bool,
 ) -> Result<String, String> {
@@ -348,7 +348,7 @@ pub(crate) async fn generate_with_provider(
                 ollama_model,
                 system,
                 prompt,
-                num_ctx,
+                budget,
                 temperature,
                 on_chunk,
                 json_format,
@@ -430,7 +430,7 @@ pub async fn summarize_stream(
             final_system_prompt,
             build_summarize_prompt(transcript_text, notes, participants),
             0.2,
-            ollama::REDUCE_CONTEXT,
+            ollama::REDUCE_BUDGET,
             &on_chunk,
             false,
         )
@@ -465,7 +465,7 @@ pub async fn summarize_stream(
                     model,
                     ollama::MAP_SYSTEM_PROMPT,
                     user,
-                    ollama::MAP_CONTEXT,
+                    ollama::MAP_BUDGET,
                     0.2,
                     &no_op,
                     false,
@@ -494,7 +494,7 @@ pub async fn summarize_stream(
                 apple::MAP_SYSTEM_PROMPT,
                 user,
                 0.2,
-                ollama::MAP_CONTEXT,
+                ollama::MAP_BUDGET,
                 &no_op,
                 false,
             )
@@ -544,10 +544,10 @@ async fn reduce_part_summaries(
     // The template prompt applies to the final pass only; intermediate
     // merge rounds keep the fixed provider merge prompt (both providers
     // share the same merge text today).
-    let (merge_system_prompt, num_ctx) = match provider {
-        SummaryProviderKind::Ollama => (ollama::MERGE_SYSTEM_PROMPT, ollama::REDUCE_CONTEXT),
+    let (merge_system_prompt, budget) = match provider {
+        SummaryProviderKind::Ollama => (ollama::MERGE_SYSTEM_PROMPT, ollama::REDUCE_BUDGET),
         SummaryProviderKind::AppleIntelligence => {
-            (apple::MERGE_SYSTEM_PROMPT, ollama::REDUCE_CONTEXT)
+            (apple::MERGE_SYSTEM_PROMPT, ollama::REDUCE_BUDGET)
         }
     };
 
@@ -576,12 +576,12 @@ async fn reduce_part_summaries(
                 reduce_call_system_prompt(is_final, final_system_prompt, merge_system_prompt);
             if is_final {
                 generate_with_provider(
-                    provider, model, ollama_url, system, prompt, 0.3, num_ctx, on_chunk, false,
+                    provider, model, ollama_url, system, prompt, 0.3, budget, on_chunk, false,
                 )
                 .await
             } else {
                 generate_with_provider(
-                    provider, model, ollama_url, system, prompt, 0.2, num_ctx, &no_op, false,
+                    provider, model, ollama_url, system, prompt, 0.2, budget, &no_op, false,
                 )
                 .await
             }

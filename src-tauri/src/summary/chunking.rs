@@ -1,6 +1,17 @@
 /// Rough token estimate without a tokenizer. Transcripts tokenize denser than prose.
+///
+/// Measured tokens per word on 2000 words of the same French transcript,
+/// Q4_K_M: qwen3:4b 1.523, qwen2.5:7b 1.532, llama3.2:3b 1.538, mistral:latest
+/// 1.760. Every measured ratio is above 1.4, so that ratio put every budget
+/// in the app 9 to 26 percent short of the real token count. This estimate
+/// feeds only budget *limits* (stuff-versus-map threshold, reduce batching,
+/// the Apple Intelligence budgets), never the chunk size itself, which is a
+/// fixed word count. Underestimating causes silent truncation; overestimating
+/// only costs a little chunking margin. A single conservative ratio is
+/// therefore the right trade: a per-model table would be guesswork for every
+/// model not in the measured set.
 pub fn estimate_tokens(text: &str) -> usize {
-    (text.split_whitespace().count() as f32 * 1.4).ceil() as usize
+    (text.split_whitespace().count() as f32 * 1.8).ceil() as usize
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,7 +80,7 @@ mod tests {
     #[test]
     fn estimate_tokens_scales_with_words() {
         assert_eq!(estimate_tokens(""), 0);
-        assert_eq!(estimate_tokens(&"word ".repeat(10)), 14);
+        assert_eq!(estimate_tokens(&"word ".repeat(10)), 18);
     }
 
     #[test]

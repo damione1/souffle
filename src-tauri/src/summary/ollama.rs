@@ -1,4 +1,8 @@
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use crate::lock_ext::MutexExt;
 
 use serde::{Deserialize, Serialize};
 
@@ -6,10 +10,56 @@ use crate::constants::{
     OLLAMA_DEFAULT_URL, OLLAMA_MAP_PROMPT, OLLAMA_MERGE_PROMPT, OLLAMA_STRUCTURED_EXTRACT_PROMPT,
 };
 
-const REDUCE_NUM_CTX: u32 = 16384;
-const MAP_NUM_CTX: u32 = 8192;
 const CONNECT_TIMEOUT_SECS: u64 = 5;
 const READ_TIMEOUT_SECS: u64 = 120;
+/// Whole-request deadline for `/api/show`. The shared client only has a
+/// recurring `read_timeout`, which resets on every successful read, so a slow
+/// trickle of bytes could hold up the summary path indefinitely. This lookup
+/// must fail fast and fall back to the stage budget.
+const SHOW_TIMEOUT_SECS: u64 = 5;
+
+/// Bounds one `/api/generate` call. `num_ctx` is the combined prompt and
+/// response window; `num_predict` caps how many tokens the model may emit.
+/// Ollama truncates a prompt over `num_ctx` from the LEFT (system prompt and
+/// the start of the transcript go first) and still returns 200 OK, so an
+/// unbounded `num_predict` just lets generation run until `llama-server`
+/// shifts the context window mid-response instead. Never set `num_ctx`
+/// above the model's native context: Ollama will RoPE-extend past it, which
+/// degrades coherence with no warning either. See `resolve_num_ctx`.
+#[derive(Debug, Clone, Copy)]
+pub struct GenerationBudget {
+    pub num_ctx: u32,
+    pub num_predict: u32,
+}
+
+/// Map-stage outputs measured 128 to 314 tokens; 700 is headroom, not a cap
+/// expected to bite.
+pub const MAP_BUDGET: GenerationBudget = GenerationBudget {
+    num_ctx: 8192,
+    num_predict: 700,
+};
+
+/// The final pass renders the summary templates, and the detailed-minutes one
+/// asks for one bullet per distinct point and to be thorough rather than
+/// terse. This bound exists to stop a runaway generation before it saturates
+/// the context and starts scrolling the prompt, not to cap a legitimate
+/// summary: 4096 is far above any real one, and still leaves three quarters
+/// of the window for the prompt.
+pub const REDUCE_BUDGET: GenerationBudget = GenerationBudget {
+    num_ctx: 16384,
+    num_predict: 4096,
+};
+
+/// Polish rewrites its input, so its output length tracks the input's. A fixed
+/// bound would cut a long dictation off mid-sentence, which is worse than the
+/// unbounded generation this guard rail replaces. Twice the input estimate
+/// leaves room for the punctuation and formatting polish adds.
+pub fn polish_budget(input_tokens: usize) -> GenerationBudget {
+    GenerationBudget {
+        num_ctx: REDUCE_BUDGET.num_ctx,
+        num_predict: input_tokens.saturating_mul(2).clamp(512, 8192) as u32,
+    }
+}
 
 /// Default chat model to offer when Ollama is running but empty.
 /// `qwen2.5:7b` is instruction-tuned (~4.7 GB) and ranks first in
@@ -53,12 +103,139 @@ struct GenerateRequest {
 struct GenerateOptions {
     temperature: f32,
     num_ctx: u32,
+    num_predict: u32,
 }
 
 #[derive(Debug, Deserialize)]
 struct GenerateChunk {
     response: String,
     done: bool,
+    /// Present only on the final chunk (`done: true`). Ollama sets it to the
+    /// number of prompt tokens it actually evaluated; when it reaches
+    /// `num_ctx - 1` the prompt was truncated (see `generate_stream`).
+    #[serde(default)]
+    prompt_eval_count: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ShowResponse {
+    #[serde(default)]
+    model_info: serde_json::Value,
+}
+
+/// Ollama prefixes this key by architecture ("qwen2.context_length",
+/// "llama.context_length", ...). Match the suffix rather than hardcoding an
+/// architecture, so a model built on an architecture this code has never
+/// seen still resolves.
+fn context_length_from_model_info(model_info: &serde_json::Value) -> Option<u32> {
+    let object = model_info.as_object()?;
+    object.iter().find_map(|(key, value)| {
+        if !key.ends_with(".context_length") {
+            return None;
+        }
+        let length = u32::try_from(value.as_u64()?).ok()?;
+        (length > 0).then_some(length)
+    })
+}
+
+/// Size the window to what this call actually needs, bounded by what the model
+/// can take. `needed` is the estimated prompt plus the generation bound: below
+/// it, either the prompt is truncated from the left or the response scrolls the
+/// window mid-generation, both silently.
+///
+/// Growing past the stage budget is only safe when the native window is known,
+/// because exceeding it makes Ollama RoPE-extend and degrade coherence, also
+/// silently. An unknown native window therefore pins this to the stage budget,
+/// which is the behavior this code had before: the lookup must never be the
+/// reason a summarization gets worse or fails.
+fn resolve_num_ctx(native: Option<u32>, requested: u32, needed: u32) -> u32 {
+    match native {
+        Some(native) => requested.max(needed).min(native),
+        None => requested,
+    }
+}
+
+/// `num_ctx` is prompt plus response. After the window is resolved (and
+/// possibly pinned to a small native size), the requested generation bound
+/// can still exceed what remains. Cap it so generation cannot scroll the
+/// prompt out of the window.
+fn cap_num_predict(num_ctx: u32, prompt_tokens: u32, requested: u32) -> u32 {
+    requested.min(num_ctx.saturating_sub(prompt_tokens).max(1))
+}
+
+type ModelContextCache = Mutex<HashMap<(String, String), Option<u32>>>;
+static MODEL_CONTEXT_CACHE: OnceLock<ModelContextCache> = OnceLock::new();
+
+fn model_context_cache() -> &'static ModelContextCache {
+    MODEL_CONTEXT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn context_cache_key(url: &str, model: &str) -> (String, String) {
+    (url.trim_end_matches('/').to_string(), model.to_string())
+}
+
+/// A completed `/api/show` (window known or advertised as absent) is cached
+/// for the process lifetime. A failed lookup is not: a show that raced a
+/// still-loading model must not pin every later call to the stage budget.
+enum NativeContextLookup {
+    Cached(Option<u32>),
+    Failed,
+}
+
+/// One `/api/show` call per (server, model), cached for the process lifetime
+/// so this runs once per model rather than once per chunk.
+async fn native_context_length(client: &reqwest::Client, url: &str, model: &str) -> Option<u32> {
+    let key = context_cache_key(url, model);
+    if let Ok(cache) = model_context_cache().acquire()
+        && let Some(cached) = cache.get(&key)
+    {
+        return *cached;
+    }
+
+    match fetch_native_context_length(client, url, model).await {
+        NativeContextLookup::Cached(native) => {
+            if let Ok(mut cache) = model_context_cache().acquire() {
+                cache.insert(key, native);
+            }
+            native
+        }
+        NativeContextLookup::Failed => None,
+    }
+}
+
+/// Failure here (network, missing field, unexpected shape) is not fatal: the
+/// caller falls back to the stage's configured `num_ctx`, which is today's
+/// behavior.
+async fn fetch_native_context_length(
+    client: &reqwest::Client,
+    url: &str,
+    model: &str,
+) -> NativeContextLookup {
+    let resp = match client
+        .post(format!("{url}/api/show"))
+        .timeout(Duration::from_secs(SHOW_TIMEOUT_SECS))
+        .json(&serde_json::json!({ "model": model }))
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::debug!(model, error = %e, "Ollama /api/show request failed");
+            return NativeContextLookup::Failed;
+        }
+    };
+    if !resp.status().is_success() {
+        tracing::debug!(model, status = %resp.status(), "Ollama /api/show returned an error status");
+        return NativeContextLookup::Failed;
+    }
+    let body: ShowResponse = match resp.json().await {
+        Ok(body) => body,
+        Err(e) => {
+            tracing::debug!(model, error = %e, "Ollama /api/show response did not parse");
+            return NativeContextLookup::Failed;
+        }
+    };
+    NativeContextLookup::Cached(context_length_from_model_info(&body.model_info))
 }
 
 pub fn is_summary_capable_model(model: &str) -> bool {
@@ -155,6 +332,8 @@ fn handle_ndjson_line(
     line: &[u8],
     full_text: &mut String,
     on_chunk: &impl Fn(super::SummarizeProgress),
+    model: &str,
+    num_ctx: u32,
 ) {
     let Ok(text) = std::str::from_utf8(line) else {
         return;
@@ -164,6 +343,17 @@ fn handle_ndjson_line(
         return;
     }
     if let Ok(parsed) = serde_json::from_str::<GenerateChunk>(text) {
+        if let Some(prompt_eval_count) = parsed.prompt_eval_count
+            && prompt_eval_count >= num_ctx.saturating_sub(1)
+        {
+            tracing::warn!(
+                model,
+                num_ctx,
+                prompt_eval_count,
+                "Ollama prompt was truncated from the left: the system prompt and \
+                 the start of the input were dropped before the model saw them"
+            );
+        }
         full_text.push_str(&parsed.response);
         // Real generation tokens only ever flow through the caller's on_chunk
         // for the truly final pass (map/intermediate reduce calls pass a
@@ -185,11 +375,30 @@ pub async fn generate_stream(
     model: &str,
     system: &str,
     prompt: String,
-    num_ctx: u32,
+    budget: GenerationBudget,
     temperature: f32,
     on_chunk: &impl Fn(super::SummarizeProgress),
     json_format: bool,
 ) -> Result<String, String> {
+    let native = native_context_length(client, url, model).await;
+    let prompt_tokens = super::estimate_tokens(system)
+        .saturating_add(super::estimate_tokens(&prompt))
+        .try_into()
+        .unwrap_or(u32::MAX);
+    let needed = prompt_tokens.saturating_add(budget.num_predict);
+    let num_ctx = resolve_num_ctx(native, budget.num_ctx, needed);
+    let num_predict = cap_num_predict(num_ctx, prompt_tokens, budget.num_predict);
+    if needed > num_ctx {
+        tracing::warn!(
+            model,
+            needed,
+            num_ctx,
+            native_context = native,
+            "This model's context window cannot hold the prompt and the response; \
+             Ollama will drop the system prompt and the start of the input"
+        );
+    }
+
     let body = GenerateRequest {
         model: model.to_string(),
         prompt,
@@ -200,6 +409,7 @@ pub async fn generate_stream(
         options: GenerateOptions {
             temperature,
             num_ctx,
+            num_predict,
         },
     };
     let resp = client
@@ -223,10 +433,10 @@ pub async fn generate_stream(
 
         while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = buf.drain(..=pos).collect();
-            handle_ndjson_line(&line, &mut full_text, on_chunk);
+            handle_ndjson_line(&line, &mut full_text, on_chunk, model, num_ctx);
         }
     }
-    handle_ndjson_line(&buf, &mut full_text, on_chunk);
+    handle_ndjson_line(&buf, &mut full_text, on_chunk, model, num_ctx);
 
     Ok(full_text)
 }
@@ -421,14 +631,14 @@ pub const MAP_SYSTEM_PROMPT: &str = OLLAMA_MAP_PROMPT;
 pub const MERGE_SYSTEM_PROMPT: &str = OLLAMA_MERGE_PROMPT;
 pub const STRUCTURED_EXTRACT_SYSTEM_PROMPT: &str = OLLAMA_STRUCTURED_EXTRACT_PROMPT;
 pub const DICTATION_POLISH_SYSTEM_PROMPT: &str = crate::constants::OLLAMA_DICTATION_POLISH_PROMPT;
-pub const REDUCE_CONTEXT: u32 = REDUCE_NUM_CTX;
-pub const MAP_CONTEXT: u32 = MAP_NUM_CTX;
 
 #[cfg(test)]
 mod tests {
     use super::{
         GenerateOptions, GenerateRequest, PullAccumulator, PullChunk, PullRequest,
-        RECOMMENDED_MODEL, is_summary_capable_model, sorted_summary_capable_models,
+        RECOMMENDED_MODEL, REDUCE_BUDGET, cap_num_predict, context_cache_key,
+        context_length_from_model_info, is_summary_capable_model, polish_budget, resolve_num_ctx,
+        sorted_summary_capable_models,
     };
 
     #[test]
@@ -508,6 +718,7 @@ mod tests {
             options: GenerateOptions {
                 temperature: 0.1,
                 num_ctx: 1024,
+                num_predict: 700,
             },
         };
         let json = serde_json::to_string(&body).expect("GenerateRequest should serialize");
@@ -515,6 +726,121 @@ mod tests {
             json.contains(r#""keep_alive":"15m""#),
             "expected keep_alive in {json}"
         );
+    }
+
+    #[test]
+    fn polish_budget_tracks_its_input_length() {
+        // A long dictation must not be cut off mid-sentence.
+        assert_eq!(polish_budget(3000).num_predict, 6000);
+        // A one-line dictation still gets room for punctuation and casing.
+        assert_eq!(polish_budget(1).num_predict, 512);
+        // Bounded, so a runaway cannot reach the context window.
+        assert!(polish_budget(usize::MAX).num_predict < REDUCE_BUDGET.num_ctx);
+    }
+
+    #[test]
+    fn generate_options_serializes_num_predict() {
+        let body = GenerateRequest {
+            model: "qwen2.5:7b".into(),
+            prompt: "hi".into(),
+            system: "sys".into(),
+            stream: true,
+            format: None,
+            keep_alive: Some("15m".into()),
+            options: GenerateOptions {
+                temperature: 0.1,
+                num_ctx: 1024,
+                num_predict: 700,
+            },
+        };
+        let json = serde_json::to_string(&body).expect("GenerateRequest should serialize");
+        assert!(
+            json.contains(r#""num_predict":700"#),
+            "expected num_predict in {json}"
+        );
+    }
+
+    #[test]
+    fn context_length_key_matches_any_architecture_prefix() {
+        let info =
+            serde_json::json!({ "qwen2.context_length": 32768, "qwen2.embedding_length": 1 });
+        assert_eq!(context_length_from_model_info(&info), Some(32768));
+
+        let info = serde_json::json!({ "llama.context_length": 4096 });
+        assert_eq!(context_length_from_model_info(&info), Some(4096));
+    }
+
+    #[test]
+    fn context_length_key_missing_returns_none() {
+        let info = serde_json::json!({ "qwen2.embedding_length": 4096 });
+        assert_eq!(context_length_from_model_info(&info), None);
+    }
+
+    #[test]
+    fn context_length_value_not_a_number_returns_none() {
+        let info = serde_json::json!({ "qwen2.context_length": "a lot" });
+        assert_eq!(context_length_from_model_info(&info), None);
+    }
+
+    #[test]
+    fn context_length_zero_is_treated_as_missing() {
+        let info = serde_json::json!({ "qwen2.context_length": 0 });
+        assert_eq!(context_length_from_model_info(&info), None);
+    }
+
+    #[test]
+    fn context_cache_key_includes_the_normalized_server() {
+        assert_eq!(
+            context_cache_key("http://127.0.0.1:11434/", "qwen2.5:7b"),
+            context_cache_key("http://127.0.0.1:11434", "qwen2.5:7b")
+        );
+        assert_ne!(
+            context_cache_key("http://127.0.0.1:11434", "qwen2.5:7b"),
+            context_cache_key("http://192.168.0.11:11434", "qwen2.5:7b")
+        );
+    }
+
+    #[test]
+    fn cap_num_predict_leaves_room_for_the_prompt() {
+        // A 4096-native model asked to emit 4096 tokens would otherwise
+        // overflow the window and scroll the prompt mid-response.
+        assert_eq!(cap_num_predict(4096, 500, 4096), 3596);
+        assert_eq!(cap_num_predict(16384, 1000, 700), 700);
+    }
+
+    #[test]
+    fn cap_num_predict_keeps_a_floor_when_the_prompt_already_fills_the_window() {
+        assert_eq!(cap_num_predict(4096, 4096, 4096), 1);
+        assert_eq!(cap_num_predict(4096, 5000, 4096), 1);
+    }
+
+    #[test]
+    fn resolve_num_ctx_never_exceeds_the_native_window() {
+        // RoPE extension past the native window degrades quality silently, so
+        // the cap wins even when the call needs more room than that.
+        assert_eq!(resolve_num_ctx(Some(4096), 8192, 2000), 4096);
+        assert_eq!(resolve_num_ctx(Some(4096), 8192, 30_000), 4096);
+    }
+
+    #[test]
+    fn resolve_num_ctx_stays_at_the_stage_budget_when_the_call_fits() {
+        assert_eq!(resolve_num_ctx(Some(32768), 8192, 2000), 8192);
+    }
+
+    #[test]
+    fn resolve_num_ctx_grows_to_fit_a_call_the_model_can_take() {
+        // The whole point of reading the native window: a long reduce prompt
+        // gets the room it needs instead of being truncated at a hardcoded
+        // 16384.
+        assert_eq!(resolve_num_ctx(Some(32768), 16384, 18_096), 18_096);
+    }
+
+    #[test]
+    fn resolve_num_ctx_will_not_grow_on_an_unknown_native_window() {
+        // Growing blind would risk RoPE extension, so this keeps the behavior
+        // the code had before the lookup existed.
+        assert_eq!(resolve_num_ctx(None, 8192, 30_000), 8192);
+        assert_eq!(resolve_num_ctx(None, 8192, 2000), 8192);
     }
 
     #[test]
