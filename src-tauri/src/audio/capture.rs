@@ -1,5 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, SampleFormat, Stream, StreamConfig};
+use cpal::{Device, SampleFormat, Stream, StreamConfig, SupportedStreamConfigRange};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use ringbuf::HeapRb;
 use ringbuf::traits::{Producer, Split};
@@ -219,6 +219,33 @@ fn choose_input_sample_rate(current: Option<u32>, min: u32, max: u32) -> u32 {
     }
 }
 
+/// Prefer an F32 range that already covers `current`, so we don't fall back
+/// and re-rate the device just because the first listed range is narrower.
+fn pick_input_config_range(
+    supported: &[SupportedStreamConfigRange],
+    current: Option<u32>,
+) -> Option<SupportedStreamConfigRange> {
+    let f32_ranges: Vec<_> = supported
+        .iter()
+        .filter(|c| c.sample_format() == SampleFormat::F32)
+        .cloned()
+        .collect();
+    let candidates: &[SupportedStreamConfigRange] = if f32_ranges.is_empty() {
+        supported
+    } else {
+        &f32_ranges
+    };
+
+    if let Some(rate) = current
+        && let Some(range) = candidates
+            .iter()
+            .find(|c| (c.min_sample_rate()..=c.max_sample_rate()).contains(&rate))
+    {
+        return Some(range.clone());
+    }
+    candidates.first().cloned()
+}
+
 #[cfg(test)]
 mod input_rate_tests {
     use super::*;
@@ -259,6 +286,46 @@ mod input_rate_tests {
     fn clamps_the_fallback_into_a_narrow_range() {
         assert_eq!(choose_input_sample_rate(None, 16_000, 16_000), 16_000);
         assert_eq!(choose_input_sample_rate(None, 88_200, 192_000), 88_200);
+    }
+
+    fn f32_range(min: u32, max: u32) -> SupportedStreamConfigRange {
+        SupportedStreamConfigRange::new(
+            1,
+            min,
+            max,
+            cpal::SupportedBufferSize::Unknown,
+            SampleFormat::F32,
+        )
+    }
+
+    #[test]
+    fn picks_later_f32_range_that_covers_current() {
+        let ranges = vec![f32_range(8_000, 44_100), f32_range(48_000, 96_000)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 48_000);
+        assert_eq!(picked.max_sample_rate(), 96_000);
+        let rate = choose_input_sample_rate(
+            Some(48_000),
+            picked.min_sample_rate(),
+            picked.max_sample_rate(),
+        );
+        assert_eq!(rate, 48_000);
+    }
+
+    #[test]
+    fn first_f32_range_still_wins_when_it_covers_current() {
+        let ranges = vec![f32_range(8_000, 96_000), f32_range(48_000, 48_000)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 8_000);
+        assert_eq!(picked.max_sample_rate(), 96_000);
+    }
+
+    #[test]
+    fn falls_back_to_first_f32_when_current_fits_none() {
+        let ranges = vec![f32_range(8_000, 16_000), f32_range(44_100, 44_100)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 8_000);
+        assert_eq!(picked.max_sample_rate(), 16_000);
     }
 }
 
@@ -1947,24 +2014,18 @@ impl AudioCapture {
     }
 
     fn preferred_config(device: &Device) -> Result<StreamConfig, String> {
-        let mut supported = device
+        let supported: Vec<_> = device
             .supported_input_configs()
-            .map_err(|e| format!("Failed to get supported configs: {e}"))?;
-
-        let config = supported
-            .find(|c| c.sample_format() == SampleFormat::F32)
-            .or_else(|| {
-                device
-                    .supported_input_configs()
-                    .ok()
-                    .and_then(|mut c| c.next())
-            })
-            .ok_or_else(|| "No supported input config found".to_string())?;
+            .map_err(|e| format!("Failed to get supported configs: {e}"))?
+            .collect();
 
         // `default_input_config` reads the device's *current* stream format,
         // which is the one rate that opens without re-rating the hardware for
         // every other process on the machine.
         let current = device.default_input_config().ok().map(|c| c.sample_rate());
+        let config = pick_input_config_range(&supported, current)
+            .ok_or_else(|| "No supported input config found".to_string())?;
+
         let rate =
             choose_input_sample_rate(current, config.min_sample_rate(), config.max_sample_rate());
         if current != Some(rate) {
