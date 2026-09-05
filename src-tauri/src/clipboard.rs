@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -86,7 +87,9 @@ fn holds_text(current: Option<&str>, expected: &str) -> bool {
 }
 
 fn verify_poll_attempts(timeout: Duration, interval: Duration) -> u32 {
-    let attempts = timeout.as_millis() / interval.as_millis().max(1);
+    let interval_ms = interval.as_millis().max(1);
+    // Inclusive of the timeout boundary: 250 ms / 10 ms reads at 0, 10, …, 250.
+    let attempts = timeout.as_millis() / interval_ms + 1;
     u32::try_from(attempts).unwrap_or(u32::MAX).max(1)
 }
 
@@ -117,6 +120,7 @@ fn paste_via_cmd_v(text: &str, delay_ms: u64, enigo: &mut Enigo) -> Result<(), S
             timeout_ms = CLIPBOARD_VERIFY_TIMEOUT.as_millis(),
             "Clipboard did not serve the transcription in time; skipping paste"
         );
+        spawn_restore(previous, text.to_string());
         return Err(
             "Clipboard write did not take effect. Paste skipped so an older clipboard entry is not pasted instead."
                 .to_string(),
@@ -125,6 +129,14 @@ fn paste_via_cmd_v(text: &str, delay_ms: u64, enigo: &mut Enigo) -> Result<(), S
 
     thread::sleep(Duration::from_millis(delay_ms));
 
+    let paste_result = send_paste_keys(enigo);
+    // The pasteboard already holds the transcription, whether ⌘V landed or
+    // not. Restore either way so a key error does not leave it there.
+    spawn_restore(previous, text.to_string());
+    paste_result
+}
+
+fn send_paste_keys(enigo: &mut Enigo) -> Result<(), String> {
     enigo
         .key(Key::Meta, Direction::Press)
         .map_err(|e| format!("Key press Meta: {e}"))?;
@@ -133,34 +145,73 @@ fn paste_via_cmd_v(text: &str, delay_ms: u64, enigo: &mut Enigo) -> Result<(), S
         .map_err(|e| format!("Key click V: {e}"))?;
     enigo
         .key(Key::Meta, Direction::Release)
-        .map_err(|e| format!("Key release Meta: {e}"))?;
+        .map_err(|e| format!("Key release Meta: {e}"))
+}
 
-    spawn_restore(previous, text.to_string());
-    Ok(())
+/// Snapshot of the clipboard from before the first paste in an overlapping
+/// burst. Only the newest generation restores it; older restores no-op so a
+/// second paste within `CLIPBOARD_RESTORE_DELAY` cannot write the first
+/// transcription back as if it were the user's original contents.
+struct RestoreBurst {
+    generation: u64,
+    original: Option<String>,
+}
+
+impl RestoreBurst {
+    const fn new() -> Self {
+        Self {
+            generation: 0,
+            original: None,
+        }
+    }
+
+    fn begin(&mut self, previous: Option<String>) -> (u64, bool) {
+        self.generation = self.generation.wrapping_add(1);
+        if self.original.is_none() {
+            self.original = previous;
+        }
+        (self.generation, self.original.is_some())
+    }
+
+    /// `None` means a newer paste owns the restore. `Some(snapshot)` is the
+    /// pre-burst clipboard, which may itself be `None`.
+    fn take_if_current(&mut self, generation: u64) -> Option<Option<String>> {
+        if generation != self.generation {
+            return None;
+        }
+        Some(self.original.take())
+    }
+}
+
+static RESTORE: Mutex<RestoreBurst> = Mutex::new(RestoreBurst::new());
+
+fn lock_restore() -> std::sync::MutexGuard<'static, RestoreBurst> {
+    RESTORE.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// The restore waits out `CLIPBOARD_RESTORE_DELAY`, and `paste_text` is a
 /// synchronous Tauri command, so it runs on the main thread. Detach it rather
 /// than freezing the UI for the whole wait; nothing downstream depends on it.
 fn spawn_restore(previous: Option<String>, ours: String) {
-    if previous.is_none() {
+    let (generation, has_snapshot) = lock_restore().begin(previous);
+    if !has_snapshot {
         return;
     }
-    thread::spawn(move || restore_clipboard(previous, &ours));
+    thread::spawn(move || restore_clipboard(generation, &ours));
 }
 
-/// Put `previous` back after a delay long enough for ⌘V to land, and only if
-/// the pasteboard still holds `ours`: anything else means another app or the
-/// user wrote in the meantime and the restore would clobber it. No-op when
-/// there was no previous text. Restore failures are ignored.
+/// Put the pre-burst clipboard back after a delay long enough for ⌘V to land,
+/// and only if this generation is still current and the pasteboard still holds
+/// `ours`. Anything else means another paste, app, or the user wrote in the
+/// meantime. No-op when there was no previous text.
 ///
 /// Returns whether a restore was attempted (for unit tests; real AX is not
 /// exercised in CI).
-fn restore_clipboard(previous: Option<String>, ours: &str) -> bool {
-    let Some(previous) = previous else {
+fn restore_clipboard(generation: u64, ours: &str) -> bool {
+    thread::sleep(CLIPBOARD_RESTORE_DELAY);
+    let Some(Some(previous)) = lock_restore().take_if_current(generation) else {
         return false;
     };
-    thread::sleep(CLIPBOARD_RESTORE_DELAY);
     let Ok(mut clipboard) = Clipboard::new() else {
         return false;
     };
@@ -194,11 +245,6 @@ mod tests {
         assert!(ax_set_applied(&Ok(true)));
         assert!(!ax_set_applied(&Ok(false)));
         assert!(!ax_set_applied(&Err("nope".into())));
-    }
-
-    #[test]
-    fn restore_clipboard_skips_when_no_previous() {
-        assert!(!restore_clipboard(None, "text"));
     }
 
     #[test]
@@ -243,7 +289,7 @@ mod tests {
     fn verify_poll_attempts_fit_the_timeout() {
         assert_eq!(
             verify_poll_attempts(Duration::from_millis(250), Duration::from_millis(10)),
-            25
+            26
         );
         assert_eq!(
             verify_poll_attempts(Duration::from_millis(5), Duration::from_millis(10)),
@@ -251,7 +297,7 @@ mod tests {
         );
         assert_eq!(
             verify_poll_attempts(Duration::from_millis(250), Duration::ZERO),
-            250
+            251
         );
     }
 
@@ -259,5 +305,39 @@ mod tests {
     fn verify_timeout_stays_short_enough_to_not_stall_dictation() {
         assert!(CLIPBOARD_VERIFY_TIMEOUT <= Duration::from_millis(250));
         assert!(CLIPBOARD_VERIFY_INTERVAL < CLIPBOARD_VERIFY_TIMEOUT);
+    }
+
+    #[test]
+    fn overlapping_pastes_restore_the_pre_burst_clipboard() {
+        let mut burst = RestoreBurst::new();
+        let (first, _) = burst.begin(Some("notes".into()));
+        let (second, has_snapshot) = burst.begin(Some("first transcription".into()));
+        assert!(has_snapshot);
+        assert!(
+            burst.take_if_current(first).is_none(),
+            "the older restore must not run once a newer paste owns the burst"
+        );
+        assert_eq!(
+            burst.take_if_current(second),
+            Some(Some("notes".into())),
+            "the newest restore puts back what was there before either paste"
+        );
+    }
+
+    #[test]
+    fn a_failed_read_on_the_second_paste_still_keeps_the_original() {
+        let mut burst = RestoreBurst::new();
+        burst.begin(Some("notes".into()));
+        let (second, has_snapshot) = burst.begin(None);
+        assert!(has_snapshot);
+        assert_eq!(burst.take_if_current(second), Some(Some("notes".into())));
+    }
+
+    #[test]
+    fn first_paste_without_a_previous_value_has_nothing_to_restore() {
+        let mut burst = RestoreBurst::new();
+        let (generation, has_snapshot) = burst.begin(None);
+        assert!(!has_snapshot);
+        assert_eq!(burst.take_if_current(generation), Some(None));
     }
 }
