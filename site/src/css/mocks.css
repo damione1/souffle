@@ -26,7 +26,17 @@
 .win-dot.red { background: #ff5f57; }
 .win-dot.amber { background: #febc2e; }
 .win-dot.green { background: #28c840; }
-.win-title { margin-left: 8px; font-size: 11.5px; color: var(--m-t5); }
+.win-title { margin-left: 8px; font-size: 11.5px; color: var(--m-t5); white-space: nowrap; }
+.win-bar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+.win-status {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  padding: 3px 9px; border-radius: 9999px;
+  background: var(--m-surface-2); outline: 1px solid var(--m-ghost);
+  font-size: 9.5px; color: var(--m-t4);
+}
+.win-status-dot { width: 5px; height: 5px; border-radius: 50%; background: #3fb27f; flex-shrink: 0; }
+.win-status-model { font-family: var(--font-mono); font-size: 9px; color: var(--m-t5); }
+.win-icon-btn { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: var(--m-t4); flex-shrink: 0; }
 .win-body { padding: 22px 26px 26px; }
 
 /* ─── Live session header (LiveSessionCard) ─── */
@@ -197,23 +207,23 @@
 /* ─────────────── Overlay demo: chat app + the pill on top ─────────────── */
 .overlay-stage { position: relative; }
 
-/* ── "Halyard": the fictional chat client the pill floats over ──
-   Its own cool palette on purpose. On the app's warm cream the mock read
-   as another Soufflé screen, which defeats the point of the section: the
-   overlay works on top of somebody else's software. */
+/* ── "E Corp Chat": the fictional chat client the pill floats over ──
+   Its own cold corporate palette on purpose. On the app's warm cream the
+   mock read as another Soufflé screen, which defeats the point of the
+   section: the overlay works on top of somebody else's software. */
 .chat {
-  --c-side: #241f3d;
-  --c-side-dim: rgba(255, 255, 255, 0.58);
+  --c-side: #1a1c1f;
+  --c-side-dim: rgba(255, 255, 255, 0.55);
   --c-side-strong: #ffffff;
-  --c-side-hover: rgba(255, 255, 255, 0.07);
-  --c-side-active: rgba(255, 255, 255, 0.14);
+  --c-side-hover: rgba(255, 255, 255, 0.06);
+  --c-side-active: rgba(196, 30, 58, 0.18);
   --c-bg: #ffffff;
-  --c-border: #e6e8ef;
-  --c-text: #1c2033;
-  --c-dim: #6b7288;
-  --c-accent: #5b5bd6;
-  --c-input: #f4f5f9;
-  --c-badge: #e14b6a;
+  --c-border: #e3e4e6;
+  --c-text: #1a1c1f;
+  --c-dim: #6b6f76;
+  --c-accent: #c41e3a;
+  --c-input: #f2f3f4;
+  --c-badge: #c41e3a;
   display: grid; grid-template-columns: 184px minmax(0, 1fr);
   min-height: 396px; background: var(--c-bg);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -230,7 +240,7 @@
 }
 .chat-ws-mark {
   display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; border-radius: 7px;
+  width: 26px; height: 26px; border-radius: 7px;
   background: var(--c-accent); color: #fff; flex-shrink: 0;
 }
 .chat-ws-name { font-size: 14px; font-weight: 600; color: var(--c-side-strong); flex: 1; min-width: 0; }
@@ -426,12 +436,33 @@
 
 /* ─── Narrow: the mocks collapse the same way the app's own layout does ─── */
 @media (max-width: 900px) {
-  /* The waveform would collapse to a sliver between the badge and the clock,
-     so drop the canvas but keep its box: it is the flexible spacer that holds
-     the badge left and the clock and stop button right. */
-  .wave canvas { display: none; }
-  .hero-grid, .out-grid { grid-template-columns: minmax(0, 1fr); }
-  .chat { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  /* The waveform used to disappear here (it would collapse to a sliver
+     between the badge and the clock), but a still row reads as broken
+     rather than responsive: shrink the canvas itself instead of hiding it,
+     so there is still something moving even in mobile/tablet portrait.
+     `.wave` keeps `flex: 1` (unchanged) so it still claims the row's
+     leftover space and the clock/stop button stay pinned to the same
+     right edge as the cards below; capping the *box* instead, via
+     flex-basis, left that space unclaimed and the row visibly short of
+     the edge at in-between widths (not narrow enough to hide anything,
+     not wide enough to not notice). */
+  .wave canvas { max-width: 70px; margin: 0 auto; }
+  /* The model name is the first thing to go: dot + "Ready" plus the two
+     icon buttons already crowds a narrow title bar next to the window title. */
+  .win-status-model { display: none; }
+  .win-bar-right { gap: 5px; }
+  .win-icon-btn { width: 18px; height: 18px; }
+  /* Dictate/Meeting stay side by side even on mobile: the whole point of
+     the pair is choosing between the two, and stacking them buries that.
+     Icon-beside-text does not fit two columns at mobile widths (the
+     kbd chip especially), so each card stacks its own icon above its
+     text instead, and everything shrinks a size. */
+  .out-grid { grid-template-columns: minmax(0, 1fr); }
+  .hero-grid .action { flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px; }
+  .hero-grid .action-icon { width: 34px; height: 34px; border-radius: 9px; }
+  .hero-grid .action-title { font-size: 13.5px; }
+  .hero-grid .action-sub { flex-wrap: wrap; font-size: 11px; }
+  .chat { grid-template-columns: minmax(0, 1fr); min-height: 280px; }
   .chat-side { display: none; }
   .win-body { padding: 14px 12px 16px; }
   .tr-card { padding: 16px 14px; }

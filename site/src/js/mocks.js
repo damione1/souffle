@@ -34,6 +34,17 @@
     this.accent = "#e9ae55";
     this.resize();
     this.refreshAccent();
+    // The pill's own wave (unlike the header one) sits in a box that
+    // animates its width open as text streams in (.pill-overlay's `width`
+    // transition). resize() at construction time or at start() catches
+    // whatever width the box has *then*, so the backing store stays sized
+    // for the collapsed pill and gets visibly stretched once it widens.
+    // Re-measuring on every box-size change keeps it sharp throughout.
+    var self = this;
+    if (window.ResizeObserver) {
+      this.ro = new ResizeObserver(function () { self.resize(); });
+      this.ro.observe(canvas);
+    }
   }
   Wave.prototype.refreshAccent = function () {
     var v = getComputedStyle(this.canvas).getPropertyValue("--wave-accent").trim();
@@ -222,12 +233,12 @@
       var i = 0;
       // The tail arrives tentative (half opacity) and commits a few
       // words behind, the way the live transcript store does.
-      var id = self.run.every(105, function () {
+      var id = self.run.every(55, function () {
         if (i >= all.length) {
           clearInterval(id);
           p.textContent = all.join("");
           index += 1;
-          self.run.after(650, nextParagraph);
+          self.run.after(400, nextParagraph);
           return;
         }
         i += 1;
@@ -280,7 +291,7 @@
     if (this.timer) { this.timer.reset(); this.timer.start(); }
     this.wave.start(true);
     var all = words(this.text), i = 0;
-    var id = this.run.every(95, function () {
+    var id = this.run.every(50, function () {
       if (i >= all.length) {
         clearInterval(id);
         if (self.timer) self.timer.stop();

@@ -1,11 +1,18 @@
 {% from "icons.njk" import icon %}
 
-{# Window chrome. `anim` names the behaviour mocks.js drives inside it. #}
-{% macro win(title, anim = "") %}
+{# Window chrome. `anim` names the behaviour mocks.js drives inside it.
+   The right-hand cluster mirrors App.svelte's own header: the model
+   status pill, the theme toggle, and the settings button. #}
+{% macro win(title, t, anim = "") %}
 <div class="mock win"{% if anim %} data-mock="{{ anim }}"{% endif %}>
   <div class="win-bar">
     <span class="win-dot red"></span><span class="win-dot amber"></span><span class="win-dot green"></span>
     <span class="win-title">{{ title }}</span>
+    <span class="win-bar-right">
+      <span class="win-status"><span class="win-status-dot"></span>{{ t.mock.statusReady }}<span class="win-status-model">{{ t.mock.statusModel }}</span></span>
+      <span class="win-icon-btn">{{ icon("moon", 13) }}</span>
+      <span class="win-icon-btn">{{ icon("sliders", 13) }}</span>
+    </span>
   </div>
   <div class="win-body">{{ caller() }}</div>
 </div>
@@ -23,7 +30,7 @@
 
 {# ── Live meeting: transcript streams in, then the notes card ── #}
 {% macro meeting(t) %}
-{% call win(t.mock.winMeeting, "meeting") %}
+{% call win(t.mock.winMeeting, t, "meeting") %}
   <div class="m-stack">
     {{ liveHead(t.mock.liveMeeting, t.mock.stop, t.mock.meetingElapsed) }}
     <div class="m-card tr-card">
@@ -52,7 +59,7 @@
 
 {# ── Dictation: text types itself in, caret blinks, auto-paste footer ── #}
 {% macro dictation(t) %}
-{% call win(t.mock.winDictation, "dictation") %}
+{% call win(t.mock.winDictation, t, "dictation") %}
   <div class="m-stack">
     {{ liveHead(t.mock.liveDictation, t.mock.stop, "0:00") }}
     <div class="m-card dict-card">
@@ -66,7 +73,7 @@
 
 {# ── Home: action cards, search, today's calendar, the timeline ── #}
 {% macro home(t) %}
-{% call win(t.mock.winHome) %}
+{% call win(t.mock.winHome, t) %}
   <div style="display:flex;flex-direction:column;gap:26px">
     <div class="hero-grid">
       <div class="action">
@@ -129,7 +136,7 @@
 
 {# ── Outcomes ── #}
 {% macro outcomes(t) %}
-{% call win(t.mock.winOutcomes) %}
+{% call win(t.mock.winOutcomes, t) %}
   <div class="m-card-sm out">
     <h3>{{ icon("checks", 15) }}{{ t.mock.outcomes }}</h3>
     <div class="out-group">
@@ -157,9 +164,9 @@
 {% endmacro %}
 
 {# ── The overlay demo ──
-   The chat client is a fictional product, "Halyard", with its own cool
-   palette so it cannot be mistaken for part of Soufflé: the whole point is
-   that the pill is floating over somebody else's app. #}
+   The chat client is a fictional product, "E Corp Chat", with its own
+   cold corporate palette so it cannot be mistaken for part of Soufflé:
+   the whole point is that the pill is floating over somebody else's app. #}
 {% macro overlay(t) %}
 {% set c = t.mock.chat %}
 <div class="overlay-stage" data-mock="overlay" data-polishing="{{ t.mock.pillPolishing }}"
@@ -174,8 +181,10 @@
       <aside class="chat-side">
         <div class="chat-ws">
           <span class="chat-ws-mark" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 3v18"/><path d="M12 7l7 3.5"/><path d="M12 13l7 3.5"/><path d="M12 7L5 10.5"/>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="square" stroke-linejoin="miter">
+              <g transform="rotate(-32 12 12)">
+                <path d="M8 5h9.5M8 5v14M8 12h7M8 19h9.5"/>
+              </g>
             </svg>
           </span>
           <span class="chat-ws-name">{{ c.workspace }}</span>
