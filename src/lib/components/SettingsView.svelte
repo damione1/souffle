@@ -223,6 +223,8 @@
         onStartRecording={controller.startRecording}
         onClearShortcut={controller.clearShortcut}
         formatShortcut={controller.formatShortcut}
+        pillHidden={controller.app.settings.pill_hidden}
+        onPillHiddenChange={controller.onPillHiddenChange}
       />
 
       <FeedbackSoundsSettingsSection

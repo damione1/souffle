@@ -718,6 +718,13 @@ export function createSettingsController() {
     });
   }
 
+  function onPillHiddenChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.pill_hidden = checked;
+    });
+  }
+
   function onFeedbackSoundsVolumeChange(event: Event) {
     const value = parseInt((event.target as HTMLInputElement).value, 10);
     if (!Number.isFinite(value)) return;
@@ -848,6 +855,7 @@ export function createSettingsController() {
     onCalendarAutostartEnabledChange,
     onFeedbackSoundsEnabledChange,
     onFeedbackSoundsVolumeChange,
+    onPillHiddenChange,
     mount,
     refreshRuntimeStatus,
     refreshDevices,

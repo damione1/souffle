@@ -13,10 +13,31 @@ use tauri_specta::Event;
 use tracing::warn;
 
 use crate::app_events::{PillHoldChanged, PillHoldKind};
+use crate::db::Database;
+use crate::settings::PILL_POSITION_KEY;
+use crate::state::AppState;
 use crate::state_machine::AppStateMachine;
 
 /// Vertical offset below the menu bar.
 const TOP_MARGIN: f64 = 40.0;
+
+/// Compact dictation size — must match the "pill" window in tauri.conf.json
+/// and `PILL_WIDTH`/`BASE_HEIGHT` in `PillApp.svelte`. Never derived from
+/// `outer_size()`: after a scale/resolution change that physical size is
+/// stale, and converting it with the new scale factor is what shrinks the
+/// HUD into a tiny scrolling box (SOU-011).
+const COMPACT_WIDTH: f64 = 280.0;
+const COMPACT_HEIGHT: f64 = 64.0;
+
+/// Last logical size the frontend asked for (`pill_resize`), or compact.
+static LAST_SIZE: Mutex<(f64, f64)> = Mutex::new((COMPACT_WIDTH, COMPACT_HEIGHT));
+/// User-dragged AppKit origin (bottom-left, global points). `None` = default
+/// top-center on the active screen.
+static CUSTOM_ORIGIN: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+/// Last origin we applied ourselves, so a follow-up `Moved` echo is ignored.
+static LAST_APPLIED_ORIGIN: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
+static APPLYING_FRAME: AtomicBool = AtomicBool::new(false);
+static PILL_HIDDEN: AtomicBool = AtomicBool::new(false);
 
 /// Minimum spacing between `DictationLiveText` emissions. Well under the
 /// 5-10Hz cap so it reads as "live" without flooding the pill's IPC channel.
@@ -72,10 +93,19 @@ pub fn clear_hold(app: &AppHandle) {
     }
 }
 
-/// Whether the pill should be visible given the current recording state and
-/// hold. Pure so it's testable without a live window/AppHandle.
-fn should_show_pill(recording: bool, held: bool) -> bool {
-    recording || held
+/// Whether the pill should be visible given the current recording state,
+/// hold, and the user's hide preference. Pure so it's testable without a
+/// live window/AppHandle.
+fn should_show_pill(recording: bool, held: bool, hidden: bool) -> bool {
+    !hidden && (recording || held)
+}
+
+pub fn set_hidden(hidden: bool) {
+    PILL_HIDDEN.store(hidden, Ordering::SeqCst);
+}
+
+fn is_hidden() -> bool {
+    PILL_HIDDEN.load(Ordering::SeqCst)
 }
 
 /// Drop a leftover hold only when a *new* recording starts. Polish holds
@@ -109,9 +139,10 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
         clear_hold(app);
     }
 
-    let result = if should_show_pill(recording, is_held()) {
-        position_top_center(&pill).and_then(|()| order_overlay(&pill, true))
+    let result = if should_show_pill(recording, is_held(), is_hidden()) {
+        apply_current_frame(&pill).and_then(|()| order_overlay(&pill, true))
     } else {
+        persist_position(app);
         order_overlay(&pill, false)
     };
     if let Err(e) = result {
@@ -144,15 +175,11 @@ pub fn live_text_tail(text: &str, max_chars: usize) -> String {
     text.chars().skip(total - max_chars).collect()
 }
 
-/// Recenters the pill horizontally below the menu bar on the active screen.
-/// `pub(crate)` so `sync` can call it when showing the pill in its compact state.
-pub(crate) fn position_top_center(pill: &tauri::WebviewWindow) -> tauri::Result<()> {
-    let scale = pill
-        .primary_monitor()?
-        .map(|m| m.scale_factor())
-        .unwrap_or(1.0);
-    let size = pill.outer_size()?.to_logical::<f64>(scale);
-    set_frame_top_center(pill, size.width, size.height)
+/// Places the pill using the last requested logical size (compact until the
+/// frontend has resized), on the active screen, clamped on-screen.
+pub(crate) fn apply_current_frame(pill: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let (width, height) = last_size();
+    set_frame(pill, width, height)
 }
 
 /// Lower/upper bounds on the pill's size, defensively clamped in
@@ -182,9 +209,12 @@ fn frame_origin(
     (x, y)
 }
 
-/// Resizes and repositions the pill in a single native `setFrame:` call, so
-/// the top edge stays pinned at `TOP_MARGIN` and the window stays centered
-/// as its height grows with the live transcript.
+/// Resizes and repositions the pill in a single native `setFrame:` call.
+///
+/// Default placement pins the top edge at `TOP_MARGIN` and centers
+/// horizontally. A user-dragged origin is kept (top edge + x), then clamped
+/// to the active screen so a saved position cannot land off-screen after a
+/// resolution change.
 ///
 /// This bypasses tao's `set_inner_size` (AppKit's `setContentSize:` anchors
 /// the window's BOTTOM-left corner, so growing the height pushes the top
@@ -204,8 +234,97 @@ pub(crate) fn set_frame_top_center(
     width: f64,
     height: f64,
 ) -> tauri::Result<()> {
+    set_frame(pill, width, height)
+}
+
+fn last_size() -> (f64, f64) {
+    LAST_SIZE
+        .lock()
+        .map(|guard| *guard)
+        .unwrap_or((COMPACT_WIDTH, COMPACT_HEIGHT))
+}
+
+fn store_last_size(width: f64, height: f64) {
+    if let Ok(mut guard) = LAST_SIZE.lock() {
+        *guard = (width, height);
+    }
+}
+
+fn custom_origin() -> Option<(f64, f64)> {
+    CUSTOM_ORIGIN.lock().ok().and_then(|guard| *guard)
+}
+
+fn store_custom_origin(origin: Option<(f64, f64)>) {
+    if let Ok(mut guard) = CUSTOM_ORIGIN.lock() {
+        *guard = origin;
+    }
+}
+
+/// Keep a rectangle of `width`×`height` fully inside `screen` when possible.
+pub(crate) fn clamp_origin(
+    screen_x: f64,
+    screen_y: f64,
+    screen_width: f64,
+    screen_height: f64,
+    width: f64,
+    height: f64,
+    x: f64,
+    y: f64,
+) -> (f64, f64) {
+    let max_x = screen_x + screen_width - width;
+    let max_y = screen_y + screen_height - height;
+    let x = if max_x < screen_x {
+        screen_x
+    } else {
+        x.clamp(screen_x, max_x)
+    };
+    let y = if max_y < screen_y {
+        screen_y
+    } else {
+        y.clamp(screen_y, max_y)
+    };
+    (x, y)
+}
+
+fn origin_for_frame(
+    screen_x: f64,
+    screen_y: f64,
+    screen_width: f64,
+    screen_height: f64,
+    width: f64,
+    height: f64,
+    previous_height: f64,
+) -> (f64, f64) {
+    if let Some((x, y)) = custom_origin() {
+        let top = y + previous_height;
+        clamp_origin(
+            screen_x,
+            screen_y,
+            screen_width,
+            screen_height,
+            width,
+            height,
+            x,
+            top - height,
+        )
+    } else {
+        frame_origin(
+            screen_x,
+            screen_y,
+            screen_width,
+            screen_height,
+            width,
+            height,
+            TOP_MARGIN,
+        )
+    }
+}
+
+fn set_frame(pill: &tauri::WebviewWindow, width: f64, height: f64) -> tauri::Result<()> {
     let width = width.clamp(MIN_WIDTH, MAX_WIDTH);
     let height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
+    let previous_height = last_size().1;
+    store_last_size(width, height);
 
     let window = pill.clone();
     pill.run_on_main_thread(move || {
@@ -220,21 +339,83 @@ pub(crate) fn set_frame_top_center(
         let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
         let overlay = configure_overlay_window(ns_window);
         let (screen_x, screen_y, screen_width, screen_height) = active_screen_frame();
-        let (x, y) = frame_origin(
+        let (x, y) = origin_for_frame(
             screen_x,
             screen_y,
             screen_width,
             screen_height,
             width,
             height,
-            TOP_MARGIN,
+            previous_height,
         );
         let frame = objc2_foundation::NSRect {
             origin: objc2_foundation::NSPoint { x, y },
             size: objc2_foundation::NSSize { width, height },
         };
+        APPLYING_FRAME.store(true, Ordering::SeqCst);
         overlay.setFrame_display(frame, true);
+        if let Ok(mut guard) = LAST_APPLIED_ORIGIN.lock() {
+            *guard = (x, y);
+        }
+        APPLYING_FRAME.store(false, Ordering::SeqCst);
     })
+}
+
+/// Record a user drag. Ignores the `Moved` echo from our own `setFrame`.
+pub(crate) fn note_user_moved(pill: &tauri::WebviewWindow) {
+    if APPLYING_FRAME.load(Ordering::SeqCst) {
+        return;
+    }
+    let window = pill.clone();
+    let _ = pill.run_on_main_thread(move || {
+        if APPLYING_FRAME.load(Ordering::SeqCst) {
+            return;
+        }
+        let Ok(ns_window_ptr) = window.ns_window() else {
+            return;
+        };
+        // SAFETY: same contract as `set_frame` — pill NSWindow*, main thread.
+        let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
+        let origin = ns_window.frame().origin;
+        let last = LAST_APPLIED_ORIGIN
+            .lock()
+            .map(|guard| *guard)
+            .unwrap_or((origin.x, origin.y));
+        if (origin.x - last.0).abs() < 2.0 && (origin.y - last.1).abs() < 2.0 {
+            return;
+        }
+        store_custom_origin(Some((origin.x, origin.y)));
+    });
+}
+
+pub(crate) fn restore_from_db(db: &Database, hidden: bool) {
+    set_hidden(hidden);
+    match db.get_setting(PILL_POSITION_KEY) {
+        Ok(Some(raw)) => {
+            if let Ok((x, y)) = serde_json::from_str::<(f64, f64)>(&raw) {
+                store_custom_origin(Some((x, y)));
+            }
+        }
+        Ok(None) => {}
+        Err(e) => warn!("Failed to load pill position: {e}"),
+    }
+}
+
+fn persist_position(app: &tauri::AppHandle) {
+    let Some(origin) = custom_origin() else {
+        return;
+    };
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    match serde_json::to_string(&origin) {
+        Ok(raw) => {
+            if let Err(e) = state.db.set_setting(PILL_POSITION_KEY, &raw) {
+                warn!("Failed to persist pill position: {e}");
+            }
+        }
+        Err(e) => warn!("Failed to serialize pill position: {e}"),
+    }
 }
 
 /// Show or hide the overlay without activating the app. Tauri's `show` /
@@ -353,10 +534,14 @@ mod tests {
 
     #[test]
     fn should_show_pill_when_recording_or_held() {
-        assert!(should_show_pill(true, false));
-        assert!(should_show_pill(false, true));
-        assert!(should_show_pill(true, true));
-        assert!(!should_show_pill(false, false));
+        assert!(should_show_pill(true, false, false));
+        assert!(should_show_pill(false, true, false));
+        assert!(should_show_pill(true, true, false));
+        assert!(!should_show_pill(false, false, false));
+        assert!(
+            !should_show_pill(true, true, true),
+            "the hide option wins even while recording or held"
+        );
     }
 
     #[test]
@@ -475,6 +660,45 @@ mod tests {
         let (x, y) = frame_origin(1920.0, 0.0, 1512.0, 982.0, 400.0, 100.0, 40.0);
         assert_eq!(x, 1920.0 + (1512.0 - 400.0) / 2.0);
         assert_eq!(y + 100.0 + 40.0, 982.0);
+    }
+
+    #[test]
+    fn clamp_origin_pulls_a_saved_position_back_on_screen() {
+        // Saved on a 1920×1080 display, then the display shrinks to 1280×800.
+        let (x, y) = clamp_origin(0.0, 0.0, 1280.0, 800.0, 280.0, 64.0, 1700.0, 900.0);
+        assert_eq!(x, 1280.0 - 280.0);
+        assert_eq!(y, 800.0 - 64.0);
+    }
+
+    #[test]
+    fn clamp_origin_leaves_an_on_screen_position_alone() {
+        let (x, y) = clamp_origin(0.0, 0.0, 1920.0, 1080.0, 280.0, 64.0, 100.0, 200.0);
+        assert_eq!((x, y), (100.0, 200.0));
+    }
+
+    #[test]
+    fn clamp_origin_pins_when_the_window_is_larger_than_the_screen() {
+        let (x, y) = clamp_origin(0.0, 0.0, 200.0, 50.0, 280.0, 64.0, 10.0, 10.0);
+        assert_eq!((x, y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn compact_logical_size_is_the_configured_pill_window() {
+        assert_eq!((COMPACT_WIDTH, COMPACT_HEIGHT), (280.0, 64.0));
+    }
+
+    #[test]
+    fn restore_from_db_loads_a_saved_origin_and_hide_flag() {
+        store_custom_origin(None);
+        set_hidden(false);
+        let (db, _dir) = crate::test_helpers::fixtures::test_db();
+        db.set_setting(crate::settings::PILL_POSITION_KEY, "[100.5,200.25]")
+            .unwrap();
+        restore_from_db(&db, true);
+        assert!(is_hidden());
+        assert_eq!(custom_origin(), Some((100.5, 200.25)));
+        set_hidden(false);
+        store_custom_origin(None);
     }
 
     /// Exercises the full hold lifecycle against the shared module-level

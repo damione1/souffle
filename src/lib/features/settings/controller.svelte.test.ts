@@ -74,6 +74,7 @@ const defaultSettings: AppSettings = {
   calendar_reminder_minutes: 2,
   calendar_autostart_enabled: true,
   feedback_sounds_enabled: true,
+  pill_hidden: false,
   feedback_sounds_volume: 70,
   model_unload_timeout_minutes: 0,
   meeting_autostop_enabled: true,

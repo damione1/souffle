@@ -124,6 +124,8 @@
     "clear": "Clear",
     "push_to_talk": "Push-to-talk",
     "push_to_talk_desc": "Hold to record, release to stop.",
+    "pill_hidden": "Hide recording overlay",
+    "pill_hidden_desc": "Don't show the floating HUD while dictating or in a meeting. Drag it when visible to move it; the position is remembered and stays on-screen if the display changes.",
     "language": "Language",
     "language_desc": "Choose the interface language."
   },

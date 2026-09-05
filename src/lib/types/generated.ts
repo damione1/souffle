@@ -555,12 +555,11 @@ async pillRelease() : Promise<Result<null, string>> {
 }
 },
 /**
- * Resize the pill window to `width` x `height` (logical pixels), keeping
- * its top edge pinned below the menu bar and staying horizontally
- * centered. The frontend calls this as the live transcript grows/shrinks
- * (e.g. switching between the compact and expanded live-text layouts): a
- * single native frame change avoids the top-edge drift that a separate
- * resize-then-recenter pair produces.
+ * Resize the pill window to `width` x `height` (logical pixels). A
+ * dragged position is kept (and clamped on-screen); otherwise the pill
+ * stays top-centered. The frontend calls this as the live transcript
+ * grows/shrinks. A single native frame change avoids the top-edge drift
+ * that a separate resize-then-recenter pair produces.
  */
 async pillResize(width: number, height: number) : Promise<Result<null, string>> {
     try {
@@ -1044,6 +1043,10 @@ auto_update_check_enabled: boolean;
  * Audible start/stop cues for dictation sessions.
  */
 feedback_sounds_enabled: boolean; 
+/**
+ * When true, the floating recording HUD is not shown.
+ */
+pill_hidden: boolean; 
 /**
  * Feedback sound volume (0-100).
  */

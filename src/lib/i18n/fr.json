@@ -124,6 +124,8 @@
     "clear": "Effacer",
     "push_to_talk": "Appuyer pour parler",
     "push_to_talk_desc": "Maintenez pour enregistrer, relâchez pour arrêter.",
+    "pill_hidden": "Masquer l'overlay d'enregistrement",
+    "pill_hidden_desc": "Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.",
     "language": "Langue",
     "language_desc": "Choisissez la langue de l'interface."
   },
