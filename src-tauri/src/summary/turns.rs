@@ -13,9 +13,13 @@ fn format_turn(paragraph: &paragraphs::Paragraph) -> String {
 /// Speaker-labeled turns with timestamps, using the same grouping as the
 /// transcript UI / Markdown export (`paragraphs.ts`).
 pub fn turns_from_segments(segments: &[TranscriptionSegment]) -> Vec<String> {
-    paragraphs::group_into_paragraphs(segments, PARAGRAPH_PAUSE_THRESHOLD_SECONDS)
+    let nonempty: Vec<TranscriptionSegment> = segments
+        .iter()
+        .filter(|segment| !segment.text.trim().is_empty())
+        .cloned()
+        .collect();
+    paragraphs::group_into_paragraphs(&nonempty, PARAGRAPH_PAUSE_THRESHOLD_SECONDS)
         .into_iter()
-        .filter(|paragraph| !paragraph.text.trim().is_empty())
         .map(|paragraph| format_turn(&paragraph))
         .collect()
 }
@@ -74,5 +78,20 @@ mod tests {
             tagged("kept", 2.0, 3.0, Speaker::Them),
         ]);
         assert_eq!(turns, vec!["[0:02] Them: kept".to_string()]);
+    }
+
+    #[test]
+    fn whitespace_prefix_does_not_steal_the_timestamp() {
+        let same_speaker = turns_from_segments(&[
+            tagged(" ", 0.0, 1.0, Speaker::Me),
+            tagged("kept", 2.0, 3.0, Speaker::Me),
+        ]);
+        assert_eq!(same_speaker, vec!["[0:02] Me: kept".to_string()]);
+
+        let undiarized = turns_from_segments(&[
+            sample_segment(" ", 0.0, 1.0),
+            sample_segment("kept", 2.0, 3.0),
+        ]);
+        assert_eq!(undiarized, vec!["[0:02] kept".to_string()]);
     }
 }
