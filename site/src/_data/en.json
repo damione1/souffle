@@ -3,7 +3,9 @@
   "meta": {
     "title": "Soufflé: private speech-to-text for macOS",
     "description": "Dictate into any app, transcribe meetings that tell your voice from everyone else's, and get on-device summaries. No cloud, no accounts, no API keys.",
-    "docsTitle": "Soufflé documentation"
+    "docsTitle": "Soufflé documentation",
+    "imageAlt": "Soufflé on macOS: a live meeting window with a running transcript, beside the tagline “Your voice never leaves your Mac.”",
+    "ogDescription": "Dictation, live meeting transcripts and on-device summaries for macOS. No cloud, no account, no API key."
   },
   "nav": {
     "features": "Features",
