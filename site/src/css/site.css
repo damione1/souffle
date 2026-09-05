@@ -94,12 +94,14 @@ button { font: inherit; border: 0; background: none; color: inherit; }
 /* ─── Nav ─── */
 .nav {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 32px; padding: 20px 160px;
+  gap: 12px; padding: 20px 160px;
   border-bottom: 1px solid var(--ghost); background: var(--glass);
   backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
   position: sticky; top: 0; z-index: 20;
 }
-.nav-links { display: flex; align-items: center; gap: 30px; }
+.nav-menu { display: contents; }
+.nav-actions { display: flex; align-items: center; gap: 12px; }
+.nav-links { display: flex; align-items: center; gap: 30px; margin: 0 auto; }
 .nav-links a { font-size: 14px; color: var(--t3); }
 .nav-links a:hover { color: var(--t1); }
 .nav-toggle {
@@ -286,7 +288,7 @@ button { font: inherit; border: 0; background: none; color: inherit; }
 
 /* ─── Narrow ─── */
 @media (max-width: 1100px) {
-  .nav { padding: 16px 24px; gap: 16px; flex-wrap: wrap; }
+  .nav { padding: 16px 24px; flex-wrap: wrap; }
   .section, .hero { padding-left: 24px; padding-right: 24px; }
   footer { padding-left: 24px !important; padding-right: 24px !important; }
   .docs { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 40px 24px 80px; }
@@ -295,13 +297,14 @@ button { font: inherit; border: 0; background: none; color: inherit; }
   .feature.is-flipped > div:first-child { order: 2; }
 }
 @media (max-width: 860px) {
+  .nav { flex-wrap: nowrap; padding: 14px 20px; }
   .nav-toggle { display: inline-flex; }
-  /* The links move out of the bar into a panel hanging under it, so a
-     phone still reaches every section the desktop nav offers. */
-  .nav-links {
+  /* Links and the language switcher move out of the bar into a panel hanging
+     under it, leaving brand + download + hamburger on a single row. */
+  .nav-menu {
     display: none; position: absolute; top: 100%; left: 0; right: 0;
-    flex-direction: column; align-items: stretch; gap: 0;
-    padding: 6px 12px 12px;
+    flex-direction: column; align-items: stretch; gap: 12px;
+    padding: 8px 12px 14px;
     /* Opaque, not the bar's --glass: the nav's own backdrop-filter is a
        backdrop root, so a nested blur samples nothing and the page would
        read straight through the panel. */
@@ -309,9 +312,12 @@ button { font: inherit; border: 0; background: none; color: inherit; }
     border-bottom: 1px solid var(--ghost);
     box-shadow: 0 24px 40px -20px rgba(0, 0, 0, 0.7);
   }
-  .nav-links.is-open { display: flex; }
+  .nav-menu.is-open { display: flex; }
+  .nav-links { flex-direction: column; align-items: stretch; gap: 0; margin: 0; }
   .nav-links a { padding: 13px 12px; border-radius: 10px; font-size: 15px; color: var(--t2); }
   .nav-links a:active { background: var(--surface-2); }
+  .lang { align-self: flex-start; margin-left: 12px; }
+  .btn-nav { padding: 9px 14px; gap: 7px; }
   .hero { padding-top: 56px; }
   .hero h1 { font-size: 40px; letter-spacing: -0.03em; }
   .hero-sub { font-size: 16px; }
