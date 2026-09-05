@@ -57,6 +57,32 @@ describe('app store', () => {
     expect(state.settings.transcription_engine_id).toBe('whisper');
   });
 
+  it('only syncs the runtime phase from machine states about the selected model', () => {
+    const state = getAppState();
+    const profile = (modelId: string) => ({
+      engine_id: 'kyutai',
+      engine_label: 'Kyutai',
+      model_id: modelId,
+      model_label: modelId,
+      backend_id: 'candle',
+      backend_label: 'Candle',
+    });
+
+    state.settings = { ...mockSettings, transcription_model_id: 'stt-2.6b-en' };
+    state.transcriptionRuntimePhase = 'download_required';
+
+    // Old model still loaded in the backend: its "ready" must not be read as
+    // the newly selected model being ready.
+    state.machineState = { state: 'ready', data: { profile: profile('stt-1b-en_fr') } };
+    expect(state.transcriptionRuntimePhase).toBe('download_required');
+
+    state.machineState = { state: 'ready', data: { profile: profile('stt-2.6b-en') } };
+    expect(state.transcriptionRuntimePhase).toBe('ready');
+
+    state.machineState = { state: 'idle' };
+    expect(state.transcriptionRuntimePhase).toBe('ready');
+  });
+
   it('recordingMode is derived from machineState', () => {
     const state = getAppState();
     state.machineState = { state: "recording_meeting", data: { profile: { engine_id: "", engine_label: "", model_id: "", model_label: "", backend_id: "", backend_label: "" }, session_id: 1, meeting_id: "m1" } };

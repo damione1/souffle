@@ -4,6 +4,7 @@ import {
   getSelectedTranscriptionBackend,
   getSelectedTranscriptionEngine,
   getSelectedTranscriptionModel,
+  findTranscriptionModel,
   toSelectedTranscriptionProfile,
   toSelectedTranscriptionProfileSelection,
   formatSelectedTranscriptionLabel,
@@ -105,6 +106,21 @@ describe('getSelectedTranscriptionModel', () => {
     const model = getSelectedTranscriptionModel(catalog, 'kyutai', 'nonexistent');
     expect(model).not.toBeNull();
     expect(model!.id).toBe('stt-1b-en_fr');
+  });
+});
+
+describe('findTranscriptionModel', () => {
+  it('returns the exact model when present', () => {
+    const model = findTranscriptionModel(catalog, 'kyutai', 'stt-small');
+    expect(model?.id).toBe('stt-small');
+  });
+
+  it('returns null for a stale or unsupported model id', () => {
+    expect(findTranscriptionModel(catalog, 'kyutai', 'nonexistent')).toBeNull();
+  });
+
+  it('returns null when the engine id does not match', () => {
+    expect(findTranscriptionModel(catalog, 'whisper', 'stt-small')).toBeNull();
   });
 });
 

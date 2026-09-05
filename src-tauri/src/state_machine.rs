@@ -66,7 +66,9 @@ pub enum StateAction {
         profile: TranscriptionProfile,
     },
     DownloadComplete,
-    StartLoad,
+    StartLoad {
+        profile: TranscriptionProfile,
+    },
     LoadComplete,
     StartDictation {
         session_id: u64,
@@ -107,9 +109,10 @@ impl AppStateMachine {
             }),
 
             // --- Load transitions ---
-            (Downloaded { profile }, StartLoad) => Ok(Loading {
-                profile: profile.clone(),
-            }),
+            // The profile being loaded is the caller's, not the one the
+            // machine last downloaded: switching to an already-downloaded
+            // model from `Downloaded` must not keep the previous profile.
+            (Downloaded { .. }, StartLoad { profile }) => Ok(Loading { profile }),
             (Loading { profile }, LoadComplete) => Ok(Ready { profile }),
             (Loading { profile }, Fail { message }) => Ok(Error {
                 message,
@@ -339,10 +342,29 @@ mod tests {
         let state = AppStateMachine::Downloaded {
             profile: test_profile(),
         };
-        let state = state.transition(StateAction::StartLoad).unwrap();
+        let state = state
+            .transition(StateAction::StartLoad {
+                profile: test_profile(),
+            })
+            .unwrap();
         assert!(matches!(state, AppStateMachine::Loading { .. }));
         let state = state.transition(StateAction::LoadComplete).unwrap();
         assert!(matches!(state, AppStateMachine::Ready { .. }));
+    }
+
+    #[test]
+    fn downloaded_can_load_a_different_downloaded_model() {
+        let state = AppStateMachine::Downloaded {
+            profile: test_profile(),
+        };
+        let state = state
+            .transition(StateAction::StartLoad {
+                profile: other_profile(),
+            })
+            .unwrap();
+        assert_eq!(state.active_profile(), Some(&other_profile()));
+        let state = state.transition(StateAction::LoadComplete).unwrap();
+        assert_eq!(state.active_profile(), Some(&other_profile()));
     }
 
     #[test]
@@ -518,7 +540,13 @@ mod tests {
     #[test]
     fn idle_cannot_start_load() {
         let state = AppStateMachine::Idle;
-        assert!(state.transition(StateAction::StartLoad).is_err());
+        assert!(
+            state
+                .transition(StateAction::StartLoad {
+                    profile: test_profile(),
+                })
+                .is_err()
+        );
     }
 
     #[test]
@@ -699,7 +727,11 @@ mod tests {
             })
             .unwrap();
         let state = state.transition(StateAction::DownloadComplete).unwrap();
-        let state = state.transition(StateAction::StartLoad).unwrap();
+        let state = state
+            .transition(StateAction::StartLoad {
+                profile: profile.clone(),
+            })
+            .unwrap();
         let state = state.transition(StateAction::LoadComplete).unwrap();
         assert!(matches!(state, AppStateMachine::Ready { .. }));
     }
@@ -710,6 +742,12 @@ mod tests {
             message: "oops".into(),
             recovery: ErrorRecovery::RetryFromIdle,
         };
-        assert!(state.transition(StateAction::StartLoad).is_err());
+        assert!(
+            state
+                .transition(StateAction::StartLoad {
+                    profile: test_profile(),
+                })
+                .is_err()
+        );
     }
 }

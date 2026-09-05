@@ -402,6 +402,57 @@ describe("settings controller", () => {
     );
   });
 
+  it("selectModelOption loads a model that is already downloaded", async () => {
+    let currentModelId = "stt-1b-en_fr";
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      switch (cmd) {
+        case "save_settings":
+          currentModelId = (args?.settings as AppSettings).transcription_model_id;
+          return Promise.resolve(null);
+        case "get_transcription_catalog":
+          return Promise.resolve({ ...fakeCatalog, selected_model_id: currentModelId });
+        case "get_model_status":
+          return Promise.resolve(
+            currentModelId === "stt-1b-en_fr"
+              ? { ...fakeStatus, phase: "ready" }
+              : {
+                  ...fakeStatus,
+                  profile: { ...fakeStatus.profile, model_id: "stt-2.6b-en", model_label: "STT 2.6B" },
+                  // Already on disk from a previous run: only a load is needed.
+                  phase: "load_required",
+                },
+          );
+        default:
+          return defaultInvoke(cmd, args);
+      }
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    // The backend is still Ready with the previously selected model.
+    ctrl.app.machineState = {
+      state: "ready",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+      },
+    };
+
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
+
+    expect(mockInvoke).toHaveBeenCalledWith("load_model", {
+      selection: { engine_id: "kyutai", model_id: "stt-2.6b-en", backend_id: "candle" },
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("download_model", expect.anything());
+  });
+
   it("shortcut recording flow", async () => {
     const ctrl = createSettingsController();
     await ctrl.mount();
