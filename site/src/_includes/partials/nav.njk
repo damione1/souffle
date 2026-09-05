@@ -3,7 +3,7 @@
 {% set docs = "/docs/" if loc.code == "en" else "/fr/docs/" %}
 <nav class="nav">
   <a class="brand" href="{{ home }}">{{ logo(34) }}<span>{{ site.name }}</span></a>
-  <div class="nav-links">
+  <div class="nav-links" id="nav-links">
     {% if isDocs %}
       <a href="{{ home }}">{{ t.nav.home }}</a>
       <a href="{{ site.releases }}">{{ t.nav.releases }}</a>
@@ -21,5 +21,9 @@
       <a href="{{ "/fr/docs/" if isDocs else "/fr/" }}" aria-current="{{ "true" if loc.code == "fr" }}">FR</a>
     </div>
     <a class="btn-nav" href="{{ "#download" if not isDocs else site.latest }}">{{ icon("download", 15) }}{{ t.nav.download }}</a>
+    <button class="nav-toggle" type="button" aria-controls="nav-links" aria-expanded="false" aria-label="{{ t.nav.menu }}">
+      <span class="nav-toggle-open">{{ icon("menu", 20) }}</span>
+      <span class="nav-toggle-close">{{ icon("close", 20) }}</span>
+    </button>
   </div>
 </nav>

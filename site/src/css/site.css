@@ -102,6 +102,16 @@ button { font: inherit; border: 0; background: none; color: inherit; }
 .nav-links { display: flex; align-items: center; gap: 30px; }
 .nav-links a { font-size: 14px; color: var(--t3); }
 .nav-links a:hover { color: var(--t1); }
+.nav-toggle {
+  display: none; align-items: center; justify-content: center;
+  width: 36px; height: 36px; padding: 0;
+  border: 0; border-radius: 10px; cursor: pointer;
+  background: var(--surface-2); outline: 1px solid var(--ghost); color: var(--t2);
+}
+.nav-toggle-open, .nav-toggle-close { display: flex; }
+.nav-toggle-close { display: none; }
+.nav-toggle[aria-expanded="true"] .nav-toggle-open { display: none; }
+.nav-toggle[aria-expanded="true"] .nav-toggle-close { display: flex; }
 .brand { display: flex; align-items: center; gap: 11px; }
 .brand span {
   font-family: var(--font-heading); font-size: 19px; font-weight: 600;
@@ -285,7 +295,23 @@ button { font: inherit; border: 0; background: none; color: inherit; }
   .feature.is-flipped > div:first-child { order: 2; }
 }
 @media (max-width: 860px) {
-  .nav-links { display: none; }
+  .nav-toggle { display: inline-flex; }
+  /* The links move out of the bar into a panel hanging under it, so a
+     phone still reaches every section the desktop nav offers. */
+  .nav-links {
+    display: none; position: absolute; top: 100%; left: 0; right: 0;
+    flex-direction: column; align-items: stretch; gap: 0;
+    padding: 6px 12px 12px;
+    /* Opaque, not the bar's --glass: the nav's own backdrop-filter is a
+       backdrop root, so a nested blur samples nothing and the page would
+       read straight through the panel. */
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--ghost);
+    box-shadow: 0 24px 40px -20px rgba(0, 0, 0, 0.7);
+  }
+  .nav-links.is-open { display: flex; }
+  .nav-links a { padding: 13px 12px; border-radius: 10px; font-size: 15px; color: var(--t2); }
+  .nav-links a:active { background: var(--surface-2); }
   .hero { padding-top: 56px; }
   .hero h1 { font-size: 40px; letter-spacing: -0.03em; }
   .hero-sub { font-size: 16px; }
@@ -299,9 +325,6 @@ button { font: inherit; border: 0; background: none; color: inherit; }
   .btn { width: 100%; }
   .copy { width: 100%; }
   .copy code { font-size: 12px; }
-}
-
-
 }
 
 /* The nav is sticky, so anchored sections need to stop below it. */
