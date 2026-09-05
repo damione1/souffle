@@ -22,21 +22,29 @@ pub fn list_dictation_entries(
 pub fn add_dictation_entry(state: State<'_, AppState>, text: String) -> Result<(), String> {
     let id = uuid::Uuid::new_v4().to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
-    state.db.add_dictation_entry(&id, &text, &timestamp)
+    state.db.add_dictation_entry(&id, &text, &timestamp)?;
+    // The Idle transition also syncs the tray, but it fires before this write
+    // (the frontend saves history only after stop resolves).
+    sync_tray(&state);
+    Ok(())
 }
 
 /// Delete a single dictation entry
 #[tauri::command]
 #[specta::specta]
 pub fn delete_dictation_entry(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.db.delete_dictation_entry(&id)
+    state.db.delete_dictation_entry(&id)?;
+    sync_tray(&state);
+    Ok(())
 }
 
 /// Clear all dictation history
 #[tauri::command]
 #[specta::specta]
 pub fn clear_dictation_history(state: State<'_, AppState>) -> Result<(), String> {
-    state.db.clear_dictation_entries()
+    state.db.clear_dictation_entries()?;
+    sync_tray(&state);
+    Ok(())
 }
 
 /// Optional LLM polish pass for dictation text before paste/history.
@@ -64,4 +72,13 @@ pub async fn polish_dictation(
         rewrite_of.as_deref(),
     )
     .await)
+}
+
+/// Best-effort tray refresh so "Copy Last Transcription" tracks history.
+/// No-op without a handle (tests, early startup) — same tolerance as
+/// `apply_transition`.
+fn sync_tray(state: &AppState) {
+    if let (Ok(app), Ok(machine)) = (state.app_handle(), state.current_machine_state()) {
+        crate::tray::sync(&app, &machine);
+    }
 }

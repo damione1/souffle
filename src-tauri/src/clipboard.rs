@@ -71,6 +71,32 @@ pub fn paste_text(text: &str, delay_ms: u64, method: PasteMethod) -> Result<(), 
     Ok(())
 }
 
+/// Write `text` to the clipboard without pasting: no synthetic Cmd+V, no AX.
+/// Backs the tray's "Copy Last Transcription" action, which exists partly to
+/// work around SOU-010 (a paste landing with the wrong clipboard contents):
+/// the user recovers by copying the same text a broken paste just wrote.
+/// Cancelling the pending restore first is what makes that recovery work:
+/// otherwise `restore_clipboard` would see its own text still on the
+/// pasteboard and dutifully overwrite this copy with the pre-paste clipboard.
+pub fn copy_text(text: &str) -> Result<(), String> {
+    // Hold RESTORE across cancel + write: otherwise a restore that already
+    // passed `take_if_current` can still `set_text` the pre-paste clipboard
+    // after this copy returns. Same mutex as `restore_clipboard`.
+    let mut burst = lock_restore();
+    burst.cancel_pending_restore();
+
+    let mut clipboard = Clipboard::new().map_err(|e| format!("Clipboard init: {e}"))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("Clipboard set: {e}"))?;
+
+    if !wait_for_clipboard(&mut clipboard, text) {
+        return Err("Clipboard write did not take effect.".to_string());
+    }
+
+    Ok(())
+}
+
 fn is_blank(text: &str) -> bool {
     text.trim().is_empty()
 }
@@ -181,12 +207,26 @@ impl RestoreBurst {
         }
         Some(self.original.take())
     }
+
+    /// Disown any in-flight restore: bumping the generation makes its
+    /// `take_if_current` check fail regardless of what text is on the
+    /// clipboard when it wakes up, and clearing the snapshot leaves nothing
+    /// to write back even if it somehow ran anyway.
+    fn cancel_pending_restore(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.original = None;
+    }
 }
 
 static RESTORE: Mutex<RestoreBurst> = Mutex::new(RestoreBurst::new());
 
 fn lock_restore() -> std::sync::MutexGuard<'static, RestoreBurst> {
     RESTORE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+#[cfg(test)]
+fn cancel_pending_restore() {
+    lock_restore().cancel_pending_restore();
 }
 
 /// The restore waits out `CLIPBOARD_RESTORE_DELAY`, and `paste_text` is a
@@ -209,7 +249,16 @@ fn spawn_restore(previous: Option<String>, ours: String) {
 /// exercised in CI).
 fn restore_clipboard(generation: u64, ours: &str) -> bool {
     thread::sleep(CLIPBOARD_RESTORE_DELAY);
-    let Some(Some(previous)) = lock_restore().take_if_current(generation) else {
+    restore_clipboard_now(generation, ours)
+}
+
+/// Post-sleep half of the restore. Kept separate so tests can exercise the
+/// lock window without waiting out `CLIPBOARD_RESTORE_DELAY`.
+fn restore_clipboard_now(generation: u64, ours: &str) -> bool {
+    // Stay locked through the pasteboard write so `copy_text` cannot land a
+    // verified copy that we then overwrite with `previous`.
+    let mut burst = lock_restore();
+    let Some(Some(previous)) = burst.take_if_current(generation) else {
         return false;
     };
     let Ok(mut clipboard) = Clipboard::new() else {
@@ -339,5 +388,97 @@ mod tests {
         let (generation, has_snapshot) = burst.begin(None);
         assert!(!has_snapshot);
         assert_eq!(burst.take_if_current(generation), Some(None));
+    }
+
+    #[test]
+    fn cancel_pending_restore_blocks_a_scheduled_restore() {
+        // The SOU-010 recovery scenario: a paste is pending a restore, and
+        // the user copies before it fires. RestoreBurst has no notion of
+        // "text" (that check lives in restore_clipboard against the live
+        // pasteboard), so cancellation must be unconditional: it does not
+        // matter here whether the copy used the identical string the paste
+        // wrote.
+        let mut burst = RestoreBurst::new();
+        let (generation, has_snapshot) = burst.begin(Some("old clipboard".into()));
+        assert!(has_snapshot);
+
+        burst.cancel_pending_restore();
+
+        assert!(
+            burst.take_if_current(generation).is_none(),
+            "a copy must cancel the paste's pending restore, even with identical text"
+        );
+    }
+
+    #[test]
+    fn cancel_pending_restore_without_a_pending_paste_is_a_no_op() {
+        let mut burst = RestoreBurst::new();
+        burst.cancel_pending_restore();
+        // The old generation (0) is stale either way.
+        assert!(burst.take_if_current(0).is_none());
+        // The new generation (1) matches, but there was never a snapshot to
+        // restore, so restore_clipboard still has nothing to write back.
+        assert_eq!(burst.take_if_current(1), Some(None));
+    }
+
+    #[test]
+    fn a_new_paste_after_a_cancelled_restore_still_gets_its_own_snapshot() {
+        let mut burst = RestoreBurst::new();
+        let (first, _) = burst.begin(Some("notes".into()));
+        burst.cancel_pending_restore();
+        assert!(burst.take_if_current(first).is_none());
+
+        let (second, has_snapshot) = burst.begin(Some("clipboard after copy".into()));
+        assert!(has_snapshot);
+        assert_eq!(
+            burst.take_if_current(second),
+            Some(Some("clipboard after copy".into()))
+        );
+    }
+
+    #[test]
+    fn cancel_waits_out_a_restore_that_already_took_its_snapshot() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, Barrier};
+        use std::time::Duration;
+
+        // The race CodeRabbit flagged: restore has already passed
+        // take_if_current (and still holds RESTORE through the write).
+        // cancel_pending_restore must not run until that lock is released,
+        // or copy_text can land and then be overwritten by previous.
+        let generation = {
+            let mut burst = lock_restore();
+            burst.begin(Some("old clipboard".into())).0
+        };
+
+        let barrier = Arc::new(Barrier::new(2));
+        let cancel_returned = Arc::new(AtomicBool::new(false));
+        let cancel_handle = {
+            let barrier = Arc::clone(&barrier);
+            let cancel_returned = Arc::clone(&cancel_returned);
+            thread::spawn(move || {
+                barrier.wait();
+                cancel_pending_restore();
+                cancel_returned.store(true, Ordering::SeqCst);
+            })
+        };
+
+        {
+            let mut burst = lock_restore();
+            assert_eq!(
+                burst.take_if_current(generation),
+                Some(Some("old clipboard".into()))
+            );
+            barrier.wait();
+            thread::sleep(Duration::from_millis(50));
+            assert!(
+                !cancel_returned.load(Ordering::SeqCst),
+                "cancel must block until the in-flight restore releases RESTORE"
+            );
+        }
+
+        cancel_handle.join().expect("cancel thread");
+        assert!(cancel_returned.load(Ordering::SeqCst));
+        *lock_restore() = RestoreBurst::new();
     }
 }
