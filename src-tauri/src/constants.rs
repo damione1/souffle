@@ -105,6 +105,7 @@ Rules:
 - Write dense, factual bullet points in the same language as the transcript.
 - One bullet per distinct fact: a topic discussed, a decision made, an action item assigned (name the owner if stated), or an open question or risk raised.
 - Do NOT use section headings or labels such as \"Decisions:\" or \"Topics:\". Output a single flat bullet list.
+- The excerpt may be labeled turns such as \"[0:12] Me:\". Extract facts only; do not reproduce the transcript, speaker labels, or timestamps.
 - No paragraphs, no commentary, no summary sentence.";
 
 /// System prompt for intermediate reduce rounds, used only when a meeting has
@@ -123,6 +124,7 @@ Rules:
 - Merge duplicate or overlapping points into a single bullet instead of repeating them.
 - Keep the parts in their given order; do not over-weight the last part.
 - Do NOT use section headings or labels such as \"Decisions:\" or \"Topics:\". Output a single flat bullet list.
+- Merge into one combined fact list. Do not keep per-part topic blocks or copy labeled transcript turns.
 - No paragraphs, no commentary, no summary sentence.";
 
 /// System prompt for dictation post-processing (polish) via Ollama.

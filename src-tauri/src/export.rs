@@ -21,7 +21,7 @@ const MIN_CUE_DURATION_SECONDS: f64 = 0.5;
 /// Paragraph pause threshold used for Markdown transcript rendering; mirrors
 /// the `pauseThreshold` the live transcript view passes to
 /// `groupIntoParagraphs` (src/lib/utils/paragraphs.ts).
-const PARAGRAPH_PAUSE_THRESHOLD_SECONDS: f64 = 1.5;
+pub(crate) const PARAGRAPH_PAUSE_THRESHOLD_SECONDS: f64 = 1.5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -424,13 +424,12 @@ fn finish_cue_block(out: String) -> String {
     format!("{}\n", out.trim_end())
 }
 
-/// Rust port of `groupIntoParagraphs` from `src/lib/utils/paragraphs.ts`,
-/// used only for the Markdown export's `## Transcript` section. Kept as a
-/// private submodule (not re-exported) since nothing outside export
-/// rendering needs paragraph grouping on the backend. See
+/// Rust port of `groupIntoParagraphs` from `src/lib/utils/paragraphs.ts`.
+/// Used for the Markdown export's `## Transcript` section and for the
+/// labeled turns sent to the summary LLM. See
 /// `src-tauri/tests/fixtures/paragraph_grouping.json` for the cross-language
 /// fixture that pins this port against the TS original.
-mod paragraphs {
+pub(crate) mod paragraphs {
     use crate::engine::{Speaker, TranscriptionSegment};
 
     /// Paragraph break after this many sentences, even with no pause.

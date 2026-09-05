@@ -8,6 +8,7 @@ mod polish;
 mod prompts;
 mod reduce;
 mod templates;
+mod turns;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +16,7 @@ use crate::apple_intelligence;
 use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::transcript::{MeetingParticipant, StructuredSummary};
 
-pub use chunking::{ChunkConfig, chunk_transcript, estimate_tokens};
+pub use chunking::{ChunkConfig, chunk_transcript, chunk_turns, estimate_tokens};
 pub use extract::{extract_structured_summary, parse_structured_summary_response};
 pub use ollama::{OllamaPullProgress, RECOMMENDED_MODEL as RECOMMENDED_OLLAMA_MODEL, pull_model};
 pub use polish::{
@@ -32,6 +33,7 @@ pub use templates::{
     default_summary_templates, is_builtin_summary_template, merge_summary_templates,
     resolve_summary_template_prompt,
 };
+pub use turns::turns_from_segments;
 
 pub const APPLE_INTELLIGENCE_MODEL_ID: &str = "apple-intelligence";
 const APPLE_INTELLIGENCE_MODEL_LABEL: &str = "Apple Intelligence";
@@ -409,8 +411,14 @@ pub(crate) async fn generate_with_provider(
 /// `resolve_summary_template_prompt`). It replaces the final-pass system
 /// prompt only: the map and intermediate merge prompts stay fixed so the
 /// user-facing structure is rendered exactly once, by the terminal call.
+///
+/// `turn_units` is the speaker-labeled transcript when the meeting still has
+/// segments; packing those units never splits a turn. Edited prose has no
+/// turns and falls back to word chunks.
+#[allow(clippy::too_many_arguments)]
 pub async fn summarize_stream(
     transcript_text: &str,
+    turn_units: Option<&[String]>,
     notes: Option<&str>,
     participants: &[MeetingParticipant],
     model: &str,
@@ -441,7 +449,10 @@ pub async fn summarize_stream(
     }
 
     let no_op = |_: SummarizeProgress| {};
-    let chunks = chunk_transcript(transcript_text, config);
+    let chunks = match turn_units {
+        Some(turns) if !turns.is_empty() => chunk_turns(turns, config),
+        _ => chunk_transcript(transcript_text, config),
+    };
     let n = chunks.len();
     let mut part_summaries = Vec::with_capacity(n);
 
@@ -943,6 +954,10 @@ mod tests {
             !ollama::MAP_SYSTEM_PROMPT.contains("## "),
             "map stage must not request markdown headings: they repeat once chunks are merged"
         );
+        assert!(
+            ollama::MAP_SYSTEM_PROMPT.contains("[0:12] Me:"),
+            "labeled turns are input structure; map must still emit a flat fact list"
+        );
         assert_eq!(ollama::MAP_SYSTEM_PROMPT, apple::MAP_SYSTEM_PROMPT);
     }
 
@@ -951,6 +966,10 @@ mod tests {
         assert!(
             !ollama::MERGE_SYSTEM_PROMPT.contains("## "),
             "intermediate reduce rounds must not request markdown headings: they repeat by the final round"
+        );
+        assert!(
+            ollama::MERGE_SYSTEM_PROMPT.contains("per-part topic blocks"),
+            "merge must fuse into one list when the source transcript was labeled turns"
         );
         assert_eq!(ollama::MERGE_SYSTEM_PROMPT, apple::MERGE_SYSTEM_PROMPT);
     }
