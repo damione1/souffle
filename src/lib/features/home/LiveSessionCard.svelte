@@ -142,10 +142,20 @@
   });
 
   onMount(() => {
-    const timer = setInterval(() => {
+    const tick = () => {
       nowMs = Date.now();
-    }, 1000);
-    return () => clearInterval(timer);
+    };
+    const timer = setInterval(tick, 1000);
+    // WebKit pauses the interval while the window is occluded; the displayed
+    // value is derived from the wall clock, so one catch-up on return is enough.
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   });
 
   onDestroy(() => {
