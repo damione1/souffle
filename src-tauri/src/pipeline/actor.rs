@@ -6,9 +6,10 @@
 //! shared `Arc<Mutex<Box<dyn TranscriptionEngine>>>` that previously smeared
 //! the engine lifecycle across command and inference threads.
 
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
@@ -755,7 +756,12 @@ impl EngineActor {
             let frames_per_second = sample_rate as f64 / info.audio.chunk_size_samples as f64;
             let drain_window_frames =
                 ((engine.emission_delay_seconds() + 0.5) * frames_per_second).ceil() as usize;
-            Box::new(SingleMode::new(audio_filters, drain_window_frames))
+            let lookback_frames = (VAD_LOOKBACK_SECONDS * frames_per_second).ceil() as usize;
+            Box::new(SingleMode::new(
+                audio_filters,
+                drain_window_frames,
+                lookback_frames,
+            ))
         };
 
         // Caller may now start audio capture.
@@ -810,6 +816,18 @@ trait SessionMode {
     /// True while a full engine frame can be drained from the buffer(s).
     fn frame_ready(&self, chunk_size: usize) -> bool;
 
+    /// Feed any audio the mode withheld during the live loop (see the lookback
+    /// ring in `SingleMode`) before the stop path feeds anything newer, so the
+    /// engine's stream stays in chronological order. Called once at session
+    /// end, before any of `finish_frame`/`finish_tail` reach the engine.
+    /// Default no-op: `DiarizedMode` withholds nothing.
+    fn drain_withheld(
+        &mut self,
+        _engine: &mut dyn TranscriptionEngine,
+    ) -> Result<Vec<TranscriptionSegment>, String> {
+        Ok(Vec::new())
+    }
+
     /// Drain one frame and run the engine on it. `Ok(None)` means the frame
     /// was VAD-skipped (single mode only): frame/health counters still
     /// advance, but the consecutive-error streak does not move. The caller
@@ -846,16 +864,40 @@ trait SessionMode {
     );
 }
 
+/// How much recently gated audio `SingleMode` keeps on hand so it can be
+/// replayed once speech resumes. Silero's own hangover (`HANGOVER_FRAMES`,
+/// 450ms) already keeps feeding audio live for a while after speech actually
+/// stops, so a soft trailing word is normally caught by that, not by this
+/// ring. What the ring actually buys back is the `ONSET_FRAMES` clip
+/// (~60ms) at the start of the word that resumes speech, plus whatever gets
+/// gated after the hangover has run out. ~4 frames at Kyutai's 80ms chunk size.
+const VAD_LOOKBACK_SECONDS: f64 = 0.3;
+
 /// Single mixed-stream session: one buffer gated by the configured audio
 /// filter chain (Silero VAD when enabled).
 struct SingleMode {
     buffer: Vec<f32>,
     audio_filters: AudioFilterChain,
+    /// Frames gated at capture time (window expired, or the `tail_drained`
+    /// latch fired). This no longer means "never reached the engine": a
+    /// frame counted here may later also be counted in `vad_replayed` once
+    /// the ring replays it. Audio lost for good is `vad_skipped -
+    /// vad_replayed`, and `vad_evicted` is the part of that loss the ring
+    /// could not even hold long enough to attempt.
     vad_skipped: u64,
     /// Frames still fed to the engine after VAD gated them, to drain the
     /// engine's emission delay once speech stops (counted separately from
     /// `vad_skipped` so the health counters stay meaningful).
     vad_drained: u64,
+    /// Gated frames recovered from `lookback` and fed once speech resumes
+    /// (counted separately from `vad_skipped`/`vad_drained`: a replayed frame
+    /// was gated once, at capture time, and must not also be double-counted
+    /// as if it had been fed live).
+    vad_replayed: u64,
+    /// Gated frames evicted from `lookback` before they could be replayed,
+    /// because a longer gated stretch than `lookback_frames` pushed them out.
+    /// This is audio genuinely lost forever, not just delayed.
+    vad_evicted: u64,
     /// How many consecutive VAD-negative frames to keep feeding the engine
     /// after the last VAD-positive frame, before actually gating. Sized to
     /// the engine's emission delay so a trailing word/punctuation still
@@ -863,18 +905,76 @@ struct SingleMode {
     drain_window_frames: usize,
     /// Consecutive VAD-negative frames seen since the last VAD-positive one.
     frames_since_speech: usize,
+    /// Latched true once the engine reports `tail_drained()` during the
+    /// current silence run, so gating starts immediately instead of waiting
+    /// out the rest of `drain_window_frames`. Reset on the next VAD-positive
+    /// frame so the next pause drains again.
+    ///
+    /// This is an advisory early exit, bounded by `frames_since_speech`: a
+    /// stale `true` (e.g. left over across an engine `reset_state()` or a
+    /// soft context refresh, neither of which reconciles this field with the
+    /// engine's own `vad_pause_streak`) costs at most one pause cycle of the
+    /// optimization. It is never load-bearing for correctness, since gating
+    /// still only starts after real silence, never before.
+    tail_drained: bool,
+    /// Most recently gated frames, oldest first, kept in case they hold the
+    /// onset of a word Silero missed or a soft trailing word it scored below
+    /// threshold. Replayed into the engine (in order, ahead of the frame that
+    /// resumed speech) as soon as speech is seen again, then cleared: a frame
+    /// only ever sits here between being gated and being replayed or evicted,
+    /// so it can never reach the engine twice.
+    lookback: VecDeque<Vec<f32>>,
+    /// Bound on `lookback`'s length. Oldest frame is evicted once full.
+    lookback_frames: usize,
 }
 
 impl SingleMode {
-    fn new(audio_filters: AudioFilterChain, drain_window_frames: usize) -> Self {
+    fn new(
+        audio_filters: AudioFilterChain,
+        drain_window_frames: usize,
+        lookback_frames: usize,
+    ) -> Self {
         Self {
             buffer: Vec::new(),
             audio_filters,
             vad_skipped: 0,
             vad_drained: 0,
+            vad_replayed: 0,
+            vad_evicted: 0,
             drain_window_frames,
             frames_since_speech: 0,
+            tail_drained: false,
+            lookback: VecDeque::new(),
+            lookback_frames,
         }
+    }
+
+    /// Buffer a gated frame, evicting the oldest once `lookback_frames` is reached.
+    fn push_lookback(&mut self, frame: Vec<f32>) {
+        if self.lookback_frames == 0 {
+            return;
+        }
+        if self.lookback.len() >= self.lookback_frames {
+            self.lookback.pop_front();
+            self.vad_evicted += 1;
+        }
+        self.lookback.push_back(frame);
+    }
+
+    /// Feed every buffered lookback frame to the engine, oldest first, and
+    /// clear the ring. Called right before a frame that reached the engine
+    /// anyway (speech resuming, or session end), so the replayed frames land
+    /// in front of it in the engine's stream.
+    fn drain_lookback(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+    ) -> Result<Vec<TranscriptionSegment>, String> {
+        let mut segments = Vec::new();
+        while let Some(frame) = self.lookback.pop_front() {
+            segments.extend(engine.transcribe(&frame, None).map_err(|e| e.to_string())?);
+            self.vad_replayed += 1;
+        }
+        Ok(segments)
     }
 }
 
@@ -887,6 +987,13 @@ impl SessionMode for SingleMode {
         self.buffer.len() >= chunk_size
     }
 
+    fn drain_withheld(
+        &mut self,
+        engine: &mut dyn TranscriptionEngine,
+    ) -> Result<Vec<TranscriptionSegment>, String> {
+        catch_engine(|| self.drain_lookback(engine))
+    }
+
     fn step(
         &mut self,
         engine: &mut dyn TranscriptionEngine,
@@ -894,20 +1001,42 @@ impl SessionMode for SingleMode {
     ) -> Result<Option<Vec<TranscriptionSegment>>, String> {
         let frame: Vec<f32> = self.buffer.drain(..chunk_size).collect();
         let speech = self.audio_filters.process(&frame);
+        let mut segments = Vec::new();
         if speech {
             self.frames_since_speech = 0;
+            self.tail_drained = false;
+            if !self.lookback.is_empty() {
+                segments.extend(self.drain_lookback(engine)?);
+            }
         } else {
             self.frames_since_speech += 1;
-            if self.frames_since_speech > self.drain_window_frames {
+            if self.tail_drained || self.frames_since_speech > self.drain_window_frames {
                 self.vad_skipped += 1;
-                return Ok(None); // Past the drain window, no speech: skip.
+                self.push_lookback(frame);
+                return Ok(None); // Gated: buffered in the lookback ring instead of dropped.
             }
             self.vad_drained += 1;
         }
-        engine
-            .transcribe(&frame, None)
-            .map(Some)
-            .map_err(|e| e.to_string())
+        segments.extend(engine.transcribe(&frame, None).map_err(|e| e.to_string())?);
+        if !speech {
+            // Checked after feeding this frame: the engine's pause streak
+            // only advances once it has processed the silence, so the tail
+            // word (if any) is already out before we start latching drained.
+            let was_drained = self.tail_drained;
+            self.tail_drained = engine.tail_drained();
+            if self.tail_drained && !was_drained && crate::debug::transcription_debug_enabled() {
+                // Logged once, on the transition, not on every gated frame
+                // that follows: this is what makes the punctuation-latency
+                // win (or lack of one) readable from a real dictation log,
+                // by comparing frames_since_speech to drain_window_frames.
+                debug!(
+                    frames_since_speech = self.frames_since_speech,
+                    drain_window_frames = self.drain_window_frames,
+                    "VAD drain window cut short: engine reports tail drained"
+                );
+            }
+        }
+        Ok(Some(segments))
     }
 
     fn finish_frame(
@@ -943,6 +1072,8 @@ impl SessionMode for SingleMode {
             transcribed_frames = frames_processed,
             vad_skipped = self.vad_skipped,
             vad_drained = self.vad_drained,
+            vad_replayed = self.vad_replayed,
+            vad_evicted = self.vad_evicted,
             segments_emitted,
             audio_backlog,
             "Session heartbeat"
@@ -1378,6 +1509,18 @@ fn finish_session(
         debug!("Drained {drained} remaining audio chunks on stop");
     }
 
+    // Feed anything the mode withheld during the live loop (the lookback ring
+    // in SingleMode) before any of the audio just drained above, so older
+    // withheld audio doesn't land behind newer audio in the engine's stream.
+    match mode.drain_withheld(engine) {
+        Ok(segments) => {
+            for seg in segments {
+                emit_filtered(engine, text_filters, seg, on_segment);
+            }
+        }
+        Err(e) => error!("Transcribe error draining withheld audio: {e}"),
+    }
+
     // Process all buffered audio through the engine (frame by frame).
     while mode.frame_ready(chunk_size) {
         match mode.finish_frame(engine, chunk_size) {
@@ -1490,7 +1633,9 @@ fn notify_meeting_idle(app: &tauri::AppHandle, reason: MeetingIdleReason) {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::path::PathBuf;
+    use std::rc::Rc;
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
@@ -1503,7 +1648,10 @@ mod tests {
     use crate::engine::{Speaker, TranscriptionSegment, default_transcription_profile};
     use crate::filter::PipelineConfig;
 
-    use super::{EngineActorHandle, SessionConfig, SessionMode, SingleMode};
+    use super::{
+        EngineActorHandle, SessionConfig, SessionMode, SessionSummary, SingleMode, TextFilterChain,
+        finish_session,
+    };
 
     /// Helper: create a disabled filter config for tests (no VAD, no text filters).
     fn noop_filter_config() -> PipelineConfig {
@@ -2059,6 +2207,10 @@ mod tests {
         fn reset(&mut self) {}
     }
 
+    /// `MockEngine` defaults `tail_drained()` to false (no schedule set),
+    /// matching the trait's default for engines with no such signal
+    /// (Whisper, Parakeet). This also exercises the fallback: without the
+    /// signal, `SingleMode` runs the full `drain_window_frames` bound.
     #[test]
     fn single_mode_drain_window_feeds_engine_then_gates() {
         use std::sync::atomic::AtomicBool;
@@ -2075,7 +2227,9 @@ mod tests {
         let chain =
             crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
         let drain_window = 3;
-        let mut mode = SingleMode::new(chain, drain_window);
+        // Lookback disabled: this test is about the window/gating mechanics,
+        // covered separately by the `single_mode_lookback_*` tests below.
+        let mut mode = SingleMode::new(chain, drain_window, 0);
         let mut engine = MockEngine::new();
 
         // Speech: fed and counted as transcribed, not skipped.
@@ -2109,6 +2263,400 @@ mod tests {
         speech.store(true, Ordering::SeqCst);
         mode.ingest(make_frame());
         assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+    }
+
+    #[test]
+    fn single_mode_tail_drained_signal_ends_window_early() {
+        use std::sync::atomic::AtomicBool;
+
+        let chunk_size = MIMI_FRAME_SIZE;
+        let make_frame = || AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        // Window is generous (5 frames); the engine reports drained after the
+        // 3rd silent frame, well before the window would otherwise expire.
+        let drain_window = 5;
+        // Lookback disabled: this test is about the tail_drained latch,
+        // covered separately by the `single_mode_lookback_*` tests below.
+        let mut mode = SingleMode::new(chain, drain_window, 0);
+        let mut engine = MockEngine::new().with_tail_drained_schedule([false, false, false, true]);
+
+        // Speech: fed (consumes the first schedule slot, irrelevant while speaking).
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+
+        speech.store(false, Ordering::SeqCst);
+
+        // Silent frames 1 and 2: engine not yet drained, both still reach it.
+        for i in 0..2 {
+            mode.ingest(make_frame());
+            assert!(
+                matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))),
+                "silent frame {i} before the drained signal should still be fed"
+            );
+        }
+        assert_eq!(mode.vad_drained, 2);
+        assert_eq!(mode.vad_skipped, 0);
+
+        // Silent frame 3: still fed (the engine reports drained only after
+        // processing it), which is what surfaces the emission-delayed tail word.
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+        assert_eq!(mode.vad_drained, 3);
+
+        // Silent frame 4: the latch is now armed, so this is gated immediately,
+        // two frames short of the 5-frame window.
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        assert_eq!(mode.vad_skipped, 1);
+        assert_eq!(mode.vad_drained, 3, "fewer frames fed than the full window");
+
+        // Speech resumes: the drained latch resets, so a second pause drains again.
+        speech.store(true, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+    }
+
+    /// Every other test above zeroes one knob to isolate the other
+    /// (`lookback_frames = 0` for the latch tests, `drain_window_frames = 0`
+    /// for the lookback tests). This is the shape that actually ships: both
+    /// knobs at their production values for the Kyutai 1b model
+    /// (`drain_window_frames = 13`, `lookback_frames = 4`), proving the
+    /// interaction the design exists for: a frame gated because the
+    /// `tail_drained` latch fired, well before the window would have expired
+    /// on its own, still lands in the ring and is replayed on speech resume.
+    #[test]
+    fn single_mode_tail_drained_latch_gates_into_lookback_at_production_values() {
+        use std::sync::atomic::AtomicBool;
+
+        let chunk_size = MIMI_FRAME_SIZE;
+        let make_frame = || AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        let drain_window_frames = 13;
+        let lookback_frames = 4;
+        let mut mode = SingleMode::new(chain, drain_window_frames, lookback_frames);
+        // Reports drained after the 3rd silent frame, far short of the
+        // 13-frame window.
+        let mut engine = MockEngine::new().with_tail_drained_schedule([false, false, false, true]);
+
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+
+        speech.store(false, Ordering::SeqCst);
+        for _ in 0..3 {
+            mode.ingest(make_frame());
+            assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+        }
+        assert!(
+            mode.tail_drained,
+            "latch should have armed on the 3rd silent frame"
+        );
+        assert_eq!(mode.vad_drained, 3);
+
+        // The 4th silent frame is gated by the latch, not by the window:
+        // only 4 of the 13 window frames have elapsed at this point.
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        assert_eq!(mode.frames_since_speech, 4);
+        assert!(
+            mode.frames_since_speech < mode.drain_window_frames,
+            "gated well before the window would have expired on its own"
+        );
+        assert_eq!(
+            mode.lookback.len(),
+            1,
+            "the latch-gated frame must land in the ring, not be dropped"
+        );
+
+        // Speech resumes: the ring replays the latch-gated frame instead of
+        // losing it.
+        speech.store(true, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+        assert_eq!(mode.vad_replayed, 1);
+        assert!(mode.lookback.is_empty());
+    }
+
+    #[test]
+    fn single_mode_lookback_replays_gated_frames_before_speech_resumes() {
+        use std::sync::atomic::AtomicBool;
+
+        let chunk_size = MIMI_FRAME_SIZE;
+        let make_frame = || AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        // No drain window: a silent frame is gated (buffered in the lookback
+        // ring) the instant speech stops, isolating the lookback behavior.
+        let mut mode = SingleMode::new(chain, 0, 4);
+        let mut engine = MockEngine::new();
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("initial")]));
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("gated1")]));
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("gated2")]));
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("resumed")]));
+
+        // Speech: fed normally.
+        mode.ingest(make_frame());
+        let result = mode.step(&mut engine, chunk_size).unwrap().unwrap();
+        assert_eq!(result[0].text, "initial");
+
+        // Speech stops: both frames are gated (buffered, not fed).
+        speech.store(false, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        assert_eq!(mode.lookback.len(), 2);
+
+        // Speech resumes: the two gated frames are replayed, in order, ahead
+        // of the frame that resumed speech, and none of their segments are lost.
+        speech.store(true, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        let result = mode.step(&mut engine, chunk_size).unwrap().unwrap();
+        let texts: Vec<&str> = result.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, ["gated1", "gated2", "resumed"]);
+        assert_eq!(mode.vad_replayed, 2);
+        assert!(mode.lookback.is_empty());
+    }
+
+    #[test]
+    fn single_mode_lookback_is_bounded() {
+        use std::sync::atomic::AtomicBool;
+
+        let chunk_size = MIMI_FRAME_SIZE;
+        let make_frame = || AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        let mut mode = SingleMode::new(chain, 0, 2);
+        let mut engine = MockEngine::new();
+
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+
+        // Gate 3 frames into a ring that only holds 2: the oldest is evicted.
+        speech.store(false, Ordering::SeqCst);
+        for _ in 0..3 {
+            mode.ingest(make_frame());
+            assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        }
+        assert_eq!(mode.lookback.len(), 2, "ring must not grow past its bound");
+
+        // Only the 2 retained frames are replayed, not the evicted one.
+        speech.store(true, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+        assert_eq!(mode.vad_replayed, 2);
+    }
+
+    #[test]
+    fn single_mode_lookback_does_not_double_feed() {
+        use std::sync::atomic::AtomicBool;
+
+        let chunk_size = MIMI_FRAME_SIZE;
+        let make_frame = || AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        let mut mode = SingleMode::new(chain, 0, 4);
+        let mut engine = MockEngine::new();
+
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+
+        speech.store(false, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+
+        speech.store(true, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+        assert_eq!(mode.vad_replayed, 2);
+        assert!(mode.lookback.is_empty());
+
+        // A further speech frame must not replay anything: the ring was
+        // already cleared, so nothing sits behind it to be fed twice.
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+        assert_eq!(
+            mode.vad_replayed, 2,
+            "already-replayed frames must not be fed again"
+        );
+    }
+
+    #[test]
+    fn single_mode_finish_tail_leaves_the_ring_to_drain_withheld() {
+        use std::sync::atomic::AtomicBool;
+
+        let chunk_size = MIMI_FRAME_SIZE;
+        let make_frame = || AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        let mut mode = SingleMode::new(chain, 0, 4);
+        let mut engine = MockEngine::new();
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("initial")]));
+
+        mode.ingest(make_frame());
+        mode.step(&mut engine, chunk_size).unwrap();
+
+        // Gated at session end: does not call the engine at all (that is the
+        // whole point of withholding it), so it consumes no queued response
+        // here. It is replayed later, on demand, by drain_withheld.
+        speech.store(false, Ordering::SeqCst);
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        assert_eq!(mode.lookback.len(), 1);
+
+        // A partial tail (less than a full frame) left over at session end.
+        mode.ingest(AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size / 2],
+            captured_at: Instant::now(),
+            speaker: None,
+        });
+        engine.transcribe_responses.push_back(Ok(vec![seg("tail")]));
+
+        // finish_tail only feeds the partial buffer; the ring is
+        // drain_withheld's job.
+        let tail_segments = mode.finish_tail(&mut engine).unwrap();
+        let tail_texts: Vec<&str> = tail_segments.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(tail_texts, ["tail"]);
+        assert_eq!(
+            mode.lookback.len(),
+            1,
+            "finish_tail must not touch the ring"
+        );
+
+        // drain_withheld is what actually drains it.
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("gated")]));
+        let withheld_segments = mode.drain_withheld(&mut engine).unwrap();
+        let withheld_texts: Vec<&str> = withheld_segments.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(withheld_texts, ["gated"]);
+        assert!(mode.lookback.is_empty());
+    }
+
+    #[test]
+    fn finish_session_drains_withheld_audio_before_buffered_frames() {
+        use std::sync::atomic::AtomicBool;
+
+        let chunk_size = MIMI_FRAME_SIZE;
+        let make_chunk = |samples: usize| AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; samples],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        // Gate one frame during the live loop: it becomes older audio sitting
+        // in the lookback ring, withheld from the engine.
+        let speech = Arc::new(AtomicBool::new(false));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        let mut mode = SingleMode::new(chain, 0, 4);
+        let mut engine = MockEngine::new();
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("withheld")]));
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("buffered")]));
+        engine.transcribe_responses.push_back(Ok(vec![seg("tail")]));
+
+        mode.ingest(make_chunk(chunk_size));
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        assert_eq!(mode.lookback.len(), 1);
+
+        // Audio that arrived but was never stepped before stop: a full frame
+        // (for the finish_frame loop) plus a partial tail. Both are newer
+        // than the gated frame above.
+        mode.ingest(make_chunk(chunk_size));
+        mode.ingest(make_chunk(chunk_size / 2));
+
+        let (_audio_tx, audio_rx) = unbounded::<AudioMessage>();
+        let (collected, cb) = collecting_callback();
+        let text_filters = Rc::new(RefCell::new(TextFilterChain::new(vec![])));
+        let mut summary = SessionSummary::default();
+
+        finish_session(
+            &audio_rx,
+            &mut engine,
+            &cb,
+            1,
+            &text_filters,
+            &mut mode,
+            &mut summary,
+        );
+
+        let texts: Vec<String> = collected
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
+        assert_eq!(
+            texts,
+            vec![
+                "withheld".to_string(),
+                "buffered".to_string(),
+                "tail".to_string()
+            ],
+            "withheld audio from the lookback ring must reach the engine \
+             before newer buffered audio, not after it"
+        );
     }
 
     #[test]

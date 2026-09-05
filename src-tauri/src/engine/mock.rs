@@ -26,6 +26,12 @@ pub struct MockEngine {
     /// Value returned by `emission_delay_seconds()`; configurable via
     /// `with_emission_delay_seconds` for drain-window tests.
     emission_delay_seconds: f64,
+    /// Popped into `tail_drained_value` on each `transcribe()` call, so tests
+    /// can script when the engine reports its tail as drained (e.g. "false"
+    /// for the first N frames, then "true") independently of
+    /// `transcribe_responses`. Once exhausted, the last value sticks.
+    tail_drained_schedule: VecDeque<bool>,
+    tail_drained_value: bool,
 }
 
 impl Default for MockEngine {
@@ -43,6 +49,8 @@ impl MockEngine {
             unload_count: Arc::new(AtomicUsize::new(0)),
             reset_state_count: Arc::new(AtomicUsize::new(0)),
             emission_delay_seconds: 0.0,
+            tail_drained_schedule: VecDeque::new(),
+            tail_drained_value: false,
         }
     }
 
@@ -61,6 +69,13 @@ impl MockEngine {
     /// Configure the value returned by `emission_delay_seconds()`.
     pub fn with_emission_delay_seconds(mut self, seconds: f64) -> Self {
         self.emission_delay_seconds = seconds;
+        self
+    }
+
+    /// Configure the sequence of `tail_drained()` results, advanced one
+    /// value per `transcribe()` call (the last value sticks once exhausted).
+    pub fn with_tail_drained_schedule(mut self, schedule: impl IntoIterator<Item = bool>) -> Self {
+        self.tail_drained_schedule = schedule.into_iter().collect();
         self
     }
 
@@ -115,6 +130,9 @@ impl TranscriptionEngine for MockEngine {
         _audio: &[f32],
         _language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        if let Some(drained) = self.tail_drained_schedule.pop_front() {
+            self.tail_drained_value = drained;
+        }
         self.transcribe_responses.pop_front().unwrap_or(Ok(vec![]))
     }
 
@@ -129,6 +147,10 @@ impl TranscriptionEngine for MockEngine {
 
     fn emission_delay_seconds(&self) -> f64 {
         self.emission_delay_seconds
+    }
+
+    fn tail_drained(&self) -> bool {
+        self.tail_drained_value
     }
 
     fn audio_requirements(&self) -> AudioInputRequirements {

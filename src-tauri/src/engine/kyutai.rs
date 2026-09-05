@@ -578,6 +578,29 @@ impl KyutaiEngine {
         Ok(())
     }
 
+    fn emission_delay_frames(model: &LoadedModel) -> usize {
+        (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize
+    }
+
+    /// Whether the engine's own semantic VAD has paused long enough that
+    /// every word already spoken has had time to clear the pipeline: a pause
+    /// streak covering the emission delay, plus margin. Shared by `flush`
+    /// (skip the silence suffix) and the `tail_drained` trait method (cut a
+    /// single-stream drain window short) so the two can't drift apart.
+    ///
+    /// Diarized mode always returns false: lane 0's pause streak says
+    /// nothing about lane 1 (system audio), and `DiarizedMode` doesn't
+    /// consult this signal anyway since both lanes must stay frame-aligned
+    /// regardless of either side's pause state.
+    fn tail_drained_for(model: &LoadedModel, diarize: bool) -> bool {
+        if diarize {
+            return false;
+        }
+        let delay_frames = Self::emission_delay_frames(model);
+        let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
+        pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES
+    }
+
     fn note_vad_pause(model: &mut LoadedModel, prs: &[Vec<f32>]) {
         if let Some(pause_head) = prs.get(VAD_PAUSE_HEAD) {
             for (batch_idx, p) in pause_head.iter().enumerate() {
@@ -1040,22 +1063,22 @@ impl TranscriptionEngine for KyutaiEngine {
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        let (delay_frames, suffix_seconds, pause_streak) = {
+        let diarize = self.diarize;
+        let (delay_frames, suffix_seconds, pause_streak, drained) = {
             let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
-            // Words are emitted audio_delay after they are spoken. If the semantic
-            // VAD has reported a pause for longer than that delay (plus margin),
-            // every word has already cleared the pipeline and the silence suffix
-            // would only burn inference time at stop.
-            let delay_frames =
-                (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
+            let delay_frames = Self::emission_delay_frames(model);
             let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
             let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
-            (delay_frames, suffix_seconds, pause_streak)
+            let drained = Self::tail_drained_for(model, diarize);
+            (delay_frames, suffix_seconds, pause_streak, drained)
         };
         let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
-        let diarize = self.diarize;
 
-        if !diarize && pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES {
+        // Words are emitted audio_delay after they are spoken. If the semantic
+        // VAD has reported a pause for longer than that delay (plus margin),
+        // every word has already cleared the pipeline and the silence suffix
+        // would only burn inference time at stop.
+        if drained {
             info!(
                 streak = pause_streak,
                 delay_frames, "VAD pause covers ASR delay, skipping silence flush"
@@ -1149,6 +1172,13 @@ impl TranscriptionEngine for KyutaiEngine {
             .as_ref()
             .map(|m| m.config.stt_config.audio_delay_seconds)
             .unwrap_or(0.0)
+    }
+
+    fn tail_drained(&self) -> bool {
+        self.model
+            .as_ref()
+            .map(|m| Self::tail_drained_for(m, self.diarize))
+            .unwrap_or(false)
     }
 
     fn normalize_text(&self, text: &str) -> String {

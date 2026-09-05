@@ -225,6 +225,15 @@ pub trait TranscriptionEngine {
     fn emission_delay_seconds(&self) -> f64 {
         0.0
     }
+    /// Whether the engine has demonstrably emitted everything it has heard so
+    /// far: its own semantic VAD has reported a pause for longer than the
+    /// emission delay, so no word is still in flight. When true, the
+    /// single-stream drain window (see `emission_delay_seconds`) can end
+    /// early instead of always running to its full length. Engines without
+    /// that signal return false and fall back to the time-based window.
+    fn tail_drained(&self) -> bool {
+        false
+    }
     /// Normalize engine-specific tokens from transcribed text.
     /// Called by the pipeline on every segment before emitting to the frontend.
     /// Each engine overrides this to strip its own special tokens
