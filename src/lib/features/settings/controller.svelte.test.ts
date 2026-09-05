@@ -745,4 +745,195 @@ describe("settings controller", () => {
     expect(ctrl.ollamaPulling).toBe(false);
     expect(ctrl.ollamaPullError).toBe("connection refused");
   });
+
+  it("onRemoveDevice drops the device and clears a dangling pin", async () => {
+    const settingsWithGhost: AppSettings = {
+      ...defaultSettings,
+      audio_device: "ghost-mic",
+      input_priority: {
+        priorities: ["ghost-mic", "usb-mic"],
+        hidden: [],
+        known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
+      },
+    };
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    mockInvoke.mockClear();
+
+    await ctrl.onRemoveDevice("ghost-mic");
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+      settings: expect.objectContaining({
+        audio_device: null,
+        input_priority: { priorities: ["usb-mic"], hidden: [], known: [] },
+      }),
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceUid: "" });
+    expect(ctrl.app.settings.audio_device).toBeNull();
+    expect(ctrl.pinUnavailable).toBe(false);
+  });
+
+  it("onRemoveDevice leaves an unrelated pin untouched", async () => {
+    const settingsWithGhost: AppSettings = {
+      ...defaultSettings,
+      audio_device: "usb-mic",
+      input_priority: {
+        priorities: ["ghost-mic", "usb-mic"],
+        hidden: [],
+        known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
+      },
+    };
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    mockInvoke.mockClear();
+
+    await ctrl.onRemoveDevice("ghost-mic");
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+      settings: expect.objectContaining({ audio_device: "usb-mic" }),
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("select_audio_device", expect.anything());
+  });
+
+  it("onResetDevices keeps only connected devices and clears dangling pins", async () => {
+    const settingsWithGhost: AppSettings = {
+      ...defaultSettings,
+      audio_device: "ghost-mic",
+      clamshell_audio_device: "ghost-mic",
+      input_priority: {
+        priorities: ["ghost-mic", "usb-mic", "builtin-mic"],
+        hidden: ["ghost-mic"],
+        known: [
+          { uid: "ghost-mic", name: "Old headset", last_seen: 1 },
+          { uid: "usb-mic", name: "USB Microphone", last_seen: 2 },
+        ],
+      },
+    };
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    mockInvoke.mockClear();
+
+    await ctrl.onResetDevices();
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+      settings: expect.objectContaining({
+        audio_device: null,
+        clamshell_audio_device: null,
+        input_priority: {
+          priorities: ["usb-mic", "builtin-mic"],
+          hidden: [],
+          known: [{ uid: "usb-mic", name: "USB Microphone", last_seen: 2 }],
+        },
+      }),
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceUid: "" });
+    expect(ctrl.app.settings.audio_device).toBeNull();
+    expect(ctrl.app.settings.clamshell_audio_device).toBeNull();
+    expect(ctrl.pinUnavailable).toBe(false);
+  });
+
+  it("onResetDevices re-reads connected devices, keeping one that reconnected after mount", async () => {
+    const settingsWithLateMic: AppSettings = {
+      ...defaultSettings,
+      audio_device: "late-mic",
+      input_priority: {
+        priorities: ["late-mic", "usb-mic"],
+        hidden: [],
+        known: [{ uid: "late-mic", name: "Late Mic", last_seen: 1 }],
+      },
+    };
+    const lateMic: AudioInputDevice = {
+      uid: "late-mic",
+      name: "Late Mic",
+      transport: "usb",
+      is_default: false,
+    };
+    let listAudioDevicesCalls = 0;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithLateMic);
+      if (cmd === "list_audio_devices") {
+        listAudioDevicesCalls += 1;
+        // Mount sees a stale snapshot without "late-mic"; by the time the
+        // user confirms the reset, the device has reconnected.
+        return Promise.resolve(listAudioDevicesCalls === 1 ? fakeDevices : [...fakeDevices, lateMic]);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    // Sanity: the mount-time snapshot really is stale.
+    expect(ctrl.audioDevices.some((device) => device.uid === "late-mic")).toBe(false);
+
+    mockInvoke.mockClear();
+    await ctrl.onResetDevices();
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+      settings: expect.objectContaining({
+        audio_device: "late-mic",
+        input_priority: {
+          priorities: ["late-mic", "usb-mic"],
+          hidden: [],
+          known: [{ uid: "late-mic", name: "Late Mic", last_seen: 1 }],
+        },
+      }),
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("select_audio_device", expect.anything());
+    expect(ctrl.app.settings.audio_device).toBe("late-mic");
+    expect(ctrl.pinUnavailable).toBe(false);
+  });
+
+  it("onResetDevices aborts and leaves settings untouched when the device refresh fails", async () => {
+    const settingsWithGhost: AppSettings = {
+      ...defaultSettings,
+      audio_device: "ghost-mic",
+      input_priority: {
+        priorities: ["ghost-mic", "usb-mic"],
+        hidden: ["ghost-mic"],
+        known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
+      },
+    };
+    let listAudioDevicesCalls = 0;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      if (cmd === "list_audio_devices") {
+        listAudioDevicesCalls += 1;
+        // Mount succeeds; the refresh triggered by the reset click fails.
+        if (listAudioDevicesCalls === 1) return Promise.resolve(fakeDevices);
+        return Promise.reject("device enumeration failed");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    mockInvoke.mockClear();
+
+    await ctrl.onResetDevices();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
+    expect(ctrl.statusMessage).toBe("device enumeration failed");
+    expect(ctrl.app.settings.audio_device).toBe("ghost-mic");
+    expect(ctrl.app.settings.input_priority).toEqual({
+      priorities: ["ghost-mic", "usb-mic"],
+      hidden: ["ghost-mic"],
+      known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
+    });
+  });
 });

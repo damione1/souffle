@@ -37,6 +37,8 @@ import type {
 import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, shortcutMissingModifier } from "../../utils";
 import {
   buildMicrophoneList,
+  keepConnectedDevices,
+  removeKnownDevice,
   reorderMicrophoneList,
 } from "./microphone-list";
 import {
@@ -235,6 +237,75 @@ export function createSettingsController() {
       }
       settings.input_priority.hidden = [...hiddenSet];
     });
+  }
+
+  /** Clear a pin/clamshell preference that now points at a device we just forgot. */
+  function clearDanglingDevicePreference(settings: AppSettings, uid: string) {
+    if (settings.audio_device === uid) {
+      settings.audio_device = null;
+    }
+    if (settings.clamshell_audio_device === uid) {
+      settings.clamshell_audio_device = null;
+    }
+  }
+
+  /** Capture holds the pin in-memory (`AudioCommand::SelectDevice`), separate
+   *  from the settings row. Clearing the row without this leaves the live pin
+   *  pointing at a device we just forgot, so it would win again on reconnect. */
+  async function syncLivePin(previousPin: string) {
+    const nextPin = app.selectedDevice;
+    pinUnavailable = Boolean(
+      nextPin && !audioDevices.some((device) => device.uid === nextPin),
+    );
+    if (previousPin === nextPin) return;
+    try {
+      await selectAudioDevice(nextPin);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
+  async function removeInputDevice(uid: string) {
+    const previousPin = app.selectedDevice;
+    await persistSettings((settings) => {
+      settings.input_priority = removeKnownDevice(settings.input_priority, uid);
+      clearDanglingDevicePreference(settings, uid);
+    });
+    await syncLivePin(previousPin);
+  }
+
+  async function resetInputDevices() {
+    // Re-read the connected set right before acting on it: the closure's
+    // `audioDevices` can be stale by the time the user confirms, and acting
+    // on a stale snapshot would wrongly drop a device that just reconnected.
+    // Called directly (not via refreshDevices()) so a failed refresh aborts
+    // the reset instead of silently proceeding on stale or empty data.
+    let freshDevices: AudioInputDevice[];
+    try {
+      freshDevices = await listAudioDevices();
+    } catch (e) {
+      statusMessage = errorMessage(e);
+      return;
+    }
+    audioDevices = freshDevices;
+    const connectedUids = audioDevices.map((device) => device.uid);
+    const connected = new Set(connectedUids);
+    const previousPin = app.selectedDevice;
+    await persistSettings((settings) => {
+      settings.input_priority = keepConnectedDevices(settings.input_priority, connectedUids);
+      // Any pin outside the connected set is cleared here, whether it is a
+      // normal dropped pin or a stale/legacy value: `audio_device` and
+      // `clamshell_audio_device` used to store device names before
+      // `migrate_audio_device_preferences`, so a leftover value may never
+      // have been a known uid in the first place.
+      if (settings.audio_device && !connected.has(settings.audio_device)) {
+        settings.audio_device = null;
+      }
+      if (settings.clamshell_audio_device && !connected.has(settings.clamshell_audio_device)) {
+        settings.clamshell_audio_device = null;
+      }
+    });
+    await syncLivePin(previousPin);
   }
 
   function onAllowBluetoothMicChange(event: Event) {
@@ -862,6 +933,8 @@ export function createSettingsController() {
     onDeviceChange,
     onMoveDevice: moveInputDevice,
     onToggleHidden: toggleInputDeviceHidden,
+    onRemoveDevice: removeInputDevice,
+    onResetDevices: resetInputDevices,
     onAllowBluetoothMicChange,
     refreshSummaryProviders,
     downloadRecommendedOllamaModel,
