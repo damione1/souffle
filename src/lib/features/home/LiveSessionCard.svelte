@@ -9,7 +9,7 @@
   import type { LiveParagraph } from "../meeting/live-transcript.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
-  import { resolveSpeakerLabel } from "../../utils";
+  import { elapsedSecondsSince, formatDuration, resolveSpeakerLabel } from "../../utils";
 
   let {
     mode,
@@ -27,7 +27,11 @@
   /** Auto-scroll only kicks in when already within this many px of the bottom. */
   const NEAR_BOTTOM_PX = 40;
 
-  let elapsedSeconds = $state(0);
+  // Repaint driver only. The displayed value is always recomputed from the
+  // wall clock below, so ticks dropped by WebKit's background throttling cost
+  // nothing but refresh smoothness. A counter incremented per tick would
+  // instead lose that time for good.
+  let nowMs = $state(Date.now());
   let transcriptEl: HTMLDivElement | undefined = $state();
   let editingParagraphId = $state<number | null>(null);
   let editDraft = $state("");
@@ -48,7 +52,7 @@
   );
 
   const elapsed = $derived(
-    `${Math.floor(elapsedSeconds / 60)}:${`${elapsedSeconds % 60}`.padStart(2, "0")}`,
+    formatDuration(elapsedSecondsSince(meeting.app.recordingStartedAtMs, nowMs)),
   );
 
   const stopping = $derived(
@@ -138,10 +142,20 @@
   });
 
   onMount(() => {
-    const timer = setInterval(() => {
-      elapsedSeconds += 1;
-    }, 1000);
-    return () => clearInterval(timer);
+    const tick = () => {
+      nowMs = Date.now();
+    };
+    const timer = setInterval(tick, 1000);
+    // WebKit pauses the interval while the window is occluded; the displayed
+    // value is derived from the wall clock, so one catch-up on return is enough.
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   });
 
   onDestroy(() => {

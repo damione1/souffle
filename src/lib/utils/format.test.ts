@@ -28,8 +28,33 @@ describe('formatDuration', () => {
     expect(formatDuration(0)).toBe('0:00');
   });
 
-  it('formats typical meeting duration', () => {
-    expect(formatDuration(3600)).toBe('60:00');
+  it('pads seconds under a minute', () => {
+    expect(formatDuration(5)).toBe('0:05');
+  });
+
+  it('formats minutes and seconds', () => {
+    expect(formatDuration(45 * 60 + 7)).toBe('45:07');
+  });
+
+  it('rolls over to hours instead of counting past 59 minutes', () => {
+    expect(formatDuration(3600)).toBe('1:00:00');
+    expect(formatDuration(90 * 60 + 3)).toBe('1:30:03');
+  });
+
+  it('pads minutes once hours are shown', () => {
+    expect(formatDuration(3600 + 5 * 60 + 9)).toBe('1:05:09');
+  });
+
+  it('handles multi-hour meetings', () => {
+    expect(formatDuration(4 * 3600 + 2 * 60 + 1)).toBe('4:02:01');
+  });
+
+  it('truncates fractional seconds', () => {
+    expect(formatDuration(61.9)).toBe('1:01');
+  });
+
+  it('never renders a negative span', () => {
+    expect(formatDuration(-5)).toBe('0:00');
   });
 });
 
