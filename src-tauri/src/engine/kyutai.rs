@@ -1252,8 +1252,11 @@ mod tests {
         let mut offset = [1.04f64, 1.04];
         let mut frames = [300usize, 300];
 
-        let last_emitted =
-            KyutaiEngine::word_start_time_raw((300 - 13) as f64 / 12.5, offset[0], origin[0]);
+        let last_emitted = KyutaiEngine::word_start_time_raw(
+            (300 - 13) as f64 / crate::constants::MIMI_FRAMES_PER_SECOND,
+            offset[0],
+            origin[0],
+        );
 
         KyutaiEngine::credit_lane_epoch(&mut origin, &mut offset, &mut frames, 0);
 

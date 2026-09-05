@@ -36,6 +36,44 @@ function paragraphEndTime(
   return end;
 }
 
+function laneHorizons(input: TranscriptionSegment[]): {
+  laneLatest: Map<string | null, number>;
+  globalHorizon: number;
+  activeLane: string | null;
+} {
+  const laneLatest = new Map<string | null, number>();
+  let globalLatest = 0;
+  for (const segment of input) {
+    const lane = segment.speaker ?? null;
+    const previous = laneLatest.get(lane);
+    if (previous === undefined || segment.start_time > previous) {
+      laneLatest.set(lane, segment.start_time);
+    }
+    if (segment.start_time > globalLatest) globalLatest = segment.start_time;
+  }
+  const last = input[input.length - 1];
+  return {
+    laneLatest,
+    globalHorizon: globalLatest - TAIL_WINDOW_S,
+    activeLane: last === undefined ? null : last.speaker ?? null,
+  };
+}
+
+/** True when this paragraph can leave the tail. An actively emitting lane
+ * with a rewound clock is exempt from the global horizon so its new words
+ * can still coalesce; a silent lane is not, so it cannot pin the tail. */
+function paragraphIsFrozen(
+  end: number,
+  lane: string | null,
+  laneLatest: Map<string | null, number>,
+  activeLane: string | null,
+  globalHorizon: number,
+): boolean {
+  const laneHorizon = (laneLatest.get(lane) ?? 0) - TAIL_WINDOW_S;
+  if (end < laneHorizon) return true;
+  return lane !== activeLane && end < globalHorizon;
+}
+
 /**
  * Incremental paragraph grouper for a live transcript stream.
  *
@@ -101,29 +139,22 @@ export function createLiveTranscript(pauseThreshold: number) {
     const { paragraphs, ranges, ordered } = groupIntoParagraphsWithRanges(input, pauseThreshold);
     const prevTail = tail;
 
-    // The horizon is the slowest lane, not the global latest: a paragraph may
-    // only freeze once no lane can still emit something older than it, and a
-    // lane with nothing left in the tail has no such claim to make. Taking the
-    // global max lets a fast lane drag the horizon past a lane that is still
-    // behind, which commits that lane's words one paragraph at a time.
-    const laneLatest = new Map<string | null, number>();
-    for (const segment of input) {
-      const lane = segment.speaker ?? null;
-      const previous = laneLatest.get(lane);
-      if (previous === undefined || segment.start_time > previous) {
-        laneLatest.set(lane, segment.start_time);
-      }
-    }
-    let slowestLaneStart: number | null = null;
-    for (const laneStart of laneLatest.values()) {
-      slowestLaneStart =
-        slowestLaneStart === null ? laneStart : Math.min(slowestLaneStart, laneStart);
-    }
-    const horizon = (slowestLaneStart ?? 0) - TAIL_WINDOW_S;
+    // A paragraph freezes once its own lane has moved 8s past it, or once it
+    // is 8s behind the global latest *and* that lane is not the one currently
+    // emitting. Using the slowest lane as a single horizon also works for a
+    // rewound clock (new words with old timestamps stay in the tail), but it
+    // traps a silent speaker's last paragraph in the tail and freezes the
+    // other lane's commits until MAX_TAIL_PARAGRAPHS kicks in.
+    const { laneLatest, globalHorizon, activeLane } = laneHorizons(input);
     let numToCommit = 0;
     for (let i = 0; i < paragraphs.length; i++) {
-      if (paragraphEndTime(ordered, ranges[i]) < horizon) numToCommit = i + 1;
-      else break;
+      const lane = ordered[ranges[i].start]?.speaker ?? null;
+      const end = paragraphEndTime(ordered, ranges[i]);
+      if (paragraphIsFrozen(end, lane, laneLatest, activeLane, globalHorizon)) {
+        numToCommit = i + 1;
+      } else {
+        break;
+      }
     }
     numToCommit = Math.max(numToCommit, paragraphs.length - MAX_TAIL_PARAGRAPHS);
     if (numToCommit === paragraphs.length && paragraphs.length > 0) {
