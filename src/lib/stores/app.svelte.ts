@@ -34,6 +34,13 @@ let transcriptionRuntimePhase = $state<TranscriptionRuntimePhase>("download_requ
 // Latest pipeline health snapshot while recording (cleared when recording ends)
 let transcriptionHealth = $state<TranscriptionHealth | null>(null);
 
+// Wall-clock start of the current recording session (dictation or meeting),
+// captured when the backend machine enters a recording state. The live
+// elapsed counter derives from this instead of counting timer ticks, which
+// WebKit drops while the window sits in the background during a meeting.
+// Module-level, so it also survives a remount of the live session card.
+let recordingStartedAtMs = $state<number | null>(null);
+
 // System-audio capture status for the current meeting session
 let systemAudioStatus = $state<SystemAudioStatus | null>(null);
 
@@ -172,7 +179,13 @@ export function getAppState() {
 
     get machineState() { return machineState; },
     set machineState(s: AppStateMachine) {
+      const wasRecording = deriveRecordingMode(machineState) !== "idle";
       machineState = s;
+      // A resumed meeting re-enters recording from a non-recording state, so
+      // the counter restarts at zero for the new recording session.
+      if (!wasRecording && deriveRecordingMode(s) !== "idle") {
+        recordingStartedAtMs = Date.now();
+      }
       // Sync runtime phase from machine when no model operation is in progress.
       // During download/load the phase is managed by runtime.ts callbacks.
       if (deriveModelOperationState(s) === "idle") {
@@ -182,11 +195,14 @@ export function getAppState() {
       if (deriveRecordingMode(s) === "idle") {
         transcriptionHealth = null;
         systemAudioStatus = null;
+        recordingStartedAtMs = null;
       }
     },
 
     get transcriptionHealth() { return transcriptionHealth; },
     set transcriptionHealth(h: TranscriptionHealth | null) { transcriptionHealth = h; },
+
+    get recordingStartedAtMs() { return recordingStartedAtMs; },
 
     get systemAudioStatus() { return systemAudioStatus; },
     set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },

@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getAppState } from './app.svelte';
 import { mockSettings } from '../test-helpers/fixtures';
+
+const profile = {
+  engine_id: "", engine_label: "", model_id: "", model_label: "", backend_id: "", backend_label: "",
+};
 
 describe('app store', () => {
   it('has correct initial state defaults', () => {
@@ -55,6 +59,43 @@ describe('app store', () => {
     expect(state.settings.debug_transcription).toBe(true);
     expect(state.settings.audio_device).toBe('mic-1');
     expect(state.settings.transcription_engine_id).toBe('whisper');
+  });
+
+  it('anchors the recording start clock while a session is live', () => {
+    const state = getAppState();
+    state.machineState = { state: "ready", data: { profile } };
+    expect(state.recordingStartedAtMs).toBeNull();
+
+    const before = Date.now();
+    state.machineState = { state: "recording_meeting", data: { profile, session_id: 1, meeting_id: "m1" } };
+    const anchor = state.recordingStartedAtMs;
+    expect(anchor).not.toBeNull();
+    expect(anchor as number).toBeGreaterThanOrEqual(before);
+
+    // Stopping still shows the live card, so the anchor must survive it.
+    state.machineState = { state: "stopping", data: { profile, was_recording: { meeting: { meeting_id: "m1" } } } };
+    expect(state.recordingStartedAtMs).toBe(anchor);
+
+    state.machineState = { state: "ready", data: { profile } };
+    expect(state.recordingStartedAtMs).toBeNull();
+  });
+
+  it('re-anchors when a meeting is resumed as a new recording session', () => {
+    const state = getAppState();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T09:00:00Z'));
+      state.machineState = { state: "recording_meeting", data: { profile, session_id: 1, meeting_id: "m1" } };
+      expect(state.recordingStartedAtMs).toBe(Date.UTC(2026, 0, 1, 9, 0, 0));
+
+      state.machineState = { state: "ready", data: { profile } };
+      vi.setSystemTime(new Date('2026-01-01T09:20:00Z'));
+      state.machineState = { state: "recording_meeting", data: { profile, session_id: 2, meeting_id: "m1" } };
+      expect(state.recordingStartedAtMs).toBe(Date.UTC(2026, 0, 1, 9, 20, 0));
+    } finally {
+      vi.useRealTimers();
+    }
+    state.machineState = { state: "idle" };
   });
 
   it('recordingMode is derived from machineState', () => {
