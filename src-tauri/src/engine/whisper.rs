@@ -71,17 +71,28 @@ fn hallucination_key(text: &str) -> String {
 }
 
 /// True when `text` is *only* a known Whisper hallucination, not real
-/// speech that happens to include "thank you".
+/// speech that happens to include "thank you" or mention Amara.
 fn is_known_hallucination(text: &str) -> bool {
     let key = hallucination_key(text);
     if key.is_empty() {
         return false;
     }
-    matches!(key.as_str(), "thank you" | "thank you thank you" | "merci")
-        || key.contains("amara")
-        || text.to_lowercase().contains("sous-titres")
-        || key.contains("subtitles by")
-        || key.contains("subtitles made")
+    matches!(
+        key.as_str(),
+        "thank you" | "thank you thank you" | "merci" | "amara" | "amara org"
+    ) || is_subtitle_credit(&key)
+}
+
+/// Whole-utterance subtitle watermarks. Prefixes, not substrings, so
+/// "I spoke to Amara yesterday" / "the subtitles are ready" survive.
+fn is_subtitle_credit(key: &str) -> bool {
+    const CREDIT_PREFIXES: &[&str] = &[
+        "sous titres réalisés par",
+        "sous titres par amara",
+        "subtitles by",
+        "subtitles made",
+    ];
+    CREDIT_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
 }
 
 /// Drop a window that is digital silence, or whose sole segment is a
@@ -239,6 +250,24 @@ impl WhisperEngine {
     }
 }
 
+/// Cache auto-detected language only from a window that kept real speech.
+/// A filtered leading hallucination must not lock the session to the
+/// wrong language for later windows.
+fn remember_detected_language(
+    cached: &mut Option<String>,
+    requested: Option<&str>,
+    detected: Option<String>,
+    surviving_segments: &[TranscriptionSegment],
+) {
+    if requested.is_some() || cached.is_some() || surviving_segments.is_empty() {
+        return;
+    }
+    if let Some(lang) = detected {
+        info!(language = %lang, "Whisper auto-detected language, caching for session");
+        *cached = Some(lang);
+    }
+}
+
 impl TranscriptionEngine for WhisperEngine {
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError> {
         let bin_path = if model_path.extension().is_some_and(|ext| ext == "bin") {
@@ -317,16 +346,13 @@ impl TranscriptionEngine for WhisperEngine {
                 seg.start_time += offset;
                 seg.end_time += offset;
             }
+            remember_detected_language(
+                &mut self.detected_language,
+                language,
+                detected,
+                &segments,
+            );
             all_segments.extend(segments);
-
-            // Cache detected language from first successful auto-detect
-            if language.is_none()
-                && let Some(ref lang) = detected
-                && self.detected_language.is_none()
-            {
-                info!(language = %lang, "Whisper auto-detected language, caching for session");
-                self.detected_language = Some(lang.clone());
-            }
         }
 
         Ok(all_segments)
@@ -433,6 +459,43 @@ mod tests {
         assert!(!is_known_hallucination("Thank you for the update."));
         assert!(!is_known_hallucination("Please thank you later today"));
         assert!(!is_known_hallucination("Merci beaucoup à toute l'équipe"));
+        assert!(!is_known_hallucination("I spoke to Amara yesterday"));
+        assert!(!is_known_hallucination("The subtitles are ready"));
+    }
+
+    #[test]
+    fn filtered_leading_window_does_not_cache_language() {
+        let mut cached = None;
+        remember_detected_language(&mut cached, None, Some("en".into()), &[]);
+        assert!(cached.is_none(), "hallucinated window must not lock language");
+
+        let speech = [TranscriptionSegment {
+            text: "Bonjour à tous".into(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("fr".into()),
+            confidence: Some(0.9),
+            speaker: None,
+        }];
+        remember_detected_language(&mut cached, None, Some("fr".into()), &speech);
+        assert_eq!(cached.as_deref(), Some("fr"));
+    }
+
+    #[test]
+    fn explicit_language_is_not_overwritten_by_detect() {
+        let mut cached = None;
+        let speech = [TranscriptionSegment {
+            text: "Hello".into(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("en".into()),
+            confidence: Some(0.9),
+            speaker: None,
+        }];
+        remember_detected_language(&mut cached, Some("fr"), Some("en".into()), &speech);
+        assert!(cached.is_none());
     }
 
     #[test]

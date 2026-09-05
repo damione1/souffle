@@ -37,19 +37,25 @@ pub fn download_model(
 }
 
 fn ensure_model_layout(profile: &TranscriptionProfile) -> Result<(), String> {
-    let target_dir = model_dir(profile);
-    if target_dir.exists() {
+    ensure_layout(&model_dir(profile), legacy_model_dir(profile).as_deref())
+}
+
+/// Relocate unless `target` already exists *outside* the legacy dir.
+/// An existing nested target (`legacy/candle`) still needs files lifted
+/// out of `legacy`, otherwise `model_exists` sees an incomplete child.
+fn ensure_layout(target_dir: &Path, legacy_dir: Option<&Path>) -> Result<(), String> {
+    if target_dir.exists() && !legacy_dir.is_some_and(|legacy| target_dir.starts_with(legacy)) {
         return Ok(());
     }
 
-    let Some(legacy_dir) = legacy_model_dir(profile) else {
+    let Some(legacy_dir) = legacy_dir else {
         return Ok(());
     };
     if !legacy_dir.exists() {
         return Ok(());
     }
 
-    relocate_model_directory(&legacy_dir, &target_dir)
+    relocate_model_directory(legacy_dir, target_dir)
 }
 
 /// Move a legacy model directory to `target`.
@@ -210,6 +216,38 @@ mod tests {
         assert!(target.join("model.safetensors").is_file());
         assert!(!target.join("candle").exists());
         assert_eq!(count_files(&target), 2);
+    }
+
+    #[test]
+    fn nested_target_still_lifts_legacy_files() {
+        let tmp = TempDir::new().unwrap();
+        let legacy = tmp.path().join("kyutai").join("stt-1b-en_fr");
+        let target = legacy.join("candle");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("config.json"), "{}").unwrap();
+        fs::write(legacy.join("model.safetensors"), b"w").unwrap();
+
+        ensure_layout(&target, Some(&legacy)).unwrap();
+
+        assert!(target.join("config.json").is_file());
+        assert!(target.join("model.safetensors").is_file());
+        assert!(!target.join("candle").exists());
+    }
+
+    #[test]
+    fn existing_target_outside_legacy_is_left_alone() {
+        let tmp = TempDir::new().unwrap();
+        let legacy = tmp.path().join("legacy");
+        let target = tmp.path().join("models").join("candle");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("config.json"), "legacy").unwrap();
+        fs::write(target.join("config.json"), "target").unwrap();
+
+        ensure_layout(&target, Some(&legacy)).unwrap();
+
+        assert_eq!(fs::read_to_string(target.join("config.json")).unwrap(), "target");
+        assert!(legacy.join("config.json").is_file());
     }
 
     #[test]
