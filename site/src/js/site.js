@@ -68,7 +68,7 @@
 (function () {
   "use strict";
   var toggle = document.querySelector(".nav-toggle");
-  var panel = document.getElementById("nav-links");
+  var panel = document.getElementById("nav-menu");
   if (!toggle || !panel) return;
 
   var close = function () {

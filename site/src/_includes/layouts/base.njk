@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ pageTitle or t.meta.title }}</title>
   <meta name="description" content="{{ t.meta.description }}">
-  <link rel="icon" href="/souffle-logo.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/souffle-logo.svg" type="image/svg+xml" sizes="any">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="{{ '/css/site.css' | bust }}">
   <link rel="stylesheet" href="{{ '/css/mocks.css' | bust }}">
   {% set altEn = "/docs/" if isDocs else "/" %}
@@ -15,17 +17,22 @@
   <link rel="alternate" hreflang="fr" href="{{ site.url }}{{ altFr }}">
   <link rel="alternate" hreflang="x-default" href="{{ site.url }}{{ altEn }}">
   <meta property="og:title" content="{{ pageTitle or t.meta.title }}">
-  <meta property="og:description" content="{{ t.meta.description }}">
+  <meta property="og:description" content="{{ t.meta.ogDescription }}">
   <meta property="og:type" content="website">
   <meta property="og:url" content="{{ site.url }}{{ page.url }}">
   <meta property="og:image" content="{{ site.url }}/og-{{ t.htmlLang }}.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:alt" content="{{ t.meta.imageAlt }}">
+  <meta property="og:site_name" content="{{ site.name }}">
   <meta property="og:locale" content="{{ 'fr_CA' if t.htmlLang == 'fr' else 'en_US' }}">
+  <meta property="og:locale:alternate" content="{{ 'en_US' if t.htmlLang == 'fr' else 'fr_CA' }}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ pageTitle or t.meta.title }}">
-  <meta name="twitter:description" content="{{ t.meta.description }}">
+  <meta name="twitter:description" content="{{ t.meta.ogDescription }}">
   <meta name="twitter:image" content="{{ site.url }}/og-{{ t.htmlLang }}.png">
+  <meta name="twitter:image:alt" content="{{ t.meta.imageAlt }}">
   {%- if not isDocs %}
   {% set app = {
     "@context": "https://schema.org",

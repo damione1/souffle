@@ -3,7 +3,9 @@
   "meta": {
     "title": "Soufflé : reconnaissance vocale privée pour macOS",
     "description": "Dictez dans n'importe quelle app, transcrivez vos réunions en distinguant votre voix de celle des autres, et obtenez des résumés générés en local. Aucun serveur, aucun compte, aucune clé d'API.",
-    "docsTitle": "Documentation Soufflé"
+    "docsTitle": "Documentation Soufflé",
+    "imageAlt": "Soufflé sur macOS : une fenêtre de réunion en direct avec sa transcription, à côté du slogan « Votre voix ne quitte jamais votre Mac. »",
+    "ogDescription": "Dictée, transcription de réunions et résumés générés en local sur macOS. Aucun serveur, aucun compte, aucune clé d'API."
   },
   "nav": {
     "features": "Fonctions",

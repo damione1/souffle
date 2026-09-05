@@ -16,6 +16,10 @@ export default function (eleventyConfig) {
   eleventyConfig.addPassthroughCopy({ "src/js": "js" });
   eleventyConfig.addPassthroughCopy({ "src/fonts": "fonts" });
   eleventyConfig.addPassthroughCopy({ "src/souffle-logo.svg": "souffle-logo.svg" });
+  eleventyConfig.addPassthroughCopy({ "src/favicon.ico": "favicon.ico" });
+  eleventyConfig.addPassthroughCopy({ "src/apple-touch-icon.png": "apple-touch-icon.png" });
+  eleventyConfig.addPassthroughCopy({ "src/icon-192.png": "icon-192.png" });
+  eleventyConfig.addPassthroughCopy({ "src/icon-512.png": "icon-512.png" });
   eleventyConfig.addPassthroughCopy({ "src/og-en.png": "og-en.png" });
   eleventyConfig.addPassthroughCopy({ "src/og-fr.png": "og-fr.png" });
   eleventyConfig.addPassthroughCopy({ "src/_headers": "_headers" });
