@@ -50,6 +50,28 @@ export function buildMicrophoneList(
   return ordered;
 }
 
+/** Drop one device from priorities, known, and hidden. No-op if it is absent from all three. */
+export function removeKnownDevice(priority: InputPriority, uid: string): InputPriority {
+  return {
+    priorities: priority.priorities.filter((entry) => entry !== uid),
+    hidden: priority.hidden.filter((entry) => entry !== uid),
+    known: priority.known.filter((entry) => entry.uid !== uid),
+  };
+}
+
+/** Drop every remembered device that is not in `connectedUids`, keeping relative order. */
+export function keepConnectedDevices(
+  priority: InputPriority,
+  connectedUids: string[],
+): InputPriority {
+  const connected = new Set(connectedUids);
+  return {
+    priorities: priority.priorities.filter((entry) => connected.has(entry)),
+    hidden: priority.hidden.filter((entry) => connected.has(entry)),
+    known: priority.known.filter((entry) => connected.has(entry.uid)),
+  };
+}
+
 export function reorderMicrophoneList(
   list: MicrophoneListEntry[],
   uid: string,

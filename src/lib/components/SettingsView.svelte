@@ -209,6 +209,8 @@
         onRefreshDevices={controller.refreshDevices}
         onMoveDevice={controller.onMoveDevice}
         onToggleHidden={controller.onToggleHidden}
+        onRemoveDevice={controller.onRemoveDevice}
+        onResetDevices={controller.onResetDevices}
       />
 
       <AudioSettingsSection

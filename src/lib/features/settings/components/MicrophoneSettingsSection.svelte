@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronUp, RefreshCw } from "@lucide/svelte";
+  import { ChevronDown, ChevronUp, RefreshCw, Trash2 } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import type { InputPriority } from "../../../types";
   import {
@@ -9,6 +9,7 @@
   } from "../microphone-list";
   import type { AudioInputDevice } from "../../../types";
   import { lastSeenAge } from "../../../utils/format";
+  import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
 
   let {
     audioDevices,
@@ -21,6 +22,8 @@
     onRefreshDevices,
     onMoveDevice,
     onToggleHidden,
+    onRemoveDevice,
+    onResetDevices,
   }: {
     audioDevices: AudioInputDevice[];
     inputPriority: InputPriority;
@@ -32,9 +35,12 @@
     onRefreshDevices: () => void | Promise<void>;
     onMoveDevice: (uid: string, direction: -1 | 1) => void | Promise<void>;
     onToggleHidden: (uid: string, hidden: boolean) => void | Promise<void>;
+    onRemoveDevice: (uid: string) => void | Promise<void>;
+    onResetDevices: () => void | Promise<void>;
   } = $props();
 
   const microphoneList = $derived(buildMicrophoneList(audioDevices, inputPriority));
+  const hasDisconnectedDevices = $derived(microphoneList.some((entry) => !entry.connected));
 
   function lastSeenLabel(entry: MicrophoneListEntry): string {
     if (entry.connected || entry.lastSeen === null) return "";
@@ -72,6 +78,15 @@
         <button onclick={onRefreshDevices} class="btn btn-icon" aria-label={$t("settings_audio.refresh_devices")}>
           <RefreshCw size={16} />
         </button>
+        {#if hasDisconnectedDevices}
+          <ConfirmAction
+            label={$t("settings_audio.reset_devices")}
+            confirmLabel={$t("settings_audio.reset_devices_confirm")}
+            confirmMessage={$t("settings_audio.reset_devices_msg")}
+            variant="danger"
+            onConfirm={onResetDevices}
+          />
+        {/if}
       </div>
     </div>
 
@@ -137,6 +152,16 @@
                 />
                 {$t("settings_audio.hide_device")}
               </label>
+              {#if !entry.connected}
+                <button
+                  type="button"
+                  class="btn btn-icon"
+                  aria-label={$t("settings_audio.remove_device", { values: { name: entry.name } })}
+                  onclick={() => onRemoveDevice(entry.uid)}
+                >
+                  <Trash2 size={16} />
+                </button>
+              {/if}
             </div>
           </li>
         {/each}
