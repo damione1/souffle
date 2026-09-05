@@ -13,7 +13,8 @@
     "github": "GitHub",
     "home": "Home",
     "releases": "Releases",
-    "download": "Download"
+    "download": "Download",
+    "menu": "Menu"
   },
   "hero": {
     "badge": "macOS 13+ · APPLE SILICON",

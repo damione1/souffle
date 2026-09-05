@@ -6,8 +6,8 @@
   <title>{{ pageTitle or t.meta.title }}</title>
   <meta name="description" content="{{ t.meta.description }}">
   <link rel="icon" href="/souffle-logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/css/site.css">
-  <link rel="stylesheet" href="/css/mocks.css">
+  <link rel="stylesheet" href="{{ '/css/site.css' | bust }}">
+  <link rel="stylesheet" href="{{ '/css/mocks.css' | bust }}">
   {% set altEn = "/docs/" if isDocs else "/" %}
   {% set altFr = "/fr/docs/" if isDocs else "/fr/" %}
   <link rel="canonical" href="{{ site.url }}{{ page.url }}">
@@ -48,7 +48,7 @@
   {% include "partials/nav.njk" %}
   <main>{{ content | safe }}</main>
   {% include "partials/footer.njk" %}
-  <script src="/js/site.js" defer></script>
-  <script src="/js/mocks.js" defer></script>
+  <script src="{{ '/js/site.js' | bust }}" defer></script>
+  <script src="{{ '/js/mocks.js' | bust }}" defer></script>
 </body>
 </html>

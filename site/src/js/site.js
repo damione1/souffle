@@ -61,3 +61,37 @@
   }, { rootMargin: "-96px 0px -70% 0px" });
   sections.forEach(function (s) { io.observe(s); });
 })();
+
+/* Mobile nav: the links live in a panel under the bar, opened by the
+   hamburger. The panel is CSS-hidden above 860px, so the desktop nav is
+   unaffected and the class left behind by a resize costs nothing. */
+(function () {
+  "use strict";
+  var toggle = document.querySelector(".nav-toggle");
+  var panel = document.getElementById("nav-links");
+  if (!toggle || !panel) return;
+
+  var close = function () {
+    panel.classList.remove("is-open");
+    toggle.setAttribute("aria-expanded", "false");
+  };
+
+  toggle.addEventListener("click", function () {
+    var open = panel.classList.toggle("is-open");
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+
+  panel.addEventListener("click", function (e) {
+    if (e.target.closest("a")) close();
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") close();
+  });
+
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest(".nav")) close();
+  });
+
+  window.matchMedia("(min-width: 861px)").addEventListener("change", close);
+})();
