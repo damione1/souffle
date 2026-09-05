@@ -88,6 +88,16 @@ pub fn download_model(
     channel: Channel<models::DownloadProgress>,
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
+
+    // Auto-recover from a previous failure so picking another model works
+    // without restarting the app (mirrors `load_model`). Must run before
+    // the existing-model fast path, otherwise Error + files on disk
+    // reports Complete while the machine stays wedged.
+    let machine = state.current_machine_state()?;
+    if matches!(machine, AppStateMachine::Error { .. }) {
+        state.apply_transition(StateAction::Recover)?;
+    }
+
     if models::model_exists(&profile) {
         // Ensure machine reflects downloaded state
         let machine = state.current_machine_state()?;
@@ -114,12 +124,6 @@ pub fn download_model(
     let machine = state.current_machine_state()?;
     if machine.is_recording() {
         return Err("Cannot switch models while recording".into());
-    }
-
-    // Auto-recover from a previous failure so picking another model works
-    // without restarting the app (mirrors `load_model`).
-    if matches!(machine, AppStateMachine::Error { .. }) {
-        state.apply_transition(StateAction::Recover)?;
     }
 
     // Switching to a different, not-yet-downloaded model while one is loaded:

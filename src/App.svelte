@@ -11,7 +11,7 @@
   import { getTranscriptionCatalog, recoverState } from "./lib/api/transcription";
   import { getReleaseNotesForVersion } from "./lib/api/diagnostics";
   import { bootstrapAppState } from "./lib/bootstrap";
-  import { getSelectedTranscriptionModel } from "./lib/features/transcription/catalog";
+  import { findTranscriptionModel } from "./lib/features/transcription/catalog";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
   import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
   import UpdateAvailableDialog from "./lib/features/onboarding/UpdateAvailableDialog.svelte";
@@ -72,7 +72,7 @@
   let transcriptionCatalog = $state<TranscriptionCatalog | null>(null);
   const modelLabel = $derived(
     app.settings.transcription_model_id
-      ? getSelectedTranscriptionModel(
+      ? findTranscriptionModel(
           transcriptionCatalog,
           app.settings.transcription_engine_id,
           app.settings.transcription_model_id,

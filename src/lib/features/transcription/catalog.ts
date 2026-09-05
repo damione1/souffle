@@ -50,6 +50,17 @@ export function getSelectedTranscriptionEngine(
   );
 }
 
+/** Exact engine/model lookup. Unlike `getSelectedTranscriptionModel`, this
+ * does not fall back to the first catalog entry when the id is unknown. */
+export function findTranscriptionModel(
+  catalog: TranscriptionCatalog | null,
+  engineId: string,
+  modelId: string,
+): TranscriptionModelDescriptor | null {
+  const engine = catalog?.engines.find((engine) => engine.id === engineId);
+  return engine?.models.find((model) => model.id === modelId) ?? null;
+}
+
 export function getSelectedTranscriptionModel(
   catalog: TranscriptionCatalog | null,
   engineId: string,
