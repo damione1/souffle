@@ -73,12 +73,14 @@ pub fn resolve_summary_language(
 /// Append an explicit output-language rule. "Same language as the
 /// transcript" is not enough: a 7B follows the English system prompt.
 ///
-/// Covers headings too, not just bullets: nothing downstream matches a
-/// heading by its literal text, and an English heading over French bullets
-/// reads as a bug.
+/// Covers every line of content, not only bullets: the "none stated"
+/// placeholders and the minutes prose drift back to English otherwise. The
+/// markdown headings stay English on purpose, matching the rule the system
+/// prompts already carry.
 pub fn with_language_instruction(system_prompt: &str, language: SummaryLanguage) -> String {
     format!(
-        "{}\n\nWrite all output, including headings and bullets, in {}.",
+        "{}\n\nWrite all summary content in {}. Keep the markdown section \
+         headings in English, exactly as specified above.",
         system_prompt.trim_end(),
         language_english_name(language)
     )
@@ -213,10 +215,17 @@ mod tests {
         let map = with_language_instruction(OLLAMA_MAP_PROMPT, language);
         let merge = with_language_instruction(OLLAMA_MERGE_PROMPT, language);
         let final_pass = with_language_instruction(OLLAMA_SUMMARIZE_PROMPT, language);
-        let rule = "Write all output, including headings and bullets, in French.";
+        let rule = "Write all summary content in French.";
         assert!(map.contains(rule));
         assert!(merge.contains(rule));
         assert!(final_pass.contains(rule));
+        // Must not contradict the headings rule the prompts already carry.
+        assert!(final_pass.contains("Keep the markdown section headings in English"));
+        assert!(
+            final_pass.contains(
+                "Keep the markdown section headings exactly as written below in English."
+            )
+        );
         assert!(map.contains("same language as the transcript"));
         assert!(final_pass.contains("same language as the input"));
     }
