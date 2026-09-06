@@ -12,15 +12,25 @@
   import type { PermissionStatus, PermState } from "../../types";
   import { errorMessage } from "../../utils";
 
+  let { onStatusChange }: { onStatusChange?: (status: PermissionStatus) => void } = $props();
+
   let status = $state<PermissionStatus>({
     microphone: "unknown",
     system_audio: "unknown",
     accessibility: "unknown",
     calendar: "unknown",
   });
-  let busy = $state<PermissionKind | null>(null);
+  let busy = $state<Record<string, boolean>>({});
   let error = $state("");
   let repairing = $state(false);
+
+  /** Every write to `status` goes through here so the parent (which cannot
+   * see this component's local state otherwise) learns the real permission
+   * state, e.g. to gate the onboarding auto-paste default (SOU-053). */
+  function setStatus(next: PermissionStatus) {
+    status = next;
+    onStatusChange?.(next);
+  }
 
   type Row = {
     kind: PermissionKind;
@@ -60,31 +70,37 @@
 
   async function refreshAll() {
     try {
-      status = await getPermissionStatus();
+      setStatus(await getPermissionStatus());
     } catch (e) {
       error = errorMessage(e);
     }
   }
 
+  /**
+   * Requests permission for a given capability, tracking the busy state per-kind.
+   */
   async function grant(kind: PermissionKind) {
-    busy = kind;
+    busy[kind] = true;
     error = "";
     try {
       const next = await requestPermission(kind);
-      status = { ...status, [kind]: next };
+      setStatus({ ...status, [kind]: next });
     } catch (e) {
       error = errorMessage(e);
     } finally {
-      busy = null;
+      busy[kind] = false;
     }
   }
 
+  /**
+   * Triggers the accessibility repair flow.
+   */
   async function repairAccessibility() {
     repairing = true;
     error = "";
     try {
       const next = await repairAccessibilityPermission();
-      status = { ...status, accessibility: next };
+      setStatus({ ...status, accessibility: next });
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -101,7 +117,7 @@
     const onFocus = () => {
       void getPermissionStatus()
         .then((s) => {
-          status = { ...status, accessibility: s.accessibility };
+          setStatus({ ...status, accessibility: s.accessibility });
         })
         .catch(() => {});
     };
@@ -131,10 +147,10 @@
         {:else}
           <button
             class="btn btn-primary shrink-0 gap-1.5"
-            disabled={busy !== null}
+            disabled={busy[row.kind]}
             onclick={() => grant(row.kind)}
           >
-            {#if busy === row.kind}
+            {#if busy[row.kind]}
               <Spinner />
               {$t("permissions.checking")}
             {:else}
@@ -149,7 +165,7 @@
           <p class="text-xs text-text-muted">{$t("permissions.accessibility_stale_hint")}</p>
           <button
             class="btn btn-ghost shrink-0 gap-1.5"
-            disabled={repairing || busy !== null}
+            disabled={repairing || busy[row.kind]}
             onclick={repairAccessibility}
           >
             {#if repairing}
@@ -159,6 +175,26 @@
               {$t("permissions.repair")}
             {/if}
           </button>
+        </div>
+      {:else if row.kind === "microphone" && s === "denied"}
+        <div class="flex items-center justify-between gap-3 pl-8">
+          <p class="text-xs text-text-muted">{$t("permissions.mic_denied_hint")}</p>
+          <button
+            class="btn btn-ghost shrink-0 gap-1.5"
+            disabled={busy[row.kind]}
+            onclick={() => grant(row.kind)}
+          >
+            {#if busy[row.kind]}
+              <Spinner />
+              {$t("permissions.checking")}
+            {:else}
+              {$t("permissions.open_settings")}
+            {/if}
+          </button>
+        </div>
+      {:else if row.kind === "microphone" && s === "no_device"}
+        <div class="flex items-center gap-3 pl-8">
+          <p class="text-xs text-text-muted">{$t("permissions.mic_no_device_hint")}</p>
         </div>
       {/if}
     </div>

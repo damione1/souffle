@@ -2,6 +2,7 @@ import { getAppState } from "../../stores/app.svelte";
 import {
   addDictationEntry,
   getTranscriptionCatalog,
+  notifyPasteFailed,
   pasteText,
   pillHold,
   pillRelease,
@@ -118,13 +119,15 @@ async function finalizeDictationText(
 }
 
 /** Persist a finished dictation and surface it in the timeline. */
-async function saveToHistory(text: string) {
-  if (!text.trim()) return;
+async function saveToHistory(text: string): Promise<boolean> {
+  if (!text.trim()) return false;
   try {
     await addDictationEntry(text.trim());
     await createTimelineController().refresh();
+    return true;
   } catch (e) {
     console.warn("Failed to save dictation entry:", e);
+    return false;
   }
 }
 
@@ -156,6 +159,11 @@ function createTranscriptionControllerInstance() {
     ) || "Transcription model";
   });
 
+  // `app.isRecording` is true for a meeting too, but this controller only
+  // owns dictation: it must never treat a meeting as "its" recording (same
+  // derivation as PillApp.svelte and meeting/controller.svelte.ts).
+  let isDictating = $derived(app.recordingMode === "dictation");
+
   function cancelLearnFromEditPoll() {
     if (learnFromEditTimer != null) {
       clearTimeout(learnFromEditTimer);
@@ -163,10 +171,19 @@ function createTranscriptionControllerInstance() {
     }
   }
 
+  /**
+   * Clears the current dictation session state.
+   * This ensures that transient state (such as the target app to paste into
+   * or the accumulated transcript) is reset, preventing state leakage between
+   * independent dictation sessions or unrelated recording types.
+   */
   function clearSessionContext() {
     focusedApp = null;
     rewriteOf = null;
     sessionMode = "insert";
+    // Nothing keeps this alive once the session that produced it is over;
+    // leaving it would let a later, unrelated stop re-paste and re-save it.
+    transcript = "";
   }
 
   async function captureStartContext() {
@@ -216,25 +233,31 @@ function createTranscriptionControllerInstance() {
 
     const unlisten = await Promise.all([
       events.shortcutToggle.listen(() => {
+        // A meeting owns the session: the dictation shortcut is a no-op,
+        // not a way to stop someone else's recording.
+        if (app.recordingMode === "meeting") return;
         if (!isStartingRecording && !isStopping) {
-          if (!app.isRecording) sessionMode = "insert";
+          if (!isDictating) sessionMode = "insert";
           void toggleRecording(true);
         }
       }),
       events.shortcutRewrite.listen(() => {
+        if (app.recordingMode === "meeting") return;
         if (!isStartingRecording && !isStopping) {
-          if (!app.isRecording) sessionMode = "rewrite";
+          if (!isDictating) sessionMode = "rewrite";
           void toggleRecording(true);
         }
       }),
       events.shortcutPttStart.listen(() => {
-        if (!app.isRecording && !isStartingRecording && !isStopping) {
+        // Push-to-talk only starts from a fully idle machine: a meeting (or
+        // an already-running dictation) must not be interrupted.
+        if (app.recordingMode === "idle" && !isStartingRecording && !isStopping) {
           sessionMode = "insert";
           void toggleRecording(true);
         }
       }),
       events.shortcutPttStop.listen(() => {
-        if (app.isRecording && !isStopping) void toggleRecording(true);
+        if (isDictating && !isStopping) void toggleRecording(true);
       }),
     ]);
 
@@ -265,10 +288,23 @@ function createTranscriptionControllerInstance() {
     }
   }
 
+  /**
+   * Toggles the dictation recording session on or off.
+   * Prevents starting if another session (e.g. meeting) is currently active.
+   * When stopping, waits for the model to finish draining and optionally
+   * runs Polish on the assembled text before pasting or storing.
+   *
+   * @param {boolean} fromShortcut - Whether the toggle was triggered via a global keyboard shortcut.
+   */
   async function toggleRecording(fromShortcut = false) {
     if (isStartingRecording || isStopping) return;
 
-    if (app.isRecording) {
+    if (!isDictating && app.recordingMode !== "idle") {
+      // Cannot start dictation while a meeting (or anything else) is recording.
+      return;
+    }
+
+    if (isDictating) {
       isStopping = true;
 
       // Polish keeps running after the recording state ends (it's an LLM
@@ -299,7 +335,7 @@ function createTranscriptionControllerInstance() {
           statusMessage = finalized.warning;
         }
 
-        await saveToHistory(finalized.text);
+        const saved = await saveToHistory(finalized.text);
 
         if (finalized.text) {
           if (fromShortcut && app.settings.auto_paste) {
@@ -311,7 +347,17 @@ function createTranscriptionControllerInstance() {
               );
               scheduleLearnFromEdit(finalized.text);
             } catch (e) {
-              statusMessage = accessibilityPasteFailureMessage(errorMessage(e));
+              const message = errorMessage(e);
+              statusMessage = accessibilityPasteFailureMessage(message);
+              // A shortcut dictation runs from another app, so the status
+              // banner above is likely not on screen: also notify outside
+              // the window (SOU-053). Best-effort: a notification failure
+              // must not mask the paste failure itself.
+              try {
+                await notifyPasteFailed(message, saved);
+              } catch (notifyError) {
+                console.warn("Paste failure notification failed:", notifyError);
+              }
             }
           } else {
             try {

@@ -228,14 +228,36 @@ impl Database {
     }
 
     /// Finalize meetings left with `ended_at IS NULL` by a crash mid-recording.
-    /// Empty shells (a started meeting with no persisted segments) are deleted;
-    /// the rest get `ended_at`/`duration`/`recording_sessions` synthesized from
-    /// their persisted segments and are rewritten (which also rebuilds FTS).
-    /// Returns the number of meetings salvaged. Safe to call whenever no
-    /// recording is live: at startup, and also from the failed-start path in
-    /// `launch_meeting`, since the accumulator guard there guarantees no other
-    /// meeting is mid-recording when it runs.
+    ///
+    /// A meeting is "header + N recording sessions", not "header + segments":
+    /// segment timestamps are relative to whichever session produced them, so
+    /// only the segments beyond the last *closed* session belong to the one
+    /// that crashed. Empty shells (a started meeting with no persisted
+    /// segments) are deleted unless audio was already recorded for them, in
+    /// which case the header is kept so `get_meeting_audio` can still find
+    /// it: a finalized header with no transcript is more useful than an
+    /// orphaned `.ogg` no `meetings` row points to. Everything else gets its
+    /// crashed session closed off and `ended_at`/`duration_seconds`
+    /// recomputed from the full session list, then is rewritten (which also
+    /// rebuilds FTS). Returns the number of meetings salvaged. Safe to call
+    /// whenever no recording is live: at startup, and also from the
+    /// failed-start path in `launch_meeting`, since the accumulator guard
+    /// there guarantees no other meeting is mid-recording when it runs.
     pub fn recover_unfinished_meetings(&self) -> Result<usize, String> {
+        self.recover_unfinished_meetings_with(&|id| {
+            crate::audio::recorder::list_session_files(id)
+                .map(|files| !files.is_empty())
+                .map_err(|e| format!("List session files for {id}: {e}"))
+        })
+    }
+
+    /// The body of [`Self::recover_unfinished_meetings`], with the "does this
+    /// meeting have audio on disk" check injected so tests can exercise the
+    /// empty-shell branches without touching the real recordings directory.
+    fn recover_unfinished_meetings_with(
+        &self,
+        has_recorded_audio: &dyn Fn(&str) -> Result<bool, String>,
+    ) -> Result<usize, String> {
         let ids: Vec<String> = {
             let conn = self.conn.acquire()?;
             let mut stmt = conn
@@ -251,29 +273,56 @@ impl Database {
         for id in ids {
             let mut meeting = self.load_meeting(&id)?;
             if meeting.segments.is_empty() {
-                self.delete_meeting(&id)?;
+                if !has_recorded_audio(&id)? {
+                    self.delete_meeting(&id)?;
+                } else {
+                    meeting.ended_at = Some(meeting.started_at);
+                    self.save_meeting(&meeting)?;
+                    recovered += 1;
+                }
                 continue;
             }
-            let duration = meeting
-                .segments
-                .iter()
-                .map(|s| s.end_time)
-                .fold(0.0_f64, f64::max);
-            let ended_at =
-                meeting.started_at + chrono::Duration::milliseconds((duration * 1000.0) as i64);
-            meeting.duration_seconds = duration;
-            meeting.ended_at = Some(ended_at);
-            if meeting.recording_sessions.is_empty() {
+
+            let closed_segment_count = meeting
+                .recording_sessions
+                .last()
+                .map(|s| s.end_segment_index)
+                .unwrap_or(0);
+            let total_segment_count = meeting.segments.len() as u64;
+            if total_segment_count > closed_segment_count {
+                let crashed_segments = &meeting.segments[closed_segment_count as usize..];
+                let crashed_duration = crashed_segments
+                    .iter()
+                    .map(|s| s.end_time)
+                    .fold(0.0_f64, f64::max);
+                // The gap between sessions (time spent stopped before the
+                // resume that crashed) isn't recorded anywhere, so the best
+                // available start is where the previous session left off.
+                let crashed_started_at = meeting
+                    .recording_sessions
+                    .last()
+                    .map(|s| s.ended_at)
+                    .unwrap_or(meeting.started_at);
+                let crashed_ended_at = crashed_started_at
+                    + chrono::Duration::milliseconds((crashed_duration * 1000.0) as i64);
                 meeting
                     .recording_sessions
                     .push(MeetingRecordingSession::completed(
                         format!("{id}-recovered"),
-                        meeting.started_at,
-                        ended_at,
-                        0,
-                        meeting.segments.len() as u64,
+                        crashed_started_at,
+                        crashed_ended_at,
+                        closed_segment_count,
+                        total_segment_count,
                     ));
             }
+
+            meeting.duration_seconds = meeting
+                .recording_sessions
+                .iter()
+                .map(|s| s.duration_seconds)
+                .sum();
+            meeting.ended_at = meeting.recording_sessions.last().map(|s| s.ended_at);
+
             self.save_meeting(&meeting)?;
             recovered += 1;
         }
@@ -896,7 +945,7 @@ mod tests {
         empty.ended_at = None;
         db.upsert_meeting_header(&empty).unwrap();
 
-        let recovered = db.recover_unfinished_meetings().unwrap();
+        let recovered = db.recover_unfinished_meetings_with(&|_| Ok(false)).unwrap();
         assert_eq!(recovered, 1);
 
         let salvaged = db.load_meeting("crashed").unwrap();
@@ -906,6 +955,135 @@ mod tests {
         assert_eq!(salvaged.segments.len(), 1);
 
         assert!(!db.meeting_exists("empty").unwrap(), "empty shell pruned");
+    }
+
+    #[test]
+    fn recover_unfinished_closes_resumed_session_without_clobbering_first() {
+        use crate::engine::TranscriptionSegment;
+        use crate::transcript::MeetingRecordingSession;
+
+        let (db, _dir) = test_db();
+
+        let seg = |t: &str, i: f64| TranscriptionSegment {
+            text: t.to_string(),
+            start_time: i,
+            end_time: i + 1.0,
+            is_final: true,
+            language: None,
+            confidence: None,
+            speaker: None,
+        };
+
+        let started_at = chrono::Utc::now();
+        let first_session_ended_at = started_at + chrono::Duration::seconds(300);
+
+        // A resumed meeting: one session already closed (5 segments), then a
+        // second session started and crashed before it was ever closed.
+        let mut resumed = sample_meeting("resumed");
+        resumed.started_at = started_at;
+        resumed.segments.clear();
+        resumed.ended_at = None;
+        resumed.recording_sessions = vec![MeetingRecordingSession::completed(
+            "resumed-session-0".to_string(),
+            started_at,
+            first_session_ended_at,
+            0,
+            5,
+        )];
+        db.upsert_meeting_header(&resumed).unwrap();
+
+        let first_session_segments: Vec<TranscriptionSegment> = (0..5)
+            .map(|i| seg(&format!("closed{i}"), i as f64))
+            .collect();
+        db.append_segments("resumed", &first_session_segments, 0)
+            .unwrap();
+
+        // The resumed session's clock restarts near zero (segment timestamps
+        // are relative to their own session), and it crashes 3 seconds in.
+        let crashed_session_segments = vec![
+            seg("resumed0", 0.0),
+            seg("resumed1", 1.0),
+            seg("resumed2", 2.0),
+        ];
+        db.append_segments("resumed", &crashed_session_segments, 5)
+            .unwrap();
+
+        let recovered = db.recover_unfinished_meetings_with(&|_| Ok(false)).unwrap();
+        assert_eq!(recovered, 1);
+
+        let salvaged = db.load_meeting("resumed").unwrap();
+        assert_eq!(
+            salvaged.recording_sessions.len(),
+            2,
+            "the crashed session must be closed, not merged into the first"
+        );
+
+        let first = &salvaged.recording_sessions[0];
+        assert_eq!(
+            first.end_segment_index, 5,
+            "first session must be untouched"
+        );
+
+        let last = &salvaged.recording_sessions[1];
+        assert_eq!(last.start_segment_index, 5);
+        assert_eq!(
+            last.end_segment_index, 8,
+            "must cover only the new segments"
+        );
+        assert_eq!(
+            last.started_at, first_session_ended_at,
+            "with no gap information, the new session starts where the previous one ended"
+        );
+
+        let expected_duration = first.duration_seconds + last.duration_seconds;
+        assert_eq!(
+            salvaged.duration_seconds, expected_duration,
+            "duration must be the sum of session durations, not max(end_time) across all segments"
+        );
+        assert_eq!(salvaged.ended_at, Some(last.ended_at));
+    }
+
+    #[test]
+    fn recover_unfinished_keeps_meeting_when_audio_recorded_but_no_segments() {
+        let (db, _dir) = test_db();
+        let id = "empty-shell-with-audio";
+
+        // Crash before the first segment flush: audio was recorded, but no
+        // segments ever made it to the DB.
+        let mut shell = sample_meeting(id);
+        shell.segments.clear();
+        shell.ended_at = None;
+        db.upsert_meeting_header(&shell).unwrap();
+
+        let recovered = db
+            .recover_unfinished_meetings_with(&|meeting_id| Ok(meeting_id == id))
+            .unwrap();
+        assert_eq!(recovered, 1);
+        assert!(
+            db.meeting_exists(id).unwrap(),
+            "a meeting with recorded audio must survive so get_meeting_audio can still find it"
+        );
+
+        let salvaged = db.load_meeting(id).unwrap();
+        assert!(
+            salvaged.ended_at.is_some(),
+            "must be finalized, not left unfinished forever"
+        );
+    }
+
+    #[test]
+    fn recover_unfinished_prunes_empty_shell_without_audio() {
+        let (db, _dir) = test_db();
+        let id = "empty-shell-no-audio";
+
+        let mut shell = sample_meeting(id);
+        shell.segments.clear();
+        shell.ended_at = None;
+        db.upsert_meeting_header(&shell).unwrap();
+
+        let recovered = db.recover_unfinished_meetings_with(&|_| Ok(false)).unwrap();
+        assert_eq!(recovered, 0, "a pruned shell is not a salvaged meeting");
+        assert!(!db.meeting_exists(id).unwrap(), "empty shell pruned");
     }
 
     #[test]
@@ -956,5 +1134,25 @@ mod tests {
         db.save_edited_transcript("m1", None).unwrap();
         let edited = db.load_edited_transcript("m1").unwrap();
         assert!(edited.is_none());
+    }
+    #[test]
+    fn recover_unfinished_preserves_shell_when_audio_check_fails() {
+        let (db, _dir) = test_db();
+        let id = "empty-shell-io-error";
+
+        let mut shell = sample_meeting(id);
+        shell.segments.clear();
+        shell.ended_at = None;
+        db.upsert_meeting_header(&shell).unwrap();
+
+        let err = db
+            .recover_unfinished_meetings_with(&|_| Err("simulated IO error".to_string()))
+            .unwrap_err();
+        assert_eq!(err, "simulated IO error");
+
+        assert!(
+            db.meeting_exists(id).unwrap(),
+            "empty shell must be preserved if we cannot determine if it has audio"
+        );
     }
 }
