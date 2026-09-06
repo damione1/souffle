@@ -209,6 +209,16 @@ pub trait TranscriptionEngine {
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn reset_state(&mut self) -> Result<(), EngineError>;
+    /// Reset the engine's internal state mid-session without rewinding the
+    /// transcript: the timeline carries over so words after the reset keep
+    /// timestamps continuous with the ones before it. Each engine implements
+    /// this against whatever it tracks as session-elapsed time (Kyutai's
+    /// per-lane epoch origin, Whisper/Parakeet's `consumed_samples`); the
+    /// default here is only a fallback for an engine that overrides neither,
+    /// and simply rewinds like a session-start `reset_state`.
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.reset_state()
+    }
     /// Audio format requirements for this engine's inference pipeline.
     /// Used by the audio capture thread (target sample rate) and the
     /// inference pipeline (chunk size) to adapt to each engine.

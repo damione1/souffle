@@ -1219,22 +1219,7 @@ fn run_session_loop(
                 let _ = snapshot.emit(app);
             }
             match action {
-                Some(StallAction::Reset) => {
-                    warn!(
-                        "Session {session_id} stalled for 30s with no frames processed; \
-                         attempting in-place engine reset"
-                    );
-                    // Match the panic protection already used for engine
-                    // calls in this loop (mode.step / catch_engine below): a
-                    // broken engine must not take the actor thread down
-                    // while we try to recover it.
-                    match catch_engine(|| engine.reset_state()) {
-                        Ok(()) => info!("Session {session_id}: stall recovery reset succeeded"),
-                        Err(e) => {
-                            warn!("Session {session_id}: stall recovery reset failed: {e}")
-                        }
-                    }
-                }
+                Some(StallAction::Reset) => attempt_stall_recovery_reset(engine, session_id),
                 Some(StallAction::Abort) => {
                     let message = "The transcription engine stopped responding; \
                                     the recording so far was saved."
@@ -1563,6 +1548,28 @@ fn finish_session(
     }
 }
 
+/// Attempt an in-place engine reset as part of stall recovery. The session
+/// is still live when this fires, so it must go through
+/// `reset_state_preserving_timeline` and not the plain `reset_state` used at
+/// session boundaries: the latter would silently rewind every timestamp
+/// after the reset to 0 (SOU-002). Broken out of `run_session_loop` so this
+/// one branch can be unit tested directly against a mock engine, without
+/// driving the real `SessionHealth`/`StallRecovery` timing (30+ real
+/// seconds) through the full session loop.
+fn attempt_stall_recovery_reset(engine: &mut dyn TranscriptionEngine, session_id: u64) {
+    warn!(
+        "Session {session_id} stalled for 30s with no frames processed; \
+         attempting in-place engine reset"
+    );
+    // Match the panic protection already used for engine calls in this loop
+    // (mode.step / catch_engine below): a broken engine must not take the
+    // actor thread down while we try to recover it.
+    match catch_engine(|| engine.reset_state_preserving_timeline()) {
+        Ok(()) => info!("Session {session_id}: stall recovery reset succeeded"),
+        Err(e) => warn!("Session {session_id}: stall recovery reset failed: {e}"),
+    }
+}
+
 /// Run a fallible engine call, converting a panic into an `Err` so a bug in the
 /// engine/Metal/candle path degrades to a logged error instead of unwinding out
 /// of the actor thread (or, under abort, taking down the whole process).
@@ -1650,7 +1657,7 @@ mod tests {
 
     use super::{
         EngineActorHandle, SessionConfig, SessionMode, SessionSummary, SingleMode, TextFilterChain,
-        finish_session,
+        attempt_stall_recovery_reset, finish_session,
     };
 
     /// Helper: create a disabled filter config for tests (no VAD, no text filters).
@@ -2722,6 +2729,36 @@ mod tests {
         assert!(
             wait_for(|| reset_count.load(Ordering::SeqCst) >= 4, Duration::from_secs(2)),
             "post-session pre-warm resets back to single-stream"
+        );
+    }
+
+    // Driving the stall-recovery ladder end to end through `run_session_loop`
+    // would need `SessionHealth` to observe ~35s of continuous real elapsed
+    // time (5s STALL_THRESHOLD + 30s RESET_AFTER), since it reads
+    // `Instant::now()` internally with no seam for a fake clock. That is
+    // impractical for a unit test, so this instead calls the extracted
+    // `attempt_stall_recovery_reset` directly: it is exactly the code
+    // `run_session_loop` runs once `StallRecovery` (already unit tested
+    // against synthetic `Instant`s in `pipeline::health`) decides to reset,
+    // so this covers the actual wiring bug this ticket is about: that stall
+    // recovery calls the timeline-preserving reset, not the plain one.
+    #[test]
+    fn stall_recovery_reset_calls_the_timeline_preserving_variant() {
+        let mut mock = MockEngine::new();
+        let reset_count = mock.reset_state_count_handle();
+        let preserving_count = mock.reset_state_preserving_count_handle();
+
+        attempt_stall_recovery_reset(&mut mock, 1);
+
+        assert_eq!(
+            preserving_count.load(Ordering::SeqCst),
+            1,
+            "stall recovery must call reset_state_preserving_timeline"
+        );
+        assert_eq!(
+            reset_count.load(Ordering::SeqCst),
+            0,
+            "stall recovery must not call the plain reset_state, which rewinds the timeline"
         );
     }
 }

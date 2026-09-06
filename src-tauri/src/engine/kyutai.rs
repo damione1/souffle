@@ -434,6 +434,27 @@ impl KyutaiEngine {
         *frames = 0;
     }
 
+    /// Compute the epoch origins and monotonic floors to carry into a
+    /// rebuilt model, by applying `credit_lane_epoch`'s arithmetic to every
+    /// lane. Used by a stall-recovery rebuild, which must not rewind the
+    /// transcript the way a session-boundary `reset_state` deliberately
+    /// does. `last_emitted_start` already reflects each lane's true
+    /// wall-clock position and is returned unchanged.
+    fn carry_timeline_across_rebuild(
+        epoch_origin_seconds: &[f64],
+        time_offset_seconds: &[f64],
+        frames_since_lane_reset: &[usize],
+        last_emitted_start: &[f64],
+    ) -> (Vec<f64>, Vec<f64>) {
+        let mut origin = epoch_origin_seconds.to_vec();
+        let mut offset = time_offset_seconds.to_vec();
+        let mut frames = frames_since_lane_reset.to_vec();
+        for lane in 0..origin.len() {
+            Self::credit_lane_epoch(&mut origin, &mut offset, &mut frames, lane);
+        }
+        (origin, last_emitted_start.to_vec())
+    }
+
     fn pending_to_segment(pending: PendingWord, end_time: f64) -> TranscriptionSegment {
         TranscriptionSegment {
             text: pending.text,
@@ -862,12 +883,38 @@ impl KyutaiEngine {
     /// Full rebuild of Mimi + LM + State from disk because moshi's
     /// State::reset() does NOT reset model_step_idx, causing RoPE
     /// positional encoding to start at the wrong offset with empty KV caches.
-    /// Teardown and rebuild use separate autorelease pools so stale Metal
-    /// objects are drained before a fresh device/model is created.
     ///
     /// Mid-session freezes should use soft `refresh_loaded` instead; this
     /// full rebuild remains for session boundaries and diarize mode changes.
+    /// A genuinely new session should start its timeline at zero, so this
+    /// does not carry the old model's timeline over.
     pub fn reset_state(&mut self) -> Result<(), EngineError> {
+        self.rebuild_model(false)?;
+        info!("ASR state rebuilt for new session");
+        Ok(())
+    }
+
+    /// Same full rebuild as `reset_state`, but for stall recovery: the
+    /// session is still ongoing, so every lane's elapsed audio is credited
+    /// into the rebuilt model's epoch origin first, and the monotonic floors
+    /// carry over too. Without this, a stall-recovery rebuild would silently
+    /// rewind every subsequent timestamp to 0 (see SOU-002), and the
+    /// `monotonic_time` safety net can't catch it because it is the floor
+    /// that gets zeroed.
+    pub fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.rebuild_model(true)?;
+        info!("ASR state rebuilt mid-session, timeline preserved");
+        Ok(())
+    }
+
+    /// Shared teardown-and-rebuild for `reset_state` and
+    /// `reset_state_preserving_timeline`. Teardown and rebuild use separate
+    /// autorelease pools so stale Metal objects are drained before a fresh
+    /// device/model is created. Everything but the timeline (KV state,
+    /// `frames_since_refresh`, `refresh_count`, `vad_pause_streak`,
+    /// `language_tracker`, `pending_words`, `prefix_pending`) is always
+    /// reinitialised: the point of the reset is to discard the wedged state.
+    fn rebuild_model(&mut self, preserve_timeline: bool) -> Result<(), EngineError> {
         FRAME_COUNT.store(0, Ordering::Relaxed);
         if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
             *dbg = None;
@@ -882,6 +929,24 @@ impl KyutaiEngine {
         let batch_size = self.batch_size();
         let meeting_language_prior = self.meeting_language_prior;
         let old = self.model.take().ok_or(EngineError::NotInitialized)?;
+
+        // Read the timeline off the old model before its fields are moved
+        // into the drop/rebuild closures below.
+        let carried_timeline = preserve_timeline.then(|| {
+            Self::carry_timeline_across_rebuild(
+                &old.epoch_origin_seconds,
+                &old.time_offset_seconds,
+                &old.frames_since_lane_reset,
+                &old.last_emitted_start,
+            )
+        });
+        // A word mid-utterance when the rebuild happens has no EndWord yet
+        // and is silently dropped by the `..` below: there is no return path
+        // here for a trailing segment without a larger change to this
+        // reset's return type, so this is only a log breadcrumb, not a fix.
+        let dropped_pending = old.pending_words.iter().filter(|w| w.is_some()).count();
+        let dropped_orphaned = old.orphaned_words.len();
+
         let LoadedModel {
             state: old_state,
             text_tokenizer,
@@ -896,7 +961,7 @@ impl KyutaiEngine {
             drop(old_device);
         });
 
-        let rebuilt = with_autorelease_pool(move || -> Result<LoadedModel, EngineError> {
+        let mut rebuilt = with_autorelease_pool(move || -> Result<LoadedModel, EngineError> {
             let device = Self::select_device()?;
             Self::build_loaded_model(
                 device,
@@ -908,8 +973,34 @@ impl KyutaiEngine {
             )
         })?;
 
+        if let Some((epoch_origin_seconds, last_emitted_start)) = carried_timeline {
+            // The rebuilt model's vectors are sized from `batch_size`, so a
+            // carried vector should be the same length; fall back to the
+            // fresh (zeroed) timeline rather than indexing blindly if not.
+            if epoch_origin_seconds.len() == rebuilt.epoch_origin_seconds.len()
+                && last_emitted_start.len() == rebuilt.last_emitted_start.len()
+            {
+                rebuilt.epoch_origin_seconds = epoch_origin_seconds;
+                rebuilt.last_emitted_start = last_emitted_start;
+            } else {
+                warn!(
+                    old_lanes = epoch_origin_seconds.len(),
+                    new_lanes = rebuilt.epoch_origin_seconds.len(),
+                    "Stall recovery rebuild changed lane count; timeline not carried over"
+                );
+            }
+        }
+
+        if preserve_timeline && (dropped_pending > 0 || dropped_orphaned > 0) {
+            warn!(
+                dropped_pending,
+                dropped_orphaned,
+                "Stall recovery rebuild dropped in-flight word(s) with no EndWord: \
+                 the transcript is missing whatever was being said right before the freeze"
+            );
+        }
+
         self.model = Some(rebuilt);
-        info!("ASR state rebuilt for new session");
         Ok(())
     }
 }
@@ -1107,6 +1198,10 @@ impl TranscriptionEngine for KyutaiEngine {
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
         KyutaiEngine::reset_state(self)
+    }
+
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        KyutaiEngine::reset_state_preserving_timeline(self)
     }
 
     fn supports_diarization(&self) -> bool {
@@ -1314,6 +1409,69 @@ mod tests {
         assert_eq!(origin[1], 58.0);
         assert_eq!(offset[1], 1.04);
         assert_eq!(frames[1], 300);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_credits_a_lane_mid_epoch() {
+        // 10s of real audio decoded (125 frames at 12.5 fps), no prefix left
+        // to subtract: the full 10s must be credited into the origin.
+        let origin = [10.0f64];
+        let offset = [0.0f64];
+        let frames = [125usize];
+        let last_emitted = [9.5f64];
+
+        let (carried_origin, carried_last_emitted) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![20.0]);
+        // Monotonic floors are copied through untouched: they already reflect
+        // each lane's true wall-clock position.
+        assert_eq!(carried_last_emitted, vec![9.5]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_leaves_an_already_credited_lane_unchanged() {
+        // Freshly refreshed lane: no frames decoded since its last credit.
+        let origin = [42.0f64];
+        let offset = [0.0f64];
+        let frames = [0usize];
+        let last_emitted = [42.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![42.0]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_does_not_double_count_the_prefix() {
+        // Epoch opened with a 13-frame (1.04s) silence prefix and only that
+        // prefix has been fed so far: the prefix must not itself be credited
+        // as real audio.
+        let origin = [5.0f64];
+        let offset = [1.04f64];
+        let frames = [13usize];
+        let last_emitted = [5.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![5.0]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_clamps_a_negative_credit_at_zero() {
+        // Fewer frames decoded than the prefix accounts for (shouldn't
+        // happen, but `credit_lane_epoch` clamps rather than going negative).
+        let origin = [7.0f64];
+        let offset = [1.04f64];
+        let frames = [5usize];
+        let last_emitted = [7.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![7.0]);
     }
 
     #[test]
