@@ -161,10 +161,14 @@ impl AppStateMachine {
             // stop widens the `Stopping` window, so an abort can land while the
             // machine is Stopping (or already Ready) — without these arms it would
             // hit the invalid-transition catch-all and stick in `Stopping`.
+            // `Unloading` is the same trap: unload_model can refuse while a
+            // session is still on the actor, and without Fail the process stays
+            // Unloading until restart.
             (RecordingDictation { profile, .. }, Fail { message })
             | (RecordingMeeting { profile, .. }, Fail { message })
             | (Stopping { profile, .. }, Fail { message })
-            | (Ready { profile }, Fail { message }) => Ok(Error {
+            | (Ready { profile }, Fail { message })
+            | (Unloading { profile, .. }, Fail { message }) => Ok(Error {
                 message,
                 recovery: ErrorRecovery::RetryFromReady { profile },
             }),
@@ -440,6 +444,53 @@ mod tests {
             .unwrap();
         let state = state.transition(StateAction::UnloadComplete).unwrap();
         assert!(matches!(state, AppStateMachine::Downloaded { .. }));
+    }
+
+    #[test]
+    fn unloading_fail_is_recoverable_from_ready() {
+        let profile = test_profile();
+        let unloading = AppStateMachine::Ready {
+            profile: profile.clone(),
+        }
+        .transition(StateAction::Unload {
+            next_profile: Some(other_profile()),
+        })
+        .unwrap();
+        assert!(matches!(unloading, AppStateMachine::Unloading { .. }));
+
+        assert!(unloading.clone().transition(StateAction::Recover).is_err());
+        assert!(
+            unloading
+                .clone()
+                .transition(StateAction::StartLoad {
+                    profile: other_profile(),
+                })
+                .is_err()
+        );
+
+        let failed = unloading
+            .transition(StateAction::Fail {
+                message: "Recording session active".into(),
+            })
+            .unwrap();
+        match &failed {
+            AppStateMachine::Error {
+                recovery: ErrorRecovery::RetryFromReady { profile: p },
+                message,
+            } => {
+                assert_eq!(p.model_id, profile.model_id);
+                assert_eq!(message, "Recording session active");
+            }
+            other => panic!("Expected Error RetryFromReady, got {other:?}"),
+        }
+
+        let recovered = failed.transition(StateAction::Recover).unwrap();
+        match recovered {
+            AppStateMachine::Ready { profile: p } => {
+                assert_eq!(p.model_id, profile.model_id)
+            }
+            other => panic!("Expected Ready, got {other:?}"),
+        }
     }
 
     // --- Error and recovery ---
