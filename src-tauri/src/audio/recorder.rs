@@ -76,29 +76,47 @@ pub fn session_path(meeting_id: &str, session_index: usize) -> PathBuf {
 
 /// Recorded session files in `dir`, sorted by session index. Ignores
 /// anything that isn't `{index}.ogg`.
-pub fn list_session_files_in(dir: &std::path::Path) -> Vec<(usize, PathBuf)> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
+pub fn list_session_files_in(dir: &std::path::Path) -> std::io::Result<Vec<(usize, PathBuf)>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
     };
-    let mut sessions: Vec<(usize, PathBuf)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("ogg") {
-                return None;
-            }
-            let session_index = path.file_stem()?.to_str()?.parse::<usize>().ok()?;
-            Some((session_index, path))
-        })
-        .collect();
+    let mut sessions = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("ogg") {
+            continue;
+        }
+        if let Some(session_index) = path.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse::<usize>().ok()) {
+            sessions.push((session_index, path));
+        }
+    }
     sessions.sort_by_key(|(index, _)| *index);
-    sessions
+    Ok(sessions)
 }
 
 /// Recorded session files for a meeting (empty if recording was never
 /// enabled, the directory is missing, or nothing survived retention).
-pub fn list_session_files(meeting_id: &str) -> Vec<(usize, PathBuf)> {
+pub fn list_session_files(meeting_id: &str) -> std::io::Result<Vec<(usize, PathBuf)>> {
     list_session_files_in(&meeting_recordings_dir(meeting_id))
+}
+
+/// One past the highest session index already listed (0 if none). Pure
+/// helper behind [`next_session_index`], split out so the derivation can be
+/// tested without touching the filesystem.
+fn next_session_index_from(sessions: &[(usize, PathBuf)]) -> usize {
+    sessions.last().map(|(index, _)| index + 1).unwrap_or(0)
+}
+
+/// The on-disk session index a new recording for `meeting_id` should use:
+/// one past the highest `{index}.ogg` already on disk. Deliberately not
+/// `recording_sessions.len()` from the DB: if that metadata ever undercounts
+/// (a crash recovery that failed to close a session, say), trusting it would
+/// have `File::create` truncate an existing recording instead of appending a
+/// new one.
+pub fn next_session_index(meeting_id: &str) -> std::io::Result<usize> {
+    Ok(next_session_index_from(&list_session_files(meeting_id)?))
 }
 
 fn opus_head(pre_skip: u16, input_rate: u32) -> Vec<u8> {
@@ -422,7 +440,7 @@ mod tests {
         std::fs::write(dir.path().join("notes.txt"), b"nope").unwrap();
         std::fs::write(dir.path().join("not-an-index.ogg"), b"skip").unwrap();
 
-        let listed = list_session_files_in(dir.path());
+        let listed = list_session_files_in(dir.path()).unwrap();
         assert_eq!(
             listed.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
             vec![0, 1]
@@ -432,7 +450,22 @@ mod tests {
     #[test]
     fn list_session_files_in_missing_dir_is_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
-        assert!(list_session_files_in(&dir.path().join("missing")).is_empty());
+        assert!(list_session_files_in(&dir.path().join("missing")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn next_session_index_from_is_one_past_the_highest() {
+        let sessions = vec![
+            (0, PathBuf::from("0.ogg")),
+            (1, PathBuf::from("1.ogg")),
+            (3, PathBuf::from("3.ogg")),
+        ];
+        assert_eq!(next_session_index_from(&sessions), 4);
+    }
+
+    #[test]
+    fn next_session_index_from_empty_is_zero() {
+        assert_eq!(next_session_index_from(&[]), 0);
     }
 
     #[test]

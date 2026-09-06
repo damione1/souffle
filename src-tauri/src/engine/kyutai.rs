@@ -19,13 +19,17 @@ use crate::settings::MeetingTranscriptionLanguage;
 /// stt-rs example (`prs[2][0] > 0.5`).
 const VAD_PAUSE_HEAD: usize = 2;
 const VAD_PAUSE_THRESHOLD: f32 = 0.5;
+/// RMS below this on an 80 ms Mimi frame counts as pause when the checkpoint
+/// has no semantic VAD heads. Same order as Whisper/Parakeet's silence floor
+/// on a 10 ms frame: enough to refuse a refresh mid-word, not a room-tone gate.
+const ENERGY_PAUSE_RMS: f32 = 0.01;
+
+/// Tensor name `checkpoint_has_semantic_vad` looks up. The 1B semantic-VAD export
+/// ships `extra_heads.0..3`; the 2.6B export has none.
+const EXTRA_HEADS_PROBE_TENSOR: &str = "extra_heads.0.weight";
 /// Safety margin (frames) on top of the ASR delay before trusting the VAD
 /// pause streak: semantic VAD can fire slightly before speech fully clears.
 const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
-/// Semantic-pause streak before a soft context refresh is allowed. ~0.5s at
-/// 12.5 Hz — long enough to sit between utterances, short enough to fire
-/// before the LM context window saturates.
-const REFRESH_PAUSE_FRAMES: usize = 6;
 /// Soft refresh fires at this fraction of `config.context` when pausing
 /// (Kyutai/Unmute recommend clearing KV between speech turns).
 const REFRESH_SOFT_CONTEXT_NUM: usize = 6;
@@ -136,12 +140,25 @@ enum RefreshDecision {
     Lane { batch_idx: usize, kind: RefreshKind },
 }
 
+/// Pause streak long enough that the ASR delay window holds only silence.
+/// Shared by `decide_refresh` (when a KV clear is safe) and `tail_drained_for`
+/// (when the stop-time silence suffix can be skipped), so the two cannot drift.
+fn drained_pause_frames(emission_delay_frames: usize) -> usize {
+    emission_delay_frames + VAD_FLUSH_MARGIN_FRAMES
+}
+
 /// Decide proactive KV refresh before the next frame.
+///
+/// `emission_delay_frames` is how far the decoder lags the audio (`asr_delay_in_tokens`).
+/// A pause-aligned clear is only safe once the VAD streak covers that lag plus
+/// [`VAD_FLUSH_MARGIN_FRAMES`]: shorter pauses still have an in-flight word (and
+/// the last `audio_delay` seconds of audio) sitting in `ItemState`.
 fn decide_refresh(
     frames_since_refresh: usize,
     context: usize,
     vad_pause_streak: &[usize],
     batch_size: usize,
+    emission_delay_frames: usize,
 ) -> RefreshDecision {
     if context == 0 || frames_since_refresh == 0 {
         return RefreshDecision::None;
@@ -157,10 +174,11 @@ fn decide_refresh(
         return RefreshDecision::None;
     }
 
+    let pause_threshold = drained_pause_frames(emission_delay_frames);
     let pausing: Vec<usize> = vad_pause_streak
         .iter()
         .enumerate()
-        .filter(|(_, streak)| **streak >= REFRESH_PAUSE_FRAMES)
+        .filter(|(_, streak)| **streak >= pause_threshold)
         .map(|(idx, _)| idx)
         .collect();
 
@@ -173,17 +191,53 @@ fn decide_refresh(
     }
 
     if pausing.len() == 1 {
-        let paused = pausing[0];
-        let other = 1 - paused;
-        if vad_pause_streak.get(other).copied().unwrap_or(0) < REFRESH_PAUSE_FRAMES {
-            return RefreshDecision::Lane {
-                batch_idx: paused,
-                kind: RefreshKind::SoftPause,
-            };
-        }
+        return RefreshDecision::Lane {
+            batch_idx: pausing[0],
+            kind: RefreshKind::SoftPause,
+        };
     }
 
     RefreshDecision::Full(RefreshKind::SoftPause)
+}
+
+/// Calculate the Root Mean Square (RMS) energy of a PCM audio slice.
+/// Returns 0.0 if the slice is empty.
+fn pcm_rms(pcm: &[f32]) -> f32 {
+    if pcm.is_empty() {
+        return 0.0;
+    }
+    let sum: f32 = pcm.iter().map(|s| s * s).sum();
+    (sum / pcm.len() as f32).sqrt()
+}
+
+/// Determine if a PCM audio slice is a pause based on its RMS energy.
+/// Used when the checkpoint has no semantic VAD heads.
+fn is_energy_pause(pcm: &[f32]) -> bool {
+    pcm_rms(pcm) < ENERGY_PAUSE_RMS
+}
+
+/// Advance per-lane pause streaks from frame energy. Used when the checkpoint
+/// has no semantic VAD heads, so `AsrMsg::Step` is never emitted and the
+/// heads-based `note_vad_pause` path cannot run.
+fn note_energy_pause_streaks(streaks: &mut [usize], lane_pcm: &[&[f32]]) {
+    for (idx, pcm) in lane_pcm.iter().enumerate() {
+        if let Some(streak) = streaks.get_mut(idx) {
+            if is_energy_pause(pcm) {
+                *streak = streak.saturating_add(1);
+            } else {
+                *streak = 0;
+            }
+        }
+    }
+}
+
+/// Helper function to check if the extra heads probe tensor is present in a list of tensor names.
+/// Used in testing to simulate safetensors metadata inspection.
+#[cfg(test)]
+fn has_extra_heads_tensor(tensor_names: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
+    tensor_names
+        .into_iter()
+        .any(|n| n.as_ref() == EXTRA_HEADS_PROBE_TENSOR)
 }
 
 /// Loaded model components — kept together so they can be used by the inference loop
@@ -215,8 +269,14 @@ struct LoadedModel {
     frames_since_refresh: usize,
     /// Soft context refreshes performed this session (diagnostics).
     refresh_count: u64,
-    /// Consecutive frames where the semantic VAD pause head fired, per batch lane.
+    /// Consecutive pause frames, per batch lane. Sourced from the semantic
+    /// VAD extra heads when the checkpoint has them, otherwise from frame
+    /// energy (`ENERGY_PAUSE_RMS`). A streak stuck at zero after load means
+    /// speech (or that no frames have been stepped yet), not "no signal".
     vad_pause_streak: Vec<usize>,
+    /// Whether this checkpoint exposed `extra_heads.*` at load. When false,
+    /// `AsrMsg::Step` never arrives and pause detection falls back to energy.
+    has_extra_heads: bool,
     /// Per-lane LID and mismatch streak tracking.
     language_tracker: LanguageTracker,
     /// Word waiting for its EndWord (or the next Word) before emit, per lane.
@@ -281,6 +341,7 @@ impl KyutaiEngine {
         model_path: &Path,
         config: &KyutaiConfig,
         batch_size: usize,
+        has_extra_heads: bool,
     ) -> Result<moshi::asr::State, EngineError> {
         let mimi_path = model_path.join(&config.mimi_name);
         let audio_tokenizer = moshi::mimi::load(
@@ -294,7 +355,6 @@ impl KyutaiEngine {
 
         let dtype = device.bf16_default_to_f32();
         let model_file = model_path.join("model.safetensors");
-        let has_extra_heads = Self::detect_extra_heads(&model_file)?;
         let vb_lm = unsafe {
             candle_nn::VarBuilder::from_mmaped_safetensors(&[&model_file], dtype, device)
                 .map_err(|e| EngineError::LoadError(format!("Model weights reload: {e}")))?
@@ -319,7 +379,19 @@ impl KyutaiEngine {
         batch_size: usize,
         meeting_language_prior: MeetingTranscriptionLanguage,
     ) -> Result<LoadedModel, EngineError> {
-        let state = Self::build_state(&device, &model_path, &config, batch_size)?;
+        let model_file = model_path.join("model.safetensors");
+        let has_extra_heads = Self::checkpoint_has_semantic_vad(&model_file);
+        if has_extra_heads {
+            info!("Kyutai checkpoint has semantic VAD extra heads");
+        } else {
+            warn!(
+                audio_delay_seconds = config.stt_config.audio_delay_seconds,
+                "Kyutai checkpoint has no semantic VAD extra heads; pause detection \
+                 falls back to frame energy. A hard KV refresh can still drop \
+                 in-flight speech if no quiet gap appears"
+            );
+        }
+        let state = Self::build_state(&device, &model_path, &config, batch_size, has_extra_heads)?;
         Ok(LoadedModel {
             state,
             text_tokenizer,
@@ -334,6 +406,7 @@ impl KyutaiEngine {
             frames_since_refresh: 0,
             refresh_count: 0,
             vad_pause_streak: vec![0; batch_size],
+            has_extra_heads,
             language_tracker: LanguageTracker::new(batch_size, meeting_language_prior),
             pending_words: vec![None; batch_size],
             orphaned_words: Vec::new(),
@@ -346,14 +419,21 @@ impl KyutaiEngine {
         (prefix_seconds * MIMI_FRAMES_PER_SECOND).ceil() as usize
     }
 
-    fn detect_extra_heads(model_file: &Path) -> Result<bool, EngineError> {
-        let file = File::open(model_file)
-            .map_err(|e| EngineError::LoadError(format!("Weights open failed: {e}")))?;
-        let mmap = unsafe { memmap2::Mmap::map(&file) }
-            .map_err(|e| EngineError::LoadError(format!("Weights mmap failed: {e}")))?;
-        let (_, metadata) = safetensors::tensor::SafeTensors::read_metadata(&mmap)
-            .map_err(|e| EngineError::LoadError(format!("Weights metadata read failed: {e}")))?;
-        Ok(metadata.info("extra_heads.0.weight").is_some())
+    /// Checks if the safetensors checkpoint contains semantic VAD extra heads.
+    /// Handles missing or corrupted metadata gracefully by returning false,
+    /// since the model load will either fail naturally later or succeed if it's
+    /// a valid checkpoint just lacking this metadata.
+    fn checkpoint_has_semantic_vad(model_file: &Path) -> bool {
+        let Ok(file) = File::open(model_file) else {
+            return false;
+        };
+        let Ok(mmap) = (unsafe { memmap2::Mmap::map(&file) }) else {
+            return false;
+        };
+        match safetensors::tensor::SafeTensors::read_metadata(&mmap) {
+            Ok((_, metadata)) => metadata.info(EXTRA_HEADS_PROBE_TENSOR).is_some(),
+            Err(_) => false,
+        }
     }
 
     fn synchronize_device(device: &Device, context: &str) -> Result<(), EngineError> {
@@ -626,6 +706,7 @@ impl KyutaiEngine {
             model.config.context,
             &model.vad_pause_streak,
             batch_size,
+            Self::emission_delay_frames(model),
         ) {
             RefreshDecision::None => {}
             RefreshDecision::Full(kind) => Self::refresh_loaded(model, kind)?,
@@ -643,8 +724,9 @@ impl KyutaiEngine {
     /// Whether the engine's own semantic VAD has paused long enough that
     /// every word already spoken has had time to clear the pipeline: a pause
     /// streak covering the emission delay, plus margin. Shared by `flush`
-    /// (skip the silence suffix) and the `tail_drained` trait method (cut a
-    /// single-stream drain window short) so the two can't drift apart.
+    /// (skip the silence suffix), `decide_refresh` (when a KV clear is safe),
+    /// and the `tail_drained` trait method (cut a single-stream drain window
+    /// short) so the three can't drift apart.
     ///
     /// Diarized mode always returns false: lane 0's pause streak says
     /// nothing about lane 1 (system audio), and `DiarizedMode` doesn't
@@ -656,7 +738,7 @@ impl KyutaiEngine {
         }
         let delay_frames = Self::emission_delay_frames(model);
         let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
-        pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES
+        pause_streak >= drained_pause_frames(delay_frames)
     }
 
     fn note_vad_pause(model: &mut LoadedModel, prs: &[Vec<f32>]) {
@@ -767,6 +849,9 @@ impl KyutaiEngine {
             *frames = frames.saturating_add(1);
         }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+        if !model.has_extra_heads {
+            note_energy_pause_streaks(&mut model.vad_pause_streak, &[chunk_data]);
+        }
         Ok(asr_msgs)
     }
 
@@ -790,6 +875,15 @@ impl KyutaiEngine {
             *frames = frames.saturating_add(1);
         }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+        if !model.has_extra_heads && data.len() >= 2 * MIMI_FRAME_SIZE {
+            note_energy_pause_streaks(
+                &mut model.vad_pause_streak,
+                &[
+                    &data[..MIMI_FRAME_SIZE],
+                    &data[MIMI_FRAME_SIZE..2 * MIMI_FRAME_SIZE],
+                ],
+            );
+        }
         Ok(asr_msgs)
     }
 
@@ -1345,18 +1439,102 @@ mod tests {
         assert_eq!(KyutaiEngine::prefix_frame_count(2.0), 25);
     }
 
+    /// stt-1b-en_fr: audio_delay_seconds = 0.5 → 6 frames at 12.5 Hz.
+    const STT_1B_DELAY: usize = 6;
+    /// stt-2.6b-en: audio_delay_seconds = 2.5 → 31 frames at 12.5 Hz.
+    const STT_26B_DELAY: usize = 31;
+
+    #[test]
+    fn drained_pause_frames_is_delay_plus_margin() {
+        assert_eq!(drained_pause_frames(STT_1B_DELAY), 12);
+        assert_eq!(drained_pause_frames(STT_26B_DELAY), 37);
+    }
+
+    #[test]
+    fn extra_heads_probe_matches_the_1b_tensor_name_only() {
+        assert!(has_extra_heads_tensor(["extra_heads.0.weight", "text_emb.weight"]));
+        assert!(!has_extra_heads_tensor(["text_emb.weight", "out_norm.weight"]));
+        assert!(!has_extra_heads_tensor(Vec::<&str>::new()));
+    }
+
+    #[test]
+    fn checkpoint_has_semantic_vad_handles_missing_file_gracefully() {
+        // Should return false rather than erroring out
+        assert!(!KyutaiEngine::checkpoint_has_semantic_vad(std::path::Path::new("/does/not/exist.safetensors")));
+    }
+
+    #[test]
+    fn energy_pause_treats_digital_silence_as_pause_and_speech_as_active() {
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let speech = vec![0.2f32; MIMI_FRAME_SIZE];
+        let nan_speech = vec![f32::NAN; MIMI_FRAME_SIZE];
+        let empty: Vec<f32> = vec![];
+        
+        assert!(is_energy_pause(&silence));
+        assert!(!is_energy_pause(&speech));
+        assert!(!is_energy_pause(&nan_speech)); // NaN is not < threshold
+        
+        assert_eq!(pcm_rms(&empty), 0.0);
+        assert!(is_energy_pause(&empty));
+    }
+
+    #[test]
+    fn energy_pause_streak_accumulates_on_quiet_frames_and_resets_on_speech() {
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let speech = vec![0.2f32; MIMI_FRAME_SIZE];
+        let mut streaks = [0usize, 0];
+
+        note_energy_pause_streaks(&mut streaks, &[&silence, &speech]);
+        assert_eq!(streaks, [1, 0]);
+        note_energy_pause_streaks(&mut streaks, &[&silence, &silence]);
+        assert_eq!(streaks, [2, 1]);
+        note_energy_pause_streaks(&mut streaks, &[&speech, &silence]);
+        assert_eq!(streaks, [0, 2]);
+    }
+
+    #[test]
+    fn energy_pause_streak_can_soft_refresh_a_checkpoint_without_vad_heads() {
+        // 2.6B: no AsrMsg::Step, streak stays 0 unless energy fills it.
+        // Without this fallback, 300 frames into a 375 context is HardDeadline
+        // or nothing — never SoftPause.
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let mut streaks = [0usize];
+        let drained = drained_pause_frames(STT_26B_DELAY);
+        for _ in 0..drained {
+            note_energy_pause_streaks(&mut streaks, &[&silence]);
+        }
+        assert_eq!(
+            decide_refresh(300, 375, &streaks, 1, STT_26B_DELAY),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[0], 1, STT_26B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
     #[test]
     fn decide_refresh_none_before_soft_window() {
         let streak = [0usize];
-        assert_eq!(decide_refresh(100, 375, &streak, 1), RefreshDecision::None);
-        assert_eq!(decide_refresh(224, 375, &streak, 1), RefreshDecision::None);
-        assert_eq!(decide_refresh(225, 375, &[0], 1), RefreshDecision::None);
+        assert_eq!(
+            decide_refresh(100, 375, &streak, 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(224, 375, &streak, 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(225, 375, &[0], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
     }
 
     #[test]
     fn decide_refresh_soft_pause_at_60_percent_context() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(225, 375, &[8], 1),
+            decide_refresh(225, 375, &[drained], 1, STT_1B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
     }
@@ -1364,25 +1542,39 @@ mod tests {
     #[test]
     fn decide_refresh_hard_deadline_near_context() {
         assert_eq!(
-            decide_refresh(350, 375, &[0], 1),
+            decide_refresh(350, 375, &[0], 1, STT_1B_DELAY),
             RefreshDecision::Full(RefreshKind::HardDeadline)
         );
         assert_eq!(
-            decide_refresh(350, 375, &[8], 1),
+            decide_refresh(
+                350,
+                375,
+                &[drained_pause_frames(STT_1B_DELAY)],
+                1,
+                STT_1B_DELAY
+            ),
             RefreshDecision::Full(RefreshKind::HardDeadline)
         );
     }
 
     #[test]
     fn decide_refresh_ignores_zero_context_or_fresh_epoch() {
-        assert_eq!(decide_refresh(400, 0, &[8], 1), RefreshDecision::None);
-        assert_eq!(decide_refresh(0, 375, &[8], 1), RefreshDecision::None);
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(400, 0, &[drained], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(0, 375, &[drained], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
     }
 
     #[test]
     fn decide_refresh_dual_one_lane_paused_other_active() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[8, 2], 2),
+            decide_refresh(300, 375, &[drained, 2], 2, STT_1B_DELAY),
             RefreshDecision::Lane {
                 batch_idx: 0,
                 kind: RefreshKind::SoftPause,
@@ -1392,9 +1584,45 @@ mod tests {
 
     #[test]
     fn decide_refresh_dual_both_paused_full_refresh() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[8, 10], 2),
+            decide_refresh(300, 375, &[drained, drained + 2], 2, STT_1B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+    }
+
+    #[test]
+    fn decide_refresh_flat_six_frame_pause_does_not_clear_while_delay_is_in_flight() {
+        // The old REFRESH_PAUSE_FRAMES = 6 sat exactly on the 1B delay and five
+        // times below the 2.6B delay. Either way, six frames of pause still
+        // hold an in-flight word.
+        assert_eq!(
+            decide_refresh(225, 375, &[6], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[6], 1, STT_26B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[8, 2], 2, STT_26B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
+    #[test]
+    fn decide_refresh_fires_once_the_delay_window_holds_only_silence() {
+        let drained = drained_pause_frames(STT_26B_DELAY);
+        assert_eq!(
+            decide_refresh(300, 375, &[drained], 1, STT_26B_DELAY),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, 2], 2, STT_26B_DELAY),
+            RefreshDecision::Lane {
+                batch_idx: 0,
+                kind: RefreshKind::SoftPause,
+            }
         );
     }
 

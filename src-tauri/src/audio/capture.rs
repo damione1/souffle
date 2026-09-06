@@ -244,7 +244,7 @@ fn pick_input_config_range(
             .iter()
             .find(|c| (c.min_sample_rate()..=c.max_sample_rate()).contains(&rate))
     {
-        return Some(range.clone());
+        return Some(*range);
     }
     candidates.first().cloned()
 }
