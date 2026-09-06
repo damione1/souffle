@@ -85,6 +85,7 @@
     "category_placeholder": "e.g. tech",
     "add_entry": "Add entry",
     "delete": "Delete",
+    "remove_alias": "Remove alias",
     "empty": "No custom dictionary entries yet.",
     "pronunciation": "Pronunciation",
     "pronunciation_placeholder": "e.g. vaysix",

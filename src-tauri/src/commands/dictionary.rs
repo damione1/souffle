@@ -1,19 +1,19 @@
 use tauri::State;
 
 use crate::db::Database;
+use crate::filter::learned_pair::{MAX_LEARNED_PAIRS, is_learned_pair_acceptable};
 use crate::filter::session_terms::derive_corrections_from_edit;
-use crate::filter::{pronunciation_aliases, DictionaryEntry};
+use crate::filter::{DictionaryEntry, pronunciation_aliases};
 use crate::state::AppState;
 
-const MAX_LEARNED_PAIRS: usize = 8;
-const MIN_TOKEN_LEN: usize = 3;
-
+/// Lists all current user dictionary entries from the database.
 #[tauri::command]
 #[specta::specta]
 pub fn list_dictionary(state: State<'_, AppState>) -> Result<Vec<DictionaryEntry>, String> {
     state.db.list_dictionary_entries()
 }
 
+/// Adds a new dictionary entry for text replacement.
 #[tauri::command]
 #[specta::specta]
 pub fn add_dictionary_entry(
@@ -31,6 +31,7 @@ pub fn add_dictionary_entry(
         .add_dictionary_entry(term, pronunciation.as_deref(), category.as_deref())
 }
 
+/// Updates an existing dictionary entry, including its term, pronunciation, and category.
 #[tauri::command]
 #[specta::specta]
 pub fn update_dictionary_entry(
@@ -49,12 +50,14 @@ pub fn update_dictionary_entry(
         .update_dictionary_entry(id, term, pronunciation.as_deref(), category.as_deref())
 }
 
+/// Deletes a specific dictionary entry by ID.
 #[tauri::command]
 #[specta::specta]
 pub fn delete_dictionary_entry(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     state.db.delete_dictionary_entry(id)
 }
 
+/// Clears all entries in the user dictionary.
 #[tauri::command]
 #[specta::specta]
 pub fn clear_dictionary(state: State<'_, AppState>) -> Result<(), String> {
@@ -72,6 +75,8 @@ pub fn learn_from_edit(
     persist_learned_corrections(&state.db, &original, &corrected)
 }
 
+/// Helper to extract learned corrections from an original/corrected text pair, filter them,
+/// and insert/update them in the database up to a maximum limit.
 pub(crate) fn persist_learned_corrections(
     db: &Database,
     original: &str,
@@ -95,12 +100,12 @@ pub(crate) fn persist_learned_corrections(
     Ok(persisted)
 }
 
+/// Checks if a given misspelling and term pair meets the threshold and safety rules for learning.
 fn is_persistable_pair(misspelling: &str, term: &str) -> bool {
-    misspelling.chars().count() >= MIN_TOKEN_LEN
-        && term.chars().count() >= MIN_TOKEN_LEN
-        && !misspelling.eq_ignore_ascii_case(term)
+    is_learned_pair_acceptable(misspelling, term)
 }
 
+/// Finds a dictionary entry that exactly matches the provided term (case-insensitive).
 fn find_entry_by_term<'a>(
     entries: &'a [DictionaryEntry],
     term: &str,
@@ -110,6 +115,7 @@ fn find_entry_by_term<'a>(
         .find(|entry| entry.term.eq_ignore_ascii_case(term))
 }
 
+/// Appends a new misspelling alias to an entry's pronunciation field, avoiding duplicates.
 fn append_misspelling_alias(entry: &DictionaryEntry, misspelling: &str) -> Option<String> {
     let existing = pronunciation_aliases(&entry.term, entry.pronunciation.as_deref());
     if existing
@@ -129,11 +135,13 @@ fn append_misspelling_alias(entry: &DictionaryEntry, misspelling: &str) -> Optio
     }
 }
 
+/// Determines if an SQLite error string matches a unique constraint violation.
 fn is_unique_constraint(err: &str) -> bool {
     let lower = err.to_ascii_lowercase();
     lower.contains("unique") || lower.contains("constraint failed")
 }
 
+/// Upserts an alias into the database, either adding a new entry or appending to an existing one.
 fn upsert_learned_alias(
     entries: &mut Vec<DictionaryEntry>,
     db: &Database,
@@ -160,6 +168,7 @@ fn upsert_learned_alias(
     }
 }
 
+/// Applies a misspelling alias update to a known dictionary entry both in DB and in-memory list.
 fn apply_alias_update(
     entries: &mut [DictionaryEntry],
     db: &Database,
@@ -272,11 +281,11 @@ mod learn_from_edit {
     fn persist_learned_corrections_caps_at_eight_pairs() {
         let (db, _dir) = test_db();
         let original = (0..11)
-            .map(|i| format!("mis{i:02}x"))
+            .map(|i| format!("Kubernetis{i:02}"))
             .collect::<Vec<_>>()
             .join(" ");
         let corrected = (0..11)
-            .map(|i| format!("term{i:02}x"))
+            .map(|i| format!("Kubernetes{i:02}"))
             .collect::<Vec<_>>()
             .join(" ");
 
@@ -315,5 +324,42 @@ mod learn_from_edit {
         let pronunciation = entries[0].pronunciation.as_deref().unwrap();
         assert!(pronunciation.contains("Kubernetis"));
         assert!(pronunciation.contains("Kubernates"));
+    }
+
+    #[test]
+    fn persist_learned_corrections_rejects_stopword_and_unrelated_pairs() {
+        let (db, _dir) = test_db();
+        assert_eq!(
+            persist_learned_corrections(&db, "on passe par Pierre", "on passe pour Pierre")
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            persist_learned_corrections(&db, "je pense que oui", "je crois que oui").unwrap(),
+            0
+        );
+        assert!(db.list_dictionary_entries().unwrap().is_empty());
+    }
+
+    #[test]
+    fn persist_learned_corrections_does_not_rewrite_function_words() {
+        use crate::filter::{PipelineConfig, build_text_filters};
+
+        let (db, _dir) = test_db();
+        persist_learned_corrections(&db, "on passe par Pierre", "on passe pour Pierre").unwrap();
+        let chain = build_text_filters(
+            &PipelineConfig {
+                vad_enabled: false,
+                vad_model_path: None,
+                filler_removal_enabled: false,
+                stutter_collapse_enabled: false,
+                dictionary_correction_enabled: true,
+            },
+            db.list_dictionary_entries().unwrap(),
+            &[],
+            &[],
+        );
+        assert_eq!(chain.apply("par ici"), "par ici");
+        assert_eq!(chain.apply("pour la revue"), "pour la revue");
     }
 }

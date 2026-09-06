@@ -194,7 +194,7 @@ pub fn apply_live_paragraph_edit(
     segment_end: u32,
     new_text: String,
 ) -> Result<(), String> {
-    use crate::filter::session_terms::derive_corrections_from_edit;
+    use crate::filter::session_terms::{cap_learned_pairs, derive_corrections_from_edit};
     use crate::lock_ext::MutexExt;
 
     let segment_start = segment_start as usize;
@@ -226,7 +226,8 @@ pub fn apply_live_paragraph_edit(
             .map(|segment| segment.text.as_str())
             .collect::<Vec<_>>()
             .join(" ");
-        let corrections = derive_corrections_from_edit(&original_text, &new_text);
+        let corrections =
+            cap_learned_pairs(derive_corrections_from_edit(&original_text, &new_text));
 
         redistribute_segment_texts(
             &mut meeting.new_segments[segment_start..segment_end],
