@@ -89,6 +89,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::stop_transcription,
             commands::list_audio_devices,
             commands::select_audio_device,
+            commands::get_input_sample_rate,
+            commands::reset_input_sample_rate,
             commands::is_laptop,
             commands::test_transcribe_wav,
             commands::paste_text,

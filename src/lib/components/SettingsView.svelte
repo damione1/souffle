@@ -204,6 +204,9 @@
         selectedDevice={controller.app.selectedDevice}
         pinUnavailable={controller.pinUnavailable}
         allowBluetoothMic={controller.app.settings.allow_bluetooth_mic}
+        sampleRate={controller.inputSampleRate}
+        sampleRateError={controller.inputSampleRateError}
+        resettingSampleRate={controller.resettingSampleRate}
         onDeviceChange={controller.onDeviceChange}
         onAllowBluetoothMicChange={controller.onAllowBluetoothMicChange}
         onRefreshDevices={controller.refreshDevices}
@@ -211,6 +214,7 @@
         onToggleHidden={controller.onToggleHidden}
         onRemoveDevice={controller.onRemoveDevice}
         onResetDevices={controller.onResetDevices}
+        onResetSampleRate={controller.onResetSampleRate}
       />
 
       <AudioSettingsSection

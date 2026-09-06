@@ -112,6 +112,8 @@ export interface SettingsApiMock {
   saveShortcuts: ReturnType<typeof vi.fn<(shortcuts: ShortcutSettings) => Promise<void>>>;
   listAudioDevices: ReturnType<typeof vi.fn<() => Promise<AudioInputDevice[]>>>;
   selectAudioDevice: ReturnType<typeof vi.fn<(deviceUid: string) => Promise<void>>>;
+  getInputSampleRate: ReturnType<typeof vi.fn<(deviceUid: string) => Promise<number>>>;
+  resetInputSampleRate: ReturnType<typeof vi.fn<(deviceUid: string) => Promise<number>>>;
 }
 
 export function createSettingsApiMock(
@@ -127,6 +129,8 @@ export function createSettingsApiMock(
       { uid: "usb-mic", name: "External USB Mic", transport: "usb", is_default: false },
     ]),
     selectAudioDevice: vi.fn<(deviceUid: string) => Promise<void>>().mockResolvedValue(undefined),
+    getInputSampleRate: vi.fn<(deviceUid: string) => Promise<number>>().mockResolvedValue(48_000),
+    resetInputSampleRate: vi.fn<(deviceUid: string) => Promise<number>>().mockResolvedValue(48_000),
     ...overrides,
   };
 }
