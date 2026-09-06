@@ -37,7 +37,12 @@ app-icon.png
 
 # Agent / assistant working files
 .serena/
-.claude/
+# Local Claude state stays out, but skills are shared with the repo.
+# The first line re-includes the directory, which a global ignore also
+# excludes; git cannot descend into an excluded directory otherwise.
+!.claude/
+.claude/*
+!.claude/skills/
 .cursor/
 AGENTS.md
 CLAUDE.md

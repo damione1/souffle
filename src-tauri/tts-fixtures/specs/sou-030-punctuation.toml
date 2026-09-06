@@ -1,0 +1,33 @@
+# Pause ladders for the SOU-030 punctuation-threshold measurement.
+#
+# Two clauses that read naturally as one sentence when spoken together. The
+# only thing that changes between rungs is the silence between them, so any
+# change in punctuation is attributable to the pause alone.
+#
+# Two different sentences on purpose: the break is not a pure function of
+# silence, it also depends on the words, and one sentence alone would hide
+# that. See the SOU-030 ticket for the measured numbers.
+
+sample_rate_hz = 16000
+out_dir = "fixtures/audio/sou-030"
+
+[backend]
+kind = "macos_say"
+voice = "Thomas"
+rate_wpm = 180
+
+[[ladder]]
+name = "hesitation-a"
+clauses = [
+  "je pense que ce serait une bonne idée",
+  "il faudrait vraiment en reparler demain matin",
+]
+gaps_ms = [100, 200, 300, 400, 600, 1000]
+
+[[ladder]]
+name = "hesitation-b"
+clauses = [
+  "le rapport est presque terminé",
+  "on pourra le publier la semaine prochaine",
+]
+gaps_ms = [100, 200, 300, 400, 600, 1000]
