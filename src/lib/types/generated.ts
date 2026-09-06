@@ -117,6 +117,31 @@ async selectAudioDevice(deviceUid: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Current `kAudioDevicePropertyNominalSampleRate` for an input device.
+ * An empty UID uses the system default input. Read-only, never writes.
+ */
+async getInputSampleRate(deviceUid: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_input_sample_rate", { deviceUid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Set the device's nominal sample rate to 48 kHz (or the closest supported
+ * rate at or below it). Writes `kAudioDevicePropertyNominalSampleRate` once.
+ * Call only from an explicit Settings click.
+ */
+async resetInputSampleRate(deviceUid: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_input_sample_rate", { deviceUid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether this Mac has a battery (i.e. is a laptop). Gates the
  * clamshell-microphone setting in the UI — meaningless on a desktop Mac.
  */
@@ -555,12 +580,11 @@ async pillRelease() : Promise<Result<null, string>> {
 }
 },
 /**
- * Resize the pill window to `width` x `height` (logical pixels), keeping
- * its top edge pinned below the menu bar and staying horizontally
- * centered. The frontend calls this as the live transcript grows/shrinks
- * (e.g. switching between the compact and expanded live-text layouts): a
- * single native frame change avoids the top-edge drift that a separate
- * resize-then-recenter pair produces.
+ * Resize the pill window to `width` x `height` (logical pixels). A
+ * dragged position is kept (and clamped on-screen); otherwise the pill
+ * stays top-centered. The frontend calls this as the live transcript
+ * grows/shrinks. A single native frame change avoids the top-edge drift
+ * that a separate resize-then-recenter pair produces.
  */
 async pillResize(width: number, height: number) : Promise<Result<null, string>> {
     try {
@@ -1044,6 +1068,10 @@ auto_update_check_enabled: boolean;
  * Audible start/stop cues for dictation sessions.
  */
 feedback_sounds_enabled: boolean; 
+/**
+ * When true, the floating recording HUD is not shown.
+ */
+pill_hidden: boolean; 
 /**
  * Feedback sound volume (0-100).
  */

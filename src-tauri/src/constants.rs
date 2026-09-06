@@ -60,6 +60,12 @@ pub const OLLAMA_DEFAULT_URL: &str = "http://localhost:11434";
 /// only pass allowed to emit the user-facing markdown structure: it must run
 /// exactly once per summary, never per chunk or per intermediate reduce round,
 /// or its headings repeat once concatenated with sibling groups.
+///
+/// When the input is several map-stage fact lists (the common long-meeting
+/// path: one reduce call that still fits the token budget), this prompt must
+/// itself say to merge and dedupe. Intermediate rounds use
+/// [`OLLAMA_MERGE_PROMPT`]; a single final call never sees that prompt, and
+/// a small model will otherwise concatenate the parts and drop `## Topics`.
 /// Decisions/action items/open questions are extracted separately by
 /// OLLAMA_STRUCTURED_EXTRACT_PROMPT and rendered in their own UI section, so
 /// this prose pass stays a narrative recap and does not duplicate them.
@@ -73,12 +79,15 @@ Rules:
 - Do not greet, thank, apologize, or address the reader.
 - Do not add an introduction, conclusion, or commentary about the meeting quality.
 - Give equal weight to the beginning, middle, and end of the meeting; do not over-emphasize the final portion.
+- If the input is several fact lists from consecutive parts of ONE meeting, merge them into a single recap. Do not keep the parts as separate blocks and do not copy each list verbatim.
+- Merge duplicate or overlapping points into a single bullet instead of repeating them.
 - If the input is very short, output only the facts that are directly present.
 - If the input only contains greetings, attendance, or setup, say only that.
 - Keep the markdown section headings exactly as written below in English.
+- Never omit the Topics section.
 - Write the content of each bullet in the same language as the input.
 - If a section has no content, write a short \"none stated\" equivalent in the same language.
-- Use short, concrete bullets. No paragraphs.
+- Use short, concrete bullets. No paragraphs. At most 8 bullets per section.
 - Decisions, action items, and open questions are extracted separately elsewhere: do not add sections for them here.
 - Return exactly this structure and nothing before or after it:
 
@@ -105,6 +114,7 @@ Rules:
 - Write dense, factual bullet points in the same language as the transcript.
 - One bullet per distinct fact: a topic discussed, a decision made, an action item assigned (name the owner if stated), or an open question or risk raised.
 - Do NOT use section headings or labels such as \"Decisions:\" or \"Topics:\". Output a single flat bullet list.
+- The excerpt may be labeled turns such as \"[0:12] Me:\". Extract facts only; do not reproduce the transcript, speaker labels, or timestamps.
 - No paragraphs, no commentary, no summary sentence.";
 
 /// System prompt for intermediate reduce rounds, used only when a meeting has
@@ -123,6 +133,7 @@ Rules:
 - Merge duplicate or overlapping points into a single bullet instead of repeating them.
 - Keep the parts in their given order; do not over-weight the last part.
 - Do NOT use section headings or labels such as \"Decisions:\" or \"Topics:\". Output a single flat bullet list.
+- Merge into one combined fact list. Do not keep per-part topic blocks or copy labeled transcript turns.
 - No paragraphs, no commentary, no summary sentence.";
 
 /// System prompt for dictation post-processing (polish) via Ollama.
@@ -174,12 +185,16 @@ Rules:
 - Do not greet, thank, apologize, or address the reader.
 - Do not add an introduction, conclusion, or commentary about the meeting quality.
 - Give equal weight to the beginning, middle, and end of the meeting; do not over-emphasize the final portion.
+- If the input is several fact lists from consecutive parts of ONE meeting, merge them into a single set of minutes. Do not keep the parts as separate blocks and do not copy each list verbatim.
+- Merge duplicate or overlapping points into a single bullet instead of repeating them.
 - Cover the meeting in chronological order with one bullet per distinct point discussed; be thorough rather than terse.
 - If the input is very short, output only the facts that are directly present.
 - If the input only contains greetings, attendance, or setup, say only that.
 - Keep the markdown section headings exactly as written below in English.
+- Never omit the Topics section.
 - Write the content of each bullet in the same language as the input.
 - If a section has no content, write a short \"none stated\" equivalent in the same language.
+- At most 16 bullets per section.
 - Decisions, action items, and open questions are extracted separately elsewhere: do not add sections for them here.
 - Return exactly this structure and nothing before or after it:
 
@@ -202,6 +217,8 @@ Rules:
 - Do not greet, thank, apologize, or address the reader.
 - Do not add an introduction, conclusion, or commentary about the meeting quality.
 - Give equal weight to the beginning, middle, and end of the meeting; do not over-emphasize the final portion.
+- If the input is several fact lists from consecutive parts of ONE meeting, merge them into a single overview. Do not keep the parts as separate blocks and do not copy each list verbatim.
+- Merge duplicate or overlapping points into a single bullet instead of repeating them.
 - Write at most 3 short bullets covering only the most important points.
 - If the input only contains greetings, attendance, or setup, say only that.
 - Keep the markdown section heading exactly as written below in English.

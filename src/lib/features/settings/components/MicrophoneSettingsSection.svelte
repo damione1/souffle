@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronUp, RefreshCw } from "@lucide/svelte";
+  import { ChevronDown, ChevronUp, RefreshCw, Trash2 } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import type { InputPriority } from "../../../types";
   import {
@@ -7,8 +7,10 @@
     transportLabelKey,
     type MicrophoneListEntry,
   } from "../microphone-list";
+  import { formatSampleRateHz, sampleRateBlocksConferencing } from "../sample-rate";
   import type { AudioInputDevice } from "../../../types";
   import { lastSeenAge } from "../../../utils/format";
+  import ConfirmAction from "../../../components/ui/ConfirmAction.svelte";
 
   let {
     audioDevices,
@@ -16,25 +18,40 @@
     selectedDevice,
     pinUnavailable,
     allowBluetoothMic,
+    sampleRate,
+    sampleRateError,
+    resettingSampleRate,
     onDeviceChange,
     onAllowBluetoothMicChange,
     onRefreshDevices,
     onMoveDevice,
     onToggleHidden,
+    onRemoveDevice,
+    onResetDevices,
+    onResetSampleRate,
   }: {
     audioDevices: AudioInputDevice[];
     inputPriority: InputPriority;
     selectedDevice: string;
     pinUnavailable: boolean;
     allowBluetoothMic: boolean;
+    sampleRate: number | null;
+    sampleRateError: string;
+    resettingSampleRate: boolean;
     onDeviceChange: (event: Event) => void | Promise<void>;
     onAllowBluetoothMicChange: (event: Event) => void | Promise<void>;
     onRefreshDevices: () => void | Promise<void>;
     onMoveDevice: (uid: string, direction: -1 | 1) => void | Promise<void>;
     onToggleHidden: (uid: string, hidden: boolean) => void | Promise<void>;
+    onRemoveDevice: (uid: string) => void | Promise<void>;
+    onResetDevices: () => void | Promise<void>;
+    onResetSampleRate: () => void | Promise<void>;
   } = $props();
 
+  const rateIsHigh = $derived(sampleRateBlocksConferencing(sampleRate));
+
   const microphoneList = $derived(buildMicrophoneList(audioDevices, inputPriority));
+  const hasDisconnectedDevices = $derived(microphoneList.some((entry) => !entry.connected));
 
   function lastSeenLabel(entry: MicrophoneListEntry): string {
     if (entry.connected || entry.lastSeen === null) return "";
@@ -72,6 +89,15 @@
         <button onclick={onRefreshDevices} class="btn btn-icon" aria-label={$t("settings_audio.refresh_devices")}>
           <RefreshCw size={16} />
         </button>
+        {#if hasDisconnectedDevices}
+          <ConfirmAction
+            label={$t("settings_audio.reset_devices")}
+            confirmLabel={$t("settings_audio.reset_devices_confirm")}
+            confirmMessage={$t("settings_audio.reset_devices_msg")}
+            variant="danger"
+            onConfirm={onResetDevices}
+          />
+        {/if}
       </div>
     </div>
 
@@ -79,6 +105,43 @@
       <p class="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning" role="status">
         {$t("settings_audio.pin_unavailable")}
       </p>
+    {/if}
+
+    {#if sampleRate !== null}
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span class="setting-label">{$t("settings_audio.sample_rate")}</span>
+          <span class="setting-desc">{$t("settings_audio.sample_rate_desc")}</span>
+        </div>
+        <span class="shrink-0 text-sm font-medium tabular-nums" data-testid="input-sample-rate">
+          {formatSampleRateHz(sampleRate)}
+        </span>
+      </div>
+    {/if}
+
+    {#if rateIsHigh}
+      <p
+        class="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning"
+        role="status"
+        data-testid="sample-rate-warning"
+      >
+        {$t("settings_audio.sample_rate_high_warning")}
+      </p>
+      <div class="flex justify-end">
+        <button
+          type="button"
+          class="btn btn-sm"
+          data-testid="reset-sample-rate"
+          disabled={resettingSampleRate}
+          onclick={onResetSampleRate}
+        >
+          {resettingSampleRate ? $t("settings_audio.reset_sample_rate_busy") : $t("settings_audio.reset_sample_rate")}
+        </button>
+      </div>
+    {/if}
+
+    {#if sampleRateError}
+      <p class="text-sm text-danger-soft" role="alert">{$t("settings_audio.reset_sample_rate_failed")}</p>
     {/if}
 
     <div class="flex flex-col gap-1">
@@ -137,6 +200,16 @@
                 />
                 {$t("settings_audio.hide_device")}
               </label>
+              {#if !entry.connected}
+                <button
+                  type="button"
+                  class="btn btn-icon"
+                  aria-label={$t("settings_audio.remove_device", { values: { name: entry.name } })}
+                  onclick={() => onRemoveDevice(entry.uid)}
+                >
+                  <Trash2 size={16} />
+                </button>
+              {/if}
             </div>
           </li>
         {/each}

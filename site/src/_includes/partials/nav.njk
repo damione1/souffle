@@ -1,0 +1,31 @@
+{% from "icons.njk" import icon, logo %}
+{% set home = "/" if loc.code == "en" else "/fr/" %}
+{% set docs = "/docs/" if loc.code == "en" else "/fr/docs/" %}
+<nav class="nav">
+  <a class="brand" href="{{ home }}">{{ logo(34) }}<span>{{ site.name }}</span></a>
+  <div class="nav-menu" id="nav-menu">
+    <div class="nav-links">
+      {% if isDocs %}
+        <a href="{{ home }}">{{ t.nav.home }}</a>
+        <a href="{{ site.releases }}">{{ t.nav.releases }}</a>
+      {% else %}
+        <a href="#features">{{ t.nav.features }}</a>
+        <a href="#models">{{ t.nav.models }}</a>
+        <a href="#privacy">{{ t.nav.privacy }}</a>
+        <a href="{{ docs }}">{{ t.nav.docs }}</a>
+      {% endif %}
+      <a href="{{ site.repo }}">{{ t.nav.github }}</a>
+    </div>
+    <div class="lang">
+      <a href="{{ "/docs/" if isDocs else "/" }}" aria-current="{{ "true" if loc.code == "en" }}">EN</a>
+      <a href="{{ "/fr/docs/" if isDocs else "/fr/" }}" aria-current="{{ "true" if loc.code == "fr" }}">FR</a>
+    </div>
+  </div>
+  <div class="nav-actions">
+    <a class="btn-nav" href="{{ "#download" if not isDocs else site.latest }}">{{ icon("download", 15) }}{{ t.nav.download }}</a>
+    <button class="nav-toggle" type="button" aria-controls="nav-menu" aria-expanded="false" aria-label="{{ t.nav.menu }}">
+      <span class="nav-toggle-open">{{ icon("menu", 20) }}</span>
+      <span class="nav-toggle-close">{{ icon("close", 20) }}</span>
+    </button>
+  </div>
+</nav>

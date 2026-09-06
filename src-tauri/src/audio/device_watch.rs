@@ -346,7 +346,7 @@ pub(crate) fn get_property<T>(
 /// Size in bytes of a property's data, or 0 if it can't be read (including
 /// "device doesn't have this property", e.g. streams in a scope it doesn't
 /// support).
-fn property_data_size(object: AudioObjectID, mut address: AudioObjectPropertyAddress) -> u32 {
+pub(crate) fn property_data_size(object: AudioObjectID, mut address: AudioObjectPropertyAddress) -> u32 {
     let mut size: u32 = 0;
     let status = unsafe {
         AudioObjectGetPropertyDataSize(

@@ -94,7 +94,11 @@ fn bring_to_ready(state: &AppState, actor: &EngineActorHandle) {
     state
         .apply_transition(StateAction::DownloadComplete)
         .unwrap();
-    state.apply_transition(StateAction::StartLoad).unwrap();
+    state
+        .apply_transition(StateAction::StartLoad {
+            profile: profile.clone(),
+        })
+        .unwrap();
     state.apply_transition(StateAction::LoadComplete).unwrap();
 }
 

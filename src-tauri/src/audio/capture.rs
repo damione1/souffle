@@ -1,5 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, SampleFormat, Stream, StreamConfig};
+use cpal::{Device, SampleFormat, Stream, StreamConfig, SupportedStreamConfigRange};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use ringbuf::HeapRb;
 use ringbuf::traits::{Producer, Split};
@@ -60,8 +60,15 @@ const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(66);
 /// Consecutive rebuild failures after which a dictation session (mic is the
 /// only source) gives up and ends itself, rather than retrying forever
 /// while the UI still claims to be recording. ~10s at the `MIC_CHECK_INTERVAL`
-/// cadence.
+/// cadence — failures closer together than that interval do not increment
+/// the counter (a BT/dock DeviceList burst must not burn the 5 slots in ms
+/// and then kill the capture thread for the process lifetime).
 const DICTATION_ABORT_AFTER_FAILURES: u32 = 5;
+
+/// `spawn_tap` can block this thread for up to 5s. A missing tap is retried
+/// on the next mic rebuild, but not more often than this, so a flapping
+/// mic does not stall the mixer every `MIC_CHECK_INTERVAL`.
+const TAP_RETRY_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Decision for one mic-loss episode in `check_mic_health`, given how many
 /// rebuilds have failed in a row, whether the session has another audio
@@ -133,6 +140,196 @@ fn should_rebuild_mic(
     resolved_changed: bool,
 ) -> bool {
     stream_failed || callbacks_stale || device_replaced || device_not_alive || resolved_changed
+}
+
+/// Keep the meeting tap/mixer across a mic rebuild of the same session.
+/// Tearing them down first meant a failed reopen also killed system audio,
+/// after which the `capture_system_audio` *setting* still counted as a
+/// fallback and the session recorded silence.
+///
+/// `tap_owned` is a live `TapHandle`, not the setting. A `MeetingState`
+/// whose `spawn_tap` failed (`tap: None`) must fall through and retry —
+/// unless `tap_retry_ready` is false, which rate-limits the 5s spawn.
+fn should_reuse_meeting(
+    existing_session: Option<u64>,
+    new_session: u64,
+    capture_system_audio: bool,
+    tap_owned: bool,
+    tap_retry_ready: bool,
+) -> bool {
+    if !(capture_system_audio && existing_session == Some(new_session)) {
+        return false;
+    }
+    tap_owned || !tap_retry_ready
+}
+
+/// Count a rebuild failure only when `min_interval` has elapsed since the
+/// last counted one. Returns the new (count, timestamp-of-this-count).
+fn count_rebuild_failure(
+    failures: u32,
+    last_counted: Option<Instant>,
+    now: Instant,
+    min_interval: Duration,
+) -> (u32, Instant) {
+    match last_counted {
+        Some(t) if now.saturating_duration_since(t) < min_interval => (failures, t),
+        _ => (failures.saturating_add(1), now),
+    }
+}
+
+/// The abort ladder is per-session. A meeting that KeepRetrying-ed on a
+/// live tap can leave the counter at 50; the next dictation must not
+/// Abort on its first transient SetInputPolicy.
+fn reset_mic_loss_ladder(
+    failures: &mut u32,
+    last_counted: &mut Option<Instant>,
+    warned: &mut bool,
+) {
+    *failures = 0;
+    *last_counted = None;
+    *warned = false;
+}
+
+/// The mic-loss ladder's "other source" is a tap that is actually running,
+/// not the user's setting. A meeting that requested system audio but never
+/// got a tap (or lost it) is dictation: abort rather than fake-record.
+fn has_fallback_audio(tap_live: bool) -> bool {
+    tap_live
+}
+
+/// Fallback rate when the device's current one can't be read. 48 kHz is what
+/// every conferencing stack negotiates; the device maximum is not, and picking
+/// it is what broke other apps.
+const FALLBACK_INPUT_SAMPLE_RATE: u32 = 48_000;
+
+/// Rate to open a shared input device at.
+///
+/// cpal writes `kAudioDevicePropertyNominalSampleRate` from
+/// `build_input_stream` whenever the requested rate differs from the device's
+/// current one, and that property is machine-wide: opening the built-in mic at
+/// its 96 kHz maximum re-rates it for every other client. Meeting apps that
+/// bring up their own pipeline afterwards (Teams) fail to start on a mic above
+/// 48 kHz, so keep whatever rate the device is already on and let CoreAudio
+/// stay untouched. Souffle resamples to the engine rate regardless, so a
+/// higher device rate buys nothing.
+///
+/// A leftover high rate from ≤ v0.9.0 is repaired only when the user clicks
+/// Reset in Settings. See [`super::sample_rate::reset_input_sample_rate`].
+fn choose_input_sample_rate(current: Option<u32>, min: u32, max: u32) -> u32 {
+    match current {
+        Some(rate) if (min..=max).contains(&rate) => rate,
+        _ => FALLBACK_INPUT_SAMPLE_RATE.clamp(min, max),
+    }
+}
+
+/// Prefer an F32 range that already covers `current`, so we don't fall back
+/// and re-rate the device just because the first listed range is narrower.
+fn pick_input_config_range(
+    supported: &[SupportedStreamConfigRange],
+    current: Option<u32>,
+) -> Option<SupportedStreamConfigRange> {
+    let f32_ranges: Vec<_> = supported
+        .iter()
+        .filter(|c| c.sample_format() == SampleFormat::F32)
+        .cloned()
+        .collect();
+    let candidates: &[SupportedStreamConfigRange] = if f32_ranges.is_empty() {
+        supported
+    } else {
+        &f32_ranges
+    };
+
+    if let Some(rate) = current
+        && let Some(range) = candidates
+            .iter()
+            .find(|c| (c.min_sample_rate()..=c.max_sample_rate()).contains(&rate))
+    {
+        return Some(range.clone());
+    }
+    candidates.first().cloned()
+}
+
+#[cfg(test)]
+mod input_rate_tests {
+    use super::*;
+
+    /// The whole point: never move a rate another app may depend on.
+    #[test]
+    fn keeps_the_rate_the_device_already_runs_at() {
+        assert_eq!(
+            choose_input_sample_rate(Some(96_000), 8_000, 96_000),
+            96_000
+        );
+        assert_eq!(
+            choose_input_sample_rate(Some(48_000), 8_000, 96_000),
+            48_000
+        );
+        assert_eq!(
+            choose_input_sample_rate(Some(16_000), 8_000, 96_000),
+            16_000
+        );
+    }
+
+    #[test]
+    fn falls_back_to_48k_when_the_current_rate_is_unknown() {
+        assert_eq!(choose_input_sample_rate(None, 8_000, 96_000), 48_000);
+    }
+
+    /// A stale reading from another device, or a rate the range no longer
+    /// covers, must not be requested: cpal would reject the whole stream.
+    #[test]
+    fn ignores_a_current_rate_outside_the_supported_range() {
+        assert_eq!(
+            choose_input_sample_rate(Some(192_000), 8_000, 96_000),
+            48_000
+        );
+    }
+
+    #[test]
+    fn clamps_the_fallback_into_a_narrow_range() {
+        assert_eq!(choose_input_sample_rate(None, 16_000, 16_000), 16_000);
+        assert_eq!(choose_input_sample_rate(None, 88_200, 192_000), 88_200);
+    }
+
+    fn f32_range(min: u32, max: u32) -> SupportedStreamConfigRange {
+        SupportedStreamConfigRange::new(
+            1,
+            min,
+            max,
+            cpal::SupportedBufferSize::Unknown,
+            SampleFormat::F32,
+        )
+    }
+
+    #[test]
+    fn picks_later_f32_range_that_covers_current() {
+        let ranges = vec![f32_range(8_000, 44_100), f32_range(48_000, 96_000)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 48_000);
+        assert_eq!(picked.max_sample_rate(), 96_000);
+        let rate = choose_input_sample_rate(
+            Some(48_000),
+            picked.min_sample_rate(),
+            picked.max_sample_rate(),
+        );
+        assert_eq!(rate, 48_000);
+    }
+
+    #[test]
+    fn first_f32_range_still_wins_when_it_covers_current() {
+        let ranges = vec![f32_range(8_000, 96_000), f32_range(48_000, 48_000)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 8_000);
+        assert_eq!(picked.max_sample_rate(), 96_000);
+    }
+
+    #[test]
+    fn falls_back_to_first_f32_when_current_fits_none() {
+        let ranges = vec![f32_range(8_000, 16_000), f32_range(44_100, 44_100)];
+        let picked = pick_input_config_range(&ranges, Some(48_000)).unwrap();
+        assert_eq!(picked.min_sample_rate(), 8_000);
+        assert_eq!(picked.max_sample_rate(), 16_000);
+    }
 }
 
 #[cfg(test)]
@@ -233,6 +430,99 @@ mod mic_loss_tests {
         );
         assert!(should_rebuild_mic(true, false, false, false, false));
         assert!(should_rebuild_mic(false, false, false, false, true));
+    }
+
+    #[test]
+    fn reuses_meeting_only_for_same_session_with_system_audio() {
+        assert!(should_reuse_meeting(Some(7), 7, true, true, false));
+        assert!(
+            !should_reuse_meeting(Some(7), 8, true, true, false),
+            "a new session must tear the old tap down"
+        );
+        assert!(
+            !should_reuse_meeting(Some(7), 7, false, true, false),
+            "dictation must not keep a leftover meeting tap"
+        );
+        assert!(!should_reuse_meeting(None, 7, true, true, false));
+    }
+
+    #[test]
+    fn missing_tap_is_retried_once_the_window_opens() {
+        assert!(
+            should_reuse_meeting(Some(7), 7, true, false, false),
+            "a just-failed spawn_tap must not be retried on the next 2s tick"
+        );
+        assert!(
+            !should_reuse_meeting(Some(7), 7, true, false, true),
+            "a MeetingState with tap: None must fall through to spawn_tap"
+        );
+        assert!(
+            should_reuse_meeting(Some(7), 7, true, true, true),
+            "an owned tap is never torn down just because the retry window opened"
+        );
+    }
+
+    #[test]
+    fn rebuild_failures_are_not_counted_inside_the_check_interval() {
+        let t0 = Instant::now();
+        let (n1, t1) = count_rebuild_failure(0, None, t0, MIC_CHECK_INTERVAL);
+        assert_eq!(n1, 1);
+        let (n2, t2) = count_rebuild_failure(
+            n1,
+            Some(t1),
+            t0 + Duration::from_millis(10),
+            MIC_CHECK_INTERVAL,
+        );
+        assert_eq!(n2, 1, "a DeviceList burst must not burn the abort ladder");
+        assert_eq!(t2, t1);
+        let (n3, _) =
+            count_rebuild_failure(n2, Some(t1), t0 + MIC_CHECK_INTERVAL, MIC_CHECK_INTERVAL);
+        assert_eq!(n3, 2);
+    }
+
+    #[test]
+    fn mic_loss_ladder_resets_between_sessions() {
+        let mut failures = 50;
+        let mut last = Some(Instant::now());
+        let mut warned = true;
+        reset_mic_loss_ladder(&mut failures, &mut last, &mut warned);
+        assert_eq!(failures, 0);
+        assert_eq!(last, None);
+        assert!(!warned);
+        let (n, _) = count_rebuild_failure(failures, last, Instant::now(), MIC_CHECK_INTERVAL);
+        assert_eq!(n, 1, "first failure of the new session counts from zero");
+        assert_eq!(
+            decide_mic_loss(n, false, false),
+            MicLossAction::KeepRetrying,
+            "a leftover meeting counter must not abort the next dictation"
+        );
+    }
+
+    #[test]
+    fn fallback_is_a_live_tap_not_the_system_audio_setting() {
+        // The setting alone used to keep a meeting alive after a rebuild
+        // had already dropped the tap — UI still "recording", no audio.
+        assert!(
+            !has_fallback_audio(false),
+            "tap missing → abort like dictation"
+        );
+        assert!(has_fallback_audio(true));
+        assert_eq!(
+            decide_mic_loss(
+                DICTATION_ABORT_AFTER_FAILURES,
+                has_fallback_audio(false),
+                false
+            ),
+            MicLossAction::Abort
+        );
+        assert_eq!(
+            decide_mic_loss(
+                DICTATION_ABORT_AFTER_FAILURES,
+                has_fallback_audio(true),
+                false
+            ),
+            MicLossAction::WarnOnce
+        );
     }
 }
 
@@ -338,6 +628,9 @@ struct MeetingState {
     /// instead of one mixed stream.
     diarize: bool,
     ticks: u32,
+    /// Last `spawn_tap` attempt (success or fail). Caps retries so a
+    /// flapping mic rebuild cannot block this thread for 5s every 2s.
+    last_tap_attempt: Instant,
 }
 
 impl MeetingState {
@@ -545,6 +838,10 @@ pub struct AudioCapture {
     /// Whether the current mic-loss episode already surfaced its one-time
     /// warning (meeting mode only); re-armed on the next successful rebuild.
     mic_loss_warned: bool,
+    /// When the last rebuild failure was counted toward `mic_rebuild_failures`.
+    /// Bursts of CoreAudio DeviceList / DefaultInput notifications must not
+    /// increment the counter faster than `MIC_CHECK_INTERVAL`.
+    last_counted_failure: Option<Instant>,
     /// Shared with the engine actor. Set right before this thread exits
     /// after giving up on an unrecoverable microphone, so the actor's
     /// AudioGone handler can surface a mic-specific message instead of its
@@ -600,6 +897,7 @@ impl AudioCapture {
                     level_throttle: AudioLevelThrottle::new(),
                     mic_rebuild_failures: 0,
                     mic_loss_warned: false,
+                    last_counted_failure: None,
                     audio_gone_reason,
                 };
 
@@ -685,7 +983,9 @@ impl AudioCapture {
                                 info!("Selected input device UID: {uid}");
                                 capture.selected_device = Some(uid);
                             }
-                            capture.refresh_input_route();
+                            if capture.refresh_input_route() {
+                                break;
+                            }
                         }
                         AudioCommand::SetClamshellDevice(uid) => {
                             if let Some(ref uid) = uid {
@@ -694,7 +994,9 @@ impl AudioCapture {
                                 info!("Clamshell-mode microphone preference cleared");
                             }
                             capture.clamshell_device = uid;
-                            capture.refresh_input_route();
+                            if capture.refresh_input_route() {
+                                break;
+                            }
                         }
                         AudioCommand::SetInputPolicy {
                             priority,
@@ -702,13 +1004,17 @@ impl AudioCapture {
                         } => {
                             capture.input_priority = priority;
                             capture.allow_bluetooth_mic = allow_bluetooth_mic;
-                            capture.refresh_input_route();
+                            if capture.refresh_input_route() {
+                                break;
+                            }
                         }
                         AudioCommand::AttachApp(app) => {
                             capture.app = Some(app);
                         }
                         AudioCommand::RefreshInputRoute => {
-                            capture.refresh_input_route();
+                            if capture.refresh_input_route() {
+                                break;
+                            }
                         }
                     }
                 }
@@ -787,13 +1093,29 @@ impl AudioCapture {
         diarize: bool,
         record_path: Option<PathBuf>,
     ) -> Result<(), String> {
-        // Ensure any previous callback stops emitting immediately, and tear
-        // down any leftover meeting state (tap included). The recorder is
-        // NOT torn down here; see `sync_recorder`, so a mid-session mic
-        // rebuild (same session_id) keeps recording to the same file.
+        let is_new_session = self
+            .active_params
+            .as_ref()
+            .is_none_or(|p| p.session_id != session_id);
+        if is_new_session {
+            self.clear_mic_loss_ladder();
+        }
+        // Ensure any previous callback stops emitting immediately. The
+        // recorder is NOT torn down here; see `sync_recorder`, so a
+        // mid-session mic rebuild (same session_id) keeps recording to the
+        // same file. The meeting tap/mixer stay too: dropping them here
+        // made a failed mic reopen also lose system audio.
         self.active_session_id.store(0, Ordering::Release);
         self.release_capture_stream();
-        self.meeting.take();
+        if !should_reuse_meeting(
+            self.meeting.as_ref().map(|m| m.session_id),
+            session_id,
+            capture_system_audio,
+            self.tap_owned_for_reuse(),
+            self.tap_retry_ready(),
+        ) {
+            self.meeting.take();
+        }
         self.sync_recorder(session_id, record_path.as_deref(), target_sample_rate);
 
         // Stored before any fallible step so a failed (re)build is retried
@@ -851,6 +1173,17 @@ impl AudioCapture {
                 mic_gain,
                 diarize,
             );
+        }
+
+        // Dictation: never keep a leftover meeting tap from a prior session.
+        self.meeting.take();
+
+        // The stream that fed the outgoing resampler is already released, so
+        // its buffered chunk can be emitted without racing samples that came
+        // after it. Only for a rebuild of the running session: a new one must
+        // not inherit the previous session's audio.
+        if !is_new_session {
+            self.emit_resampler_tail(session_id);
         }
 
         let resampler = Arc::new(Mutex::new(Resampler::new(
@@ -1038,10 +1371,9 @@ impl AudioCapture {
         let sample_rate = config.sample_rate;
         let channels = config.channels;
 
-        // ~2s of headroom per ring; the 5ms tick drains far faster.
+        // ~2s of headroom per ring; the 20ms tick drains far faster.
         let mic_capacity = (sample_rate as usize * channels as usize) * 2;
         let (mut mic_prod, mic_cons) = HeapRb::<f32>::new(mic_capacity).split();
-        let (tap_prod, tap_cons) = HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
 
         // Mic stream first: it's the session's pacing clock and must never
         // be held hostage by tap startup (see system_tap.rs module docs).
@@ -1082,6 +1414,19 @@ impl AudioCapture {
         // bounds how much of a slow tap's wait it can retain, but that beats
         // discarding all of it outright.
         self.active_session_id.store(session_id, Ordering::Release);
+
+        if let Some(meeting) = self.meeting.as_mut() {
+            meeting
+                .mixer
+                .replace_mic(mic_cons, sample_rate, channels, mic_gain);
+            meeting.session_id = session_id;
+            meeting.diarize = diarize;
+            self.stream = Some(stream);
+            info!("Meeting microphone rebuilt; system-audio tap kept");
+            return Ok(());
+        }
+
+        let (tap_prod, tap_cons) = HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
 
         #[cfg(target_os = "macos")]
         let (tap, tap_rate) = match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
@@ -1138,6 +1483,7 @@ impl AudioCapture {
             aec_active,
             diarize,
             ticks: 0,
+            last_tap_attempt: Instant::now(),
         });
 
         info!("Meeting audio capture started (mic + system audio)");
@@ -1217,8 +1563,7 @@ impl AudioCapture {
             params.record_path.clone(),
         ) {
             Ok(()) => {
-                self.mic_rebuild_failures = 0;
-                self.mic_loss_warned = false;
+                self.clear_mic_loss_ladder();
                 if resolved_changed && resolved != self.mic_device_uid {
                     warn!(
                         "Input route did not converge on the resolved device \
@@ -1230,14 +1575,21 @@ impl AudioCapture {
                 false
             }
             Err(e) => {
-                self.mic_rebuild_failures += 1;
+                let (n, counted_at) = count_rebuild_failure(
+                    self.mic_rebuild_failures,
+                    self.last_counted_failure,
+                    Instant::now(),
+                    MIC_CHECK_INTERVAL,
+                );
+                self.mic_rebuild_failures = n;
+                self.last_counted_failure = Some(counted_at);
                 warn!(
                     "Capture rebuild failed ({} in a row): {e}",
                     self.mic_rebuild_failures
                 );
                 match decide_mic_loss(
                     self.mic_rebuild_failures,
-                    params.capture_system_audio,
+                    has_fallback_audio(self.tap_is_live()),
                     self.mic_loss_warned,
                 ) {
                     MicLossAction::KeepRetrying => false,
@@ -1265,7 +1617,13 @@ impl AudioCapture {
     /// Called on explicit route events (device pick, policy change, CoreAudio
     /// device-list or default-input change), so a previously non-converged
     /// target is fair game again.
-    fn refresh_input_route(&mut self) {
+    ///
+    /// Returns `true` when the microphone is unrecoverable and the session
+    /// has been torn down: the caller must break the audio thread so the
+    /// actor observes AudioGone. Returning without exiting left the actor
+    /// waiting on a channel that never closed, and `Stop` could no longer
+    /// send EndOfStream (`active_params` was already cleared).
+    fn refresh_input_route(&mut self) -> bool {
         self.route_attempt_uid = None;
         if self.active_params.is_some() {
             self.last_mic_check = Instant::now();
@@ -1273,7 +1631,60 @@ impl AudioCapture {
                 tracing::error!(
                     "Microphone unrecoverable after input route change; ending session"
                 );
+                return true;
             }
+        }
+        false
+    }
+
+    fn clear_mic_loss_ladder(&mut self) {
+        reset_mic_loss_ladder(
+            &mut self.mic_rebuild_failures,
+            &mut self.last_counted_failure,
+            &mut self.mic_loss_warned,
+        );
+    }
+
+    /// A process tap that is still owned by this session. The system-audio
+    /// *setting* is not enough: a rebuild may have already dropped the tap.
+    /// Ownership, not IOProc liveness — a zombie handle still counts.
+    fn tap_is_live(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.meeting.as_ref().is_some_and(|m| m.tap.is_some())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// Whether `should_reuse_meeting` may keep the current mixer. On macOS
+    /// this is a tap handle; elsewhere there is nothing to recover so a
+    /// same-session meeting mixer is always reusable.
+    fn tap_owned_for_reuse(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.tap_is_live()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.meeting.is_some()
+        }
+    }
+
+    /// Missing tap + retry window elapsed. `spawn_tap` blocks up to 5s, so
+    /// this must stay false on the 2s health cadence after a failed spawn.
+    fn tap_retry_ready(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.meeting.as_ref().is_some_and(|m| {
+                m.tap.is_none() && m.last_tap_attempt.elapsed() >= TAP_RETRY_INTERVAL
+            })
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
         }
     }
 
@@ -1281,6 +1692,7 @@ impl AudioCapture {
     fn meeting_tick(&mut self) {
         // Do all mixer work inside this borrow, then release it before calling
         // &self/&mut self helpers (sending, RMS) to satisfy the borrow checker.
+        let tap_clock = self.stream.is_none();
         let (session_id, diarize, mixed, me, them) = {
             let Some(meeting) = self.meeting.as_mut() else {
                 return;
@@ -1290,10 +1702,18 @@ impl AudioCapture {
                 meeting.check_output_route(self.app.as_ref());
             }
             if meeting.diarize {
-                let (me, them) = meeting.mixer.tick_split();
+                let (me, them) = if tap_clock {
+                    meeting.mixer.tick_split_on_tap_clock()
+                } else {
+                    meeting.mixer.tick_split()
+                };
                 (meeting.session_id, true, Vec::new(), me, them)
             } else {
-                let mixed = meeting.mixer.tick();
+                let mixed = if tap_clock {
+                    meeting.mixer.tick_on_tap_clock()
+                } else {
+                    meeting.mixer.tick()
+                };
                 (meeting.session_id, false, mixed, Vec::new(), Vec::new())
             }
         };
@@ -1421,6 +1841,7 @@ impl AudioCapture {
         self.finish_recording();
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
+        self.clear_mic_loss_ladder();
     }
 
     fn abort_after_panic(&mut self) {
@@ -1442,6 +1863,38 @@ impl AudioCapture {
             );
         }
         self.teardown_session_state();
+    }
+
+    /// Emit what the mic resampler still holds before a rebuild replaces it,
+    /// mirroring the flush `stop` does at session end. Without this the
+    /// partial FFT chunk (~20ms of speech) dies with the old stream, on top
+    /// of the gap the teardown already costs.
+    ///
+    /// Callers must have released the capture stream first, so no callback
+    /// can push samples that would end up ordered before this tail.
+    fn emit_resampler_tail(&mut self, session_id: u64) {
+        let Some(resampler) = self.resampler.take() else {
+            return;
+        };
+        let Ok(mut r) = resampler.lock() else {
+            return;
+        };
+        let tail = r.flush();
+        if tail.is_empty() {
+            return;
+        }
+        if self
+            .audio_sender
+            .try_send(AudioMessage::Chunk(AudioChunk {
+                session_id,
+                samples: tail,
+                captured_at: Instant::now(),
+                speaker: None,
+            }))
+            .is_err()
+        {
+            debug!("Dropped the resampler tail on mic rebuild (channel full)");
+        }
     }
 
     /// Stop IO and dispose the capture AudioUnit.
@@ -1482,6 +1935,7 @@ impl AudioCapture {
         self.last_mic_callback_ms.store(0, Ordering::Relaxed);
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
+        self.clear_mic_loss_ladder();
 
         // Stop IO and dispose the AudioUnit — after this, no callback runs
         // and a Bluetooth headset can leave HFP/mono for A2DP stereo.
@@ -1563,20 +2017,27 @@ impl AudioCapture {
     }
 
     fn preferred_config(device: &Device) -> Result<StreamConfig, String> {
-        let mut supported = device
+        let supported: Vec<_> = device
             .supported_input_configs()
-            .map_err(|e| format!("Failed to get supported configs: {e}"))?;
+            .map_err(|e| format!("Failed to get supported configs: {e}"))?
+            .collect();
 
-        let config = supported
-            .find(|c| c.sample_format() == SampleFormat::F32)
-            .or_else(|| {
-                device
-                    .supported_input_configs()
-                    .ok()
-                    .and_then(|mut c| c.next())
-            })
+        // `default_input_config` reads the device's *current* stream format,
+        // which is the one rate that opens without re-rating the hardware for
+        // every other process on the machine.
+        let current = device.default_input_config().ok().map(|c| c.sample_rate());
+        let config = pick_input_config_range(&supported, current)
             .ok_or_else(|| "No supported input config found".to_string())?;
 
-        Ok(config.with_max_sample_rate().into())
+        let rate =
+            choose_input_sample_rate(current, config.min_sample_rate(), config.max_sample_rate());
+        if current != Some(rate) {
+            warn!(
+                "Input device current rate unreadable or unsupported ({current:?}); \
+                 opening at {rate}Hz, which re-rates the device system-wide"
+            );
+        }
+
+        Ok(config.with_sample_rate(rate).into())
     }
 }

@@ -6,7 +6,7 @@ use crate::lock_ext::MutexExt;
 use super::Database;
 
 /// A dictation history entry
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DictationEntry {
     pub id: String,
     pub text: String,

@@ -13,7 +13,7 @@ import { frontmostAppName, readFocusedText, readSelectedText } from "../../api/f
 import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
-import { errorMessage } from "../../utils";
+import { errorMessage, segmentGap } from "../../utils";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
 
@@ -134,6 +134,7 @@ function createTranscriptionControllerInstance() {
   let isStartingRecording = $state(false);
   let isStopping = $state(false);
   let transcript = $state("");
+  let tentative = $state("");
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
 
@@ -355,6 +356,7 @@ function createTranscriptionControllerInstance() {
     cancelLearnFromEditPoll();
     if (!fromShortcut) sessionMode = "insert";
     transcript = "";
+    tentative = "";
     statusMessage = "";
     isStartingRecording = true;
     sessionGeneration += 1;
@@ -364,14 +366,12 @@ function createTranscriptionControllerInstance() {
       await captureStartContext();
       await startStreamingTranscription((segment: TranscriptionSegment) => {
         if (generation !== sessionGeneration) return; // stale session
-        if (segment.is_final) {
-          if (transcript) {
-            if (!transcript.endsWith(" ") && !segment.text.startsWith(" ")) {
-              transcript += " ";
-            }
-          }
-          transcript += segment.text;
+        if (!segment.is_final) {
+          tentative = segment.text;
+          return;
         }
+        tentative = "";
+        transcript += segmentGap(transcript, segment.text) + segment.text;
       });
     } catch (e) {
       statusMessage = errorMessage(e);
@@ -388,6 +388,7 @@ function createTranscriptionControllerInstance() {
     sessionGeneration += 1; // cut off in-flight segments from the dead session
     isStartingRecording = false;
     isStopping = false;
+    tentative = "";
     cancelLearnFromEditPoll();
     if (transcript.trim()) {
       void finalizeDictationText(transcript, sessionFocusedApp, sessionRewriteOf).then(({ text, warning }) => {
@@ -410,6 +411,7 @@ function createTranscriptionControllerInstance() {
     get isStartingRecording() { return isStartingRecording; },
     get isStopping() { return isStopping; },
     get transcript() { return transcript; },
+    get tentative() { return tentative; },
     get statusMessage() { return statusMessage; },
     get catalog() { return catalog; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },

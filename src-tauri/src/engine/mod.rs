@@ -1,3 +1,4 @@
+pub mod batch_windows;
 pub mod kyutai;
 pub mod parakeet;
 pub mod whisper;
@@ -208,6 +209,16 @@ pub trait TranscriptionEngine {
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn reset_state(&mut self) -> Result<(), EngineError>;
+    /// Reset the engine's internal state mid-session without rewinding the
+    /// transcript: the timeline carries over so words after the reset keep
+    /// timestamps continuous with the ones before it. Each engine implements
+    /// this against whatever it tracks as session-elapsed time (Kyutai's
+    /// per-lane epoch origin, Whisper/Parakeet's `consumed_samples`); the
+    /// default here is only a fallback for an engine that overrides neither,
+    /// and simply rewinds like a session-start `reset_state`.
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.reset_state()
+    }
     /// Audio format requirements for this engine's inference pipeline.
     /// Used by the audio capture thread (target sample rate) and the
     /// inference pipeline (chunk size) to adapt to each engine.
@@ -223,6 +234,15 @@ pub trait TranscriptionEngine {
     /// behind the next utterance. 0 for engines with no such lag.
     fn emission_delay_seconds(&self) -> f64 {
         0.0
+    }
+    /// Whether the engine has demonstrably emitted everything it has heard so
+    /// far: its own semantic VAD has reported a pause for longer than the
+    /// emission delay, so no word is still in flight. When true, the
+    /// single-stream drain window (see `emission_delay_seconds`) can end
+    /// early instead of always running to its full length. Engines without
+    /// that signal return false and fall back to the time-based window.
+    fn tail_drained(&self) -> bool {
+        false
     }
     /// Normalize engine-specific tokens from transcribed text.
     /// Called by the pipeline on every segment before emitting to the frontend.
@@ -247,7 +267,11 @@ pub trait TranscriptionEngine {
 
     /// Heuristic meeting-language prior for LID and lane resets (Kyutai only).
     /// Never passed to the engine as a forced decode language.
-    fn set_meeting_language_prior(&mut self, _prior: crate::settings::MeetingTranscriptionLanguage) {}
+    fn set_meeting_language_prior(
+        &mut self,
+        _prior: crate::settings::MeetingTranscriptionLanguage,
+    ) {
+    }
 
     /// Transcribe one paired frame from both streams (mic = Me, system = Them),
     /// returning segments already tagged with their speaker. Only valid after

@@ -2,11 +2,14 @@ mod apple;
 mod chunking;
 mod extract;
 mod formatters;
+mod language;
+mod map;
 mod ollama;
 mod polish;
 mod prompts;
 mod reduce;
 mod templates;
+mod turns;
 
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +17,12 @@ use crate::apple_intelligence;
 use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::transcript::{MeetingParticipant, StructuredSummary};
 
-pub use chunking::{ChunkConfig, chunk_transcript, estimate_tokens};
+pub use chunking::{ChunkConfig, chunk_transcript, chunk_turns, estimate_tokens};
 pub use extract::{extract_structured_summary, parse_structured_summary_response};
+pub use language::{
+    SummaryLanguage, majority_language_from_segments, resolve_summary_language,
+    with_language_instruction,
+};
 pub use ollama::{OllamaPullProgress, RECOMMENDED_MODEL as RECOMMENDED_OLLAMA_MODEL, pull_model};
 pub use polish::{
     DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
@@ -31,6 +38,7 @@ pub use templates::{
     default_summary_templates, is_builtin_summary_template, merge_summary_templates,
     resolve_summary_template_prompt,
 };
+pub use turns::turns_from_segments;
 
 pub const APPLE_INTELLIGENCE_MODEL_ID: &str = "apple-intelligence";
 const APPLE_INTELLIGENCE_MODEL_LABEL: &str = "Apple Intelligence";
@@ -208,6 +216,30 @@ fn sanitize_summary(text: &str) -> String {
     trimmed.to_string()
 }
 
+/// Log when the final pass dropped a section its own prompt asked for.
+///
+/// A small model given many map-stage fact lists concatenates them and stops
+/// after `## Summary`. No retry: the live preview streams tokens, so a second
+/// `generate` would append a second draft on screen, and a model that
+/// concatenated once usually does it again. The warning is how we find out it
+/// happened. Only checked for prompts that actually request the section, so a
+/// brief-overview template stays quiet.
+fn final_summary_is_truncated(summary: &str, final_system_prompt: &str) -> bool {
+    final_system_prompt.contains("## Topics")
+        && !summary
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case("## Topics"))
+}
+
+fn warn_if_final_summary_is_truncated(summary: &str, final_system_prompt: &str) {
+    if final_summary_is_truncated(summary, final_system_prompt) {
+        tracing::warn!(
+            "Final summary is missing the Topics section its prompt required; \
+             the model likely concatenated the map chunks"
+        );
+    }
+}
+
 fn apple_model_descriptor() -> SummaryModelDescriptor {
     SummaryModelDescriptor {
         id: APPLE_INTELLIGENCE_MODEL_ID.to_string(),
@@ -335,7 +367,7 @@ pub(crate) async fn generate_with_provider(
     system: &str,
     prompt: String,
     temperature: f32,
-    num_ctx: u32,
+    budget: ollama::GenerationBudget,
     on_chunk: &impl Fn(SummarizeProgress),
     json_format: bool,
 ) -> Result<String, String> {
@@ -348,12 +380,13 @@ pub(crate) async fn generate_with_provider(
                 ollama_model,
                 system,
                 prompt,
-                num_ctx,
+                budget,
                 temperature,
                 on_chunk,
                 json_format,
             )
             .await
+            .map(|output| output.text)
         }
         SummaryProviderKind::AppleIntelligence => {
             let system = system.to_string();
@@ -407,18 +440,40 @@ pub(crate) async fn generate_with_provider(
 /// `resolve_summary_template_prompt`). It replaces the final-pass system
 /// prompt only: the map and intermediate merge prompts stay fixed so the
 /// user-facing structure is rendered exactly once, by the terminal call.
+///
+/// `turn_units` is the speaker-labeled transcript when the meeting still has
+/// segments; packing those units never splits a turn. Edited prose has no
+/// turns and falls back to word chunks.
+///
+/// `output_language` is injected into the map, merge, and final system
+/// prompts. A 7B follows the English instruction language unless told
+/// explicitly which language to write in.
+#[allow(clippy::too_many_arguments)]
 pub async fn summarize_stream(
     transcript_text: &str,
+    turn_units: Option<&[String]>,
     notes: Option<&str>,
     participants: &[MeetingParticipant],
     model: &str,
     ollama_base_url: Option<&str>,
     final_system_prompt: &str,
+    output_language: SummaryLanguage,
     on_chunk: impl Fn(SummarizeProgress),
 ) -> Result<String, String> {
     let provider = resolve_provider(model)?;
     let config = chunk_config(provider);
     let ollama_url = ollama_base_url.unwrap_or(OLLAMA_DEFAULT_URL);
+    let final_system_prompt = with_language_instruction(final_system_prompt, output_language);
+    // Both providers share the same map/merge text today; pick the provider
+    // constant so Apple stays on the same language-injection path if they diverge.
+    let (map_base, merge_base) = match provider {
+        SummaryProviderKind::Ollama => (ollama::MAP_SYSTEM_PROMPT, ollama::MERGE_SYSTEM_PROMPT),
+        SummaryProviderKind::AppleIntelligence => {
+            (apple::MAP_SYSTEM_PROMPT, apple::MERGE_SYSTEM_PROMPT)
+        }
+    };
+    let map_system_prompt = with_language_instruction(map_base, output_language);
+    let merge_system_prompt = with_language_instruction(merge_base, output_language);
 
     if estimate_tokens(transcript_text) <= config.stuff_token_limit {
         // Single-call path: the whole transcript fits, so this one call IS
@@ -427,19 +482,24 @@ pub async fn summarize_stream(
             provider,
             model,
             ollama_url,
-            final_system_prompt,
+            &final_system_prompt,
             build_summarize_prompt(transcript_text, notes, participants),
             0.2,
-            ollama::REDUCE_CONTEXT,
+            ollama::REDUCE_BUDGET,
             &on_chunk,
             false,
         )
         .await?;
-        return Ok(sanitize_summary(&full));
+        let summary = sanitize_summary(&full);
+        warn_if_final_summary_is_truncated(&summary, &final_system_prompt);
+        return Ok(summary);
     }
 
     let no_op = |_: SummarizeProgress| {};
-    let chunks = chunk_transcript(transcript_text, config);
+    let chunks = match turn_units {
+        Some(turns) if !turns.is_empty() => chunk_turns(turns, config),
+        _ => chunk_transcript(transcript_text, config),
+    };
     let n = chunks.len();
     let mut part_summaries = Vec::with_capacity(n);
 
@@ -453,23 +513,37 @@ pub async fn summarize_stream(
                     Some(i as u32 + 1),
                     Some(n as u32),
                 ));
-                let user = format!(
-                    "Part {} of {}.\n\nTranscript excerpt:\n---\n{}\n---",
-                    i + 1,
-                    n,
-                    chunk
-                );
-                ollama::generate_stream(
-                    &client,
-                    ollama_url,
-                    model,
-                    ollama::MAP_SYSTEM_PROMPT,
-                    user,
-                    ollama::MAP_CONTEXT,
-                    0.2,
-                    &no_op,
-                    false,
-                )
+                let client = client.clone();
+                let ollama_url = ollama_url.to_string();
+                let model = model.to_string();
+                let map_system_prompt = map_system_prompt.clone();
+                async move {
+                    map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
+                        let client = client.clone();
+                        let ollama_url = ollama_url.clone();
+                        let model = model.clone();
+                        let map_system_prompt = map_system_prompt.clone();
+                        async move {
+                            ollama::generate_stream(
+                                &client,
+                                &ollama_url,
+                                &model,
+                                &map_system_prompt,
+                                user,
+                                ollama::MAP_BUDGET,
+                                temperature,
+                                &|_| {},
+                                false,
+                            )
+                            .await
+                            .map(|output| map::MapOutput {
+                                text: output.text,
+                                eval_count: output.eval_count,
+                            })
+                        }
+                    })
+                    .await
+                }
             })
             .buffered(config.map_concurrency)
             .try_collect()
@@ -481,23 +555,28 @@ pub async fn summarize_stream(
                 Some(i as u32 + 1),
                 Some(n as u32),
             ));
-            let user = format!(
-                "Part {} of {}.\n\nTranscript excerpt:\n---\n{}\n---",
-                i + 1,
-                n,
-                chunk
-            );
-            let part = generate_with_provider(
-                provider,
-                model,
-                ollama_url,
-                apple::MAP_SYSTEM_PROMPT,
-                user,
-                0.2,
-                ollama::MAP_CONTEXT,
-                &no_op,
-                false,
-            )
+            let map_system_prompt = map_system_prompt.clone();
+            let part = map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
+                let map_system_prompt = map_system_prompt.clone();
+                async move {
+                    generate_with_provider(
+                        provider,
+                        model,
+                        ollama_url,
+                        &map_system_prompt,
+                        user,
+                        temperature,
+                        ollama::MAP_BUDGET,
+                        &no_op,
+                        false,
+                    )
+                    .await
+                    .map(|text| map::MapOutput {
+                        text,
+                        eval_count: None,
+                    })
+                }
+            })
             .await?;
             part_summaries.push(part);
         }
@@ -511,11 +590,14 @@ pub async fn summarize_stream(
         notes,
         participants,
         config,
-        final_system_prompt,
+        &final_system_prompt,
+        &merge_system_prompt,
         &on_chunk,
     )
     .await?;
-    Ok(sanitize_summary(&full))
+    let summary = sanitize_summary(&full);
+    warn_if_final_summary_is_truncated(&summary, &final_system_prompt);
+    Ok(summary)
 }
 
 /// Combine map-stage part summaries into the final prose summary.
@@ -539,17 +621,13 @@ async fn reduce_part_summaries(
     participants: &[MeetingParticipant],
     config: ChunkConfig,
     final_system_prompt: &str,
+    merge_system_prompt: &str,
     on_chunk: &impl Fn(SummarizeProgress),
 ) -> Result<String, String> {
     // The template prompt applies to the final pass only; intermediate
-    // merge rounds keep the fixed provider merge prompt (both providers
-    // share the same merge text today).
-    let (merge_system_prompt, num_ctx) = match provider {
-        SummaryProviderKind::Ollama => (ollama::MERGE_SYSTEM_PROMPT, ollama::REDUCE_CONTEXT),
-        SummaryProviderKind::AppleIntelligence => {
-            (apple::MERGE_SYSTEM_PROMPT, ollama::REDUCE_CONTEXT)
-        }
-    };
+    // merge rounds keep the (language-annotated) merge prompt. Both
+    // providers share the same merge text today.
+    let budget = ollama::REDUCE_BUDGET;
 
     on_chunk(SummarizeProgress::stage_marker(
         SummarizeStage::Combine,
@@ -576,12 +654,12 @@ async fn reduce_part_summaries(
                 reduce_call_system_prompt(is_final, final_system_prompt, merge_system_prompt);
             if is_final {
                 generate_with_provider(
-                    provider, model, ollama_url, system, prompt, 0.3, num_ctx, on_chunk, false,
+                    provider, model, ollama_url, system, prompt, 0.3, budget, on_chunk, false,
                 )
                 .await
             } else {
                 generate_with_provider(
-                    provider, model, ollama_url, system, prompt, 0.2, num_ctx, &no_op, false,
+                    provider, model, ollama_url, system, prompt, 0.2, budget, &no_op, false,
                 )
                 .await
             }
@@ -687,8 +765,8 @@ mod tests {
     use super::{
         APPLE_INTELLIGENCE_MODEL_ID, ChunkConfig, ModelChoiceError, SummaryModelDescriptor,
         SummaryProviderChoice, SummaryProviderKind, apple, check_providers, choose_summary_model,
-        ollama, reduce_call_system_prompt, resolve_provider, run_reduce_tree, sanitize_summary,
-        structured_extract_for_persist,
+        final_summary_is_truncated, ollama, reduce_call_system_prompt, resolve_provider,
+        run_reduce_tree, sanitize_summary, structured_extract_for_persist,
     };
     use crate::transcript::StructuredSummary;
 
@@ -739,6 +817,32 @@ mod tests {
         let input = "Here is a summary of the meeting.\n## Summary\nKey points are listed below.";
         let result = sanitize_summary(input);
         assert_eq!(result, "## Summary\nKey points are listed below.");
+    }
+
+    #[test]
+    fn truncated_summary_warns_only_when_the_prompt_asked_for_topics() {
+        let prompt = crate::constants::OLLAMA_SUMMARIZE_PROMPT;
+        let brief = crate::constants::OLLAMA_BRIEF_OVERVIEW_PROMPT;
+        assert!(prompt.contains("## Topics"));
+        assert!(!brief.contains("## Topics"));
+
+        let concatenated =
+            "## Summary\n- fact from part 1\n\n- fact from part 2\n\n- fact from part 3";
+        assert!(final_summary_is_truncated(concatenated, prompt));
+        assert!(final_summary_is_truncated("", prompt));
+
+        // A brief overview has no Topics section by design.
+        assert!(!final_summary_is_truncated(concatenated, brief));
+
+        // The required structure is quiet.
+        assert!(!final_summary_is_truncated(
+            "## Summary\n- recap\n\n## Topics\n- agenda\n",
+            prompt
+        ));
+        assert!(!final_summary_is_truncated(
+            "## Meeting Minutes\n- point\n\n## Topics\n- none stated\n",
+            crate::constants::OLLAMA_DETAILED_MINUTES_PROMPT
+        ));
     }
 
     fn model(id: &str, provider: SummaryProviderKind) -> SummaryModelDescriptor {
@@ -928,6 +1032,10 @@ mod tests {
             !ollama::MAP_SYSTEM_PROMPT.contains("## "),
             "map stage must not request markdown headings: they repeat once chunks are merged"
         );
+        assert!(
+            ollama::MAP_SYSTEM_PROMPT.contains("[0:12] Me:"),
+            "labeled turns are input structure; map must still emit a flat fact list"
+        );
         assert_eq!(ollama::MAP_SYSTEM_PROMPT, apple::MAP_SYSTEM_PROMPT);
     }
 
@@ -936,6 +1044,10 @@ mod tests {
         assert!(
             !ollama::MERGE_SYSTEM_PROMPT.contains("## "),
             "intermediate reduce rounds must not request markdown headings: they repeat by the final round"
+        );
+        assert!(
+            ollama::MERGE_SYSTEM_PROMPT.contains("per-part topic blocks"),
+            "merge must fuse into one list when the source transcript was labeled turns"
         );
         assert_eq!(ollama::MERGE_SYSTEM_PROMPT, apple::MERGE_SYSTEM_PROMPT);
     }
@@ -957,6 +1069,58 @@ mod tests {
             super::default_summary_templates()[0].prompt,
             prompt,
             "the Default template must ship the standard final-pass prompt"
+        );
+    }
+
+    /// The common long-meeting path is a single final reduce (map chunks still
+    /// fit `reduce_token_limit`), so merge/dedup cannot live only on
+    /// `OLLAMA_MERGE_PROMPT`. Every final-pass template must say so, or a 7B
+    /// concatenates the parts and, on the default/detailed templates, drops
+    /// `## Topics`.
+    #[test]
+    fn final_pass_prompts_merge_map_chunks_and_cap_output() {
+        let default = crate::constants::OLLAMA_SUMMARIZE_PROMPT;
+        let detailed = crate::constants::OLLAMA_DETAILED_MINUTES_PROMPT;
+        let brief = crate::constants::OLLAMA_BRIEF_OVERVIEW_PROMPT;
+
+        for prompt in [default, detailed, brief] {
+            assert!(
+                prompt.contains("consecutive parts of ONE meeting"),
+                "final pass must treat map chunks as parts of one meeting"
+            );
+            assert!(
+                prompt.contains("Do not keep the parts as separate blocks"),
+                "final pass must forbid per-part blocks"
+            );
+            assert!(
+                prompt.contains("Merge duplicate or overlapping points"),
+                "final pass must carry the merge-prompt dedup rule"
+            );
+        }
+
+        assert!(
+            default.contains("Never omit the Topics section"),
+            "default recap must require ## Topics"
+        );
+        assert!(
+            default.contains("At most 8 bullets per section"),
+            "default recap must cap length so concatenating 12 map lists is not the cheap path"
+        );
+        assert!(
+            detailed.contains("Never omit the Topics section"),
+            "detailed minutes must require ## Topics"
+        );
+        assert!(
+            detailed.contains("At most 16 bullets per section"),
+            "detailed minutes still need a ceiling"
+        );
+        assert!(
+            !brief.contains("## Topics"),
+            "brief overview keeps a single ## Summary section"
+        );
+        assert!(
+            brief.contains("at most 3 short bullets"),
+            "brief overview already caps output"
         );
     }
 

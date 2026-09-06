@@ -32,6 +32,8 @@
     onStartRecording,
     onClearShortcut,
     formatShortcut,
+    pillHidden,
+    onPillHiddenChange,
   }: {
     theme: Theme;
     locale: string;
@@ -51,6 +53,8 @@
     onStartRecording: (field: "toggle" | "ptt" | "rewrite") => void;
     onClearShortcut: (field: "toggle" | "ptt" | "rewrite") => void | Promise<void>;
     formatShortcut: (shortcut: string) => string;
+    pillHidden: boolean;
+    onPillHiddenChange: (event: Event) => void;
   } = $props();
 </script>
 
@@ -201,6 +205,21 @@
           <button onclick={() => onClearShortcut("rewrite")} class="btn btn-ghost text-sm">{$t("settings_interface.clear")}</button>
         {/if}
       </div>
+    {/snippet}
+  </SettingsField>
+
+  <SettingsField
+    label={$t("settings_interface.pill_hidden")}
+    description={$t("settings_interface.pill_hidden_desc")}
+  >
+    {#snippet control()}
+      <input
+        type="checkbox"
+        checked={pillHidden}
+        onchange={onPillHiddenChange}
+        class="switch"
+        aria-label={$t("settings_interface.pill_hidden")}
+      />
     {/snippet}
   </SettingsField>
 

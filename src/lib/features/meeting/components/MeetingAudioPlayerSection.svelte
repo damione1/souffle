@@ -4,7 +4,7 @@
   import { t } from "svelte-i18n";
   import { defaultAudioTarget, buildPlayCommand, type AudioSeekTarget } from "../audio-map";
   import type { MeetingAudioSession } from "../../../types";
-  import { formatDuration } from "../../../utils";
+  import { formatTimestamp } from "../../../utils";
 
   let {
     audioSessions,
@@ -88,7 +88,7 @@
         <Play size={16} />
       {/if}
     </button>
-    <span class="w-10 shrink-0 text-right font-mono text-[11px] text-text-muted">{formatDuration(currentTime)}</span>
+    <span class="w-10 shrink-0 text-right font-mono text-[11px] text-text-muted">{formatTimestamp(currentTime)}</span>
     <input
       type="range"
       class="flex-1"
@@ -98,6 +98,6 @@
       oninput={onScrub}
       aria-label={$t("meeting_audio.scrubber")}
     />
-    <span class="w-10 shrink-0 font-mono text-[11px] text-text-muted">{formatDuration(duration)}</span>
+    <span class="w-10 shrink-0 font-mono text-[11px] text-text-muted">{formatTimestamp(duration)}</span>
   </section>
 {/if}

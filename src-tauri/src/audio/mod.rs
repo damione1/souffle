@@ -11,6 +11,7 @@ pub mod recorder;
 pub mod resampler;
 pub mod retention;
 pub mod route_notice;
+pub mod sample_rate;
 pub mod system_tap;
 
 pub use capture::{AudioCapture, AudioChunk, AudioMessage};

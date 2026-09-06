@@ -21,10 +21,11 @@
   import ConfirmAction from "./ui/ConfirmAction.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
-  type SettingsTab = "transcription" | "audio" | "interface" | "meetings" | "system";
+  type SettingsTab = "transcription" | "ai" | "audio" | "interface" | "meetings" | "system";
 
   const TABS: { id: SettingsTab; labelKey: string }[] = [
     { id: "transcription", labelKey: "settings.tab_transcription" },
+    { id: "ai", labelKey: "settings.tab_ai" },
     { id: "audio", labelKey: "settings.tab_audio" },
     { id: "interface", labelKey: "settings.tab_interface" },
     { id: "meetings", labelKey: "settings.tab_meetings" },
@@ -147,6 +148,36 @@
         onUnloadTimeoutChange={controller.onModelUnloadTimeoutChange}
       />
 
+      <DictionarySettingsSection
+        entries={controller.dictionaryEntries}
+        learnFromEdit={controller.app.settings.dictation_learn_from_edit}
+        onLearnFromEditChange={controller.onLearnFromEditChange}
+        onAdd={controller.handleAddDictionaryEntry}
+        onDelete={controller.handleDeleteDictionaryEntry}
+      />
+    {:else if activeTab === "ai"}
+      <IntelligenceSettingsSection
+        ollamaUrl={controller.app.settings.ollama_url}
+        ollamaAvailable={controller.ollamaAvailable}
+        appleIntelligenceAvailable={controller.appleIntelligenceAvailable}
+        appleIntelligenceUnavailableReason={controller.appleIntelligenceUnavailableReason}
+        ollamaModels={controller.ollamaModels}
+        summaryModels={controller.summaryModels}
+        summaryProvider={controller.app.settings.summary_provider}
+        selectedOllamaModel={controller.app.settings.ollama_model}
+        recommendedOllamaModel={controller.recommendedOllamaModel}
+        ollamaPulling={controller.ollamaPulling}
+        ollamaPullStatus={controller.ollamaPullStatus}
+        ollamaPullDownloaded={controller.ollamaPullDownloaded}
+        ollamaPullTotal={controller.ollamaPullTotal}
+        ollamaPullError={controller.ollamaPullError}
+        onOllamaUrlChange={controller.onOllamaUrlChange}
+        onOllamaModelChange={controller.onOllamaModelChange}
+        onSummaryProviderChange={controller.onSummaryProviderChange}
+        onRetrySummaryProviders={controller.refreshSummaryProviders}
+        onDownloadRecommendedOllamaModel={controller.downloadRecommendedOllamaModel}
+      />
+
       <DictationPolishSettingsSection
         enabled={controller.app.settings.dictation_polish_enabled}
         templateId={controller.app.settings.dictation_polish_template_id}
@@ -157,12 +188,14 @@
         onPromptChange={controller.onDictationPolishPromptChange}
       />
 
-      <DictionarySettingsSection
-        entries={controller.dictionaryEntries}
-        learnFromEdit={controller.app.settings.dictation_learn_from_edit}
-        onLearnFromEditChange={controller.onLearnFromEditChange}
-        onAdd={controller.handleAddDictionaryEntry}
-        onDelete={controller.handleDeleteDictionaryEntry}
+      <SummaryTemplatesSettingsSection
+        templates={controller.app.settings.summary_templates}
+        defaultTemplateId={controller.app.settings.default_summary_template_id}
+        onDefaultChange={controller.onDefaultSummaryTemplateChange}
+        onNameChange={controller.onSummaryTemplateNameChange}
+        onPromptChange={controller.onSummaryTemplatePromptChange}
+        onAdd={controller.addSummaryTemplate}
+        onDelete={controller.deleteSummaryTemplate}
       />
     {:else if activeTab === "audio"}
       <MicrophoneSettingsSection
@@ -171,11 +204,17 @@
         selectedDevice={controller.app.selectedDevice}
         pinUnavailable={controller.pinUnavailable}
         allowBluetoothMic={controller.app.settings.allow_bluetooth_mic}
+        sampleRate={controller.inputSampleRate}
+        sampleRateError={controller.inputSampleRateError}
+        resettingSampleRate={controller.resettingSampleRate}
         onDeviceChange={controller.onDeviceChange}
         onAllowBluetoothMicChange={controller.onAllowBluetoothMicChange}
         onRefreshDevices={controller.refreshDevices}
         onMoveDevice={controller.onMoveDevice}
         onToggleHidden={controller.onToggleHidden}
+        onRemoveDevice={controller.onRemoveDevice}
+        onResetDevices={controller.onResetDevices}
+        onResetSampleRate={controller.onResetSampleRate}
       />
 
       <AudioSettingsSection
@@ -223,6 +262,8 @@
         onStartRecording={controller.startRecording}
         onClearShortcut={controller.clearShortcut}
         formatShortcut={controller.formatShortcut}
+        pillHidden={controller.app.settings.pill_hidden}
+        onPillHiddenChange={controller.onPillHiddenChange}
       />
 
       <FeedbackSoundsSettingsSection
@@ -243,38 +284,6 @@
         onToggleCalendar={controller.toggleCalendarSelected}
         onReminderMinutesChange={controller.onCalendarReminderMinutesChange}
         onAutostartEnabledChange={controller.onCalendarAutostartEnabledChange}
-      />
-
-      <IntelligenceSettingsSection
-        ollamaUrl={controller.app.settings.ollama_url}
-        ollamaAvailable={controller.ollamaAvailable}
-        appleIntelligenceAvailable={controller.appleIntelligenceAvailable}
-        appleIntelligenceUnavailableReason={controller.appleIntelligenceUnavailableReason}
-        ollamaModels={controller.ollamaModels}
-        summaryModels={controller.summaryModels}
-        summaryProvider={controller.app.settings.summary_provider}
-        selectedOllamaModel={controller.app.settings.ollama_model}
-        recommendedOllamaModel={controller.recommendedOllamaModel}
-        ollamaPulling={controller.ollamaPulling}
-        ollamaPullStatus={controller.ollamaPullStatus}
-        ollamaPullDownloaded={controller.ollamaPullDownloaded}
-        ollamaPullTotal={controller.ollamaPullTotal}
-        ollamaPullError={controller.ollamaPullError}
-        onOllamaUrlChange={controller.onOllamaUrlChange}
-        onOllamaModelChange={controller.onOllamaModelChange}
-        onSummaryProviderChange={controller.onSummaryProviderChange}
-        onRetrySummaryProviders={controller.refreshSummaryProviders}
-        onDownloadRecommendedOllamaModel={controller.downloadRecommendedOllamaModel}
-      />
-
-      <SummaryTemplatesSettingsSection
-        templates={controller.app.settings.summary_templates}
-        defaultTemplateId={controller.app.settings.default_summary_template_id}
-        onDefaultChange={controller.onDefaultSummaryTemplateChange}
-        onNameChange={controller.onSummaryTemplateNameChange}
-        onPromptChange={controller.onSummaryTemplatePromptChange}
-        onAdd={controller.addSummaryTemplate}
-        onDelete={controller.deleteSummaryTemplate}
       />
     {:else}
       <PermissionsSettingsSection />

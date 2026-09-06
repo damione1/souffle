@@ -8,7 +8,9 @@ import {
   getShortcuts,
   getSystemAudioSupport,
   isLaptop as checkIsLaptop,
+  getInputSampleRate,
   listAudioDevices,
+  resetInputSampleRate,
   saveSettings,
   saveShortcuts as persistShortcutSettings,
   selectAudioDevice,
@@ -37,8 +39,11 @@ import type {
 import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, shortcutMissingModifier } from "../../utils";
 import {
   buildMicrophoneList,
+  keepConnectedDevices,
+  removeKnownDevice,
   reorderMicrophoneList,
 } from "./microphone-list";
+import { resolveSampleRateDeviceUid } from "./sample-rate";
 import {
   getFirstAvailableTranscriptionBackend,
   getFirstAvailableTranscriptionModel,
@@ -58,6 +63,12 @@ export function createSettingsController() {
 
   let audioDevices = $state<AudioInputDevice[]>([]);
   let pinUnavailable = $state(false);
+  let inputSampleRate = $state<number | null>(null);
+  let inputSampleRateError = $state("");
+  let resettingSampleRate = $state(false);
+  // Only the newest sample-rate request may write the shared state: the
+  // microphone can change while a CoreAudio read or reset is still in flight.
+  let sampleRateRequest = 0;
   let systemAudioSupported = $state(false);
   // Gates the "microphone when lid is closed" picker: meaningless on a
   // desktop Mac, so it's hidden entirely rather than shown disabled.
@@ -133,9 +144,10 @@ export function createSettingsController() {
 
   async function refreshRuntimeStatus() {
     try {
-      await refreshTranscriptionRuntimeStatus(app, catalog);
+      return await refreshTranscriptionRuntimeStatus(app, catalog);
     } catch (e) {
       statusMessage = errorMessage(e);
+      return null;
     }
   }
 
@@ -184,8 +196,43 @@ export function createSettingsController() {
         const connected = audioDevices.some((device) => device.uid === app.selectedDevice);
         pinUnavailable = !connected;
       }
+      await refreshInputSampleRate();
     } catch (e) {
       statusMessage = errorMessage(e);
+    }
+  }
+
+  async function refreshInputSampleRate() {
+    const uid = resolveSampleRateDeviceUid(app.selectedDevice, audioDevices);
+    const request = ++sampleRateRequest;
+    if (!uid) {
+      inputSampleRate = null;
+      return;
+    }
+    try {
+      const hz = await getInputSampleRate(uid);
+      if (request !== sampleRateRequest) return;
+      inputSampleRate = hz;
+    } catch (e) {
+      if (request !== sampleRateRequest) return;
+      console.warn("get_input_sample_rate failed:", e);
+      inputSampleRate = null;
+    }
+  }
+
+  async function onResetSampleRate() {
+    const uid = resolveSampleRateDeviceUid(app.selectedDevice, audioDevices);
+    if (!uid || resettingSampleRate) return;
+    const request = ++sampleRateRequest;
+    resettingSampleRate = true;
+    inputSampleRateError = "";
+    try {
+      const hz = await resetInputSampleRate(uid);
+      if (request === sampleRateRequest) inputSampleRate = hz;
+    } catch (e) {
+      if (request === sampleRateRequest) inputSampleRateError = errorMessage(e);
+    } finally {
+      resettingSampleRate = false;
     }
   }
 
@@ -210,6 +257,7 @@ export function createSettingsController() {
       await persistSettings((settings) => {
         settings.audio_device = value || null;
       });
+      await refreshInputSampleRate();
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -234,6 +282,75 @@ export function createSettingsController() {
       }
       settings.input_priority.hidden = [...hiddenSet];
     });
+  }
+
+  /** Clear a pin/clamshell preference that now points at a device we just forgot. */
+  function clearDanglingDevicePreference(settings: AppSettings, uid: string) {
+    if (settings.audio_device === uid) {
+      settings.audio_device = null;
+    }
+    if (settings.clamshell_audio_device === uid) {
+      settings.clamshell_audio_device = null;
+    }
+  }
+
+  /** Capture holds the pin in-memory (`AudioCommand::SelectDevice`), separate
+   *  from the settings row. Clearing the row without this leaves the live pin
+   *  pointing at a device we just forgot, so it would win again on reconnect. */
+  async function syncLivePin(previousPin: string) {
+    const nextPin = app.selectedDevice;
+    pinUnavailable = Boolean(
+      nextPin && !audioDevices.some((device) => device.uid === nextPin),
+    );
+    if (previousPin === nextPin) return;
+    try {
+      await selectAudioDevice(nextPin);
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
+  async function removeInputDevice(uid: string) {
+    const previousPin = app.selectedDevice;
+    await persistSettings((settings) => {
+      settings.input_priority = removeKnownDevice(settings.input_priority, uid);
+      clearDanglingDevicePreference(settings, uid);
+    });
+    await syncLivePin(previousPin);
+  }
+
+  async function resetInputDevices() {
+    // Re-read the connected set right before acting on it: the closure's
+    // `audioDevices` can be stale by the time the user confirms, and acting
+    // on a stale snapshot would wrongly drop a device that just reconnected.
+    // Called directly (not via refreshDevices()) so a failed refresh aborts
+    // the reset instead of silently proceeding on stale or empty data.
+    let freshDevices: AudioInputDevice[];
+    try {
+      freshDevices = await listAudioDevices();
+    } catch (e) {
+      statusMessage = errorMessage(e);
+      return;
+    }
+    audioDevices = freshDevices;
+    const connectedUids = audioDevices.map((device) => device.uid);
+    const connected = new Set(connectedUids);
+    const previousPin = app.selectedDevice;
+    await persistSettings((settings) => {
+      settings.input_priority = keepConnectedDevices(settings.input_priority, connectedUids);
+      // Any pin outside the connected set is cleared here, whether it is a
+      // normal dropped pin or a stale/legacy value: `audio_device` and
+      // `clamshell_audio_device` used to store device names before
+      // `migrate_audio_device_preferences`, so a leftover value may never
+      // have been a known uid in the first place.
+      if (settings.audio_device && !connected.has(settings.audio_device)) {
+        settings.audio_device = null;
+      }
+      if (settings.clamshell_audio_device && !connected.has(settings.clamshell_audio_device)) {
+        settings.clamshell_audio_device = null;
+      }
+    });
+    await syncLivePin(previousPin);
   }
 
   function onAllowBluetoothMicChange(event: Event) {
@@ -323,14 +440,19 @@ export function createSettingsController() {
       settings.transcription_backend_id = option.backendId;
     });
 
-    if (app.transcriptionRuntimePhase === "download_required") {
+    // Branch on the phase the backend just reported for the newly selected
+    // model, never on stored state a StateChanged event may have overwritten
+    // with the previous model's phase.
+    const phase = await refreshRuntimeStatus();
+
+    if (phase === "download_required") {
       await startTranscriptionModelDownload(
         app,
         catalog,
         (message) => { statusMessage = message; },
         { autoLoad: true },
       );
-    } else if (app.transcriptionRuntimePhase === "load_required") {
+    } else if (phase === "load_required") {
       await startTranscriptionModelLoad(app, catalog, (message) => {
         statusMessage = message;
       });
@@ -712,6 +834,13 @@ export function createSettingsController() {
     });
   }
 
+  function onPillHiddenChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.pill_hidden = checked;
+    });
+  }
+
   function onFeedbackSoundsVolumeChange(event: Event) {
     const value = parseInt((event.target as HTMLInputElement).value, 10);
     if (!Number.isFinite(value)) return;
@@ -805,6 +934,10 @@ export function createSettingsController() {
     get app() { return app; },
     get audioDevices() { return audioDevices; },
     get pinUnavailable() { return pinUnavailable; },
+    get inputSampleRate() { return inputSampleRate; },
+    get inputSampleRateError() { return inputSampleRateError; },
+    get resettingSampleRate() { return resettingSampleRate; },
+    onResetSampleRate,
     setPinUnavailable,
     onInputDevicesChanged,
     get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },
@@ -842,12 +975,15 @@ export function createSettingsController() {
     onCalendarAutostartEnabledChange,
     onFeedbackSoundsEnabledChange,
     onFeedbackSoundsVolumeChange,
+    onPillHiddenChange,
     mount,
     refreshRuntimeStatus,
     refreshDevices,
     onDeviceChange,
     onMoveDevice: moveInputDevice,
     onToggleHidden: toggleInputDeviceHidden,
+    onRemoveDevice: removeInputDevice,
+    onResetDevices: resetInputDevices,
     onAllowBluetoothMicChange,
     refreshSummaryProviders,
     downloadRecommendedOllamaModel,

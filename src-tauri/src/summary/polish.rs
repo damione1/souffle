@@ -380,6 +380,12 @@ fn format_dictionary_vocabulary(entries: &[DictionaryEntry]) -> Option<String> {
     ))
 }
 
+fn polish_output_basis<'a>(stripped: &'a str, rewrite_of: Option<&'a str>) -> &'a str {
+    rewrite_of
+        .filter(|selection| !selection.trim().is_empty())
+        .unwrap_or(stripped)
+}
+
 fn polish_system_prompt(provider: SummaryProviderKind) -> &'static str {
     match provider {
         SummaryProviderKind::Ollama => super::ollama::DICTATION_POLISH_SYSTEM_PROMPT,
@@ -463,7 +469,9 @@ pub async fn polish_dictation_text(
         polish_system_prompt(provider),
         prompt,
         0.1,
-        super::ollama::REDUCE_CONTEXT,
+        super::ollama::polish_budget(super::estimate_tokens(polish_output_basis(
+            &stripped, rewrite_of,
+        ))),
         &no_op,
         false,
     )
@@ -500,7 +508,7 @@ mod tests {
         SUPERSEDED_CLEAN_PROMPTS, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL,
         TEMPLATE_NO_FILLERS, build_polish_user_prompt, default_polish_templates,
         early_polish_dictation_result, effective_template_prompt, is_blank_for_polish,
-        merge_polish_templates, parse_polish_response, strip_invisible_chars,
+        merge_polish_templates, parse_polish_response, polish_output_basis, strip_invisible_chars,
         superseded_default_prompts,
     };
     use crate::filter::DictionaryEntry;
@@ -744,6 +752,15 @@ mod tests {
             "The dictation transcript is the user's spoken rewrite instructions. Output only the rewritten selection."
         ));
         assert!(!prompt.contains("Target app:"));
+    }
+
+    #[test]
+    fn polish_output_basis_uses_the_selection_when_rewriting() {
+        let instruction = "make it shorter";
+        let selection = "A long selected passage that must survive the rewrite.";
+        assert_eq!(polish_output_basis(instruction, Some(selection)), selection);
+        assert_eq!(polish_output_basis(instruction, None), instruction);
+        assert_eq!(polish_output_basis(instruction, Some("  \n")), instruction);
     }
 
     #[test]

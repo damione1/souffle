@@ -490,14 +490,13 @@ pub async fn summarize_meeting(
     let transcript = state.db.load_meeting(&id)?;
     let settings = AppSettings::load(&state.db)?;
 
-    let text = match transcript.edited_transcript {
-        Some(ref edited) if !edited.is_empty() => edited.clone(),
-        _ => transcript
-            .segments
-            .iter()
-            .map(|s| s.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" "),
+    let (text, turn_units) = match transcript.edited_transcript {
+        Some(ref edited) if !edited.is_empty() => (edited.clone(), None),
+        _ => {
+            let turns = crate::summary::turns_from_segments(&transcript.segments);
+            let text = turns.join("\n");
+            (text, Some(turns))
+        }
     };
 
     if text.is_empty() {
@@ -506,16 +505,23 @@ pub async fn summarize_meeting(
 
     let final_system_prompt =
         crate::summary::resolve_summary_template_prompt(&settings, template_id.as_deref());
+    let output_language = crate::summary::resolve_summary_language(
+        settings.meeting_transcription_language,
+        &transcript.segments,
+        &settings.locale,
+    );
 
     let channel_clone = channel.clone();
     let db = state.db.clone();
     let summary = crate::summary::summarize_stream(
         &text,
+        turn_units.as_deref(),
         transcript.notes.as_deref(),
         &transcript.participants,
         &model,
         Some(&settings.ollama_url),
         &final_system_prompt,
+        output_language,
         move |progress| {
             let _ = channel_clone.send(progress);
         },

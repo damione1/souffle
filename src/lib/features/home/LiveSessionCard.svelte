@@ -9,7 +9,7 @@
   import type { LiveParagraph } from "../meeting/live-transcript.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
-  import { resolveSpeakerLabel } from "../../utils";
+  import { elapsedSecondsSince, formatDuration, resolveSpeakerLabel, segmentGap } from "../../utils";
 
   let {
     mode,
@@ -27,7 +27,11 @@
   /** Auto-scroll only kicks in when already within this many px of the bottom. */
   const NEAR_BOTTOM_PX = 40;
 
-  let elapsedSeconds = $state(0);
+  // Repaint driver only. The displayed value is always recomputed from the
+  // wall clock below, so ticks dropped by WebKit's background throttling cost
+  // nothing but refresh smoothness. A counter incremented per tick would
+  // instead lose that time for good.
+  let nowMs = $state(Date.now());
   let transcriptEl: HTMLDivElement | undefined = $state();
   let editingParagraphId = $state<number | null>(null);
   let editDraft = $state("");
@@ -41,14 +45,19 @@
         .slice(-LIVE_PARAGRAPH_WINDOW)
       : [],
   );
-  const liveTentative = $derived(mode === "meeting" ? meeting.liveTranscript.tentative : "");
+  const liveTentative = $derived(
+    mode === "meeting" ? meeting.liveTranscript.tentative : transcription.tentative,
+  );
+
 
   const hasLiveContent = $derived(
-    mode === "dictation" ? Boolean(liveText) : liveParagraphs.length > 0 || Boolean(liveTentative),
+    mode === "dictation"
+      ? Boolean(liveText) || Boolean(liveTentative)
+      : liveParagraphs.length > 0 || Boolean(liveTentative),
   );
 
   const elapsed = $derived(
-    `${Math.floor(elapsedSeconds / 60)}:${`${elapsedSeconds % 60}`.padStart(2, "0")}`,
+    formatDuration(elapsedSecondsSince(meeting.app.recordingStartedAtMs, nowMs)),
   );
 
   const stopping = $derived(
@@ -138,10 +147,20 @@
   });
 
   onMount(() => {
-    const timer = setInterval(() => {
-      elapsedSeconds += 1;
-    }, 1000);
-    return () => clearInterval(timer);
+    const tick = () => {
+      nowMs = Date.now();
+    };
+    const timer = setInterval(tick, 1000);
+    // WebKit pauses the interval while the window is occluded; the displayed
+    // value is derived from the wall clock, so one catch-up on return is enough.
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   });
 
   onDestroy(() => {
@@ -179,7 +198,7 @@
   {#if mode === "dictation"}
     <div class="flex min-h-[340px] flex-col rounded-[18px] bg-surface-1 p-[30px] px-8 outline-1 outline-ghost-border">
       <p class="m-0 text-[19px] font-normal leading-[1.85] text-text-secondary">
-        {liveText}<span
+        {liveText}{#if liveTentative}<span class="opacity-50">{segmentGap(liveText, liveTentative)}{liveTentative}</span>{/if}<span
           class="ml-0.5 inline-block h-5 w-0.5 bg-accent align-[-3px]"
           style="animation: blink 1s step-end infinite;"
         ></span>
@@ -280,7 +299,7 @@
                     class="m-0 inline text-[15px] leading-[1.75] text-text-secondary"
                   />
                   {#if i === liveParagraphs.length - 1 && liveTentative}
-                    <span class="opacity-50">{paragraph.text ? " " : ""}{liveTentative}</span>
+                    <span class="opacity-50">{segmentGap(paragraph.text, liveTentative)}{liveTentative}</span>
                   {/if}
                 </p>
               {/if}

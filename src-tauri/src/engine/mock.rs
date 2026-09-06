@@ -23,9 +23,22 @@ pub struct MockEngine {
     /// Shared with tests via `reset_state_count_handle()`, for asserting the
     /// actor's pre-warm / skip-reset-when-fresh behavior.
     reset_state_count: Arc<AtomicUsize>,
+    /// Shared with tests via `reset_state_preserving_count_handle()`. Kept
+    /// separate from `reset_state_count` so a test can tell the two
+    /// `TranscriptionEngine` reset methods apart: the trait default routes
+    /// `reset_state_preserving_timeline()` back into `reset_state()`, so a
+    /// single shared counter would climb identically no matter which one the
+    /// caller actually invoked.
+    reset_state_preserving_count: Arc<AtomicUsize>,
     /// Value returned by `emission_delay_seconds()`; configurable via
     /// `with_emission_delay_seconds` for drain-window tests.
     emission_delay_seconds: f64,
+    /// Popped into `tail_drained_value` on each `transcribe()` call, so tests
+    /// can script when the engine reports its tail as drained (e.g. "false"
+    /// for the first N frames, then "true") independently of
+    /// `transcribe_responses`. Once exhausted, the last value sticks.
+    tail_drained_schedule: VecDeque<bool>,
+    tail_drained_value: bool,
 }
 
 impl Default for MockEngine {
@@ -42,7 +55,10 @@ impl MockEngine {
             flush_responses: VecDeque::new(),
             unload_count: Arc::new(AtomicUsize::new(0)),
             reset_state_count: Arc::new(AtomicUsize::new(0)),
+            reset_state_preserving_count: Arc::new(AtomicUsize::new(0)),
             emission_delay_seconds: 0.0,
+            tail_drained_schedule: VecDeque::new(),
+            tail_drained_value: false,
         }
     }
 
@@ -58,9 +74,22 @@ impl MockEngine {
         Arc::clone(&self.reset_state_count)
     }
 
+    /// Clone of the reset_state_preserving_timeline call counter; call
+    /// before the mock is moved into the actor's factory closure.
+    pub fn reset_state_preserving_count_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.reset_state_preserving_count)
+    }
+
     /// Configure the value returned by `emission_delay_seconds()`.
     pub fn with_emission_delay_seconds(mut self, seconds: f64) -> Self {
         self.emission_delay_seconds = seconds;
+        self
+    }
+
+    /// Configure the sequence of `tail_drained()` results, advanced one
+    /// value per `transcribe()` call (the last value sticks once exhausted).
+    pub fn with_tail_drained_schedule(mut self, schedule: impl IntoIterator<Item = bool>) -> Self {
+        self.tail_drained_schedule = schedule.into_iter().collect();
         self
     }
 
@@ -115,6 +144,9 @@ impl TranscriptionEngine for MockEngine {
         _audio: &[f32],
         _language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        if let Some(drained) = self.tail_drained_schedule.pop_front() {
+            self.tail_drained_value = drained;
+        }
         self.transcribe_responses.pop_front().unwrap_or(Ok(vec![]))
     }
 
@@ -127,8 +159,18 @@ impl TranscriptionEngine for MockEngine {
         Ok(())
     }
 
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.reset_state_preserving_count
+            .fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
     fn emission_delay_seconds(&self) -> f64 {
         self.emission_delay_seconds
+    }
+
+    fn tail_drained(&self) -> bool {
+        self.tail_drained_value
     }
 
     fn audio_requirements(&self) -> AudioInputRequirements {

@@ -4,6 +4,7 @@ import type {
   PipelineError,
   SystemAudioStatus,
   TranscriptionHealth,
+  TranscriptionProfile,
   TranscriptionRuntimePhase,
   UpcomingMeeting,
 } from "../types";
@@ -33,6 +34,13 @@ let transcriptionRuntimePhase = $state<TranscriptionRuntimePhase>("download_requ
 
 // Latest pipeline health snapshot while recording (cleared when recording ends)
 let transcriptionHealth = $state<TranscriptionHealth | null>(null);
+
+// Wall-clock start of the current recording session (dictation or meeting),
+// captured when the backend machine enters a recording state. The live
+// elapsed counter derives from this instead of counting timer ticks, which
+// WebKit drops while the window sits in the background during a meeting.
+// Module-level, so it also survives a remount of the live session card.
+let recordingStartedAtMs = $state<number | null>(null);
 
 // System-audio capture status for the current meeting session
 let systemAudioStatus = $state<SystemAudioStatus | null>(null);
@@ -82,6 +90,7 @@ let settings = $state<AppSettings>({
   calendar_reminder_minutes: 2,
   calendar_autostart_enabled: true,
   feedback_sounds_enabled: true,
+  pill_hidden: false,
   feedback_sounds_volume: 70,
   model_unload_timeout_minutes: 60,
   meeting_autostop_enabled: true,
@@ -145,6 +154,43 @@ function deriveRuntimePhase(state: AppStateMachine): TranscriptionRuntimePhase {
   }
 }
 
+/** The profile the backend is currently busy with, when it tracks one. */
+export function machineProfile(state: AppStateMachine): TranscriptionProfile | null {
+  switch (state.state) {
+    case "idle":
+      return null;
+    case "error": {
+      const recovery = state.data.recovery;
+      if (typeof recovery === "object") {
+        if ("retry_from_downloaded" in recovery) return recovery.retry_from_downloaded.profile;
+        if ("retry_from_ready" in recovery) return recovery.retry_from_ready.profile;
+      }
+      return null;
+    }
+    default:
+      return state.data.profile;
+  }
+}
+
+/** Whether the machine is talking about the model the user has selected.
+ * After a model switch the two diverge (machine still Ready with the old
+ * profile), and the machine's phase must not be applied to the new one. */
+export function machineMatchesSelection(
+  state: AppStateMachine,
+  selection: Pick<
+    AppSettings,
+    "transcription_engine_id" | "transcription_model_id" | "transcription_backend_id"
+  >,
+): boolean {
+  const profile = machineProfile(state);
+  if (!profile) return false;
+  return (
+    profile.engine_id === selection.transcription_engine_id
+    && profile.model_id === selection.transcription_model_id
+    && profile.backend_id === selection.transcription_backend_id
+  );
+}
+
 function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOperationState {
   switch (state.state) {
     case "downloading": return "downloading";
@@ -172,21 +218,33 @@ export function getAppState() {
 
     get machineState() { return machineState; },
     set machineState(s: AppStateMachine) {
+      const wasRecording = deriveRecordingMode(machineState) !== "idle";
       machineState = s;
+      // A resumed meeting re-enters recording from a non-recording state, so
+      // the counter restarts at zero for the new recording session.
+      if (!wasRecording && deriveRecordingMode(s) !== "idle") {
+        recordingStartedAtMs = Date.now();
+      }
       // Sync runtime phase from machine when no model operation is in progress.
       // During download/load the phase is managed by runtime.ts callbacks.
-      if (deriveModelOperationState(s) === "idle") {
+      // Only when the machine is talking about the selected model: otherwise a
+      // stray event would report the *old* model's phase (e.g. "ready") for a
+      // model the user just picked and that still needs a download or a load.
+      if (deriveModelOperationState(s) === "idle" && machineMatchesSelection(s, settings)) {
         transcriptionRuntimePhase = deriveRuntimePhase(s);
       }
       // Health snapshots only make sense while recording
       if (deriveRecordingMode(s) === "idle") {
         transcriptionHealth = null;
         systemAudioStatus = null;
+        recordingStartedAtMs = null;
       }
     },
 
     get transcriptionHealth() { return transcriptionHealth; },
     set transcriptionHealth(h: TranscriptionHealth | null) { transcriptionHealth = h; },
+
+    get recordingStartedAtMs() { return recordingStartedAtMs; },
 
     get systemAudioStatus() { return systemAudioStatus; },
     set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },

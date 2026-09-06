@@ -3,26 +3,26 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+use super::batch_windows::{
+    CHUNK_SAMPLES, SAMPLE_RATE as WHISPER_SAMPLE_RATE, drain_ready_windows, pcm_rms,
+};
 use super::{
     AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
     collapse_whitespace,
 };
 
-/// Whisper sample rate: 16kHz mono f32 (required by whisper.cpp)
-const WHISPER_SAMPLE_RATE: u32 = 16_000;
-
 /// Number of CPU threads for whisper.cpp inference.
 const WHISPER_N_THREADS: i32 = 4;
-
-/// Chunk size for pipeline delivery: 5 seconds at 16kHz.
-/// Non-overlapping chunks avoid duplicate text from sliding windows.
-const CHUNK_SAMPLES: usize = WHISPER_SAMPLE_RATE as usize * 5;
 
 /// Minimum audio for meaningful inference (1 second).
 const MIN_INFERENCE_SAMPLES: usize = WHISPER_SAMPLE_RATE as usize;
 
 /// Segments with no-speech probability above this are discarded.
 const NO_SPEECH_PROB_THRESHOLD: f32 = 0.6;
+
+/// Digital-silence / near-zero RMS. Room tone sits well above this; those
+/// windows are dropped via [`is_known_hallucination`] instead.
+const SILENCE_RMS_FLOOR: f32 = 5e-4;
 
 /// Strip whisper special tokens: [_BEG_], [_TT_xxx], [_SOT_], [_EOT_], [_LANG_xx], etc.
 fn strip_special_tokens(text: &str) -> String {
@@ -59,6 +59,57 @@ fn strip_special_tokens(text: &str) -> String {
     collapse_whitespace(&result)
 }
 
+/// Alphanumeric-only lowercase key so `"Thank you."` / `". . Thank you."`
+/// collapse to the same token.
+fn hallucination_key(text: &str) -> String {
+    let lowered = text.to_lowercase();
+    let spaced: String = lowered
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    collapse_whitespace(&spaced)
+}
+
+/// True when `text` is *only* a known Whisper hallucination, not real
+/// speech that happens to include "thank you" or mention Amara.
+fn is_known_hallucination(text: &str) -> bool {
+    let key = hallucination_key(text);
+    if key.is_empty() {
+        return false;
+    }
+    matches!(
+        key.as_str(),
+        "thank you" | "thank you thank you" | "merci" | "amara" | "amara org"
+    ) || is_subtitle_credit(&key)
+}
+
+/// Whole-utterance subtitle watermarks. Prefixes, not substrings, so
+/// "I spoke to Amara yesterday" / "the subtitles are ready" survive.
+fn is_subtitle_credit(key: &str) -> bool {
+    const CREDIT_PREFIXES: &[&str] = &[
+        "sous titres réalisés par",
+        "sous titres par amara",
+        "subtitles by",
+        "subtitles made",
+    ];
+    CREDIT_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+}
+
+/// Drop a window that is digital silence, or whose sole segment is a
+/// known hallucination. Real speech that mentions "thank you" is kept.
+fn drop_silent_or_hallucinated_window(
+    segments: Vec<TranscriptionSegment>,
+    audio: &[f32],
+) -> Vec<TranscriptionSegment> {
+    if pcm_rms(audio) < SILENCE_RMS_FLOOR {
+        return Vec::new();
+    }
+    if segments.len() == 1 && is_known_hallucination(&segments[0].text) {
+        return Vec::new();
+    }
+    segments
+}
+
 struct LoadedWhisperModel {
     ctx: WhisperContext,
     #[allow(dead_code)]
@@ -66,7 +117,8 @@ struct LoadedWhisperModel {
 }
 
 /// Whisper STT engine via whisper-rs (whisper.cpp bindings).
-/// Batch-oriented: accumulates audio, triggers inference every CHUNK_SAMPLES.
+/// Batch-oriented: accumulates audio, cuts on a silence gap in [4 s, 7 s]
+/// (else 7 s). Pipeline hop stays [`CHUNK_SAMPLES`] (5 s).
 pub struct WhisperEngine {
     model: Option<LoadedWhisperModel>,
     /// Audio buffer — accumulates until chunk threshold
@@ -102,6 +154,20 @@ impl WhisperEngine {
         let offset = self.consumed_samples as f64 / WHISPER_SAMPLE_RATE as f64;
         self.consumed_samples += window_len;
         offset
+    }
+
+    /// Shared implementation for `reset_state` and
+    /// `reset_state_preserving_timeline`: both must drop the buffered audio
+    /// a wedged engine choked on. Only a plain reset also drops
+    /// `consumed_samples` and `detected_language`, since a stall-recovery
+    /// reset happens mid-session against the same speaker and must keep the
+    /// window-timestamp offset and cached language continuous.
+    fn reset_buffer(&mut self, preserve_timeline: bool) {
+        self.audio_buffer.clear();
+        if !preserve_timeline {
+            self.detected_language = None;
+            self.consumed_samples = 0;
+        }
     }
 
     /// Run inference on a chunk of audio. Returns detected language code
@@ -192,7 +258,27 @@ impl WhisperEngine {
             });
         }
 
+        segments = drop_silent_or_hallucinated_window(segments, audio);
+
         Ok((segments, detected_lang))
+    }
+}
+
+/// Cache auto-detected language only from a window that kept real speech.
+/// A filtered leading hallucination must not lock the session to the
+/// wrong language for later windows.
+fn remember_detected_language(
+    cached: &mut Option<String>,
+    requested: Option<&str>,
+    detected: Option<String>,
+    surviving_segments: &[TranscriptionSegment],
+) {
+    if requested.is_some() || cached.is_some() || surviving_segments.is_empty() {
+        return;
+    }
+    if let Some(lang) = detected {
+        info!(language = %lang, "Whisper auto-detected language, caching for session");
+        *cached = Some(lang);
     }
 }
 
@@ -252,41 +338,38 @@ impl TranscriptionEngine for WhisperEngine {
 
         self.audio_buffer.extend_from_slice(audio);
 
-        if self.audio_buffer.len() < CHUNK_SAMPLES {
-            return Ok(vec![]);
+        let mut all_segments = Vec::new();
+        let windows = drain_ready_windows(&mut self.audio_buffer);
+
+        for to_process in windows {
+            let offset = self.take_window_offset(to_process.len());
+            let effective_lang = if language.is_some() {
+                language.map(String::from)
+            } else {
+                self.detected_language.clone()
+            };
+            let (mut segments, detected) = {
+                let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+                Self::run_inference(
+                    &loaded.ctx,
+                    &to_process,
+                    effective_lang.as_deref().or(language),
+                )?
+            };
+            for seg in &mut segments {
+                seg.start_time += offset;
+                seg.end_time += offset;
+            }
+            remember_detected_language(
+                &mut self.detected_language,
+                language,
+                detected,
+                &segments,
+            );
+            all_segments.extend(segments);
         }
 
-        let to_process: Vec<f32> = self.audio_buffer.drain(..).collect();
-        let offset = self.take_window_offset(to_process.len());
-        let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
-
-        // Use cached language if available, otherwise auto-detect
-        let effective_lang = if language.is_some() {
-            language.map(String::from)
-        } else {
-            self.detected_language.clone()
-        };
-
-        let (mut segments, detected) = Self::run_inference(
-            &loaded.ctx,
-            &to_process,
-            effective_lang.as_deref().or(language),
-        )?;
-        for seg in &mut segments {
-            seg.start_time += offset;
-            seg.end_time += offset;
-        }
-
-        // Cache detected language from first successful auto-detect
-        if language.is_none()
-            && let Some(ref lang) = detected
-            && self.detected_language.is_none()
-        {
-            info!(language = %lang, "Whisper auto-detected language, caching for session");
-            self.detected_language = Some(lang.clone());
-        }
-
-        Ok(segments)
+        Ok(all_segments)
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
@@ -312,10 +395,12 @@ impl TranscriptionEngine for WhisperEngine {
     }
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
-        self.audio_buffer.clear();
-        // Clear cached language so next session auto-detects fresh
-        self.detected_language = None;
-        self.consumed_samples = 0;
+        self.reset_buffer(false);
+        Ok(())
+    }
+
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.reset_buffer(true);
         Ok(())
     }
 
@@ -367,5 +452,137 @@ mod tests {
     fn strip_special_tokens_cleans_extra_spaces() {
         let input = "[_BEG_]  Hello  [_TT_100]  world  [_TT_200]";
         assert_eq!(strip_special_tokens(input), "Hello world");
+    }
+
+    #[test]
+    fn known_hallucinations_are_dropped() {
+        for text in [
+            "Thank you.",
+            "Thank you. Thank you.",
+            ". . Thank you.",
+            "Merci.",
+            "Sous-titres réalisés par Amara.org",
+        ] {
+            assert!(
+                is_known_hallucination(text),
+                "expected hallucination: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn real_speech_with_thank_you_is_kept() {
+        assert!(!is_known_hallucination("Thank you for the update."));
+        assert!(!is_known_hallucination("Please thank you later today"));
+        assert!(!is_known_hallucination("Merci beaucoup à toute l'équipe"));
+        assert!(!is_known_hallucination("I spoke to Amara yesterday"));
+        assert!(!is_known_hallucination("The subtitles are ready"));
+    }
+
+    #[test]
+    fn filtered_leading_window_does_not_cache_language() {
+        let mut cached = None;
+        remember_detected_language(&mut cached, None, Some("en".into()), &[]);
+        assert!(cached.is_none(), "hallucinated window must not lock language");
+
+        let speech = [TranscriptionSegment {
+            text: "Bonjour à tous".into(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("fr".into()),
+            confidence: Some(0.9),
+            speaker: None,
+        }];
+        remember_detected_language(&mut cached, None, Some("fr".into()), &speech);
+        assert_eq!(cached.as_deref(), Some("fr"));
+    }
+
+    #[test]
+    fn explicit_language_is_not_overwritten_by_detect() {
+        let mut cached = None;
+        let speech = [TranscriptionSegment {
+            text: "Hello".into(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("en".into()),
+            confidence: Some(0.9),
+            speaker: None,
+        }];
+        remember_detected_language(&mut cached, Some("fr"), Some("en".into()), &speech);
+        assert!(cached.is_none());
+    }
+
+    #[test]
+    fn silent_buffer_drops_any_segment() {
+        let silent = vec![0.0f32; 16_000];
+        assert!(pcm_rms(&silent) < SILENCE_RMS_FLOOR);
+        let segs = vec![TranscriptionSegment {
+            text: "Hello".into(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("en".into()),
+            confidence: Some(0.9),
+            speaker: None,
+        }];
+        assert!(drop_silent_or_hallucinated_window(segs, &silent).is_empty());
+    }
+
+    #[test]
+    fn sole_thank_you_on_room_tone_is_dropped() {
+        // Brown-ish noise above the digital-silence floor.
+        let room: Vec<f32> = (0..16_000)
+            .map(|i| ((i % 17) as f32 / 17.0 - 0.5) * 0.04)
+            .collect();
+        assert!(pcm_rms(&room) >= SILENCE_RMS_FLOOR);
+        let segs = vec![TranscriptionSegment {
+            text: "Thank you.".into(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("en".into()),
+            confidence: Some(0.4),
+            speaker: None,
+        }];
+        assert!(drop_silent_or_hallucinated_window(segs, &room).is_empty());
+    }
+
+    #[test]
+    fn speech_window_with_thank_you_in_a_sentence_is_kept() {
+        let speech: Vec<f32> = (0..16_000).map(|i| (i as f32 * 0.05).sin() * 0.3).collect();
+        let segs = vec![TranscriptionSegment {
+            text: "Thank you for joining the call.".into(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("en".into()),
+            confidence: Some(0.9),
+            speaker: None,
+        }];
+        let kept = drop_silent_or_hallucinated_window(segs, &speech);
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].text.contains("joining"));
+    }
+
+    #[test]
+    fn audio_requirements_keep_5s_pipeline_hop() {
+        let engine = WhisperEngine::new();
+        let reqs = engine.audio_requirements();
+        assert_eq!(reqs.sample_rate_hz, 16_000);
+        assert_eq!(reqs.chunk_size_samples, CHUNK_SAMPLES as u32);
+    }
+
+    #[test]
+    fn five_second_speech_waits_for_gap_or_seven() {
+        let pcm: Vec<f32> = (0..CHUNK_SAMPLES)
+            .map(|i| (i as f32 * 0.02).sin() * 0.3)
+            .collect();
+        assert_eq!(
+            crate::engine::batch_windows::find_cut_samples(&pcm),
+            None,
+            "must not knife-cut at 5 s (data|platform / Snowflake)"
+        );
     }
 }

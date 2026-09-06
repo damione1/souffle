@@ -197,12 +197,21 @@ struct LoadedModel {
     /// Silence prefix (config audio_silence_prefix_seconds) still to be fed
     /// before the first real audio of the current refresh epoch.
     prefix_pending: bool,
-    /// Prefix duration for the current epoch; subtracted from moshi times.
-    time_offset_seconds: f64,
-    /// Wall-clock seconds of real audio attributed to prior refresh epochs,
-    /// so Word timestamps stay monotone across soft KV clears.
-    epoch_origin_seconds: f64,
-    /// LM frames since the last soft/hard refresh (includes this epoch's prefix).
+    /// Prefix duration for the current epoch, per batch lane; subtracted from
+    /// moshi times.
+    time_offset_seconds: Vec<f64>,
+    /// Wall-clock seconds of real audio attributed to prior epochs of each lane,
+    /// so Word timestamps stay monotone across KV clears. Per lane because
+    /// `refresh_lane` restarts one lane's moshi clock and not the other's.
+    epoch_origin_seconds: Vec<f64>,
+    /// LM frames fed to each lane since that lane's last KV clear, full or
+    /// per-lane. This is what a lane's epoch credit is computed from.
+    frames_since_lane_reset: Vec<usize>,
+    /// Last start_time emitted per lane. Guarantees monotonicity even if a
+    /// lane's internal clock restarts (reset_batch_idx).
+    last_emitted_start: Vec<f64>,
+    /// LM frames since the last soft/hard full refresh (includes this epoch's
+    /// prefix). Drives the refresh policy and the hard context deadline.
     frames_since_refresh: usize,
     /// Soft context refreshes performed this session (diagnostics).
     refresh_count: u64,
@@ -318,8 +327,10 @@ impl KyutaiEngine {
             device,
             model_path,
             prefix_pending: true,
-            time_offset_seconds: 0.0,
-            epoch_origin_seconds: 0.0,
+            time_offset_seconds: vec![0.0; batch_size],
+            epoch_origin_seconds: vec![0.0; batch_size],
+            frames_since_lane_reset: vec![0; batch_size],
+            last_emitted_start: vec![0.0; batch_size],
             frames_since_refresh: 0,
             refresh_count: 0,
             vad_pause_streak: vec![0; batch_size],
@@ -353,11 +364,19 @@ impl KyutaiEngine {
 
     /// Map a moshi word timestamp into session wall-clock seconds, accounting
     /// for the current epoch's silence prefix and prior soft-refresh epochs.
-    fn word_start_time(model: &LoadedModel, moshi_start: f64) -> f64 {
+    fn word_start_time(model: &LoadedModel, moshi_start: f64, batch_idx: usize) -> f64 {
         Self::word_start_time_raw(
             moshi_start,
-            model.time_offset_seconds,
-            model.epoch_origin_seconds,
+            model
+                .time_offset_seconds
+                .get(batch_idx)
+                .copied()
+                .unwrap_or(0.0),
+            model
+                .epoch_origin_seconds
+                .get(batch_idx)
+                .copied()
+                .unwrap_or(0.0),
         )
     }
 
@@ -369,6 +388,73 @@ impl KyutaiEngine {
         (moshi_start - time_offset_seconds + epoch_origin_seconds).max(0.0)
     }
 
+    /// Floor an emitted timestamp at the last one emitted for the same lane.
+    /// A regression here can only mean a lane's moshi clock restarted without
+    /// its epoch being credited; the warning is the only signal that would
+    /// surface such a bug, since the UI would just silently rewind.
+    fn monotonic_time(model: &mut LoadedModel, batch_idx: usize, raw: f64) -> f64 {
+        let Some(floor) = model.last_emitted_start.get_mut(batch_idx) else {
+            return raw;
+        };
+        if raw < *floor - 1.0 {
+            warn!(
+                batch_idx,
+                raw = format!("{raw:.2}"),
+                floor = format!("{:.2}", *floor),
+                drop = format!("{:.2}", *floor - raw),
+                "Lane timestamp regressed; clamping to keep the transcript monotone"
+            );
+        }
+        let clamped = raw.max(*floor);
+        *floor = clamped;
+        clamped
+    }
+
+    /// Credit a lane's elapsed audio to its epoch origin and restart its clock.
+    /// Moshi's `reset_batch_idx` zeroes that lane's `step_idx` and
+    /// `last_stop_time`, so without this credit the lane's next word maps back
+    /// onto the start of the epoch and the transcript rewinds by up to a full
+    /// context window.
+    fn credit_lane_epoch(
+        epoch_origin_seconds: &mut [f64],
+        time_offset_seconds: &mut [f64],
+        frames_since_lane_reset: &mut [usize],
+        lane: usize,
+    ) {
+        let (Some(origin), Some(offset), Some(frames)) = (
+            epoch_origin_seconds.get_mut(lane),
+            time_offset_seconds.get_mut(lane),
+            frames_since_lane_reset.get_mut(lane),
+        ) else {
+            return;
+        };
+        let lane_secs = *frames as f64 / MIMI_FRAMES_PER_SECOND - *offset;
+        *origin += lane_secs.max(0.0);
+        *offset = 0.0;
+        *frames = 0;
+    }
+
+    /// Compute the epoch origins and monotonic floors to carry into a
+    /// rebuilt model, by applying `credit_lane_epoch`'s arithmetic to every
+    /// lane. Used by a stall-recovery rebuild, which must not rewind the
+    /// transcript the way a session-boundary `reset_state` deliberately
+    /// does. `last_emitted_start` already reflects each lane's true
+    /// wall-clock position and is returned unchanged.
+    fn carry_timeline_across_rebuild(
+        epoch_origin_seconds: &[f64],
+        time_offset_seconds: &[f64],
+        frames_since_lane_reset: &[usize],
+        last_emitted_start: &[f64],
+    ) -> (Vec<f64>, Vec<f64>) {
+        let mut origin = epoch_origin_seconds.to_vec();
+        let mut offset = time_offset_seconds.to_vec();
+        let mut frames = frames_since_lane_reset.to_vec();
+        for lane in 0..origin.len() {
+            Self::credit_lane_epoch(&mut origin, &mut offset, &mut frames, lane);
+        }
+        (origin, last_emitted_start.to_vec())
+    }
+
     fn pending_to_segment(pending: PendingWord, end_time: f64) -> TranscriptionSegment {
         TranscriptionSegment {
             text: pending.text,
@@ -376,6 +462,20 @@ impl KyutaiEngine {
             end_time: end_time.max(pending.start_time),
             is_final: true,
             language: pending.language,
+            confidence: None,
+            speaker: pending.speaker,
+        }
+    }
+
+    /// Live preview of a word still waiting for EndWord. Does not consume
+    /// the pending slot; the later final still comes from `emit_pending`.
+    fn pending_to_tentative_segment(pending: &PendingWord) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: pending.text.clone(),
+            start_time: pending.start_time,
+            end_time: pending.start_time,
+            is_final: false,
+            language: pending.language.clone(),
             confidence: None,
             speaker: pending.speaker,
         }
@@ -392,15 +492,38 @@ impl KyutaiEngine {
         }
     }
 
-    fn drain_orphans(model: &mut LoadedModel, segments: &mut Vec<TranscriptionSegment>) {
-        for pending in model.orphaned_words.drain(..) {
+    fn drain_orphans(
+        orphaned_words: &mut Vec<PendingWord>,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        for pending in orphaned_words.drain(..) {
             let end = pending.start_time;
             segments.push(Self::pending_to_segment(pending, end));
         }
     }
 
+    /// Everything a new word owes the UI, in the order the consumers expect:
+    /// words orphaned by a lane reset, then the previous word closed at this
+    /// word's start, then this word as a preview. A final must never land
+    /// after the preview it would otherwise erase.
+    fn open_word(
+        pending_words: &mut Vec<Option<PendingWord>>,
+        orphaned_words: &mut Vec<PendingWord>,
+        batch_idx: usize,
+        pending: PendingWord,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        Self::drain_orphans(orphaned_words, segments);
+        Self::emit_pending(pending_words, batch_idx, pending.start_time, segments);
+        if batch_idx >= pending_words.len() {
+            pending_words.resize_with(batch_idx + 1, || None);
+        }
+        segments.push(Self::pending_to_tentative_segment(&pending));
+        pending_words[batch_idx] = Some(pending);
+    }
+
     fn drain_all_pending(model: &mut LoadedModel, segments: &mut Vec<TranscriptionSegment>) {
-        Self::drain_orphans(model, segments);
+        Self::drain_orphans(&mut model.orphaned_words, segments);
         for batch_idx in 0..model.pending_words.len() {
             if let Some(pending) = model.pending_words[batch_idx].take() {
                 let end = pending.start_time;
@@ -414,14 +537,19 @@ impl KyutaiEngine {
     fn refresh_loaded(model: &mut LoadedModel, kind: RefreshKind) -> Result<(), EngineError> {
         let frames = model.frames_since_refresh;
         let context = model.config.context;
-        let real_secs = frames as f64 / MIMI_FRAMES_PER_SECOND - model.time_offset_seconds;
-        model.epoch_origin_seconds += real_secs.max(0.0);
+        for lane in 0..model.epoch_origin_seconds.len() {
+            Self::credit_lane_epoch(
+                &mut model.epoch_origin_seconds,
+                &mut model.time_offset_seconds,
+                &mut model.frames_since_lane_reset,
+                lane,
+            );
+        }
         model
             .state
             .reset()
             .map_err(|e| EngineError::InferenceError(format!("ASR context refresh: {e}")))?;
         model.prefix_pending = true;
-        model.time_offset_seconds = 0.0;
         model.frames_since_refresh = 0;
         model.vad_pause_streak = vec![0; model.state.batch_size()];
         model.language_tracker.reset_all();
@@ -438,7 +566,12 @@ impl KyutaiEngine {
             frames_before_refresh = frames,
             context,
             refresh_count = model.refresh_count,
-            epoch_origin_seconds = format!("{:.2}", model.epoch_origin_seconds),
+            epoch_origin_seconds = model
+                .epoch_origin_seconds
+                .iter()
+                .map(|s| format!("{s:.2}"))
+                .collect::<Vec<_>>()
+                .join(","),
             "ASR context refreshed (soft KV clear)"
         );
         Ok(())
@@ -451,6 +584,14 @@ impl KyutaiEngine {
         batch_idx: usize,
         kind: RefreshKind,
     ) -> Result<(), EngineError> {
+        // This path feeds no silence prefix, so the lane's offset goes to zero
+        // along with its clock.
+        Self::credit_lane_epoch(
+            &mut model.epoch_origin_seconds,
+            &mut model.time_offset_seconds,
+            &mut model.frames_since_lane_reset,
+            batch_idx,
+        );
         model
             .state
             .reset_batch_idx(batch_idx)
@@ -469,6 +610,10 @@ impl KyutaiEngine {
         debug!(
             kind = ?kind,
             batch_idx,
+            epoch_origin_seconds = format!(
+                "{:.2}",
+                model.epoch_origin_seconds.get(batch_idx).copied().unwrap_or(0.0)
+            ),
             "ASR lane context reset (per-batch KV clear)"
         );
         Ok(())
@@ -489,6 +634,29 @@ impl KyutaiEngine {
             }
         }
         Ok(())
+    }
+
+    fn emission_delay_frames(model: &LoadedModel) -> usize {
+        (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize
+    }
+
+    /// Whether the engine's own semantic VAD has paused long enough that
+    /// every word already spoken has had time to clear the pipeline: a pause
+    /// streak covering the emission delay, plus margin. Shared by `flush`
+    /// (skip the silence suffix) and the `tail_drained` trait method (cut a
+    /// single-stream drain window short) so the two can't drift apart.
+    ///
+    /// Diarized mode always returns false: lane 0's pause streak says
+    /// nothing about lane 1 (system audio), and `DiarizedMode` doesn't
+    /// consult this signal anyway since both lanes must stay frame-aligned
+    /// regardless of either side's pause state.
+    fn tail_drained_for(model: &LoadedModel, diarize: bool) -> bool {
+        if diarize {
+            return false;
+        }
+        let delay_frames = Self::emission_delay_frames(model);
+        let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
+        pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES
     }
 
     fn note_vad_pause(model: &mut LoadedModel, prs: &[Vec<f32>]) {
@@ -517,13 +685,17 @@ impl KyutaiEngine {
         let prefix_frames =
             Self::prefix_frame_count(model.config.stt_config.audio_silence_prefix_seconds);
         if prefix_frames == 0 {
-            model.time_offset_seconds = 0.0;
+            model.time_offset_seconds.fill(0.0);
             return Ok(());
         }
-        model.time_offset_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
+        // The prefix is fed to every lane, and its frames also count into
+        // `frames_since_lane_reset`, which is what makes subtracting the offset
+        // when crediting an epoch the right thing to do.
+        let prefix_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
+        model.time_offset_seconds.fill(prefix_seconds);
         info!(
             frames = prefix_frames,
-            seconds = model.time_offset_seconds,
+            seconds = prefix_seconds,
             "Feeding silence prefix before epoch audio"
         );
         let silence = vec![0.0f32; MIMI_FRAME_SIZE];
@@ -590,6 +762,10 @@ impl KyutaiEngine {
                 .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
         })?;
         model.frames_since_refresh = model.frames_since_refresh.saturating_add(1);
+        // One step_pcm advances every lane, so every lane's clock advances.
+        for frames in model.frames_since_lane_reset.iter_mut() {
+            *frames = frames.saturating_add(1);
+        }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
         Ok(asr_msgs)
     }
@@ -609,6 +785,10 @@ impl KyutaiEngine {
                 .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
         })?;
         model.frames_since_refresh = model.frames_since_refresh.saturating_add(1);
+        // One step_pcm advances every lane, so every lane's clock advances.
+        for frames in model.frames_since_lane_reset.iter_mut() {
+            *frames = frames.saturating_add(1);
+        }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
         Ok(asr_msgs)
     }
@@ -619,7 +799,7 @@ impl KyutaiEngine {
         debug_enabled: bool,
         segments: &mut Vec<TranscriptionSegment>,
     ) {
-        Self::drain_orphans(model, segments);
+        Self::drain_orphans(&mut model.orphaned_words, segments);
         let frame_num = FRAME_COUNT.load(Ordering::Relaxed).saturating_sub(1);
         let diarized = model.state.batch_size() == 2;
 
@@ -669,6 +849,10 @@ impl KyutaiEngine {
                         continue;
                     }
                     let language = detect_word(&text).map(|code| code.as_str().to_string());
+                    // Mapped before the mismatch reset below: this word's moshi
+                    // clock belongs to the epoch that reset is about to close.
+                    let raw_start = Self::word_start_time(model, *start_time, *batch_idx);
+                    let start_time = Self::monotonic_time(model, *batch_idx, raw_start);
                     let mismatch_reset = model.language_tracker.on_word(&text, *batch_idx);
                     if mismatch_reset
                         && let Err(e) =
@@ -676,7 +860,6 @@ impl KyutaiEngine {
                     {
                         warn!(batch_idx, "Language mismatch lane reset failed: {e}");
                     }
-                    let start_time = Self::word_start_time(model, *start_time);
                     let speaker = if diarized {
                         Some(if *batch_idx == 0 {
                             Speaker::Me
@@ -686,24 +869,25 @@ impl KyutaiEngine {
                     } else {
                         None
                     };
-                    // Previous word on this lane never got EndWord: close it
-                    // at this word's start so we don't drop it.
-                    Self::emit_pending(&mut model.pending_words, *batch_idx, start_time, segments);
-                    if *batch_idx >= model.pending_words.len() {
-                        model.pending_words.resize_with(*batch_idx + 1, || None);
-                    }
-                    model.pending_words[*batch_idx] = Some(PendingWord {
-                        text,
-                        start_time,
-                        language,
-                        speaker,
-                    });
+                    Self::open_word(
+                        &mut model.pending_words,
+                        &mut model.orphaned_words,
+                        *batch_idx,
+                        PendingWord {
+                            text,
+                            start_time,
+                            language,
+                            speaker,
+                        },
+                        segments,
+                    );
                 }
                 moshi::asr::AsrMsg::EndWord {
                     stop_time,
                     batch_idx,
                 } => {
-                    let end_time = Self::word_start_time(model, *stop_time);
+                    let raw_end = Self::word_start_time(model, *stop_time, *batch_idx);
+                    let end_time = Self::monotonic_time(model, *batch_idx, raw_end);
                     Self::emit_pending(&mut model.pending_words, *batch_idx, end_time, segments);
                 }
                 moshi::asr::AsrMsg::Step { prs, .. } => {
@@ -711,7 +895,7 @@ impl KyutaiEngine {
                 }
             }
         }
-        Self::drain_orphans(model, segments);
+        Self::drain_orphans(&mut model.orphaned_words, segments);
     }
 
     fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
@@ -736,12 +920,38 @@ impl KyutaiEngine {
     /// Full rebuild of Mimi + LM + State from disk because moshi's
     /// State::reset() does NOT reset model_step_idx, causing RoPE
     /// positional encoding to start at the wrong offset with empty KV caches.
-    /// Teardown and rebuild use separate autorelease pools so stale Metal
-    /// objects are drained before a fresh device/model is created.
     ///
     /// Mid-session freezes should use soft `refresh_loaded` instead; this
     /// full rebuild remains for session boundaries and diarize mode changes.
+    /// A genuinely new session should start its timeline at zero, so this
+    /// does not carry the old model's timeline over.
     pub fn reset_state(&mut self) -> Result<(), EngineError> {
+        self.rebuild_model(false)?;
+        info!("ASR state rebuilt for new session");
+        Ok(())
+    }
+
+    /// Same full rebuild as `reset_state`, but for stall recovery: the
+    /// session is still ongoing, so every lane's elapsed audio is credited
+    /// into the rebuilt model's epoch origin first, and the monotonic floors
+    /// carry over too. Without this, a stall-recovery rebuild would silently
+    /// rewind every subsequent timestamp to 0 (see SOU-002), and the
+    /// `monotonic_time` safety net can't catch it because it is the floor
+    /// that gets zeroed.
+    pub fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.rebuild_model(true)?;
+        info!("ASR state rebuilt mid-session, timeline preserved");
+        Ok(())
+    }
+
+    /// Shared teardown-and-rebuild for `reset_state` and
+    /// `reset_state_preserving_timeline`. Teardown and rebuild use separate
+    /// autorelease pools so stale Metal objects are drained before a fresh
+    /// device/model is created. Everything but the timeline (KV state,
+    /// `frames_since_refresh`, `refresh_count`, `vad_pause_streak`,
+    /// `language_tracker`, `pending_words`, `prefix_pending`) is always
+    /// reinitialised: the point of the reset is to discard the wedged state.
+    fn rebuild_model(&mut self, preserve_timeline: bool) -> Result<(), EngineError> {
         FRAME_COUNT.store(0, Ordering::Relaxed);
         if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
             *dbg = None;
@@ -756,6 +966,24 @@ impl KyutaiEngine {
         let batch_size = self.batch_size();
         let meeting_language_prior = self.meeting_language_prior;
         let old = self.model.take().ok_or(EngineError::NotInitialized)?;
+
+        // Read the timeline off the old model before its fields are moved
+        // into the drop/rebuild closures below.
+        let carried_timeline = preserve_timeline.then(|| {
+            Self::carry_timeline_across_rebuild(
+                &old.epoch_origin_seconds,
+                &old.time_offset_seconds,
+                &old.frames_since_lane_reset,
+                &old.last_emitted_start,
+            )
+        });
+        // A word mid-utterance when the rebuild happens has no EndWord yet
+        // and is silently dropped by the `..` below: there is no return path
+        // here for a trailing segment without a larger change to this
+        // reset's return type, so this is only a log breadcrumb, not a fix.
+        let dropped_pending = old.pending_words.iter().filter(|w| w.is_some()).count();
+        let dropped_orphaned = old.orphaned_words.len();
+
         let LoadedModel {
             state: old_state,
             text_tokenizer,
@@ -770,7 +998,7 @@ impl KyutaiEngine {
             drop(old_device);
         });
 
-        let rebuilt = with_autorelease_pool(move || -> Result<LoadedModel, EngineError> {
+        let mut rebuilt = with_autorelease_pool(move || -> Result<LoadedModel, EngineError> {
             let device = Self::select_device()?;
             Self::build_loaded_model(
                 device,
@@ -782,8 +1010,34 @@ impl KyutaiEngine {
             )
         })?;
 
+        if let Some((epoch_origin_seconds, last_emitted_start)) = carried_timeline {
+            // The rebuilt model's vectors are sized from `batch_size`, so a
+            // carried vector should be the same length; fall back to the
+            // fresh (zeroed) timeline rather than indexing blindly if not.
+            if epoch_origin_seconds.len() == rebuilt.epoch_origin_seconds.len()
+                && last_emitted_start.len() == rebuilt.last_emitted_start.len()
+            {
+                rebuilt.epoch_origin_seconds = epoch_origin_seconds;
+                rebuilt.last_emitted_start = last_emitted_start;
+            } else {
+                warn!(
+                    old_lanes = epoch_origin_seconds.len(),
+                    new_lanes = rebuilt.epoch_origin_seconds.len(),
+                    "Stall recovery rebuild changed lane count; timeline not carried over"
+                );
+            }
+        }
+
+        if preserve_timeline && (dropped_pending > 0 || dropped_orphaned > 0) {
+            warn!(
+                dropped_pending,
+                dropped_orphaned,
+                "Stall recovery rebuild dropped in-flight word(s) with no EndWord: \
+                 the transcript is missing whatever was being said right before the freeze"
+            );
+        }
+
         self.model = Some(rebuilt);
-        info!("ASR state rebuilt for new session");
         Ok(())
     }
 }
@@ -937,22 +1191,22 @@ impl TranscriptionEngine for KyutaiEngine {
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        let (delay_frames, suffix_seconds, pause_streak) = {
+        let diarize = self.diarize;
+        let (delay_frames, suffix_seconds, pause_streak, drained) = {
             let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
-            // Words are emitted audio_delay after they are spoken. If the semantic
-            // VAD has reported a pause for longer than that delay (plus margin),
-            // every word has already cleared the pipeline and the silence suffix
-            // would only burn inference time at stop.
-            let delay_frames =
-                (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
+            let delay_frames = Self::emission_delay_frames(model);
             let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
             let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
-            (delay_frames, suffix_seconds, pause_streak)
+            let drained = Self::tail_drained_for(model, diarize);
+            (delay_frames, suffix_seconds, pause_streak, drained)
         };
         let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
-        let diarize = self.diarize;
 
-        if !diarize && pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES {
+        // Words are emitted audio_delay after they are spoken. If the semantic
+        // VAD has reported a pause for longer than that delay (plus margin),
+        // every word has already cleared the pipeline and the silence suffix
+        // would only burn inference time at stop.
+        if drained {
             info!(
                 streak = pause_streak,
                 delay_frames, "VAD pause covers ASR delay, skipping silence flush"
@@ -981,6 +1235,10 @@ impl TranscriptionEngine for KyutaiEngine {
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
         KyutaiEngine::reset_state(self)
+    }
+
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        KyutaiEngine::reset_state_preserving_timeline(self)
     }
 
     fn supports_diarization(&self) -> bool {
@@ -1046,6 +1304,13 @@ impl TranscriptionEngine for KyutaiEngine {
             .as_ref()
             .map(|m| m.config.stt_config.audio_delay_seconds)
             .unwrap_or(0.0)
+    }
+
+    fn tail_drained(&self) -> bool {
+        self.model
+            .as_ref()
+            .map(|m| Self::tail_drained_for(m, self.diarize))
+            .unwrap_or(false)
     }
 
     fn normalize_text(&self, text: &str) -> String {
@@ -1142,6 +1407,111 @@ mod tests {
     }
 
     #[test]
+    fn credit_lane_epoch_keeps_the_reset_lane_monotone() {
+        // Two lanes 24s into an epoch that opened with a 13-frame (1.04s)
+        // silence prefix, 58s of earlier epochs already credited.
+        let mut origin = [58.0f64, 58.0];
+        let mut offset = [1.04f64, 1.04];
+        let mut frames = [300usize, 300];
+
+        let last_emitted = KyutaiEngine::word_start_time_raw(
+            (300 - 13) as f64 / crate::constants::MIMI_FRAMES_PER_SECOND,
+            offset[0],
+            origin[0],
+        );
+
+        KyutaiEngine::credit_lane_epoch(&mut origin, &mut offset, &mut frames, 0);
+
+        // reset_batch_idx restarts the lane's moshi clock at 0: the next word
+        // must not land before the last one emitted on that lane.
+        let after_reset = KyutaiEngine::word_start_time_raw(0.0, offset[0], origin[0]);
+        assert!(
+            after_reset >= last_emitted,
+            "lane 0 rewound: {after_reset} < {last_emitted}"
+        );
+        assert_eq!(frames[0], 0);
+        assert_eq!(offset[0], 0.0);
+    }
+
+    #[test]
+    fn credit_lane_epoch_leaves_the_other_lane_untouched() {
+        let mut origin = [58.0f64, 58.0];
+        let mut offset = [1.04f64, 1.04];
+        let mut frames = [300usize, 300];
+
+        KyutaiEngine::credit_lane_epoch(&mut origin, &mut offset, &mut frames, 0);
+
+        // The lane that kept decoding must keep its clock: crediting it here
+        // would push its words forward by a whole epoch.
+        assert_eq!(origin[1], 58.0);
+        assert_eq!(offset[1], 1.04);
+        assert_eq!(frames[1], 300);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_credits_a_lane_mid_epoch() {
+        // 10s of real audio decoded (125 frames at 12.5 fps), no prefix left
+        // to subtract: the full 10s must be credited into the origin.
+        let origin = [10.0f64];
+        let offset = [0.0f64];
+        let frames = [125usize];
+        let last_emitted = [9.5f64];
+
+        let (carried_origin, carried_last_emitted) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![20.0]);
+        // Monotonic floors are copied through untouched: they already reflect
+        // each lane's true wall-clock position.
+        assert_eq!(carried_last_emitted, vec![9.5]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_leaves_an_already_credited_lane_unchanged() {
+        // Freshly refreshed lane: no frames decoded since its last credit.
+        let origin = [42.0f64];
+        let offset = [0.0f64];
+        let frames = [0usize];
+        let last_emitted = [42.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![42.0]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_does_not_double_count_the_prefix() {
+        // Epoch opened with a 13-frame (1.04s) silence prefix and only that
+        // prefix has been fed so far: the prefix must not itself be credited
+        // as real audio.
+        let origin = [5.0f64];
+        let offset = [1.04f64];
+        let frames = [13usize];
+        let last_emitted = [5.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![5.0]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_clamps_a_negative_credit_at_zero() {
+        // Fewer frames decoded than the prefix accounts for (shouldn't
+        // happen, but `credit_lane_epoch` clamps rather than going negative).
+        let origin = [7.0f64];
+        let offset = [1.04f64];
+        let frames = [5usize];
+        let last_emitted = [7.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![7.0]);
+    }
+
+    #[test]
     fn pending_word_uses_endword_stop_time() {
         let pending = PendingWord {
             text: "hello".into(),
@@ -1167,5 +1537,107 @@ mod tests {
         };
         let seg = KyutaiEngine::pending_to_segment(pending, 1.5);
         assert_eq!(seg.end_time, 2.0);
+    }
+
+    #[test]
+    fn pending_word_tentative_is_not_final_and_does_not_consume() {
+        let pending = PendingWord {
+            text: "hello".into(),
+            start_time: 1.2,
+            language: Some("en".into()),
+            speaker: Some(Speaker::Me),
+        };
+        let tentative = KyutaiEngine::pending_to_tentative_segment(&pending);
+        assert_eq!(tentative.text, "hello");
+        assert_eq!(tentative.start_time, 1.2);
+        assert_eq!(tentative.end_time, 1.2);
+        assert_eq!(tentative.language.as_deref(), Some("en"));
+        assert_eq!(tentative.speaker, Some(Speaker::Me));
+        assert!(!tentative.is_final);
+
+        let finalized = KyutaiEngine::pending_to_segment(pending, 1.6);
+        assert_eq!(finalized.text, "hello");
+        assert_eq!(finalized.end_time, 1.6);
+        assert!(finalized.is_final);
+    }
+
+    fn word(text: &str, start_time: f64) -> PendingWord {
+        PendingWord {
+            text: text.into(),
+            start_time,
+            language: None,
+            speaker: None,
+        }
+    }
+
+    #[test]
+    fn open_word_emits_the_orphan_final_before_the_new_preview() {
+        // A language-mismatch reset moved "bonjour" to the orphan list before
+        // "monde" arrived. The consumers drop a preview as soon as a final
+        // lands, so the orphan has to come first.
+        let mut pending_words = vec![None];
+        let mut orphaned_words = vec![word("bonjour", 1.0)];
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            0,
+            word("monde", 1.4),
+            &mut segments,
+        );
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].text, "bonjour");
+        assert!(segments[0].is_final);
+        assert_eq!(segments[1].text, "monde");
+        assert!(!segments[1].is_final);
+        assert!(orphaned_words.is_empty());
+        assert_eq!(
+            pending_words[0].as_ref().map(|p| p.text.as_str()),
+            Some("monde")
+        );
+    }
+
+    #[test]
+    fn open_word_closes_the_previous_word_before_previewing_the_new_one() {
+        let mut pending_words = vec![Some(word("hello", 1.0))];
+        let mut orphaned_words = Vec::new();
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            0,
+            word("world", 1.5),
+            &mut segments,
+        );
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].text, "hello");
+        assert!(segments[0].is_final);
+        assert_eq!(segments[0].end_time, 1.5);
+        assert_eq!(segments[1].text, "world");
+        assert!(!segments[1].is_final);
+    }
+
+    #[test]
+    fn open_word_grows_the_lane_list_for_a_new_batch_index() {
+        let mut pending_words = Vec::new();
+        let mut orphaned_words = Vec::new();
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            1,
+            word("them", 2.0),
+            &mut segments,
+        );
+
+        assert_eq!(pending_words.len(), 2);
+        assert!(pending_words[0].is_none());
+        assert_eq!(segments.len(), 1);
+        assert!(!segments[0].is_final);
     }
 }

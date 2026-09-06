@@ -250,6 +250,55 @@ describe("createLiveTranscript diarized tail window", () => {
     ]);
   });
 
+  it("does not split a lane into one paragraph per word when its clock regresses", () => {
+    // Them keeps advancing; Me's lane clock restarts far behind it. With a
+    // global horizon, every Me word lands under it, gets committed on its own,
+    // and empties the tail for the next one.
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    const regressed = ["a", "b", "c", "d", "e", "f", "g"];
+    feedSegments(live, [
+      dseg("them one", 40.0, "them"),
+      dseg("them two", 41.0, "them"),
+      dseg("them three", 42.0, "them"),
+      ...regressed.map((word, i) => dseg(word, 1.0 + i * 0.3, "me")),
+    ]);
+
+    const mine = [...live.committed, ...live.tail].filter((p) => p.speaker === "me");
+    expect(mine).toHaveLength(1);
+    expect(mine[0].text).toBe(regressed.join(" "));
+  });
+
+  it("does not let a silent lane pin the other lane's commits", () => {
+    // Me said one thing, then went quiet. Them keeps talking well past the
+    // tail window. Me's leftover paragraph must freeze so Them's older turns
+    // can commit; a single slowest-lane horizon would hold everything at t=0.
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    feedSegments(live, [
+      dseg("Me hello.", 0.0, "me"),
+      dseg("Them one.", 20.0, "them"),
+      dseg("Them two.", 22.0, "them"),
+      dseg("Them three.", 24.0, "them"),
+      dseg("Them four.", 26.0, "them"),
+      dseg("Them five.", 28.0, "them"),
+      dseg("Them six.", 30.0, "them"),
+      dseg("Them seven.", 32.0, "them"),
+    ]);
+
+    expect(live.committed.map((p) => p.text)).toEqual([
+      "Me hello.",
+      "Them one.",
+      "Them two.",
+    ]);
+    expect(live.tail[0]?.text).toBe("Them three.");
+    expect(live.tail.map((p) => p.speaker)).toEqual([
+      "them",
+      "them",
+      "them",
+      "them",
+      "them",
+    ]);
+  });
+
   it("does not zipper same-speaker words that arrive with overlapping timestamps", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
     feedSegments(live, [

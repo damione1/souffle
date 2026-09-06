@@ -1,4 +1,3 @@
-/** Format seconds as "M:SS" */
 /** "CommandOrControl+Shift+Space" → "⌘ ⇧ Space" for display. */
 export function formatShortcutLabel(shortcut: string): string {
   if (!shortcut) return "";
@@ -9,6 +8,9 @@ export function formatShortcutLabel(shortcut: string): string {
     .replace(/\+/g, " ");
 }
 
+/** Position inside a recording, as "M:SS". Stays minute-based past an hour
+ * ("61:01") because it renders in fixed-width columns next to the scrubber,
+ * where an "H:MM:SS" reading would overflow. Durations use `formatDuration`. */
 export function formatTimestamp(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -20,11 +22,15 @@ export function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-/** Format duration in seconds as "M:SS" */
+/** A span of time, as "M:SS" below an hour and "H:MM:SS" from an hour on.
+ * Meetings routinely run past an hour, where a bare "90:00" is hard to read. */
 export function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = `${total % 60}`.padStart(2, "0");
+  if (hours === 0) return `${mins}:${secs}`;
+  return `${hours}:${`${mins}`.padStart(2, "0")}:${secs}`;
 }
 
 /** Human-readable byte size, e.g. "482 KB" or "1.3 GB". */

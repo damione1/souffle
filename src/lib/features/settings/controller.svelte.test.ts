@@ -74,6 +74,7 @@ const defaultSettings: AppSettings = {
   calendar_reminder_minutes: 2,
   calendar_autostart_enabled: true,
   feedback_sounds_enabled: true,
+  pill_hidden: false,
   feedback_sounds_volume: 70,
   model_unload_timeout_minutes: 0,
   meeting_autostop_enabled: true,
@@ -223,6 +224,10 @@ describe("settings controller", () => {
         return Promise.resolve(fakeDevices);
       case "select_audio_device":
         return Promise.resolve(null);
+      case "get_input_sample_rate":
+        return Promise.resolve(48_000);
+      case "reset_input_sample_rate":
+        return Promise.resolve(48_000);
       case "check_summary_providers":
         return Promise.resolve({
           ollama_url: "http://localhost:11434",
@@ -342,6 +347,10 @@ describe("settings controller", () => {
           return Promise.resolve(fakeDevices);
         case "select_audio_device":
           return Promise.resolve(null);
+        case "get_input_sample_rate":
+          return Promise.resolve(48_000);
+        case "reset_input_sample_rate":
+          return Promise.resolve(48_000);
         case "check_summary_providers":
           return Promise.resolve({
             ollama_url: "http://localhost:11434",
@@ -400,6 +409,57 @@ describe("settings controller", () => {
         },
       }),
     );
+  });
+
+  it("selectModelOption loads a model that is already downloaded", async () => {
+    let currentModelId = "stt-1b-en_fr";
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      switch (cmd) {
+        case "save_settings":
+          currentModelId = (args?.settings as AppSettings).transcription_model_id;
+          return Promise.resolve(null);
+        case "get_transcription_catalog":
+          return Promise.resolve({ ...fakeCatalog, selected_model_id: currentModelId });
+        case "get_model_status":
+          return Promise.resolve(
+            currentModelId === "stt-1b-en_fr"
+              ? { ...fakeStatus, phase: "ready" }
+              : {
+                  ...fakeStatus,
+                  profile: { ...fakeStatus.profile, model_id: "stt-2.6b-en", model_label: "STT 2.6B" },
+                  // Already on disk from a previous run: only a load is needed.
+                  phase: "load_required",
+                },
+          );
+        default:
+          return defaultInvoke(cmd, args);
+      }
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    // The backend is still Ready with the previously selected model.
+    ctrl.app.machineState = {
+      state: "ready",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+      },
+    };
+
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
+
+    expect(mockInvoke).toHaveBeenCalledWith("load_model", {
+      selection: { engine_id: "kyutai", model_id: "stt-2.6b-en", backend_id: "candle" },
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("download_model", expect.anything());
   });
 
   it("shortcut recording flow", async () => {
@@ -692,5 +752,252 @@ describe("settings controller", () => {
 
     expect(ctrl.ollamaPulling).toBe(false);
     expect(ctrl.ollamaPullError).toBe("connection refused");
+  });
+
+  it("onRemoveDevice drops the device and clears a dangling pin", async () => {
+    const settingsWithGhost: AppSettings = {
+      ...defaultSettings,
+      audio_device: "ghost-mic",
+      input_priority: {
+        priorities: ["ghost-mic", "usb-mic"],
+        hidden: [],
+        known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
+      },
+    };
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    mockInvoke.mockClear();
+
+    await ctrl.onRemoveDevice("ghost-mic");
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+      settings: expect.objectContaining({
+        audio_device: null,
+        input_priority: { priorities: ["usb-mic"], hidden: [], known: [] },
+      }),
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceUid: "" });
+    expect(ctrl.app.settings.audio_device).toBeNull();
+    expect(ctrl.pinUnavailable).toBe(false);
+  });
+
+  it("onRemoveDevice leaves an unrelated pin untouched", async () => {
+    const settingsWithGhost: AppSettings = {
+      ...defaultSettings,
+      audio_device: "usb-mic",
+      input_priority: {
+        priorities: ["ghost-mic", "usb-mic"],
+        hidden: [],
+        known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
+      },
+    };
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    mockInvoke.mockClear();
+
+    await ctrl.onRemoveDevice("ghost-mic");
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+      settings: expect.objectContaining({ audio_device: "usb-mic" }),
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("select_audio_device", expect.anything());
+  });
+
+  it("onResetDevices keeps only connected devices and clears dangling pins", async () => {
+    const settingsWithGhost: AppSettings = {
+      ...defaultSettings,
+      audio_device: "ghost-mic",
+      clamshell_audio_device: "ghost-mic",
+      input_priority: {
+        priorities: ["ghost-mic", "usb-mic", "builtin-mic"],
+        hidden: ["ghost-mic"],
+        known: [
+          { uid: "ghost-mic", name: "Old headset", last_seen: 1 },
+          { uid: "usb-mic", name: "USB Microphone", last_seen: 2 },
+        ],
+      },
+    };
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    mockInvoke.mockClear();
+
+    await ctrl.onResetDevices();
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+      settings: expect.objectContaining({
+        audio_device: null,
+        clamshell_audio_device: null,
+        input_priority: {
+          priorities: ["usb-mic", "builtin-mic"],
+          hidden: [],
+          known: [{ uid: "usb-mic", name: "USB Microphone", last_seen: 2 }],
+        },
+      }),
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceUid: "" });
+    expect(ctrl.app.settings.audio_device).toBeNull();
+    expect(ctrl.app.settings.clamshell_audio_device).toBeNull();
+    expect(ctrl.pinUnavailable).toBe(false);
+  });
+
+  it("onResetDevices re-reads connected devices, keeping one that reconnected after mount", async () => {
+    const settingsWithLateMic: AppSettings = {
+      ...defaultSettings,
+      audio_device: "late-mic",
+      input_priority: {
+        priorities: ["late-mic", "usb-mic"],
+        hidden: [],
+        known: [{ uid: "late-mic", name: "Late Mic", last_seen: 1 }],
+      },
+    };
+    const lateMic: AudioInputDevice = {
+      uid: "late-mic",
+      name: "Late Mic",
+      transport: "usb",
+      is_default: false,
+    };
+    let listAudioDevicesCalls = 0;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithLateMic);
+      if (cmd === "list_audio_devices") {
+        listAudioDevicesCalls += 1;
+        // Mount sees a stale snapshot without "late-mic"; by the time the
+        // user confirms the reset, the device has reconnected.
+        return Promise.resolve(listAudioDevicesCalls === 1 ? fakeDevices : [...fakeDevices, lateMic]);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    // Sanity: the mount-time snapshot really is stale.
+    expect(ctrl.audioDevices.some((device) => device.uid === "late-mic")).toBe(false);
+
+    mockInvoke.mockClear();
+    await ctrl.onResetDevices();
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+      settings: expect.objectContaining({
+        audio_device: "late-mic",
+        input_priority: {
+          priorities: ["late-mic", "usb-mic"],
+          hidden: [],
+          known: [{ uid: "late-mic", name: "Late Mic", last_seen: 1 }],
+        },
+      }),
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("select_audio_device", expect.anything());
+    expect(ctrl.app.settings.audio_device).toBe("late-mic");
+    expect(ctrl.pinUnavailable).toBe(false);
+  });
+
+  it("onResetDevices aborts and leaves settings untouched when the device refresh fails", async () => {
+    const settingsWithGhost: AppSettings = {
+      ...defaultSettings,
+      audio_device: "ghost-mic",
+      input_priority: {
+        priorities: ["ghost-mic", "usb-mic"],
+        hidden: ["ghost-mic"],
+        known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
+      },
+    };
+    let listAudioDevicesCalls = 0;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      if (cmd === "list_audio_devices") {
+        listAudioDevicesCalls += 1;
+        // Mount succeeds; the refresh triggered by the reset click fails.
+        if (listAudioDevicesCalls === 1) return Promise.resolve(fakeDevices);
+        return Promise.reject("device enumeration failed");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    mockInvoke.mockClear();
+
+    await ctrl.onResetDevices();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
+    expect(ctrl.statusMessage).toBe("device enumeration failed");
+    expect(ctrl.app.settings.audio_device).toBe("ghost-mic");
+    expect(ctrl.app.settings.input_priority).toEqual({
+      priorities: ["ghost-mic", "usb-mic"],
+      hidden: ["ghost-mic"],
+      known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
+    });
+  });
+
+  it("mount reads the default mic sample rate and never resets it", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    expect(mockInvoke).toHaveBeenCalledWith("get_input_sample_rate", { deviceUid: "builtin-mic" });
+    expect(mockInvoke).not.toHaveBeenCalledWith("reset_input_sample_rate", expect.anything());
+    expect(ctrl.inputSampleRate).toBe(48_000);
+  });
+
+  it("onResetSampleRate writes 48 kHz only after the click", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_input_sample_rate") return Promise.resolve(96_000);
+      if (cmd === "reset_input_sample_rate") return Promise.resolve(48_000);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    expect(ctrl.inputSampleRate).toBe(96_000);
+    expect(mockInvoke).not.toHaveBeenCalledWith("reset_input_sample_rate", expect.anything());
+
+    mockInvoke.mockClear();
+    await ctrl.onResetSampleRate();
+
+    expect(mockInvoke).toHaveBeenCalledWith("reset_input_sample_rate", { deviceUid: "builtin-mic" });
+    expect(ctrl.inputSampleRate).toBe(48_000);
+  });
+
+  it("a sample-rate read that lands after a mic switch does not overwrite the new one", async () => {
+    const pending: Record<string, (hz: number) => void> = {};
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_input_sample_rate") {
+        const uid = (args as { deviceUid: string }).deviceUid;
+        return new Promise<number>((resolve) => {
+          pending[uid] = resolve;
+        });
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    const mounted = ctrl.mount();
+    await vi.waitFor(() => expect(pending["builtin-mic"]).toBeDefined());
+
+    const switched = ctrl.onDeviceChange({
+      target: { value: "usb-mic" },
+    } as unknown as Event);
+    await vi.waitFor(() => expect(pending["usb-mic"]).toBeDefined());
+
+    pending["usb-mic"](48_000);
+    pending["builtin-mic"](96_000);
+    await Promise.all([mounted, switched]);
+
+    expect(ctrl.inputSampleRate).toBe(48_000);
   });
 });

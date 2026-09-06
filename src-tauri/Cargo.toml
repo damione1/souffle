@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "souffle-mcp"]
+members = [".", "souffle-mcp", "tts-fixtures"]
 
 [package]
 name = "souffle"

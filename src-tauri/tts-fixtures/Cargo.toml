@@ -1,0 +1,16 @@
+[package]
+name = "souffle-tts-fixtures"
+version = "0.1.0"
+description = "Developer tool that renders spoken-audio fixtures for the local engine tests"
+authors = ["Damien Goehrig"]
+license = "GPL-3.0-or-later"
+edition = "2024"
+
+[[bin]]
+name = "tts-fixtures"
+path = "src/main.rs"
+
+[dependencies]
+hound = "3.5"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

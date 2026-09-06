@@ -1,0 +1,23 @@
+{% from "icons.njk" import icon %}
+{% from "mocks/mocks.njk" import overlay %}
+{#
+  Laid out as a feature row so it sits naturally after dictation, and
+  mirrored: the dictation row puts its mock on the left, this one puts it
+  on the right. The mock lives in a column rather than spanning the wrap,
+  which also keeps the chat window from dwarfing the app screens.
+#}
+<div id="overlay" class="feature is-overlay reveal">
+  <div class="feature-text">
+    <span class="pill pill-secondary" style="align-self:flex-start">
+      {{ icon("layers", 13) }}{{ t.overlay.eyebrow }}
+    </span>
+    <h2>{{ t.overlay.title }}</h2>
+    <p class="lead">{{ t.overlay.body }}</p>
+    <div class="checks">
+      {%- for b in t.overlay.bullets %}
+      <div class="check">{{ icon("check", 17, 2.2) }}<span>{{ b }}</span></div>
+      {%- endfor %}
+    </div>
+  </div>
+  <div class="overlay-figure">{{ overlay(t) }}</div>
+</div>

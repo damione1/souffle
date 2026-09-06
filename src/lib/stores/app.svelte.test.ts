@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getAppState } from './app.svelte';
 import { mockSettings } from '../test-helpers/fixtures';
+
+const profile = {
+  engine_id: "", engine_label: "", model_id: "", model_label: "", backend_id: "", backend_label: "",
+};
 
 describe('app store', () => {
   it('has correct initial state defaults', () => {
@@ -55,6 +59,85 @@ describe('app store', () => {
     expect(state.settings.debug_transcription).toBe(true);
     expect(state.settings.audio_device).toBe('mic-1');
     expect(state.settings.transcription_engine_id).toBe('whisper');
+  });
+
+  it('anchors the recording start clock while a session is live', () => {
+    const state = getAppState();
+    state.machineState = { state: "ready", data: { profile } };
+    expect(state.recordingStartedAtMs).toBeNull();
+
+    const before = Date.now();
+    state.machineState = { state: "recording_meeting", data: { profile, session_id: 1, meeting_id: "m1" } };
+    const anchor = state.recordingStartedAtMs;
+    expect(anchor).not.toBeNull();
+    expect(anchor as number).toBeGreaterThanOrEqual(before);
+
+    // Stopping still shows the live card, so the anchor must survive it.
+    state.machineState = { state: "stopping", data: { profile, was_recording: { meeting: { meeting_id: "m1" } } } };
+    expect(state.recordingStartedAtMs).toBe(anchor);
+
+    state.machineState = { state: "ready", data: { profile } };
+    expect(state.recordingStartedAtMs).toBeNull();
+  });
+
+  it('anchors dictation the same way as a meeting', () => {
+    const state = getAppState();
+    state.machineState = { state: "ready", data: { profile } };
+    expect(state.recordingStartedAtMs).toBeNull();
+
+    state.machineState = { state: "recording_dictation", data: { profile, session_id: 1 } };
+    const anchor = state.recordingStartedAtMs;
+    expect(anchor).not.toBeNull();
+
+    state.machineState = { state: "stopping", data: { profile, was_recording: "dictation" } };
+    expect(state.recordingStartedAtMs).toBe(anchor);
+
+    state.machineState = { state: "ready", data: { profile } };
+    expect(state.recordingStartedAtMs).toBeNull();
+  });
+
+  it('re-anchors when a meeting is resumed as a new recording session', () => {
+    const state = getAppState();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T09:00:00Z'));
+      state.machineState = { state: "recording_meeting", data: { profile, session_id: 1, meeting_id: "m1" } };
+      expect(state.recordingStartedAtMs).toBe(Date.UTC(2026, 0, 1, 9, 0, 0));
+
+      state.machineState = { state: "ready", data: { profile } };
+      vi.setSystemTime(new Date('2026-01-01T09:20:00Z'));
+      state.machineState = { state: "recording_meeting", data: { profile, session_id: 2, meeting_id: "m1" } };
+      expect(state.recordingStartedAtMs).toBe(Date.UTC(2026, 0, 1, 9, 20, 0));
+    } finally {
+      vi.useRealTimers();
+    }
+    state.machineState = { state: "idle" };
+  });
+
+  it('only syncs the runtime phase from machine states about the selected model', () => {
+    const state = getAppState();
+    const selected = (modelId: string) => ({
+      engine_id: 'kyutai',
+      engine_label: 'Kyutai',
+      model_id: modelId,
+      model_label: modelId,
+      backend_id: 'candle',
+      backend_label: 'Candle',
+    });
+
+    state.settings = { ...mockSettings, transcription_model_id: 'stt-2.6b-en' };
+    state.transcriptionRuntimePhase = 'download_required';
+
+    // Old model still loaded in the backend: its "ready" must not be read as
+    // the newly selected model being ready.
+    state.machineState = { state: 'ready', data: { profile: selected('stt-1b-en_fr') } };
+    expect(state.transcriptionRuntimePhase).toBe('download_required');
+
+    state.machineState = { state: 'ready', data: { profile: selected('stt-2.6b-en') } };
+    expect(state.transcriptionRuntimePhase).toBe('ready');
+
+    state.machineState = { state: 'idle' };
+    expect(state.transcriptionRuntimePhase).toBe('ready');
   });
 
   it('recordingMode is derived from machineState', () => {

@@ -39,7 +39,15 @@ jobs:
           cache: npm
 
       - run: npm ci
+      # Cheap: cargo metadata honors CARGO_TARGET_DIR (no release build).
+      - run: ./scripts/build-mcp-sidecar.test.sh
       # Tauri's build script validates `externalBin` entries during `cargo test`,
       # so the MCP sidecar must exist before type export (same as release builds).
       - run: ./scripts/build-mcp-sidecar.sh
       - run: npm run check:generated-types
+      # Two PRs can each be green and still break develop together: one turned
+      # a &str into a String while the other added a caller. Only the merged
+      # tree catches that, so run the suites here as well as locally.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+      - run: npm test
+      - run: npm run check

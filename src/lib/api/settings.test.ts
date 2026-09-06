@@ -19,6 +19,8 @@ import {
   saveShortcuts,
   listAudioDevices,
   selectAudioDevice,
+  getInputSampleRate,
+  resetInputSampleRate,
 } from './settings';
 import { mockSettings } from '../test-helpers/fixtures';
 
@@ -85,5 +87,23 @@ describe('settings API', () => {
     await selectAudioDevice('ExternalMicUid');
 
     expect(mockInvoke).toHaveBeenCalledWith('select_audio_device', expect.objectContaining({ deviceUid: 'ExternalMicUid' }), undefined);
+  });
+
+  it('getInputSampleRate calls correct command', async () => {
+    mockInvoke.mockResolvedValue(96000);
+
+    const result = await getInputSampleRate('BuiltInMic');
+
+    expect(mockInvoke).toHaveBeenCalledWith('get_input_sample_rate', expect.objectContaining({ deviceUid: 'BuiltInMic' }), undefined);
+    expect(result).toBe(96000);
+  });
+
+  it('resetInputSampleRate calls correct command', async () => {
+    mockInvoke.mockResolvedValue(48000);
+
+    const result = await resetInputSampleRate('BuiltInMic');
+
+    expect(mockInvoke).toHaveBeenCalledWith('reset_input_sample_rate', expect.objectContaining({ deviceUid: 'BuiltInMic' }), undefined);
+    expect(result).toBe(48000);
   });
 });

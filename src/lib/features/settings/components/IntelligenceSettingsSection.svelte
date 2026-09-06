@@ -4,6 +4,7 @@
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { SummaryModelDescriptor, SummaryProviderChoice } from "../../../types";
+  import { ollamaModelPickerState } from "../ollama-model-picker";
 
   let {
     ollamaUrl,
@@ -87,15 +88,16 @@
           : null,
   );
 
-  // Ollama's model picker and setup prompts only belong on screen when
-  // Ollama would actually run. Auto + Apple Intelligence available used to
-  // leave the dropdown up, so changing the model looked like it did something
-  // while polish kept using Apple. Explicit Ollama still shows both, even
-  // when Apple is around — that choice is a lock, not a fallback.
+  // URL + status stay visible under Auto (Ollama is the fallback). The
+  // picker used to vanish when Apple was available, which hid the fallback
+  // model. It now stays up, muted and captioned, so the fallback can be
+  // chosen without looking like it applies while Apple is the active path.
   let ollamaRelevant = $derived(
     summaryProvider === "ollama" || (summaryProvider === "auto" && !appleIntelligenceAvailable),
   );
-  let showModelPicker = $derived(ollamaRelevant && summaryModels.length > 0);
+  let modelPicker = $derived(
+    ollamaModelPickerState(summaryProvider, appleIntelligenceAvailable, summaryModels.length),
+  );
   // Online but with nothing usable: offer the way out rather than a dead end.
   let showOllamaSetup = $derived(ollamaRelevant && ollamaAvailable && summaryModels.length === 0);
 </script>
@@ -162,7 +164,7 @@
 
   <SettingsField
     label={$t("settings_intelligence.connection_status")}
-    description={$t("settings_intelligence.models_found", { values: { count: ollamaModels.length } })}
+    description={$t("settings_intelligence.models_found", { values: { count: summaryModels.length } })}
   >
     {#snippet control()}
       <div class="flex gap-2 items-center">
@@ -173,20 +175,28 @@
     {/snippet}
   </SettingsField>
 
-  {#if showModelPicker}
-    <div class="flex items-center justify-between gap-4">
-      <label for="summary-model" class="setting-label shrink-0">{$t("settings_intelligence.summary_model")}</label>
-      <select
-        id="summary-model"
-        value={selectedOllamaModel || summaryModels[0].id}
-        onchange={onOllamaModelChange}
-        class="field-select max-w-64"
-      >
-        {#each summaryModels as model}
-          <option value={model.id}>{model.label}</option>
-        {/each}
-      </select>
-    </div>
+  {#if modelPicker.visible}
+    <SettingsField
+      label={$t("settings_intelligence.summary_model")}
+      description={modelPicker.showFallbackHint
+        ? $t("settings_intelligence.summary_model_fallback_desc")
+        : undefined}
+      htmlFor="summary-model"
+      disabled={modelPicker.muted}
+    >
+      {#snippet control()}
+        <select
+          id="summary-model"
+          value={selectedOllamaModel || summaryModels[0].id}
+          onchange={onOllamaModelChange}
+          class="field-select max-w-64"
+        >
+          {#each summaryModels as model}
+            <option value={model.id}>{model.label}</option>
+          {/each}
+        </select>
+      {/snippet}
+    </SettingsField>
   {/if}
 
   {#if showOllamaSetup}
