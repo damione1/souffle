@@ -143,12 +143,10 @@ async fn launch_meeting(
         ],
     );
 
-    // This session's position in the meeting's recording_sessions — 0 for a
-    // new meeting, len() for a resume — is exactly the on-disk file index a
-    // recorder should write to, if recording is on.
+    // The on-disk file index a recorder should write to, if recording is on.
     let recording_target = RecordingTarget {
         meeting_id: accumulator.id.clone(),
-        session_index: accumulator.recording_sessions.len(),
+        session_index: crate::audio::recorder::next_session_index(&accumulator.id).map_err(|e| format!("Determine session index: {e}"))?,
     };
 
     // Persist the header before any segments so a crash leaves a recoverable
@@ -234,8 +232,8 @@ enum PipelineMode {
 
 /// Identifies where a meeting recording session's audio file belongs, if
 /// the retention setting turns out to be on. Resolved before the session
-/// starts (`launch_meeting` knows the meeting id and the session's position
-/// in `recording_sessions`); whether to actually record is decided inside
+/// starts (`launch_meeting` knows the meeting id and picks the next free
+/// on-disk session index); whether to actually record is decided inside
 /// `start_pipeline_blocking` once settings are loaded.
 struct RecordingTarget {
     meeting_id: String,
