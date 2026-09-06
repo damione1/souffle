@@ -368,3 +368,61 @@ async fn dictation_round_trip() {
         history.iter().map(|e| &e.text).collect::<Vec<_>>()
     );
 }
+
+/// SOU-044: the dictation shortcut's `stop_transcription` must refuse to
+/// touch a meeting recording, not silently stop it (and lose the
+/// accumulator) as if it were a dictation session.
+#[tokio::test]
+async fn stop_transcription_refuses_a_meeting_recording() {
+    let mock = MockEngine::new().with_transcribe_response(
+        Ok(vec![TranscriptionSegment {
+            text: "hello meeting".to_string(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("en".to_string()),
+            confidence: Some(0.9),
+            speaker: None,
+        }]),
+        1,
+    );
+    let h = build_harness(mock);
+    let state = h.app.state::<AppState>();
+
+    let (_collected, channel) = collecting_channel();
+
+    commands::start_meeting_recording(state.clone(), "Weekly Sync".to_string(), None, channel)
+        .await
+        .expect("start_meeting_recording");
+
+    let meeting_id = match state.current_machine_state().unwrap() {
+        AppStateMachine::RecordingMeeting { meeting_id, .. } => meeting_id,
+        other => panic!("expected RecordingMeeting after start, got {other:?}"),
+    };
+
+    let result = commands::stop_transcription(state.clone()).await;
+    assert!(
+        result.is_err(),
+        "stop_transcription must refuse a meeting recording, got {result:?}"
+    );
+
+    assert!(
+        matches!(
+            state.current_machine_state().unwrap(),
+            AppStateMachine::RecordingMeeting { .. }
+        ),
+        "the meeting must still be recording after the refused stop"
+    );
+
+    let accumulator_meeting_id = state
+        .meeting_accumulator
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|m| m.id.clone());
+    assert_eq!(
+        accumulator_meeting_id,
+        Some(meeting_id),
+        "meeting_accumulator must be left intact by the refused stop"
+    );
+}

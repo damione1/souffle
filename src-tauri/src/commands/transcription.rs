@@ -508,6 +508,11 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
     if !state.current_machine_state()?.is_recording() {
         return Err("Not recording".into());
     }
+    if !was_dictation {
+        // A meeting (or anything else recording) is not this command's to
+        // stop: symmetric with stop_meeting_recording refusing a dictation.
+        return Err("Not dictating".into());
+    }
 
     // Transition to Stopping
     state.apply_transition(StateAction::StopRecording)?;
