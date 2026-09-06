@@ -20,6 +20,7 @@
     notifyMeetingFinalized,
     notifyMeetingIdle,
     notifyMeetingStopRequested,
+    notifyStateChanged,
     notifySystemWokeUp,
   } from "./lib/features/meeting/controller.svelte";
   import {
@@ -177,6 +178,9 @@
       app.machineState = event.payload;
       if (aborted === "dictation") notifyDictationAborted();
       else if (aborted === "meeting") notifyMeetingAborted();
+      // Lets a wake-resume that's waiting on a still-draining sleep-triggered
+      // stop fire the moment the machine reports `ready`.
+      notifyStateChanged(event.payload);
     }).then((fn) => {
       unlistenState = fn;
     });
@@ -238,8 +242,8 @@
     // Belt and braces: the webview itself may have been suspended when the
     // backend's wake event fired (and so missed it), but visibility always
     // flips to visible when the window comes back, so recheck here too.
-    // `take_sleep_paused_meeting` is idempotent (clears on read), so a
-    // redundant call from both paths is harmless.
+    // `peek_sleep_paused_meeting` is non-destructive, so a redundant call
+    // from both paths is harmless.
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") notifySystemWokeUp();
     };
