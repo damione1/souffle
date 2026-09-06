@@ -986,5 +986,32 @@ describe("MeetingController", () => {
         vi.useRealTimers();
       }
     });
+
+    it("shares an in-flight promise when notifySystemWokeUp is called concurrently", async () => {
+      let resolvePeek: (value: string | null) => void;
+      mockPeekSleepPausedMeeting.mockReturnValue(
+        new Promise((resolve) => {
+          resolvePeek = resolve;
+        })
+      );
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      mockResumeMeetingRecording.mockResolvedValue(undefined);
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+
+      // Fire two notifications concurrently (e.g. SystemWokeUp and visibilitychange)
+      notifySystemWokeUp();
+      notifySystemWokeUp();
+
+      // Both calls should share the single in-flight peek
+      expect(mockPeekSleepPausedMeeting).toHaveBeenCalledOnce();
+
+      resolvePeek!("meet-1");
+      await vi.waitFor(() => expect(mockResumeMeetingRecording).toHaveBeenCalledOnce());
+
+      expect(mockGetMeeting).toHaveBeenCalledOnce();
+      expect(mockResumeMeetingRecording).toHaveBeenCalledOnce();
+    });
   });
 });

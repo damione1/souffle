@@ -520,7 +520,10 @@ function createMeetingControllerInstance() {
     }
   }
 
-  /** The system woke from sleep (or the webview visibility turned to
+  let activeWakeResumePromise: Promise<void> | null = null;
+
+  /**
+   * The system woke from sleep (or the webview visibility turned to
    * visible, as a belt-and-braces recheck in case the wake event fired while
    * the webview was suspended). Ask the backend whether a meeting was
    * stopped by sleep and, if so, reload it and auto-resume recording through
@@ -535,28 +538,39 @@ function createMeetingControllerInstance() {
    * handleStateChanged to observe `ready` instead of abandoning the resume.
    * Idempotent: `peekSleepPausedMeeting` doesn't clear its state on read, so
    * a second call (event + visibilitychange both firing) just re-arms the
-   * same wait harmlessly. */
-  async function resumeAfterSystemWake() {
-    let meetingId: string | null;
-    try {
-      meetingId = await peekSleepPausedMeeting();
-    } catch (e) {
-      statusMessage = errorMessage(e);
-      return;
-    }
-    if (!meetingId) return;
+   * same wait harmlessly.
+   */
+  function resumeAfterSystemWake(): Promise<void> {
+    if (activeWakeResumePromise) return activeWakeResumePromise;
+    activeWakeResumePromise = (async () => {
+      try {
+        let meetingId: string | null;
+        try {
+          meetingId = await peekSleepPausedMeeting();
+        } catch (e) {
+          statusMessage = errorMessage(e);
+          return;
+        }
+        if (!meetingId) return;
 
-    if (isRecordingMeeting) {
-      armPendingWakeResume(meetingId);
-      return;
-    }
+        if (isRecordingMeeting) {
+          armPendingWakeResume(meetingId);
+          return;
+        }
 
-    await performWakeResume(meetingId);
+        await performWakeResume(meetingId);
+      } finally {
+        activeWakeResumePromise = null;
+      }
+    })();
+    return activeWakeResumePromise;
   }
 
-  /** Wait for the sleep-triggered stop to reach `ready`, capped at
+  /**
+   * Wait for the sleep-triggered stop to reach `ready`, capped at
    * WAKE_RESUME_TIMEOUT_MS. Re-arming (a second wake notification for the
-   * same id while already waiting) just restarts the timer. */
+   * same id while already waiting) just restarts the timer.
+   */
   function armPendingWakeResume(meetingId: string) {
     pendingWakeResumeMeetingId = meetingId;
     if (pendingWakeResumeTimer) clearTimeout(pendingWakeResumeTimer);
@@ -567,10 +581,12 @@ function createMeetingControllerInstance() {
     }, WAKE_RESUME_TIMEOUT_MS);
   }
 
-  /** Called from the global StateChanged listener (see notifyStateChanged).
+  /**
+   * Called from the global StateChanged listener (see notifyStateChanged).
    * If a wake-resume is waiting on the sleep-triggered stop and the machine
    * just reported `ready`, run the resume now instead of waiting out the
-   * full timeout. */
+   * full timeout.
+   */
   function handleStateChanged(state: AppStateMachine) {
     if (!pendingWakeResumeMeetingId || state.state !== "ready") return;
     const meetingId = pendingWakeResumeMeetingId;
@@ -883,6 +899,10 @@ export function notifySystemWokeUp() {
 // and recording state are never lost when the user switches tabs.
 let instance: ReturnType<typeof createMeetingControllerInstance> | null = null;
 
+/**
+ * Get or create the global meeting controller singleton.
+ * The meeting controller holds state for the active meeting and recording.
+ */
 export function createMeetingController() {
   if (!instance) {
     instance = createMeetingControllerInstance();
@@ -890,7 +910,9 @@ export function createMeetingController() {
   return instance;
 }
 
-/** Reset the singleton for testing. */
+/**
+ * Clear the controller singleton so tests can start fresh.
+ */
 export function resetMeetingControllerForTest() {
   instance = null;
 }

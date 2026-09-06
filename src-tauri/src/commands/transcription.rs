@@ -126,12 +126,6 @@ async fn launch_meeting(
     event_description: Option<String>,
     channel: Channel<TranscriptionSegment>,
 ) -> Result<u64, String> {
-    // Any recording starting now (whether the user resumed by hand or
-    // started something new) makes a stale sleep-paused bookkeeping entry
-    // meaningless: clear it so a later wake never misreports an
-    // already-handled meeting as needing a resume prompt.
-    state.clear_sleep_paused_meeting();
-
     let session_id = next_audio_session_id(state)?;
 
     // Session-scoped transcription hints: participant names plus distinctive
@@ -208,6 +202,12 @@ async fn launch_meeting(
         }
         return Err(error);
     }
+
+    // Any recording successfully starting now (whether the user resumed by hand
+    // or started something new) makes a stale sleep-paused bookkeeping entry
+    // meaningless: clear it so a later wake never misreports an
+    // already-handled meeting as needing a resume prompt.
+    state.clear_sleep_paused_meeting();
 
     Ok(session_id)
 }

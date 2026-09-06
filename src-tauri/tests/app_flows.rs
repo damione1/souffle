@@ -112,7 +112,7 @@ struct Harness {
     /// Kept alive so `AppState::audio_cmd_sender.send(...)` never errors with
     /// "all receivers dropped" — nothing needs to read from it since there is
     /// no real audio-capture thread in this test.
-    _audio_cmd_rx: Receiver<AudioCommand>,
+    pub audio_cmd_rx: Receiver<AudioCommand>,
     _tmp: TempDir,
 }
 
@@ -161,7 +161,7 @@ fn build_harness(mock: MockEngine) -> Harness {
         db,
         actor,
         audio_msg_tx,
-        _audio_cmd_rx: audio_cmd_rx,
+        audio_cmd_rx,
         _tmp: tmp,
     }
 }
@@ -454,4 +454,30 @@ async fn clear_sleep_paused_meeting_command_clears_without_resuming() {
     commands::clear_sleep_paused_meeting(state.clone());
 
     assert_eq!(commands::peek_sleep_paused_meeting(state.clone()), None);
+}
+
+#[tokio::test]
+async fn failed_resume_preserves_sleep_paused_flag() {
+    let h = build_harness(MockEngine::new());
+    let state = h.app.state::<AppState>();
+
+    // Mock a sleeping meeting
+    state.set_sleep_paused_meeting("meeting-x".to_string());
+    assert_eq!(
+        commands::peek_sleep_paused_meeting(state.clone()),
+        Some("meeting-x".to_string())
+    );
+
+    // Drop the audio receiver so the command channel send in start_pipeline_blocking fails
+    drop(h.audio_cmd_rx);
+
+    let (_collected, channel) = collecting_channel();
+    let result = commands::resume_meeting_recording(state.clone(), "meeting-x".to_string(), channel).await;
+    assert!(result.is_err(), "resume should fail because audio cmd channel is dropped");
+
+    // The flag must survive because the resume failed
+    assert_eq!(
+        commands::peek_sleep_paused_meeting(state.clone()),
+        Some("meeting-x".to_string())
+    );
 }
