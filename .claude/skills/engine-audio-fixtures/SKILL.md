@@ -53,7 +53,7 @@ Runtime is roughly 30 seconds for the twelve SOU-030 clips on an M-series Mac.
 Each rung prints the pause length, whether the model ended the sentence there,
 and the transcript:
 
-```
+```text
 === hesitation-a ===
     100 ms  no break  Je pense que ce serait une bonne idée, il faudrait ...
     300 ms  BREAK     Je pense que ce serait une bonne idée. Il faudrait ...
