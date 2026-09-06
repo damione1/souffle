@@ -13,9 +13,9 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use ogg::writing::{PacketWriteEndInfo, PacketWriter};
@@ -44,11 +44,6 @@ const STREAM_SERIAL: u32 = 1;
 /// before the writer catches up, without letting a wedged writer thread
 /// build up unbounded memory.
 const CHANNEL_CAPACITY: usize = 256;
-
-/// An Ogg Opus file that only ever received OpusHead + OpusTags is ~80–120
-/// bytes. Anything at or below this has no audio packets; listing it would
-/// show a dead player in the meeting UI.
-const HEADER_ONLY_OGG_MAX_BYTES: u64 = 200;
 
 /// Comfortably above the largest Opus packet this encoder ever produces at
 /// 32kbps/20ms frames; matches the size libopus's own examples use.
@@ -106,10 +101,23 @@ pub fn list_session_files_in(dir: &std::path::Path) -> std::io::Result<Vec<(usiz
     Ok(sessions)
 }
 
+/// Checks if an Ogg file has at least one audio packet (i.e. packet index >= 3
+/// after OpusHead and OpusTags). This accurately detects audio even for very
+/// short, low-bitrate VBR recordings that might fall under arbitrary size thresholds.
 fn ogg_file_has_audio(path: &std::path::Path) -> bool {
-    std::fs::metadata(path)
-        .map(|meta| meta.len() > HEADER_ONLY_OGG_MAX_BYTES)
-        .unwrap_or(false)
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut reader = ogg::reading::PacketReader::new(file);
+    let mut packet_count = 0;
+    while let Ok(Some(_)) = reader.read_packet() {
+        packet_count += 1;
+        if packet_count >= 3 {
+            return true;
+        }
+    }
+    false
 }
 
 /// Recorded session files for a meeting (empty if recording was never
@@ -277,8 +285,12 @@ impl<W: Write> OggOpusWriter<W> {
     }
 }
 
+/// Messages sent from the audio capture thread to the recorder's writer thread.
 enum RecorderMsg {
+    /// A chunk of raw f32 PCM audio samples to be resampled (if necessary) and encoded.
     Chunk(Vec<f32>),
+    /// Explicit signal to stop the writer loop, flush remaining data, and cleanly close the file.
+    Finish,
 }
 
 /// Flush then finish, each under `catch_unwind`, so a poisoned resampler
@@ -327,6 +339,7 @@ pub struct MeetingRecorder {
     handle: Option<JoinHandle<()>>,
     dropped: Arc<AtomicU64>,
     samples_received: Arc<AtomicU64>,
+    shutdown: Arc<AtomicBool>,
 }
 
 /// Cloneable, realtime-safe handle that queues PCM to a [`MeetingRecorder`].
@@ -336,15 +349,17 @@ pub struct RecorderPush {
     sender: SyncSender<RecorderMsg>,
     dropped: Arc<AtomicU64>,
     samples_received: Arc<AtomicU64>,
+    shutdown: Arc<AtomicBool>,
 }
 
 fn try_push_chunk(
     sender: &SyncSender<RecorderMsg>,
     dropped: &AtomicU64,
     samples_received: &AtomicU64,
+    shutdown: &AtomicBool,
     samples: &[f32],
 ) {
-    if samples.is_empty() {
+    if samples.is_empty() || shutdown.load(Ordering::Relaxed) {
         return;
     }
     samples_received.fetch_add(samples.len() as u64, Ordering::Relaxed);
@@ -357,11 +372,13 @@ fn try_push_chunk(
 }
 
 impl RecorderPush {
+    /// Queue a chunk for encoding if the recorder hasn't been shut down.
     pub fn push(&self, samples: &[f32]) {
         try_push_chunk(
             &self.sender,
             &self.dropped,
             &self.samples_received,
+            &self.shutdown,
             samples,
         );
     }
@@ -384,6 +401,7 @@ impl MeetingRecorder {
         let (tx, rx) = sync_channel::<RecorderMsg>(CHANNEL_CAPACITY);
         let dropped = Arc::new(AtomicU64::new(0));
         let samples_received = Arc::new(AtomicU64::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         let handle = std::thread::Builder::new()
             .name("meeting-recorder".into())
@@ -391,24 +409,29 @@ impl MeetingRecorder {
                 let mut resampler = (encode_rate != sample_rate)
                     .then(|| super::resampler::Resampler::new(sample_rate, 1, encode_rate, 1.0));
 
-                while let Ok(RecorderMsg::Chunk(samples)) = rx.recv() {
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let owned;
-                        let encode_samples: &[f32] = match resampler.as_mut() {
-                            Some(r) => {
-                                owned = r.process(&samples);
-                                &owned
+                while let Ok(msg) = rx.recv() {
+                    match msg {
+                        RecorderMsg::Chunk(samples) => {
+                            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                let owned;
+                                let encode_samples: &[f32] = match resampler.as_mut() {
+                                    Some(r) => {
+                                        owned = r.process(&samples);
+                                        &owned
+                                    }
+                                    None => &samples,
+                                };
+                                writer.write_chunk(encode_samples)
+                            }));
+                            match result {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => tracing::warn!("Meeting recorder encode error: {e}"),
+                                Err(_) => tracing::warn!(
+                                    "Meeting recorder panicked on a chunk; skipping it and keeping the file"
+                                ),
                             }
-                            None => &samples,
-                        };
-                        writer.write_chunk(encode_samples)
-                    }));
-                    match result {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => tracing::warn!("Meeting recorder encode error: {e}"),
-                        Err(_) => tracing::warn!(
-                            "Meeting recorder panicked on a chunk; skipping it and keeping the file"
-                        ),
+                        }
+                        RecorderMsg::Finish => break,
                     }
                 }
 
@@ -422,9 +445,11 @@ impl MeetingRecorder {
             handle: Some(handle),
             dropped,
             samples_received,
+            shutdown,
         })
     }
 
+    /// Retrieve the session ID this recorder is associated with.
     pub fn session_id(&self) -> u64 {
         self.session_id
     }
@@ -434,7 +459,7 @@ impl MeetingRecorder {
     /// audio-capture thread that calls this.
     pub fn push(&self, samples: &[f32]) {
         if let Some(sender) = &self.sender {
-            try_push_chunk(sender, &self.dropped, &self.samples_received, samples);
+            try_push_chunk(sender, &self.dropped, &self.samples_received, &self.shutdown, samples);
         }
     }
 
@@ -444,13 +469,16 @@ impl MeetingRecorder {
             sender: self.sender.as_ref()?.clone(),
             dropped: Arc::clone(&self.dropped),
             samples_received: Arc::clone(&self.samples_received),
+            shutdown: Arc::clone(&self.shutdown),
         })
     }
 
+    /// Get the number of dropped chunks due to a full channel.
     pub fn dropped_chunks(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
 
+    /// Get the total number of audio samples received for recording.
     pub fn samples_received(&self) -> u64 {
         self.samples_received.load(Ordering::Relaxed)
     }
@@ -458,14 +486,19 @@ impl MeetingRecorder {
 
 impl Drop for MeetingRecorder {
     fn drop(&mut self) {
-        // Dropping the sender closes the channel, so the writer thread's
-        // `recv()` returns and it finalizes (flush + close) before exiting.
+        // Signal the writer thread to finish and exit immediately, bypassing
+        // any remaining `RecorderPush` handles that might be kept alive by
+        // callbacks. This ensures the file is finalized (flush + close)
+        // synchronously before `drop` returns.
         // This runs whenever a `MeetingRecorder` goes out of scope — normal
         // stop, a session end after mic loss, or stack unwinding from a
         // caught panic (`panic = "unwind"`) — so every teardown path closes
         // the file. Only a hard crash (SIGKILL/abort) skips it, leaving a
         // truncated but structurally valid Ogg file.
-        self.sender.take();
+        self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(RecorderMsg::Finish);
+        }
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
@@ -498,8 +531,20 @@ mod tests {
     #[test]
     fn list_session_files_in_skips_non_ogg_and_sorts_by_index() {
         let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("1.ogg"), vec![0u8; 512]).unwrap();
-        std::fs::write(dir.path().join("0.ogg"), vec![0u8; 512]).unwrap();
+        let empty = dir.path().join("1.ogg");
+        let file = std::fs::File::create(&empty).expect("create");
+        let mut writer = OggOpusWriter::new(std::io::BufWriter::new(file), 16_000).expect("writer");
+        writer.write_chunk(&sine(0.1, 16_000)).unwrap();
+        writer.finish().expect("finish");
+        drop(writer);
+
+        let empty0 = dir.path().join("0.ogg");
+        let file0 = std::fs::File::create(&empty0).expect("create");
+        let mut writer0 = OggOpusWriter::new(std::io::BufWriter::new(file0), 16_000).expect("writer");
+        writer0.write_chunk(&sine(0.1, 16_000)).unwrap();
+        writer0.finish().expect("finish");
+        drop(writer0);
+
         std::fs::write(dir.path().join("notes.txt"), b"nope").unwrap();
         std::fs::write(dir.path().join("not-an-index.ogg"), b"skip").unwrap();
 
@@ -598,16 +643,25 @@ mod tests {
         writer.finish().expect("finish with no audio");
         drop(writer);
 
-        let listed = list_session_files_in(dir.path());
+        let listed = list_session_files_in(dir.path()).unwrap();
         assert!(
             listed.is_empty(),
             "header-only ogg must not be offered as playable audio, listed {listed:?}"
         );
-        let size = std::fs::metadata(&empty).expect("meta").len();
-        assert!(
-            size <= HEADER_ONLY_OGG_MAX_BYTES,
-            "empty ogg grew past the header-only cutoff ({size} > {HEADER_ONLY_OGG_MAX_BYTES}); bump the constant"
-        );
+    }
+
+    #[test]
+    fn ogg_file_has_audio_accepts_partial_frame() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("short.ogg");
+        let file = std::fs::File::create(&path).expect("create");
+        let mut writer = OggOpusWriter::new(std::io::BufWriter::new(file), 16_000).expect("writer");
+        // write 10ms of audio, less than a full 20ms frame, so it gets flushed via `finish()`
+        writer.write_chunk(&sine(0.01, 16_000)).expect("write");
+        writer.finish().expect("finish");
+        drop(writer);
+
+        assert!(ogg_file_has_audio(&path), "partial frame should be recognized as having audio");
     }
 
     #[test]
@@ -626,6 +680,26 @@ mod tests {
         assert!(!bytes.is_empty());
         assert_eq!(&bytes[0..4], b"OggS");
     }
+    
+    #[test]
+    fn recorder_joins_cleanly_even_if_push_handle_retained() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("retained.ogg");
+        
+        let recorder = MeetingRecorder::start(path.clone(), 24_000, 1).expect("start");
+        let retained_handle = recorder.push_handle().expect("handle");
+        
+        retained_handle.push(&sine(0.1, 24_000));
+        
+        drop(recorder); // should trigger Finish and join
+        
+        // Pushing after drop should be rejected immediately due to shutdown flag
+        retained_handle.push(&sine(0.1, 24_000));
+        
+        let bytes = std::fs::read(&path).expect("recording file must exist");
+        assert!(!bytes.is_empty());
+        assert_eq!(&bytes[0..4], b"OggS");
+    }
 
     /// Exercises the exact `try_send`-or-count-a-drop mechanism `push` uses,
     /// against a rendezvous channel (capacity 0) with no receiver draining
@@ -636,11 +710,11 @@ mod tests {
     fn full_channel_drops_chunks_without_blocking() {
         let (tx, _rx) = sync_channel::<RecorderMsg>(0);
         let dropped = Arc::new(AtomicU64::new(0));
+        let samples_received = Arc::new(AtomicU64::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         let push = |samples: &[f32]| {
-            if tx.try_send(RecorderMsg::Chunk(samples.to_vec())).is_err() {
-                dropped.fetch_add(1, Ordering::Relaxed);
-            }
+            try_push_chunk(&tx, &dropped, &samples_received, &shutdown, samples);
         };
 
         for _ in 0..10 {
@@ -654,3 +728,4 @@ mod tests {
         );
     }
 }
+
