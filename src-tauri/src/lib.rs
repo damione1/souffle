@@ -94,6 +94,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::is_laptop,
             commands::test_transcribe_wav,
             commands::paste_text,
+            commands::notify_paste_failed,
             commands::frontmost_app_name,
             commands::read_selected_text,
             commands::read_focused_text,

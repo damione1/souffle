@@ -12,6 +12,8 @@
   import type { PermissionStatus, PermState } from "../../types";
   import { errorMessage } from "../../utils";
 
+  let { onStatusChange }: { onStatusChange?: (status: PermissionStatus) => void } = $props();
+
   let status = $state<PermissionStatus>({
     microphone: "unknown",
     system_audio: "unknown",
@@ -21,6 +23,14 @@
   let busy = $state<PermissionKind | null>(null);
   let error = $state("");
   let repairing = $state(false);
+
+  /** Every write to `status` goes through here so the parent (which cannot
+   * see this component's local state otherwise) learns the real permission
+   * state, e.g. to gate the onboarding auto-paste default (SOU-053). */
+  function setStatus(next: PermissionStatus) {
+    status = next;
+    onStatusChange?.(next);
+  }
 
   type Row = {
     kind: PermissionKind;
@@ -60,7 +70,7 @@
 
   async function refreshAll() {
     try {
-      status = await getPermissionStatus();
+      setStatus(await getPermissionStatus());
     } catch (e) {
       error = errorMessage(e);
     }
@@ -71,7 +81,7 @@
     error = "";
     try {
       const next = await requestPermission(kind);
-      status = { ...status, [kind]: next };
+      setStatus({ ...status, [kind]: next });
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -84,7 +94,7 @@
     error = "";
     try {
       const next = await repairAccessibilityPermission();
-      status = { ...status, accessibility: next };
+      setStatus({ ...status, accessibility: next });
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -101,7 +111,7 @@
     const onFocus = () => {
       void getPermissionStatus()
         .then((s) => {
-          status = { ...status, accessibility: s.accessibility };
+          setStatus({ ...status, accessibility: s.accessibility });
         })
         .catch(() => {});
     };

@@ -2,6 +2,7 @@ import { getAppState } from "../../stores/app.svelte";
 import {
   addDictationEntry,
   getTranscriptionCatalog,
+  notifyPasteFailed,
   pasteText,
   pillHold,
   pillRelease,
@@ -311,7 +312,17 @@ function createTranscriptionControllerInstance() {
               );
               scheduleLearnFromEdit(finalized.text);
             } catch (e) {
-              statusMessage = accessibilityPasteFailureMessage(errorMessage(e));
+              const message = errorMessage(e);
+              statusMessage = accessibilityPasteFailureMessage(message);
+              // A shortcut dictation runs from another app, so the status
+              // banner above is likely not on screen: also notify outside
+              // the window (SOU-053). Best-effort: a notification failure
+              // must not mask the paste failure itself.
+              try {
+                await notifyPasteFailed(message);
+              } catch (notifyError) {
+                console.warn("Paste failure notification failed:", notifyError);
+              }
             }
           } else {
             try {
