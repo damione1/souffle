@@ -274,7 +274,9 @@ pub fn is_summary_capable_model(model: &str) -> bool {
         return false;
     }
 
-    let blocked_tokens = ["stt", "asr", "e5", "bge", "gte", "code"];
+    let blocked_tokens = [
+        "stt", "asr", "e5", "bge", "gte", "code", "audio", "omni", "vl", "vision", "tts", "xtts",
+    ];
     let tokens = lower.split(|c: char| !c.is_alphanumeric());
     !tokens
         .into_iter()
@@ -682,6 +684,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_audio_omni_and_vision_models_for_summary() {
+        assert!(!is_summary_capable_model("qwen2-audio"));
+        assert!(!is_summary_capable_model("qwen2.5-omni"));
+        assert!(!is_summary_capable_model("qwen2.5-vl:7b"));
+        assert!(!is_summary_capable_model("llama3.2-vision"));
+        assert!(is_summary_capable_model("qwen2.5:7b"));
+        assert_eq!(
+            sorted_summary_capable_models(&["qwen2-audio".into(), "qwen2.5:7b".into()]),
+            vec!["qwen2.5:7b".to_string()]
+        );
+    }
+
+    #[test]
     fn rejects_short_keyword_models_as_whole_tokens() {
         assert!(!is_summary_capable_model("intfloat/e5-large"));
         assert!(!is_summary_capable_model("kyutai-stt:1b"));
@@ -691,6 +706,7 @@ mod tests {
     fn accepts_models_where_short_keyword_is_only_a_substring() {
         assert!(is_summary_capable_model("faste5ish:latest"));
         assert!(is_summary_capable_model("vgte-model:latest"));
+        assert!(is_summary_capable_model("audiolm:latest"));
     }
 
     /// A code model can follow the polish prompt just enough to look like it
