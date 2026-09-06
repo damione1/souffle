@@ -261,6 +261,7 @@ fn store_custom_origin(origin: Option<(f64, f64)>) {
 }
 
 /// Keep a rectangle of `width`×`height` fully inside `screen` when possible.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn clamp_origin(
     screen_x: f64,
     screen_y: f64,
@@ -529,11 +530,10 @@ pub(crate) fn screen_containing_point(
 /// monitor, shrink) falls back to the focused screen so `clamp_origin` can
 /// pull the HUD back on-screen.
 fn placement_screen_frame(origin: Option<(f64, f64)>) -> (f64, f64, f64, f64) {
-    if let Some((x, y)) = origin {
-        if let Some(frame) = screen_containing_point(&all_screen_frames(), x, y) {
+    if let Some((x, y)) = origin
+        && let Some(frame) = screen_containing_point(&all_screen_frames(), x, y) {
             return frame;
         }
-    }
     active_screen_frame()
 }
 
