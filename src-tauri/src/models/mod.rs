@@ -15,7 +15,11 @@ pub fn model_exists(profile: &TranscriptionProfile) -> bool {
         return false;
     };
 
-    download::model_exists(&model_dir(profile), &artifact.required_files)
+    download::model_exists(
+        &model_dir(profile),
+        &artifact.required_files,
+        artifact.download_size_bytes,
+    )
 }
 
 pub fn model_dir(profile: &TranscriptionProfile) -> PathBuf {
@@ -246,7 +250,10 @@ mod tests {
 
         ensure_layout(&target, Some(&legacy)).unwrap();
 
-        assert_eq!(fs::read_to_string(target.join("config.json")).unwrap(), "target");
+        assert_eq!(
+            fs::read_to_string(target.join("config.json")).unwrap(),
+            "target"
+        );
         assert!(legacy.join("config.json").is_file());
     }
 
