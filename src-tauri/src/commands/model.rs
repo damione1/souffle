@@ -146,7 +146,7 @@ pub fn download_model(
     // Ready (it tracks a single profile through download → load → ready).
     let machine = state.current_machine_state()?;
     if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
-        unload_loaded_model(&state, None)?;
+        unload_loaded_model(state.inner(), None)?;
         // Machine is now Downloaded { current } — different from `profile`.
     }
 
@@ -240,7 +240,7 @@ pub fn load_model(
 
     // If model is ready with a different profile, unload first
     if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
-        unload_loaded_model(&state, Some(profile.clone()))?;
+        unload_loaded_model(state.inner(), Some(profile.clone()))?;
         // Machine is now in Loading { next_profile }
     } else {
         // Ensure machine is in Downloaded state before loading

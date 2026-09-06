@@ -235,6 +235,8 @@ impl AppStateMachine {
         }
     }
 
+    /// Checks whether the state machine is currently in a recording state (dictation or meeting)
+    /// or in the process of stopping a recording.
     pub fn is_recording(&self) -> bool {
         matches!(
             self,
@@ -244,6 +246,8 @@ impl AppStateMachine {
         )
     }
 
+    /// Checks whether a model is currently fully loaded and ready to transcribe.
+    /// Returns true in Ready, Recording, and Stopping states.
     pub fn is_model_ready(&self) -> bool {
         matches!(
             self,
@@ -254,6 +258,8 @@ impl AppStateMachine {
         )
     }
 
+    /// Returns the active transcription profile if the machine is in a state
+    /// where a specific profile is being targeted, downloaded, loaded, or used.
     pub fn active_profile(&self) -> Option<&TranscriptionProfile> {
         match self {
             AppStateMachine::Downloading { profile }
@@ -268,6 +274,7 @@ impl AppStateMachine {
         }
     }
 
+    /// Returns a string representation of the current state variant.
     pub fn variant_name(&self) -> &'static str {
         match self {
             AppStateMachine::Idle => "idle",
@@ -491,6 +498,34 @@ mod tests {
             }
             other => panic!("Expected Ready, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unloading_without_next_fail_is_recoverable_from_ready() {
+        let profile = test_profile();
+        let unloading = AppStateMachine::Ready {
+            profile: profile.clone(),
+        }
+        .transition(StateAction::Unload { next_profile: None })
+        .unwrap();
+        assert!(matches!(unloading, AppStateMachine::Unloading { .. }));
+
+        let failed = unloading
+            .transition(StateAction::Fail {
+                message: "Unload failed".into(),
+            })
+            .unwrap();
+        
+        match &failed {
+            AppStateMachine::Error {
+                recovery: ErrorRecovery::RetryFromReady { profile: p },
+                ..
+            } => assert_eq!(p.model_id, profile.model_id),
+            other => panic!("Expected Error RetryFromReady, got {other:?}"),
+        }
+
+        let recovered = failed.transition(StateAction::Recover).unwrap();
+        assert!(matches!(recovered, AppStateMachine::Ready { .. }));
     }
 
     // --- Error and recovery ---
