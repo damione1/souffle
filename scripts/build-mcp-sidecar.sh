@@ -8,7 +8,7 @@ set -euo pipefail
 # sidecar gracefully — but must run before `tauri build` so release bundles
 # include it (wired into `beforeBuildCommand` in src-tauri/tauri.conf.json).
 #
-# Cargo artifacts are not always at src-tauri/target — CARGO_TARGET_DIR and
+# Cargo artifacts are not always at src-tauri/target. CARGO_TARGET_DIR and
 # .cargo/config.toml `build.target-dir` relocate them. Ask cargo metadata.
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
