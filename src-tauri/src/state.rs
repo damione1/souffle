@@ -158,7 +158,10 @@ pub struct AppState {
     pub app_handle: Mutex<Option<AppHandle>>,
     /// Set when a meeting recording is stopped by the system-sleep handler
     /// (as opposed to a user-initiated stop), so the frontend can offer to
-    /// resume it after wake. Cleared by `take_sleep_paused_meeting`.
+    /// resume it after wake. Read non-destructively by
+    /// `peek_sleep_paused_meeting`; cleared explicitly by
+    /// `clear_sleep_paused_meeting` (or implicitly by `launch_meeting`,
+    /// which clears it on every recording start).
     pub sleep_paused_meeting_id: Mutex<Option<String>>,
 }
 
@@ -286,14 +289,27 @@ impl AppState {
         }
     }
 
-    /// Return and clear the meeting id paused by sleep, if any. Clearing on
-    /// read means a resume attempt (successful or not) never re-offers the
-    /// same meeting on a later wake.
-    pub fn take_sleep_paused_meeting(&self) -> Option<String> {
+    /// Return the meeting id paused by sleep, if any, without clearing it.
+    /// The caller decides when the flag should go away (a resume that
+    /// actually starts, or an explicit user refusal) instead of it being
+    /// consumed by the mere act of checking: the wake handler may need to
+    /// check more than once while the sleep-triggered stop is still
+    /// draining.
+    pub fn peek_sleep_paused_meeting(&self) -> Option<String> {
         self.sleep_paused_meeting_id
             .lock()
             .ok()
-            .and_then(|mut guard| guard.take())
+            .and_then(|guard| guard.clone())
+    }
+
+    /// Clear the meeting id paused by sleep. Called after a resume actually
+    /// starts, or after the user explicitly declines to resume. Also called
+    /// unconditionally by `launch_meeting` on every recording start, which
+    /// is what makes a stale id harmless even if neither of those happens.
+    pub fn clear_sleep_paused_meeting(&self) {
+        if let Ok(mut guard) = self.sleep_paused_meeting_id.lock() {
+            *guard = None;
+        }
     }
 }
 
