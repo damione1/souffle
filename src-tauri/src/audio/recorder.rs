@@ -45,6 +45,11 @@ const STREAM_SERIAL: u32 = 1;
 /// build up unbounded memory.
 const CHANNEL_CAPACITY: usize = 256;
 
+/// An Ogg Opus file that only ever received OpusHead + OpusTags is ~80–120
+/// bytes. Anything at or below this has no audio packets; listing it would
+/// show a dead player in the meeting UI.
+const HEADER_ONLY_OGG_MAX_BYTES: u64 = 200;
+
 /// Comfortably above the largest Opus packet this encoder ever produces at
 /// 32kbps/20ms frames; matches the size libopus's own examples use.
 const MAX_OPUS_PACKET_BYTES: usize = 4000;
@@ -75,7 +80,8 @@ pub fn session_path(meeting_id: &str, session_index: usize) -> PathBuf {
 }
 
 /// Recorded session files in `dir`, sorted by session index. Ignores
-/// anything that isn't `{index}.ogg`.
+/// anything that isn't `{index}.ogg`, and header-only files (OpusHead +
+/// OpusTags, no audio packets) so the UI does not offer a dead player.
 pub fn list_session_files_in(dir: &std::path::Path) -> Vec<(usize, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -88,11 +94,20 @@ pub fn list_session_files_in(dir: &std::path::Path) -> Vec<(usize, PathBuf)> {
                 return None;
             }
             let session_index = path.file_stem()?.to_str()?.parse::<usize>().ok()?;
+            if !ogg_file_has_audio(&path) {
+                return None;
+            }
             Some((session_index, path))
         })
         .collect();
     sessions.sort_by_key(|(index, _)| *index);
     sessions
+}
+
+fn ogg_file_has_audio(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .map(|meta| meta.len() > HEADER_ONLY_OGG_MAX_BYTES)
+        .unwrap_or(false)
 }
 
 /// Recorded session files for a meeting (empty if recording was never
@@ -292,6 +307,45 @@ pub struct MeetingRecorder {
     sender: Option<SyncSender<RecorderMsg>>,
     handle: Option<JoinHandle<()>>,
     dropped: Arc<AtomicU64>,
+    samples_received: Arc<AtomicU64>,
+}
+
+/// Cloneable, realtime-safe handle that queues PCM to a [`MeetingRecorder`].
+/// Used by the no-tap capture callback, which cannot hold `&self.recorder`.
+#[derive(Clone)]
+pub struct RecorderPush {
+    sender: SyncSender<RecorderMsg>,
+    dropped: Arc<AtomicU64>,
+    samples_received: Arc<AtomicU64>,
+}
+
+fn try_push_chunk(
+    sender: &SyncSender<RecorderMsg>,
+    dropped: &AtomicU64,
+    samples_received: &AtomicU64,
+    samples: &[f32],
+) {
+    if samples.is_empty() {
+        return;
+    }
+    samples_received.fetch_add(samples.len() as u64, Ordering::Relaxed);
+    if sender
+        .try_send(RecorderMsg::Chunk(samples.to_vec()))
+        .is_err()
+    {
+        dropped.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+impl RecorderPush {
+    pub fn push(&self, samples: &[f32]) {
+        try_push_chunk(
+            &self.sender,
+            &self.dropped,
+            &self.samples_received,
+            samples,
+        );
+    }
 }
 
 impl MeetingRecorder {
@@ -310,6 +364,7 @@ impl MeetingRecorder {
 
         let (tx, rx) = sync_channel::<RecorderMsg>(CHANNEL_CAPACITY);
         let dropped = Arc::new(AtomicU64::new(0));
+        let samples_received = Arc::new(AtomicU64::new(0));
 
         let handle = std::thread::Builder::new()
             .name("meeting-recorder".into())
@@ -347,6 +402,7 @@ impl MeetingRecorder {
             sender: Some(tx),
             handle: Some(handle),
             dropped,
+            samples_received,
         })
     }
 
@@ -358,20 +414,26 @@ impl MeetingRecorder {
     /// chunk (and counts it) instead of ever stalling the realtime
     /// audio-capture thread that calls this.
     pub fn push(&self, samples: &[f32]) {
-        if samples.is_empty() {
-            return;
+        if let Some(sender) = &self.sender {
+            try_push_chunk(sender, &self.dropped, &self.samples_received, samples);
         }
-        if let Some(sender) = &self.sender
-            && sender
-                .try_send(RecorderMsg::Chunk(samples.to_vec()))
-                .is_err()
-        {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
-        }
+    }
+
+    /// Clone of the push path for the no-tap cpal callback.
+    pub fn push_handle(&self) -> Option<RecorderPush> {
+        Some(RecorderPush {
+            sender: self.sender.as_ref()?.clone(),
+            dropped: Arc::clone(&self.dropped),
+            samples_received: Arc::clone(&self.samples_received),
+        })
     }
 
     pub fn dropped_chunks(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
+    }
+
+    pub fn samples_received(&self) -> u64 {
+        self.samples_received.load(Ordering::Relaxed)
     }
 }
 
@@ -417,8 +479,8 @@ mod tests {
     #[test]
     fn list_session_files_in_skips_non_ogg_and_sorts_by_index() {
         let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("1.ogg"), b"b").unwrap();
-        std::fs::write(dir.path().join("0.ogg"), b"a").unwrap();
+        std::fs::write(dir.path().join("1.ogg"), vec![0u8; 512]).unwrap();
+        std::fs::write(dir.path().join("0.ogg"), vec![0u8; 512]).unwrap();
         std::fs::write(dir.path().join("notes.txt"), b"nope").unwrap();
         std::fs::write(dir.path().join("not-an-index.ogg"), b"skip").unwrap();
 
@@ -491,6 +553,27 @@ mod tests {
         let file = std::fs::File::create(&path).expect("create");
         let mut writer = OggOpusWriter::new(std::io::BufWriter::new(file), 16_000).expect("writer");
         writer.finish().expect("finish with no audio");
+    }
+
+    #[test]
+    fn list_session_files_in_skips_header_only_ogg() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let empty = dir.path().join("0.ogg");
+        let file = std::fs::File::create(&empty).expect("create");
+        let mut writer = OggOpusWriter::new(std::io::BufWriter::new(file), 16_000).expect("writer");
+        writer.finish().expect("finish with no audio");
+        drop(writer);
+
+        let listed = list_session_files_in(dir.path());
+        assert!(
+            listed.is_empty(),
+            "header-only ogg must not be offered as playable audio, listed {listed:?}"
+        );
+        let size = std::fs::metadata(&empty).expect("meta").len();
+        assert!(
+            size <= HEADER_ONLY_OGG_MAX_BYTES,
+            "empty ogg grew past the header-only cutoff ({size} > {HEADER_ONLY_OGG_MAX_BYTES}); bump the constant"
+        );
     }
 
     #[test]
