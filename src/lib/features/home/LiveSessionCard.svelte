@@ -45,10 +45,14 @@
         .slice(-LIVE_PARAGRAPH_WINDOW)
       : [],
   );
-  const liveTentative = $derived(mode === "meeting" ? meeting.liveTranscript.tentative : "");
+  const liveTentative = $derived(
+    mode === "meeting" ? meeting.liveTranscript.tentative : transcription.tentative,
+  );
 
   const hasLiveContent = $derived(
-    mode === "dictation" ? Boolean(liveText) : liveParagraphs.length > 0 || Boolean(liveTentative),
+    mode === "dictation"
+      ? Boolean(liveText) || Boolean(liveTentative)
+      : liveParagraphs.length > 0 || Boolean(liveTentative),
   );
 
   const elapsed = $derived(
@@ -193,7 +197,7 @@
   {#if mode === "dictation"}
     <div class="flex min-h-[340px] flex-col rounded-[18px] bg-surface-1 p-[30px] px-8 outline-1 outline-ghost-border">
       <p class="m-0 text-[19px] font-normal leading-[1.85] text-text-secondary">
-        {liveText}<span
+        {liveText}{#if liveTentative}<span class="opacity-50">{liveText ? " " : ""}{liveTentative}</span>{/if}<span
           class="ml-0.5 inline-block h-5 w-0.5 bg-accent align-[-3px]"
           style="animation: blink 1s step-end infinite;"
         ></span>

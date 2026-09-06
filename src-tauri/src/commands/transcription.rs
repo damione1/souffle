@@ -67,6 +67,12 @@ fn build_meeting_on_segment(
     Box::new(move |seg| {
         let _ = channel.send(seg.clone());
 
+        // Tentatives are live-UI only. Persisting them would write a row
+        // that the later final then duplicates.
+        if !seg.is_final {
+            return;
+        }
+
         let batch = {
             let Ok(mut guard) = accumulator.lock() else {
                 return;
@@ -361,6 +367,20 @@ struct DictationLiveTextState {
     last_emit: Option<std::time::Instant>,
 }
 
+/// Confirmed text plus the current pending word, for the pill preview only.
+/// Does not mutate `accumulated` — paste still uses confirmed finals.
+fn dictation_live_preview(accumulated: &str, tentative: &str) -> String {
+    if tentative.is_empty() {
+        accumulated.to_string()
+    } else if accumulated.is_empty() {
+        tentative.to_string()
+    } else if accumulated.ends_with(' ') || tentative.starts_with(' ') {
+        format!("{accumulated}{tentative}")
+    } else {
+        format!("{accumulated} {tentative}")
+    }
+}
+
 /// The per-segment callback for dictation: forward every segment to the main
 /// window's channel as before, and additionally accumulate final segments'
 /// text to emit a throttled `DictationLiveText` sample to the (separate)
@@ -376,21 +396,33 @@ fn build_dictation_on_segment(
         let text = seg.text.clone();
         let _ = channel.send(seg);
 
-        if !is_final {
-            return;
-        }
         let Ok(mut state) = live_text.lock() else {
             return;
         };
-        if !state.accumulated.is_empty() && !state.accumulated.ends_with(' ') && !text.starts_with(' ') {
+        if !is_final {
+            let preview = dictation_live_preview(&state.accumulated, &text);
+            let tail = crate::pill::live_text_tail(&preview, crate::pill::LIVE_TEXT_MAX_CHARS);
+            drop(state);
+            let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
+            return;
+        }
+        if !state.accumulated.is_empty()
+            && !state.accumulated.ends_with(' ')
+            && !text.starts_with(' ')
+        {
             state.accumulated.push(' ');
         }
         state.accumulated.push_str(&text);
 
         let now = std::time::Instant::now();
-        if crate::pill::should_emit_live_text(state.last_emit, now, crate::pill::LIVE_TEXT_MIN_INTERVAL) {
+        if crate::pill::should_emit_live_text(
+            state.last_emit,
+            now,
+            crate::pill::LIVE_TEXT_MIN_INTERVAL,
+        ) {
             state.last_emit = Some(now);
-            let tail = crate::pill::live_text_tail(&state.accumulated, crate::pill::LIVE_TEXT_MAX_CHARS);
+            let tail =
+                crate::pill::live_text_tail(&state.accumulated, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
             let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
         }
@@ -822,13 +854,25 @@ pub fn take_sleep_paused_meeting(state: State<'_, AppState>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MEETING_FLUSH_THRESHOLD, build_meeting_on_segment};
+    use super::{MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, dictation_live_preview};
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
     use crate::state::MeetingAccumulator;
     use crate::test_helpers::fixtures::test_db;
     use chrono::Utc;
     use std::sync::{Arc, Mutex};
     use tauri::ipc::Channel;
+
+    fn test_segment(text: &str, is_final: bool) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: text.to_string(),
+            start_time: 0.0,
+            end_time: 0.0,
+            is_final,
+            language: None,
+            confidence: None,
+            speaker: None,
+        }
+    }
 
     #[test]
     fn build_meeting_on_segment_rolls_back_persisted_count_on_flush_failure() {
@@ -879,5 +923,53 @@ mod tests {
             meeting.persisted_new_count, 0,
             "flush failed (FK violation) so the batch must be retried, not lost"
         );
+    }
+
+    #[test]
+    fn build_meeting_on_segment_skips_non_finals_for_persistence() {
+        let (db, _dir) = test_db();
+        let db = Arc::new(db);
+
+        let accumulator = Arc::new(Mutex::new(Some(MeetingAccumulator {
+            id: "live-only".to_string(),
+            title: "Live".to_string(),
+            existing_segments: Vec::new(),
+            new_segments: Vec::new(),
+            recording_sessions: Vec::new(),
+            session_started_at: Utc::now(),
+            transcription_profile: default_transcription_profile(),
+            summary: None,
+            summary_is_stale: false,
+            summary_model: None,
+            summary_generated_at: None,
+            structured_summary: None,
+            notes: None,
+            calendar_event_id: None,
+            participants: Vec::new(),
+            persisted_new_count: 0,
+        })));
+
+        let channel: Channel<TranscriptionSegment> = Channel::new(|_| Ok(()));
+        let on_segment = build_meeting_on_segment(channel, Arc::clone(&accumulator), db);
+
+        on_segment(test_segment("pending", false));
+        on_segment(test_segment("hello", true));
+        on_segment(test_segment("world", false));
+
+        let guard = accumulator.lock().unwrap();
+        let meeting = guard.as_ref().unwrap();
+        assert_eq!(meeting.new_segments.len(), 1);
+        assert_eq!(meeting.new_segments[0].text, "hello");
+        assert!(meeting.new_segments[0].is_final);
+        assert_eq!(meeting.persisted_new_count, 0);
+    }
+
+    #[test]
+    fn dictation_live_preview_joins_confirmed_and_tentative() {
+        assert_eq!(dictation_live_preview("", "hello"), "hello");
+        assert_eq!(dictation_live_preview("hello", ""), "hello");
+        assert_eq!(dictation_live_preview("hello", "world"), "hello world");
+        assert_eq!(dictation_live_preview("hello ", "world"), "hello world");
+        assert_eq!(dictation_live_preview("hello", " world"), "hello world");
     }
 }

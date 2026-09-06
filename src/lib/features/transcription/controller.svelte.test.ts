@@ -576,4 +576,114 @@ describe("transcription controller", () => {
     }
   });
 
+  function captureTranscriptionChannel() {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+    return {
+      emit(segment: { text: string; is_final: boolean }) {
+        transcriptionChannel?.onmessage?.(segment);
+      },
+    };
+  }
+
+  it("non-final sets tentative without changing transcript", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    await ctrl.toggleRecording();
+
+    channel.emit({ text: "hello", is_final: false });
+
+    expect(ctrl.tentative).toBe("hello");
+    expect(ctrl.transcript).toBe("");
+  });
+
+  it("final after tentative clears tentative and appends to transcript", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    await ctrl.toggleRecording();
+
+    channel.emit({ text: "hello", is_final: true });
+    channel.emit({ text: "world", is_final: false });
+    expect(ctrl.transcript).toBe("hello");
+    expect(ctrl.tentative).toBe("world");
+
+    channel.emit({ text: "world", is_final: true });
+    expect(ctrl.tentative).toBe("");
+    expect(ctrl.transcript).toBe("hello world");
+  });
+
+  it("paste and polish use transcript only, not the live tentative", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true, auto_paste: true };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "hello", is_final: true });
+    channel.emit({ text: "pending", is_final: false });
+    expect(ctrl.tentative).toBe("pending");
+
+    await ctrl.toggleRecording(true);
+
+    expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
+      text: "hello",
+    }));
+    expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello" });
+    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.objectContaining({
+      text: "hello",
+    }));
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
+      text: expect.stringContaining("pending"),
+    }));
+  });
+
+  it("abort clears tentative and saves transcript only", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: false };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "hello", is_final: true });
+    channel.emit({ text: "pending", is_final: false });
+    expect(ctrl.tentative).toBe("pending");
+
+    ctrl.handleRecordingAborted();
+
+    expect(ctrl.tentative).toBe("");
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello" });
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", {
+      text: expect.stringContaining("pending"),
+    });
+  });
+
+  it("starting a session resets leftover tentative", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "stale", is_final: false });
+    expect(ctrl.tentative).toBe("stale");
+
+    await ctrl.toggleRecording();
+    ctrl.app.machineState = { state: "idle" };
+    await ctrl.toggleRecording();
+    expect(ctrl.tentative).toBe("");
+    expect(ctrl.transcript).toBe("");
+  });
+
 });

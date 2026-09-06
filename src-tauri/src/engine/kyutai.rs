@@ -467,6 +467,20 @@ impl KyutaiEngine {
         }
     }
 
+    /// Live preview of a word still waiting for EndWord. Does not consume
+    /// the pending slot — the later final still comes from `emit_pending`.
+    fn pending_to_tentative_segment(pending: &PendingWord) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: pending.text.clone(),
+            start_time: pending.start_time,
+            end_time: pending.start_time,
+            is_final: false,
+            language: pending.language.clone(),
+            confidence: None,
+            speaker: pending.speaker,
+        }
+    }
+
     fn emit_pending(
         pending_words: &mut [Option<PendingWord>],
         batch_idx: usize,
@@ -838,12 +852,16 @@ impl KyutaiEngine {
                     if *batch_idx >= model.pending_words.len() {
                         model.pending_words.resize_with(*batch_idx + 1, || None);
                     }
-                    model.pending_words[*batch_idx] = Some(PendingWord {
+                    let pending = PendingWord {
                         text,
                         start_time,
                         language,
                         speaker,
-                    });
+                    };
+                    // Show the last word immediately; it stays pending until
+                    // EndWord / the next Word / drain finalizes it.
+                    segments.push(Self::pending_to_tentative_segment(&pending));
+                    model.pending_words[*batch_idx] = Some(pending);
                 }
                 moshi::asr::AsrMsg::EndWord {
                     stop_time,
@@ -1500,5 +1518,27 @@ mod tests {
         };
         let seg = KyutaiEngine::pending_to_segment(pending, 1.5);
         assert_eq!(seg.end_time, 2.0);
+    }
+
+    #[test]
+    fn pending_word_tentative_is_not_final_and_does_not_consume() {
+        let pending = PendingWord {
+            text: "hello".into(),
+            start_time: 1.2,
+            language: Some("en".into()),
+            speaker: Some(Speaker::Me),
+        };
+        let tentative = KyutaiEngine::pending_to_tentative_segment(&pending);
+        assert_eq!(tentative.text, "hello");
+        assert_eq!(tentative.start_time, 1.2);
+        assert_eq!(tentative.end_time, 1.2);
+        assert_eq!(tentative.language.as_deref(), Some("en"));
+        assert_eq!(tentative.speaker, Some(Speaker::Me));
+        assert!(!tentative.is_final);
+
+        let finalized = KyutaiEngine::pending_to_segment(pending, 1.6);
+        assert_eq!(finalized.text, "hello");
+        assert_eq!(finalized.end_time, 1.6);
+        assert!(finalized.is_final);
     }
 }
