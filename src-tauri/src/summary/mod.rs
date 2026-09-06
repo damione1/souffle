@@ -2,6 +2,7 @@ mod apple;
 mod chunking;
 mod extract;
 mod formatters;
+mod language;
 mod map;
 mod ollama;
 mod polish;
@@ -18,6 +19,10 @@ use crate::transcript::{MeetingParticipant, StructuredSummary};
 
 pub use chunking::{ChunkConfig, chunk_transcript, chunk_turns, estimate_tokens};
 pub use extract::{extract_structured_summary, parse_structured_summary_response};
+pub use language::{
+    SummaryLanguage, majority_language_from_segments, resolve_summary_language,
+    with_language_instruction,
+};
 pub use ollama::{OllamaPullProgress, RECOMMENDED_MODEL as RECOMMENDED_OLLAMA_MODEL, pull_model};
 pub use polish::{
     DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
@@ -415,6 +420,10 @@ pub(crate) async fn generate_with_provider(
 /// `turn_units` is the speaker-labeled transcript when the meeting still has
 /// segments; packing those units never splits a turn. Edited prose has no
 /// turns and falls back to word chunks.
+///
+/// `output_language` is injected into the map, merge, and final system
+/// prompts. A 7B follows the English instruction language unless told
+/// explicitly which language to write in.
 #[allow(clippy::too_many_arguments)]
 pub async fn summarize_stream(
     transcript_text: &str,
@@ -424,11 +433,23 @@ pub async fn summarize_stream(
     model: &str,
     ollama_base_url: Option<&str>,
     final_system_prompt: &str,
+    output_language: SummaryLanguage,
     on_chunk: impl Fn(SummarizeProgress),
 ) -> Result<String, String> {
     let provider = resolve_provider(model)?;
     let config = chunk_config(provider);
     let ollama_url = ollama_base_url.unwrap_or(OLLAMA_DEFAULT_URL);
+    let final_system_prompt = with_language_instruction(final_system_prompt, output_language);
+    // Both providers share the same map/merge text today; pick the provider
+    // constant so Apple stays on the same language-injection path if they diverge.
+    let (map_base, merge_base) = match provider {
+        SummaryProviderKind::Ollama => (ollama::MAP_SYSTEM_PROMPT, ollama::MERGE_SYSTEM_PROMPT),
+        SummaryProviderKind::AppleIntelligence => {
+            (apple::MAP_SYSTEM_PROMPT, apple::MERGE_SYSTEM_PROMPT)
+        }
+    };
+    let map_system_prompt = with_language_instruction(map_base, output_language);
+    let merge_system_prompt = with_language_instruction(merge_base, output_language);
 
     if estimate_tokens(transcript_text) <= config.stuff_token_limit {
         // Single-call path: the whole transcript fits, so this one call IS
@@ -437,7 +458,7 @@ pub async fn summarize_stream(
             provider,
             model,
             ollama_url,
-            final_system_prompt,
+            &final_system_prompt,
             build_summarize_prompt(transcript_text, notes, participants),
             0.2,
             ollama::REDUCE_BUDGET,
@@ -469,17 +490,19 @@ pub async fn summarize_stream(
                 let client = client.clone();
                 let ollama_url = ollama_url.to_string();
                 let model = model.to_string();
+                let map_system_prompt = map_system_prompt.clone();
                 async move {
                     map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
                         let client = client.clone();
                         let ollama_url = ollama_url.clone();
                         let model = model.clone();
+                        let map_system_prompt = map_system_prompt.clone();
                         async move {
                             ollama::generate_stream(
                                 &client,
                                 &ollama_url,
                                 &model,
-                                ollama::MAP_SYSTEM_PROMPT,
+                                &map_system_prompt,
                                 user,
                                 ollama::MAP_BUDGET,
                                 temperature,
@@ -506,23 +529,27 @@ pub async fn summarize_stream(
                 Some(i as u32 + 1),
                 Some(n as u32),
             ));
-            let part = map::map_one_chunk(i + 1, n, &chunk, |user, temperature| async move {
-                generate_with_provider(
-                    provider,
-                    model,
-                    ollama_url,
-                    apple::MAP_SYSTEM_PROMPT,
-                    user,
-                    temperature,
-                    ollama::MAP_BUDGET,
-                    &no_op,
-                    false,
-                )
-                .await
-                .map(|text| map::MapOutput {
-                    text,
-                    eval_count: None,
-                })
+            let map_system_prompt = map_system_prompt.clone();
+            let part = map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
+                let map_system_prompt = map_system_prompt.clone();
+                async move {
+                    generate_with_provider(
+                        provider,
+                        model,
+                        ollama_url,
+                        &map_system_prompt,
+                        user,
+                        temperature,
+                        ollama::MAP_BUDGET,
+                        &no_op,
+                        false,
+                    )
+                    .await
+                    .map(|text| map::MapOutput {
+                        text,
+                        eval_count: None,
+                    })
+                }
             })
             .await?;
             part_summaries.push(part);
@@ -537,7 +564,8 @@ pub async fn summarize_stream(
         notes,
         participants,
         config,
-        final_system_prompt,
+        &final_system_prompt,
+        &merge_system_prompt,
         &on_chunk,
     )
     .await?;
@@ -565,17 +593,13 @@ async fn reduce_part_summaries(
     participants: &[MeetingParticipant],
     config: ChunkConfig,
     final_system_prompt: &str,
+    merge_system_prompt: &str,
     on_chunk: &impl Fn(SummarizeProgress),
 ) -> Result<String, String> {
     // The template prompt applies to the final pass only; intermediate
-    // merge rounds keep the fixed provider merge prompt (both providers
-    // share the same merge text today).
-    let (merge_system_prompt, budget) = match provider {
-        SummaryProviderKind::Ollama => (ollama::MERGE_SYSTEM_PROMPT, ollama::REDUCE_BUDGET),
-        SummaryProviderKind::AppleIntelligence => {
-            (apple::MERGE_SYSTEM_PROMPT, ollama::REDUCE_BUDGET)
-        }
-    };
+    // merge rounds keep the (language-annotated) merge prompt. Both
+    // providers share the same merge text today.
+    let budget = ollama::REDUCE_BUDGET;
 
     on_chunk(SummarizeProgress::stage_marker(
         SummarizeStage::Combine,
