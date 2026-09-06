@@ -1111,6 +1111,7 @@ struct DiarizedMode {
 }
 
 impl DiarizedMode {
+    /// Creates a new `DiarizedMode` session with empty buffers and no padding armed.
     fn new() -> Self {
         Self {
             me_buf: Vec::new(),
@@ -1122,7 +1123,8 @@ impl DiarizedMode {
         }
     }
 
-    /// Untagged audio (shouldn't happen in diarized mode) goes to the mic.
+    /// Returns a mutable reference to the buffer for the given speaker.
+    /// Untagged audio (shouldn't happen in diarized mode) goes to the mic (Me).
     fn buf_for(&mut self, speaker: Option<Speaker>) -> &mut Vec<f32> {
         match speaker {
             Some(Speaker::Them) => &mut self.them_buf,
@@ -1130,6 +1132,7 @@ impl DiarizedMode {
         }
     }
 
+    /// Calculates the number of full `chunk_size` frames in the buffer.
     fn full_frames(buf: &[f32], chunk_size: usize) -> usize {
         if chunk_size == 0 {
             0
@@ -1138,14 +1141,23 @@ impl DiarizedMode {
         }
     }
 
+    /// Takes one full `chunk_size` frame from the buffer if available.
+    /// If the buffer has fewer than `chunk_size` samples, it drains whatever
+    /// is available, places them at the start of the returned frame, and
+    /// zero-pads the remainder to maintain strict frame alignment.
     fn take_frame_or_silence(buf: &mut Vec<f32>, chunk_size: usize) -> Vec<f32> {
         if buf.len() >= chunk_size {
             buf.drain(..chunk_size).collect()
         } else {
-            vec![0.0; chunk_size]
+            let mut frame = std::mem::take(buf);
+            frame.resize(chunk_size, 0.0);
+            frame
         }
     }
 
+    /// Checks if either lane has fallen behind by more than `DIARIZE_LAG_TOLERANCE_FRAMES`
+    /// full frames compared to the other. If so, and the lagging lane is completely empty
+    /// of full frames, arms padding for the lagging lane.
     fn arm_padding(&mut self, chunk_size: usize) {
         let me_n = Self::full_frames(&self.me_buf, chunk_size);
         let them_n = Self::full_frames(&self.them_buf, chunk_size);
@@ -2025,6 +2037,42 @@ mod tests {
             !segments.iter().any(|s| s.speaker == Some(Speaker::Me)),
             "padded mic frames must not emit Me speech"
         );
+    }
+
+    #[test]
+    fn diarized_mode_preserves_partial_buffer_when_padding_begins() {
+        let mut mode = DiarizedMode::new();
+        let mut engine = MockEngine::new();
+
+        // Push a partial frame to the mic lane
+        let partial_samples = MIMI_FRAME_SIZE / 2;
+        mode.me_buf.extend(vec![0.5f32; partial_samples]);
+
+        // Push enough them frames to trigger lag tolerance padding on me
+        for _ in 0..DIARIZE_LAG_TOLERANCE_FRAMES + 1 {
+            mode.ingest(diarized_lane_chunk(Speaker::Them));
+        }
+
+        assert!(mode.frame_ready(MIMI_FRAME_SIZE));
+        
+        mode.step(&mut engine, MIMI_FRAME_SIZE).unwrap();
+
+        // The partial samples should have been drained and padded
+        assert!(mode.me_buf.is_empty(), "partial me buffer should be completely drained");
+        assert_eq!(
+            mode.them_buf.len(),
+            DIARIZE_LAG_TOLERANCE_FRAMES * MIMI_FRAME_SIZE,
+            "one them frame consumed, remaining should be left"
+        );
+        
+        assert_eq!(engine.dual_calls.len(), 1);
+        
+        let (me_frame, them_frame) = &engine.dual_calls[0];
+        assert_eq!(me_frame.len(), MIMI_FRAME_SIZE);
+        assert_eq!(me_frame[0..partial_samples], vec![0.5f32; partial_samples]);
+        assert_eq!(me_frame[partial_samples..], vec![0.0f32; MIMI_FRAME_SIZE - partial_samples]);
+        
+        assert_eq!(them_frame.len(), MIMI_FRAME_SIZE);
     }
 
     #[test]
