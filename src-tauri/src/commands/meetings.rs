@@ -505,6 +505,11 @@ pub async fn summarize_meeting(
 
     let final_system_prompt =
         crate::summary::resolve_summary_template_prompt(&settings, template_id.as_deref());
+    let output_language = crate::summary::resolve_summary_language(
+        settings.meeting_transcription_language,
+        &transcript.segments,
+        &settings.locale,
+    );
 
     let channel_clone = channel.clone();
     let db = state.db.clone();
@@ -516,6 +521,7 @@ pub async fn summarize_meeting(
         &model,
         Some(&settings.ollama_url),
         &final_system_prompt,
+        output_language,
         move |progress| {
             let _ = channel_clone.send(progress);
         },
