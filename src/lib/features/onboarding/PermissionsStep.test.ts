@@ -103,4 +103,50 @@ describe("PermissionsStep per-row busy state", () => {
 
     resolveRequest("granted");
   });
+
+  it("handles two concurrent pending requests remaining independently active until each completes", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWith("unknown"));
+    let resolveMic: (value: PermState) => void = () => {};
+    let resolveSys: (value: PermState) => void = () => {};
+    
+    permissionsApi.requestPermission.mockImplementation((kind) => {
+      return new Promise<PermState>((resolve) => {
+        if (kind === "microphone") {
+          resolveMic = resolve;
+        } else if (kind === "system_audio") {
+          resolveSys = resolve;
+        }
+      });
+    });
+
+    render(PermissionsStep);
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+
+    const micButton = within(rowFor("Microphone")).getByRole("button") as HTMLButtonElement;
+    const systemAudioButton = within(rowFor("System audio")).getByRole("button") as HTMLButtonElement;
+
+    await fireEvent.click(micButton);
+    await fireEvent.click(systemAudioButton);
+
+    expect(micButton.disabled).toBe(true);
+    expect(systemAudioButton.disabled).toBe(true);
+    
+    // Resolve microphone to "unknown" so the button stays in the DOM, 
+    // allowing us to verify its disabled state transitions back to false.
+    resolveMic("unknown");
+    
+    // Using await waitFor to ensure svelte state reactivity
+    await waitFor(() => {
+      expect(micButton.disabled).toBe(false);
+    });
+    // System audio should still be disabled
+    expect(systemAudioButton.disabled).toBe(true);
+    
+    // Resolve system audio
+    resolveSys("unknown");
+    
+    await waitFor(() => {
+      expect(systemAudioButton.disabled).toBe(false);
+    });
+  });
 });

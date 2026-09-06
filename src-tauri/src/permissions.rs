@@ -185,18 +185,20 @@ fn open_microphone_settings() {
 #[cfg(not(target_os = "macos"))]
 fn open_microphone_settings() {}
 
-/// Symmetric with `calendar::request_access`: an already-decided `Denied`
-/// opens System Settings instead of re-running the probe, which would just
-/// spend 15s to land on the same answer (macOS never re-prompts after a
-/// deny). `NotDetermined` still probes, since that's what shows the TCC
-/// dialog the first time.
 fn request_microphone_with(
     status: impl FnOnce() -> PermState,
     open_settings: impl FnOnce(),
     probe: impl FnOnce() -> PermState,
+    has_device: impl FnOnce() -> bool,
 ) -> PermState {
     match status() {
-        PermState::Granted => PermState::Granted,
+        PermState::Granted => {
+            if has_device() {
+                PermState::Granted
+            } else {
+                PermState::NoDevice
+            }
+        }
         PermState::Denied => {
             open_settings();
             PermState::Denied
@@ -205,11 +207,17 @@ fn request_microphone_with(
     }
 }
 
+fn has_microphone_device() -> bool {
+    use cpal::traits::HostTrait;
+    cpal::default_host().default_input_device().is_some()
+}
+
 fn request_microphone() -> PermState {
     request_microphone_with(
         microphone_authorization_status,
         open_microphone_settings,
         probe_microphone,
+        has_microphone_device,
     )
 }
 
@@ -268,11 +276,16 @@ pub fn probe_microphone() -> PermState {
         _ => return PermState::Denied,
     };
 
-    let Ok(stream) = stream else {
-        return PermState::Denied;
+    let stream = match stream {
+        Ok(s) => s,
+        Err(cpal::BuildStreamError::DeviceNotAvailable) => return PermState::NoDevice,
+        Err(_) => return PermState::Denied,
     };
-    if stream.play().is_err() {
-        return PermState::Denied;
+    if let Err(e) = stream.play() {
+        match e {
+            cpal::PlayStreamError::DeviceNotAvailable => return PermState::NoDevice,
+            _ => return PermState::Denied,
+        }
     }
 
     // Wait up to 15s for a callback. On first launch the macOS TCC dialog is
@@ -378,6 +391,7 @@ mod tests {
                 probed.set(true);
                 PermState::Granted
             },
+            || true,
         );
 
         assert_eq!(result, PermState::Denied);
@@ -399,6 +413,7 @@ mod tests {
                 probed.set(true);
                 PermState::Granted
             },
+            || true,
         );
 
         assert_eq!(result, PermState::Granted);
@@ -414,6 +429,7 @@ mod tests {
             || PermState::Granted,
             || panic!("Granted must not open Settings"),
             || panic!("Granted must not probe"),
+            || true,
         );
         assert_eq!(result, PermState::Granted);
     }
