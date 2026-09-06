@@ -64,6 +64,7 @@ pub fn model_exists(
     })
 }
 
+/// Determines if a file is a model weight file based on its extension.
 fn is_weight_file(file: &str) -> bool {
     file.ends_with(".bin") || file.ends_with(".safetensors") || file.ends_with(".onnx")
 }
@@ -82,6 +83,8 @@ fn min_bytes_for_file(file: &str, advertised_size: Option<u64>, required_files: 
     }
 }
 
+/// Checks whether a file exists and its size meets or exceeds the minimum required bytes.
+/// Correctly handles edge cases like directories or broken symlinks by verifying it's a file.
 fn file_meets_floor(path: &Path, min_bytes: u64) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() >= min_bytes)
 }
@@ -92,12 +95,10 @@ fn assert_download_complete(downloaded: u64, total_bytes: Option<u64>) -> Result
     if downloaded == 0 {
         return Err("Download ended with no data".into());
     }
-    if let Some(expected) = total_bytes {
-        if downloaded != expected {
-            return Err(format!(
-                "Download incomplete: received {downloaded} of {expected} bytes"
-            ));
-        }
+    if let Some(expected) = total_bytes.filter(|&expected| downloaded != expected) {
+        return Err(format!(
+            "Download incomplete: received {downloaded} of {expected} bytes"
+        ));
     }
     Ok(())
 }

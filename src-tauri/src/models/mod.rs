@@ -6,6 +6,9 @@ use crate::engine::{TranscriptionProfile, resolve_transcription_artifact};
 
 pub use download::{DownloadProgress, DownloadStatus};
 
+/// Checks whether the full set of required files for a given transcription profile
+/// exists in the expected model directory. If the profile references a legacy layout,
+/// files are automatically migrated to the new layout before checking.
 pub fn model_exists(profile: &TranscriptionProfile) -> bool {
     if ensure_model_layout(profile).is_err() {
         return false;
@@ -22,6 +25,8 @@ pub fn model_exists(profile: &TranscriptionProfile) -> bool {
     )
 }
 
+/// Returns the fully qualified local filesystem path where the model for a
+/// specific transcription profile is (or will be) stored.
 pub fn model_dir(profile: &TranscriptionProfile) -> PathBuf {
     crate::constants::app_data_dir()
         .join("models")
@@ -30,6 +35,9 @@ pub fn model_dir(profile: &TranscriptionProfile) -> PathBuf {
         .join(&profile.backend_id)
 }
 
+/// Downloads all required files for a given transcription profile. Progress
+/// is reported back via the provided `progress_callback`. Layout migration
+/// is automatically performed beforehand if needed.
 pub fn download_model(
     profile: &TranscriptionProfile,
     progress_callback: impl Fn(DownloadProgress),
