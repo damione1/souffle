@@ -211,6 +211,21 @@ fn sanitize_summary(text: &str) -> String {
     trimmed.to_string()
 }
 
+/// True when the sanitized final-pass text has no `## Topics` heading.
+///
+/// A 7B on a single final reduce (many map chunks, still under the token
+/// budget) will concatenate the fact lists and drop this section. We detect
+/// that here so tests — and a future one-shot retry — can see it. Retry is
+/// not wired: the live preview concatenates streamed tokens, so a second
+/// `generate` would append a second draft on screen, and a model that
+/// concatenated once often does it again.
+#[cfg(test)]
+fn summary_missing_topics(text: &str) -> bool {
+    !sanitize_summary(text)
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case("## Topics"))
+}
+
 fn apple_model_descriptor() -> SummaryModelDescriptor {
     SummaryModelDescriptor {
         id: APPLE_INTELLIGENCE_MODEL_ID.to_string(),
@@ -714,7 +729,7 @@ mod tests {
         APPLE_INTELLIGENCE_MODEL_ID, ChunkConfig, ModelChoiceError, SummaryModelDescriptor,
         SummaryProviderChoice, SummaryProviderKind, apple, check_providers, choose_summary_model,
         ollama, reduce_call_system_prompt, resolve_provider, run_reduce_tree, sanitize_summary,
-        structured_extract_for_persist,
+        structured_extract_for_persist, summary_missing_topics,
     };
     use crate::transcript::StructuredSummary;
 
@@ -765,6 +780,35 @@ mod tests {
         let input = "Here is a summary of the meeting.\n## Summary\nKey points are listed below.";
         let result = sanitize_summary(input);
         assert_eq!(result, "## Summary\nKey points are listed below.");
+    }
+
+    #[test]
+    fn summary_missing_topics_detects_concatenated_map_chunks() {
+        let concatenated =
+            "## Summary\n- fact from part 1\n\n- fact from part 2\n\n- fact from part 3";
+        assert!(
+            summary_missing_topics(concatenated),
+            "a reduce that only emitted ## Summary must be flagged"
+        );
+        assert!(summary_missing_topics(""));
+        assert!(summary_missing_topics(
+            "Just a blob of bullets\n- one\n- two"
+        ));
+    }
+
+    #[test]
+    fn summary_missing_topics_accepts_required_structure() {
+        assert!(!summary_missing_topics(
+            "## Summary\n- recap\n\n## Topics\n- agenda\n"
+        ));
+        assert!(
+            !summary_missing_topics("Thanks.\n\n## Summary\n- recap\n\n## Topics\n- agenda\n"),
+            "preamble stripped by sanitize must not hide ## Topics"
+        );
+        assert!(
+            !summary_missing_topics("## Meeting Minutes\n- point\n\n## Topics\n- none stated\n"),
+            "detailed minutes still require ## Topics"
+        );
     }
 
     fn model(id: &str, provider: SummaryProviderKind) -> SummaryModelDescriptor {
@@ -991,6 +1035,58 @@ mod tests {
             super::default_summary_templates()[0].prompt,
             prompt,
             "the Default template must ship the standard final-pass prompt"
+        );
+    }
+
+    /// The common long-meeting path is a single final reduce (map chunks still
+    /// fit `reduce_token_limit`), so merge/dedup cannot live only on
+    /// `OLLAMA_MERGE_PROMPT`. Every final-pass template must say so, or a 7B
+    /// concatenates the parts and — on the default/detailed templates — drops
+    /// `## Topics`.
+    #[test]
+    fn final_pass_prompts_merge_map_chunks_and_cap_output() {
+        let default = crate::constants::OLLAMA_SUMMARIZE_PROMPT;
+        let detailed = crate::constants::OLLAMA_DETAILED_MINUTES_PROMPT;
+        let brief = crate::constants::OLLAMA_BRIEF_OVERVIEW_PROMPT;
+
+        for prompt in [default, detailed, brief] {
+            assert!(
+                prompt.contains("consecutive parts of ONE meeting"),
+                "final pass must treat map chunks as parts of one meeting"
+            );
+            assert!(
+                prompt.contains("Do not keep the parts as separate blocks"),
+                "final pass must forbid per-part blocks"
+            );
+            assert!(
+                prompt.contains("Merge duplicate or overlapping points"),
+                "final pass must carry the merge-prompt dedup rule"
+            );
+        }
+
+        assert!(
+            default.contains("Never omit the Topics section"),
+            "default recap must require ## Topics"
+        );
+        assert!(
+            default.contains("At most 8 bullets per section"),
+            "default recap must cap length so concatenating 12 map lists is not the cheap path"
+        );
+        assert!(
+            detailed.contains("Never omit the Topics section"),
+            "detailed minutes must require ## Topics"
+        );
+        assert!(
+            detailed.contains("At most 16 bullets per section"),
+            "detailed minutes still need a ceiling"
+        );
+        assert!(
+            !brief.contains("## Topics"),
+            "brief overview keeps a single ## Summary section"
+        );
+        assert!(
+            brief.contains("at most 3 short bullets"),
+            "brief overview already caps output"
         );
     }
 
