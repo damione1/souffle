@@ -548,11 +548,13 @@ pub(crate) mod paragraphs {
         for seg in segments {
             match seg.speaker {
                 Some(speaker) => {
-                    if !lanes.contains_key(&speaker) {
-                        lane_order.push(speaker);
-                        lanes.insert(speaker, Vec::new());
-                    }
-                    lanes.get_mut(&speaker).unwrap().push(seg);
+                    lanes
+                        .entry(speaker)
+                        .or_insert_with(|| {
+                            lane_order.push(speaker);
+                            Vec::new()
+                        })
+                        .push(seg);
                 }
                 None => untagged.push(seg),
             }

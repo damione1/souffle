@@ -1,5 +1,6 @@
 import { getAppState } from "../../stores/app.svelte";
 import { getTranscriptionCatalog } from "../../api/transcription";
+import { getPermissionStatus, requestPermission } from "../../api/permissions";
 import {
   getShortcuts,
   listAudioDevices,
@@ -8,7 +9,13 @@ import {
   selectAudioDevice,
 } from "../../api/settings";
 import { setLocale } from "../../i18n";
-import type { AppSettings, AudioInputDevice, TranscriptionCatalog } from "../../types";
+import type {
+  AppSettings,
+  AudioInputDevice,
+  PermissionStatus,
+  PermState,
+  TranscriptionCatalog,
+} from "../../types";
 import { errorMessage, formatShortcutLabel } from "../../utils";
 import { keyEventToShortcut, shortcutMissingModifier } from "../../utils/shortcut";
 import { listAvailableModelOptions } from "../transcription/catalog";
@@ -43,7 +50,12 @@ export function createOnboardingController() {
   let rewrite = $state("");
   let recordingShortcut = $state(false);
   let shortcutError = $state("");
-  let autoPaste = $state(true);
+  // Mirrors the backend default (settings.rs) until the real Accessibility
+  // state comes in from PermissionsStep or the initial probe below: the
+  // wizard must never promise auto-paste before it knows the paste it
+  // enables can actually run (SOU-053).
+  let autoPaste = $state(false);
+  let accessibility = $state<PermState>("unknown");
 
   const options = $derived(listAvailableModelOptions(catalog));
   const step = $derived(steps[stepIndex] ?? "permissions");
@@ -76,7 +88,15 @@ export function createOnboardingController() {
     steps = wizardSteps(flags);
     stepIndex = 0;
     selectedDevice = app.selectedDevice;
-    autoPaste = true;
+
+    // Seeds the real Accessibility state even when the permissions step is
+    // skipped (already granted in a previous run). PermissionsStep, when it
+    // does mount, reports fresher updates through onPermissionsStatusChange.
+    try {
+      onPermissionsStatusChange(await getPermissionStatus());
+    } catch {
+      // Leave the safe "unknown" default (auto-paste stays off).
+    }
 
     try {
       catalog = await getTranscriptionCatalog();
@@ -218,6 +238,39 @@ export function createOnboardingController() {
     void persistToggleShortcut(shortcut);
   }
 
+  /** Auto-paste only tracks Accessibility on an actual transition, so a
+   * manual toggle on the shortcut step is not clobbered by an unrelated
+   * status refresh (e.g. remounting the permissions step). */
+  function applyAccessibility(next: PermState) {
+    const previous = accessibility;
+    accessibility = next;
+    if (accessibility !== previous) {
+      autoPaste = accessibility === "granted";
+    }
+  }
+
+  /** PermissionsStep's report of the real permission state (also used by
+   * `mount` to seed it when that step is skipped). */
+  function onPermissionsStatusChange(status: PermissionStatus) {
+    applyAccessibility(status.accessibility);
+  }
+
+  /** The shortcut step's warning offers a way back to fixing Accessibility:
+   * jump to the permissions step when it's part of this run of the wizard,
+   * otherwise trigger the same request/open-Settings flow it uses directly. */
+  async function reviewAccessibility() {
+    const permissionsIndex = steps.indexOf("permissions");
+    if (permissionsIndex !== -1) {
+      stepIndex = permissionsIndex;
+      return;
+    }
+    try {
+      applyAccessibility(await requestPermission("accessibility"));
+    } catch (e) {
+      statusMessage = errorMessage(e);
+    }
+  }
+
   async function goNext() {
     if (!canContinue) return;
     if (stepIndex >= steps.length - 1) {
@@ -271,6 +324,7 @@ export function createOnboardingController() {
     get shortcutError() { return shortcutError; },
     get autoPaste() { return autoPaste; },
     set autoPaste(value: boolean) { autoPaste = value; },
+    get accessibility() { return accessibility; },
     get busy() { return busy; },
     get isDownloading() { return isDownloading; },
     get isLoading() { return isLoading; },
@@ -281,6 +335,8 @@ export function createOnboardingController() {
     onDeviceChange,
     refreshDevices,
     onLocaleChange,
+    onPermissionsStatusChange,
+    reviewAccessibility,
     startShortcutRecording,
     handleKeyDown,
     goNext,

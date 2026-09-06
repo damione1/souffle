@@ -75,6 +75,13 @@ export async function pasteText(
   await unwrap(commands.pasteText(text, delayMs, method));
 }
 
+/** Surface a shortcut dictation's paste failure outside the app window with
+ * a system notification (SOU-053): the window is usually not what the user
+ * is looking at when a shortcut dictation runs. */
+export async function notifyPasteFailed(error: string, savedToHistory: boolean): Promise<void> {
+  await unwrap(commands.notifyPasteFailed(error, savedToHistory));
+}
+
 export async function getMachineState(): Promise<AppStateMachine> {
   return unwrap(commands.getMachineState());
 }

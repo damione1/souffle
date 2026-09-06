@@ -380,6 +380,9 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
             },
             fr,
         ));
+        // A meeting owns the recording session; this item must not offer to
+        // start dictation on top of it (SOU-044).
+        let _ = handles.dictation.set_enabled(!meeting);
         let _ = handles.meeting.set_text(label(
             if meeting {
                 "stop_meeting"

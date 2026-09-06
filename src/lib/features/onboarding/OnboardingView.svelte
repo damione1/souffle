@@ -102,7 +102,7 @@
     {/if}
 
     {#if controller.step === "permissions"}
-      <PermissionsStep />
+      <PermissionsStep onStatusChange={(status) => controller.onPermissionsStatusChange(status)} />
     {:else if controller.step === "microphone"}
       <div class="flex flex-col gap-3 text-left">
         <div class="flex items-center gap-2">
@@ -200,6 +200,25 @@
             aria-label={$t("settings_interface.auto_paste")}
           />
         </label>
+        {#if controller.accessibility !== "granted"}
+          <p
+            class="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning"
+            role="status"
+            data-testid="auto-paste-accessibility-warning"
+          >
+            {$t("onboarding.auto_paste_accessibility_warning")}
+          </p>
+          <div class="flex justify-end">
+            <button
+              type="button"
+              class="btn btn-sm"
+              data-testid="review-accessibility"
+              onclick={() => void controller.reviewAccessibility()}
+            >
+              {$t("permissions.review")}
+            </button>
+          </div>
+        {/if}
       </div>
     {/if}
 
