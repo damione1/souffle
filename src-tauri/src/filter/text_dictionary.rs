@@ -1,5 +1,6 @@
 use strsim::normalized_levenshtein;
 
+use super::learned_pair::{PHONETIC_SIMILARITY_FLOOR, is_protected_stopword};
 use super::soundex::soundex;
 use super::{DictionaryEntry, TextFilter, TextFilterKind};
 
@@ -17,43 +18,6 @@ const MIN_WORD_LEN: usize = 3;
 /// to differentiate themselves and collide with many unrelated codes. The
 /// Levenshtein spelling-correction path below is unaffected by this floor.
 const MIN_PHONETIC_WORD_LEN: usize = 4;
-
-/// Minimum normalized similarity, on top of Soundex equality, required for a
-/// *derived* phonetic match: one computed from the term's own spelling (or a
-/// session term), not from an explicit user pronunciation. Soundex equality
-/// alone is a weak signal, collapsing "dans" and "Denis" to the same code
-/// (D520); this floor keeps that kind of orthographically unrelated pair
-/// from matching while still allowing real misheard spellings through, e.g.
-/// "Delphine" transcribed as "Delfine" (similarity 0.75).
-const PHONETIC_SIMILARITY_FLOOR: f64 = 0.65;
-
-/// High-frequency French and English function words that a *derived*
-/// phonetic match must never replace. These are exactly the words most
-/// likely to collide with a name added to the dictionary purely by
-/// coincidence (short, common, phonetically generic). An explicit
-/// user-typed pronunciation is the only thing allowed to override this list
-/// (see `DictionaryMatch::explicit_pronunciation`): that's a deliberate
-/// instruction from the user, not an accidental Soundex collision.
-///
-/// Extend this list as new false positives get reported; it is intentionally
-/// a curated sample of common short words, not an exhaustive stopword corpus.
-const PROTECTED_STOPWORDS: &[&str] = &[
-    // French
-    "dans", "donc", "des", "dont", "doit", "deux", "par", "pour", "pas", "peu", "peut", "plus",
-    "avec", "sans", "sous", "sur", "vers", "chez", "mais", "car", "que", "qui", "quoi", "quand",
-    "comme", "alors", "aussi", "bien", "bon", "cette", "cet", "ces", "ses", "son", "sa", "ton",
-    "leur", "leurs", "nos", "vos", "tout", "tous", "toute", "toutes", "etre", "avoir", "fait",
-    "faire", "dit", "dire", "cela", "ceci", "ainsi", "puis", "encore", "toujours", "jamais",
-    "rien", "ici", // English
-    "the", "then", "than", "this", "that", "these", "those", "with", "from", "have", "been",
-    "were", "when", "what", "which", "who", "whom", "where", "there", "their", "they", "them",
-    "will", "would", "could", "should", "just", "very", "also", "into", "onto", "over", "under",
-    "about", "after", "before",
-];
-
-fn is_protected_stopword(word_lower: &str) -> bool {
-    PROTECTED_STOPWORDS.contains(&word_lower)
-}
 
 pub struct DictionaryFilter {
     entries: Vec<DictionaryMatch>,
@@ -87,6 +51,7 @@ struct DictionaryMatch {
 /// otherwise the term's own Soundex, except for digit-bearing terms ("V6",
 /// "K8s") whose alphabetic Soundex would collide with unrelated short words.
 /// Returns the code plus whether it came from an explicit pronunciation.
+/// Derives the phonetic code for a term, returning the code and whether it is phonetic-only.
 fn derive_phonetic_code(term: &str, pronunciation: Option<&str>) -> (Option<String>, bool) {
     if let Some(p) = pronunciation.map(str::trim).filter(|p| !p.is_empty()) {
         let primary = p
@@ -151,7 +116,10 @@ impl DictionaryFilter {
         }
         for correction in session_corrections {
             let miss = correction.misspelling.trim();
-            if !miss.is_empty() && miss.to_lowercase() != correction.term.to_lowercase() {
+            if !miss.is_empty()
+                && miss.to_lowercase() != correction.term.to_lowercase()
+                && !is_protected_stopword(&miss.to_lowercase())
+            {
                 exact_aliases.push(ExactAlias {
                     alias_lower: miss.to_lowercase(),
                     term: correction.term.clone(),
@@ -166,7 +134,9 @@ impl DictionaryFilter {
                 term_lower,
                 phonetic_code: soundex(&correction.misspelling),
                 phonetic_only: false,
-                explicit_pronunciation: true,
+                // Learned from a live edit, not typed as a pronunciation:
+                // it goes through the derived floors, not the explicit bypass.
+                explicit_pronunciation: false,
             });
         }
         exact_aliases.sort_by(|a, b| {
@@ -181,6 +151,7 @@ impl DictionaryFilter {
         }
     }
 
+    /// Finds a fuzzy or phonetic replacement for a given word.
     fn find_replacement(&self, word: &str) -> Option<&str> {
         let word_char_count = word.chars().count();
         if word_char_count < MIN_WORD_LEN {
@@ -245,6 +216,7 @@ impl DictionaryFilter {
         best_match.map(|(term, _)| term)
     }
 
+    /// Applies exact pronunciation aliases to the text, replacing them with the corresponding term.
     fn apply_exact_aliases(&self, text: &str) -> String {
         if self.exact_aliases.is_empty() {
             return text.to_string();
@@ -277,6 +249,7 @@ impl DictionaryFilter {
         result
     }
 
+    /// Applies fuzzy and phonetic matching to individual words in the text.
     fn apply_fuzzy(&self, text: &str) -> String {
         let mut result = String::with_capacity(text.len());
         let mut chars = text.char_indices().peekable();
@@ -308,10 +281,12 @@ impl DictionaryFilter {
     }
 }
 
+/// Determines if a character is part of a word.
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '\'' || c == '-'
 }
 
+/// Checks if the given byte index is at the start of a word in the text.
 fn at_word_start(text: &str, byte_index: usize) -> bool {
     let Some(ch) = text[byte_index..].chars().next() else {
         return false;
@@ -326,6 +301,7 @@ fn at_word_start(text: &str, byte_index: usize) -> bool {
             .is_none_or(|prev| !is_word_char(prev))
 }
 
+/// Attempts to match a multi-word or single-word alias exactly starting at the given byte index.
 fn match_alias_at(text: &str, byte_start: usize, alias_lower: &str) -> Option<usize> {
     let mut consumed = 0;
     let mut text_chars = text[byte_start..].chars();
@@ -342,6 +318,7 @@ fn match_alias_at(text: &str, byte_start: usize, alias_lower: &str) -> Option<us
     Some(byte_start + consumed)
 }
 
+/// Checks if two characters are equal ignoring ASCII case.
 fn char_eq_ignore_case(text_ch: char, alias_lower_ch: char) -> bool {
     if text_ch == alias_lower_ch {
         return true;
@@ -497,6 +474,21 @@ mod tests {
             }],
         );
         assert_eq!(f.apply("Kubernetis cluster"), "Kubernetes cluster");
+    }
+
+    #[test]
+    fn learned_session_correction_does_not_override_stopword_protection() {
+        use crate::filter::session_terms::SessionCorrection;
+        let f = DictionaryFilter::with_session_hints(
+            vec![],
+            &[],
+            &[SessionCorrection {
+                misspelling: "pour".to_string(),
+                term: "Pierre".to_string(),
+            }],
+        );
+        assert_eq!(f.apply("par ici"), "par ici");
+        assert_eq!(f.apply("pour la revue"), "pour la revue");
     }
 
     #[test]

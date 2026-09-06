@@ -18,6 +18,7 @@ import {
 import {
   listDictionary,
   addDictionaryEntry as apiAddDictionaryEntry,
+  updateDictionaryEntry as apiUpdateDictionaryEntry,
   deleteDictionaryEntry as apiDeleteDictionaryEntry,
 } from "../../api/dictionary";
 import { listCalendars } from "../../api/calendar";
@@ -867,6 +868,18 @@ export function createSettingsController() {
     dictionaryEntries = dictionaryEntries.filter((e) => e.id !== id);
   }
 
+  async function handleUpdateDictionaryEntry(
+    id: number,
+    term: string,
+    pronunciation: string | null,
+    category: string | null,
+  ) {
+    await apiUpdateDictionaryEntry(id, term, pronunciation, category);
+    dictionaryEntries = dictionaryEntries.map((entry) =>
+      entry.id === id ? { ...entry, term, pronunciation, category } : entry,
+    );
+  }
+
   function formatShortcut(shortcut: string): string {
     return formatShortcutLabel(shortcut) || "Not set";
   }
@@ -1025,6 +1038,7 @@ export function createSettingsController() {
     onDictionaryCorrectionChange,
     handleAddDictionaryEntry,
     handleDeleteDictionaryEntry,
+    handleUpdateDictionaryEntry,
     startRecording,
     handleKeyDown,
     clearShortcut,

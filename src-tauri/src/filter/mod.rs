@@ -1,4 +1,5 @@
 mod audio_vad;
+pub(crate) mod learned_pair;
 pub mod session_terms;
 pub mod soundex;
 mod text_dictionary;
