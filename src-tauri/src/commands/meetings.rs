@@ -104,6 +104,7 @@ pub fn get_meeting_audio(
     meeting_id: String,
 ) -> Result<Vec<crate::transcript::MeetingAudioSession>, String> {
     Ok(crate::audio::recorder::list_session_files(&meeting_id)
+        .map_err(|e| format!("List session files: {e}"))?
         .into_iter()
         .map(
             |(session_index, path)| crate::transcript::MeetingAudioSession {
@@ -403,6 +404,7 @@ pub fn export_meeting_audio_filename(
 #[specta::specta]
 pub fn export_meeting_audio_to_file(id: String, path: String) -> Result<(), String> {
     let sources: Vec<_> = crate::audio::recorder::list_session_files(&id)
+        .map_err(|e| format!("List session files: {e}"))?
         .into_iter()
         .map(|(_, path)| path)
         .collect();
@@ -422,6 +424,7 @@ pub async fn save_meeting_audio_export(
     let meeting = state.db.load_meeting(&id)?;
     let filename = export::export_audio_filename(&meeting);
     let sources: Vec<_> = crate::audio::recorder::list_session_files(&id)
+        .map_err(|e| format!("List session files: {e}"))?
         .into_iter()
         .map(|(_, path)| path)
         .collect();

@@ -245,7 +245,9 @@ impl Database {
     /// there guarantees no other meeting is mid-recording when it runs.
     pub fn recover_unfinished_meetings(&self) -> Result<usize, String> {
         self.recover_unfinished_meetings_with(&|id| {
-            !crate::audio::recorder::list_session_files(id).is_empty()
+            crate::audio::recorder::list_session_files(id)
+                .map(|files| !files.is_empty())
+                .map_err(|e| format!("List session files for {id}: {e}"))
         })
     }
 
@@ -254,7 +256,7 @@ impl Database {
     /// empty-shell branches without touching the real recordings directory.
     fn recover_unfinished_meetings_with(
         &self,
-        has_recorded_audio: &dyn Fn(&str) -> bool,
+        has_recorded_audio: &dyn Fn(&str) -> Result<bool, String>,
     ) -> Result<usize, String> {
         let ids: Vec<String> = {
             let conn = self.conn.acquire()?;
@@ -271,7 +273,7 @@ impl Database {
         for id in ids {
             let mut meeting = self.load_meeting(&id)?;
             if meeting.segments.is_empty() {
-                if !has_recorded_audio(&id) {
+                if !has_recorded_audio(&id)? {
                     self.delete_meeting(&id)?;
                 } else {
                     meeting.ended_at = Some(meeting.started_at);
@@ -943,7 +945,7 @@ mod tests {
         empty.ended_at = None;
         db.upsert_meeting_header(&empty).unwrap();
 
-        let recovered = db.recover_unfinished_meetings_with(&|_| false).unwrap();
+        let recovered = db.recover_unfinished_meetings_with(&|_| Ok(false)).unwrap();
         assert_eq!(recovered, 1);
 
         let salvaged = db.load_meeting("crashed").unwrap();
@@ -1006,7 +1008,7 @@ mod tests {
         db.append_segments("resumed", &crashed_session_segments, 5)
             .unwrap();
 
-        let recovered = db.recover_unfinished_meetings_with(&|_| false).unwrap();
+        let recovered = db.recover_unfinished_meetings_with(&|_| Ok(false)).unwrap();
         assert_eq!(recovered, 1);
 
         let salvaged = db.load_meeting("resumed").unwrap();
@@ -1054,7 +1056,7 @@ mod tests {
         db.upsert_meeting_header(&shell).unwrap();
 
         let recovered = db
-            .recover_unfinished_meetings_with(&|meeting_id| meeting_id == id)
+            .recover_unfinished_meetings_with(&|meeting_id| Ok(meeting_id == id))
             .unwrap();
         assert_eq!(recovered, 1);
         assert!(
@@ -1079,7 +1081,7 @@ mod tests {
         shell.ended_at = None;
         db.upsert_meeting_header(&shell).unwrap();
 
-        let recovered = db.recover_unfinished_meetings_with(&|_| false).unwrap();
+        let recovered = db.recover_unfinished_meetings_with(&|_| Ok(false)).unwrap();
         assert_eq!(recovered, 0, "a pruned shell is not a salvaged meeting");
         assert!(!db.meeting_exists(id).unwrap(), "empty shell pruned");
     }
@@ -1132,5 +1134,25 @@ mod tests {
         db.save_edited_transcript("m1", None).unwrap();
         let edited = db.load_edited_transcript("m1").unwrap();
         assert!(edited.is_none());
+    }
+    #[test]
+    fn recover_unfinished_preserves_shell_when_audio_check_fails() {
+        let (db, _dir) = test_db();
+        let id = "empty-shell-io-error";
+
+        let mut shell = sample_meeting(id);
+        shell.segments.clear();
+        shell.ended_at = None;
+        db.upsert_meeting_header(&shell).unwrap();
+
+        let err = db
+            .recover_unfinished_meetings_with(&|_| Err("simulated IO error".to_string()))
+            .unwrap_err();
+        assert_eq!(err, "simulated IO error");
+
+        assert!(
+            db.meeting_exists(id).unwrap(),
+            "empty shell must be preserved if we cannot determine if it has audio"
+        );
     }
 }

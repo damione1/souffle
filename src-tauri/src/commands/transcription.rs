@@ -146,7 +146,7 @@ async fn launch_meeting(
     // The on-disk file index a recorder should write to, if recording is on.
     let recording_target = RecordingTarget {
         meeting_id: accumulator.id.clone(),
-        session_index: crate::audio::recorder::next_session_index(&accumulator.id),
+        session_index: crate::audio::recorder::next_session_index(&accumulator.id).map_err(|e| format!("Determine session index: {e}"))?,
     };
 
     // Persist the header before any segments so a crash leaves a recoverable
