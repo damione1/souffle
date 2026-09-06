@@ -183,14 +183,10 @@ fn decide_refresh(
     }
 
     if pausing.len() == 1 {
-        let paused = pausing[0];
-        let other = 1 - paused;
-        if vad_pause_streak.get(other).copied().unwrap_or(0) < pause_threshold {
-            return RefreshDecision::Lane {
-                batch_idx: paused,
-                kind: RefreshKind::SoftPause,
-            };
-        }
+        return RefreshDecision::Lane {
+            batch_idx: pausing[0],
+            kind: RefreshKind::SoftPause,
+        };
     }
 
     RefreshDecision::Full(RefreshKind::SoftPause)
