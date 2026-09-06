@@ -126,12 +126,6 @@ async fn launch_meeting(
     event_description: Option<String>,
     channel: Channel<TranscriptionSegment>,
 ) -> Result<u64, String> {
-    // Any recording starting now (whether the user resumed by hand or
-    // started something new) makes a stale sleep-paused bookkeeping entry
-    // meaningless — clear it so a later wake never misreports an
-    // already-handled meeting as needing a resume prompt.
-    let _ = state.take_sleep_paused_meeting();
-
     let session_id = next_audio_session_id(state)?;
 
     // Session-scoped transcription hints: participant names plus distinctive
@@ -149,12 +143,10 @@ async fn launch_meeting(
         ],
     );
 
-    // This session's position in the meeting's recording_sessions — 0 for a
-    // new meeting, len() for a resume — is exactly the on-disk file index a
-    // recorder should write to, if recording is on.
+    // The on-disk file index a recorder should write to, if recording is on.
     let recording_target = RecordingTarget {
         meeting_id: accumulator.id.clone(),
-        session_index: accumulator.recording_sessions.len(),
+        session_index: crate::audio::recorder::next_session_index(&accumulator.id).map_err(|e| format!("Determine session index: {e}"))?,
     };
 
     // Persist the header before any segments so a crash leaves a recoverable
@@ -209,6 +201,12 @@ async fn launch_meeting(
         return Err(error);
     }
 
+    // Any recording successfully starting now (whether the user resumed by hand
+    // or started something new) makes a stale sleep-paused bookkeeping entry
+    // meaningless: clear it so a later wake never misreports an
+    // already-handled meeting as needing a resume prompt.
+    state.clear_sleep_paused_meeting();
+
     Ok(session_id)
 }
 
@@ -234,8 +232,8 @@ enum PipelineMode {
 
 /// Identifies where a meeting recording session's audio file belongs, if
 /// the retention setting turns out to be on. Resolved before the session
-/// starts (`launch_meeting` knows the meeting id and the session's position
-/// in `recording_sessions`); whether to actually record is decided inside
+/// starts (`launch_meeting` knows the meeting id and picks the next free
+/// on-disk session index); whether to actually record is decided inside
 /// `start_pipeline_blocking` once settings are loaded.
 struct RecordingTarget {
     meeting_id: String,
@@ -847,14 +845,28 @@ pub fn handle_system_did_wake(app: &AppHandle) {
     let _ = SystemWokeUp.emit(app);
 }
 
-/// Return and clear the meeting id paused by the system-sleep handler, if
-/// any. The frontend calls this on `SystemWokeUp` (and again on webview
-/// visibility change, belt and braces) to decide whether to offer/auto-start
-/// a resume.
+/// Return the meeting id paused by the system-sleep handler, if any, without
+/// clearing it. The frontend calls this on `SystemWokeUp` (and again on
+/// webview visibility change, belt and braces) to decide whether to
+/// offer/auto-start a resume. Non-destructive because the sleep-triggered
+/// stop may still be draining when wake fires: the frontend needs to be
+/// able to check again once it finishes, rather than have the first check
+/// burn the id before a resume was actually attempted.
 #[tauri::command]
 #[specta::specta]
-pub fn take_sleep_paused_meeting(state: State<'_, AppState>) -> Option<String> {
-    state.take_sleep_paused_meeting()
+pub fn peek_sleep_paused_meeting(state: State<'_, AppState>) -> Option<String> {
+    state.peek_sleep_paused_meeting()
+}
+
+/// Clear the meeting id paused by the system-sleep handler. The frontend
+/// calls this after a resume actually starts, or after the user explicitly
+/// declines to resume. `launch_meeting` also clears it unconditionally on
+/// every recording start, so a resume that goes through the normal start
+/// path never needs this to avoid re-offering the same meeting later.
+#[tauri::command]
+#[specta::specta]
+pub fn clear_sleep_paused_meeting(state: State<'_, AppState>) {
+    state.clear_sleep_paused_meeting();
 }
 
 #[cfg(test)]
