@@ -23,7 +23,8 @@ const VAD_PAUSE_THRESHOLD: f32 = 0.5;
 /// has no semantic VAD heads. Same order as Whisper/Parakeet's silence floor
 /// on a 10 ms frame: enough to refuse a refresh mid-word, not a room-tone gate.
 const ENERGY_PAUSE_RMS: f32 = 0.01;
-/// Tensor name `detect_extra_heads` looks up. The 1B semantic-VAD export
+
+/// Tensor name `checkpoint_has_semantic_vad` looks up. The 1B semantic-VAD export
 /// ships `extra_heads.0..3`; the 2.6B export has none.
 const EXTRA_HEADS_PROBE_TENSOR: &str = "extra_heads.0.weight";
 /// Safety margin (frames) on top of the ASR delay before trusting the VAD
@@ -199,6 +200,8 @@ fn decide_refresh(
     RefreshDecision::Full(RefreshKind::SoftPause)
 }
 
+/// Calculate the Root Mean Square (RMS) energy of a PCM audio slice.
+/// Returns 0.0 if the slice is empty.
 fn pcm_rms(pcm: &[f32]) -> f32 {
     if pcm.is_empty() {
         return 0.0;
@@ -207,6 +210,8 @@ fn pcm_rms(pcm: &[f32]) -> f32 {
     (sum / pcm.len() as f32).sqrt()
 }
 
+/// Determine if a PCM audio slice is a pause based on its RMS energy.
+/// Used when the checkpoint has no semantic VAD heads.
 fn is_energy_pause(pcm: &[f32]) -> bool {
     pcm_rms(pcm) < ENERGY_PAUSE_RMS
 }
@@ -226,6 +231,8 @@ fn note_energy_pause_streaks(streaks: &mut [usize], lane_pcm: &[&[f32]]) {
     }
 }
 
+/// Helper function to check if the extra heads probe tensor is present in a list of tensor names.
+/// Used in testing to simulate safetensors metadata inspection.
 #[cfg(test)]
 fn has_extra_heads_tensor(tensor_names: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
     tensor_names
@@ -373,7 +380,7 @@ impl KyutaiEngine {
         meeting_language_prior: MeetingTranscriptionLanguage,
     ) -> Result<LoadedModel, EngineError> {
         let model_file = model_path.join("model.safetensors");
-        let has_extra_heads = Self::detect_extra_heads(&model_file)?;
+        let has_extra_heads = Self::checkpoint_has_semantic_vad(&model_file);
         if has_extra_heads {
             info!("Kyutai checkpoint has semantic VAD extra heads");
         } else {
@@ -412,14 +419,21 @@ impl KyutaiEngine {
         (prefix_seconds * MIMI_FRAMES_PER_SECOND).ceil() as usize
     }
 
-    fn detect_extra_heads(model_file: &Path) -> Result<bool, EngineError> {
-        let file = File::open(model_file)
-            .map_err(|e| EngineError::LoadError(format!("Weights open failed: {e}")))?;
-        let mmap = unsafe { memmap2::Mmap::map(&file) }
-            .map_err(|e| EngineError::LoadError(format!("Weights mmap failed: {e}")))?;
-        let (_, metadata) = safetensors::tensor::SafeTensors::read_metadata(&mmap)
-            .map_err(|e| EngineError::LoadError(format!("Weights metadata read failed: {e}")))?;
-        Ok(metadata.info(EXTRA_HEADS_PROBE_TENSOR).is_some())
+    /// Checks if the safetensors checkpoint contains semantic VAD extra heads.
+    /// Handles missing or corrupted metadata gracefully by returning false,
+    /// since the model load will either fail naturally later or succeed if it's
+    /// a valid checkpoint just lacking this metadata.
+    fn checkpoint_has_semantic_vad(model_file: &Path) -> bool {
+        let Ok(file) = File::open(model_file) else {
+            return false;
+        };
+        let Ok(mmap) = (unsafe { memmap2::Mmap::map(&file) }) else {
+            return false;
+        };
+        match safetensors::tensor::SafeTensors::read_metadata(&mmap) {
+            Ok((_, metadata)) => metadata.info(EXTRA_HEADS_PROBE_TENSOR).is_some(),
+            Err(_) => false,
+        }
     }
 
     fn synchronize_device(device: &Device, context: &str) -> Result<(), EngineError> {
@@ -1444,11 +1458,24 @@ mod tests {
     }
 
     #[test]
+    fn checkpoint_has_semantic_vad_handles_missing_file_gracefully() {
+        // Should return false rather than erroring out
+        assert!(!KyutaiEngine::checkpoint_has_semantic_vad(std::path::Path::new("/does/not/exist.safetensors")));
+    }
+
+    #[test]
     fn energy_pause_treats_digital_silence_as_pause_and_speech_as_active() {
         let silence = vec![0.0f32; MIMI_FRAME_SIZE];
         let speech = vec![0.2f32; MIMI_FRAME_SIZE];
+        let nan_speech = vec![f32::NAN; MIMI_FRAME_SIZE];
+        let empty: Vec<f32> = vec![];
+        
         assert!(is_energy_pause(&silence));
         assert!(!is_energy_pause(&speech));
+        assert!(!is_energy_pause(&nan_speech)); // NaN is not < threshold
+        
+        assert_eq!(pcm_rms(&empty), 0.0);
+        assert!(is_energy_pause(&empty));
     }
 
     #[test]
@@ -1472,15 +1499,16 @@ mod tests {
         // or nothing — never SoftPause.
         let silence = vec![0.0f32; MIMI_FRAME_SIZE];
         let mut streaks = [0usize];
-        for _ in 0..REFRESH_PAUSE_FRAMES {
+        let drained = drained_pause_frames(STT_26B_DELAY);
+        for _ in 0..drained {
             note_energy_pause_streaks(&mut streaks, &[&silence]);
         }
         assert_eq!(
-            decide_refresh(300, 375, &streaks, 1),
+            decide_refresh(300, 375, &streaks, 1, STT_26B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
         assert_eq!(
-            decide_refresh(300, 375, &[0], 1),
+            decide_refresh(300, 375, &[0], 1, STT_26B_DELAY),
             RefreshDecision::None
         );
     }
