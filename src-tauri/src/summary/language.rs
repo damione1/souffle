@@ -72,9 +72,13 @@ pub fn resolve_summary_language(
 
 /// Append an explicit output-language rule. "Same language as the
 /// transcript" is not enough: a 7B follows the English system prompt.
+///
+/// Covers headings too, not just bullets: nothing downstream matches a
+/// heading by its literal text, and an English heading over French bullets
+/// reads as a bug.
 pub fn with_language_instruction(system_prompt: &str, language: SummaryLanguage) -> String {
     format!(
-        "{}\n\nWrite every bullet in {}.",
+        "{}\n\nWrite all output, including headings and bullets, in {}.",
         system_prompt.trim_end(),
         language_english_name(language)
     )
@@ -209,9 +213,10 @@ mod tests {
         let map = with_language_instruction(OLLAMA_MAP_PROMPT, language);
         let merge = with_language_instruction(OLLAMA_MERGE_PROMPT, language);
         let final_pass = with_language_instruction(OLLAMA_SUMMARIZE_PROMPT, language);
-        assert!(map.contains("Write every bullet in French."));
-        assert!(merge.contains("Write every bullet in French."));
-        assert!(final_pass.contains("Write every bullet in French."));
+        let rule = "Write all output, including headings and bullets, in French.";
+        assert!(map.contains(rule));
+        assert!(merge.contains(rule));
+        assert!(final_pass.contains(rule));
         assert!(map.contains("same language as the transcript"));
         assert!(final_pass.contains("same language as the input"));
     }
