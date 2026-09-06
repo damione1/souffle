@@ -90,7 +90,7 @@
 
   // URL + status stay visible under Auto (Ollama is the fallback). The
   // picker used to vanish when Apple was available, which hid the fallback
-  // model. It now stays up — muted and captioned — so the fallback can be
+  // model. It now stays up, muted and captioned, so the fallback can be
   // chosen without looking like it applies while Apple is the active path.
   let ollamaRelevant = $derived(
     summaryProvider === "ollama" || (summaryProvider === "auto" && !appleIntelligenceAvailable),
