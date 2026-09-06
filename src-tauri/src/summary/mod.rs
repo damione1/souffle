@@ -211,19 +211,28 @@ fn sanitize_summary(text: &str) -> String {
     trimmed.to_string()
 }
 
-/// True when the sanitized final-pass text has no `## Topics` heading.
+/// Log when the final pass dropped a section its own prompt asked for.
 ///
-/// A 7B on a single final reduce (many map chunks, still under the token
-/// budget) will concatenate the fact lists and drop this section. We detect
-/// that here so tests — and a future one-shot retry — can see it. Retry is
-/// not wired: the live preview concatenates streamed tokens, so a second
+/// A small model given many map-stage fact lists concatenates them and stops
+/// after `## Summary`. No retry: the live preview streams tokens, so a second
 /// `generate` would append a second draft on screen, and a model that
-/// concatenated once often does it again.
-#[cfg(test)]
-fn summary_missing_topics(text: &str) -> bool {
-    !sanitize_summary(text)
-        .lines()
-        .any(|line| line.trim().eq_ignore_ascii_case("## Topics"))
+/// concatenated once usually does it again. The warning is how we find out it
+/// happened. Only checked for prompts that actually request the section, so a
+/// brief-overview template stays quiet.
+fn final_summary_is_truncated(summary: &str, final_system_prompt: &str) -> bool {
+    final_system_prompt.contains("## Topics")
+        && !summary
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case("## Topics"))
+}
+
+fn warn_if_final_summary_is_truncated(summary: &str, final_system_prompt: &str) {
+    if final_summary_is_truncated(summary, final_system_prompt) {
+        tracing::warn!(
+            "Final summary is missing the Topics section its prompt required; \
+             the model likely concatenated the map chunks"
+        );
+    }
 }
 
 fn apple_model_descriptor() -> SummaryModelDescriptor {
@@ -460,7 +469,9 @@ pub async fn summarize_stream(
             false,
         )
         .await?;
-        return Ok(sanitize_summary(&full));
+        let summary = sanitize_summary(&full);
+        warn_if_final_summary_is_truncated(&summary, final_system_prompt);
+        return Ok(summary);
     }
 
     let no_op = |_: SummarizeProgress| {};
@@ -556,7 +567,9 @@ pub async fn summarize_stream(
         &on_chunk,
     )
     .await?;
-    Ok(sanitize_summary(&full))
+    let summary = sanitize_summary(&full);
+    warn_if_final_summary_is_truncated(&summary, final_system_prompt);
+    Ok(summary)
 }
 
 /// Combine map-stage part summaries into the final prose summary.
@@ -728,8 +741,8 @@ mod tests {
     use super::{
         APPLE_INTELLIGENCE_MODEL_ID, ChunkConfig, ModelChoiceError, SummaryModelDescriptor,
         SummaryProviderChoice, SummaryProviderKind, apple, check_providers, choose_summary_model,
-        ollama, reduce_call_system_prompt, resolve_provider, run_reduce_tree, sanitize_summary,
-        structured_extract_for_persist, summary_missing_topics,
+        final_summary_is_truncated, ollama, reduce_call_system_prompt, resolve_provider,
+        run_reduce_tree, sanitize_summary, structured_extract_for_persist,
     };
     use crate::transcript::StructuredSummary;
 
@@ -783,32 +796,29 @@ mod tests {
     }
 
     #[test]
-    fn summary_missing_topics_detects_concatenated_map_chunks() {
+    fn truncated_summary_warns_only_when_the_prompt_asked_for_topics() {
+        let prompt = crate::constants::OLLAMA_SUMMARIZE_PROMPT;
+        let brief = crate::constants::OLLAMA_BRIEF_OVERVIEW_PROMPT;
+        assert!(prompt.contains("## Topics"));
+        assert!(!brief.contains("## Topics"));
+
         let concatenated =
             "## Summary\n- fact from part 1\n\n- fact from part 2\n\n- fact from part 3";
-        assert!(
-            summary_missing_topics(concatenated),
-            "a reduce that only emitted ## Summary must be flagged"
-        );
-        assert!(summary_missing_topics(""));
-        assert!(summary_missing_topics(
-            "Just a blob of bullets\n- one\n- two"
-        ));
-    }
+        assert!(final_summary_is_truncated(concatenated, prompt));
+        assert!(final_summary_is_truncated("", prompt));
 
-    #[test]
-    fn summary_missing_topics_accepts_required_structure() {
-        assert!(!summary_missing_topics(
-            "## Summary\n- recap\n\n## Topics\n- agenda\n"
+        // A brief overview has no Topics section by design.
+        assert!(!final_summary_is_truncated(concatenated, brief));
+
+        // The required structure is quiet.
+        assert!(!final_summary_is_truncated(
+            "## Summary\n- recap\n\n## Topics\n- agenda\n",
+            prompt
         ));
-        assert!(
-            !summary_missing_topics("Thanks.\n\n## Summary\n- recap\n\n## Topics\n- agenda\n"),
-            "preamble stripped by sanitize must not hide ## Topics"
-        );
-        assert!(
-            !summary_missing_topics("## Meeting Minutes\n- point\n\n## Topics\n- none stated\n"),
-            "detailed minutes still require ## Topics"
-        );
+        assert!(!final_summary_is_truncated(
+            "## Meeting Minutes\n- point\n\n## Topics\n- none stated\n",
+            crate::constants::OLLAMA_DETAILED_MINUTES_PROMPT
+        ));
     }
 
     fn model(id: &str, provider: SummaryProviderKind) -> SummaryModelDescriptor {
@@ -1041,7 +1051,7 @@ mod tests {
     /// The common long-meeting path is a single final reduce (map chunks still
     /// fit `reduce_token_limit`), so merge/dedup cannot live only on
     /// `OLLAMA_MERGE_PROMPT`. Every final-pass template must say so, or a 7B
-    /// concatenates the parts and — on the default/detailed templates — drops
+    /// concatenates the parts and, on the default/detailed templates, drops
     /// `## Topics`.
     #[test]
     fn final_pass_prompts_merge_map_chunks_and_cap_output() {
