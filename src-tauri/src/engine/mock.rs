@@ -23,6 +23,13 @@ pub struct MockEngine {
     /// Shared with tests via `reset_state_count_handle()`, for asserting the
     /// actor's pre-warm / skip-reset-when-fresh behavior.
     reset_state_count: Arc<AtomicUsize>,
+    /// Shared with tests via `reset_state_preserving_count_handle()`. Kept
+    /// separate from `reset_state_count` so a test can tell the two
+    /// `TranscriptionEngine` reset methods apart: the trait default routes
+    /// `reset_state_preserving_timeline()` back into `reset_state()`, so a
+    /// single shared counter would climb identically no matter which one the
+    /// caller actually invoked.
+    reset_state_preserving_count: Arc<AtomicUsize>,
     /// Value returned by `emission_delay_seconds()`; configurable via
     /// `with_emission_delay_seconds` for drain-window tests.
     emission_delay_seconds: f64,
@@ -48,6 +55,7 @@ impl MockEngine {
             flush_responses: VecDeque::new(),
             unload_count: Arc::new(AtomicUsize::new(0)),
             reset_state_count: Arc::new(AtomicUsize::new(0)),
+            reset_state_preserving_count: Arc::new(AtomicUsize::new(0)),
             emission_delay_seconds: 0.0,
             tail_drained_schedule: VecDeque::new(),
             tail_drained_value: false,
@@ -64,6 +72,12 @@ impl MockEngine {
     /// into the actor's factory closure.
     pub fn reset_state_count_handle(&self) -> Arc<AtomicUsize> {
         Arc::clone(&self.reset_state_count)
+    }
+
+    /// Clone of the reset_state_preserving_timeline call counter; call
+    /// before the mock is moved into the actor's factory closure.
+    pub fn reset_state_preserving_count_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.reset_state_preserving_count)
     }
 
     /// Configure the value returned by `emission_delay_seconds()`.
@@ -142,6 +156,12 @@ impl TranscriptionEngine for MockEngine {
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
         self.reset_state_count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.reset_state_preserving_count
+            .fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 

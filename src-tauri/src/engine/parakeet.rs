@@ -43,6 +43,18 @@ impl ParakeetEngine {
         }
     }
 
+    /// Shared implementation for `reset_state` and
+    /// `reset_state_preserving_timeline`: both must drop the buffered audio
+    /// a wedged engine choked on. Only a plain reset also drops
+    /// `consumed_samples`, since a stall-recovery reset happens mid-session
+    /// and must keep the window-timestamp offset continuous.
+    fn reset_buffer(&mut self, preserve_timeline: bool) {
+        self.audio_buffer.clear();
+        if !preserve_timeline {
+            self.consumed_samples = 0;
+        }
+    }
+
     /// Session-time offset (seconds) for the next inference window,
     /// then advance by the window length.
     fn take_window_offset(&mut self, window_len: usize) -> f64 {
@@ -172,8 +184,12 @@ impl TranscriptionEngine for ParakeetEngine {
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
         // TDT inference is stateless per window; only our buffer carries over.
-        self.audio_buffer.clear();
-        self.consumed_samples = 0;
+        self.reset_buffer(false);
+        Ok(())
+    }
+
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.reset_buffer(true);
         Ok(())
     }
 
