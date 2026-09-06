@@ -493,6 +493,8 @@
     "subtitle": "Soufflé a besoin de quelques permissions macOS pour enregistrer et coller. Accordez-les maintenant pour éviter les interruptions.",
     "mic_label": "Microphone",
     "mic_desc": "Enregistrer votre voix pour la dictée et les meetings.",
+    "mic_denied_hint": "L'accès au microphone a été refusé, et macOS ne redemandera pas. Autorisez-le dans Réglages Système > Confidentialité et sécurité > Microphone, puis revenez ici.",
+    "mic_no_device_hint": "Aucun microphone détecté. Connectez-en un, ou choisissez une autre entrée dans Réglages > Audio.",
     "system_label": "Audio système",
     "system_desc": "Capturer les autres participants pendant les meetings.",
     "accessibility_label": "Accessibilité",

@@ -1,12 +1,13 @@
 //! macOS permission detection + prompting for the startup onboarding.
 //!
-//! There is no clean read-only status API for the microphone or Core Audio
-//! taps without pulling in AVFoundation, so we *probe*: briefly open the
-//! device. Opening it both triggers the system TCC prompt (first time) and
-//! tells us whether audio actually flows (granted). Accessibility — needed for
-//! the synthesized Cmd+V paste — does have a cheap check (`AXIsProcessTrusted`),
-//! and is granted only via System Settings, so its "request" just opens the
-//! relevant pane.
+//! The microphone has a real read-only status API (`AVCaptureDevice`'s
+//! `authorizationStatus`), so `request` checks it first and only falls back
+//! to probing (briefly opening the device, which also triggers the TCC
+//! prompt) when the OS hasn't decided yet. There is no equivalent for Core
+//! Audio taps, so system audio is still probe-only. Accessibility (needed
+//! for the synthesized Cmd+V paste) has its own cheap check
+//! (`AXIsProcessTrusted`), and is granted only via System Settings, so its
+//! "request" just opens the relevant pane.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -21,6 +22,11 @@ pub enum PermState {
     Unknown,
     /// The OS doesn't support this capability (e.g. taps need macOS 14.4+).
     Unsupported,
+    /// Microphone only: TCC access may well be granted, but there is no
+    /// usable input device (none plugged in, or its config can't be read).
+    /// Kept distinct from `Denied` because the fix isn't the same: plug in
+    /// or pick a device, not open System Settings.
+    NoDevice,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -141,10 +147,78 @@ pub fn repair_accessibility() -> PermState {
     }
 }
 
-// --- Microphone (probe: triggers the TCC prompt + detects delivery) ---
+// --- Microphone ---
+
+/// Read-only TCC status via `AVCaptureDevice`, no prompt. Lets `request`
+/// tell "the user already said no" apart from "hasn't been asked yet",
+/// which the probe alone can't do.
+#[cfg(target_os = "macos")]
+fn microphone_authorization_status() -> PermState {
+    use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+
+    // Falling back to Unknown (rather than panicking) keeps a missing symbol
+    // from taking down a permission check: the caller just probes instead.
+    let Some(media_type) = (unsafe { AVMediaTypeAudio }) else {
+        return PermState::Unknown;
+    };
+    match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
+        AVAuthorizationStatus::NotDetermined => PermState::Unknown,
+        AVAuthorizationStatus::Authorized => PermState::Granted,
+        // Restricted (parental controls/MDM) can't be changed from the app
+        // either, so it gets the same treatment as an explicit deny.
+        _ => PermState::Denied,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn microphone_authorization_status() -> PermState {
+    PermState::Unknown
+}
+
+#[cfg(target_os = "macos")]
+fn open_microphone_settings() {
+    let _ = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        .spawn();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_microphone_settings() {}
+
+/// Symmetric with `calendar::request_access`: an already-decided `Denied`
+/// opens System Settings instead of re-running the probe, which would just
+/// spend 15s to land on the same answer (macOS never re-prompts after a
+/// deny). `NotDetermined` still probes, since that's what shows the TCC
+/// dialog the first time.
+fn request_microphone_with(
+    status: impl FnOnce() -> PermState,
+    open_settings: impl FnOnce(),
+    probe: impl FnOnce() -> PermState,
+) -> PermState {
+    match status() {
+        PermState::Granted => PermState::Granted,
+        PermState::Denied => {
+            open_settings();
+            PermState::Denied
+        }
+        _ => probe(),
+    }
+}
+
+fn request_microphone() -> PermState {
+    request_microphone_with(
+        microphone_authorization_status,
+        open_microphone_settings,
+        probe_microphone,
+    )
+}
 
 fn no_op_stream_error(_e: cpal::StreamError) {}
 
+/// Briefly open the default input device and wait for real audio callbacks.
+/// This is what actually triggers the TCC prompt the first time; afterwards
+/// `request_microphone` skips straight to this only when the OS reports
+/// `NotDetermined`.
 pub fn probe_microphone() -> PermState {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use std::sync::Arc;
@@ -153,10 +227,10 @@ pub fn probe_microphone() -> PermState {
 
     let host = cpal::default_host();
     let Some(device) = host.default_input_device() else {
-        return PermState::Denied;
+        return PermState::NoDevice;
     };
     let Ok(config) = device.default_input_config() else {
-        return PermState::Denied;
+        return PermState::NoDevice;
     };
 
     let got = Arc::new(AtomicBool::new(false));
@@ -251,7 +325,7 @@ pub fn probe_system_audio() -> PermState {
 /// the resulting state.
 pub fn request(kind: PermissionKind) -> PermState {
     match kind {
-        PermissionKind::Microphone => probe_microphone(),
+        PermissionKind::Microphone => request_microphone(),
         PermissionKind::SystemAudio => probe_system_audio(),
         PermissionKind::Accessibility => {
             open_accessibility_settings();
@@ -268,6 +342,7 @@ pub fn request(kind: PermissionKind) -> PermState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     /// The onboarding UI matches on this exact string (`s === "denied"`), so
     /// a rename here would silently break the repair-permission affordance.
@@ -275,5 +350,71 @@ mod tests {
     fn perm_state_denied_serializes_snake_case() {
         let json = serde_json::to_string(&PermState::Denied).unwrap();
         assert_eq!(json, "\"denied\"");
+    }
+
+    /// `NoDevice` must serialize to its own value, distinct from `Denied`:
+    /// the two need different instructions in the UI (plug in a mic vs.
+    /// open System Settings), so they can't collapse to the same state.
+    #[test]
+    fn perm_state_no_device_is_distinct_from_denied() {
+        let no_device = serde_json::to_string(&PermState::NoDevice).unwrap();
+        let denied = serde_json::to_string(&PermState::Denied).unwrap();
+        assert_ne!(no_device, denied);
+        assert_eq!(no_device, "\"no_device\"");
+    }
+
+    /// A settled `Denied` must open Settings and must NOT re-run the probe:
+    /// macOS never re-prompts after a deny, so probing again would just
+    /// burn 15s to land on the same answer.
+    #[test]
+    fn denied_opens_settings_without_probing() {
+        let opened = Cell::new(false);
+        let probed = Cell::new(false);
+
+        let result = request_microphone_with(
+            || PermState::Denied,
+            || opened.set(true),
+            || {
+                probed.set(true);
+                PermState::Granted
+            },
+        );
+
+        assert_eq!(result, PermState::Denied);
+        assert!(opened.get(), "Denied must open System Settings");
+        assert!(!probed.get(), "Denied must not run the probe");
+    }
+
+    /// `NotDetermined` (modeled as `Unknown` here) still probes: that's what
+    /// shows the TCC dialog the first time.
+    #[test]
+    fn not_determined_probes_without_opening_settings() {
+        let opened = Cell::new(false);
+        let probed = Cell::new(false);
+
+        let result = request_microphone_with(
+            || PermState::Unknown,
+            || opened.set(true),
+            || {
+                probed.set(true);
+                PermState::Granted
+            },
+        );
+
+        assert_eq!(result, PermState::Granted);
+        assert!(!opened.get(), "NotDetermined must not open Settings");
+        assert!(probed.get(), "NotDetermined must run the probe");
+    }
+
+    /// Already-authorized short-circuits to `Granted` without touching
+    /// Settings or the probe.
+    #[test]
+    fn granted_short_circuits() {
+        let result = request_microphone_with(
+            || PermState::Granted,
+            || panic!("Granted must not open Settings"),
+            || panic!("Granted must not probe"),
+        );
+        assert_eq!(result, PermState::Granted);
     }
 }

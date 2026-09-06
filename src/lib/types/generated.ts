@@ -1432,7 +1432,14 @@ export type PermState = "granted" | "denied" |
 /**
  * The OS doesn't support this capability (e.g. taps need macOS 14.4+).
  */
-"unsupported"
+"unsupported" | 
+/**
+ * Microphone only: TCC access may well be granted, but there is no
+ * usable input device (none plugged in, or its config can't be read).
+ * Kept distinct from `Denied` because the fix isn't the same: plug in
+ * or pick a device, not open System Settings.
+ */
+"no_device"
 /**
  * Which capability to probe or prompt for via `request`.
  */
