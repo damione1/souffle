@@ -216,6 +216,30 @@ fn sanitize_summary(text: &str) -> String {
     trimmed.to_string()
 }
 
+/// Log when the final pass dropped a section its own prompt asked for.
+///
+/// A small model given many map-stage fact lists concatenates them and stops
+/// after `## Summary`. No retry: the live preview streams tokens, so a second
+/// `generate` would append a second draft on screen, and a model that
+/// concatenated once usually does it again. The warning is how we find out it
+/// happened. Only checked for prompts that actually request the section, so a
+/// brief-overview template stays quiet.
+fn final_summary_is_truncated(summary: &str, final_system_prompt: &str) -> bool {
+    final_system_prompt.contains("## Topics")
+        && !summary
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case("## Topics"))
+}
+
+fn warn_if_final_summary_is_truncated(summary: &str, final_system_prompt: &str) {
+    if final_summary_is_truncated(summary, final_system_prompt) {
+        tracing::warn!(
+            "Final summary is missing the Topics section its prompt required; \
+             the model likely concatenated the map chunks"
+        );
+    }
+}
+
 fn apple_model_descriptor() -> SummaryModelDescriptor {
     SummaryModelDescriptor {
         id: APPLE_INTELLIGENCE_MODEL_ID.to_string(),
@@ -466,7 +490,9 @@ pub async fn summarize_stream(
             false,
         )
         .await?;
-        return Ok(sanitize_summary(&full));
+        let summary = sanitize_summary(&full);
+        warn_if_final_summary_is_truncated(&summary, final_system_prompt);
+        return Ok(summary);
     }
 
     let no_op = |_: SummarizeProgress| {};
@@ -569,7 +595,9 @@ pub async fn summarize_stream(
         &on_chunk,
     )
     .await?;
-    Ok(sanitize_summary(&full))
+    let summary = sanitize_summary(&full);
+    warn_if_final_summary_is_truncated(&summary, final_system_prompt);
+    Ok(summary)
 }
 
 /// Combine map-stage part summaries into the final prose summary.
@@ -737,8 +765,8 @@ mod tests {
     use super::{
         APPLE_INTELLIGENCE_MODEL_ID, ChunkConfig, ModelChoiceError, SummaryModelDescriptor,
         SummaryProviderChoice, SummaryProviderKind, apple, check_providers, choose_summary_model,
-        ollama, reduce_call_system_prompt, resolve_provider, run_reduce_tree, sanitize_summary,
-        structured_extract_for_persist,
+        final_summary_is_truncated, ollama, reduce_call_system_prompt, resolve_provider,
+        run_reduce_tree, sanitize_summary, structured_extract_for_persist,
     };
     use crate::transcript::StructuredSummary;
 
@@ -789,6 +817,32 @@ mod tests {
         let input = "Here is a summary of the meeting.\n## Summary\nKey points are listed below.";
         let result = sanitize_summary(input);
         assert_eq!(result, "## Summary\nKey points are listed below.");
+    }
+
+    #[test]
+    fn truncated_summary_warns_only_when_the_prompt_asked_for_topics() {
+        let prompt = crate::constants::OLLAMA_SUMMARIZE_PROMPT;
+        let brief = crate::constants::OLLAMA_BRIEF_OVERVIEW_PROMPT;
+        assert!(prompt.contains("## Topics"));
+        assert!(!brief.contains("## Topics"));
+
+        let concatenated =
+            "## Summary\n- fact from part 1\n\n- fact from part 2\n\n- fact from part 3";
+        assert!(final_summary_is_truncated(concatenated, prompt));
+        assert!(final_summary_is_truncated("", prompt));
+
+        // A brief overview has no Topics section by design.
+        assert!(!final_summary_is_truncated(concatenated, brief));
+
+        // The required structure is quiet.
+        assert!(!final_summary_is_truncated(
+            "## Summary\n- recap\n\n## Topics\n- agenda\n",
+            prompt
+        ));
+        assert!(!final_summary_is_truncated(
+            "## Meeting Minutes\n- point\n\n## Topics\n- none stated\n",
+            crate::constants::OLLAMA_DETAILED_MINUTES_PROMPT
+        ));
     }
 
     fn model(id: &str, provider: SummaryProviderKind) -> SummaryModelDescriptor {
@@ -1015,6 +1069,58 @@ mod tests {
             super::default_summary_templates()[0].prompt,
             prompt,
             "the Default template must ship the standard final-pass prompt"
+        );
+    }
+
+    /// The common long-meeting path is a single final reduce (map chunks still
+    /// fit `reduce_token_limit`), so merge/dedup cannot live only on
+    /// `OLLAMA_MERGE_PROMPT`. Every final-pass template must say so, or a 7B
+    /// concatenates the parts and, on the default/detailed templates, drops
+    /// `## Topics`.
+    #[test]
+    fn final_pass_prompts_merge_map_chunks_and_cap_output() {
+        let default = crate::constants::OLLAMA_SUMMARIZE_PROMPT;
+        let detailed = crate::constants::OLLAMA_DETAILED_MINUTES_PROMPT;
+        let brief = crate::constants::OLLAMA_BRIEF_OVERVIEW_PROMPT;
+
+        for prompt in [default, detailed, brief] {
+            assert!(
+                prompt.contains("consecutive parts of ONE meeting"),
+                "final pass must treat map chunks as parts of one meeting"
+            );
+            assert!(
+                prompt.contains("Do not keep the parts as separate blocks"),
+                "final pass must forbid per-part blocks"
+            );
+            assert!(
+                prompt.contains("Merge duplicate or overlapping points"),
+                "final pass must carry the merge-prompt dedup rule"
+            );
+        }
+
+        assert!(
+            default.contains("Never omit the Topics section"),
+            "default recap must require ## Topics"
+        );
+        assert!(
+            default.contains("At most 8 bullets per section"),
+            "default recap must cap length so concatenating 12 map lists is not the cheap path"
+        );
+        assert!(
+            detailed.contains("Never omit the Topics section"),
+            "detailed minutes must require ## Topics"
+        );
+        assert!(
+            detailed.contains("At most 16 bullets per section"),
+            "detailed minutes still need a ceiling"
+        );
+        assert!(
+            !brief.contains("## Topics"),
+            "brief overview keeps a single ## Summary section"
+        );
+        assert!(
+            brief.contains("at most 3 short bullets"),
+            "brief overview already caps output"
         );
     }
 
