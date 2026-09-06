@@ -52,8 +52,12 @@ describe("resolveSampleRateDeviceUid", () => {
     expect(resolveSampleRateDeviceUid("usb", [builtin, usb])).toBe("usb");
   });
 
-  it("returns null when the pin is not connected", () => {
-    expect(resolveSampleRateDeviceUid("ghost", [builtin, usb])).toBeNull();
+  it("falls back to the default input when the pin is not connected", () => {
+    expect(resolveSampleRateDeviceUid("ghost", [builtin, usb])).toBe("builtin");
+  });
+
+  it("returns null when no device is connected", () => {
+    expect(resolveSampleRateDeviceUid("ghost", [])).toBeNull();
   });
 
   it("uses the default input when selection is automatic", () => {

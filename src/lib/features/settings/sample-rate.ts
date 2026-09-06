@@ -18,8 +18,8 @@ export function resolveSampleRateDeviceUid(
   selectedDevice: string,
   devices: AudioInputDevice[],
 ): string | null {
-  if (selectedDevice) {
-    return devices.some((device) => device.uid === selectedDevice) ? selectedDevice : null;
+  if (selectedDevice && devices.some((device) => device.uid === selectedDevice)) {
+    return selectedDevice;
   }
   return devices.find((device) => device.is_default)?.uid ?? devices[0]?.uid ?? null;
 }

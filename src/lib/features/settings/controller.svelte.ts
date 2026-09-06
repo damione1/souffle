@@ -66,6 +66,9 @@ export function createSettingsController() {
   let inputSampleRate = $state<number | null>(null);
   let inputSampleRateError = $state("");
   let resettingSampleRate = $state(false);
+  // Only the newest sample-rate request may write the shared state: the
+  // microphone can change while a CoreAudio read or reset is still in flight.
+  let sampleRateRequest = 0;
   let systemAudioSupported = $state(false);
   // Gates the "microphone when lid is closed" picker: meaningless on a
   // desktop Mac, so it's hidden entirely rather than shown disabled.
@@ -201,13 +204,17 @@ export function createSettingsController() {
 
   async function refreshInputSampleRate() {
     const uid = resolveSampleRateDeviceUid(app.selectedDevice, audioDevices);
+    const request = ++sampleRateRequest;
     if (!uid) {
       inputSampleRate = null;
       return;
     }
     try {
-      inputSampleRate = await getInputSampleRate(uid);
+      const hz = await getInputSampleRate(uid);
+      if (request !== sampleRateRequest) return;
+      inputSampleRate = hz;
     } catch (e) {
+      if (request !== sampleRateRequest) return;
       console.warn("get_input_sample_rate failed:", e);
       inputSampleRate = null;
     }
@@ -216,12 +223,14 @@ export function createSettingsController() {
   async function onResetSampleRate() {
     const uid = resolveSampleRateDeviceUid(app.selectedDevice, audioDevices);
     if (!uid || resettingSampleRate) return;
+    const request = ++sampleRateRequest;
     resettingSampleRate = true;
     inputSampleRateError = "";
     try {
-      inputSampleRate = await resetInputSampleRate(uid);
+      const hz = await resetInputSampleRate(uid);
+      if (request === sampleRateRequest) inputSampleRate = hz;
     } catch (e) {
-      inputSampleRateError = errorMessage(e);
+      if (request === sampleRateRequest) inputSampleRateError = errorMessage(e);
     } finally {
       resettingSampleRate = false;
     }

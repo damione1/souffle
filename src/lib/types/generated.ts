@@ -118,7 +118,7 @@ async selectAudioDevice(deviceUid: string) : Promise<Result<null, string>> {
 },
 /**
  * Current `kAudioDevicePropertyNominalSampleRate` for an input device.
- * An empty UID uses the system default input. Read-only — never writes.
+ * An empty UID uses the system default input. Read-only, never writes.
  */
 async getInputSampleRate(deviceUid: string) : Promise<Result<number, string>> {
     try {

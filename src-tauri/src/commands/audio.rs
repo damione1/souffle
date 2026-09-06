@@ -126,11 +126,13 @@ fn emit_pin_status(app: &AppHandle, uid: &str) {
 }
 
 /// Current `kAudioDevicePropertyNominalSampleRate` for an input device.
-/// An empty UID uses the system default input. Read-only — never writes.
+/// An empty UID uses the system default input. Read-only, never writes.
 #[tauri::command]
 #[specta::specta]
-pub fn get_input_sample_rate(device_uid: String) -> Result<u32, String> {
-    sample_rate::read_input_sample_rate(&device_uid)
+pub async fn get_input_sample_rate(device_uid: String) -> Result<u32, String> {
+    tauri::async_runtime::spawn_blocking(move || sample_rate::read_input_sample_rate(&device_uid))
+        .await
+        .map_err(|e| format!("Could not read the sample rate: {e}"))?
 }
 
 /// Set the device's nominal sample rate to 48 kHz (or the closest supported
@@ -138,8 +140,10 @@ pub fn get_input_sample_rate(device_uid: String) -> Result<u32, String> {
 /// Call only from an explicit Settings click.
 #[tauri::command]
 #[specta::specta]
-pub fn reset_input_sample_rate(device_uid: String) -> Result<u32, String> {
-    sample_rate::reset_input_sample_rate(&device_uid)
+pub async fn reset_input_sample_rate(device_uid: String) -> Result<u32, String> {
+    tauri::async_runtime::spawn_blocking(move || sample_rate::reset_input_sample_rate(&device_uid))
+        .await
+        .map_err(|e| format!("Could not reset the sample rate: {e}"))?
 }
 
 /// Whether system-audio capture (Core Audio process taps) is available on this OS

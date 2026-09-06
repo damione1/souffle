@@ -972,4 +972,32 @@ describe("settings controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("reset_input_sample_rate", { deviceUid: "builtin-mic" });
     expect(ctrl.inputSampleRate).toBe(48_000);
   });
+
+  it("a sample-rate read that lands after a mic switch does not overwrite the new one", async () => {
+    const pending: Record<string, (hz: number) => void> = {};
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_input_sample_rate") {
+        const uid = (args as { deviceUid: string }).deviceUid;
+        return new Promise<number>((resolve) => {
+          pending[uid] = resolve;
+        });
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    const mounted = ctrl.mount();
+    await vi.waitFor(() => expect(pending["builtin-mic"]).toBeDefined());
+
+    const switched = ctrl.onDeviceChange({
+      target: { value: "usb-mic" },
+    } as unknown as Event);
+    await vi.waitFor(() => expect(pending["usb-mic"]).toBeDefined());
+
+    pending["usb-mic"](48_000);
+    pending["builtin-mic"](96_000);
+    await Promise.all([mounted, switched]);
+
+    expect(ctrl.inputSampleRate).toBe(48_000);
+  });
 });

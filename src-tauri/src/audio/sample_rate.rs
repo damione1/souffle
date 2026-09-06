@@ -26,7 +26,7 @@ pub fn choose_repair_sample_rate(min: u32, max: u32) -> u32 {
 
 /// Same policy over CoreAudio `AudioValueRange`s (discrete points or spans).
 ///
-/// Empty `ranges` falls back to 48 kHz — the HAL write will fail if the
+/// Empty `ranges` falls back to 48 kHz. The HAL write will fail if the
 /// device truly cannot do it.
 pub fn choose_repair_sample_rate_from_ranges(ranges: &[(u32, u32)]) -> u32 {
     if ranges.is_empty() {
@@ -106,6 +106,10 @@ mod macos {
         default_input_device_id, get_property, global_address, object_id_for_uid,
         property_data_size,
     };
+
+    /// Bounded wait for the HAL to apply a nominal-rate write.
+    const SETTLE_ATTEMPTS: u32 = 20;
+    const SETTLE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
     fn resolve_device(device_uid: &str) -> Result<AudioObjectID, String> {
         if device_uid.is_empty() {
@@ -226,21 +230,29 @@ mod macos {
             "Reset input sample rate on user request"
         );
         set_nominal_rate(device, target)?;
+        Ok(settled_rate(device, target).unwrap_or_else(|| {
+            warn!(
+                uid = device_uid,
+                wanted = target,
+                "Nominal sample rate never settled on the requested rate"
+            );
+            target
+        }))
+    }
 
-        match nominal_rate(device) {
-            Ok(actual) => {
-                if actual != target {
-                    warn!(
-                        uid = device_uid,
-                        wanted = target,
-                        actual,
-                        "Nominal sample rate after reset differs from the requested rate"
-                    );
-                }
-                Ok(actual)
+    /// The HAL applies the write asynchronously, so an immediate read can still
+    /// return the old rate. Poll until it settles, then report what stuck.
+    fn settled_rate(device: AudioObjectID, target: u32) -> Option<u32> {
+        let mut last = None;
+        for _ in 0..SETTLE_ATTEMPTS {
+            match nominal_rate(device) {
+                Ok(actual) if actual == target => return Some(actual),
+                Ok(actual) => last = Some(actual),
+                Err(_) => {}
             }
-            Err(_) => Ok(target),
+            std::thread::sleep(SETTLE_INTERVAL);
         }
+        last
     }
 }
 
