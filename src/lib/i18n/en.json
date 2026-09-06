@@ -404,6 +404,7 @@
     "shortcut_unset": "Not set",
     "shortcut_needs_modifier": "Shortcut must include a modifier key (⌘, Ctrl, Shift, Option) or be a function key.",
     "auto_paste_desc": "When you stop, paste the transcript into the app you were using. Needs Accessibility.",
+    "auto_paste_accessibility_warning": "Automatic paste needs Accessibility, which isn't granted yet. Your dictation will go to your history instead.",
     "continue": "Continue",
     "back": "Back",
     "finish": "Get started",

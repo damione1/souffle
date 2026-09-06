@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { transcriptionApi, settingsApi, startDownload } = vi.hoisted(() => ({
+const { transcriptionApi, settingsApi, permissionsApi, startDownload } = vi.hoisted(() => ({
   transcriptionApi: {
     getTranscriptionCatalog: vi.fn(),
   },
@@ -12,11 +12,17 @@ const { transcriptionApi, settingsApi, startDownload } = vi.hoisted(() => ({
     listAudioDevices: vi.fn(),
     selectAudioDevice: vi.fn(),
   },
+  permissionsApi: {
+    getPermissionStatus: vi.fn(),
+    requestPermission: vi.fn(),
+    repairAccessibilityPermission: vi.fn(),
+  },
   startDownload: vi.fn(),
 }));
 
 vi.mock("../../api/transcription", () => transcriptionApi);
 vi.mock("../../api/settings", () => settingsApi);
+vi.mock("../../api/permissions", () => permissionsApi);
 vi.mock("../transcription/runtime", () => ({
   resetTranscriptionRuntimeState: vi.fn(),
   startTranscriptionModelDownload: startDownload,
@@ -36,6 +42,7 @@ describe("createOnboardingController", () => {
   const app = getAppState();
 
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
     app.showOnboarding = true;
     app.settings = { ...mockSettings };
@@ -49,6 +56,13 @@ describe("createOnboardingController", () => {
     settingsApi.saveShortcuts.mockResolvedValue(undefined);
     settingsApi.listAudioDevices.mockResolvedValue(fakeDevices);
     settingsApi.selectAudioDevice.mockResolvedValue(undefined);
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      microphone: "unknown",
+      system_audio: "unknown",
+      accessibility: "unknown",
+      calendar: "unknown",
+    });
+    permissionsApi.requestPermission.mockResolvedValue("granted");
     startDownload.mockResolvedValue(undefined);
   });
 
@@ -135,13 +149,17 @@ describe("createOnboardingController", () => {
     expect(ctrl.recordingShortcut).toBe(false);
   });
 
-  it("finishes by enabling auto-paste and marking setup complete", async () => {
+  it("finishes marking setup complete, auto-paste following Accessibility", async () => {
     localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      microphone: "granted",
+      system_audio: "granted",
+      accessibility: "granted",
+      calendar: "unknown",
+    });
     const ctrl = createOnboardingController();
     await ctrl.mount();
-    ctrl.autoPaste = true;
 
-    // Skip to shortcut: mic → model → shortcut would require model ready.
     await ctrl.finish();
 
     expect(settingsApi.saveSettings).toHaveBeenCalledWith(
@@ -149,6 +167,95 @@ describe("createOnboardingController", () => {
     );
     expect(localStorage.getItem(SETUP_STORAGE_KEY)).toBe("1");
     expect(localStorage.getItem(PERMISSIONS_STORAGE_KEY)).toBe("1");
+    expect(app.showOnboarding).toBe(false);
+  });
+
+  // SOU-053: the wizard used to hardcode auto-paste on at mount regardless
+  // of Accessibility, so finishing without ever granting it silently broke
+  // the very first shortcut dictation.
+  it("does not enable auto-paste when Accessibility was never granted", async () => {
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      microphone: "granted",
+      system_audio: "granted",
+      accessibility: "denied",
+      calendar: "unknown",
+    });
+    const ctrl = createOnboardingController();
+    await ctrl.mount();
+    expect(ctrl.accessibility).toBe("denied");
+
+    await ctrl.finish();
+
+    expect(settingsApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_paste: false }),
+    );
+  });
+
+  it("enables auto-paste once Accessibility is reported granted", async () => {
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      microphone: "granted",
+      system_audio: "granted",
+      accessibility: "granted",
+      calendar: "unknown",
+    });
+    const ctrl = createOnboardingController();
+    await ctrl.mount();
+    expect(ctrl.accessibility).toBe("granted");
+
+    await ctrl.finish();
+
+    expect(settingsApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_paste: true }),
+    );
+  });
+
+  it("updates auto-paste when the permissions step reports a later status change", async () => {
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      microphone: "granted",
+      system_audio: "granted",
+      accessibility: "denied",
+      calendar: "unknown",
+    });
+    const ctrl = createOnboardingController();
+    await ctrl.mount();
+    expect(ctrl.autoPaste).toBe(false);
+
+    ctrl.onPermissionsStatusChange({
+      microphone: "granted",
+      system_audio: "granted",
+      accessibility: "granted",
+      calendar: "unknown",
+    });
+    expect(ctrl.autoPaste).toBe(true);
+
+    await ctrl.finish();
+    expect(settingsApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_paste: true }),
+    );
+  });
+
+  it("never overwrites the stored setting when finishing in recovery mode", async () => {
+    // setupDone => the wizard resumes in recovery mode (e.g. re-download a
+    // deleted model), and must not touch auto_paste even if Accessibility
+    // now reads granted.
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    localStorage.setItem(SETUP_STORAGE_KEY, "1");
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      microphone: "granted",
+      system_audio: "granted",
+      accessibility: "granted",
+      calendar: "unknown",
+    });
+    const ctrl = createOnboardingController();
+    await ctrl.mount();
+    expect(ctrl.recoveryOnly).toBe(true);
+
+    await ctrl.finish();
+
+    expect(settingsApi.saveSettings).not.toHaveBeenCalled();
     expect(app.showOnboarding).toBe(false);
   });
 

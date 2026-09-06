@@ -5,6 +5,7 @@ use std::time::Duration;
 use crossbeam_channel::Sender;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -799,6 +800,71 @@ pub fn paste_text(
     crate::clipboard::paste_text(&text, delay_ms, method)
 }
 
+/// Pure decision: notification text for a failed paste, split out from
+/// `notify_paste_failed` so it's testable without a live AppHandle (mirrors
+/// `copy_notification_text` in `tray.rs`).
+fn paste_failure_notification_text(french: bool, error: &str, saved_to_history: bool) -> (&'static str, &'static str) {
+    let accessibility_missing = error.contains("Accessibility permission missing");
+    match (french, accessibility_missing, saved_to_history) {
+        (false, true, true) => (
+            "Paste failed",
+            "Accessibility permission is needed to paste automatically. Your dictation was saved to history.",
+        ),
+        (false, true, false) => (
+            "Paste failed",
+            "Accessibility permission is needed to paste automatically.",
+        ),
+        (true, true, true) => (
+            "Collage échoué",
+            "L'autorisation Accessibilité est nécessaire pour coller automatiquement. Votre dictée a été enregistrée dans l'historique.",
+        ),
+        (true, true, false) => (
+            "Collage échoué",
+            "L'autorisation Accessibilité est nécessaire pour coller automatiquement.",
+        ),
+        (false, false, true) => (
+            "Paste failed",
+            "The last dictation couldn't be pasted automatically. It was saved to history.",
+        ),
+        (false, false, false) => (
+            "Paste failed",
+            "The last dictation couldn't be pasted automatically.",
+        ),
+        (true, false, true) => (
+            "Collage échoué",
+            "La dernière dictée n'a pas pu être collée automatiquement. Elle a été enregistrée dans l'historique.",
+        ),
+        (true, false, false) => (
+            "Collage échoué",
+            "La dernière dictée n'a pas pu être collée automatiquement.",
+        ),
+    }
+}
+
+/// Called by the frontend when a shortcut-triggered dictation fails to
+/// paste. A shortcut dictation is by definition run from another app, so
+/// Soufflé's window is usually not what the user is looking at: the in-app
+/// status banner alone would go unseen (SOU-053). Informational only,
+/// matching the calendar reminder and meeting-idle notifications: action
+/// buttons and click callbacks are unreliable on macOS with the
+/// notification plugin.
+#[tauri::command]
+#[specta::specta]
+pub fn notify_paste_failed(app: AppHandle, error: String, saved_to_history: bool) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let french = AppSettings::load(&state.db)
+        .map(|settings| settings.locale.starts_with("fr"))
+        .unwrap_or(false);
+
+    let (title, body) = paste_failure_notification_text(french, &error, saved_to_history);
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| format!("Paste failure notification failed: {e}"))
+}
+
 /// Called from the `NSWorkspace` will-sleep observer (installed in `power.rs`
 /// during setup) on the main thread. If a meeting recording is active, stop
 /// it through the exact same path a user-initiated stop takes — segments are
@@ -880,7 +946,10 @@ pub fn clear_sleep_paused_meeting(state: State<'_, AppState>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, dictation_live_preview};
+    use super::{
+        MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, dictation_live_preview,
+        paste_failure_notification_text,
+    };
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
     use crate::state::MeetingAccumulator;
     use crate::test_helpers::fixtures::test_db;
@@ -997,5 +1066,60 @@ mod tests {
         assert_eq!(dictation_live_preview("hello", "world"), "hello world");
         assert_eq!(dictation_live_preview("hello ", "world"), "hello world");
         assert_eq!(dictation_live_preview("hello", " world"), "hello world");
+    }
+
+    #[test]
+    fn paste_failure_notification_mentions_accessibility_when_that_is_the_cause() {
+        let (title, body) = paste_failure_notification_text(
+            false,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            true,
+        );
+        assert_eq!(title, "Paste failed");
+        assert!(body.contains("Accessibility permission"));
+        assert!(body.contains("saved to history"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(
+            false,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            false,
+        );
+        assert_eq!(title_not_saved, "Paste failed");
+        assert!(body_not_saved.contains("Accessibility permission"));
+        assert!(!body_not_saved.contains("saved to history"));
+    }
+
+    #[test]
+    fn paste_failure_notification_falls_back_to_a_generic_message() {
+        let (title, body) = paste_failure_notification_text(false, "Enigo init: some OS error", true);
+        assert_eq!(title, "Paste failed");
+        assert!(!body.contains("Accessibility permission"));
+        assert!(body.contains("saved to history"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(false, "Enigo init: some OS error", false);
+        assert_eq!(title_not_saved, "Paste failed");
+        assert!(!body_not_saved.contains("Accessibility permission"));
+        assert!(!body_not_saved.contains("saved to history"));
+    }
+
+    #[test]
+    fn paste_failure_notification_is_localized_to_french() {
+        let (title, body) = paste_failure_notification_text(
+            true,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            true,
+        );
+        assert_eq!(title, "Collage échoué");
+        assert!(body.contains("Accessibilité"));
+        assert!(body.contains("l'historique"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(
+            true,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            false,
+        );
+        assert_eq!(title_not_saved, "Collage échoué");
+        assert!(body_not_saved.contains("Accessibilité"));
+        assert!(!body_not_saved.contains("l'historique"));
     }
 }

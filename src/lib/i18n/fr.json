@@ -404,6 +404,7 @@
     "shortcut_unset": "Non défini",
     "shortcut_needs_modifier": "Le raccourci doit inclure une touche modificatrice (⌘, Ctrl, Shift, Option) ou être une touche de fonction.",
     "auto_paste_desc": "À l'arrêt, colle la transcription dans l'app que vous utilisiez. Nécessite Accessibilité.",
+    "auto_paste_accessibility_warning": "Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.",
     "continue": "Continuer",
     "back": "Retour",
     "finish": "Commencer",
