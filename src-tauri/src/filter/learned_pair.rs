@@ -37,8 +37,25 @@ const PROTECTED_STOPWORDS: &[&str] = &[
     "about", "after", "before",
 ];
 
+/// Removes accents from common French characters, folding them to their ASCII equivalents.
+fn fold_french_diacritics(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'à' | 'â' | 'ä' => 'a',
+            'î' | 'ï' => 'i',
+            'ô' | 'ö' => 'o',
+            'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            _ => c,
+        })
+        .collect()
+}
+
+/// Checks whether a lowercase word is a protected stopword (optionally with accents).
 pub(crate) fn is_protected_stopword(word_lower: &str) -> bool {
-    PROTECTED_STOPWORDS.contains(&word_lower)
+    let folded = fold_french_diacritics(word_lower);
+    PROTECTED_STOPWORDS.contains(&folded.as_str())
 }
 
 /// Whether a misspelling→term pair is close enough to an ASR error to keep.
@@ -67,6 +84,7 @@ mod tests {
     fn rejects_a_stopword_source() {
         assert!(!is_learned_pair_acceptable("pour", "Pierre"));
         assert!(!is_learned_pair_acceptable("par", "Pierre"));
+        assert!(!is_learned_pair_acceptable("être", "other"));
     }
 
     #[test]

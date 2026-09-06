@@ -107,6 +107,7 @@ pub(crate) fn cap_learned_pairs(corrections: Vec<SessionCorrection>) -> Vec<Sess
     }
 }
 
+/// Splits text into space-separated tokens, stripping non-alphanumeric characters.
 fn tokenize_words(text: &str) -> Vec<String> {
     text.split_whitespace()
         .map(|token| {
@@ -118,6 +119,7 @@ fn tokenize_words(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Helper to validate a learned pair and push it to the list of corrections.
 fn push_correction(
     corrections: &mut Vec<SessionCorrection>,
     seen: &mut HashSet<(String, String)>,
@@ -136,10 +138,12 @@ fn push_correction(
     }
 }
 
+/// Determines if a pair passes the heuristic for a valid misspelled term vs its correction.
 fn is_correction_candidate(from: &str, to: &str) -> bool {
     is_learned_pair_acceptable(from, to)
 }
 
+/// Returns true if a token looks like a proper name (sufficient length, alphabetic characters).
 fn is_name_token(token: &str) -> bool {
     token.chars().count() >= MIN_TOKEN_LEN
         && token

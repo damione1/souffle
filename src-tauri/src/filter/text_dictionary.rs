@@ -51,6 +51,7 @@ struct DictionaryMatch {
 /// otherwise the term's own Soundex, except for digit-bearing terms ("V6",
 /// "K8s") whose alphabetic Soundex would collide with unrelated short words.
 /// Returns the code plus whether it came from an explicit pronunciation.
+/// Derives the phonetic code for a term, returning the code and whether it is phonetic-only.
 fn derive_phonetic_code(term: &str, pronunciation: Option<&str>) -> (Option<String>, bool) {
     if let Some(p) = pronunciation.map(str::trim).filter(|p| !p.is_empty()) {
         let primary = p
@@ -115,13 +116,14 @@ impl DictionaryFilter {
         }
         for correction in session_corrections {
             let miss = correction.misspelling.trim();
-            if !miss.is_empty() && miss.to_lowercase() != correction.term.to_lowercase() {
-                if !is_protected_stopword(&miss.to_lowercase()) {
-                    exact_aliases.push(ExactAlias {
-                        alias_lower: miss.to_lowercase(),
-                        term: correction.term.clone(),
-                    });
-                }
+            if !miss.is_empty()
+                && miss.to_lowercase() != correction.term.to_lowercase()
+                && !is_protected_stopword(&miss.to_lowercase())
+            {
+                exact_aliases.push(ExactAlias {
+                    alias_lower: miss.to_lowercase(),
+                    term: correction.term.clone(),
+                });
             }
             let term_lower = correction.term.to_lowercase();
             if matches.iter().any(|m| m.term_lower == term_lower) {
@@ -149,6 +151,7 @@ impl DictionaryFilter {
         }
     }
 
+    /// Finds a fuzzy or phonetic replacement for a given word.
     fn find_replacement(&self, word: &str) -> Option<&str> {
         let word_char_count = word.chars().count();
         if word_char_count < MIN_WORD_LEN {
@@ -213,6 +216,7 @@ impl DictionaryFilter {
         best_match.map(|(term, _)| term)
     }
 
+    /// Applies exact pronunciation aliases to the text, replacing them with the corresponding term.
     fn apply_exact_aliases(&self, text: &str) -> String {
         if self.exact_aliases.is_empty() {
             return text.to_string();
@@ -245,6 +249,7 @@ impl DictionaryFilter {
         result
     }
 
+    /// Applies fuzzy and phonetic matching to individual words in the text.
     fn apply_fuzzy(&self, text: &str) -> String {
         let mut result = String::with_capacity(text.len());
         let mut chars = text.char_indices().peekable();
@@ -276,10 +281,12 @@ impl DictionaryFilter {
     }
 }
 
+/// Determines if a character is part of a word.
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '\'' || c == '-'
 }
 
+/// Checks if the given byte index is at the start of a word in the text.
 fn at_word_start(text: &str, byte_index: usize) -> bool {
     let Some(ch) = text[byte_index..].chars().next() else {
         return false;
@@ -294,6 +301,7 @@ fn at_word_start(text: &str, byte_index: usize) -> bool {
             .is_none_or(|prev| !is_word_char(prev))
 }
 
+/// Attempts to match a multi-word or single-word alias exactly starting at the given byte index.
 fn match_alias_at(text: &str, byte_start: usize, alias_lower: &str) -> Option<usize> {
     let mut consumed = 0;
     let mut text_chars = text[byte_start..].chars();
@@ -310,6 +318,7 @@ fn match_alias_at(text: &str, byte_start: usize, alias_lower: &str) -> Option<us
     Some(byte_start + consumed)
 }
 
+/// Checks if two characters are equal ignoring ASCII case.
 fn char_eq_ignore_case(text_ch: char, alias_lower_ch: char) -> bool {
     if text_ch == alias_lower_ch {
         return true;

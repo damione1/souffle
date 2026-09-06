@@ -29,6 +29,8 @@
   let newPronunciation = $state("");
   let newCategory = $state("");
   let addError = $state("");
+  let updateError = $state("");
+  let pendingUpdates = $state(new Set<number>());
 
   async function handleAdd() {
     const term = newTerm.trim();
@@ -52,8 +54,20 @@
   }
 
   async function removeAlias(entry: DictionaryEntry, alias: string) {
-    const next = aliasesOf(entry).filter((item) => item !== alias);
-    await onUpdate(entry.id, entry.term, next.length ? next.join(", ") : null, entry.category);
+    if (pendingUpdates.has(entry.id)) return;
+    updateError = "";
+    pendingUpdates.add(entry.id);
+    // force reactivity
+    pendingUpdates = new Set(pendingUpdates);
+    try {
+      const next = aliasesOf(entry).filter((item) => item !== alias);
+      await onUpdate(entry.id, entry.term, next.length ? next.join(", ") : null, entry.category);
+    } catch (e) {
+      updateError = e instanceof Error ? e.message : String(e);
+    } finally {
+      pendingUpdates.delete(entry.id);
+      pendingUpdates = new Set(pendingUpdates);
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -140,8 +154,9 @@
                     {alias}
                     <button
                       type="button"
+                      disabled={pendingUpdates.has(entry.id)}
                       onclick={() => removeAlias(entry, alias)}
-                      class="btn btn-icon btn-ghost !min-h-0 !min-w-0 !p-0.5 text-text-muted hover:!text-danger-soft"
+                      class="btn btn-icon btn-ghost !min-h-0 !min-w-0 !p-0.5 text-text-muted hover:!text-danger-soft disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label={`${$t("settings_dictionary.remove_alias")} ${alias}`}
                     >
                       ×
@@ -160,6 +175,9 @@
         </div>
       {/each}
     </div>
+    {#if updateError}
+      <p class="text-danger-soft text-xs mt-2">{updateError}</p>
+    {/if}
   {:else}
     <p class="text-text-muted text-xs italic">{$t("settings_dictionary.empty")}</p>
   {/if}

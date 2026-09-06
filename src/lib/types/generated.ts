@@ -708,6 +708,9 @@ async recoverState() : Promise<Result<AppStateMachine, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Lists all current user dictionary entries from the database.
+ */
 async listDictionary() : Promise<Result<DictionaryEntry[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_dictionary") };
@@ -716,6 +719,9 @@ async listDictionary() : Promise<Result<DictionaryEntry[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Adds a new dictionary entry for text replacement.
+ */
 async addDictionaryEntry(term: string, pronunciation: string | null, category: string | null) : Promise<Result<DictionaryEntry, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_dictionary_entry", { term, pronunciation, category }) };
@@ -724,6 +730,9 @@ async addDictionaryEntry(term: string, pronunciation: string | null, category: s
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Updates an existing dictionary entry, including its term, pronunciation, and category.
+ */
 async updateDictionaryEntry(id: number, term: string, pronunciation: string | null, category: string | null) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_dictionary_entry", { id, term, pronunciation, category }) };
@@ -732,6 +741,9 @@ async updateDictionaryEntry(id: number, term: string, pronunciation: string | nu
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Deletes a specific dictionary entry by ID.
+ */
 async deleteDictionaryEntry(id: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_dictionary_entry", { id }) };
@@ -740,6 +752,9 @@ async deleteDictionaryEntry(id: number) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Clears all entries in the user dictionary.
+ */
 async clearDictionary() : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("clear_dictionary") };
