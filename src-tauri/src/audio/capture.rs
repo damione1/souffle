@@ -1194,6 +1194,7 @@ impl AudioCapture {
         )));
         self.resampler = Some(Arc::clone(&resampler));
         let sender = self.audio_sender.clone();
+        let recorder_feed = self.recorder.as_ref().and_then(|r| r.push_handle());
         let active_session_id = Arc::clone(&self.active_session_id);
         let rms_ref = Arc::clone(&self.audio_rms);
         let dropped_counter = Arc::clone(&self.dropped_counter);
@@ -1244,6 +1245,9 @@ impl AudioCapture {
                                 "First audio chunk: {} samples, max_amp={max_amp:.4}",
                                 resampled.len(),
                             );
+                        }
+                        if let Some(feed) = &recorder_feed {
+                            feed.push(&resampled);
                         }
                         if sender
                             .try_send(AudioMessage::Chunk(AudioChunk {
@@ -1321,6 +1325,12 @@ impl AudioCapture {
             let dropped = recorder.dropped_chunks();
             if dropped > 0 {
                 warn!("Meeting recorder dropped {dropped} audio chunks this session");
+            }
+            if recorder.samples_received() == 0 {
+                warn!(
+                    "Meeting recorder wrote no audio samples this session \
+                     (header-only ogg; the player will hide it)"
+                );
             }
             // Drop joins the writer thread, flushing the encoder and closing
             // the file — not on the realtime path, only at session end.
@@ -1883,6 +1893,7 @@ impl AudioCapture {
         if tail.is_empty() {
             return;
         }
+        self.push_recording_mono(&tail);
         if self
             .audio_sender
             .try_send(AudioMessage::Chunk(AudioChunk {
@@ -1971,16 +1982,17 @@ impl AudioCapture {
             }
             return;
         }
-        self.finish_recording();
 
         if session_id != 0 {
             // Flush the resampler's remaining partial chunk so the last
-            // spoken samples reach the engine instead of being discarded.
+            // spoken samples reach the engine *and* the recorder instead of
+            // being discarded. Finish the file after this tail, not before.
             if let Some(resampler) = self.resampler.take()
                 && let Ok(mut r) = resampler.lock()
             {
                 let tail = r.flush();
                 if !tail.is_empty() {
+                    self.push_recording_mono(&tail);
                     let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
                         session_id,
                         samples: tail,
@@ -1992,6 +2004,7 @@ impl AudioCapture {
 
             self.send_end_of_stream(session_id);
         }
+        self.finish_recording();
 
         if had_stream {
             info!("Audio capture stopped");
