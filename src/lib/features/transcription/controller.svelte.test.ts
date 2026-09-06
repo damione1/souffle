@@ -741,4 +741,29 @@ describe("transcription controller", () => {
     expect(pasteCalls[0][1]).toEqual(expect.objectContaining({ text: "hello" }));
   });
 
+  it("toggleRecording directly is a no-op while a meeting is recording", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+        meeting_id: "meeting-1",
+      },
+    };
+
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+  });
 });

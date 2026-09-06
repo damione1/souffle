@@ -168,6 +168,12 @@ function createTranscriptionControllerInstance() {
     }
   }
 
+  /**
+   * Clears the current dictation session state.
+   * This ensures that transient state (such as the target app to paste into
+   * or the accumulated transcript) is reset, preventing state leakage between
+   * independent dictation sessions or unrelated recording types.
+   */
   function clearSessionContext() {
     focusedApp = null;
     rewriteOf = null;
@@ -279,8 +285,21 @@ function createTranscriptionControllerInstance() {
     }
   }
 
+  /**
+   * Toggles the dictation recording session on or off.
+   * Prevents starting if another session (e.g. meeting) is currently active.
+   * When stopping, waits for the model to finish draining and optionally
+   * runs Polish on the assembled text before pasting or storing.
+   *
+   * @param {boolean} fromShortcut - Whether the toggle was triggered via a global keyboard shortcut.
+   */
   async function toggleRecording(fromShortcut = false) {
     if (isStartingRecording || isStopping) return;
+
+    if (!isDictating && app.recordingMode !== "idle") {
+      // Cannot start dictation while a meeting (or anything else) is recording.
+      return;
+    }
 
     if (isDictating) {
       isStopping = true;

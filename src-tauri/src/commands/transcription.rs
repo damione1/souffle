@@ -499,14 +499,23 @@ pub async fn start_transcription(
 #[tauri::command]
 #[specta::specta]
 pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
-    let was_dictation = matches!(
-        state.current_machine_state()?,
-        AppStateMachine::RecordingDictation { .. }
+    let current_state = state.current_machine_state()?;
+    let is_dictation = matches!(current_state, AppStateMachine::RecordingDictation { .. });
+    let is_stopping_dictation = matches!(
+        current_state,
+        AppStateMachine::Stopping {
+            was_recording: crate::state_machine::RecordingKind::Dictation,
+            ..
+        }
     );
-    if !state.current_machine_state()?.is_recording() {
+
+    if !current_state.is_recording() {
         return Err("Not recording".into());
     }
-    if !was_dictation {
+    if is_stopping_dictation {
+        return Err("Already stopping".into());
+    }
+    if !is_dictation {
         // A meeting (or anything else recording) is not this command's to
         // stop: symmetric with stop_meeting_recording refusing a dictation.
         return Err("Not dictating".into());
@@ -533,13 +542,13 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
     // Clear the pill's live-text preview now that the session is over — the
     // dictation on_segment closure (and its accumulated text) is dropped
     // with the session, so nothing else will do this.
-    if was_dictation
+    if is_dictation
         && let Ok(app) = state.app_handle()
     {
         let _ = crate::app_events::DictationLiveText { text: String::new() }.emit(&app);
     }
 
-    if was_dictation
+    if is_dictation
         && let Ok(settings) = AppSettings::load(&state.db)
     {
         crate::audio::feedback::play_dictation_feedback(
