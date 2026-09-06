@@ -491,7 +491,7 @@ pub async fn summarize_stream(
         )
         .await?;
         let summary = sanitize_summary(&full);
-        warn_if_final_summary_is_truncated(&summary, final_system_prompt);
+        warn_if_final_summary_is_truncated(&summary, &final_system_prompt);
         return Ok(summary);
     }
 
@@ -596,7 +596,7 @@ pub async fn summarize_stream(
     )
     .await?;
     let summary = sanitize_summary(&full);
-    warn_if_final_summary_is_truncated(&summary, final_system_prompt);
+    warn_if_final_summary_is_truncated(&summary, &final_system_prompt);
     Ok(summary)
 }
 
