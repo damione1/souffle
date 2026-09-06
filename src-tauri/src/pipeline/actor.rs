@@ -862,6 +862,12 @@ trait SessionMode {
         segments_emitted: u64,
         audio_backlog: usize,
     );
+
+    /// Message used when the stall ladder aborts the session. Override when
+    /// the stall is an input-starvation, not a wedged engine.
+    fn stall_abort_message(&self) -> String {
+        "The transcription engine stopped responding; the recording so far was saved.".to_string()
+    }
 }
 
 /// How much recently gated audio `SingleMode` keeps on hand so it can be
@@ -1081,6 +1087,12 @@ impl SessionMode for SingleMode {
     }
 }
 
+/// How many full frames one diarized lane may lead the other before we treat
+/// the trailing lane as silent and pad it. ~480 ms at 80 ms/frame — enough
+/// for capture jitter, short enough that a dead mic does not stall the live
+/// lane (and the stall watchdog) for tens of seconds.
+const DIARIZE_LAG_TOLERANCE_FRAMES: usize = 6;
+
 /// Diarized session: mic (Me) and system audio (Them) buffered separately and
 /// stepped together into one batched `transcribe_dual` call, so the two lanes
 /// stay frame-aligned. No Silero VAD: a silent frame can't be dropped from
@@ -1089,33 +1101,105 @@ impl SessionMode for SingleMode {
 struct DiarizedMode {
     me_buf: Vec<f32>,
     them_buf: Vec<f32>,
+    /// Samples ingested per lane this session, including those not yet stepped.
+    me_samples_received: u64,
+    them_samples_received: u64,
+    /// Once a lane falls behind by more than [`DIARIZE_LAG_TOLERANCE_FRAMES`],
+    /// keep padding it with silence until it receives audio again.
+    pad_me: bool,
+    pad_them: bool,
 }
 
 impl DiarizedMode {
+    /// Creates a new `DiarizedMode` session with empty buffers and no padding armed.
     fn new() -> Self {
         Self {
             me_buf: Vec::new(),
             them_buf: Vec::new(),
+            me_samples_received: 0,
+            them_samples_received: 0,
+            pad_me: false,
+            pad_them: false,
         }
     }
 
-    /// Untagged audio (shouldn't happen in diarized mode) goes to the mic.
+    /// Returns a mutable reference to the buffer for the given speaker.
+    /// Untagged audio (shouldn't happen in diarized mode) goes to the mic (Me).
     fn buf_for(&mut self, speaker: Option<Speaker>) -> &mut Vec<f32> {
         match speaker {
             Some(Speaker::Them) => &mut self.them_buf,
             _ => &mut self.me_buf,
         }
     }
+
+    /// Calculates the number of full `chunk_size` frames in the buffer.
+    fn full_frames(buf: &[f32], chunk_size: usize) -> usize {
+        if chunk_size == 0 {
+            0
+        } else {
+            buf.len() / chunk_size
+        }
+    }
+
+    /// Takes one full `chunk_size` frame from the buffer if available.
+    /// If the buffer has fewer than `chunk_size` samples, it drains whatever
+    /// is available, places them at the start of the returned frame, and
+    /// zero-pads the remainder to maintain strict frame alignment.
+    fn take_frame_or_silence(buf: &mut Vec<f32>, chunk_size: usize) -> Vec<f32> {
+        if buf.len() >= chunk_size {
+            buf.drain(..chunk_size).collect()
+        } else {
+            let mut frame = std::mem::take(buf);
+            frame.resize(chunk_size, 0.0);
+            frame
+        }
+    }
+
+    /// Checks if either lane has fallen behind by more than `DIARIZE_LAG_TOLERANCE_FRAMES`
+    /// full frames compared to the other. If so, and the lagging lane is completely empty
+    /// of full frames, arms padding for the lagging lane.
+    fn arm_padding(&mut self, chunk_size: usize) {
+        let me_n = Self::full_frames(&self.me_buf, chunk_size);
+        let them_n = Self::full_frames(&self.them_buf, chunk_size);
+        if them_n > DIARIZE_LAG_TOLERANCE_FRAMES && me_n == 0 {
+            self.pad_me = true;
+        }
+        if me_n > DIARIZE_LAG_TOLERANCE_FRAMES && them_n == 0 {
+            self.pad_them = true;
+        }
+    }
 }
 
 impl SessionMode for DiarizedMode {
     fn ingest(&mut self, chunk: AudioChunk) {
+        let n = chunk.samples.len() as u64;
+        match chunk.speaker {
+            Some(Speaker::Them) => {
+                self.them_samples_received = self.them_samples_received.saturating_add(n);
+                self.pad_them = false;
+            }
+            _ => {
+                self.me_samples_received = self.me_samples_received.saturating_add(n);
+                self.pad_me = false;
+            }
+        }
         self.buf_for(chunk.speaker)
             .extend_from_slice(&chunk.samples);
     }
 
     fn frame_ready(&self, chunk_size: usize) -> bool {
-        self.me_buf.len() >= chunk_size && self.them_buf.len() >= chunk_size
+        let me_n = Self::full_frames(&self.me_buf, chunk_size);
+        let them_n = Self::full_frames(&self.them_buf, chunk_size);
+        if me_n >= 1 && them_n >= 1 {
+            return true;
+        }
+        if them_n >= 1 && (self.pad_me || them_n > DIARIZE_LAG_TOLERANCE_FRAMES) {
+            return true;
+        }
+        if me_n >= 1 && (self.pad_them || me_n > DIARIZE_LAG_TOLERANCE_FRAMES) {
+            return true;
+        }
+        false
     }
 
     fn step(
@@ -1123,8 +1207,9 @@ impl SessionMode for DiarizedMode {
         engine: &mut dyn TranscriptionEngine,
         chunk_size: usize,
     ) -> Result<Option<Vec<TranscriptionSegment>>, String> {
-        let me_frame: Vec<f32> = self.me_buf.drain(..chunk_size).collect();
-        let them_frame: Vec<f32> = self.them_buf.drain(..chunk_size).collect();
+        self.arm_padding(chunk_size);
+        let me_frame = Self::take_frame_or_silence(&mut self.me_buf, chunk_size);
+        let them_frame = Self::take_frame_or_silence(&mut self.them_buf, chunk_size);
         engine
             .transcribe_dual(&me_frame, &them_frame)
             .map(Some)
@@ -1136,8 +1221,9 @@ impl SessionMode for DiarizedMode {
         engine: &mut dyn TranscriptionEngine,
         chunk_size: usize,
     ) -> Result<Vec<TranscriptionSegment>, String> {
-        let me_frame: Vec<f32> = self.me_buf.drain(..chunk_size).collect();
-        let them_frame: Vec<f32> = self.them_buf.drain(..chunk_size).collect();
+        self.arm_padding(chunk_size);
+        let me_frame = Self::take_frame_or_silence(&mut self.me_buf, chunk_size);
+        let them_frame = Self::take_frame_or_silence(&mut self.them_buf, chunk_size);
         catch_engine(|| engine.transcribe_dual(&me_frame, &them_frame))
     }
 
@@ -1166,8 +1252,29 @@ impl SessionMode for DiarizedMode {
             transcribed_frames = frames_processed,
             segments_emitted,
             audio_backlog,
+            me_buf = self.me_buf.len(),
+            them_buf = self.them_buf.len(),
+            me_samples_received = self.me_samples_received,
+            them_samples_received = self.them_samples_received,
+            pad_me = self.pad_me,
+            pad_them = self.pad_them,
             "Diarized session heartbeat"
         );
+    }
+
+    fn stall_abort_message(&self) -> String {
+        if self.pad_me {
+            "Microphone input stopped; system audio was still arriving. \
+             The recording so far was saved."
+                .to_string()
+        } else if self.pad_them {
+            "System audio stopped; the microphone was still arriving. \
+             The recording so far was saved."
+                .to_string()
+        } else {
+            "The transcription engine stopped responding; the recording so far was saved."
+                .to_string()
+        }
     }
 }
 
@@ -1221,9 +1328,7 @@ fn run_session_loop(
             match action {
                 Some(StallAction::Reset) => attempt_stall_recovery_reset(engine, session_id),
                 Some(StallAction::Abort) => {
-                    let message = "The transcription engine stopped responding; \
-                                    the recording so far was saved."
-                        .to_string();
+                    let message = mode.stall_abort_message();
                     if let Some((reply, _)) = pending_stop.take() {
                         let _ = reply.send(Err(message.clone()));
                     }
@@ -1656,8 +1761,8 @@ mod tests {
     use crate::filter::PipelineConfig;
 
     use super::{
-        EngineActorHandle, SessionConfig, SessionMode, SessionSummary, SingleMode, TextFilterChain,
-        attempt_stall_recovery_reset, finish_session,
+        DIARIZE_LAG_TOLERANCE_FRAMES, DiarizedMode, EngineActorHandle, SessionConfig, SessionMode,
+        SessionSummary, SingleMode, TextFilterChain, attempt_stall_recovery_reset, finish_session,
     };
 
     /// Helper: create a disabled filter config for tests (no VAD, no text filters).
@@ -1815,6 +1920,159 @@ mod tests {
                 .map(|s| (&s.text, s.speaker))
                 .collect::<Vec<_>>()
         );
+    }
+
+    fn diarized_lane_chunk(speaker: Speaker) -> AudioChunk {
+        AudioChunk {
+            session_id: 1,
+            samples: vec![0.5f32; MIMI_FRAME_SIZE],
+            captured_at: Instant::now(),
+            speaker: Some(speaker),
+        }
+    }
+
+    fn step_while_ready(mode: &mut DiarizedMode, engine: &mut MockEngine) -> usize {
+        let mut steps = 0;
+        while mode.frame_ready(MIMI_FRAME_SIZE) {
+            mode.step(engine, MIMI_FRAME_SIZE).unwrap();
+            steps += 1;
+        }
+        steps
+    }
+
+    #[test]
+    fn diarized_mode_pads_a_silent_mic_instead_of_waiting() {
+        let mut mode = DiarizedMode::new();
+        let mut engine = MockEngine::new();
+        for _ in 0..10 {
+            mode.ingest(diarized_lane_chunk(Speaker::Them));
+        }
+        let steps = step_while_ready(&mut mode, &mut engine);
+        assert_eq!(
+            steps, 10,
+            "ten Them frames and no Me must produce ten dual steps, not wait forever"
+        );
+        assert!(mode.me_buf.is_empty());
+        assert!(mode.them_buf.is_empty());
+        assert_eq!(
+            mode.stall_abort_message(),
+            "Microphone input stopped; system audio was still arriving. \
+             The recording so far was saved."
+        );
+    }
+
+    #[test]
+    fn diarized_mode_pads_a_silent_system_lane_instead_of_waiting() {
+        let mut mode = DiarizedMode::new();
+        let mut engine = MockEngine::new();
+        for _ in 0..10 {
+            mode.ingest(diarized_lane_chunk(Speaker::Me));
+        }
+        let steps = step_while_ready(&mut mode, &mut engine);
+        assert_eq!(steps, 10);
+        assert_eq!(
+            mode.stall_abort_message(),
+            "System audio stopped; the microphone was still arriving. \
+             The recording so far was saved."
+        );
+    }
+
+    #[test]
+    fn diarized_mode_waits_out_normal_lane_jitter() {
+        let mut mode = DiarizedMode::new();
+        let mut engine = MockEngine::new();
+        for _ in 0..DIARIZE_LAG_TOLERANCE_FRAMES {
+            mode.ingest(diarized_lane_chunk(Speaker::Them));
+        }
+        assert!(
+            !mode.frame_ready(MIMI_FRAME_SIZE),
+            "a lead of {DIARIZE_LAG_TOLERANCE_FRAMES} frames is still jitter, not a dead lane"
+        );
+        assert_eq!(step_while_ready(&mut mode, &mut engine), 0);
+        mode.ingest(diarized_lane_chunk(Speaker::Me));
+        assert!(mode.frame_ready(MIMI_FRAME_SIZE));
+        assert_eq!(step_while_ready(&mut mode, &mut engine), 1);
+        assert_eq!(mode.them_buf.len(), DIARIZE_LAG_TOLERANCE_FRAMES.saturating_sub(1) * MIMI_FRAME_SIZE);
+    }
+
+    #[test]
+    fn diarized_session_transcribes_system_audio_when_mic_is_silent() {
+        let (actor, audio_tx) = spawn_with_mock(MockEngine::new());
+        let (collected, cb) = collecting_callback();
+        let cfg = SessionConfig {
+            pipeline_config: noop_filter_config(),
+            dictionary_entries: vec![],
+            session_terms: vec![],
+            session_corrections: vec![],
+            diarize: true,
+            idle_config: None,
+            meeting_transcription_language: crate::settings::MeetingTranscriptionLanguage::Auto,
+        };
+        actor.start_session(1, cfg, cb).expect("start diarized");
+
+        for _ in 0..10 {
+            audio_tx
+                .send(audio_chunk_from(1, Some(Speaker::Them)))
+                .unwrap();
+        }
+        audio_tx.send(end_of_stream(1)).unwrap();
+        actor
+            .stop_session(Duration::from_secs(2))
+            .expect("stop diarized");
+
+        let segments = collected.lock().unwrap();
+        let them = segments
+            .iter()
+            .filter(|s| s.speaker == Some(Speaker::Them) && s.text == "them-speaks")
+            .count();
+        assert!(
+            them >= 10,
+            "expected at least 10 Them segments from a silent mic, got {them}: {:?}",
+            segments
+                .iter()
+                .map(|s| (&s.text, s.speaker))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !segments.iter().any(|s| s.speaker == Some(Speaker::Me)),
+            "padded mic frames must not emit Me speech"
+        );
+    }
+
+    #[test]
+    fn diarized_mode_preserves_partial_buffer_when_padding_begins() {
+        let mut mode = DiarizedMode::new();
+        let mut engine = MockEngine::new();
+
+        // Push a partial frame to the mic lane
+        let partial_samples = MIMI_FRAME_SIZE / 2;
+        mode.me_buf.extend(vec![0.5f32; partial_samples]);
+
+        // Push enough them frames to trigger lag tolerance padding on me
+        for _ in 0..DIARIZE_LAG_TOLERANCE_FRAMES + 1 {
+            mode.ingest(diarized_lane_chunk(Speaker::Them));
+        }
+
+        assert!(mode.frame_ready(MIMI_FRAME_SIZE));
+        
+        mode.step(&mut engine, MIMI_FRAME_SIZE).unwrap();
+
+        // The partial samples should have been drained and padded
+        assert!(mode.me_buf.is_empty(), "partial me buffer should be completely drained");
+        assert_eq!(
+            mode.them_buf.len(),
+            DIARIZE_LAG_TOLERANCE_FRAMES * MIMI_FRAME_SIZE,
+            "one them frame consumed, remaining should be left"
+        );
+        
+        assert_eq!(engine.dual_calls.len(), 1);
+        
+        let (me_frame, them_frame) = &engine.dual_calls[0];
+        assert_eq!(me_frame.len(), MIMI_FRAME_SIZE);
+        assert_eq!(me_frame[0..partial_samples], vec![0.5f32; partial_samples]);
+        assert_eq!(me_frame[partial_samples..], vec![0.0f32; MIMI_FRAME_SIZE - partial_samples]);
+        
+        assert_eq!(them_frame.len(), MIMI_FRAME_SIZE);
     }
 
     #[test]
