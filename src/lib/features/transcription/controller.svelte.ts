@@ -13,7 +13,7 @@ import { frontmostAppName, readFocusedText, readSelectedText } from "../../api/f
 import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
-import { errorMessage } from "../../utils";
+import { errorMessage, segmentGap } from "../../utils";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
 
@@ -371,12 +371,7 @@ function createTranscriptionControllerInstance() {
           return;
         }
         tentative = "";
-        if (transcript) {
-          if (!transcript.endsWith(" ") && !segment.text.startsWith(" ")) {
-            transcript += " ";
-          }
-        }
-        transcript += segment.text;
+        transcript += segmentGap(transcript, segment.text) + segment.text;
       });
     } catch (e) {
       statusMessage = errorMessage(e);

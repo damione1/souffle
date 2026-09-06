@@ -368,7 +368,7 @@ struct DictationLiveTextState {
 }
 
 /// Confirmed text plus the current pending word, for the pill preview only.
-/// Does not mutate `accumulated` — paste still uses confirmed finals.
+/// Does not mutate `accumulated`, so paste still uses confirmed finals.
 fn dictation_live_preview(accumulated: &str, tentative: &str) -> String {
     if tentative.is_empty() {
         accumulated.to_string()

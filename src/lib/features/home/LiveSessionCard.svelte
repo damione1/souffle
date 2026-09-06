@@ -9,7 +9,7 @@
   import type { LiveParagraph } from "../meeting/live-transcript.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
-  import { elapsedSecondsSince, formatDuration, resolveSpeakerLabel } from "../../utils";
+  import { elapsedSecondsSince, formatDuration, resolveSpeakerLabel, segmentGap } from "../../utils";
 
   let {
     mode,
@@ -48,6 +48,7 @@
   const liveTentative = $derived(
     mode === "meeting" ? meeting.liveTranscript.tentative : transcription.tentative,
   );
+
 
   const hasLiveContent = $derived(
     mode === "dictation"
@@ -197,7 +198,7 @@
   {#if mode === "dictation"}
     <div class="flex min-h-[340px] flex-col rounded-[18px] bg-surface-1 p-[30px] px-8 outline-1 outline-ghost-border">
       <p class="m-0 text-[19px] font-normal leading-[1.85] text-text-secondary">
-        {liveText}{#if liveTentative}<span class="opacity-50">{liveText ? " " : ""}{liveTentative}</span>{/if}<span
+        {liveText}{#if liveTentative}<span class="opacity-50">{segmentGap(liveText, liveTentative)}{liveTentative}</span>{/if}<span
           class="ml-0.5 inline-block h-5 w-0.5 bg-accent align-[-3px]"
           style="animation: blink 1s step-end infinite;"
         ></span>
@@ -298,7 +299,7 @@
                     class="m-0 inline text-[15px] leading-[1.75] text-text-secondary"
                   />
                   {#if i === liveParagraphs.length - 1 && liveTentative}
-                    <span class="opacity-50">{paragraph.text ? " " : ""}{liveTentative}</span>
+                    <span class="opacity-50">{segmentGap(paragraph.text, liveTentative)}{liveTentative}</span>
                   {/if}
                 </p>
               {/if}

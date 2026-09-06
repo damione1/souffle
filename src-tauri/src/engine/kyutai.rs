@@ -468,7 +468,7 @@ impl KyutaiEngine {
     }
 
     /// Live preview of a word still waiting for EndWord. Does not consume
-    /// the pending slot — the later final still comes from `emit_pending`.
+    /// the pending slot; the later final still comes from `emit_pending`.
     fn pending_to_tentative_segment(pending: &PendingWord) -> TranscriptionSegment {
         TranscriptionSegment {
             text: pending.text.clone(),
@@ -492,15 +492,38 @@ impl KyutaiEngine {
         }
     }
 
-    fn drain_orphans(model: &mut LoadedModel, segments: &mut Vec<TranscriptionSegment>) {
-        for pending in model.orphaned_words.drain(..) {
+    fn drain_orphans(
+        orphaned_words: &mut Vec<PendingWord>,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        for pending in orphaned_words.drain(..) {
             let end = pending.start_time;
             segments.push(Self::pending_to_segment(pending, end));
         }
     }
 
+    /// Everything a new word owes the UI, in the order the consumers expect:
+    /// words orphaned by a lane reset, then the previous word closed at this
+    /// word's start, then this word as a preview. A final must never land
+    /// after the preview it would otherwise erase.
+    fn open_word(
+        pending_words: &mut Vec<Option<PendingWord>>,
+        orphaned_words: &mut Vec<PendingWord>,
+        batch_idx: usize,
+        pending: PendingWord,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        Self::drain_orphans(orphaned_words, segments);
+        Self::emit_pending(pending_words, batch_idx, pending.start_time, segments);
+        if batch_idx >= pending_words.len() {
+            pending_words.resize_with(batch_idx + 1, || None);
+        }
+        segments.push(Self::pending_to_tentative_segment(&pending));
+        pending_words[batch_idx] = Some(pending);
+    }
+
     fn drain_all_pending(model: &mut LoadedModel, segments: &mut Vec<TranscriptionSegment>) {
-        Self::drain_orphans(model, segments);
+        Self::drain_orphans(&mut model.orphaned_words, segments);
         for batch_idx in 0..model.pending_words.len() {
             if let Some(pending) = model.pending_words[batch_idx].take() {
                 let end = pending.start_time;
@@ -776,7 +799,7 @@ impl KyutaiEngine {
         debug_enabled: bool,
         segments: &mut Vec<TranscriptionSegment>,
     ) {
-        Self::drain_orphans(model, segments);
+        Self::drain_orphans(&mut model.orphaned_words, segments);
         let frame_num = FRAME_COUNT.load(Ordering::Relaxed).saturating_sub(1);
         let diarized = model.state.batch_size() == 2;
 
@@ -846,22 +869,18 @@ impl KyutaiEngine {
                     } else {
                         None
                     };
-                    // Previous word on this lane never got EndWord: close it
-                    // at this word's start so we don't drop it.
-                    Self::emit_pending(&mut model.pending_words, *batch_idx, start_time, segments);
-                    if *batch_idx >= model.pending_words.len() {
-                        model.pending_words.resize_with(*batch_idx + 1, || None);
-                    }
-                    let pending = PendingWord {
-                        text,
-                        start_time,
-                        language,
-                        speaker,
-                    };
-                    // Show the last word immediately; it stays pending until
-                    // EndWord / the next Word / drain finalizes it.
-                    segments.push(Self::pending_to_tentative_segment(&pending));
-                    model.pending_words[*batch_idx] = Some(pending);
+                    Self::open_word(
+                        &mut model.pending_words,
+                        &mut model.orphaned_words,
+                        *batch_idx,
+                        PendingWord {
+                            text,
+                            start_time,
+                            language,
+                            speaker,
+                        },
+                        segments,
+                    );
                 }
                 moshi::asr::AsrMsg::EndWord {
                     stop_time,
@@ -876,7 +895,7 @@ impl KyutaiEngine {
                 }
             }
         }
-        Self::drain_orphans(model, segments);
+        Self::drain_orphans(&mut model.orphaned_words, segments);
     }
 
     fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
@@ -1540,5 +1559,85 @@ mod tests {
         assert_eq!(finalized.text, "hello");
         assert_eq!(finalized.end_time, 1.6);
         assert!(finalized.is_final);
+    }
+
+    fn word(text: &str, start_time: f64) -> PendingWord {
+        PendingWord {
+            text: text.into(),
+            start_time,
+            language: None,
+            speaker: None,
+        }
+    }
+
+    #[test]
+    fn open_word_emits_the_orphan_final_before_the_new_preview() {
+        // A language-mismatch reset moved "bonjour" to the orphan list before
+        // "monde" arrived. The consumers drop a preview as soon as a final
+        // lands, so the orphan has to come first.
+        let mut pending_words = vec![None];
+        let mut orphaned_words = vec![word("bonjour", 1.0)];
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            0,
+            word("monde", 1.4),
+            &mut segments,
+        );
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].text, "bonjour");
+        assert!(segments[0].is_final);
+        assert_eq!(segments[1].text, "monde");
+        assert!(!segments[1].is_final);
+        assert!(orphaned_words.is_empty());
+        assert_eq!(
+            pending_words[0].as_ref().map(|p| p.text.as_str()),
+            Some("monde")
+        );
+    }
+
+    #[test]
+    fn open_word_closes_the_previous_word_before_previewing_the_new_one() {
+        let mut pending_words = vec![Some(word("hello", 1.0))];
+        let mut orphaned_words = Vec::new();
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            0,
+            word("world", 1.5),
+            &mut segments,
+        );
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].text, "hello");
+        assert!(segments[0].is_final);
+        assert_eq!(segments[0].end_time, 1.5);
+        assert_eq!(segments[1].text, "world");
+        assert!(!segments[1].is_final);
+    }
+
+    #[test]
+    fn open_word_grows_the_lane_list_for_a_new_batch_index() {
+        let mut pending_words = Vec::new();
+        let mut orphaned_words = Vec::new();
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            1,
+            word("them", 2.0),
+            &mut segments,
+        );
+
+        assert_eq!(pending_words.len(), 2);
+        assert!(pending_words[0].is_none());
+        assert_eq!(segments.len(), 1);
+        assert!(!segments[0].is_final);
     }
 }
