@@ -1,12 +1,10 @@
 use tauri::State;
 
 use crate::db::Database;
+use crate::filter::learned_pair::{MAX_LEARNED_PAIRS, is_learned_pair_acceptable};
 use crate::filter::session_terms::derive_corrections_from_edit;
-use crate::filter::{pronunciation_aliases, DictionaryEntry};
+use crate::filter::{DictionaryEntry, pronunciation_aliases};
 use crate::state::AppState;
-
-const MAX_LEARNED_PAIRS: usize = 8;
-const MIN_TOKEN_LEN: usize = 3;
 
 #[tauri::command]
 #[specta::specta]
@@ -96,9 +94,7 @@ pub(crate) fn persist_learned_corrections(
 }
 
 fn is_persistable_pair(misspelling: &str, term: &str) -> bool {
-    misspelling.chars().count() >= MIN_TOKEN_LEN
-        && term.chars().count() >= MIN_TOKEN_LEN
-        && !misspelling.eq_ignore_ascii_case(term)
+    is_learned_pair_acceptable(misspelling, term)
 }
 
 fn find_entry_by_term<'a>(
@@ -272,11 +268,11 @@ mod learn_from_edit {
     fn persist_learned_corrections_caps_at_eight_pairs() {
         let (db, _dir) = test_db();
         let original = (0..11)
-            .map(|i| format!("mis{i:02}x"))
+            .map(|i| format!("Kubernetis{i:02}"))
             .collect::<Vec<_>>()
             .join(" ");
         let corrected = (0..11)
-            .map(|i| format!("term{i:02}x"))
+            .map(|i| format!("Kubernetes{i:02}"))
             .collect::<Vec<_>>()
             .join(" ");
 
@@ -315,5 +311,42 @@ mod learn_from_edit {
         let pronunciation = entries[0].pronunciation.as_deref().unwrap();
         assert!(pronunciation.contains("Kubernetis"));
         assert!(pronunciation.contains("Kubernates"));
+    }
+
+    #[test]
+    fn persist_learned_corrections_rejects_stopword_and_unrelated_pairs() {
+        let (db, _dir) = test_db();
+        assert_eq!(
+            persist_learned_corrections(&db, "on passe par Pierre", "on passe pour Pierre")
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            persist_learned_corrections(&db, "je pense que oui", "je crois que oui").unwrap(),
+            0
+        );
+        assert!(db.list_dictionary_entries().unwrap().is_empty());
+    }
+
+    #[test]
+    fn persist_learned_corrections_does_not_rewrite_function_words() {
+        use crate::filter::{PipelineConfig, build_text_filters};
+
+        let (db, _dir) = test_db();
+        persist_learned_corrections(&db, "on passe par Pierre", "on passe pour Pierre").unwrap();
+        let chain = build_text_filters(
+            &PipelineConfig {
+                vad_enabled: false,
+                vad_model_path: None,
+                filler_removal_enabled: false,
+                stutter_collapse_enabled: false,
+                dictionary_correction_enabled: true,
+            },
+            db.list_dictionary_entries().unwrap(),
+            &[],
+            &[],
+        );
+        assert_eq!(chain.apply("par ici"), "par ici");
+        assert_eq!(chain.apply("pour la revue"), "pour la revue");
     }
 }

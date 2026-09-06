@@ -10,12 +10,19 @@
     onLearnFromEditChange,
     onAdd,
     onDelete,
+    onUpdate,
   }: {
     entries: DictionaryEntry[];
     learnFromEdit: boolean;
     onLearnFromEditChange: (event: Event) => void;
     onAdd: (term: string, pronunciation: string | null, category: string | null) => void | Promise<void>;
     onDelete: (id: number) => void | Promise<void>;
+    onUpdate: (
+      id: number,
+      term: string,
+      pronunciation: string | null,
+      category: string | null,
+    ) => void | Promise<void>;
   } = $props();
 
   let newTerm = $state("");
@@ -35,6 +42,18 @@
     } catch (e) {
       addError = e instanceof Error ? e.message : String(e);
     }
+  }
+
+  function aliasesOf(entry: DictionaryEntry): string[] {
+    return (entry.pronunciation ?? "")
+      .split(",")
+      .map((alias) => alias.trim())
+      .filter(Boolean);
+  }
+
+  async function removeAlias(entry: DictionaryEntry, alias: string) {
+    const next = aliasesOf(entry).filter((item) => item !== alias);
+    await onUpdate(entry.id, entry.term, next.length ? next.join(", ") : null, entry.category);
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -114,7 +133,23 @@
       {#each entries as entry (entry.id)}
         <div class="flex items-center gap-2 rounded-[9px] bg-surface-2/60 px-2.5 py-1.5 text-sm text-text-secondary">
           <span class="flex-1 font-medium">
-            {entry.term}{#if entry.pronunciation}<span class="text-text-muted font-normal"> · {entry.pronunciation}</span>{/if}
+            {entry.term}{#if aliasesOf(entry).length}
+              <span class="ml-1 inline-flex flex-wrap gap-1 font-normal">
+                {#each aliasesOf(entry) as alias (alias)}
+                  <span class="inline-flex items-center gap-0.5 rounded-md bg-surface-3 px-1.5 py-0.5 text-xs text-text-muted">
+                    {alias}
+                    <button
+                      type="button"
+                      onclick={() => removeAlias(entry, alias)}
+                      class="btn btn-icon btn-ghost !min-h-0 !min-w-0 !p-0.5 text-text-muted hover:!text-danger-soft"
+                      aria-label={`${$t("settings_dictionary.remove_alias")} ${alias}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                {/each}
+              </span>
+            {/if}
           </span>
           {#if entry.category}
             <span class="text-text-muted text-xs">{entry.category}</span>

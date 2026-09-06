@@ -1,5 +1,6 @@
 use strsim::normalized_levenshtein;
 
+use super::learned_pair::{PHONETIC_SIMILARITY_FLOOR, is_protected_stopword};
 use super::soundex::soundex;
 use super::{DictionaryEntry, TextFilter, TextFilterKind};
 
@@ -17,43 +18,6 @@ const MIN_WORD_LEN: usize = 3;
 /// to differentiate themselves and collide with many unrelated codes. The
 /// Levenshtein spelling-correction path below is unaffected by this floor.
 const MIN_PHONETIC_WORD_LEN: usize = 4;
-
-/// Minimum normalized similarity, on top of Soundex equality, required for a
-/// *derived* phonetic match: one computed from the term's own spelling (or a
-/// session term), not from an explicit user pronunciation. Soundex equality
-/// alone is a weak signal, collapsing "dans" and "Denis" to the same code
-/// (D520); this floor keeps that kind of orthographically unrelated pair
-/// from matching while still allowing real misheard spellings through, e.g.
-/// "Delphine" transcribed as "Delfine" (similarity 0.75).
-const PHONETIC_SIMILARITY_FLOOR: f64 = 0.65;
-
-/// High-frequency French and English function words that a *derived*
-/// phonetic match must never replace. These are exactly the words most
-/// likely to collide with a name added to the dictionary purely by
-/// coincidence (short, common, phonetically generic). An explicit
-/// user-typed pronunciation is the only thing allowed to override this list
-/// (see `DictionaryMatch::explicit_pronunciation`): that's a deliberate
-/// instruction from the user, not an accidental Soundex collision.
-///
-/// Extend this list as new false positives get reported; it is intentionally
-/// a curated sample of common short words, not an exhaustive stopword corpus.
-const PROTECTED_STOPWORDS: &[&str] = &[
-    // French
-    "dans", "donc", "des", "dont", "doit", "deux", "par", "pour", "pas", "peu", "peut", "plus",
-    "avec", "sans", "sous", "sur", "vers", "chez", "mais", "car", "que", "qui", "quoi", "quand",
-    "comme", "alors", "aussi", "bien", "bon", "cette", "cet", "ces", "ses", "son", "sa", "ton",
-    "leur", "leurs", "nos", "vos", "tout", "tous", "toute", "toutes", "etre", "avoir", "fait",
-    "faire", "dit", "dire", "cela", "ceci", "ainsi", "puis", "encore", "toujours", "jamais",
-    "rien", "ici", // English
-    "the", "then", "than", "this", "that", "these", "those", "with", "from", "have", "been",
-    "were", "when", "what", "which", "who", "whom", "where", "there", "their", "they", "them",
-    "will", "would", "could", "should", "just", "very", "also", "into", "onto", "over", "under",
-    "about", "after", "before",
-];
-
-fn is_protected_stopword(word_lower: &str) -> bool {
-    PROTECTED_STOPWORDS.contains(&word_lower)
-}
 
 pub struct DictionaryFilter {
     entries: Vec<DictionaryMatch>,
@@ -152,10 +116,12 @@ impl DictionaryFilter {
         for correction in session_corrections {
             let miss = correction.misspelling.trim();
             if !miss.is_empty() && miss.to_lowercase() != correction.term.to_lowercase() {
-                exact_aliases.push(ExactAlias {
-                    alias_lower: miss.to_lowercase(),
-                    term: correction.term.clone(),
-                });
+                if !is_protected_stopword(&miss.to_lowercase()) {
+                    exact_aliases.push(ExactAlias {
+                        alias_lower: miss.to_lowercase(),
+                        term: correction.term.clone(),
+                    });
+                }
             }
             let term_lower = correction.term.to_lowercase();
             if matches.iter().any(|m| m.term_lower == term_lower) {
@@ -166,7 +132,9 @@ impl DictionaryFilter {
                 term_lower,
                 phonetic_code: soundex(&correction.misspelling),
                 phonetic_only: false,
-                explicit_pronunciation: true,
+                // Learned from a live edit, not typed as a pronunciation:
+                // it goes through the derived floors, not the explicit bypass.
+                explicit_pronunciation: false,
             });
         }
         exact_aliases.sort_by(|a, b| {
@@ -497,6 +465,21 @@ mod tests {
             }],
         );
         assert_eq!(f.apply("Kubernetis cluster"), "Kubernetes cluster");
+    }
+
+    #[test]
+    fn learned_session_correction_does_not_override_stopword_protection() {
+        use crate::filter::session_terms::SessionCorrection;
+        let f = DictionaryFilter::with_session_hints(
+            vec![],
+            &[],
+            &[SessionCorrection {
+                misspelling: "pour".to_string(),
+                term: "Pierre".to_string(),
+            }],
+        );
+        assert_eq!(f.apply("par ici"), "par ici");
+        assert_eq!(f.apply("pour la revue"), "pour la revue");
     }
 
     #[test]
