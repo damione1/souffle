@@ -761,4 +761,84 @@ describe("transcription controller", () => {
     expect(ctrl.transcript).toBe("");
   });
 
+  it("shortcut-toggle is a no-op while a meeting is recording (SOU-044)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+        meeting_id: "meeting-1",
+      },
+    };
+
+    eventListeners["shortcut-toggle"]?.({ payload: null });
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    // The meeting's own state must survive untouched.
+    expect(ctrl.app.machineState.state).toBe("recording_meeting");
+  });
+
+  it("a stopped dictation's transcript cannot be repasted by a later interrupted session (SOU-044)", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, auto_paste: true, dictation_polish_enabled: false };
+
+    // Session 1: dictate "hello" and stop via the shortcut path (auto-paste fires).
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "hello", is_final: true });
+    await ctrl.toggleRecording(true);
+
+    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.objectContaining({ text: "hello" }));
+    expect(ctrl.transcript).toBe("");
+    ctrl.app.machineState = { state: "idle" };
+
+    // Session 2: start fresh, then get interrupted before any words arrive.
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    ctrl.handleRecordingAborted();
+
+    expect(ctrl.transcript).toBe("");
+    const pasteCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "paste_text");
+    expect(pasteCalls).toHaveLength(1);
+    expect(pasteCalls[0][1]).toEqual(expect.objectContaining({ text: "hello" }));
+  });
+
+  it("toggleRecording directly is a no-op while a meeting is recording", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+        meeting_id: "meeting-1",
+      },
+    };
+
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+  });
 });

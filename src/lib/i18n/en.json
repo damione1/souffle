@@ -494,6 +494,8 @@
     "subtitle": "Soufflé needs a few macOS permissions to record and paste. Grant them now to avoid interruptions later.",
     "mic_label": "Microphone",
     "mic_desc": "Record your voice for dictation and meetings.",
+    "mic_denied_hint": "Microphone access was denied, and macOS won't ask again. Allow it under System Settings > Privacy & Security > Microphone, then come back here.",
+    "mic_no_device_hint": "No microphone was found. Connect one, or pick a different input in Settings > Audio.",
     "system_label": "System audio",
     "system_desc": "Capture other participants during meetings.",
     "accessibility_label": "Accessibility",
