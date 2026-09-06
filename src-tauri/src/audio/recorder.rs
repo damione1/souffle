@@ -101,6 +101,23 @@ pub fn list_session_files(meeting_id: &str) -> Vec<(usize, PathBuf)> {
     list_session_files_in(&meeting_recordings_dir(meeting_id))
 }
 
+/// One past the highest session index already listed (0 if none). Pure
+/// helper behind [`next_session_index`], split out so the derivation can be
+/// tested without touching the filesystem.
+fn next_session_index_from(sessions: &[(usize, PathBuf)]) -> usize {
+    sessions.last().map(|(index, _)| index + 1).unwrap_or(0)
+}
+
+/// The on-disk session index a new recording for `meeting_id` should use:
+/// one past the highest `{index}.ogg` already on disk. Deliberately not
+/// `recording_sessions.len()` from the DB: if that metadata ever undercounts
+/// (a crash recovery that failed to close a session, say), trusting it would
+/// have `File::create` truncate an existing recording instead of appending a
+/// new one.
+pub fn next_session_index(meeting_id: &str) -> usize {
+    next_session_index_from(&list_session_files(meeting_id))
+}
+
 fn opus_head(pre_skip: u16, input_rate: u32) -> Vec<u8> {
     let mut v = Vec::with_capacity(19);
     v.extend_from_slice(b"OpusHead");
@@ -433,6 +450,21 @@ mod tests {
     fn list_session_files_in_missing_dir_is_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
         assert!(list_session_files_in(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn next_session_index_from_is_one_past_the_highest() {
+        let sessions = vec![
+            (0, PathBuf::from("0.ogg")),
+            (1, PathBuf::from("1.ogg")),
+            (3, PathBuf::from("3.ogg")),
+        ];
+        assert_eq!(next_session_index_from(&sessions), 4);
+    }
+
+    #[test]
+    fn next_session_index_from_empty_is_zero() {
+        assert_eq!(next_session_index_from(&[]), 0);
     }
 
     #[test]
