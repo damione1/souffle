@@ -57,21 +57,11 @@ fn build_apple_intelligence_bridge() {
     let framework_path =
         Path::new(&sdk_path).join("System/Library/Frameworks/FoundationModels.framework");
     let force_stub = env::var("SOUFFLE_FORCE_AI_STUB").as_deref() == Ok("1");
-    let command_line_tools_only = env::var("SWIFTC").is_err() && is_command_line_tools_only();
-    if command_line_tools_only && !force_stub {
-        println!(
-            "cargo:warning=Command Line Tools-only toolchain detected; Apple Intelligence \
-             (FoundationModels) needs full Xcode. Falling back to stubs. Install Xcode and run \
-             `sudo xcode-select -s /Applications/Xcode.app`, or set SOUFFLE_FORCE_AI_STUB=1 to \
-             silence this message."
-        );
-    }
+    // Command Line Tools and full Xcode both work once the SDK ships
+    // FoundationModels (macOS 26+). Decide from the framework, not xcode-select.
+    let has_foundation_models = framework_path.exists() && !force_stub;
 
-    let has_foundation_models = framework_path.exists() && !force_stub && !command_line_tools_only;
-
-    // Notarized releases with real Apple Intelligence require Xcode 26+ (FoundationModels
-    // in the macOS SDK). CI runners on macos-15 link the stub until the workflow moves to
-    // a runner image with that SDK; stub linkage is surfaced at runtime via is_stub_linked().
+    // Stub linkage is surfaced at runtime via is_stub_linked().
     let source_file = if has_foundation_models {
         println!("cargo:rustc-cfg=apple_intelligence_real");
         println!("cargo:warning=Building with Apple Intelligence support.");
@@ -82,7 +72,10 @@ fn build_apple_intelligence_bridge() {
         STUB_SWIFT_FILE
     } else {
         println!("cargo:rustc-cfg=apple_intelligence_stub");
-        println!("cargo:warning=Apple Intelligence SDK not found. Building with stubs.");
+        println!(
+            "cargo:warning=Apple Intelligence SDK not found (FoundationModels.framework missing). \
+             Building with stubs. Need macOS SDK 26+ from Command Line Tools or Xcode."
+        );
         STUB_SWIFT_FILE
     };
 
@@ -161,18 +154,4 @@ fn build_apple_intelligence_bridge() {
     }
 
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
-}
-
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-fn is_command_line_tools_only() -> bool {
-    use std::process::Command;
-
-    Command::new("xcode-select")
-        .arg("-p")
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|path| path.trim().ends_with("CommandLineTools"))
-        .unwrap_or(false)
 }
