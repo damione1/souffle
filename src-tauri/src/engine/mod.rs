@@ -595,7 +595,7 @@ fn kyutai_2_6b_model_descriptor() -> TranscriptionModelDescriptor {
     TranscriptionModelDescriptor {
         id: KYUTAI_MODEL_2_6B_ID.to_string(),
         label: "STT 2.6B EN".to_string(),
-        description: "Larger Kyutai streaming model optimized for English transcription quality."
+        description: "Larger Kyutai streaming model optimized for English. This checkpoint has no pause detector, so uninterrupted speech can lose about 2.5 seconds every 28 seconds unless a quiet gap lets the cache refresh."
             .to_string(),
         download_size_bytes: Some(5_620_000_000),
         recommended_memory_bytes: Some(10_000_000_000),
@@ -826,6 +826,22 @@ mod tests {
         assert!(kyutai.models.iter().any(|m| m.id == KYUTAI_MODEL_2_6B_ID));
         assert!(cat.iter().any(|e| e.id == WHISPER_ENGINE_ID));
         assert!(cat.iter().any(|e| e.id == PARAKEET_ENGINE_ID));
+    }
+
+    #[test]
+    fn kyutai_2_6b_catalog_notes_missing_pause_heads() {
+        let cat = transcription_engine_catalog();
+        let kyutai = cat.iter().find(|e| e.id == KYUTAI_ENGINE_ID).unwrap();
+        let model = kyutai
+            .models
+            .iter()
+            .find(|m| m.id == KYUTAI_MODEL_2_6B_ID)
+            .unwrap();
+        assert!(
+            model.description.contains("no pause detector"),
+            "2.6B catalog should say this checkpoint has no pause detector: {}",
+            model.description
+        );
     }
 
     #[test]

@@ -19,6 +19,13 @@ use crate::settings::MeetingTranscriptionLanguage;
 /// stt-rs example (`prs[2][0] > 0.5`).
 const VAD_PAUSE_HEAD: usize = 2;
 const VAD_PAUSE_THRESHOLD: f32 = 0.5;
+/// RMS below this on an 80 ms Mimi frame counts as pause when the checkpoint
+/// has no semantic VAD heads. Same order as Whisper/Parakeet's silence floor
+/// on a 10 ms frame: enough to refuse a refresh mid-word, not a room-tone gate.
+const ENERGY_PAUSE_RMS: f32 = 0.01;
+/// Tensor name `detect_extra_heads` looks up. The 1B semantic-VAD export
+/// ships `extra_heads.0..3`; the 2.6B export has none.
+const EXTRA_HEADS_PROBE_TENSOR: &str = "extra_heads.0.weight";
 /// Safety margin (frames) on top of the ASR delay before trusting the VAD
 /// pause streak: semantic VAD can fire slightly before speech fully clears.
 const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
@@ -186,6 +193,40 @@ fn decide_refresh(
     RefreshDecision::Full(RefreshKind::SoftPause)
 }
 
+fn pcm_rms(pcm: &[f32]) -> f32 {
+    if pcm.is_empty() {
+        return 0.0;
+    }
+    let sum: f32 = pcm.iter().map(|s| s * s).sum();
+    (sum / pcm.len() as f32).sqrt()
+}
+
+fn is_energy_pause(pcm: &[f32]) -> bool {
+    pcm_rms(pcm) < ENERGY_PAUSE_RMS
+}
+
+/// Advance per-lane pause streaks from frame energy. Used when the checkpoint
+/// has no semantic VAD heads, so `AsrMsg::Step` is never emitted and the
+/// heads-based `note_vad_pause` path cannot run.
+fn note_energy_pause_streaks(streaks: &mut [usize], lane_pcm: &[&[f32]]) {
+    for (idx, pcm) in lane_pcm.iter().enumerate() {
+        if let Some(streak) = streaks.get_mut(idx) {
+            if is_energy_pause(pcm) {
+                *streak = streak.saturating_add(1);
+            } else {
+                *streak = 0;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn has_extra_heads_tensor(tensor_names: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
+    tensor_names
+        .into_iter()
+        .any(|n| n.as_ref() == EXTRA_HEADS_PROBE_TENSOR)
+}
+
 /// Loaded model components — kept together so they can be used by the inference loop
 struct LoadedModel {
     state: moshi::asr::State,
@@ -215,8 +256,14 @@ struct LoadedModel {
     frames_since_refresh: usize,
     /// Soft context refreshes performed this session (diagnostics).
     refresh_count: u64,
-    /// Consecutive frames where the semantic VAD pause head fired, per batch lane.
+    /// Consecutive pause frames, per batch lane. Sourced from the semantic
+    /// VAD extra heads when the checkpoint has them, otherwise from frame
+    /// energy (`ENERGY_PAUSE_RMS`). A streak stuck at zero after load means
+    /// speech (or that no frames have been stepped yet), not "no signal".
     vad_pause_streak: Vec<usize>,
+    /// Whether this checkpoint exposed `extra_heads.*` at load. When false,
+    /// `AsrMsg::Step` never arrives and pause detection falls back to energy.
+    has_extra_heads: bool,
     /// Per-lane LID and mismatch streak tracking.
     language_tracker: LanguageTracker,
     /// Word waiting for its EndWord (or the next Word) before emit, per lane.
@@ -281,6 +328,7 @@ impl KyutaiEngine {
         model_path: &Path,
         config: &KyutaiConfig,
         batch_size: usize,
+        has_extra_heads: bool,
     ) -> Result<moshi::asr::State, EngineError> {
         let mimi_path = model_path.join(&config.mimi_name);
         let audio_tokenizer = moshi::mimi::load(
@@ -294,7 +342,6 @@ impl KyutaiEngine {
 
         let dtype = device.bf16_default_to_f32();
         let model_file = model_path.join("model.safetensors");
-        let has_extra_heads = Self::detect_extra_heads(&model_file)?;
         let vb_lm = unsafe {
             candle_nn::VarBuilder::from_mmaped_safetensors(&[&model_file], dtype, device)
                 .map_err(|e| EngineError::LoadError(format!("Model weights reload: {e}")))?
@@ -319,7 +366,19 @@ impl KyutaiEngine {
         batch_size: usize,
         meeting_language_prior: MeetingTranscriptionLanguage,
     ) -> Result<LoadedModel, EngineError> {
-        let state = Self::build_state(&device, &model_path, &config, batch_size)?;
+        let model_file = model_path.join("model.safetensors");
+        let has_extra_heads = Self::detect_extra_heads(&model_file)?;
+        if has_extra_heads {
+            info!("Kyutai checkpoint has semantic VAD extra heads");
+        } else {
+            warn!(
+                audio_delay_seconds = config.stt_config.audio_delay_seconds,
+                "Kyutai checkpoint has no semantic VAD extra heads; pause detection \
+                 falls back to frame energy. A hard KV refresh can still drop \
+                 in-flight speech if no quiet gap appears"
+            );
+        }
+        let state = Self::build_state(&device, &model_path, &config, batch_size, has_extra_heads)?;
         Ok(LoadedModel {
             state,
             text_tokenizer,
@@ -334,6 +393,7 @@ impl KyutaiEngine {
             frames_since_refresh: 0,
             refresh_count: 0,
             vad_pause_streak: vec![0; batch_size],
+            has_extra_heads,
             language_tracker: LanguageTracker::new(batch_size, meeting_language_prior),
             pending_words: vec![None; batch_size],
             orphaned_words: Vec::new(),
@@ -353,7 +413,7 @@ impl KyutaiEngine {
             .map_err(|e| EngineError::LoadError(format!("Weights mmap failed: {e}")))?;
         let (_, metadata) = safetensors::tensor::SafeTensors::read_metadata(&mmap)
             .map_err(|e| EngineError::LoadError(format!("Weights metadata read failed: {e}")))?;
-        Ok(metadata.info("extra_heads.0.weight").is_some())
+        Ok(metadata.info(EXTRA_HEADS_PROBE_TENSOR).is_some())
     }
 
     fn synchronize_device(device: &Device, context: &str) -> Result<(), EngineError> {
@@ -767,6 +827,9 @@ impl KyutaiEngine {
             *frames = frames.saturating_add(1);
         }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+        if !model.has_extra_heads {
+            note_energy_pause_streaks(&mut model.vad_pause_streak, &[chunk_data]);
+        }
         Ok(asr_msgs)
     }
 
@@ -790,6 +853,15 @@ impl KyutaiEngine {
             *frames = frames.saturating_add(1);
         }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+        if !model.has_extra_heads && data.len() >= 2 * MIMI_FRAME_SIZE {
+            note_energy_pause_streaks(
+                &mut model.vad_pause_streak,
+                &[
+                    &data[..MIMI_FRAME_SIZE],
+                    &data[MIMI_FRAME_SIZE..2 * MIMI_FRAME_SIZE],
+                ],
+            );
+        }
         Ok(asr_msgs)
     }
 
@@ -1343,6 +1415,55 @@ mod tests {
         assert_eq!(KyutaiEngine::prefix_frame_count(1.0), 13);
         assert_eq!(KyutaiEngine::prefix_frame_count(0.5), 7);
         assert_eq!(KyutaiEngine::prefix_frame_count(2.0), 25);
+    }
+
+    #[test]
+    fn extra_heads_probe_matches_the_1b_tensor_name_only() {
+        assert!(has_extra_heads_tensor(["extra_heads.0.weight", "text_emb.weight"]));
+        assert!(!has_extra_heads_tensor(["text_emb.weight", "out_norm.weight"]));
+        assert!(!has_extra_heads_tensor(Vec::<&str>::new()));
+    }
+
+    #[test]
+    fn energy_pause_treats_digital_silence_as_pause_and_speech_as_active() {
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let speech = vec![0.2f32; MIMI_FRAME_SIZE];
+        assert!(is_energy_pause(&silence));
+        assert!(!is_energy_pause(&speech));
+    }
+
+    #[test]
+    fn energy_pause_streak_accumulates_on_quiet_frames_and_resets_on_speech() {
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let speech = vec![0.2f32; MIMI_FRAME_SIZE];
+        let mut streaks = [0usize, 0];
+
+        note_energy_pause_streaks(&mut streaks, &[&silence, &speech]);
+        assert_eq!(streaks, [1, 0]);
+        note_energy_pause_streaks(&mut streaks, &[&silence, &silence]);
+        assert_eq!(streaks, [2, 1]);
+        note_energy_pause_streaks(&mut streaks, &[&speech, &silence]);
+        assert_eq!(streaks, [0, 2]);
+    }
+
+    #[test]
+    fn energy_pause_streak_can_soft_refresh_a_checkpoint_without_vad_heads() {
+        // 2.6B: no AsrMsg::Step, streak stays 0 unless energy fills it.
+        // Without this fallback, 300 frames into a 375 context is HardDeadline
+        // or nothing — never SoftPause.
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let mut streaks = [0usize];
+        for _ in 0..REFRESH_PAUSE_FRAMES {
+            note_energy_pause_streaks(&mut streaks, &[&silence]);
+        }
+        assert_eq!(
+            decide_refresh(300, 375, &streaks, 1),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[0], 1),
+            RefreshDecision::None
+        );
     }
 
     #[test]
