@@ -368,3 +368,90 @@ async fn dictation_round_trip() {
         history.iter().map(|e| &e.text).collect::<Vec<_>>()
     );
 }
+
+/// Regression test for SOU-040: `peek_sleep_paused_meeting` must not clear
+/// the flag on read (the old `take_sleep_paused_meeting` did, which burned
+/// the id before the frontend had a chance to wait out a still-draining
+/// sleep-triggered stop). The flag only goes away once a recording actually
+/// starts again, via `launch_meeting`.
+#[tokio::test]
+async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
+    let mock = MockEngine::new().with_transcribe_response(
+        Ok(vec![TranscriptionSegment {
+            text: "before sleep".to_string(),
+            start_time: 0.0,
+            end_time: 1.0,
+            is_final: true,
+            language: Some("en".to_string()),
+            confidence: Some(0.9),
+            speaker: None,
+        }]),
+        1,
+    );
+    let h = build_harness(mock);
+    let state = h.app.state::<AppState>();
+
+    let (_collected, channel) = collecting_channel();
+    commands::start_meeting_recording(state.clone(), "Sleepy Sync".to_string(), None, channel)
+        .await
+        .expect("start_meeting_recording");
+
+    let (session_id, meeting_id) = match state.current_machine_state().unwrap() {
+        AppStateMachine::RecordingMeeting {
+            session_id,
+            meeting_id,
+            ..
+        } => (session_id, meeting_id),
+        other => panic!("expected RecordingMeeting after start, got {other:?}"),
+    };
+
+    h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
+    h.audio_msg_tx
+        .send(AudioMessage::EndOfStream { session_id })
+        .unwrap();
+
+    // Mirror handle_system_will_sleep: remember the id, then run the same
+    // stop+drain the sleep-triggered background task performs.
+    state.set_sleep_paused_meeting(meeting_id.clone());
+    stop_meeting_and_persist(&h, &state);
+
+    // Two peeks in a row (matching the frontend's SystemWokeUp event plus
+    // its visibilitychange belt-and-braces recheck) must both see the id:
+    // neither call may consume it.
+    assert_eq!(
+        commands::peek_sleep_paused_meeting(state.clone()),
+        Some(meeting_id.clone())
+    );
+    assert_eq!(
+        commands::peek_sleep_paused_meeting(state.clone()),
+        Some(meeting_id.clone())
+    );
+
+    // Resuming goes through launch_meeting, which clears the flag
+    // unconditionally: a later wake must not re-offer this meeting.
+    let (_collected2, channel2) = collecting_channel();
+    commands::resume_meeting_recording(state.clone(), meeting_id.clone(), channel2)
+        .await
+        .expect("resume_meeting_recording");
+
+    assert_eq!(commands::peek_sleep_paused_meeting(state.clone()), None);
+}
+
+/// `clear_sleep_paused_meeting` lets the frontend drop the flag on an
+/// explicit user refusal (or once a resume actually starts) without going
+/// through a full recording start.
+#[tokio::test]
+async fn clear_sleep_paused_meeting_command_clears_without_resuming() {
+    let h = build_harness(MockEngine::new());
+    let state = h.app.state::<AppState>();
+
+    state.set_sleep_paused_meeting("meeting-x".to_string());
+    assert_eq!(
+        commands::peek_sleep_paused_meeting(state.clone()),
+        Some("meeting-x".to_string())
+    );
+
+    commands::clear_sleep_paused_meeting(state.clone());
+
+    assert_eq!(commands::peek_sleep_paused_meeting(state.clone()), None);
+}
