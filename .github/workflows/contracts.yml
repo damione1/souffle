@@ -39,6 +39,8 @@ jobs:
           cache: npm
 
       - run: npm ci
+      # Cheap: cargo metadata honors CARGO_TARGET_DIR (no release build).
+      - run: ./scripts/build-mcp-sidecar.test.sh
       # Tauri's build script validates `externalBin` entries during `cargo test`,
       # so the MCP sidecar must exist before type export (same as release builds).
       - run: ./scripts/build-mcp-sidecar.sh
