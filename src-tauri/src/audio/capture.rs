@@ -212,6 +212,9 @@ const FALLBACK_INPUT_SAMPLE_RATE: u32 = 48_000;
 /// 48 kHz, so keep whatever rate the device is already on and let CoreAudio
 /// stay untouched. Souffle resamples to the engine rate regardless, so a
 /// higher device rate buys nothing.
+///
+/// A leftover high rate from ≤ v0.9.0 is repaired only when the user clicks
+/// Reset in Settings. See [`super::sample_rate::reset_input_sample_rate`].
 fn choose_input_sample_rate(current: Option<u32>, min: u32, max: u32) -> u32 {
     match current {
         Some(rate) if (min..=max).contains(&rate) => rate,

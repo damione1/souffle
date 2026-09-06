@@ -8,7 +8,9 @@ import {
   getShortcuts,
   getSystemAudioSupport,
   isLaptop as checkIsLaptop,
+  getInputSampleRate,
   listAudioDevices,
+  resetInputSampleRate,
   saveSettings,
   saveShortcuts as persistShortcutSettings,
   selectAudioDevice,
@@ -41,6 +43,7 @@ import {
   removeKnownDevice,
   reorderMicrophoneList,
 } from "./microphone-list";
+import { resolveSampleRateDeviceUid } from "./sample-rate";
 import {
   getFirstAvailableTranscriptionBackend,
   getFirstAvailableTranscriptionModel,
@@ -60,6 +63,12 @@ export function createSettingsController() {
 
   let audioDevices = $state<AudioInputDevice[]>([]);
   let pinUnavailable = $state(false);
+  let inputSampleRate = $state<number | null>(null);
+  let inputSampleRateError = $state("");
+  let resettingSampleRate = $state(false);
+  // Only the newest sample-rate request may write the shared state: the
+  // microphone can change while a CoreAudio read or reset is still in flight.
+  let sampleRateRequest = 0;
   let systemAudioSupported = $state(false);
   // Gates the "microphone when lid is closed" picker: meaningless on a
   // desktop Mac, so it's hidden entirely rather than shown disabled.
@@ -187,8 +196,43 @@ export function createSettingsController() {
         const connected = audioDevices.some((device) => device.uid === app.selectedDevice);
         pinUnavailable = !connected;
       }
+      await refreshInputSampleRate();
     } catch (e) {
       statusMessage = errorMessage(e);
+    }
+  }
+
+  async function refreshInputSampleRate() {
+    const uid = resolveSampleRateDeviceUid(app.selectedDevice, audioDevices);
+    const request = ++sampleRateRequest;
+    if (!uid) {
+      inputSampleRate = null;
+      return;
+    }
+    try {
+      const hz = await getInputSampleRate(uid);
+      if (request !== sampleRateRequest) return;
+      inputSampleRate = hz;
+    } catch (e) {
+      if (request !== sampleRateRequest) return;
+      console.warn("get_input_sample_rate failed:", e);
+      inputSampleRate = null;
+    }
+  }
+
+  async function onResetSampleRate() {
+    const uid = resolveSampleRateDeviceUid(app.selectedDevice, audioDevices);
+    if (!uid || resettingSampleRate) return;
+    const request = ++sampleRateRequest;
+    resettingSampleRate = true;
+    inputSampleRateError = "";
+    try {
+      const hz = await resetInputSampleRate(uid);
+      if (request === sampleRateRequest) inputSampleRate = hz;
+    } catch (e) {
+      if (request === sampleRateRequest) inputSampleRateError = errorMessage(e);
+    } finally {
+      resettingSampleRate = false;
     }
   }
 
@@ -213,6 +257,7 @@ export function createSettingsController() {
       await persistSettings((settings) => {
         settings.audio_device = value || null;
       });
+      await refreshInputSampleRate();
     } catch (e) {
       statusMessage = errorMessage(e);
     }
@@ -889,6 +934,10 @@ export function createSettingsController() {
     get app() { return app; },
     get audioDevices() { return audioDevices; },
     get pinUnavailable() { return pinUnavailable; },
+    get inputSampleRate() { return inputSampleRate; },
+    get inputSampleRateError() { return inputSampleRateError; },
+    get resettingSampleRate() { return resettingSampleRate; },
+    onResetSampleRate,
     setPinUnavailable,
     onInputDevicesChanged,
     get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },

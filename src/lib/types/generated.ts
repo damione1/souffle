@@ -117,6 +117,31 @@ async selectAudioDevice(deviceUid: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Current `kAudioDevicePropertyNominalSampleRate` for an input device.
+ * An empty UID uses the system default input. Read-only, never writes.
+ */
+async getInputSampleRate(deviceUid: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_input_sample_rate", { deviceUid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Set the device's nominal sample rate to 48 kHz (or the closest supported
+ * rate at or below it). Writes `kAudioDevicePropertyNominalSampleRate` once.
+ * Call only from an explicit Settings click.
+ */
+async resetInputSampleRate(deviceUid: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_input_sample_rate", { deviceUid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether this Mac has a battery (i.e. is a laptop). Gates the
  * clamshell-microphone setting in the UI — meaningless on a desktop Mac.
  */

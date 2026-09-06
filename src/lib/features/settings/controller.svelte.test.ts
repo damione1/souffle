@@ -224,6 +224,10 @@ describe("settings controller", () => {
         return Promise.resolve(fakeDevices);
       case "select_audio_device":
         return Promise.resolve(null);
+      case "get_input_sample_rate":
+        return Promise.resolve(48_000);
+      case "reset_input_sample_rate":
+        return Promise.resolve(48_000);
       case "check_summary_providers":
         return Promise.resolve({
           ollama_url: "http://localhost:11434",
@@ -343,6 +347,10 @@ describe("settings controller", () => {
           return Promise.resolve(fakeDevices);
         case "select_audio_device":
           return Promise.resolve(null);
+        case "get_input_sample_rate":
+          return Promise.resolve(48_000);
+        case "reset_input_sample_rate":
+          return Promise.resolve(48_000);
         case "check_summary_providers":
           return Promise.resolve({
             ollama_url: "http://localhost:11434",
@@ -935,5 +943,61 @@ describe("settings controller", () => {
       hidden: ["ghost-mic"],
       known: [{ uid: "ghost-mic", name: "Old headset", last_seen: 1 }],
     });
+  });
+
+  it("mount reads the default mic sample rate and never resets it", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    expect(mockInvoke).toHaveBeenCalledWith("get_input_sample_rate", { deviceUid: "builtin-mic" });
+    expect(mockInvoke).not.toHaveBeenCalledWith("reset_input_sample_rate", expect.anything());
+    expect(ctrl.inputSampleRate).toBe(48_000);
+  });
+
+  it("onResetSampleRate writes 48 kHz only after the click", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_input_sample_rate") return Promise.resolve(96_000);
+      if (cmd === "reset_input_sample_rate") return Promise.resolve(48_000);
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    expect(ctrl.inputSampleRate).toBe(96_000);
+    expect(mockInvoke).not.toHaveBeenCalledWith("reset_input_sample_rate", expect.anything());
+
+    mockInvoke.mockClear();
+    await ctrl.onResetSampleRate();
+
+    expect(mockInvoke).toHaveBeenCalledWith("reset_input_sample_rate", { deviceUid: "builtin-mic" });
+    expect(ctrl.inputSampleRate).toBe(48_000);
+  });
+
+  it("a sample-rate read that lands after a mic switch does not overwrite the new one", async () => {
+    const pending: Record<string, (hz: number) => void> = {};
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_input_sample_rate") {
+        const uid = (args as { deviceUid: string }).deviceUid;
+        return new Promise<number>((resolve) => {
+          pending[uid] = resolve;
+        });
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    const mounted = ctrl.mount();
+    await vi.waitFor(() => expect(pending["builtin-mic"]).toBeDefined());
+
+    const switched = ctrl.onDeviceChange({
+      target: { value: "usb-mic" },
+    } as unknown as Event);
+    await vi.waitFor(() => expect(pending["usb-mic"]).toBeDefined());
+
+    pending["usb-mic"](48_000);
+    pending["builtin-mic"](96_000);
+    await Promise.all([mounted, switched]);
+
+    expect(ctrl.inputSampleRate).toBe(48_000);
   });
 });

@@ -25,6 +25,14 @@ export async function selectAudioDevice(deviceUid: string): Promise<void> {
   await unwrap(commands.selectAudioDevice(deviceUid));
 }
 
+export async function getInputSampleRate(deviceUid: string): Promise<number> {
+  return unwrap(commands.getInputSampleRate(deviceUid));
+}
+
+export async function resetInputSampleRate(deviceUid: string): Promise<number> {
+  return unwrap(commands.resetInputSampleRate(deviceUid));
+}
+
 export async function getSystemAudioSupport(): Promise<boolean> {
   return commands.getSystemAudioSupport();
 }
