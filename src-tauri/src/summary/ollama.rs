@@ -264,11 +264,14 @@ pub fn is_summary_capable_model(model: &str) -> bool {
     // worse than offering nothing, because the feature then looks broken
     // instead of unconfigured.
     let speech_or_embedding = ["whisper", "speech", "wav2vec", "embed", "minilm"];
+    // llava covers bakllava and the llava-llama3 / llava-phi3 variants.
+    let vision_models = ["llava", "moondream"];
     // "coder" alone covers starcoder, sqlcoder, deepseek-coder and qwen-coder.
     let code_models = ["coder", "codellama", "codegemma", "codestral", "code-"];
     if speech_or_embedding
         .iter()
         .chain(code_models.iter())
+        .chain(vision_models.iter())
         .any(|keyword| lower.contains(keyword))
     {
         return false;
@@ -277,10 +280,19 @@ pub fn is_summary_capable_model(model: &str) -> bool {
     let blocked_tokens = [
         "stt", "asr", "e5", "bge", "gte", "code", "audio", "omni", "vl", "vision", "tts", "xtts",
     ];
+    // Ollama also glues the modality onto the version number (`qwen2.5vl`),
+    // which never yields a standalone token. Only reject the glued form when a
+    // digit precedes it, so `audiolm` and friends stay accepted.
+    let glued_modalities = ["vl", "vision", "audio", "omni", "tts"];
     let tokens = lower.split(|c: char| !c.is_alphanumeric());
-    !tokens
-        .into_iter()
-        .any(|token| blocked_tokens.contains(&token))
+    !tokens.into_iter().any(|token| {
+        blocked_tokens.contains(&token)
+            || glued_modalities.iter().any(|modality| {
+                token
+                    .strip_suffix(modality)
+                    .is_some_and(|head| head.ends_with(|c: char| c.is_ascii_digit()))
+            })
+    })
 }
 
 fn summary_model_priority(model: &str) -> usize {
@@ -689,6 +701,11 @@ mod tests {
         assert!(!is_summary_capable_model("qwen2.5-omni"));
         assert!(!is_summary_capable_model("qwen2.5-vl:7b"));
         assert!(!is_summary_capable_model("llama3.2-vision"));
+        assert!(!is_summary_capable_model("qwen2.5vl:7b"));
+        assert!(!is_summary_capable_model("qwen3vl:8b"));
+        assert!(!is_summary_capable_model("llava:13b"));
+        assert!(!is_summary_capable_model("bakllava"));
+        assert!(!is_summary_capable_model("moondream"));
         assert!(is_summary_capable_model("qwen2.5:7b"));
         assert_eq!(
             sorted_summary_capable_models(&["qwen2-audio".into(), "qwen2.5:7b".into()]),
@@ -707,6 +724,7 @@ mod tests {
         assert!(is_summary_capable_model("faste5ish:latest"));
         assert!(is_summary_capable_model("vgte-model:latest"));
         assert!(is_summary_capable_model("audiolm:latest"));
+        assert!(is_summary_capable_model("supervision-writer:latest"));
     }
 
     /// A code model can follow the polish prompt just enough to look like it
