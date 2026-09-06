@@ -179,9 +179,9 @@ async pasteText(text: string, delayMs: number, method: PasteMethod) : Promise<Re
  * buttons and click callbacks are unreliable on macOS with the
  * notification plugin.
  */
-async notifyPasteFailed(error: string) : Promise<Result<null, string>> {
+async notifyPasteFailed(error: string, savedToHistory: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("notify_paste_failed", { error }) };
+    return { status: "ok", data: await TAURI_INVOKE("notify_paste_failed", { error, savedToHistory }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

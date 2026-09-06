@@ -119,13 +119,15 @@ async function finalizeDictationText(
 }
 
 /** Persist a finished dictation and surface it in the timeline. */
-async function saveToHistory(text: string) {
-  if (!text.trim()) return;
+async function saveToHistory(text: string): Promise<boolean> {
+  if (!text.trim()) return false;
   try {
     await addDictationEntry(text.trim());
     await createTimelineController().refresh();
+    return true;
   } catch (e) {
     console.warn("Failed to save dictation entry:", e);
+    return false;
   }
 }
 
@@ -333,7 +335,7 @@ function createTranscriptionControllerInstance() {
           statusMessage = finalized.warning;
         }
 
-        await saveToHistory(finalized.text);
+        const saved = await saveToHistory(finalized.text);
 
         if (finalized.text) {
           if (fromShortcut && app.settings.auto_paste) {
@@ -352,7 +354,7 @@ function createTranscriptionControllerInstance() {
               // the window (SOU-053). Best-effort: a notification failure
               // must not mask the paste failure itself.
               try {
-                await notifyPasteFailed(message);
+                await notifyPasteFailed(message, saved);
               } catch (notifyError) {
                 console.warn("Paste failure notification failed:", notifyError);
               }

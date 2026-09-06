@@ -803,24 +803,40 @@ pub fn paste_text(
 /// Pure decision: notification text for a failed paste, split out from
 /// `notify_paste_failed` so it's testable without a live AppHandle (mirrors
 /// `copy_notification_text` in `tray.rs`).
-fn paste_failure_notification_text(french: bool, error: &str) -> (&'static str, &'static str) {
+fn paste_failure_notification_text(french: bool, error: &str, saved_to_history: bool) -> (&'static str, &'static str) {
     let accessibility_missing = error.contains("Accessibility permission missing");
-    match (french, accessibility_missing) {
-        (false, true) => (
+    match (french, accessibility_missing, saved_to_history) {
+        (false, true, true) => (
             "Paste failed",
             "Accessibility permission is needed to paste automatically. Your dictation was saved to history.",
         ),
-        (true, true) => (
+        (false, true, false) => (
+            "Paste failed",
+            "Accessibility permission is needed to paste automatically.",
+        ),
+        (true, true, true) => (
             "Collage échoué",
             "L'autorisation Accessibilité est nécessaire pour coller automatiquement. Votre dictée a été enregistrée dans l'historique.",
         ),
-        (false, false) => (
+        (true, true, false) => (
+            "Collage échoué",
+            "L'autorisation Accessibilité est nécessaire pour coller automatiquement.",
+        ),
+        (false, false, true) => (
             "Paste failed",
             "The last dictation couldn't be pasted automatically. It was saved to history.",
         ),
-        (true, false) => (
+        (false, false, false) => (
+            "Paste failed",
+            "The last dictation couldn't be pasted automatically.",
+        ),
+        (true, false, true) => (
             "Collage échoué",
             "La dernière dictée n'a pas pu être collée automatiquement. Elle a été enregistrée dans l'historique.",
+        ),
+        (true, false, false) => (
+            "Collage échoué",
+            "La dernière dictée n'a pas pu être collée automatiquement.",
         ),
     }
 }
@@ -834,13 +850,13 @@ fn paste_failure_notification_text(french: bool, error: &str) -> (&'static str, 
 /// notification plugin.
 #[tauri::command]
 #[specta::specta]
-pub fn notify_paste_failed(app: AppHandle, error: String) -> Result<(), String> {
+pub fn notify_paste_failed(app: AppHandle, error: String, saved_to_history: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
     let french = AppSettings::load(&state.db)
         .map(|settings| settings.locale.starts_with("fr"))
         .unwrap_or(false);
 
-    let (title, body) = paste_failure_notification_text(french, &error);
+    let (title, body) = paste_failure_notification_text(french, &error, saved_to_history);
     app.notification()
         .builder()
         .title(title)
@@ -1057,18 +1073,33 @@ mod tests {
         let (title, body) = paste_failure_notification_text(
             false,
             crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            true,
         );
         assert_eq!(title, "Paste failed");
         assert!(body.contains("Accessibility permission"));
         assert!(body.contains("saved to history"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(
+            false,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            false,
+        );
+        assert_eq!(title_not_saved, "Paste failed");
+        assert!(body_not_saved.contains("Accessibility permission"));
+        assert!(!body_not_saved.contains("saved to history"));
     }
 
     #[test]
     fn paste_failure_notification_falls_back_to_a_generic_message() {
-        let (title, body) = paste_failure_notification_text(false, "Enigo init: some OS error");
+        let (title, body) = paste_failure_notification_text(false, "Enigo init: some OS error", true);
         assert_eq!(title, "Paste failed");
         assert!(!body.contains("Accessibility permission"));
         assert!(body.contains("saved to history"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(false, "Enigo init: some OS error", false);
+        assert_eq!(title_not_saved, "Paste failed");
+        assert!(!body_not_saved.contains("Accessibility permission"));
+        assert!(!body_not_saved.contains("saved to history"));
     }
 
     #[test]
@@ -1076,8 +1107,19 @@ mod tests {
         let (title, body) = paste_failure_notification_text(
             true,
             crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            true,
         );
         assert_eq!(title, "Collage échoué");
         assert!(body.contains("Accessibilité"));
+        assert!(body.contains("l'historique"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(
+            true,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            false,
+        );
+        assert_eq!(title_not_saved, "Collage échoué");
+        assert!(body_not_saved.contains("Accessibilité"));
+        assert!(!body_not_saved.contains("l'historique"));
     }
 }

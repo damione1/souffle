@@ -281,8 +281,51 @@ describe("transcription controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.anything());
     expect(mockInvoke).toHaveBeenCalledWith("notify_paste_failed", {
       error: "Accessibility permission missing.",
+      savedToHistory: true,
     });
     expect(ctrl.statusMessage).toContain("Paste failed");
+  });
+
+  it("notifies outside the window when a shortcut paste fails and history fails", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "paste_text") {
+        return Promise.reject("Accessibility permission missing.");
+      }
+      if (cmd === "add_dictation_entry") {
+        return Promise.reject("DB error");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = {
+      ...ctrl.app.settings,
+      auto_paste: true,
+      dictation_polish_enabled: false,
+    };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+
+    await ctrl.toggleRecording(true);
+
+    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith("notify_paste_failed", {
+      error: "Accessibility permission missing.",
+      savedToHistory: false,
+    });
   });
 
   it("does not notify when a shortcut paste succeeds", async () => {
