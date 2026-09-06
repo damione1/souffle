@@ -22,10 +22,6 @@ const VAD_PAUSE_THRESHOLD: f32 = 0.5;
 /// Safety margin (frames) on top of the ASR delay before trusting the VAD
 /// pause streak: semantic VAD can fire slightly before speech fully clears.
 const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
-/// Semantic-pause streak before a soft context refresh is allowed. ~0.5s at
-/// 12.5 Hz — long enough to sit between utterances, short enough to fire
-/// before the LM context window saturates.
-const REFRESH_PAUSE_FRAMES: usize = 6;
 /// Soft refresh fires at this fraction of `config.context` when pausing
 /// (Kyutai/Unmute recommend clearing KV between speech turns).
 const REFRESH_SOFT_CONTEXT_NUM: usize = 6;
@@ -136,12 +132,25 @@ enum RefreshDecision {
     Lane { batch_idx: usize, kind: RefreshKind },
 }
 
+/// Pause streak long enough that the ASR delay window holds only silence.
+/// Shared by `decide_refresh` (when a KV clear is safe) and `tail_drained_for`
+/// (when the stop-time silence suffix can be skipped), so the two cannot drift.
+fn drained_pause_frames(emission_delay_frames: usize) -> usize {
+    emission_delay_frames + VAD_FLUSH_MARGIN_FRAMES
+}
+
 /// Decide proactive KV refresh before the next frame.
+///
+/// `emission_delay_frames` is how far the decoder lags the audio (`asr_delay_in_tokens`).
+/// A pause-aligned clear is only safe once the VAD streak covers that lag plus
+/// [`VAD_FLUSH_MARGIN_FRAMES`]: shorter pauses still have an in-flight word (and
+/// the last `audio_delay` seconds of audio) sitting in `ItemState`.
 fn decide_refresh(
     frames_since_refresh: usize,
     context: usize,
     vad_pause_streak: &[usize],
     batch_size: usize,
+    emission_delay_frames: usize,
 ) -> RefreshDecision {
     if context == 0 || frames_since_refresh == 0 {
         return RefreshDecision::None;
@@ -157,10 +166,11 @@ fn decide_refresh(
         return RefreshDecision::None;
     }
 
+    let pause_threshold = drained_pause_frames(emission_delay_frames);
     let pausing: Vec<usize> = vad_pause_streak
         .iter()
         .enumerate()
-        .filter(|(_, streak)| **streak >= REFRESH_PAUSE_FRAMES)
+        .filter(|(_, streak)| **streak >= pause_threshold)
         .map(|(idx, _)| idx)
         .collect();
 
@@ -173,14 +183,10 @@ fn decide_refresh(
     }
 
     if pausing.len() == 1 {
-        let paused = pausing[0];
-        let other = 1 - paused;
-        if vad_pause_streak.get(other).copied().unwrap_or(0) < REFRESH_PAUSE_FRAMES {
-            return RefreshDecision::Lane {
-                batch_idx: paused,
-                kind: RefreshKind::SoftPause,
-            };
-        }
+        return RefreshDecision::Lane {
+            batch_idx: pausing[0],
+            kind: RefreshKind::SoftPause,
+        };
     }
 
     RefreshDecision::Full(RefreshKind::SoftPause)
@@ -626,6 +632,7 @@ impl KyutaiEngine {
             model.config.context,
             &model.vad_pause_streak,
             batch_size,
+            Self::emission_delay_frames(model),
         ) {
             RefreshDecision::None => {}
             RefreshDecision::Full(kind) => Self::refresh_loaded(model, kind)?,
@@ -643,8 +650,9 @@ impl KyutaiEngine {
     /// Whether the engine's own semantic VAD has paused long enough that
     /// every word already spoken has had time to clear the pipeline: a pause
     /// streak covering the emission delay, plus margin. Shared by `flush`
-    /// (skip the silence suffix) and the `tail_drained` trait method (cut a
-    /// single-stream drain window short) so the two can't drift apart.
+    /// (skip the silence suffix), `decide_refresh` (when a KV clear is safe),
+    /// and the `tail_drained` trait method (cut a single-stream drain window
+    /// short) so the three can't drift apart.
     ///
     /// Diarized mode always returns false: lane 0's pause streak says
     /// nothing about lane 1 (system audio), and `DiarizedMode` doesn't
@@ -656,7 +664,7 @@ impl KyutaiEngine {
         }
         let delay_frames = Self::emission_delay_frames(model);
         let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
-        pause_streak >= delay_frames + VAD_FLUSH_MARGIN_FRAMES
+        pause_streak >= drained_pause_frames(delay_frames)
     }
 
     fn note_vad_pause(model: &mut LoadedModel, prs: &[Vec<f32>]) {
@@ -1345,18 +1353,39 @@ mod tests {
         assert_eq!(KyutaiEngine::prefix_frame_count(2.0), 25);
     }
 
+    /// stt-1b-en_fr: audio_delay_seconds = 0.5 → 6 frames at 12.5 Hz.
+    const STT_1B_DELAY: usize = 6;
+    /// stt-2.6b-en: audio_delay_seconds = 2.5 → 31 frames at 12.5 Hz.
+    const STT_26B_DELAY: usize = 31;
+
+    #[test]
+    fn drained_pause_frames_is_delay_plus_margin() {
+        assert_eq!(drained_pause_frames(STT_1B_DELAY), 12);
+        assert_eq!(drained_pause_frames(STT_26B_DELAY), 37);
+    }
+
     #[test]
     fn decide_refresh_none_before_soft_window() {
         let streak = [0usize];
-        assert_eq!(decide_refresh(100, 375, &streak, 1), RefreshDecision::None);
-        assert_eq!(decide_refresh(224, 375, &streak, 1), RefreshDecision::None);
-        assert_eq!(decide_refresh(225, 375, &[0], 1), RefreshDecision::None);
+        assert_eq!(
+            decide_refresh(100, 375, &streak, 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(224, 375, &streak, 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(225, 375, &[0], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
     }
 
     #[test]
     fn decide_refresh_soft_pause_at_60_percent_context() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(225, 375, &[8], 1),
+            decide_refresh(225, 375, &[drained], 1, STT_1B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
     }
@@ -1364,25 +1393,39 @@ mod tests {
     #[test]
     fn decide_refresh_hard_deadline_near_context() {
         assert_eq!(
-            decide_refresh(350, 375, &[0], 1),
+            decide_refresh(350, 375, &[0], 1, STT_1B_DELAY),
             RefreshDecision::Full(RefreshKind::HardDeadline)
         );
         assert_eq!(
-            decide_refresh(350, 375, &[8], 1),
+            decide_refresh(
+                350,
+                375,
+                &[drained_pause_frames(STT_1B_DELAY)],
+                1,
+                STT_1B_DELAY
+            ),
             RefreshDecision::Full(RefreshKind::HardDeadline)
         );
     }
 
     #[test]
     fn decide_refresh_ignores_zero_context_or_fresh_epoch() {
-        assert_eq!(decide_refresh(400, 0, &[8], 1), RefreshDecision::None);
-        assert_eq!(decide_refresh(0, 375, &[8], 1), RefreshDecision::None);
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(400, 0, &[drained], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(0, 375, &[drained], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
     }
 
     #[test]
     fn decide_refresh_dual_one_lane_paused_other_active() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[8, 2], 2),
+            decide_refresh(300, 375, &[drained, 2], 2, STT_1B_DELAY),
             RefreshDecision::Lane {
                 batch_idx: 0,
                 kind: RefreshKind::SoftPause,
@@ -1392,9 +1435,45 @@ mod tests {
 
     #[test]
     fn decide_refresh_dual_both_paused_full_refresh() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[8, 10], 2),
+            decide_refresh(300, 375, &[drained, drained + 2], 2, STT_1B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+    }
+
+    #[test]
+    fn decide_refresh_flat_six_frame_pause_does_not_clear_while_delay_is_in_flight() {
+        // The old REFRESH_PAUSE_FRAMES = 6 sat exactly on the 1B delay and five
+        // times below the 2.6B delay. Either way, six frames of pause still
+        // hold an in-flight word.
+        assert_eq!(
+            decide_refresh(225, 375, &[6], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[6], 1, STT_26B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[8, 2], 2, STT_26B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
+    #[test]
+    fn decide_refresh_fires_once_the_delay_window_holds_only_silence() {
+        let drained = drained_pause_frames(STT_26B_DELAY);
+        assert_eq!(
+            decide_refresh(300, 375, &[drained], 1, STT_26B_DELAY),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, 2], 2, STT_26B_DELAY),
+            RefreshDecision::Lane {
+                batch_idx: 0,
+                kind: RefreshKind::SoftPause,
+            }
         );
     }
 
