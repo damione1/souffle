@@ -242,13 +242,26 @@ async stopMeetingRecording() : Promise<Result<string, string>> {
 }
 },
 /**
- * Return and clear the meeting id paused by the system-sleep handler, if
- * any. The frontend calls this on `SystemWokeUp` (and again on webview
- * visibility change, belt and braces) to decide whether to offer/auto-start
- * a resume.
+ * Return the meeting id paused by the system-sleep handler, if any, without
+ * clearing it. The frontend calls this on `SystemWokeUp` (and again on
+ * webview visibility change, belt and braces) to decide whether to
+ * offer/auto-start a resume. Non-destructive because the sleep-triggered
+ * stop may still be draining when wake fires: the frontend needs to be
+ * able to check again once it finishes, rather than have the first check
+ * burn the id before a resume was actually attempted.
  */
-async takeSleepPausedMeeting() : Promise<string | null> {
-    return await TAURI_INVOKE("take_sleep_paused_meeting");
+async peekSleepPausedMeeting() : Promise<string | null> {
+    return await TAURI_INVOKE("peek_sleep_paused_meeting");
+},
+/**
+ * Clear the meeting id paused by the system-sleep handler. The frontend
+ * calls this after a resume actually starts, or after the user explicitly
+ * declines to resume. `launch_meeting` also clears it unconditionally on
+ * every recording start, so a resume that goes through the normal start
+ * path never needs this to avoid re-offering the same meeting later.
+ */
+async clearSleepPausedMeeting() : Promise<void> {
+    await TAURI_INVOKE("clear_sleep_paused_meeting");
 },
 /**
  * List all saved meetings
@@ -1570,10 +1583,12 @@ export type SystemAudioStatus = { active: boolean;
 reason: string | null }
 /**
  * The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
- * The frontend calls `take_sleep_paused_meeting` on receiving this (and again
+ * The frontend calls `peek_sleep_paused_meeting` on receiving this (and again
  * on webview visibility change, in case the webview itself was suspended
  * when this fired) to see whether a meeting was paused by sleep and, if so,
- * offer to resume it.
+ * offer to resume it. If the sleep-triggered stop is still draining, the
+ * frontend waits for the machine to report `ready` before resuming rather
+ * than giving up.
  */
 export type SystemWokeUp = null
 export type Theme = "dark" | "light" | "system"
