@@ -92,8 +92,8 @@ cd src-tauri
 cargo run -p souffle-tts-fixtures -- tts-fixtures/specs/sou-030-punctuation.toml
 ```
 
-Useful flags: `--only <fixture-name>` to render one, `--dry-run` to list what
-would be written.
+Useful flags: `--only <name>` to render one fixture, or a whole ladder by its
+prefix (`--only hesitation-a`). `--dry-run` lists what would be written.
 
 If regenerating changes the committed WAVs, re-run the test and update the
 baseline numbers in `punctuation_threshold.rs` and in the SOU-030 ticket. A
@@ -158,6 +158,9 @@ not the speech. Its limits, worth stating in any result:
 - Prosody at a clause boundary is flatter than natural speech. A semantic VAD
   partly keys on intonation, so absolute thresholds may sit slightly differently
   for real voices. Relative comparisons between rungs stay valid.
+- Each clause keeps a few tens of ms of decaying tail from `say`. The inserted
+  digital silence is still exact; the acoustic pause is slightly longer than
+  the labeled gap. Relative comparisons between rungs stay valid.
 - English and French voices only, whatever the OS ships.
 
 The generator hides the backend behind a `SpeechBackend` trait, so swapping in

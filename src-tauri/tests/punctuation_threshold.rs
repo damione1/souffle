@@ -40,11 +40,44 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/audio/sou-030")
 }
 
+fn fixture_path(ladder: &str, gap_ms: u32) -> PathBuf {
+    fixtures_dir().join(format!("{ladder}-gap{gap_ms:04}ms.wav"))
+}
+
+fn require_fixtures() {
+    let missing: Vec<PathBuf> = LADDERS
+        .iter()
+        .flat_map(|ladder| GAPS_MS.iter().map(move |gap| fixture_path(ladder, *gap)))
+        .filter(|path| !path.is_file())
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "missing fixture(s): {}\nGenerate with: cargo run -p souffle-tts-fixtures -- tts-fixtures/specs/sou-030-punctuation.toml",
+        missing
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
 fn load_wav_mono(path: &Path) -> (Vec<f32>, u32) {
     let mut reader =
         hound::WavReader::open(path).unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
     let spec = reader.spec();
     assert_eq!(spec.channels, 1, "{} must be mono", path.display());
+    assert_eq!(
+        spec.bits_per_sample,
+        16,
+        "{} must be 16-bit PCM",
+        path.display()
+    );
+    assert_eq!(
+        spec.sample_format,
+        hound::SampleFormat::Int,
+        "{} must be integer PCM",
+        path.display()
+    );
     let samples: Vec<f32> = reader
         .samples::<i16>()
         .map(|s| s.expect("read sample") as f32 / i16::MAX as f32)
@@ -114,6 +147,7 @@ fn has_internal_sentence_break(text: &str) -> bool {
 #[test]
 #[ignore = "loads the real 2.2 GB Kyutai model; run locally with --ignored"]
 fn kyutai_ends_a_sentence_on_a_short_hesitation_pause() {
+    require_fixtures();
     let profile = resolve_transcription_profile(
         Some(KYUTAI_ENGINE_ID),
         Some(KYUTAI_MODEL_ID),
@@ -143,7 +177,7 @@ fn kyutai_ends_a_sentence_on_a_short_hesitation_pause() {
     for ladder in LADDERS {
         println!("\n=== {ladder} ===");
         for gap_ms in GAPS_MS {
-            let path = fixtures_dir().join(format!("{ladder}-gap{gap_ms:04}ms.wav"));
+            let path = fixture_path(ladder, gap_ms);
             let (samples, rate) = load_wav_mono(&path);
             let pcm = resample(samples, rate, engine_rate);
 
@@ -238,4 +272,6 @@ fn internal_sentence_break_detection() {
     assert!(!has_internal_sentence_break("Une seule phrase"));
     assert!(!has_internal_sentence_break(""));
     assert!(has_internal_sentence_break("Vraiment ? Oui bien sûr."));
+    assert!(!has_internal_sentence_break("Une seule phrase..."));
+    assert!(has_internal_sentence_break("Stop. Go."));
 }

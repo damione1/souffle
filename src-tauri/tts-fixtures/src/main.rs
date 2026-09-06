@@ -17,6 +17,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 type Res<T> = Result<T, Box<dyn Error>>;
 
@@ -135,8 +138,10 @@ struct MacosSay {
 
 impl SpeechBackend for MacosSay {
     fn synthesize(&self, text: &str, sample_rate_hz: u32) -> Res<Vec<i16>> {
-        let tmp =
-            std::env::temp_dir().join(format!("souffle-tts-clause-{}.wav", std::process::id()));
+        if !cfg!(target_os = "macos") {
+            return Err("macos_say requires macOS (`say` is not available)".into());
+        }
+        let tmp = TempWav::new();
         let status = Command::new("say")
             .arg("-v")
             .arg(&self.voice)
@@ -145,19 +150,35 @@ impl SpeechBackend for MacosSay {
             .arg(format!("--data-format=LEI16@{sample_rate_hz}"))
             .arg("--file-format=WAVE")
             .arg("-o")
-            .arg(&tmp)
+            .arg(&tmp.0)
             .arg(text)
             .status()?;
         if !status.success() {
             return Err(format!("say failed for {text:?} (voice {})", self.voice).into());
         }
-        let samples = read_mono_i16(&tmp, sample_rate_hz)?;
-        let _ = std::fs::remove_file(&tmp);
-        Ok(samples)
+        read_mono_i16(&tmp.0, sample_rate_hz)
     }
 
     fn describe(&self) -> String {
         format!("macOS say (voice {}, {} wpm)", self.voice, self.rate_wpm)
+    }
+}
+
+/// Unique temp WAV that is always deleted, including on `say` / decode errors.
+struct TempWav(PathBuf);
+
+impl TempWav {
+    fn new() -> Self {
+        let n = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        Self(
+            std::env::temp_dir().join(format!("souffle-tts-clause-{}-{n}.wav", std::process::id())),
+        )
+    }
+}
+
+impl Drop for TempWav {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -177,6 +198,15 @@ fn read_mono_i16(path: &Path, expect_rate: u32) -> Res<Vec<i16>> {
             "{}: expected {expect_rate} Hz, got {} Hz",
             path.display(),
             spec.sample_rate
+        )
+        .into());
+    }
+    if spec.bits_per_sample != 16 || spec.sample_format != hound::SampleFormat::Int {
+        return Err(format!(
+            "{}: expected 16-bit PCM, got {:?}-bit {:?}",
+            path.display(),
+            spec.bits_per_sample,
+            spec.sample_format
         )
         .into());
     }
@@ -284,7 +314,7 @@ fn main() -> Res<()> {
     let mut fixtures: Vec<Fixture> = spec.ladder.iter().flat_map(|l| l.expand()).collect();
     fixtures.extend(spec.fixture.iter().cloned());
     if let Some(only) = &args.only {
-        fixtures.retain(|f| &f.name == only);
+        fixtures.retain(|f| matches_only(&f.name, only));
         if fixtures.is_empty() {
             return Err(format!("no fixture named {only} in {}", args.spec.display()).into());
         }
@@ -316,4 +346,84 @@ fn spec_base_dir() -> Res<PathBuf> {
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| "cannot locate src-tauri from the crate manifest".into())
+}
+
+/// Exact name, or a prefix so `--only hesitation-a` renders the whole ladder.
+fn matches_only(name: &str, only: &str) -> bool {
+    name == only || name.starts_with(&format!("{only}-"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str, clauses: &[&str], gaps_ms: &[u32]) -> Fixture {
+        Fixture {
+            name: name.into(),
+            clauses: clauses.iter().map(|s| (*s).to_string()).collect(),
+            gaps_ms: gaps_ms.to_vec(),
+            lead_ms: 300,
+            trail_ms: 800,
+        }
+    }
+
+    #[test]
+    fn ladder_names_zero_pad_the_gap() {
+        let ladder = Ladder {
+            name: "hesitation-a".into(),
+            clauses: vec!["a".into(), "b".into()],
+            gaps_ms: vec![100, 1000],
+            lead_ms: 300,
+            trail_ms: 800,
+        };
+        let expanded = ladder.expand();
+        assert_eq!(expanded[0].name, "hesitation-a-gap0100ms");
+        assert_eq!(expanded[1].name, "hesitation-a-gap1000ms");
+        assert_eq!(expanded[0].gaps_ms, vec![100]);
+        assert_eq!(expanded[1].gaps_ms, vec![1000]);
+    }
+
+    #[test]
+    fn gap_before_reuses_a_single_value() {
+        let f = fixture("x", &["a", "b", "c"], &[250]);
+        assert_eq!(f.gap_before(1).unwrap(), 250);
+        assert_eq!(f.gap_before(2).unwrap(), 250);
+    }
+
+    #[test]
+    fn gap_before_uses_per_pair_values() {
+        let f = fixture("x", &["a", "b", "c"], &[250, 900]);
+        assert_eq!(f.gap_before(1).unwrap(), 250);
+        assert_eq!(f.gap_before(2).unwrap(), 900);
+    }
+
+    #[test]
+    fn gap_before_rejects_wrong_arity() {
+        let f = fixture("x", &["a", "b", "c"], &[1, 2, 3]);
+        assert!(f.gap_before(1).is_err());
+    }
+
+    #[test]
+    fn gap_before_rejects_empty_gaps() {
+        let f = fixture("x", &["a", "b"], &[]);
+        assert!(f.gap_before(1).is_err());
+    }
+
+    #[test]
+    fn silence_duration_is_exact_at_16k() {
+        assert_eq!(silence(100, 16_000).len(), 1_600);
+        assert_eq!(silence(300, 16_000).len(), 4_800);
+        assert!(silence(100, 16_000).iter().all(|&s| s == 0));
+    }
+
+    #[test]
+    fn only_matches_ladder_prefix() {
+        assert!(matches_only("hesitation-a-gap0100ms", "hesitation-a"));
+        assert!(matches_only(
+            "hesitation-a-gap0100ms",
+            "hesitation-a-gap0100ms"
+        ));
+        assert!(!matches_only("hesitation-b-gap0100ms", "hesitation-a"));
+        assert!(matches_only("hesitation-a-gap0100ms", "hesitation"));
+    }
 }
