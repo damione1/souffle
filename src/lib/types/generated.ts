@@ -338,9 +338,9 @@ async saveEditedTranscript(id: string, editedTranscript: string | null) : Promis
  * register session corrections so later STT output of the same misspelling
  * is rewritten for the rest of this recording session.
  */
-async applyLiveParagraphEdit(meetingId: string, segmentStart: number, segmentEnd: number, newText: string) : Promise<Result<null, string>> {
+async applyLiveParagraphEdit(meetingId: string, segmentIndices: number[], newText: string) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("apply_live_paragraph_edit", { meetingId, segmentStart, segmentEnd, newText }) };
+    return { status: "ok", data: await TAURI_INVOKE("apply_live_paragraph_edit", { meetingId, segmentIndices, newText }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

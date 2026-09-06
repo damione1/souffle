@@ -89,11 +89,10 @@ export async function saveEditedTranscript(id: string, editedTranscript: string 
 
 export async function applyLiveParagraphEdit(
   meetingId: string,
-  segmentStart: number,
-  segmentEnd: number,
+  segmentIndices: number[],
   newText: string,
 ): Promise<void> {
-  await unwrap(commands.applyLiveParagraphEdit(meetingId, segmentStart, segmentEnd, newText));
+  await unwrap(commands.applyLiveParagraphEdit(meetingId, segmentIndices, newText));
 }
 
 /** Suggested filename for a meeting export (e.g. "2026-07-09-weekly-sync.md"). */

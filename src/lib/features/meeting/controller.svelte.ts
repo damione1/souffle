@@ -24,6 +24,7 @@ import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
 import { type AudioSeekTarget, resolveAudioSeekTarget } from "./audio-map";
 import { createLiveTranscript } from "./live-transcript.svelte";
+import { redistributeSegmentTexts } from "./live-edit";
 
 function defaultMeetingTitle(): string {
   return `Meeting ${new Date().toLocaleDateString()}`;
@@ -435,23 +436,6 @@ function createMeetingControllerInstance() {
     return meeting?.id ?? "";
   }
 
-  function redistributeSegmentTexts(segmentStart: number, segmentEnd: number, newText: string) {
-    const words = newText.trim().split(/\s+/).filter(Boolean);
-    const slice = liveMeetingSegments.slice(segmentStart, segmentEnd);
-    if (slice.length === 0) return;
-    if (slice.length === 1) {
-      slice[0].text = newText.trim();
-      return;
-    }
-    for (let i = 0; i < slice.length; i++) {
-      if (i + 1 < slice.length) {
-        slice[i].text = words[i] ?? "";
-      } else {
-        slice[i].text = words.slice(i).join(" ");
-      }
-    }
-  }
-
   async function addDictionaryAlias(term: string, pronunciation: string | null) {
     const trimmedTerm = term.trim();
     if (!trimmedTerm) return;
@@ -480,20 +464,36 @@ function createMeetingControllerInstance() {
     const trimmed = newText.trim();
     if (!trimmed || !isRecordingMeeting) return;
 
+    const current = [...liveTranscript.committed, ...liveTranscript.tail]
+      .find((paragraph) => paragraph.id === paragraphId);
+    if (!current) return;
+
+    const previousText = current.text;
+    const indices = current.segmentIndices;
+    const previousSegmentTexts = indices.map((index) => liveMeetingSegments[index]?.text ?? "");
+
     const updated = liveTranscript.editParagraph(paragraphId, trimmed);
     if (!updated) return;
 
-    const { start, end } = updated.segmentRange;
-    if (end <= start || end > liveMeetingSegments.length) return;
+    if (
+      indices.length === 0
+      || indices.some((index) => index < 0 || index >= liveMeetingSegments.length)
+    ) {
+      return;
+    }
 
-    redistributeSegmentTexts(start, end, trimmed);
+    redistributeSegmentTexts(liveMeetingSegments, indices, trimmed);
 
     const meetingId = recordingMeetingId();
     if (!meetingId) return;
 
     try {
-      await submitLiveParagraphEdit(meetingId, start, end, trimmed);
+      await submitLiveParagraphEdit(meetingId, indices, trimmed);
     } catch (e) {
+      liveTranscript.editParagraph(paragraphId, previousText);
+      for (let i = 0; i < indices.length; i++) {
+        liveMeetingSegments[indices[i]].text = previousSegmentTexts[i];
+      }
       statusMessage = errorMessage(e);
     }
   }

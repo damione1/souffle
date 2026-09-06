@@ -189,17 +189,14 @@ pub fn save_edited_transcript(
 pub fn apply_live_paragraph_edit(
     state: State<'_, AppState>,
     meeting_id: String,
-    segment_start: u32,
-    segment_end: u32,
+    segment_indices: Vec<u32>,
     new_text: String,
 ) -> Result<(), String> {
     use crate::filter::session_terms::derive_corrections_from_edit;
     use crate::lock_ext::MutexExt;
 
-    let segment_start = segment_start as usize;
-    let segment_end = segment_end as usize;
-    if segment_end <= segment_start {
-        return Err("Invalid segment range".into());
+    if segment_indices.is_empty() {
+        return Err("Paragraph has no segments".into());
     }
 
     let new_text = new_text.trim().to_string();
@@ -215,25 +212,29 @@ pub fn apply_live_paragraph_edit(
         if meeting.id != meeting_id {
             return Err("Meeting id mismatch".into());
         }
-        if segment_end > meeting.new_segments.len() {
-            return Err("Segment range out of bounds".into());
+
+        let indices = unique_ordered_indices(&segment_indices, meeting.new_segments.len())?;
+        let speaker = meeting.new_segments[indices[0]].speaker;
+        if indices
+            .iter()
+            .any(|&index| meeting.new_segments[index].speaker != speaker)
+        {
+            return Err("Paragraph edit spans more than one speaker".into());
         }
 
-        let slice = &meeting.new_segments[segment_start..segment_end];
-        let original_text = slice
+        let original_text = indices
             .iter()
-            .map(|segment| segment.text.as_str())
+            .map(|&index| meeting.new_segments[index].text.as_str())
             .collect::<Vec<_>>()
             .join(" ");
         let corrections = derive_corrections_from_edit(&original_text, &new_text);
 
-        redistribute_segment_texts(
-            &mut meeting.new_segments[segment_start..segment_end],
-            &new_text,
-        );
+        redistribute_segment_texts_at(&mut meeting.new_segments, &indices, &new_text);
 
         let global_base = meeting.existing_segments.len();
-        let db_updates: Vec<(i64, String)> = (segment_start..segment_end)
+        let db_updates: Vec<(i64, String)> = indices
+            .iter()
+            .copied()
             .filter(|index| *index < meeting.persisted_new_count)
             .map(|index| {
                 (
@@ -294,27 +295,49 @@ pub fn add_session_correction(
         .add_session_correction(SessionCorrection { misspelling, term })
 }
 
-fn redistribute_segment_texts(segments: &mut [TranscriptionSegment], new_text: &str) {
+fn unique_ordered_indices(raw: &[u32], len: usize) -> Result<Vec<usize>, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut indices = Vec::with_capacity(raw.len());
+    for &raw_index in raw {
+        let index = raw_index as usize;
+        if index >= len {
+            return Err("Segment range out of bounds".into());
+        }
+        if seen.insert(index) {
+            indices.push(index);
+        }
+    }
+    if indices.is_empty() {
+        return Err("Paragraph has no segments".into());
+    }
+    Ok(indices)
+}
+
+fn redistribute_segment_texts_at(
+    segments: &mut [TranscriptionSegment],
+    indices: &[usize],
+    new_text: &str,
+) {
     let words: Vec<&str> = new_text.split_whitespace().collect();
-    if segments.is_empty() {
+    if indices.is_empty() {
         return;
     }
     if words.is_empty() {
-        for segment in segments.iter_mut() {
-            segment.text.clear();
+        for &index in indices {
+            segments[index].text.clear();
         }
         return;
     }
-    if segments.len() == 1 {
-        segments[0].text = new_text.to_string();
+    if indices.len() == 1 {
+        segments[indices[0]].text = new_text.to_string();
         return;
     }
-    let last_index = segments.len() - 1;
-    for (index, segment) in segments.iter_mut().enumerate() {
-        if index < last_index {
-            segment.text = words.get(index).copied().unwrap_or("").to_string();
+    let last = indices.len() - 1;
+    for (offset, &index) in indices.iter().enumerate() {
+        if offset < last {
+            segments[index].text = words.get(offset).copied().unwrap_or("").to_string();
         } else {
-            segment.text = words.get(index..).unwrap_or(&[""]).join(" ");
+            segments[index].text = words.get(offset..).unwrap_or(&[""]).join(" ");
         }
     }
 }
@@ -568,4 +591,69 @@ pub fn search_text(
         return Ok(vec![]);
     }
     state.db.search_text(&query, limit.unwrap_or(20))
+}
+
+#[cfg(test)]
+mod live_edit {
+    use super::*;
+    use crate::engine::{Speaker, TranscriptionSegment};
+
+    fn seg(text: &str, speaker: Option<Speaker>) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: text.to_string(),
+            start_time: 0.0,
+            end_time: 0.5,
+            is_final: true,
+            language: None,
+            confidence: None,
+            speaker,
+        }
+    }
+
+    #[test]
+    fn redistribute_at_indices_leaves_the_other_speaker() {
+        let mut segments = vec![
+            seg("hello", Some(Speaker::Me)),
+            seg("hi", Some(Speaker::Them)),
+            seg("how", Some(Speaker::Me)),
+            seg("good", Some(Speaker::Them)),
+            seg("are", Some(Speaker::Me)),
+            seg("thanks", Some(Speaker::Them)),
+            seg("you", Some(Speaker::Me)),
+        ];
+        redistribute_segment_texts_at(&mut segments, &[0, 2, 4, 6], "hello how are we");
+        assert_eq!(
+            segments
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>(),
+            ["hello", "hi", "how", "good", "are", "thanks", "we"]
+        );
+    }
+
+    #[test]
+    fn unique_ordered_indices_rejects_out_of_bounds() {
+        assert!(unique_ordered_indices(&[0, 9], 3).is_err());
+        assert_eq!(
+            unique_ordered_indices(&[0, 2, 0, 4], 7).unwrap(),
+            vec![0, 2, 4]
+        );
+    }
+
+    #[test]
+    fn original_text_joins_listed_segments_in_display_order() {
+        let segments = vec![
+            seg("hello", Some(Speaker::Me)),
+            seg("hi", Some(Speaker::Them)),
+            seg("how", Some(Speaker::Me)),
+        ];
+        let indices = unique_ordered_indices(&[0, 2], segments.len()).unwrap();
+        let original: String = indices
+            .iter()
+            .map(|&index| segments[index].text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(original, "hello how");
+        assert_eq!(segments[1].text, "hi");
+    }
 }
