@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use tracing::info;
@@ -25,17 +25,26 @@ pub enum DownloadStatus {
     Error(String),
 }
 
-/// Check if all required model files exist locally.
+/// Check if all required model files exist locally and look complete.
+/// Presence alone is not enough: an empty or obviously truncated weight
+/// file must not count as downloaded (SOU-074).
+///
 /// For engines with a config.json that references extra files (mimi, tokenizer),
 /// those referenced files are also checked.
-pub fn model_exists(model_dir: &Path, required_files: &[String]) -> bool {
+pub fn model_exists(
+    model_dir: &Path,
+    required_files: &[String],
+    advertised_size: Option<u64>,
+) -> bool {
     if !model_dir.exists() {
         return false;
     }
-    if !required_files
-        .iter()
-        .all(|file| model_dir.join(file).exists())
-    {
+    if !required_files.iter().all(|file| {
+        file_meets_floor(
+            &model_dir.join(file),
+            min_bytes_for_file(file, advertised_size, required_files),
+        )
+    }) {
         return false;
     }
 
@@ -51,8 +60,47 @@ pub fn model_exists(model_dir: &Path, required_files: &[String]) -> bool {
     ["mimi_name", "tokenizer_name"].iter().all(|field| {
         config[*field]
             .as_str()
-            .is_none_or(|file_name| model_dir.join(file_name).exists())
+            .is_none_or(|file_name| file_meets_floor(&model_dir.join(file_name), 1))
     })
+}
+
+/// Determines if a file is a model weight file based on its extension.
+fn is_weight_file(file: &str) -> bool {
+    file.ends_with(".bin") || file.ends_with(".safetensors") || file.ends_with(".onnx")
+}
+
+/// Floor for a required file. Sidecars and multi-file weight sets need to be
+/// non-empty. A single advertised weight file (Whisper's 1.62 GB `.bin`) must
+/// also clear half the advertised size so an 80 MB stub cannot look ready.
+fn min_bytes_for_file(file: &str, advertised_size: Option<u64>, required_files: &[String]) -> u64 {
+    if !is_weight_file(file) {
+        return 1;
+    }
+    let weight_count = required_files.iter().filter(|f| is_weight_file(f)).count();
+    match (advertised_size, weight_count) {
+        (Some(total), 1) => (total / 2).max(1),
+        _ => 1,
+    }
+}
+
+/// Checks whether a file exists and its size meets or exceeds the minimum required bytes.
+/// Correctly handles edge cases like directories or broken symlinks by verifying it's a file.
+fn file_meets_floor(path: &Path, min_bytes: u64) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() >= min_bytes)
+}
+
+/// Refuse to treat a stream as finished when it produced no bytes, or when
+/// `Content-Length` was set and we did not receive that many.
+fn assert_download_complete(downloaded: u64, total_bytes: Option<u64>) -> Result<(), String> {
+    if downloaded == 0 {
+        return Err("Download ended with no data".into());
+    }
+    if let Some(expected) = total_bytes.filter(|&expected| downloaded != expected) {
+        return Err(format!(
+            "Download incomplete: received {downloaded} of {expected} bytes"
+        ));
+    }
+    Ok(())
 }
 
 /// Download model files from HuggingFace with streaming byte-level progress.
@@ -224,21 +272,42 @@ fn download_file_with_progress(
         status: DownloadStatus::Downloading,
     });
 
-    // Stream to a temp file, then rename
+    write_download_stream(
+        response,
+        dest,
+        file_label,
+        total_bytes,
+        completed_files,
+        total_files,
+        progress_callback,
+    )
+}
+
+/// Stream `reader` to `dest.part`, then rename. Leaves the `.part` and does
+/// not touch `dest` when the byte count disagrees with `Content-Length`.
+fn write_download_stream(
+    reader: impl Read,
+    dest: &Path,
+    file_label: &str,
+    total_bytes: Option<u64>,
+    completed_files: u32,
+    total_files: u32,
+    progress_callback: &impl Fn(DownloadProgress),
+) -> Result<(), String> {
     let temp_dest = dest.with_extension("part");
     let mut file = std::fs::File::create(&temp_dest)
         .map_err(|e| format!("Create temp file for {file_label}: {e}"))?;
 
     let mut downloaded: u64 = 0;
     let mut last_reported: u64 = 0;
-    // Report progress every ~500KB to avoid flooding the channel
     let report_interval: u64 = 512 * 1024;
 
-    let mut reader = std::io::BufReader::new(response);
+    let mut reader = std::io::BufReader::new(reader);
     let mut buf = [0u8; 64 * 1024];
 
     loop {
-        let n = std::io::Read::read(&mut reader, &mut buf)
+        let n = reader
+            .read(&mut buf)
             .map_err(|e| format!("Read error for {file_label}: {e}"))?;
         if n == 0 {
             break;
@@ -264,7 +333,10 @@ fn download_file_with_progress(
         .map_err(|e| format!("Flush error for {file_label}: {e}"))?;
     drop(file);
 
-    // Atomic rename
+    if let Err(e) = assert_download_complete(downloaded, total_bytes) {
+        return Err(format!("{file_label}: {e}"));
+    }
+
     std::fs::rename(&temp_dest, dest).map_err(|e| format!("Rename error for {file_label}: {e}"))?;
 
     Ok(())
@@ -340,7 +412,8 @@ mod tests {
     fn model_exists_returns_false_for_missing_dir() {
         assert!(!model_exists(
             std::path::Path::new("/nonexistent/path"),
-            &["model.bin".into()]
+            &["model.bin".into()],
+            None,
         ));
     }
 
@@ -348,23 +421,42 @@ mod tests {
     fn model_exists_returns_false_when_required_file_missing() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("other.bin"), "data").unwrap();
-        assert!(!model_exists(dir.path(), &["model.bin".into()]));
+        assert!(!model_exists(dir.path(), &["model.bin".into()], None));
     }
 
     #[test]
     fn model_exists_returns_true_when_all_required_files_present() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("model.bin"), "data").unwrap();
-        assert!(model_exists(dir.path(), &["model.bin".into()]));
+        assert!(model_exists(dir.path(), &["model.bin".into()], None));
     }
 
     #[test]
-    fn model_exists_returns_true_for_whisper_single_bin() {
+    fn model_exists_rejects_empty_required_file() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("ggml-large-v3-turbo.bin"), "data").unwrap();
+        fs::write(dir.path().join("model.bin"), b"").unwrap();
+        assert!(!model_exists(dir.path(), &["model.bin".into()], None));
+    }
+
+    #[test]
+    fn model_exists_rejects_truncated_whisper_bin() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("ggml-large-v3-turbo.bin"), [0u8; 16]).unwrap();
+        assert!(!model_exists(
+            dir.path(),
+            &["ggml-large-v3-turbo.bin".into()],
+            whisper_artifact().download_size_bytes,
+        ));
+    }
+
+    #[test]
+    fn model_exists_accepts_whisper_bin_above_the_floor() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("ggml-large-v3-turbo.bin"), vec![0u8; 600]).unwrap();
         assert!(model_exists(
             dir.path(),
-            &["ggml-large-v3-turbo.bin".into()]
+            &["ggml-large-v3-turbo.bin".into()],
+            Some(1_000),
         ));
     }
 
@@ -376,7 +468,8 @@ mod tests {
         fs::write(dir.path().join("model.safetensors"), "data").unwrap();
         assert!(!model_exists(
             dir.path(),
-            &["config.json".into(), "model.safetensors".into()]
+            &["config.json".into(), "model.safetensors".into()],
+            None,
         ));
     }
 
@@ -390,7 +483,8 @@ mod tests {
         fs::write(dir.path().join("tok.model"), "data").unwrap();
         assert!(model_exists(
             dir.path(),
-            &["config.json".into(), "model.safetensors".into()]
+            &["config.json".into(), "model.safetensors".into()],
+            None,
         ));
     }
 
@@ -400,8 +494,75 @@ mod tests {
         fs::write(dir.path().join("ggml-large-v3-turbo.bin"), "data").unwrap();
         assert!(model_exists(
             dir.path(),
-            &["ggml-large-v3-turbo.bin".into()]
+            &["ggml-large-v3-turbo.bin".into()],
+            None,
         ));
+    }
+
+    #[test]
+    fn assert_download_complete_rejects_short_and_empty() {
+        assert!(assert_download_complete(50, Some(100)).is_err());
+        assert!(assert_download_complete(0, None).is_err());
+        assert!(assert_download_complete(0, Some(0)).is_err());
+        assert!(assert_download_complete(100, Some(100)).is_ok());
+        assert!(assert_download_complete(40, None).is_ok());
+    }
+
+    #[test]
+    fn truncated_stream_leaves_part_and_skips_rename() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("model.bin");
+        let err = write_download_stream(
+            std::io::Cursor::new(vec![1u8; 50]),
+            &dest,
+            "model.bin",
+            Some(100),
+            0,
+            1,
+            &|_| {},
+        )
+        .unwrap_err();
+        assert!(err.contains("incomplete"), "{err}");
+        assert!(!dest.exists());
+        assert!(dest.with_extension("part").exists());
+    }
+
+    #[test]
+    fn empty_stream_does_not_rename() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("model.bin");
+        let err = write_download_stream(
+            std::io::Cursor::new(Vec::<u8>::new()),
+            &dest,
+            "model.bin",
+            None,
+            0,
+            1,
+            &|_| {},
+        )
+        .unwrap_err();
+        assert!(err.contains("no data"), "{err}");
+        assert!(!dest.exists());
+        assert!(dest.with_extension("part").exists());
+    }
+
+    #[test]
+    fn complete_stream_renames_into_dest() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("model.bin");
+        write_download_stream(
+            std::io::Cursor::new(vec![9u8; 40]),
+            &dest,
+            "model.bin",
+            Some(40),
+            0,
+            1,
+            &|_| {},
+        )
+        .unwrap();
+        assert!(dest.exists());
+        assert!(!dest.with_extension("part").exists());
+        assert_eq!(fs::metadata(&dest).unwrap().len(), 40);
     }
 
     #[test]

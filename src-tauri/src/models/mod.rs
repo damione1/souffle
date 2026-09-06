@@ -6,6 +6,9 @@ use crate::engine::{TranscriptionProfile, resolve_transcription_artifact};
 
 pub use download::{DownloadProgress, DownloadStatus};
 
+/// Checks whether the full set of required files for a given transcription profile
+/// exists in the expected model directory. If the profile references a legacy layout,
+/// files are automatically migrated to the new layout before checking.
 pub fn model_exists(profile: &TranscriptionProfile) -> bool {
     if ensure_model_layout(profile).is_err() {
         return false;
@@ -15,9 +18,15 @@ pub fn model_exists(profile: &TranscriptionProfile) -> bool {
         return false;
     };
 
-    download::model_exists(&model_dir(profile), &artifact.required_files)
+    download::model_exists(
+        &model_dir(profile),
+        &artifact.required_files,
+        artifact.download_size_bytes,
+    )
 }
 
+/// Returns the fully qualified local filesystem path where the model for a
+/// specific transcription profile is (or will be) stored.
 pub fn model_dir(profile: &TranscriptionProfile) -> PathBuf {
     crate::constants::app_data_dir()
         .join("models")
@@ -26,6 +35,9 @@ pub fn model_dir(profile: &TranscriptionProfile) -> PathBuf {
         .join(&profile.backend_id)
 }
 
+/// Downloads all required files for a given transcription profile. Progress
+/// is reported back via the provided `progress_callback`. Layout migration
+/// is automatically performed beforehand if needed.
 pub fn download_model(
     profile: &TranscriptionProfile,
     progress_callback: impl Fn(DownloadProgress),
@@ -246,7 +258,10 @@ mod tests {
 
         ensure_layout(&target, Some(&legacy)).unwrap();
 
-        assert_eq!(fs::read_to_string(target.join("config.json")).unwrap(), "target");
+        assert_eq!(
+            fs::read_to_string(target.join("config.json")).unwrap(),
+            "target"
+        );
         assert!(legacy.join("config.json").is_file());
     }
 
