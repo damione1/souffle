@@ -163,6 +163,13 @@ pub struct AppState {
     /// `clear_sleep_paused_meeting` (or implicitly by `launch_meeting`,
     /// which clears it on every recording start).
     pub sleep_paused_meeting_id: Mutex<Option<String>>,
+    /// Serializes `apply_live_paragraph_edit`. Each edit reads the accumulator,
+    /// rewrites it, then writes the rows it mirrors, and the accumulator lock
+    /// is released in between so a segment arriving mid-edit is not blocked on
+    /// SQLite. Without this, two edits touching the same segments can commit
+    /// their database writes in the opposite order to their accumulator
+    /// writes, and a failed one can restore over a newer one.
+    pub live_edit_lock: Mutex<()>,
 }
 
 impl AppState {
@@ -182,6 +189,7 @@ impl AppState {
             machine: Mutex::new(AppStateMachine::Idle),
             app_handle: Mutex::new(None),
             sleep_paused_meeting_id: Mutex::new(None),
+            live_edit_lock: Mutex::new(()),
         }
     }
 

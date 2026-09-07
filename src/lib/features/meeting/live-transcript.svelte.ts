@@ -8,8 +8,8 @@ import type { TranscriptionSegment } from "../../types";
  * paragraph keeps growing. */
 export type LiveParagraph = Paragraph & {
   id: number;
-  /** Half-open range into the finalized segment list for this paragraph. */
-  segmentRange: ParagraphRange;
+  /** Emission indices into the finalized segment list, in display order. */
+  segmentIndices: number[];
 };
 
 type IndexedSegment = { segment: TranscriptionSegment; index: number };
@@ -103,19 +103,16 @@ export function createLiveTranscript(pauseThreshold: number) {
   let tailSegments: IndexedSegment[] = [];
   let nextParagraphId = 0;
 
-  function globalRange(
+  function globalIndices(
     range: ParagraphRange,
     ordered: TranscriptionSegment[],
-  ): ParagraphRange {
+  ): number[] {
     const indices: number[] = [];
     for (let i = range.start; i < range.end; i++) {
       const found = tailSegments.find((item) => item.segment === ordered[i]);
       if (found) indices.push(found.index);
     }
-    if (indices.length === 0) {
-      return range;
-    }
-    return { start: Math.min(...indices), end: Math.max(...indices) + 1 };
+    return indices;
   }
 
   function assignIds(paragraphs: Paragraph[], prev: LiveParagraph[]): number[] {
@@ -167,7 +164,7 @@ export function createLiveTranscript(pauseThreshold: number) {
       committed.push({
         ...paragraphs[i],
         id: ids[i],
-        segmentRange: globalRange(ranges[i], ordered),
+        segmentIndices: globalIndices(ranges[i], ordered),
       });
     }
     if (numToCommit > 0) {
@@ -180,7 +177,7 @@ export function createLiveTranscript(pauseThreshold: number) {
     tail = remaining.map((paragraph, i) => ({
       ...paragraph,
       id: ids[numToCommit + i],
-      segmentRange: globalRange(remainingRanges[i], ordered),
+      segmentIndices: globalIndices(remainingRanges[i], ordered),
     }));
   }
 

@@ -39,7 +39,7 @@ function feedSegments(live: ReturnType<typeof createLiveTranscript>, segments: T
 function runStream(segments: TranscriptionSegment[]) {
   const live = createLiveTranscript(PAUSE_THRESHOLD);
   feedSegments(live, segments);
-  const all = [...live.committed, ...live.tail].map(({ id: _id, segmentRange: _range, ...rest }) => rest);
+  const all = [...live.committed, ...live.tail].map(({ id: _id, segmentIndices: _indices, ...rest }) => rest);
   return { live, all };
 }
 
@@ -205,7 +205,7 @@ describe("createLiveTranscript paragraph ids", () => {
 });
 
 describe("createLiveTranscript segment ranges and live edits", () => {
-  it("tracks segment ranges on committed paragraphs", () => {
+  it("tracks emission indices on committed paragraphs", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
     feedSegments(live, [
       seg("hello", 0),
@@ -215,8 +215,8 @@ describe("createLiveTranscript segment ranges and live edits", () => {
 
     const paragraphs = [...live.committed, ...live.tail];
     expect(paragraphs.length).toBeGreaterThan(0);
-    expect(paragraphs[0].segmentRange.start).toBe(0);
-    expect(paragraphs[0].segmentRange.end).toBeGreaterThan(0);
+    expect(paragraphs[0].segmentIndices[0]).toBe(0);
+    expect(paragraphs[0].segmentIndices.length).toBeGreaterThan(0);
   });
 
   it("editParagraph updates committed text without resetting the stream", () => {
@@ -314,5 +314,26 @@ describe("createLiveTranscript diarized tail window", () => {
     const all = [...live.committed, ...live.tail];
     expect(all).toHaveLength(1);
     expect(all[0].text).toBe("Je vous la mets dans le chat");
+  });
+
+  it("stores emission indices for a frozen Me turn, not a closed range over Them", () => {
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    feedSegments(live, [
+      dseg("hello", 0.0, "me"),
+      dseg("hi", 0.15, "them"),
+      dseg("how", 0.5, "me"),
+      dseg("good", 0.6, "them"),
+      dseg("are", 0.9, "me"),
+      dseg("thanks", 1.0, "them"),
+      dseg("you", 1.3, "me"),
+      dseg("later one.", 10.0, "them"),
+      dseg("later two.", 12.0, "them"),
+    ]);
+
+    const mine = [...live.committed, ...live.tail].find(
+      (paragraph) => paragraph.speaker === "me" && paragraph.text.includes("hello"),
+    );
+    expect(mine?.segmentIndices).toEqual([0, 2, 4, 6]);
+    expect(mine?.text).toBe("hello how are you");
   });
 });

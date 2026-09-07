@@ -25,6 +25,7 @@ import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
 import { type AudioSeekTarget, resolveAudioSeekTarget } from "./audio-map";
 import { createLiveTranscript } from "./live-transcript.svelte";
+import { redistributeSegmentTexts } from "./live-edit";
 
 function defaultMeetingTitle(): string {
   return `Meeting ${new Date().toLocaleDateString()}`;
@@ -122,6 +123,18 @@ function createMeetingControllerInstance() {
   // transcript section (buildMeetingTranscriptBlocks operates on segments,
   // not paragraphs). Mutated via push, not clone-per-segment.
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
+  // Bumped by every reset of the two buffers above. An in-flight live edit
+  // carries the value it started under: paragraph ids restart at 0 on reset,
+  // so a rollback that ignored this would index a replaced segment array and
+  // rewrite an unrelated paragraph of the next recording.
+  let liveEpoch = 0;
+
+  /** Drop the live buffers and retire any edit still in flight against them. */
+  function resetLiveBuffers() {
+    liveTranscript.reset();
+    liveMeetingSegments = [];
+    liveEpoch++;
+  }
 
   let meeting = $state<MeetingTranscript | null>(null);
   let isLoadingMeeting = $state(false);
@@ -288,8 +301,7 @@ function createMeetingControllerInstance() {
     try {
       const title = options?.title?.trim() || defaultMeetingTitle();
       const calendar = options?.calendar ?? null;
-      liveTranscript.reset();
-      liveMeetingSegments = [];
+      resetLiveBuffers();
       statusMessage = "";
       summaryStream = "";
       meeting = null;
@@ -334,8 +346,7 @@ function createMeetingControllerInstance() {
       };
     } catch (e) {
       statusMessage = errorMessage(e);
-      liveTranscript.reset();
-      liveMeetingSegments = [];
+      resetLiveBuffers();
     }
   }
 
@@ -350,8 +361,7 @@ function createMeetingControllerInstance() {
     try {
       const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { statusMessage = message; });
       if (!ready) return;
-      liveTranscript.reset();
-      liveMeetingSegments = [];
+      resetLiveBuffers();
       statusMessage = "";
       summaryStream = "";
       clearIdleState();
@@ -365,8 +375,7 @@ function createMeetingControllerInstance() {
       });
     } catch (e) {
       statusMessage = errorMessage(e);
-      liveTranscript.reset();
-      liveMeetingSegments = [];
+      resetLiveBuffers();
     }
   }
 
@@ -405,8 +414,7 @@ function createMeetingControllerInstance() {
    * buffer. No-op if the user already navigated elsewhere. */
   function handleMeetingFinalized(id: string) {
     if (app.currentMeetingId !== id && meeting?.id !== id) return;
-    liveTranscript.reset();
-    liveMeetingSegments = [];
+    resetLiveBuffers();
     clearIdleState();
     void loadMeeting(id);
   }
@@ -414,8 +422,7 @@ function createMeetingControllerInstance() {
   /** The backend aborted the recording session (machine went to Error).
    * The backend salvages the accumulated meeting to history before failing. */
   function handleRecordingAborted() {
-    liveTranscript.reset();
-    liveMeetingSegments = [];
+    resetLiveBuffers();
     meeting = null;
     audioSessions = [];
     app.currentMeetingId = null;
@@ -457,23 +464,6 @@ function createMeetingControllerInstance() {
     return meeting?.id ?? "";
   }
 
-  function redistributeSegmentTexts(segmentStart: number, segmentEnd: number, newText: string) {
-    const words = newText.trim().split(/\s+/).filter(Boolean);
-    const slice = liveMeetingSegments.slice(segmentStart, segmentEnd);
-    if (slice.length === 0) return;
-    if (slice.length === 1) {
-      slice[0].text = newText.trim();
-      return;
-    }
-    for (let i = 0; i < slice.length; i++) {
-      if (i + 1 < slice.length) {
-        slice[i].text = words[i] ?? "";
-      } else {
-        slice[i].text = words.slice(i).join(" ");
-      }
-    }
-  }
-
   async function addDictionaryAlias(term: string, pronunciation: string | null) {
     const trimmedTerm = term.trim();
     if (!trimmedTerm) return;
@@ -502,20 +492,39 @@ function createMeetingControllerInstance() {
     const trimmed = newText.trim();
     if (!trimmed || !isRecordingMeeting) return;
 
-    const updated = liveTranscript.editParagraph(paragraphId, trimmed);
-    if (!updated) return;
+    const current = [...liveTranscript.committed, ...liveTranscript.tail]
+      .find((paragraph) => paragraph.id === paragraphId);
+    if (!current) return;
 
-    const { start, end } = updated.segmentRange;
-    if (end <= start || end > liveMeetingSegments.length) return;
-
-    redistributeSegmentTexts(start, end, trimmed);
+    const indices = [...current.segmentIndices];
+    if (
+      indices.length === 0
+      || indices.some((index) => index < 0 || index >= liveMeetingSegments.length)
+    ) {
+      return;
+    }
 
     const meetingId = recordingMeetingId();
     if (!meetingId) return;
 
+    const previousText = current.text;
+    const previousSegmentTexts = indices.map((index) => liveMeetingSegments[index].text);
+
+    if (!liveTranscript.editParagraph(paragraphId, trimmed)) return;
+    redistributeSegmentTexts(liveMeetingSegments, indices, trimmed);
+
+    const epoch = liveEpoch;
     try {
-      await submitLiveParagraphEdit(meetingId, start, end, trimmed);
+      await submitLiveParagraphEdit(meetingId, indices, trimmed);
     } catch (e) {
+      // The buffers this edit belonged to are gone (stopped, aborted, or a new
+      // recording started). There is nothing left to roll back, and writing
+      // into their replacements would corrupt them.
+      if (liveEpoch !== epoch) return;
+      liveTranscript.editParagraph(paragraphId, previousText);
+      for (let i = 0; i < indices.length; i++) {
+        liveMeetingSegments[indices[i]].text = previousSegmentTexts[i];
+      }
       statusMessage = errorMessage(e);
     }
   }
@@ -634,8 +643,7 @@ function createMeetingControllerInstance() {
     meeting = null;
     audioSessions = [];
     seekTarget = null;
-    liveTranscript.reset();
-    liveMeetingSegments = [];
+    resetLiveBuffers();
     statusMessage = "";
     summaryStream = "";
     app.currentMeetingId = null;
