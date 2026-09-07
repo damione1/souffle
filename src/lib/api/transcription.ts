@@ -75,6 +75,13 @@ export async function pasteText(
   await unwrap(commands.pasteText(text, delayMs, method));
 }
 
+/** Surface a shortcut dictation's paste failure outside the app window with
+ * a system notification (SOU-053): the window is usually not what the user
+ * is looking at when a shortcut dictation runs. */
+export async function notifyPasteFailed(error: string, savedToHistory: boolean): Promise<void> {
+  await unwrap(commands.notifyPasteFailed(error, savedToHistory));
+}
+
 export async function getMachineState(): Promise<AppStateMachine> {
   return unwrap(commands.getMachineState());
 }
@@ -88,12 +95,6 @@ export async function pillHold(kind: PillHoldKind): Promise<void> {
 /** Release a hold set by {@link pillHold}. Safe to call with nothing held. */
 export async function pillRelease(): Promise<void> {
   await unwrap(commands.pillRelease());
-}
-
-/** Resize the pill window, keeping its top edge pinned below the menu bar
- * and staying horizontally centered. */
-export async function pillResize(width: number, height: number): Promise<void> {
-  await unwrap(commands.pillResize(width, height));
 }
 
 export async function recoverState(): Promise<AppStateMachine> {

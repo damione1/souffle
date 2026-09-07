@@ -13,6 +13,21 @@ use crate::settings::AppSettings;
 use crate::state::AppState;
 use crate::state_machine::{AppStateMachine, StateAction};
 
+/// Drop the loaded engine so the machine can leave Ready. On actor error,
+/// Fail out of Unloading — never leave that corridor without UnloadComplete.
+fn unload_loaded_model(
+    state: &AppState,
+    next_profile: Option<TranscriptionProfile>,
+) -> Result<(), String> {
+    state.apply_transition(StateAction::Unload { next_profile })?;
+    if let Err(e) = state.engine_actor.unload_model() {
+        state.apply_transition(StateAction::Fail { message: e.clone() })?;
+        return Err(e);
+    }
+    state.apply_transition(StateAction::UnloadComplete)?;
+    Ok(())
+}
+
 fn selected_profile(state: &AppState) -> Result<TranscriptionProfile, String> {
     let settings = AppSettings::load(&state.db)?;
     resolve_transcription_profile(
@@ -131,9 +146,7 @@ pub fn download_model(
     // Ready (it tracks a single profile through download → load → ready).
     let machine = state.current_machine_state()?;
     if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
-        state.apply_transition(StateAction::Unload { next_profile: None })?;
-        state.engine_actor.unload_model()?;
-        state.apply_transition(StateAction::UnloadComplete)?;
+        unload_loaded_model(state.inner(), None)?;
         // Machine is now Downloaded { current } — different from `profile`.
     }
 
@@ -227,11 +240,7 @@ pub fn load_model(
 
     // If model is ready with a different profile, unload first
     if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
-        state.apply_transition(StateAction::Unload {
-            next_profile: Some(profile.clone()),
-        })?;
-        state.engine_actor.unload_model()?;
-        state.apply_transition(StateAction::UnloadComplete)?;
+        unload_loaded_model(state.inner(), Some(profile.clone()))?;
         // Machine is now in Loading { next_profile }
     } else {
         // Ensure machine is in Downloaded state before loading

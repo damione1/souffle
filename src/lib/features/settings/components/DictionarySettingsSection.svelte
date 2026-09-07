@@ -10,18 +10,27 @@
     onLearnFromEditChange,
     onAdd,
     onDelete,
+    onUpdate,
   }: {
     entries: DictionaryEntry[];
     learnFromEdit: boolean;
     onLearnFromEditChange: (event: Event) => void;
     onAdd: (term: string, pronunciation: string | null, category: string | null) => void | Promise<void>;
     onDelete: (id: number) => void | Promise<void>;
+    onUpdate: (
+      id: number,
+      term: string,
+      pronunciation: string | null,
+      category: string | null,
+    ) => void | Promise<void>;
   } = $props();
 
   let newTerm = $state("");
   let newPronunciation = $state("");
   let newCategory = $state("");
   let addError = $state("");
+  let updateError = $state("");
+  let pendingUpdates = $state(new Set<number>());
 
   async function handleAdd() {
     const term = newTerm.trim();
@@ -34,6 +43,30 @@
       newCategory = "";
     } catch (e) {
       addError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function aliasesOf(entry: DictionaryEntry): string[] {
+    return (entry.pronunciation ?? "")
+      .split(",")
+      .map((alias) => alias.trim())
+      .filter(Boolean);
+  }
+
+  async function removeAlias(entry: DictionaryEntry, alias: string) {
+    if (pendingUpdates.has(entry.id)) return;
+    updateError = "";
+    pendingUpdates.add(entry.id);
+    // force reactivity
+    pendingUpdates = new Set(pendingUpdates);
+    try {
+      const next = aliasesOf(entry).filter((item) => item !== alias);
+      await onUpdate(entry.id, entry.term, next.length ? next.join(", ") : null, entry.category);
+    } catch (e) {
+      updateError = e instanceof Error ? e.message : String(e);
+    } finally {
+      pendingUpdates.delete(entry.id);
+      pendingUpdates = new Set(pendingUpdates);
     }
   }
 
@@ -114,7 +147,24 @@
       {#each entries as entry (entry.id)}
         <div class="flex items-center gap-2 rounded-[9px] bg-surface-2/60 px-2.5 py-1.5 text-sm text-text-secondary">
           <span class="flex-1 font-medium">
-            {entry.term}{#if entry.pronunciation}<span class="text-text-muted font-normal"> · {entry.pronunciation}</span>{/if}
+            {entry.term}{#if aliasesOf(entry).length}
+              <span class="ml-1 inline-flex flex-wrap gap-1 font-normal">
+                {#each aliasesOf(entry) as alias (alias)}
+                  <span class="inline-flex items-center gap-0.5 rounded-md bg-surface-3 px-1.5 py-0.5 text-xs text-text-muted">
+                    {alias}
+                    <button
+                      type="button"
+                      disabled={pendingUpdates.has(entry.id)}
+                      onclick={() => removeAlias(entry, alias)}
+                      class="btn btn-icon btn-ghost !min-h-0 !min-w-0 !p-0.5 text-text-muted hover:!text-danger-soft disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label={`${$t("settings_dictionary.remove_alias")} ${alias}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                {/each}
+              </span>
+            {/if}
           </span>
           {#if entry.category}
             <span class="text-text-muted text-xs">{entry.category}</span>
@@ -125,6 +175,9 @@
         </div>
       {/each}
     </div>
+    {#if updateError}
+      <p class="text-danger-soft text-xs mt-2">{updateError}</p>
+    {/if}
   {:else}
     <p class="text-text-muted text-xs italic">{$t("settings_dictionary.empty")}</p>
   {/if}

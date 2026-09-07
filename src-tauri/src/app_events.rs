@@ -75,6 +75,13 @@ pub struct PipelineError {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct MeetingStopRequested;
 
+/// Emitted by the native HUD stop button to ask the dictation controller in
+/// the main window to run its normal stop pipeline (`stop_transcription` +
+/// polish + paste). Stop-only: unlike `ShortcutToggle`, this must never
+/// start a session (SOU-044 / SOU-046).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DictationStopRequested;
+
 /// Emitted once a stopped meeting has been fully drained and saved in the
 /// background, so the detail view can refresh from the now-complete record.
 /// `stop_meeting_recording` returns before this work finishes (decoupled stop),
@@ -169,10 +176,12 @@ pub struct ArchiveExportProgress {
 }
 
 /// The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
-/// The frontend calls `take_sleep_paused_meeting` on receiving this (and again
+/// The frontend calls `peek_sleep_paused_meeting` on receiving this (and again
 /// on webview visibility change, in case the webview itself was suspended
 /// when this fired) to see whether a meeting was paused by sleep and, if so,
-/// offer to resume it.
+/// offer to resume it. If the sleep-triggered stop is still draining, the
+/// frontend waits for the machine to report `ready` before resuming rather
+/// than giving up.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct SystemWokeUp;
 

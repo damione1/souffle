@@ -1,10 +1,12 @@
 import { addDictionaryEntry, addSessionCorrection } from "../../api/dictionary";
 import {
+  clearSleepPausedMeeting,
   deleteMeeting as removeMeeting,
   saveMeetingExport,
   saveMeetingAudioExport,
   getMeeting,
   getMeetingAudio,
+  peekSleepPausedMeeting,
   renameMeeting as applyMeetingRename,
   resumeMeetingRecording,
   saveEditedTranscript,
@@ -13,17 +15,17 @@ import {
   startMeetingRecording,
   stopMeetingRecording,
   summarizeMeeting as runMeetingSummary,
-  takeSleepPausedMeeting,
 } from "../../api/meetings";
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummaryProviderChoice, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { AppStateMachine, ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummaryProviderChoice, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
 import { type AudioSeekTarget, resolveAudioSeekTarget } from "./audio-map";
 import { createLiveTranscript } from "./live-transcript.svelte";
+import { redistributeSegmentTexts } from "./live-edit";
 
 function defaultMeetingTitle(): string {
   return `Meeting ${new Date().toLocaleDateString()}`;
@@ -32,6 +34,12 @@ function defaultMeetingTitle(): string {
 /** Extra silence tolerated after the banner first appears before auto-stop
  * kicks in, on top of the configured silence threshold. */
 const SILENCE_AUTOSTOP_GRACE_SECONDS = 120;
+
+/** Cap on how long a wake-resume waits for a sleep-triggered stop to finish
+ * draining (EndOfStream + engine flush + DB save) before giving up on the
+ * automatic resume and falling back to the manual "Resume recording"
+ * banner instead of abandoning it silently. */
+const WAKE_RESUME_TIMEOUT_MS = 8000;
 
 /** Honour the Settings provider so the meeting picker cannot run Apple
  * Intelligence when the user locked Ollama, or the reverse. Auto keeps
@@ -87,6 +95,16 @@ function createMeetingControllerInstance() {
   let notesSaveState = $state<"idle" | "pending" | "saved">("idle");
   let notesTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Meeting id waiting for a still-draining sleep-triggered stop to reach
+  // `ready` before resumeAfterSystemWake actually resumes it. Cleared once
+  // handleStateChanged fires the resume, or the wait times out.
+  let pendingWakeResumeMeetingId: string | null = null;
+  let pendingWakeResumeTimer: ReturnType<typeof setTimeout> | null = null;
+  // Set when a wake-resume gives up waiting and falls back to the manual
+  // "Resume recording" banner: lets closeMeeting() treat navigating away
+  // without resuming as an explicit refusal and clear the backend flag.
+  let wakeResumeFallbackMeetingId: string | null = null;
+
   // Meeting-idle ("meeting seems to be over") banner state.
   let idleSignal = $state<MeetingIdle | null>(null);
   // True once the user dismissed the current silence episode ("keep
@@ -105,6 +123,18 @@ function createMeetingControllerInstance() {
   // transcript section (buildMeetingTranscriptBlocks operates on segments,
   // not paragraphs). Mutated via push, not clone-per-segment.
   let liveMeetingSegments = $state<TranscriptionSegment[]>([]);
+  // Bumped by every reset of the two buffers above. An in-flight live edit
+  // carries the value it started under: paragraph ids restart at 0 on reset,
+  // so a rollback that ignored this would index a replaced segment array and
+  // rewrite an unrelated paragraph of the next recording.
+  let liveEpoch = 0;
+
+  /** Drop the live buffers and retire any edit still in flight against them. */
+  function resetLiveBuffers() {
+    liveTranscript.reset();
+    liveMeetingSegments = [];
+    liveEpoch++;
+  }
 
   let meeting = $state<MeetingTranscript | null>(null);
   let isLoadingMeeting = $state(false);
@@ -271,8 +301,7 @@ function createMeetingControllerInstance() {
     try {
       const title = options?.title?.trim() || defaultMeetingTitle();
       const calendar = options?.calendar ?? null;
-      liveTranscript.reset();
-      liveMeetingSegments = [];
+      resetLiveBuffers();
       statusMessage = "";
       summaryStream = "";
       meeting = null;
@@ -317,19 +346,22 @@ function createMeetingControllerInstance() {
       };
     } catch (e) {
       statusMessage = errorMessage(e);
-      liveTranscript.reset();
-      liveMeetingSegments = [];
+      resetLiveBuffers();
     }
   }
 
   async function resumeRecording() {
     if (!meeting || !meeting.id) return;
 
+    // Resuming (whether from the wake-resume banner or the ordinary flow)
+    // goes through launch_meeting, which clears the backend's sleep-pause
+    // flag unconditionally: the local refusal marker is now moot too.
+    if (wakeResumeFallbackMeetingId === meeting.id) wakeResumeFallbackMeetingId = null;
+
     try {
       const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { statusMessage = message; });
       if (!ready) return;
-      liveTranscript.reset();
-      liveMeetingSegments = [];
+      resetLiveBuffers();
       statusMessage = "";
       summaryStream = "";
       clearIdleState();
@@ -343,8 +375,7 @@ function createMeetingControllerInstance() {
       });
     } catch (e) {
       statusMessage = errorMessage(e);
-      liveTranscript.reset();
-      liveMeetingSegments = [];
+      resetLiveBuffers();
     }
   }
 
@@ -383,8 +414,7 @@ function createMeetingControllerInstance() {
    * buffer. No-op if the user already navigated elsewhere. */
   function handleMeetingFinalized(id: string) {
     if (app.currentMeetingId !== id && meeting?.id !== id) return;
-    liveTranscript.reset();
-    liveMeetingSegments = [];
+    resetLiveBuffers();
     clearIdleState();
     void loadMeeting(id);
   }
@@ -392,8 +422,7 @@ function createMeetingControllerInstance() {
   /** The backend aborted the recording session (machine went to Error).
    * The backend salvages the accumulated meeting to history before failing. */
   function handleRecordingAborted() {
-    liveTranscript.reset();
-    liveMeetingSegments = [];
+    resetLiveBuffers();
     meeting = null;
     audioSessions = [];
     app.currentMeetingId = null;
@@ -435,23 +464,6 @@ function createMeetingControllerInstance() {
     return meeting?.id ?? "";
   }
 
-  function redistributeSegmentTexts(segmentStart: number, segmentEnd: number, newText: string) {
-    const words = newText.trim().split(/\s+/).filter(Boolean);
-    const slice = liveMeetingSegments.slice(segmentStart, segmentEnd);
-    if (slice.length === 0) return;
-    if (slice.length === 1) {
-      slice[0].text = newText.trim();
-      return;
-    }
-    for (let i = 0; i < slice.length; i++) {
-      if (i + 1 < slice.length) {
-        slice[i].text = words[i] ?? "";
-      } else {
-        slice[i].text = words.slice(i).join(" ");
-      }
-    }
-  }
-
   async function addDictionaryAlias(term: string, pronunciation: string | null) {
     const trimmedTerm = term.trim();
     if (!trimmedTerm) return;
@@ -480,41 +492,122 @@ function createMeetingControllerInstance() {
     const trimmed = newText.trim();
     if (!trimmed || !isRecordingMeeting) return;
 
-    const updated = liveTranscript.editParagraph(paragraphId, trimmed);
-    if (!updated) return;
+    const current = [...liveTranscript.committed, ...liveTranscript.tail]
+      .find((paragraph) => paragraph.id === paragraphId);
+    if (!current) return;
 
-    const { start, end } = updated.segmentRange;
-    if (end <= start || end > liveMeetingSegments.length) return;
-
-    redistributeSegmentTexts(start, end, trimmed);
+    const indices = [...current.segmentIndices];
+    if (
+      indices.length === 0
+      || indices.some((index) => index < 0 || index >= liveMeetingSegments.length)
+    ) {
+      return;
+    }
 
     const meetingId = recordingMeetingId();
     if (!meetingId) return;
 
+    const previousText = current.text;
+    const previousSegmentTexts = indices.map((index) => liveMeetingSegments[index].text);
+
+    if (!liveTranscript.editParagraph(paragraphId, trimmed)) return;
+    redistributeSegmentTexts(liveMeetingSegments, indices, trimmed);
+
+    const epoch = liveEpoch;
     try {
-      await submitLiveParagraphEdit(meetingId, start, end, trimmed);
+      await submitLiveParagraphEdit(meetingId, indices, trimmed);
     } catch (e) {
+      // The buffers this edit belonged to are gone (stopped, aborted, or a new
+      // recording started). There is nothing left to roll back, and writing
+      // into their replacements would corrupt them.
+      if (liveEpoch !== epoch) return;
+      liveTranscript.editParagraph(paragraphId, previousText);
+      for (let i = 0; i < indices.length; i++) {
+        liveMeetingSegments[indices[i]].text = previousSegmentTexts[i];
+      }
       statusMessage = errorMessage(e);
     }
   }
 
-  /** The system woke from sleep (or the webview visibility turned to
+  let activeWakeResumePromise: Promise<void> | null = null;
+
+  /**
+   * The system woke from sleep (or the webview visibility turned to
    * visible, as a belt-and-braces recheck in case the wake event fired while
    * the webview was suspended). Ask the backend whether a meeting was
    * stopped by sleep and, if so, reload it and auto-resume recording through
-   * the normal resume flow. Idempotent: `take_sleep_paused_meeting` clears
-   * its state on read, so a second call (event + visibilitychange both
-   * firing) is a harmless no-op. */
-  async function resumeAfterSystemWake() {
-    let meetingId: string | null;
-    try {
-      meetingId = await takeSleepPausedMeeting();
-    } catch (e) {
-      statusMessage = errorMessage(e);
-      return;
-    }
-    if (!meetingId || isRecordingMeeting) return;
+   * the normal resume flow.
+   *
+   * The sleep-triggered stop is spawned off the AppKit will-sleep callback
+   * (it must not block that callback), so macOS routinely finishes going to
+   * sleep before the stop finishes draining: the machine can still read
+   * `recording_meeting` (the stop hasn't even transitioned yet) or
+   * `stopping` (it's draining) right when this runs. `isRecordingMeeting`
+   * covers exactly those two states, so when it's true this waits for
+   * handleStateChanged to observe `ready` instead of abandoning the resume.
+   * Idempotent: `peekSleepPausedMeeting` doesn't clear its state on read, so
+   * a second call (event + visibilitychange both firing) just re-arms the
+   * same wait harmlessly.
+   */
+  function resumeAfterSystemWake(): Promise<void> {
+    if (activeWakeResumePromise) return activeWakeResumePromise;
+    activeWakeResumePromise = (async () => {
+      try {
+        let meetingId: string | null;
+        try {
+          meetingId = await peekSleepPausedMeeting();
+        } catch (e) {
+          statusMessage = errorMessage(e);
+          return;
+        }
+        if (!meetingId) return;
 
+        if (isRecordingMeeting) {
+          armPendingWakeResume(meetingId);
+          return;
+        }
+
+        await performWakeResume(meetingId);
+      } finally {
+        activeWakeResumePromise = null;
+      }
+    })();
+    return activeWakeResumePromise;
+  }
+
+  /**
+   * Wait for the sleep-triggered stop to reach `ready`, capped at
+   * WAKE_RESUME_TIMEOUT_MS. Re-arming (a second wake notification for the
+   * same id while already waiting) just restarts the timer.
+   */
+  function armPendingWakeResume(meetingId: string) {
+    pendingWakeResumeMeetingId = meetingId;
+    if (pendingWakeResumeTimer) clearTimeout(pendingWakeResumeTimer);
+    pendingWakeResumeTimer = setTimeout(() => {
+      pendingWakeResumeTimer = null;
+      pendingWakeResumeMeetingId = null;
+      void fallBackToManualResume(meetingId);
+    }, WAKE_RESUME_TIMEOUT_MS);
+  }
+
+  /**
+   * Called from the global StateChanged listener (see notifyStateChanged).
+   * If a wake-resume is waiting on the sleep-triggered stop and the machine
+   * just reported `ready`, run the resume now instead of waiting out the
+   * full timeout.
+   */
+  function handleStateChanged(state: AppStateMachine) {
+    if (!pendingWakeResumeMeetingId || state.state !== "ready") return;
+    const meetingId = pendingWakeResumeMeetingId;
+    if (pendingWakeResumeTimer) {
+      clearTimeout(pendingWakeResumeTimer);
+      pendingWakeResumeTimer = null;
+    }
+    pendingWakeResumeMeetingId = null;
+    void performWakeResume(meetingId);
+  }
+
+  async function performWakeResume(meetingId: string) {
     await loadMeeting(meetingId);
     if (!meeting || meeting.id !== meetingId) return; // load failed; loadMeeting already reported it
 
@@ -526,14 +619,31 @@ function createMeetingControllerInstance() {
     }
   }
 
+  /** The sleep-triggered stop never reached `ready` within
+   * WAKE_RESUME_TIMEOUT_MS: load the meeting so the manual "Resume
+   * recording" banner is available instead of abandoning the resume
+   * silently. */
+  async function fallBackToManualResume(meetingId: string) {
+    wakeResumeFallbackMeetingId = meetingId;
+    await loadMeeting(meetingId);
+    if (!meeting || meeting.id !== meetingId) return; // load failed; loadMeeting already reported it
+    statusMessage = "Sleep interrupted this meeting. Resume recording to continue.";
+  }
+
   /** Leave the detail view: clear the open meeting and return to the list. */
   function closeMeeting() {
     void flushNotes();
+    // Leaving the wake-resume fallback banner without resuming is an
+    // explicit refusal: clear the backend flag so a later wake (with no
+    // recording started in between) never silently re-offers this meeting.
+    if (wakeResumeFallbackMeetingId && wakeResumeFallbackMeetingId === meeting?.id) {
+      wakeResumeFallbackMeetingId = null;
+      void clearSleepPausedMeeting().catch(() => {});
+    }
     meeting = null;
     audioSessions = [];
     seekTarget = null;
-    liveTranscript.reset();
-    liveMeetingSegments = [];
+    resetLiveBuffers();
     statusMessage = "";
     summaryStream = "";
     app.currentMeetingId = null;
@@ -742,6 +852,7 @@ function createMeetingControllerInstance() {
     handleRecordingAborted,
     handleMeetingFinalized,
     handleMeetingIdle,
+    handleStateChanged,
     dismissIdle,
     applyLiveParagraphEdit,
     addDictionaryAlias,
@@ -775,6 +886,15 @@ export function notifyMeetingIdle(payload: MeetingIdle) {
   instance?.handleMeetingIdle(payload);
 }
 
+/** Called from the global StateChanged listener on every machine transition.
+ * No-op unless a wake-resume is waiting on the machine to report `ready`, so
+ * this deliberately doesn't create the controller (most state changes have
+ * nothing to do with a pending wake-resume, and none can be pending before
+ * the controller exists in the first place). */
+export function notifyStateChanged(state: AppStateMachine) {
+  instance?.handleStateChanged(state);
+}
+
 /** Called from the global SystemWokeUp listener and from the webview
  * visibilitychange handler: check for (and offer/auto-start) a meeting
  * that sleep paused. Creates the controller if it doesn't exist yet, since
@@ -787,6 +907,10 @@ export function notifySystemWokeUp() {
 // and recording state are never lost when the user switches tabs.
 let instance: ReturnType<typeof createMeetingControllerInstance> | null = null;
 
+/**
+ * Get or create the global meeting controller singleton.
+ * The meeting controller holds state for the active meeting and recording.
+ */
 export function createMeetingController() {
   if (!instance) {
     instance = createMeetingControllerInstance();
@@ -794,7 +918,9 @@ export function createMeetingController() {
   return instance;
 }
 
-/** Reset the singleton for testing. */
+/**
+ * Clear the controller singleton so tests can start fresh.
+ */
 export function resetMeetingControllerForTest() {
   instance = null;
 }

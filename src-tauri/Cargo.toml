@@ -3,7 +3,11 @@ members = [".", "souffle-mcp", "tts-fixtures"]
 
 [package]
 name = "souffle"
-version = "0.4.0"
+# Placeholder. The release workflow rewrites this line from the release tag, so
+# a version still reading 0.0.0 at compile time means the binary was built from
+# a checkout rather than cut from a tag. `update_check::current_version` turns
+# that into "local build".
+version = "0.0.0"
 description = "Local speech-to-text desktop application"
 authors = ["Damien Goehrig"]
 license = "GPL-3.0-or-later"
@@ -97,6 +101,14 @@ objc2-core-audio = "0.3"
 objc2-core-audio-types = "0.3"
 # Calendar integration (read-only EventKit access)
 objc2-event-kit = "0.3"
+# Microphone TCC status (AVCaptureDevice.authorizationStatus), no prompt.
+# default-features off plus a minimal feature list keeps this from pulling
+# in the rest of AVFoundation (asset reading/writing, capture sessions, ...)
+# that this app never touches.
+objc2-av-foundation = { version = "0.3", default-features = false, features = [
+    "AVCaptureDevice",
+    "AVMediaFormat",
+] }
 # Sleep/wake observers (NSWorkspace notifications)
 objc2-app-kit = "0.3"
 ringbuf = "0.5"

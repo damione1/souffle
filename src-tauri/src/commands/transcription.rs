@@ -5,6 +5,7 @@ use std::time::Duration;
 use crossbeam_channel::Sender;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -126,12 +127,6 @@ async fn launch_meeting(
     event_description: Option<String>,
     channel: Channel<TranscriptionSegment>,
 ) -> Result<u64, String> {
-    // Any recording starting now (whether the user resumed by hand or
-    // started something new) makes a stale sleep-paused bookkeeping entry
-    // meaningless — clear it so a later wake never misreports an
-    // already-handled meeting as needing a resume prompt.
-    let _ = state.take_sleep_paused_meeting();
-
     let session_id = next_audio_session_id(state)?;
 
     // Session-scoped transcription hints: participant names plus distinctive
@@ -149,12 +144,10 @@ async fn launch_meeting(
         ],
     );
 
-    // This session's position in the meeting's recording_sessions — 0 for a
-    // new meeting, len() for a resume — is exactly the on-disk file index a
-    // recorder should write to, if recording is on.
+    // The on-disk file index a recorder should write to, if recording is on.
     let recording_target = RecordingTarget {
         meeting_id: accumulator.id.clone(),
-        session_index: accumulator.recording_sessions.len(),
+        session_index: crate::audio::recorder::next_session_index(&accumulator.id).map_err(|e| format!("Determine session index: {e}"))?,
     };
 
     // Persist the header before any segments so a crash leaves a recoverable
@@ -209,6 +202,12 @@ async fn launch_meeting(
         return Err(error);
     }
 
+    // Any recording successfully starting now (whether the user resumed by hand
+    // or started something new) makes a stale sleep-paused bookkeeping entry
+    // meaningless: clear it so a later wake never misreports an
+    // already-handled meeting as needing a resume prompt.
+    state.clear_sleep_paused_meeting();
+
     Ok(session_id)
 }
 
@@ -234,8 +233,8 @@ enum PipelineMode {
 
 /// Identifies where a meeting recording session's audio file belongs, if
 /// the retention setting turns out to be on. Resolved before the session
-/// starts (`launch_meeting` knows the meeting id and the session's position
-/// in `recording_sessions`); whether to actually record is decided inside
+/// starts (`launch_meeting` knows the meeting id and picks the next free
+/// on-disk session index); whether to actually record is decided inside
 /// `start_pipeline_blocking` once settings are loaded.
 struct RecordingTarget {
     meeting_id: String,
@@ -383,9 +382,9 @@ fn dictation_live_preview(accumulated: &str, tentative: &str) -> String {
 
 /// The per-segment callback for dictation: forward every segment to the main
 /// window's channel as before, and additionally accumulate final segments'
-/// text to emit a throttled `DictationLiveText` sample to the (separate)
-/// pill webview. Meetings do not go through this path — their own
-/// `build_meeting_on_segment` never touches live text.
+/// text to emit a throttled `DictationLiveText` sample (LiveSessionCard) and
+/// push the same tail to the native HUD. Meetings do not go through this
+/// path — their own `build_meeting_on_segment` never touches live text.
 fn build_dictation_on_segment(
     app: AppHandle,
     channel: Channel<crate::engine::TranscriptionSegment>,
@@ -403,6 +402,7 @@ fn build_dictation_on_segment(
             let preview = dictation_live_preview(&state.accumulated, &text);
             let tail = crate::pill::live_text_tail(&preview, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
+            crate::pill::push_live_text(&tail);
             let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
             return;
         }
@@ -424,6 +424,7 @@ fn build_dictation_on_segment(
             let tail =
                 crate::pill::live_text_tail(&state.accumulated, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
+            crate::pill::push_live_text(&tail);
             let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
         }
     })
@@ -501,12 +502,26 @@ pub async fn start_transcription(
 #[tauri::command]
 #[specta::specta]
 pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
-    let was_dictation = matches!(
-        state.current_machine_state()?,
-        AppStateMachine::RecordingDictation { .. }
+    let current_state = state.current_machine_state()?;
+    let is_dictation = matches!(current_state, AppStateMachine::RecordingDictation { .. });
+    let is_stopping_dictation = matches!(
+        current_state,
+        AppStateMachine::Stopping {
+            was_recording: crate::state_machine::RecordingKind::Dictation,
+            ..
+        }
     );
-    if !state.current_machine_state()?.is_recording() {
+
+    if !current_state.is_recording() {
         return Err("Not recording".into());
+    }
+    if is_stopping_dictation {
+        return Err("Already stopping".into());
+    }
+    if !is_dictation {
+        // A meeting (or anything else recording) is not this command's to
+        // stop: symmetric with stop_meeting_recording refusing a dictation.
+        return Err("Not dictating".into());
     }
 
     // Transition to Stopping
@@ -530,13 +545,14 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
     // Clear the pill's live-text preview now that the session is over — the
     // dictation on_segment closure (and its accumulated text) is dropped
     // with the session, so nothing else will do this.
-    if was_dictation
+    if is_dictation
         && let Ok(app) = state.app_handle()
     {
+        crate::pill::push_live_text("");
         let _ = crate::app_events::DictationLiveText { text: String::new() }.emit(&app);
     }
 
-    if was_dictation
+    if is_dictation
         && let Ok(settings) = AppSettings::load(&state.db)
     {
         crate::audio::feedback::play_dictation_feedback(
@@ -787,6 +803,71 @@ pub fn paste_text(
     crate::clipboard::paste_text(&text, delay_ms, method)
 }
 
+/// Pure decision: notification text for a failed paste, split out from
+/// `notify_paste_failed` so it's testable without a live AppHandle (mirrors
+/// `copy_notification_text` in `tray.rs`).
+fn paste_failure_notification_text(french: bool, error: &str, saved_to_history: bool) -> (&'static str, &'static str) {
+    let accessibility_missing = error.contains("Accessibility permission missing");
+    match (french, accessibility_missing, saved_to_history) {
+        (false, true, true) => (
+            "Paste failed",
+            "Accessibility permission is needed to paste automatically. Your dictation was saved to history.",
+        ),
+        (false, true, false) => (
+            "Paste failed",
+            "Accessibility permission is needed to paste automatically.",
+        ),
+        (true, true, true) => (
+            "Collage échoué",
+            "L'autorisation Accessibilité est nécessaire pour coller automatiquement. Votre dictée a été enregistrée dans l'historique.",
+        ),
+        (true, true, false) => (
+            "Collage échoué",
+            "L'autorisation Accessibilité est nécessaire pour coller automatiquement.",
+        ),
+        (false, false, true) => (
+            "Paste failed",
+            "The last dictation couldn't be pasted automatically. It was saved to history.",
+        ),
+        (false, false, false) => (
+            "Paste failed",
+            "The last dictation couldn't be pasted automatically.",
+        ),
+        (true, false, true) => (
+            "Collage échoué",
+            "La dernière dictée n'a pas pu être collée automatiquement. Elle a été enregistrée dans l'historique.",
+        ),
+        (true, false, false) => (
+            "Collage échoué",
+            "La dernière dictée n'a pas pu être collée automatiquement.",
+        ),
+    }
+}
+
+/// Called by the frontend when a shortcut-triggered dictation fails to
+/// paste. A shortcut dictation is by definition run from another app, so
+/// Soufflé's window is usually not what the user is looking at: the in-app
+/// status banner alone would go unseen (SOU-053). Informational only,
+/// matching the calendar reminder and meeting-idle notifications: action
+/// buttons and click callbacks are unreliable on macOS with the
+/// notification plugin.
+#[tauri::command]
+#[specta::specta]
+pub fn notify_paste_failed(app: AppHandle, error: String, saved_to_history: bool) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let french = AppSettings::load(&state.db)
+        .map(|settings| settings.locale.starts_with("fr"))
+        .unwrap_or(false);
+
+    let (title, body) = paste_failure_notification_text(french, &error, saved_to_history);
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| format!("Paste failure notification failed: {e}"))
+}
+
 /// Called from the `NSWorkspace` will-sleep observer (installed in `power.rs`
 /// during setup) on the main thread. If a meeting recording is active, stop
 /// it through the exact same path a user-initiated stop takes — segments are
@@ -842,19 +923,36 @@ pub fn handle_system_did_wake(app: &AppHandle) {
     let _ = SystemWokeUp.emit(app);
 }
 
-/// Return and clear the meeting id paused by the system-sleep handler, if
-/// any. The frontend calls this on `SystemWokeUp` (and again on webview
-/// visibility change, belt and braces) to decide whether to offer/auto-start
-/// a resume.
+/// Return the meeting id paused by the system-sleep handler, if any, without
+/// clearing it. The frontend calls this on `SystemWokeUp` (and again on
+/// webview visibility change, belt and braces) to decide whether to
+/// offer/auto-start a resume. Non-destructive because the sleep-triggered
+/// stop may still be draining when wake fires: the frontend needs to be
+/// able to check again once it finishes, rather than have the first check
+/// burn the id before a resume was actually attempted.
 #[tauri::command]
 #[specta::specta]
-pub fn take_sleep_paused_meeting(state: State<'_, AppState>) -> Option<String> {
-    state.take_sleep_paused_meeting()
+pub fn peek_sleep_paused_meeting(state: State<'_, AppState>) -> Option<String> {
+    state.peek_sleep_paused_meeting()
+}
+
+/// Clear the meeting id paused by the system-sleep handler. The frontend
+/// calls this after a resume actually starts, or after the user explicitly
+/// declines to resume. `launch_meeting` also clears it unconditionally on
+/// every recording start, so a resume that goes through the normal start
+/// path never needs this to avoid re-offering the same meeting later.
+#[tauri::command]
+#[specta::specta]
+pub fn clear_sleep_paused_meeting(state: State<'_, AppState>) {
+    state.clear_sleep_paused_meeting();
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, dictation_live_preview};
+    use super::{
+        MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, dictation_live_preview,
+        paste_failure_notification_text,
+    };
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
     use crate::state::MeetingAccumulator;
     use crate::test_helpers::fixtures::test_db;
@@ -971,5 +1069,60 @@ mod tests {
         assert_eq!(dictation_live_preview("hello", "world"), "hello world");
         assert_eq!(dictation_live_preview("hello ", "world"), "hello world");
         assert_eq!(dictation_live_preview("hello", " world"), "hello world");
+    }
+
+    #[test]
+    fn paste_failure_notification_mentions_accessibility_when_that_is_the_cause() {
+        let (title, body) = paste_failure_notification_text(
+            false,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            true,
+        );
+        assert_eq!(title, "Paste failed");
+        assert!(body.contains("Accessibility permission"));
+        assert!(body.contains("saved to history"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(
+            false,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            false,
+        );
+        assert_eq!(title_not_saved, "Paste failed");
+        assert!(body_not_saved.contains("Accessibility permission"));
+        assert!(!body_not_saved.contains("saved to history"));
+    }
+
+    #[test]
+    fn paste_failure_notification_falls_back_to_a_generic_message() {
+        let (title, body) = paste_failure_notification_text(false, "Enigo init: some OS error", true);
+        assert_eq!(title, "Paste failed");
+        assert!(!body.contains("Accessibility permission"));
+        assert!(body.contains("saved to history"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(false, "Enigo init: some OS error", false);
+        assert_eq!(title_not_saved, "Paste failed");
+        assert!(!body_not_saved.contains("Accessibility permission"));
+        assert!(!body_not_saved.contains("saved to history"));
+    }
+
+    #[test]
+    fn paste_failure_notification_is_localized_to_french() {
+        let (title, body) = paste_failure_notification_text(
+            true,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            true,
+        );
+        assert_eq!(title, "Collage échoué");
+        assert!(body.contains("Accessibilité"));
+        assert!(body.contains("l'historique"));
+
+        let (title_not_saved, body_not_saved) = paste_failure_notification_text(
+            true,
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR,
+            false,
+        );
+        assert_eq!(title_not_saved, "Collage échoué");
+        assert!(body_not_saved.contains("Accessibilité"));
+        assert!(!body_not_saved.contains("l'historique"));
     }
 }

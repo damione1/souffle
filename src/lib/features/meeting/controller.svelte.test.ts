@@ -25,7 +25,8 @@ const mockResumeMeetingRecording = vi.fn<
   (id: string, onSegment: (s: TranscriptionSegment) => void) => Promise<void>
 >();
 const mockStopMeetingRecording = vi.fn<() => Promise<string>>();
-const mockTakeSleepPausedMeeting = vi.fn<() => Promise<string | null>>();
+const mockPeekSleepPausedMeeting = vi.fn<() => Promise<string | null>>();
+const mockClearSleepPausedMeeting = vi.fn<() => Promise<void>>();
 const mockGetMeeting = vi.fn<(id: string) => Promise<MeetingTranscript>>();
 const mockDeleteMeeting = vi.fn<(id: string) => Promise<void>>();
 const mockRenameMeeting = vi.fn<(id: string, title: string) => Promise<void>>();
@@ -43,6 +44,9 @@ const mockSaveMeetingExport = vi.fn<
 >();
 const mockSaveMeetingAudioExport = vi.fn<(id: string) => Promise<void>>();
 const mockGetMeetingAudio = vi.fn<(id: string) => Promise<import("../../types").MeetingAudioSession[]>>();
+const mockApplyLiveParagraphEdit = vi.fn<
+  (meetingId: string, segmentIndices: number[], newText: string) => Promise<void>
+>();
 
 vi.mock("../../api/meetings", () => ({
   startMeetingRecording: (...a: unknown[]) =>
@@ -52,7 +56,8 @@ vi.mock("../../api/meetings", () => ({
   resumeMeetingRecording: (...a: unknown[]) =>
     mockResumeMeetingRecording(...(a as [string, (s: TranscriptionSegment) => void])),
   stopMeetingRecording: (...a: unknown[]) => mockStopMeetingRecording(...(a as [])),
-  takeSleepPausedMeeting: (...a: unknown[]) => mockTakeSleepPausedMeeting(...(a as [])),
+  peekSleepPausedMeeting: (...a: unknown[]) => mockPeekSleepPausedMeeting(...(a as [])),
+  clearSleepPausedMeeting: (...a: unknown[]) => mockClearSleepPausedMeeting(...(a as [])),
   getMeeting: (...a: unknown[]) => mockGetMeeting(...(a as [string])),
   deleteMeeting: (...a: unknown[]) => mockDeleteMeeting(...(a as [string])),
   renameMeeting: (...a: unknown[]) => mockRenameMeeting(...(a as [string, string])),
@@ -68,6 +73,8 @@ vi.mock("../../api/meetings", () => ({
   saveMeetingAudioExport: (...a: unknown[]) =>
     mockSaveMeetingAudioExport(...(a as [string])),
   getMeetingAudio: (...a: unknown[]) => mockGetMeetingAudio(...(a as [string])),
+  applyLiveParagraphEdit: (...a: unknown[]) =>
+    mockApplyLiveParagraphEdit(...(a as [string, number[], string])),
 }));
 
 vi.mock("../../api/summary", () => ({
@@ -116,6 +123,8 @@ const {
   createMeetingController,
   resetMeetingControllerForTest,
   notifyMeetingIdle,
+  notifyMeetingFinalized,
+  notifyStateChanged,
   notifySystemWokeUp,
 } = await import("./controller.svelte");
 
@@ -559,6 +568,106 @@ describe("MeetingController", () => {
     expect(ctrl.isExporting).toBe(false);
   });
 
+  describe("applyLiveParagraphEdit", () => {
+    // Reassigned by every startRecording, so a test can feed the recording
+    // that replaced the one it started with.
+    let emit: (s: TranscriptionSegment) => void = () => {};
+
+    async function recordOneParagraph() {
+      mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+      mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+      mockStartMeetingRecording.mockImplementation(async (_t, _c, onSegment) => {
+        emit = onSegment;
+      });
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+      await ctrl.startRecording();
+      mockApp.machineState = {
+        state: "recording_meeting",
+        data: {
+          profile: makeMeeting().transcription_profile,
+          session_id: 1,
+          meeting_id: "live-1",
+        },
+      } as import("../../types").AppStateMachine;
+
+      // Two turns far enough apart that the first one freezes into `committed`.
+      emit(liveSeg("hello", 0));
+      emit(liveSeg("there.", 0.3));
+      emit(liveSeg("much", 30));
+      emit(liveSeg("later.", 30.3));
+      return { ctrl };
+    }
+
+    function liveSeg(text: string, start: number): TranscriptionSegment {
+      return {
+        text,
+        start_time: start,
+        end_time: start + 0.2,
+        is_final: true,
+        language: null,
+        confidence: null,
+        speaker: null,
+      };
+    }
+
+    it("rolls the paragraph and its segments back when the backend rejects", async () => {
+      const { ctrl } = await recordOneParagraph();
+      const paragraph = ctrl.liveTranscript.committed[0];
+      mockApplyLiveParagraphEdit.mockRejectedValue(new Error("db is locked"));
+
+      await ctrl.applyLiveParagraphEdit(paragraph.id, "hello world");
+
+      expect(ctrl.liveTranscript.committed[0].text).toBe("hello there.");
+      expect(ctrl.liveMeetingSegments.map((s) => s.text)).toEqual([
+        "hello",
+        "there.",
+        "much",
+        "later.",
+      ]);
+      expect(ctrl.statusMessage).toContain("db is locked");
+    });
+
+    it("does not roll back into the buffers of the next recording", async () => {
+      const { ctrl } = await recordOneParagraph();
+      const paragraph = ctrl.liveTranscript.committed[0];
+
+      let reject: (e: Error) => void = () => {};
+      mockApplyLiveParagraphEdit.mockImplementation(
+        () => new Promise<void>((_resolve, r) => { reject = (e) => r(e); }),
+      );
+
+      const pending = ctrl.applyLiveParagraphEdit(paragraph.id, "hello world");
+
+      // The meeting stops and a fresh one starts before the edit settles.
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      mockApp.currentMeetingId = "live-1";
+      notifyMeetingFinalized("live-1");
+      await ctrl.startRecording();
+      emit(liveSeg("brand", 0));
+      emit(liveSeg("new.", 0.3));
+      emit(liveSeg("second", 30));
+      emit(liveSeg("turn.", 30.3));
+
+      // Paragraph ids restart at 0, so the stale rollback addresses a real
+      // paragraph of this recording, not a missing one.
+      expect(ctrl.liveTranscript.committed[0].id).toBe(paragraph.id);
+
+      reject(new Error("db is locked"));
+      await pending;
+
+      expect(ctrl.liveTranscript.committed[0].text).toBe("brand new.");
+      expect(ctrl.liveMeetingSegments.map((s) => s.text)).toEqual([
+        "brand",
+        "new.",
+        "second",
+        "turn.",
+      ]);
+      expect(ctrl.statusMessage).not.toContain("db is locked");
+    });
+  });
+
   it("exportMeeting is a no-op while the meeting is recording", async () => {
     mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
     mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
@@ -844,7 +953,7 @@ describe("MeetingController", () => {
 
   describe("notifySystemWokeUp", () => {
     it("loads and auto-resumes the meeting sleep paused, when one exists", async () => {
-      mockTakeSleepPausedMeeting.mockResolvedValue("meet-1");
+      mockPeekSleepPausedMeeting.mockResolvedValue("meet-1");
       mockGetMeeting.mockResolvedValue(makeMeeting());
       mockResumeMeetingRecording.mockResolvedValue(undefined);
 
@@ -854,20 +963,20 @@ describe("MeetingController", () => {
       notifySystemWokeUp();
       await vi.waitFor(() => expect(mockResumeMeetingRecording).toHaveBeenCalledOnce());
 
-      expect(mockTakeSleepPausedMeeting).toHaveBeenCalledOnce();
+      expect(mockPeekSleepPausedMeeting).toHaveBeenCalledOnce();
       expect(mockGetMeeting).toHaveBeenCalledWith("meet-1");
       expect(mockResumeMeetingRecording.mock.calls[0][0]).toBe("meet-1");
       expect(ctrl.statusMessage).toMatch(/resumed after sleep/i);
     });
 
     it("does nothing when no meeting was paused by sleep", async () => {
-      mockTakeSleepPausedMeeting.mockResolvedValue(null);
+      mockPeekSleepPausedMeeting.mockResolvedValue(null);
 
       const ctrl = createMeetingController();
       await ctrl.mount();
 
       notifySystemWokeUp();
-      await vi.waitFor(() => expect(mockTakeSleepPausedMeeting).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(mockPeekSleepPausedMeeting).toHaveBeenCalledOnce());
 
       expect(mockGetMeeting).not.toHaveBeenCalled();
       expect(mockResumeMeetingRecording).not.toHaveBeenCalled();
@@ -875,7 +984,7 @@ describe("MeetingController", () => {
     });
 
     it("leaves the meeting loaded (not resumed) and surfaces the error when resume fails", async () => {
-      mockTakeSleepPausedMeeting.mockResolvedValue("meet-1");
+      mockPeekSleepPausedMeeting.mockResolvedValue("meet-1");
       mockGetMeeting.mockResolvedValue(makeMeeting());
       mockResumeMeetingRecording.mockRejectedValue(new Error("model unload failed"));
 
@@ -887,6 +996,128 @@ describe("MeetingController", () => {
 
       expect(ctrl.meeting?.id).toBe("meet-1");
       expect(ctrl.statusMessage).toMatch(/model unload failed/i);
+    });
+
+    // The sleep-triggered stop is spawned off the AppKit will-sleep callback
+    // and routinely hasn't finished draining (EndOfStream + engine flush +
+    // DB save) by the time wake fires: the machine can still read `stopping`
+    // (or even `recording_meeting`) right when SystemWokeUp arrives. This is
+    // the regression this ticket (SOU-040) fixes: the old destructive
+    // take_sleep_paused_meeting burned the id on this very check, so the
+    // resume was lost for good even though the meeting was about to become
+    // resumable moments later.
+    function setStoppingMeeting(meetingId = "meet-1") {
+      mockApp.machineState = {
+        state: "stopping",
+        data: {
+          profile: makeMeeting().transcription_profile,
+          was_recording: { meeting: { meeting_id: meetingId } },
+        },
+      } as import("../../types").AppStateMachine;
+    }
+
+    function setReady() {
+      mockApp.machineState = {
+        state: "ready",
+        data: { profile: makeMeeting().transcription_profile },
+      } as import("../../types").AppStateMachine;
+    }
+
+    it("waits for the sleep-triggered stop to finish draining, then resumes once the machine reports ready", async () => {
+      mockPeekSleepPausedMeeting.mockResolvedValue("meet-1");
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      mockResumeMeetingRecording.mockResolvedValue(undefined);
+      setStoppingMeeting();
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+
+      notifySystemWokeUp();
+      await vi.waitFor(() => expect(mockPeekSleepPausedMeeting).toHaveBeenCalledOnce());
+
+      // Still draining: must not resume (or even load the meeting) yet.
+      expect(mockResumeMeetingRecording).not.toHaveBeenCalled();
+      expect(mockGetMeeting).not.toHaveBeenCalled();
+
+      // The background stop finishes: the machine reports ready.
+      setReady();
+      notifyStateChanged(mockApp.machineState);
+
+      await vi.waitFor(() => expect(mockResumeMeetingRecording).toHaveBeenCalledOnce());
+      expect(mockGetMeeting).toHaveBeenCalledWith("meet-1");
+      expect(mockResumeMeetingRecording.mock.calls[0][0]).toBe("meet-1");
+      expect(ctrl.statusMessage).toMatch(/resumed after sleep/i);
+    });
+
+    it("does not resume or clear the flag while stopping never reaches ready, and falls back to the manual banner once the wait times out", async () => {
+      vi.useFakeTimers();
+      try {
+        mockPeekSleepPausedMeeting.mockResolvedValue("meet-1");
+        mockGetMeeting.mockResolvedValue(makeMeeting());
+        setStoppingMeeting();
+
+        const ctrl = createMeetingController();
+        await ctrl.mount();
+
+        notifySystemWokeUp();
+        // Flush the pending peekSleepPausedMeeting() microtask without
+        // advancing mocked time, so the wait is armed but the timeout
+        // hasn't started ticking down yet.
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(mockPeekSleepPausedMeeting).toHaveBeenCalledOnce();
+
+        // An unrelated transition that still isn't `ready` (the drain is
+        // still in flight) must neither resume nor discard the id.
+        setStoppingMeeting();
+        notifyStateChanged(mockApp.machineState);
+        expect(mockResumeMeetingRecording).not.toHaveBeenCalled();
+        expect(mockClearSleepPausedMeeting).not.toHaveBeenCalled();
+        expect(ctrl.meeting).toBeNull();
+
+        // The wait cap elapses with the machine still never having reported
+        // ready: give up on the automatic resume, but the id was never
+        // attempted, so it must not be cleared either (only a successful
+        // resume or an explicit user refusal may do that).
+        await vi.advanceTimersByTimeAsync(10_000);
+
+        expect(mockResumeMeetingRecording).not.toHaveBeenCalled();
+        expect(mockClearSleepPausedMeeting).not.toHaveBeenCalled();
+        // Falls back to the manual "Resume recording" banner instead of a
+        // silent abandon: the meeting is loaded so canResumeRecording can
+        // turn true.
+        expect(ctrl.meeting?.id).toBe("meet-1");
+        expect(ctrl.statusMessage).toMatch(/resume/i);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("shares an in-flight promise when notifySystemWokeUp is called concurrently", async () => {
+      let resolvePeek: (value: string | null) => void;
+      mockPeekSleepPausedMeeting.mockReturnValue(
+        new Promise((resolve) => {
+          resolvePeek = resolve;
+        })
+      );
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      mockResumeMeetingRecording.mockResolvedValue(undefined);
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+
+      // Fire two notifications concurrently (e.g. SystemWokeUp and visibilitychange)
+      notifySystemWokeUp();
+      notifySystemWokeUp();
+
+      // Both calls should share the single in-flight peek
+      expect(mockPeekSleepPausedMeeting).toHaveBeenCalledOnce();
+
+      resolvePeek!("meet-1");
+      await vi.waitFor(() => expect(mockResumeMeetingRecording).toHaveBeenCalledOnce());
+
+      expect(mockGetMeeting).toHaveBeenCalledOnce();
+      expect(mockResumeMeetingRecording).toHaveBeenCalledOnce();
     });
   });
 });

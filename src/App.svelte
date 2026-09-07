@@ -20,11 +20,13 @@
     notifyMeetingFinalized,
     notifyMeetingIdle,
     notifyMeetingStopRequested,
+    notifyStateChanged,
     notifySystemWokeUp,
   } from "./lib/features/meeting/controller.svelte";
   import {
     createTranscriptionController,
     notifyDictationAborted,
+    notifyDictationStopRequested,
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
   import { applyTheme, errorMessage } from "./lib/utils";
@@ -45,6 +47,7 @@
 
   let unlistenSystemAudio: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
+  let unlistenDictationStop: (() => void) | null = null;
   let unlistenMeetingFinalized: (() => void) | null = null;
   let unlistenUpcomingMeeting: (() => void) | null = null;
   let unlistenMeetingIdle: (() => void) | null = null;
@@ -177,6 +180,9 @@
       app.machineState = event.payload;
       if (aborted === "dictation") notifyDictationAborted();
       else if (aborted === "meeting") notifyMeetingAborted();
+      // Lets a wake-resume that's waiting on a still-draining sleep-triggered
+      // stop fire the moment the machine reports `ready`.
+      notifyStateChanged(event.payload);
     }).then((fn) => {
       unlistenState = fn;
     });
@@ -203,6 +209,12 @@
       notifyMeetingStopRequested();
     }).then((fn) => {
       unlistenMeetingStop = fn;
+    });
+
+    events.dictationStopRequested.listen(() => {
+      notifyDictationStopRequested();
+    }).then((fn) => {
+      unlistenDictationStop = fn;
     });
 
     events.meetingFinalized.listen((event) => {
@@ -238,8 +250,8 @@
     // Belt and braces: the webview itself may have been suspended when the
     // backend's wake event fired (and so missed it), but visibility always
     // flips to visible when the window comes back, so recheck here too.
-    // `take_sleep_paused_meeting` is idempotent (clears on read), so a
-    // redundant call from both paths is harmless.
+    // `peek_sleep_paused_meeting` is non-destructive, so a redundant call
+    // from both paths is harmless.
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") notifySystemWokeUp();
     };
@@ -254,6 +266,7 @@
       unlistenPipelineError?.();
       unlistenSystemAudio?.();
       unlistenMeetingStop?.();
+      unlistenDictationStop?.();
       unlistenMeetingFinalized?.();
       unlistenUpcomingMeeting?.();
       unlistenMeetingIdle?.();

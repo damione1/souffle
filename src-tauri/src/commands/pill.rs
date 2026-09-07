@@ -34,17 +34,3 @@ pub fn pill_release(app: AppHandle) -> Result<(), String> {
     crate::pill::sync(&app, &state.current_machine_state()?);
     Ok(())
 }
-
-/// Resize the pill window to `width` x `height` (logical pixels). A
-/// dragged position is kept (and clamped on-screen); otherwise the pill
-/// stays top-centered. The frontend calls this as the live transcript
-/// grows/shrinks. A single native frame change avoids the top-edge drift
-/// that a separate resize-then-recenter pair produces.
-#[tauri::command]
-#[specta::specta]
-pub fn pill_resize(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
-    let Some(pill) = app.get_webview_window("pill") else {
-        return Ok(());
-    };
-    crate::pill::set_frame_top_center(&pill, width, height).map_err(|e| e.to_string())
-}

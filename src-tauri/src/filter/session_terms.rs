@@ -7,6 +7,8 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
+use super::learned_pair::is_learned_pair_acceptable;
+
 /// Upper bound on derived terms: invitation bodies can be huge
 /// (videoconference boilerplate), and every term costs a comparison per
 /// transcribed word.
@@ -78,15 +80,11 @@ pub fn derive_corrections_from_edit(original: &str, corrected: &str) -> Vec<Sess
 
         // Skip ahead on whichever side still has a matching token later in
         // the other list (handles insertions/deletions without pairing noise).
-        if j + 1 < corr_words.len()
-            && orig_words[i].eq_ignore_ascii_case(&corr_words[j + 1])
-        {
+        if j + 1 < corr_words.len() && orig_words[i].eq_ignore_ascii_case(&corr_words[j + 1]) {
             j += 1;
             continue;
         }
-        if i + 1 < orig_words.len()
-            && orig_words[i + 1].eq_ignore_ascii_case(&corr_words[j])
-        {
+        if i + 1 < orig_words.len() && orig_words[i + 1].eq_ignore_ascii_case(&corr_words[j]) {
             i += 1;
             continue;
         }
@@ -99,13 +97,29 @@ pub fn derive_corrections_from_edit(original: &str, corrected: &str) -> Vec<Sess
     corrections
 }
 
+/// Drop every pair when an edit produced more than [`super::learned_pair::MAX_LEARNED_PAIRS`]:
+/// that is a reformulation, not a set of recognition fixes.
+pub(crate) fn cap_learned_pairs(corrections: Vec<SessionCorrection>) -> Vec<SessionCorrection> {
+    if corrections.len() > super::learned_pair::MAX_LEARNED_PAIRS {
+        Vec::new()
+    } else {
+        corrections
+    }
+}
+
+/// Splits text into space-separated tokens, stripping non-alphanumeric characters.
 fn tokenize_words(text: &str) -> Vec<String> {
     text.split_whitespace()
-        .map(|token| token.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+        .map(|token| {
+            token
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_string()
+        })
         .filter(|token| !token.is_empty())
         .collect()
 }
 
+/// Helper to validate a learned pair and push it to the list of corrections.
 fn push_correction(
     corrections: &mut Vec<SessionCorrection>,
     seen: &mut HashSet<(String, String)>,
@@ -124,12 +138,12 @@ fn push_correction(
     }
 }
 
+/// Determines if a pair passes the heuristic for a valid misspelled term vs its correction.
 fn is_correction_candidate(from: &str, to: &str) -> bool {
-    from.chars().count() >= MIN_TOKEN_LEN
-        && to.chars().count() >= MIN_TOKEN_LEN
-        && !from.eq_ignore_ascii_case(to)
+    is_learned_pair_acceptable(from, to)
 }
 
+/// Returns true if a token looks like a proper name (sufficient length, alphabetic characters).
 fn is_name_token(token: &str) -> bool {
     token.chars().count() >= MIN_TOKEN_LEN
         && token
@@ -211,6 +225,32 @@ mod tests {
             "Kubernetes and Kubernetes again",
         );
         assert_eq!(corrections.len(), 1);
+    }
+
+    #[test]
+    fn derive_corrections_skips_reformulation_noise() {
+        let corrections =
+            derive_corrections_from_edit("je pense que c est bien", "je crois que c etait bien");
+        assert!(
+            corrections.is_empty(),
+            "reformulation pairs must not become learned rules: {corrections:?}"
+        );
+    }
+
+    #[test]
+    fn cap_learned_pairs_drops_a_rewrite() {
+        let many: Vec<_> = (0..9)
+            .map(|i| SessionCorrection {
+                misspelling: format!("Kubernetis{i:02}"),
+                term: format!("Kubernetes{i:02}"),
+            })
+            .collect();
+        assert!(cap_learned_pairs(many).is_empty());
+        let few = vec![SessionCorrection {
+            misspelling: "Kubernetis".into(),
+            term: "Kubernetes".into(),
+        }];
+        assert_eq!(cap_learned_pairs(few).len(), 1);
     }
 
     #[test]
