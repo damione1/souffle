@@ -1757,6 +1757,8 @@ impl AudioCapture {
     /// waveform decays instead of freezing on its last value.
     fn emit_audio_level(&self, level: f32) {
         use tauri_specta::Event;
+        // Drive the native pill waveform bars directly (no IPC round-trip).
+        crate::pill::push_rms(level);
         if let Some(app) = &self.app {
             let _ = crate::app_events::AudioLevel { level }.emit(app);
         }

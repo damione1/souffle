@@ -130,7 +130,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::polish_dictation,
             commands::pill_hold,
             commands::pill_release,
-            commands::pill_resize,
             commands::get_settings,
             commands::save_settings,
             commands::save_shortcuts,
@@ -175,6 +174,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::SystemAudioStatus,
             app_events::AudioLevel,
             app_events::MeetingStopRequested,
+            app_events::DictationStopRequested,
             app_events::MeetingFinalized,
             app_events::UpcomingMeeting,
             app_events::TodayCalendarUpdated,
@@ -397,21 +397,10 @@ pub fn run() {
                 device_watch::destroy_orphaned_souffle_taps();
             }
 
-            if let Some(pill) = app.get_webview_window("pill") {
-                if let Err(e) = crate::pill::apply_current_frame(&pill) {
-                    tracing::warn!("Pill overlay configure failed: {e}");
-                }
-                let pill_events = pill.clone();
-                pill.on_window_event(move |event| match event {
-                    tauri::WindowEvent::Moved(_) => crate::pill::note_user_moved(&pill_events),
-                    tauri::WindowEvent::ScaleFactorChanged { .. } => {
-                        if let Err(e) = crate::pill::apply_current_frame(&pill_events) {
-                            tracing::warn!("Pill overlay rescale failed: {e}");
-                        }
-                    }
-                    _ => {}
-                });
-            }
+            // Create the native NSPanel pill (SOU-051). The panel is owned by
+            // Swift; no Tauri webview window is involved. This must run on the
+            // main thread (setup closure), which it does.
+            crate::pill::create_panel(app.handle());
 
             // Close hides; it must not destroy. The pill + tray keep the
             // process alive, so a destroyed `main` leaves Soufflé in the

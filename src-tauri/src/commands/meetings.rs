@@ -12,10 +12,10 @@ use crate::state::AppState;
 
 /// Native save panel, parented to `main` after bringing the app forward.
 ///
-/// The JS dialog plugin parents to whichever webview invoked it. The pill
-/// overlay is a non-activating `NSPanel`, and WKWebView swallows OS surfaces
-/// the same way it swallows `target="_blank"` (see `open_release_page`):
-/// click, nothing opens. Talk to AppKit from this side of the webview.
+/// The JS dialog plugin parents to whichever webview invoked it. WKWebView
+/// swallows OS surfaces the same way it swallows `target="_blank"` (see
+/// `open_release_page`): click, nothing opens. Talk to AppKit from this
+/// side of the webview, always parented to `main`.
 pub(crate) fn pick_save_path(
     app: &AppHandle,
     file_name: &str,

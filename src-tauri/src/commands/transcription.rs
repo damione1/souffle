@@ -382,9 +382,9 @@ fn dictation_live_preview(accumulated: &str, tentative: &str) -> String {
 
 /// The per-segment callback for dictation: forward every segment to the main
 /// window's channel as before, and additionally accumulate final segments'
-/// text to emit a throttled `DictationLiveText` sample to the (separate)
-/// pill webview. Meetings do not go through this path — their own
-/// `build_meeting_on_segment` never touches live text.
+/// text to emit a throttled `DictationLiveText` sample (LiveSessionCard) and
+/// push the same tail to the native HUD. Meetings do not go through this
+/// path — their own `build_meeting_on_segment` never touches live text.
 fn build_dictation_on_segment(
     app: AppHandle,
     channel: Channel<crate::engine::TranscriptionSegment>,
@@ -402,6 +402,7 @@ fn build_dictation_on_segment(
             let preview = dictation_live_preview(&state.accumulated, &text);
             let tail = crate::pill::live_text_tail(&preview, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
+            crate::pill::push_live_text(&tail);
             let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
             return;
         }
@@ -423,6 +424,7 @@ fn build_dictation_on_segment(
             let tail =
                 crate::pill::live_text_tail(&state.accumulated, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
+            crate::pill::push_live_text(&tail);
             let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
         }
     })
@@ -546,6 +548,7 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
     if is_dictation
         && let Ok(app) = state.app_handle()
     {
+        crate::pill::push_live_text("");
         let _ = crate::app_events::DictationLiveText { text: String::new() }.emit(&app);
     }
 
