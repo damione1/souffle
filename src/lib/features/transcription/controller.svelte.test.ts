@@ -927,6 +927,8 @@ describe("transcription controller", () => {
 
     mockInvoke.mockImplementation(defaultInvoke);
     await ctrl.toggleRecording(true);
+    const startCalls = mockInvoke.mock.calls.filter((call) => call[0] === "start_transcription");
+    expect(startCalls).toHaveLength(2);
     simulateRecordingStarted(ctrl.app);
 
     await new Promise((r) => setTimeout(r, 60));
