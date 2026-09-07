@@ -223,6 +223,42 @@ impl Database {
             )
             .map_err(|e| format!("Update segment text: {e}"))?;
         }
+
+        // Rebuild FTS only if there is no edited_transcript
+        let edited_transcript: Option<String> = tx
+            .query_row(
+                "SELECT edited_transcript FROM meetings WHERE id = ?1",
+                params![meeting_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Query edited_transcript: {e}"))?;
+
+        if edited_transcript.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
+            let mut stmt = tx
+                .prepare("SELECT text FROM segments WHERE meeting_id = ?1 ORDER BY sort_order")
+                .map_err(|e| format!("Prepare segments: {e}"))?;
+            let texts: Vec<String> = stmt
+                .query_map(params![meeting_id], |row| row.get(0))
+                .map_err(|e| format!("Query segments: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Collect segments: {e}"))?;
+            let full_text = texts.join(" ");
+
+            tx.execute(
+                "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
+                params![meeting_id],
+            )
+            .map_err(|e| format!("Delete FTS: {e}"))?;
+
+            if !full_text.is_empty() {
+                tx.execute(
+                    "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+                    params![full_text, "meeting", meeting_id],
+                )
+                .map_err(|e| format!("Insert FTS: {e}"))?;
+            }
+        }
+
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -556,12 +592,46 @@ impl Database {
         id: &str,
         edited_transcript: Option<&str>,
     ) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
-        conn.execute(
+        let mut conn = self.conn.acquire()?;
+        let tx = conn.transaction().map_err(|e| format!("Transaction: {e}"))?;
+
+        tx.execute(
             "UPDATE meetings SET edited_transcript = ?1 WHERE id = ?2",
             params![edited_transcript, id],
         )
         .map_err(|e| format!("Update edited transcript: {e}"))?;
+
+        // Rebuild FTS
+        let text_to_index = if let Some(edited) = edited_transcript.filter(|t| !t.is_empty()) {
+            edited.to_string()
+        } else {
+            let mut stmt = tx
+                .prepare("SELECT text FROM segments WHERE meeting_id = ?1 ORDER BY sort_order")
+                .map_err(|e| format!("Prepare segments: {e}"))?;
+            let texts: Vec<String> = stmt
+                .query_map(params![id], |row| row.get(0))
+                .map_err(|e| format!("Query segments: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Collect segments: {e}"))?;
+            texts.join(" ")
+        };
+
+        tx.execute(
+            "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("Delete FTS: {e}"))?;
+
+        if !text_to_index.is_empty() {
+            tx.execute(
+                "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+                params![text_to_index, "meeting", id],
+            )
+            .map_err(|e| format!("Insert FTS: {e}"))?;
+        }
+
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+
         Ok(())
     }
 
