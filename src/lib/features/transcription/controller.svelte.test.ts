@@ -900,6 +900,42 @@ describe("transcription controller", () => {
     expect(pasteCalls[0][1]).toEqual(expect.objectContaining({ text: "hello" }));
   });
 
+  it("queued PTT stop does not stop a later dictation after abort (SOU-045)", async () => {
+    let releaseStart: (() => void) | undefined;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        return new Promise<void>((r) => { releaseStart = r; });
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    const firstStart = ctrl.toggleRecording(true);
+    await vi.waitFor(() => {
+      expect(releaseStart).toBeTypeOf("function");
+    });
+
+    eventListeners["shortcut-ptt-stop"]?.({ payload: null });
+    releaseStart!();
+    await firstStart;
+    simulateRecordingStarted(ctrl.app);
+
+    ctrl.handleRecordingAborted();
+    ctrl.app.machineState = { state: "idle" };
+
+    mockInvoke.mockImplementation(defaultInvoke);
+    await ctrl.toggleRecording(true);
+    const startCalls = mockInvoke.mock.calls.filter((call) => call[0] === "start_transcription");
+    expect(startCalls).toHaveLength(2);
+    simulateRecordingStarted(ctrl.app);
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+  });
+
   it("toggleRecording directly is a no-op while a meeting is recording", async () => {
     const ctrl = createTranscriptionController();
     await ctrl.mount();
