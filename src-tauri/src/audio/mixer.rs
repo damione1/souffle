@@ -102,14 +102,11 @@ impl MeetingMixer {
         // tap leg (which survived the mic rebuild) accumulates system audio.
         // Ingest it now and pad the mic leg with silence so the accumulated tap
         // is not immediately discarded as "drift lead" on the next tick.
-        loop {
-            let n = self.tap.pop_slice(&mut self.scratch);
-            if n == 0 {
-                break;
-            }
-            let resampled = self.tap_to_mix.process(&self.scratch[..n]);
-            self.tap_fifo.extend(resampled);
-        }
+        // Drain both rings unbound: the new mic stream may already hold
+        // samples from the rebuild interval (capture starts it before this
+        // swap). Pad only the remaining tap lead so those mic samples line
+        // up with the tap they arrived with, instead of sitting after silence.
+        self.ingest(false);
         if self.tap_fifo.len() > self.mic_fifo.len() {
             let pad = self.tap_fifo.len() - self.mic_fifo.len();
             self.mic_fifo.resize(self.mic_fifo.len() + pad, 0.0);
@@ -475,11 +472,38 @@ mod tests {
         out.extend(mixer.flush());
 
         assert!(!out.is_empty());
-        // Cross-rate FFT buffering plus the flush pad means the mix may not
-        // sit at the midpoint; any sample near 0.3 proves the tap survived.
+        assert_eq!(mixer.tap_discarded(), 0, "buffered tap must not be dropped as drift");
+        assert!(
+            out.iter().any(|s| (*s - 0.2).abs() < 0.05),
+            "replaced mic must still emit the tap that survived the rebuild"
+        );
+        assert!(
+            out.iter().any(|s| (*s - 0.1).abs() < 0.05),
+            "new mic samples after the rebuild must still mix"
+        );
+    }
+
+    #[test]
+    fn replace_mic_drains_new_mic_before_silence_pad() {
+        let (old_mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+        tap.push_slice(&vec![0.2f32; FRAME_SAMPLES * 2]);
+        drop(old_mic);
+
+        let (mut new_mic, new_cons) = HeapRb::<f32>::new(48_000 * 2).split();
+        new_mic.push_slice(&vec![0.1f32; FRAME_SAMPLES]);
+        mixer.replace_mic(new_cons, 48_000, 1, 1.0);
+
+        let mut out = mixer.tick();
+        out.extend(mixer.flush());
+
+        assert_eq!(mixer.tap_discarded(), 0, "aligned tap must not be dropped as drift");
         assert!(
             out.iter().any(|s| (*s - 0.3).abs() < 0.05),
-            "replaced mic must still mix with the tap that survived the rebuild"
+            "mic already in the new ring must mix with tap, not sit after a silence pad"
+        );
+        assert!(
+            out.iter().any(|s| (*s - 0.2).abs() < 0.05),
+            "rebuild-gap tap must pair with silence, not later mic"
         );
     }
 
