@@ -76,6 +76,13 @@ fn normalize_token(raw: &str) -> String {
         .to_lowercase()
 }
 
+fn is_french_accent(ch: char) -> bool {
+    matches!(
+        ch,
+        'é' | 'è' | 'ê' | 'ë' | 'à' | 'â' | 'ù' | 'û' | 'ô' | 'î' | 'ï' | 'ç' | 'œ' | 'æ'
+    )
+}
+
 fn score_token(token: &str) -> LangScore {
     let mut score = LangScore::default();
     if token.is_empty() {
@@ -83,11 +90,8 @@ fn score_token(token: &str) -> LangScore {
     }
 
     for ch in token.chars() {
-        match ch {
-            'é' | 'è' | 'ê' | 'ë' | 'à' | 'â' | 'ù' | 'û' | 'ô' | 'î' | 'ï' | 'ç' | 'œ' | 'æ' => {
-                score.fr += 2;
-            }
-            _ => {}
+        if is_french_accent(ch) {
+            score.fr += 2;
         }
     }
 
@@ -99,9 +103,9 @@ fn score_token(token: &str) -> LangScore {
     }
 
     // `-ment` / `-tion` are weak FR cues and collide with English
-    // (`development`, `nation`). Require an accent, same as the intended
-    // grouping before `&&` bound tighter than `||` (SOU-060).
-    if (token.ends_with("ment") || token.ends_with("tion")) && token.contains('é') {
+    // (`development`, `nation`). Require any French accent, not just `é`
+    // (`bâtiment`, `façonnement`).
+    if (token.ends_with("ment") || token.ends_with("tion")) && token.chars().any(is_french_accent) {
         score.fr += 1;
     }
     if token.ends_with("ing") || token.ends_with("ness") || token.ends_with("tion") {
@@ -327,6 +331,7 @@ mod tests {
         assert_ne!(detect_word("development"), Some(LanguageCode::Fr));
         assert_eq!(detect_word("development"), None);
         assert_eq!(detect_word("développement"), Some(LanguageCode::Fr));
+        assert_eq!(detect_word("bâtiment"), Some(LanguageCode::Fr));
     }
 
     #[test]
