@@ -39,6 +39,7 @@ pub struct MockEngine {
     /// `transcribe_responses`. Once exhausted, the last value sticks.
     tail_drained_schedule: VecDeque<bool>,
     tail_drained_value: bool,
+    pub dual_calls: Vec<(Vec<f32>, Vec<f32>)>,
 }
 
 impl Default for MockEngine {
@@ -59,6 +60,7 @@ impl MockEngine {
             emission_delay_seconds: 0.0,
             tail_drained_schedule: VecDeque::new(),
             tail_drained_value: false,
+            dual_calls: Vec::new(),
         }
     }
 
@@ -192,6 +194,8 @@ impl TranscriptionEngine for MockEngine {
         me: &[f32],
         them: &[f32],
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        self.dual_calls.push((me.to_vec(), them.to_vec()));
+        
         let tagged = |speaker: Speaker, text: &str| TranscriptionSegment {
             text: text.to_string(),
             start_time: 0.0,

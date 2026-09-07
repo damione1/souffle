@@ -154,6 +154,7 @@
         onLearnFromEditChange={controller.onLearnFromEditChange}
         onAdd={controller.handleAddDictionaryEntry}
         onDelete={controller.handleDeleteDictionaryEntry}
+        onUpdate={controller.handleUpdateDictionaryEntry}
       />
     {:else if activeTab === "ai"}
       <IntelligenceSettingsSection

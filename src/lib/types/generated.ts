@@ -171,6 +171,23 @@ async pasteText(text: string, delayMs: number, method: PasteMethod) : Promise<Re
 }
 },
 /**
+ * Called by the frontend when a shortcut-triggered dictation fails to
+ * paste. A shortcut dictation is by definition run from another app, so
+ * Soufflé's window is usually not what the user is looking at: the in-app
+ * status banner alone would go unseen (SOU-053). Informational only,
+ * matching the calendar reminder and meeting-idle notifications: action
+ * buttons and click callbacks are unreliable on macOS with the
+ * notification plugin.
+ */
+async notifyPasteFailed(error: string, savedToHistory: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("notify_paste_failed", { error, savedToHistory }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Localized name of the frontmost app at call time.
  */
 async frontmostAppName() : Promise<Result<string | null, string>> {
@@ -242,13 +259,26 @@ async stopMeetingRecording() : Promise<Result<string, string>> {
 }
 },
 /**
- * Return and clear the meeting id paused by the system-sleep handler, if
- * any. The frontend calls this on `SystemWokeUp` (and again on webview
- * visibility change, belt and braces) to decide whether to offer/auto-start
- * a resume.
+ * Return the meeting id paused by the system-sleep handler, if any, without
+ * clearing it. The frontend calls this on `SystemWokeUp` (and again on
+ * webview visibility change, belt and braces) to decide whether to
+ * offer/auto-start a resume. Non-destructive because the sleep-triggered
+ * stop may still be draining when wake fires: the frontend needs to be
+ * able to check again once it finishes, rather than have the first check
+ * burn the id before a resume was actually attempted.
  */
-async takeSleepPausedMeeting() : Promise<string | null> {
-    return await TAURI_INVOKE("take_sleep_paused_meeting");
+async peekSleepPausedMeeting() : Promise<string | null> {
+    return await TAURI_INVOKE("peek_sleep_paused_meeting");
+},
+/**
+ * Clear the meeting id paused by the system-sleep handler. The frontend
+ * calls this after a resume actually starts, or after the user explicitly
+ * declines to resume. `launch_meeting` also clears it unconditionally on
+ * every recording start, so a resume that goes through the normal start
+ * path never needs this to avoid re-offering the same meeting later.
+ */
+async clearSleepPausedMeeting() : Promise<void> {
+    await TAURI_INVOKE("clear_sleep_paused_meeting");
 },
 /**
  * List all saved meetings
@@ -678,6 +708,9 @@ async recoverState() : Promise<Result<AppStateMachine, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Lists all current user dictionary entries from the database.
+ */
 async listDictionary() : Promise<Result<DictionaryEntry[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_dictionary") };
@@ -686,6 +719,9 @@ async listDictionary() : Promise<Result<DictionaryEntry[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Adds a new dictionary entry for text replacement.
+ */
 async addDictionaryEntry(term: string, pronunciation: string | null, category: string | null) : Promise<Result<DictionaryEntry, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_dictionary_entry", { term, pronunciation, category }) };
@@ -694,6 +730,9 @@ async addDictionaryEntry(term: string, pronunciation: string | null, category: s
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Updates an existing dictionary entry, including its term, pronunciation, and category.
+ */
 async updateDictionaryEntry(id: number, term: string, pronunciation: string | null, category: string | null) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_dictionary_entry", { id, term, pronunciation, category }) };
@@ -702,6 +741,9 @@ async updateDictionaryEntry(id: number, term: string, pronunciation: string | nu
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Deletes a specific dictionary entry by ID.
+ */
 async deleteDictionaryEntry(id: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_dictionary_entry", { id }) };
@@ -710,6 +752,9 @@ async deleteDictionaryEntry(id: number) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Clears all entries in the user dictionary.
+ */
 async clearDictionary() : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("clear_dictionary") };
@@ -1432,7 +1477,14 @@ export type PermState = "granted" | "denied" |
 /**
  * The OS doesn't support this capability (e.g. taps need macOS 14.4+).
  */
-"unsupported"
+"unsupported" | 
+/**
+ * Microphone only: TCC access may well be granted, but there is no
+ * usable input device (none plugged in, or its config can't be read).
+ * Kept distinct from `Denied` because the fix isn't the same: plug in
+ * or pick a device, not open System Settings.
+ */
+"no_device"
 /**
  * Which capability to probe or prompt for via `request`.
  */
@@ -1563,10 +1615,12 @@ export type SystemAudioStatus = { active: boolean;
 reason: string | null }
 /**
  * The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
- * The frontend calls `take_sleep_paused_meeting` on receiving this (and again
+ * The frontend calls `peek_sleep_paused_meeting` on receiving this (and again
  * on webview visibility change, in case the webview itself was suspended
  * when this fired) to see whether a meeting was paused by sleep and, if so,
- * offer to resume it.
+ * offer to resume it. If the sleep-triggered stop is still draining, the
+ * frontend waits for the machine to report `ready` before resuming rather
+ * than giving up.
  */
 export type SystemWokeUp = null
 export type Theme = "dark" | "light" | "system"

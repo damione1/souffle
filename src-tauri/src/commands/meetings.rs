@@ -104,6 +104,7 @@ pub fn get_meeting_audio(
     meeting_id: String,
 ) -> Result<Vec<crate::transcript::MeetingAudioSession>, String> {
     Ok(crate::audio::recorder::list_session_files(&meeting_id)
+        .map_err(|e| format!("List session files: {e}"))?
         .into_iter()
         .map(
             |(session_index, path)| crate::transcript::MeetingAudioSession {
@@ -192,7 +193,7 @@ pub fn apply_live_paragraph_edit(
     segment_indices: Vec<u32>,
     new_text: String,
 ) -> Result<(), String> {
-    use crate::filter::session_terms::derive_corrections_from_edit;
+    use crate::filter::session_terms::{cap_learned_pairs, derive_corrections_from_edit};
     use crate::lock_ext::MutexExt;
 
     if segment_indices.is_empty() {
@@ -233,7 +234,8 @@ pub fn apply_live_paragraph_edit(
         if original_text == new_text {
             return Ok(());
         }
-        let corrections = derive_corrections_from_edit(&original_text, &new_text);
+        let corrections =
+            cap_learned_pairs(derive_corrections_from_edit(&original_text, &new_text));
 
         let previous_texts: Vec<(usize, String)> = indices
             .iter()
@@ -465,6 +467,7 @@ pub fn export_meeting_audio_filename(
 #[specta::specta]
 pub fn export_meeting_audio_to_file(id: String, path: String) -> Result<(), String> {
     let sources: Vec<_> = crate::audio::recorder::list_session_files(&id)
+        .map_err(|e| format!("List session files: {e}"))?
         .into_iter()
         .map(|(_, path)| path)
         .collect();
@@ -484,6 +487,7 @@ pub async fn save_meeting_audio_export(
     let meeting = state.db.load_meeting(&id)?;
     let filename = export::export_audio_filename(&meeting);
     let sources: Vec<_> = crate::audio::recorder::list_session_files(&id)
+        .map_err(|e| format!("List session files: {e}"))?
         .into_iter()
         .map(|(_, path)| path)
         .collect();

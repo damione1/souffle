@@ -169,10 +169,12 @@ pub struct ArchiveExportProgress {
 }
 
 /// The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
-/// The frontend calls `take_sleep_paused_meeting` on receiving this (and again
+/// The frontend calls `peek_sleep_paused_meeting` on receiving this (and again
 /// on webview visibility change, in case the webview itself was suspended
 /// when this fired) to see whether a meeting was paused by sleep and, if so,
-/// offer to resume it.
+/// offer to resume it. If the sleep-triggered stop is still draining, the
+/// frontend waits for the machine to report `ready` before resuming rather
+/// than giving up.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct SystemWokeUp;
 

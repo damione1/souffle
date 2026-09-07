@@ -1,10 +1,12 @@
 import { addDictionaryEntry, addSessionCorrection } from "../../api/dictionary";
 import {
+  clearSleepPausedMeeting,
   deleteMeeting as removeMeeting,
   saveMeetingExport,
   saveMeetingAudioExport,
   getMeeting,
   getMeetingAudio,
+  peekSleepPausedMeeting,
   renameMeeting as applyMeetingRename,
   resumeMeetingRecording,
   saveEditedTranscript,
@@ -13,12 +15,11 @@ import {
   startMeetingRecording,
   stopMeetingRecording,
   summarizeMeeting as runMeetingSummary,
-  takeSleepPausedMeeting,
 } from "../../api/meetings";
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummaryProviderChoice, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
+import type { AppStateMachine, ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummaryProviderChoice, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
@@ -33,6 +34,12 @@ function defaultMeetingTitle(): string {
 /** Extra silence tolerated after the banner first appears before auto-stop
  * kicks in, on top of the configured silence threshold. */
 const SILENCE_AUTOSTOP_GRACE_SECONDS = 120;
+
+/** Cap on how long a wake-resume waits for a sleep-triggered stop to finish
+ * draining (EndOfStream + engine flush + DB save) before giving up on the
+ * automatic resume and falling back to the manual "Resume recording"
+ * banner instead of abandoning it silently. */
+const WAKE_RESUME_TIMEOUT_MS = 8000;
 
 /** Honour the Settings provider so the meeting picker cannot run Apple
  * Intelligence when the user locked Ollama, or the reverse. Auto keeps
@@ -87,6 +94,16 @@ function createMeetingControllerInstance() {
   let notesDraft = $state("");
   let notesSaveState = $state<"idle" | "pending" | "saved">("idle");
   let notesTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Meeting id waiting for a still-draining sleep-triggered stop to reach
+  // `ready` before resumeAfterSystemWake actually resumes it. Cleared once
+  // handleStateChanged fires the resume, or the wait times out.
+  let pendingWakeResumeMeetingId: string | null = null;
+  let pendingWakeResumeTimer: ReturnType<typeof setTimeout> | null = null;
+  // Set when a wake-resume gives up waiting and falls back to the manual
+  // "Resume recording" banner: lets closeMeeting() treat navigating away
+  // without resuming as an explicit refusal and clear the backend flag.
+  let wakeResumeFallbackMeetingId: string | null = null;
 
   // Meeting-idle ("meeting seems to be over") banner state.
   let idleSignal = $state<MeetingIdle | null>(null);
@@ -336,6 +353,11 @@ function createMeetingControllerInstance() {
   async function resumeRecording() {
     if (!meeting || !meeting.id) return;
 
+    // Resuming (whether from the wake-resume banner or the ordinary flow)
+    // goes through launch_meeting, which clears the backend's sleep-pause
+    // flag unconditionally: the local refusal marker is now moot too.
+    if (wakeResumeFallbackMeetingId === meeting.id) wakeResumeFallbackMeetingId = null;
+
     try {
       const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { statusMessage = message; });
       if (!ready) return;
@@ -507,23 +529,85 @@ function createMeetingControllerInstance() {
     }
   }
 
-  /** The system woke from sleep (or the webview visibility turned to
+  let activeWakeResumePromise: Promise<void> | null = null;
+
+  /**
+   * The system woke from sleep (or the webview visibility turned to
    * visible, as a belt-and-braces recheck in case the wake event fired while
    * the webview was suspended). Ask the backend whether a meeting was
    * stopped by sleep and, if so, reload it and auto-resume recording through
-   * the normal resume flow. Idempotent: `take_sleep_paused_meeting` clears
-   * its state on read, so a second call (event + visibilitychange both
-   * firing) is a harmless no-op. */
-  async function resumeAfterSystemWake() {
-    let meetingId: string | null;
-    try {
-      meetingId = await takeSleepPausedMeeting();
-    } catch (e) {
-      statusMessage = errorMessage(e);
-      return;
-    }
-    if (!meetingId || isRecordingMeeting) return;
+   * the normal resume flow.
+   *
+   * The sleep-triggered stop is spawned off the AppKit will-sleep callback
+   * (it must not block that callback), so macOS routinely finishes going to
+   * sleep before the stop finishes draining: the machine can still read
+   * `recording_meeting` (the stop hasn't even transitioned yet) or
+   * `stopping` (it's draining) right when this runs. `isRecordingMeeting`
+   * covers exactly those two states, so when it's true this waits for
+   * handleStateChanged to observe `ready` instead of abandoning the resume.
+   * Idempotent: `peekSleepPausedMeeting` doesn't clear its state on read, so
+   * a second call (event + visibilitychange both firing) just re-arms the
+   * same wait harmlessly.
+   */
+  function resumeAfterSystemWake(): Promise<void> {
+    if (activeWakeResumePromise) return activeWakeResumePromise;
+    activeWakeResumePromise = (async () => {
+      try {
+        let meetingId: string | null;
+        try {
+          meetingId = await peekSleepPausedMeeting();
+        } catch (e) {
+          statusMessage = errorMessage(e);
+          return;
+        }
+        if (!meetingId) return;
 
+        if (isRecordingMeeting) {
+          armPendingWakeResume(meetingId);
+          return;
+        }
+
+        await performWakeResume(meetingId);
+      } finally {
+        activeWakeResumePromise = null;
+      }
+    })();
+    return activeWakeResumePromise;
+  }
+
+  /**
+   * Wait for the sleep-triggered stop to reach `ready`, capped at
+   * WAKE_RESUME_TIMEOUT_MS. Re-arming (a second wake notification for the
+   * same id while already waiting) just restarts the timer.
+   */
+  function armPendingWakeResume(meetingId: string) {
+    pendingWakeResumeMeetingId = meetingId;
+    if (pendingWakeResumeTimer) clearTimeout(pendingWakeResumeTimer);
+    pendingWakeResumeTimer = setTimeout(() => {
+      pendingWakeResumeTimer = null;
+      pendingWakeResumeMeetingId = null;
+      void fallBackToManualResume(meetingId);
+    }, WAKE_RESUME_TIMEOUT_MS);
+  }
+
+  /**
+   * Called from the global StateChanged listener (see notifyStateChanged).
+   * If a wake-resume is waiting on the sleep-triggered stop and the machine
+   * just reported `ready`, run the resume now instead of waiting out the
+   * full timeout.
+   */
+  function handleStateChanged(state: AppStateMachine) {
+    if (!pendingWakeResumeMeetingId || state.state !== "ready") return;
+    const meetingId = pendingWakeResumeMeetingId;
+    if (pendingWakeResumeTimer) {
+      clearTimeout(pendingWakeResumeTimer);
+      pendingWakeResumeTimer = null;
+    }
+    pendingWakeResumeMeetingId = null;
+    void performWakeResume(meetingId);
+  }
+
+  async function performWakeResume(meetingId: string) {
     await loadMeeting(meetingId);
     if (!meeting || meeting.id !== meetingId) return; // load failed; loadMeeting already reported it
 
@@ -535,9 +619,27 @@ function createMeetingControllerInstance() {
     }
   }
 
+  /** The sleep-triggered stop never reached `ready` within
+   * WAKE_RESUME_TIMEOUT_MS: load the meeting so the manual "Resume
+   * recording" banner is available instead of abandoning the resume
+   * silently. */
+  async function fallBackToManualResume(meetingId: string) {
+    wakeResumeFallbackMeetingId = meetingId;
+    await loadMeeting(meetingId);
+    if (!meeting || meeting.id !== meetingId) return; // load failed; loadMeeting already reported it
+    statusMessage = "Sleep interrupted this meeting. Resume recording to continue.";
+  }
+
   /** Leave the detail view: clear the open meeting and return to the list. */
   function closeMeeting() {
     void flushNotes();
+    // Leaving the wake-resume fallback banner without resuming is an
+    // explicit refusal: clear the backend flag so a later wake (with no
+    // recording started in between) never silently re-offers this meeting.
+    if (wakeResumeFallbackMeetingId && wakeResumeFallbackMeetingId === meeting?.id) {
+      wakeResumeFallbackMeetingId = null;
+      void clearSleepPausedMeeting().catch(() => {});
+    }
     meeting = null;
     audioSessions = [];
     seekTarget = null;
@@ -750,6 +852,7 @@ function createMeetingControllerInstance() {
     handleRecordingAborted,
     handleMeetingFinalized,
     handleMeetingIdle,
+    handleStateChanged,
     dismissIdle,
     applyLiveParagraphEdit,
     addDictionaryAlias,
@@ -783,6 +886,15 @@ export function notifyMeetingIdle(payload: MeetingIdle) {
   instance?.handleMeetingIdle(payload);
 }
 
+/** Called from the global StateChanged listener on every machine transition.
+ * No-op unless a wake-resume is waiting on the machine to report `ready`, so
+ * this deliberately doesn't create the controller (most state changes have
+ * nothing to do with a pending wake-resume, and none can be pending before
+ * the controller exists in the first place). */
+export function notifyStateChanged(state: AppStateMachine) {
+  instance?.handleStateChanged(state);
+}
+
 /** Called from the global SystemWokeUp listener and from the webview
  * visibilitychange handler: check for (and offer/auto-start) a meeting
  * that sleep paused. Creates the controller if it doesn't exist yet, since
@@ -795,6 +907,10 @@ export function notifySystemWokeUp() {
 // and recording state are never lost when the user switches tabs.
 let instance: ReturnType<typeof createMeetingControllerInstance> | null = null;
 
+/**
+ * Get or create the global meeting controller singleton.
+ * The meeting controller holds state for the active meeting and recording.
+ */
 export function createMeetingController() {
   if (!instance) {
     instance = createMeetingControllerInstance();
@@ -802,7 +918,9 @@ export function createMeetingController() {
   return instance;
 }
 
-/** Reset the singleton for testing. */
+/**
+ * Clear the controller singleton so tests can start fresh.
+ */
 export function resetMeetingControllerForTest() {
   instance = null;
 }

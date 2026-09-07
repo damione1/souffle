@@ -56,10 +56,17 @@ export async function stopMeetingRecording(): Promise<string> {
   return unwrap(commands.stopMeetingRecording());
 }
 
-/** The meeting id paused by the system-sleep handler, if any (and clears
- * it). Called on wake so the frontend can offer/auto-start a resume. */
-export async function takeSleepPausedMeeting(): Promise<string | null> {
-  return commands.takeSleepPausedMeeting();
+/** The meeting id paused by the system-sleep handler, if any. Non-destructive:
+ * called on wake (possibly more than once, while a sleep-triggered stop is
+ * still draining) to decide whether to offer/auto-start a resume. */
+export async function peekSleepPausedMeeting(): Promise<string | null> {
+  return commands.peekSleepPausedMeeting();
+}
+
+/** Clear the meeting id paused by the system-sleep handler. Call after a
+ * resume actually starts, or after the user explicitly declines to resume. */
+export async function clearSleepPausedMeeting(): Promise<void> {
+  return commands.clearSleepPausedMeeting();
 }
 
 /** `templateId` picks the summary template for the final pass; null lets
