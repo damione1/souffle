@@ -11,6 +11,10 @@ export type BootstrapResult = {
   whatsNew: { version: string; releaseNotes: string } | null;
 };
 
+/** Mirrors `update_check::LOCAL_BUILD`: what get_app_version returns from a
+ * checkout the release workflow never stamped. */
+export const LOCAL_BUILD = "local build";
+
 export async function bootstrapAppState(
   app: ReturnType<typeof getAppState>,
 ): Promise<BootstrapResult> {
@@ -43,6 +47,14 @@ export async function bootstrapAppState(
   const currentVersion = await getAppVersion();
   const previousVersion = app.settings.last_seen_version.trim();
   const setupDone = readSetupFlags().setupDone;
+
+  // A build made from a checkout has no release notes to show, and its version
+  // string is not a number, so "Updated to vlocal build." would be the whole
+  // dialog. Leave last_seen_version alone too: the next real release should
+  // still announce itself.
+  if (currentVersion === LOCAL_BUILD) {
+    return { whatsNew: null };
+  }
 
   // First launch and unfinished setup: stamp the version silently so the
   // changelog never stacks on the wizard, and so finishing setup doesn't

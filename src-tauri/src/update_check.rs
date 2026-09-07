@@ -20,7 +20,22 @@ struct GitHubRelease {
     body: Option<String>,
 }
 
+/// Cargo version of a checkout the release workflow has not stamped.
+const UNRELEASED: &str = "0.0.0";
+
+/// Shown wherever a release would show its number, so a binary built from a
+/// checkout never passes itself off as a shipped version.
+pub const LOCAL_BUILD: &str = "local build";
+
+/// True when this binary was built from a checkout rather than cut from a tag.
+pub fn is_local_build() -> bool {
+    env!("CARGO_PKG_VERSION") == UNRELEASED
+}
+
 pub fn current_version() -> String {
+    if is_local_build() {
+        return LOCAL_BUILD.to_string();
+    }
     env!("CARGO_PKG_VERSION").to_string()
 }
 
@@ -31,7 +46,7 @@ pub fn check_for_updates() -> UpdateCheckResult {
     match fetch_latest_release() {
         Ok(release) => {
             let latest = normalize_version_tag(&release.tag_name);
-            let update_available = version_gt(&latest, &current);
+            let update_available = should_offer_update(&latest, &current, is_local_build());
             UpdateCheckResult {
                 current_version: current,
                 latest_version: Some(latest),
@@ -99,6 +114,13 @@ fn normalize_version_tag(tag: &str) -> String {
     tag.trim().trim_start_matches('v').to_string()
 }
 
+/// Whether to announce `latest` to someone running `current`. A local build is
+/// normally ahead of the newest tag and its version does not compare, so it is
+/// never offered an "update" to code older than what was just built.
+fn should_offer_update(latest: &str, current: &str, local_build: bool) -> bool {
+    !local_build && version_gt(latest, current)
+}
+
 /// Compare dotted numeric version strings (`0.1.0` style).
 pub fn version_gt(left: &str, right: &str) -> bool {
     parse_version_parts(left) > parse_version_parts(right)
@@ -114,6 +136,24 @@ fn parse_version_parts(version: &str) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Guards the contract with the release workflow: it rewrites the Cargo
+    /// version from the tag, so anything it has not touched is a local build.
+    #[test]
+    fn an_unstamped_checkout_reports_a_local_build() {
+        assert!(is_local_build());
+        assert_eq!(current_version(), LOCAL_BUILD);
+    }
+
+    /// A tag parses as numerically greater than the placeholder, so without
+    /// the guard every local build would nag daily to install older code.
+    #[test]
+    fn a_local_build_is_never_offered_an_update() {
+        assert!(version_gt("0.10.0", UNRELEASED));
+        assert!(!should_offer_update("0.10.0", LOCAL_BUILD, true));
+        assert!(should_offer_update("0.10.0", "0.9.0", false));
+        assert!(!should_offer_update("0.10.0", "0.10.0", false));
+    }
 
     #[test]
     fn version_gt_orders_semver_parts() {
