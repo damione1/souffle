@@ -9,7 +9,7 @@
 //! processing module) so the backend can be swapped without touching the
 //! mixer. Works on 10ms mono frames at the mixer rate.
 
-use sonora::config::EchoCanceller;
+use sonora::config::{EchoCanceller, TransparentModeType};
 use sonora::{AudioProcessing, Config, StreamConfig};
 
 /// Coarse estimate of the delay between a render frame reaching sonora and
@@ -54,12 +54,20 @@ fn decide_rearm(attempts_so_far: u32) -> RearmDecision {
 
 fn build_apm(sample_rate: u32) -> AudioProcessing {
     let stream = StreamConfig::new(sample_rate, 1);
+    // SOU-063: configure AEC for ASR, not telephony. A swallowed word is
+    // a permanent transcript loss; residual echo is at worst a duplicate
+    // a text filter can drop. sonora's `Config` defaults already leave NS
+    // and AGC2 off (`None`). `EchoCanceller` has no NLP-level knob —
+    // HMM transparent mode is the exposed way to back off suppression
+    // when the filter sees no (or poorly correlated) echo.
     AudioProcessing::builder()
         .config(Config {
             echo_canceller: Some(EchoCanceller {
-                transparent_mode: sonora::config::TransparentModeType::Hmm,
+                transparent_mode: TransparentModeType::Hmm,
                 ..EchoCanceller::default()
             }),
+            noise_suppression: None,
+            gain_controller2: None,
             ..Config::default()
         })
         .capture_config(stream)

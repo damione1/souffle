@@ -250,6 +250,60 @@ mod tests {
         );
     }
 
+    /// Speech in the first 90 ms, silence in the last 480 ms: the block
+    /// must be fed. Overwriting with the last 30 ms (SOU-067) returned
+    /// silence once hangover expired inside the same call.
+    #[test]
+    fn silero_mixed_block_feeds_when_speech_is_not_last_frame() {
+        let Some(model_path) = resolve_vad_model_path() else {
+            eprintln!("skipping: silero_vad_v4.onnx not found");
+            return;
+        };
+        if crate::ort_runtime::resolve_resource("libonnxruntime.dylib").is_none() {
+            eprintln!("skipping: libonnxruntime.dylib not found");
+            return;
+        }
+
+        let mut vad = match audio_vad::SileroVadFilter::new(&model_path, 16_000) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("skipping: Silero VAD init failed: {e}");
+                return;
+            }
+        };
+
+        // 90 ms of a voiced-ish harmonic stack (onset is 2 frames), then
+        // 480 ms of silence — hangover is 450 ms, so the last 30 ms is
+        // true silence and would have overwritten the verdict.
+        let mut block = Vec::with_capacity(480 * 19);
+        for i in 0..(480 * 3) {
+            let t = i as f32 / 16_000.0;
+            block.push(
+                (t * 120.0 * std::f32::consts::TAU).sin() * 0.35
+                    + (t * 240.0 * std::f32::consts::TAU).sin() * 0.2
+                    + (t * 360.0 * std::f32::consts::TAU).sin() * 0.1,
+            );
+        }
+        block.extend(std::iter::repeat(0.0f32).take(480 * 16));
+
+        let mut probe = match audio_vad::SileroVadFilter::new(&model_path, 16_000) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("skipping: Silero VAD init failed: {e}");
+                return;
+            }
+        };
+        if !probe.process(&block[..480 * 3]) {
+            eprintln!("skipping: synthetic voice not detected by Silero");
+            return;
+        }
+
+        assert!(
+            vad.process(&block),
+            "mixed block with early speech must be fed (SOU-067 OR-accumulate)"
+        );
+    }
+
     #[test]
     fn build_text_filters_includes_whitespace_always() {
         let config = PipelineConfig {

@@ -756,10 +756,16 @@ impl EngineActor {
             // Bounded window (in engine frames) to keep feeding the engine
             // after VAD gates speech, so the emission-delayed tail word
             // drains instead of staying stuck behind the next utterance.
-            let frames_per_second = sample_rate as f64 / info.audio.chunk_size_samples as f64;
-            let drain_window_frames =
-                ((engine.emission_delay_seconds() + 0.5) * frames_per_second).ceil() as usize;
-            let lookback_frames = (VAD_LOOKBACK_SECONDS * frames_per_second).ceil() as usize;
+            let drain_window_frames = vad_hold_frames(
+                engine.emission_delay_seconds() + 0.5,
+                sample_rate,
+                info.audio.chunk_size_samples,
+            );
+            let lookback_frames = vad_hold_frames(
+                VAD_LOOKBACK_SECONDS,
+                sample_rate,
+                info.audio.chunk_size_samples,
+            );
             Box::new(SingleMode::new(
                 audio_filters,
                 drain_window_frames,
@@ -881,6 +887,19 @@ trait SessionMode {
 /// (~60ms) at the start of the word that resumes speech, plus whatever gets
 /// gated after the hangover has run out. ~4 frames at Kyutai's 80ms chunk size.
 const VAD_LOOKBACK_SECONDS: f64 = 0.3;
+
+/// Convert a hold duration into engine-frame counts.
+///
+/// Batch engines (Whisper/Parakeet) advertise 5 s chunks, so a 0.3 s
+/// lookback still rounds up to one 5 s frame — that overshoot is
+/// documented, not a 0.3 s ring. A true 30 ms gate is SOU-067/068.
+fn vad_hold_frames(hold_seconds: f64, sample_rate: u32, chunk_size_samples: u32) -> usize {
+    if sample_rate == 0 || chunk_size_samples == 0 {
+        return 1;
+    }
+    let chunk_seconds = f64::from(chunk_size_samples) / f64::from(sample_rate);
+    (hold_seconds / chunk_seconds).ceil().max(1.0) as usize
+}
 
 /// Single mixed-stream session: one buffer gated by the configured audio
 /// filter chain (Silero VAD when enabled).
@@ -2658,6 +2677,25 @@ mod tests {
         mode.step(&mut engine, chunk_size).unwrap();
         assert_eq!(mode.vad_replayed, 1);
         assert!(mode.lookback.is_empty());
+    }
+
+    #[test]
+    fn vad_hold_frames_covers_lookback_for_kyutai_and_batch() {
+        // Kyutai: 1920 @ 24 kHz = 80 ms → 0.3 s ≈ 4 frames.
+        let kyutai = super::vad_hold_frames(super::VAD_LOOKBACK_SECONDS, 24_000, 1_920);
+        assert_eq!(kyutai, 4);
+        assert!((kyutai as f64) * (1_920.0 / 24_000.0) >= super::VAD_LOOKBACK_SECONDS);
+
+        // Whisper/Parakeet: 80_000 @ 16 kHz = 5 s. One frame covers 0.3 s
+        // but the ring is 5 s, not 0.3 s — point 2 of SOU-067.
+        let batch = super::vad_hold_frames(super::VAD_LOOKBACK_SECONDS, 16_000, 80_000);
+        assert_eq!(batch, 1);
+        assert!((batch as f64) * (80_000.0 / 16_000.0) >= super::VAD_LOOKBACK_SECONDS);
+        assert_eq!(
+            super::vad_hold_frames(0.5, 16_000, 80_000),
+            1,
+            "0.5 s drain on a 5 s chunk is still one frame"
+        );
     }
 
     #[test]
