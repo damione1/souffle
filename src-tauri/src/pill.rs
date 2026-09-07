@@ -1,65 +1,179 @@
-//! The floating recording pill — a small always-on-top window shown while
-//! any recording (dictation or meeting) is active, so the user gets visual
-//! feedback even when the main window is hidden. Visibility is driven from
-//! the backend's state transitions (the single source of truth); content
-//! and the stop action live in the pill's webview (`src/lib/pill/`).
+//! The floating recording pill — a native NSPanel (SOU-051) shown while any
+//! recording (dictation or meeting) is active, giving the user visual feedback
+//! even when the main window is hidden.
+//!
+//! The panel is owned entirely by Swift (`pill_panel.swift`). This module
+//! holds the Rust-side state (HOLD, HIDDEN, position persistence) and drives
+//! the Swift layer via the C bridge (`pill_bridge.h`).
+//!
+//! Key design invariants:
+//! - Visibility is driven by `pill::sync` — the single source of truth is the
+//!   `AppStateMachine` + the HOLD flag + the user's hide preference.
+//! - Sizing and positioning are computed inside Swift; Rust never calls
+//!   `setFrame:` — it only tells Swift what mode we're in.
+//! - The stop button invokes a C callback registered at startup. Dictation
+//!   stop is `DictationStopRequested` (stop-only, not a toggle — SOU-044/046);
+//!   the main-window controller then runs `stop_transcription` + polish/paste.
+//!   Meetings use `MeetingStopRequested`, same path as the tray.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 use tracing::warn;
 
-use crate::app_events::{PillHoldChanged, PillHoldKind};
+use crate::app_events::{
+    DictationStopRequested, MeetingStopRequested, PillHoldChanged, PillHoldKind,
+};
 use crate::db::Database;
 use crate::settings::PILL_POSITION_KEY;
 use crate::state::AppState;
 use crate::state_machine::AppStateMachine;
 
-/// Vertical offset below the menu bar.
-const TOP_MARGIN: f64 = 40.0;
+// ---------------------------------------------------------------------------
+// FFI (pill_bridge.h / pill_panel.swift)
+// ---------------------------------------------------------------------------
 
-/// Compact dictation size — must match the "pill" window in tauri.conf.json
-/// and `PILL_WIDTH`/`BASE_HEIGHT` in `PillApp.svelte`. Never derived from
-/// `outer_size()`: after a scale/resolution change that physical size is
-/// stale, and converting it with the new scale factor is what shrinks the
-/// HUD into a tiny scrolling box (SOU-011).
-const COMPACT_WIDTH: f64 = 280.0;
-const COMPACT_HEIGHT: f64 = 64.0;
+/// Recording mode passed to the Swift panel (mirrors `PillMode` in Swift).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PillPanelMode {
+    Dictation = 0,
+    Meeting = 1,
+    Polishing = 2,
+}
 
-/// Last logical size the frontend asked for (`pill_resize`), or compact.
-static LAST_SIZE: Mutex<(f64, f64)> = Mutex::new((COMPACT_WIDTH, COMPACT_HEIGHT));
-/// User-dragged AppKit origin (bottom-left, global points). `None` = default
-/// top-center on the active screen.
-static CUSTOM_ORIGIN: Mutex<Option<(f64, f64)>> = Mutex::new(None);
-/// Last origin we applied ourselves, so a follow-up `Moved` echo is ignored.
-static LAST_APPLIED_ORIGIN: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
-static APPLYING_FRAME: AtomicBool = AtomicBool::new(false);
-static PILL_HIDDEN: AtomicBool = AtomicBool::new(false);
+type PillStopCallback = unsafe extern "C" fn(recording_mode: i32);
 
-/// Minimum spacing between `DictationLiveText` emissions. Well under the
-/// 5-10Hz cap so it reads as "live" without flooding the pill's IPC channel.
-pub const LIVE_TEXT_MIN_INTERVAL: Duration = Duration::from_millis(120);
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+unsafe extern "C" {
+    fn pill_panel_create();
+    fn pill_panel_set_visible(visible: i32);
+    fn pill_panel_set_mode(
+        mode: i32,
+        title: *const std::ffi::c_char,
+        stop_label: *const std::ffi::c_char,
+        a11y_label: *const std::ffi::c_char,
+    );
+    fn pill_panel_set_live_text(text: *const std::ffi::c_char);
+    fn pill_panel_push_rms(level: f32);
+    fn pill_panel_restore_origin(x: f64, y: f64);
+    fn pill_panel_get_origin(out_x: *mut f64, out_y: *mut f64) -> i32;
+    fn pill_panel_set_stop_callback(callback: Option<PillStopCallback>);
+}
 
-/// Tail length (characters) sent to the pill: enough to fill the expanded
-/// live-text preview (3-4 lines at the wider width) without shipping the
-/// whole running dictation on every update.
-pub const LIVE_TEXT_MAX_CHARS: usize = 360;
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_create() {}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_set_visible(_visible: i32) {}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_set_mode(
+    _mode: i32,
+    _title: *const std::ffi::c_char,
+    _stop_label: *const std::ffi::c_char,
+    _a11y_label: *const std::ffi::c_char,
+) {
+}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_set_live_text(_text: *const std::ffi::c_char) {}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_push_rms(_level: f32) {}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_restore_origin(_x: f64, _y: f64) {}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_get_origin(_out_x: *mut f64, _out_y: *mut f64) -> i32 {
+    0
+}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_set_stop_callback(_callback: Option<PillStopCallback>) {}
 
-/// Frontend-driven hold on pill visibility, independent of the state
-/// machine (set/cleared via the `pill_hold` / `pill_release` commands).
-/// `sync` clears it only when *entering* a recording state, so a hold
-/// whose release call was somehow lost (crash, error path) can never leave
-/// a zombie pill once the user starts a new session — without also wiping
-/// a polish hold that is engaged *before* stop, while still recording.
+// ---------------------------------------------------------------------------
+// Module-level state
+// ---------------------------------------------------------------------------
+
+/// Frontend-driven hold on pill visibility, independent of the state machine
+/// (set/cleared via the `pill_hold` / `pill_release` commands).
+/// `sync` clears it only when *entering* a recording state, so a hold whose
+/// release call was somehow lost can never leave a zombie pill once the user
+/// starts a new session.
 static HOLD: Mutex<Option<PillHoldKind>> = Mutex::new(None);
 
 /// Last `recording` value observed by `sync`. Used so the leftover-hold
-/// safety net only fires on a rising edge (idle → recording), not on every
-/// sync while a session is already live.
+/// safety net only fires on a rising edge (idle → recording).
 static LAST_RECORDING: AtomicBool = AtomicBool::new(false);
+
+static PILL_HIDDEN: AtomicBool = AtomicBool::new(false);
+
+/// Restored / last-known origin, kept in Rust so `restore_from_db` is
+/// testable without AppKit.
+static CUSTOM_ORIGIN: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+// ---------------------------------------------------------------------------
+// Live-text constants (public — used by commands::transcription)
+// ---------------------------------------------------------------------------
+
+/// Minimum spacing between `DictationLiveText` emissions.
+pub const LIVE_TEXT_MIN_INTERVAL: Duration = Duration::from_millis(120);
+
+/// Tail length (characters) sent to the pill.
+pub const LIVE_TEXT_MAX_CHARS: usize = 360;
+
+// ---------------------------------------------------------------------------
+// Initialisation
+// ---------------------------------------------------------------------------
+
+/// Create the native panel and install the stop callback.
+/// Must be called from the Tauri setup closure (main thread).
+pub fn create_panel(app: &AppHandle) {
+    // SAFETY: Swift hops to the main thread internally.
+    unsafe { pill_panel_create() };
+    install_stop_callback(app.clone());
+}
+
+fn install_stop_callback(app: AppHandle) {
+    STOP_APP_HANDLE.set(std::sync::Mutex::new(Some(app))).ok();
+
+    unsafe extern "C" fn on_stop(recording_mode: i32) {
+        let Some(guard) = STOP_APP_HANDLE.get() else {
+            return;
+        };
+        let Ok(guard) = guard.lock() else {
+            return;
+        };
+        let Some(app) = guard.as_ref() else {
+            return;
+        };
+
+        if recording_mode == PillPanelMode::Meeting as i32 {
+            let _ = MeetingStopRequested.emit(app);
+        } else {
+            // Stop-only. Never ShortcutToggle: that can start a new dictation
+            // or (historically) take down a meeting (SOU-044 / SOU-046).
+            let _ = DictationStopRequested.emit(app);
+        }
+    }
+
+    // SAFETY: `on_stop` is a plain C function pointer; Swift may call it
+    // from the main thread. AppHandle is Send + Sync.
+    unsafe { pill_panel_set_stop_callback(Some(on_stop)) };
+}
+
+static STOP_APP_HANDLE: std::sync::OnceLock<std::sync::Mutex<Option<AppHandle>>> =
+    std::sync::OnceLock::new();
+
+// ---------------------------------------------------------------------------
+// Visibility helpers
+// ---------------------------------------------------------------------------
+
+pub fn set_hidden(hidden: bool) {
+    PILL_HIDDEN.store(hidden, Ordering::SeqCst);
+}
+
+fn is_hidden() -> bool {
+    PILL_HIDDEN.load(Ordering::SeqCst)
+}
 
 fn set_hold_state(kind: PillHoldKind) {
     if let Ok(mut guard) = HOLD.lock() {
@@ -67,8 +181,6 @@ fn set_hold_state(kind: PillHoldKind) {
     }
 }
 
-/// Clears the hold, returning whether one was actually active (so callers
-/// only emit a change event when something changed).
 fn clear_hold_state() -> bool {
     HOLD.lock()
         .map(|mut guard| guard.take().is_some())
@@ -79,80 +191,163 @@ fn is_held() -> bool {
     HOLD.lock().map(|guard| guard.is_some()).unwrap_or(false)
 }
 
-/// Engage a hold and notify the pill webview.
+fn should_show_pill(recording: bool, held: bool, hidden: bool) -> bool {
+    !hidden && (recording || held)
+}
+
+fn should_clear_hold_on_sync(was_recording: bool, now_recording: bool) -> bool {
+    now_recording && !was_recording
+}
+
+fn store_custom_origin(origin: Option<(f64, f64)>) {
+    if let Ok(mut guard) = CUSTOM_ORIGIN.lock() {
+        *guard = origin;
+    }
+}
+
+fn custom_origin() -> Option<(f64, f64)> {
+    CUSTOM_ORIGIN.lock().ok().and_then(|guard| *guard)
+}
+
+fn locale_is_french(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .and_then(|state| crate::settings::AppSettings::load(&state.db).ok())
+        .map(|settings| settings.locale.starts_with("fr"))
+        .unwrap_or(false)
+}
+
+fn mode_title(mode: PillPanelMode, fr: bool) -> &'static str {
+    match (mode, fr) {
+        (PillPanelMode::Dictation, false) => "Dictating",
+        (PillPanelMode::Dictation, true) => "Dictée",
+        (PillPanelMode::Meeting, _) => "",
+        (PillPanelMode::Polishing, false) => "Reformulating…",
+        (PillPanelMode::Polishing, true) => "Reformulation…",
+    }
+}
+
+fn stop_label(fr: bool) -> &'static str {
+    if fr {
+        "Arrêter l'enregistrement"
+    } else {
+        "Stop recording"
+    }
+}
+
+fn a11y_label(mode: PillPanelMode, fr: bool) -> &'static str {
+    match (mode, fr) {
+        (PillPanelMode::Dictation, false) => "Dictation in progress",
+        (PillPanelMode::Dictation, true) => "Dictée en cours",
+        (PillPanelMode::Meeting, false) => "Meeting recording in progress",
+        (PillPanelMode::Meeting, true) => "Enregistrement de meeting en cours",
+        (PillPanelMode::Polishing, false) => "Reformulating",
+        (PillPanelMode::Polishing, true) => "Reformulation",
+    }
+}
+
+fn to_cstring(s: &str) -> Option<std::ffi::CString> {
+    std::ffi::CString::new(s).ok()
+}
+
+fn apply_mode(mode: PillPanelMode, fr: bool) {
+    let Some(title) = to_cstring(mode_title(mode, fr)) else {
+        return;
+    };
+    let Some(stop) = to_cstring(stop_label(fr)) else {
+        return;
+    };
+    let Some(a11y) = to_cstring(a11y_label(mode, fr)) else {
+        return;
+    };
+    unsafe {
+        pill_panel_set_mode(mode as i32, title.as_ptr(), stop.as_ptr(), a11y.as_ptr());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public hold API
+// ---------------------------------------------------------------------------
+
 pub fn set_hold(app: &AppHandle, kind: PillHoldKind) {
     set_hold_state(kind);
     let _ = PillHoldChanged { kind: Some(kind) }.emit(app);
 }
 
-/// Release a hold. Safe to call with nothing held (e.g. paste succeeded
-/// without dictation polish ever engaging a hold) — a no-op, no event.
 pub fn clear_hold(app: &AppHandle) {
     if clear_hold_state() {
         let _ = PillHoldChanged { kind: None }.emit(app);
     }
 }
 
-/// Whether the pill should be visible given the current recording state,
-/// hold, and the user's hide preference. Pure so it's testable without a
-/// live window/AppHandle.
-fn should_show_pill(recording: bool, held: bool, hidden: bool) -> bool {
-    !hidden && (recording || held)
-}
+// ---------------------------------------------------------------------------
+// Main sync entry point
+// ---------------------------------------------------------------------------
 
-pub fn set_hidden(hidden: bool) {
-    PILL_HIDDEN.store(hidden, Ordering::SeqCst);
-}
-
-fn is_hidden() -> bool {
-    PILL_HIDDEN.load(Ordering::SeqCst)
-}
-
-/// Drop a leftover hold only when a *new* recording starts. Polish holds
-/// the pill *before* `stop_transcription` while the machine is still in a
-/// recording state; clearing on `recording == true` would drop it on the
-/// same `sync` that is supposed to keep the spinner up.
-fn should_clear_hold_on_sync(was_recording: bool, now_recording: bool) -> bool {
-    now_recording && !was_recording
-}
-
-/// Show the pill while recording (or while held), hide it otherwise. Called
-/// on every state transition; must never steal focus from the app the user
-/// is dictating into. We `orderFrontRegardless` a non-activating `NSPanel`
-/// rather than Tauri's `show`/`set_focus`, which activate the app and kick
-/// the user out of another app's fullscreen Space.
+/// Show/hide the pill and update mode. Called on every state transition.
 pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
-    let Some(pill) = app.get_webview_window("pill") else {
-        return;
-    };
-
     let recording = matches!(
         machine,
         AppStateMachine::RecordingDictation { .. } | AppStateMachine::RecordingMeeting { .. }
     );
 
-    // A fresh recording starting is authoritative: any leftover hold from a
-    // previous session (e.g. a release call that never landed) must not
-    // keep blocking future hides.
     let was_recording = LAST_RECORDING.swap(recording, Ordering::SeqCst);
     if should_clear_hold_on_sync(was_recording, recording) {
         clear_hold(app);
     }
 
-    let result = if should_show_pill(recording, is_held(), is_hidden()) {
-        apply_current_frame(&pill).and_then(|()| order_overlay(&pill, true))
+    let show = should_show_pill(recording, is_held(), is_hidden());
+    let fr = locale_is_french(app);
+
+    let mode = if is_held() {
+        PillPanelMode::Polishing
     } else {
-        persist_position(app);
-        order_overlay(&pill, false)
+        match machine {
+            AppStateMachine::RecordingMeeting { .. } => PillPanelMode::Meeting,
+            AppStateMachine::Stopping { was_recording, .. } => {
+                if matches!(
+                    was_recording,
+                    crate::state_machine::RecordingKind::Meeting { .. }
+                ) {
+                    PillPanelMode::Meeting
+                } else {
+                    PillPanelMode::Dictation
+                }
+            }
+            _ => PillPanelMode::Dictation,
+        }
     };
-    if let Err(e) = result {
-        warn!("Recording pill sync failed: {e}");
+
+    apply_mode(mode, fr);
+
+    if !show {
+        persist_position(app);
+        if let Some(empty) = to_cstring("") {
+            unsafe { pill_panel_set_live_text(empty.as_ptr()) };
+        }
     }
+
+    unsafe { pill_panel_set_visible(if show { 1 } else { 0 }) };
 }
 
-/// Whether enough time has passed since the last live-text emission to send
-/// another one. Pure decision — the `Instant::now()` call lives at the call
-/// site so this is testable with fixed timestamps.
+// ---------------------------------------------------------------------------
+// Live text / RMS API
+// ---------------------------------------------------------------------------
+
+/// Push a new live-text tail to the Swift panel. Thread-safe; Swift hops
+/// to the main thread internally.
+pub fn push_live_text(text: &str) {
+    let Some(cstr) = to_cstring(text) else {
+        return;
+    };
+    unsafe { pill_panel_set_live_text(cstr.as_ptr()) };
+}
+
+/// Push a new RMS level (0.0–1.0) for the waveform animation.
+pub fn push_rms(level: f32) {
+    unsafe { pill_panel_push_rms(level) };
+}
+
+/// Whether enough time has passed since the last live-text emission.
 pub fn should_emit_live_text(
     last_emit: Option<Instant>,
     now: Instant,
@@ -164,9 +359,7 @@ pub fn should_emit_live_text(
     }
 }
 
-/// Last `max_chars` characters of `text` (UTF-8-safe: counts chars, not
-/// bytes), so the pill shows a readable tail instead of the whole running
-/// dictation.
+/// Last `max_chars` characters of `text` (UTF-8-safe).
 pub fn live_text_tail(text: &str, max_chars: usize) -> String {
     let total = text.chars().count();
     if total <= max_chars {
@@ -175,220 +368,9 @@ pub fn live_text_tail(text: &str, max_chars: usize) -> String {
     text.chars().skip(total - max_chars).collect()
 }
 
-/// Places the pill using the last requested logical size (compact until the
-/// frontend has resized), on the active screen, clamped on-screen.
-pub(crate) fn apply_current_frame(pill: &tauri::WebviewWindow) -> tauri::Result<()> {
-    let (width, height) = last_size();
-    set_frame(pill, width, height)
-}
-
-/// Lower/upper bounds on the pill's size, defensively clamped in
-/// `set_frame_top_center` against whatever the frontend's live-text
-/// measurement comes up with. The floor is the compact *meeting* HUD
-/// (dot + stop); dictation compact is larger and is requested explicitly.
-const MIN_WIDTH: f64 = 88.0;
-const MAX_WIDTH: f64 = 600.0;
-const MIN_HEIGHT: f64 = 40.0;
-const MAX_HEIGHT: f64 = 260.0;
-
-/// AppKit frame origin (bottom-left corner, global screen coordinates) that
-/// keeps the pill's TOP edge pinned at `top_margin` below the top of
-/// `screen` and horizontally centered on that screen. Pure so the anchoring
-/// math is unit-testable without a live window.
-fn frame_origin(
-    screen_x: f64,
-    screen_y: f64,
-    screen_width: f64,
-    screen_height: f64,
-    width: f64,
-    height: f64,
-    top_margin: f64,
-) -> (f64, f64) {
-    let x = screen_x + (screen_width - width) / 2.0;
-    let y = screen_y + screen_height - top_margin - height;
-    (x, y)
-}
-
-/// Resizes and repositions the pill in a single native `setFrame:` call.
-///
-/// Default placement pins the top edge at `TOP_MARGIN` and centers
-/// horizontally. A user-dragged origin is kept (top edge + x), then clamped
-/// to the active screen so a saved position cannot land off-screen after a
-/// resolution change.
-///
-/// This bypasses tao's `set_inner_size` (AppKit's `setContentSize:` anchors
-/// the window's BOTTOM-left corner, so growing the height pushes the top
-/// edge into the menu bar until AppKit's `constrainFrameRect` clamps it) and
-/// bypasses the two-step JS resize-then-recenter dance, which raced because
-/// tao dispatches the resize asynchronously.
-///
-/// The frame is applied without animation (`setFrame:display:`, not
-/// `setFrame:display:animate:`). `animate:YES` runs synchronously on the
-/// main thread via a nested run loop (`NSAnimation`) until the animation
-/// finishes, and it does not bail out early if the window is ordered out
-/// mid-animation. At end-of-dictation the pill resizes back to compact at
-/// the same moment the backend hides the window, so an animated call here
-/// can spin forever and deadlock the main thread.
-pub(crate) fn set_frame_top_center(
-    pill: &tauri::WebviewWindow,
-    width: f64,
-    height: f64,
-) -> tauri::Result<()> {
-    set_frame(pill, width, height)
-}
-
-fn last_size() -> (f64, f64) {
-    LAST_SIZE
-        .lock()
-        .map(|guard| *guard)
-        .unwrap_or((COMPACT_WIDTH, COMPACT_HEIGHT))
-}
-
-fn store_last_size(width: f64, height: f64) {
-    if let Ok(mut guard) = LAST_SIZE.lock() {
-        *guard = (width, height);
-    }
-}
-
-fn custom_origin() -> Option<(f64, f64)> {
-    CUSTOM_ORIGIN.lock().ok().and_then(|guard| *guard)
-}
-
-fn store_custom_origin(origin: Option<(f64, f64)>) {
-    if let Ok(mut guard) = CUSTOM_ORIGIN.lock() {
-        *guard = origin;
-    }
-}
-
-/// Keep a rectangle of `width`×`height` fully inside `screen` when possible.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn clamp_origin(
-    screen_x: f64,
-    screen_y: f64,
-    screen_width: f64,
-    screen_height: f64,
-    width: f64,
-    height: f64,
-    x: f64,
-    y: f64,
-) -> (f64, f64) {
-    let max_x = screen_x + screen_width - width;
-    let max_y = screen_y + screen_height - height;
-    let x = if max_x < screen_x {
-        screen_x
-    } else {
-        x.clamp(screen_x, max_x)
-    };
-    let y = if max_y < screen_y {
-        screen_y
-    } else {
-        y.clamp(screen_y, max_y)
-    };
-    (x, y)
-}
-
-fn origin_for_frame(
-    screen_x: f64,
-    screen_y: f64,
-    screen_width: f64,
-    screen_height: f64,
-    width: f64,
-    height: f64,
-    previous_height: f64,
-) -> (f64, f64) {
-    if let Some((x, y)) = custom_origin() {
-        let top = y + previous_height;
-        clamp_origin(
-            screen_x,
-            screen_y,
-            screen_width,
-            screen_height,
-            width,
-            height,
-            x,
-            top - height,
-        )
-    } else {
-        frame_origin(
-            screen_x,
-            screen_y,
-            screen_width,
-            screen_height,
-            width,
-            height,
-            TOP_MARGIN,
-        )
-    }
-}
-
-fn set_frame(pill: &tauri::WebviewWindow, width: f64, height: f64) -> tauri::Result<()> {
-    let width = width.clamp(MIN_WIDTH, MAX_WIDTH);
-    let height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
-    let previous_height = last_size().1;
-    store_last_size(width, height);
-
-    let window = pill.clone();
-    pill.run_on_main_thread(move || {
-        let Ok(ns_window_ptr) = window.ns_window() else {
-            warn!("Pill resize: failed to get the native NSWindow handle");
-            return;
-        };
-        // SAFETY: `ns_window_ptr` comes from `WebviewWindow::ns_window`, which
-        // returns the pill's own NSWindow* for as long as the window is
-        // alive; we're on the main thread (required for AppKit calls) inside
-        // this `run_on_main_thread` closure.
-        let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
-        let overlay = configure_overlay_window(ns_window);
-        let (screen_x, screen_y, screen_width, screen_height) =
-            placement_screen_frame(custom_origin());
-        let (x, y) = origin_for_frame(
-            screen_x,
-            screen_y,
-            screen_width,
-            screen_height,
-            width,
-            height,
-            previous_height,
-        );
-        let frame = objc2_foundation::NSRect {
-            origin: objc2_foundation::NSPoint { x, y },
-            size: objc2_foundation::NSSize { width, height },
-        };
-        APPLYING_FRAME.store(true, Ordering::SeqCst);
-        overlay.setFrame_display(frame, true);
-        if let Ok(mut guard) = LAST_APPLIED_ORIGIN.lock() {
-            *guard = (x, y);
-        }
-        APPLYING_FRAME.store(false, Ordering::SeqCst);
-    })
-}
-
-/// Record a user drag. Ignores the `Moved` echo from our own `setFrame`.
-pub(crate) fn note_user_moved(pill: &tauri::WebviewWindow) {
-    if APPLYING_FRAME.load(Ordering::SeqCst) {
-        return;
-    }
-    let window = pill.clone();
-    let _ = pill.run_on_main_thread(move || {
-        if APPLYING_FRAME.load(Ordering::SeqCst) {
-            return;
-        }
-        let Ok(ns_window_ptr) = window.ns_window() else {
-            return;
-        };
-        // SAFETY: same contract as `set_frame` — pill NSWindow*, main thread.
-        let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
-        let origin = ns_window.frame().origin;
-        let last = LAST_APPLIED_ORIGIN
-            .lock()
-            .map(|guard| *guard)
-            .unwrap_or((origin.x, origin.y));
-        if (origin.x - last.0).abs() < 2.0 && (origin.y - last.1).abs() < 2.0 {
-            return;
-        }
-        store_custom_origin(Some((origin.x, origin.y)));
-    });
-}
+// ---------------------------------------------------------------------------
+// Position persistence
+// ---------------------------------------------------------------------------
 
 pub(crate) fn restore_from_db(db: &Database, hidden: bool) {
     set_hidden(hidden);
@@ -396,6 +378,7 @@ pub(crate) fn restore_from_db(db: &Database, hidden: bool) {
         Ok(Some(raw)) => {
             if let Ok((x, y)) = serde_json::from_str::<(f64, f64)>(&raw) {
                 store_custom_origin(Some((x, y)));
+                unsafe { pill_panel_restore_origin(x, y) };
             }
         }
         Ok(None) => {}
@@ -404,13 +387,18 @@ pub(crate) fn restore_from_db(db: &Database, hidden: bool) {
 }
 
 fn persist_position(app: &tauri::AppHandle) {
-    let Some(origin) = custom_origin() else {
+    let mut x: f64 = 0.0;
+    let mut y: f64 = 0.0;
+    let has_origin = unsafe { pill_panel_get_origin(&mut x, &mut y) } != 0;
+    if !has_origin {
         return;
-    };
+    }
+    store_custom_origin(Some((x, y)));
+
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
-    match serde_json::to_string(&origin) {
+    match serde_json::to_string(&(x, y)) {
         Ok(raw) => {
             if let Err(e) = state.db.set_setting(PILL_POSITION_KEY, &raw) {
                 warn!("Failed to persist pill position: {e}");
@@ -420,153 +408,9 @@ fn persist_position(app: &tauri::AppHandle) {
     }
 }
 
-/// Show or hide the overlay without activating the app. Tauri's `show` /
-/// `hide` go through NSWindow ordering that can fail to land on another
-/// app's fullscreen Space; FluidVoice uses `orderFrontRegardless` /
-/// `orderOut:` on a non-activating NSPanel instead.
-fn order_overlay(pill: &tauri::WebviewWindow, visible: bool) -> tauri::Result<()> {
-    let window = pill.clone();
-    pill.run_on_main_thread(move || {
-        let Ok(ns_window_ptr) = window.ns_window() else {
-            warn!("Pill overlay: failed to get the native NSWindow handle");
-            return;
-        };
-        // SAFETY: same contract as `set_frame_top_center` — pill NSWindow*,
-        // main thread, window still alive.
-        let ns_window: &objc2_app_kit::NSWindow = unsafe { &*ns_window_ptr.cast() };
-        let overlay = configure_overlay_window(ns_window);
-        if visible {
-            overlay.orderFrontRegardless();
-        } else {
-            overlay.orderOut(None);
-        }
-    })
-}
-
-fn overlay_collection_behavior() -> objc2_app_kit::NSWindowCollectionBehavior {
-    use objc2_app_kit::NSWindowCollectionBehavior;
-    NSWindowCollectionBehavior::CanJoinAllSpaces
-        | NSWindowCollectionBehavior::FullScreenAuxiliary
-        | NSWindowCollectionBehavior::IgnoresCycle
-}
-
-fn overlay_style_mask(
-    current: objc2_app_kit::NSWindowStyleMask,
-) -> objc2_app_kit::NSWindowStyleMask {
-    current | objc2_app_kit::NSWindowStyleMask::NonactivatingPanel
-}
-
-/// Exclude the HUD from screenshots and screen sharing. The user still sees
-/// it on their display; Zoom / Meet / ScreenCaptureKit do not. `None` is
-/// the documented AppKit opt-out (`NSWindowSharingNone`).
-fn overlay_sharing_type() -> objc2_app_kit::NSWindowSharingType {
-    objc2_app_kit::NSWindowSharingType::None
-}
-
-/// Promote the Tauri webview's `NSWindow` to a non-activating `NSPanel`.
-/// `FullScreenAuxiliary` is documented as an auxiliary-panel behavior —
-/// setting it on a regular `NSWindow` (what we did previously) is ignored
-/// by Mission Control, so the HUD stays stuck on the primary desktop Space.
-///
-/// Same `object_setClass` trick as tauri-nspanel / FluidVoice's native
-/// `NSPanel(styleMask: [.borderless, .nonactivatingPanel])`.
-fn configure_overlay_window(ns_window: &objc2_app_kit::NSWindow) -> &objc2_app_kit::NSWindow {
-    use objc2::ClassType;
-    use objc2::runtime::{AnyObject, NSObjectProtocol};
-    use objc2_app_kit::{NSPanel, NSStatusWindowLevel, NSWindowAnimationBehavior};
-
-    if !ns_window.isKindOfClass(NSPanel::class()) {
-        // SAFETY: NSPanel is an NSWindow subclass; wry/tao windows are
-        // NSWindow instances (or same-layout subclasses). Changing the isa
-        // to NSPanel is the established overlay path (tauri-nspanel). The
-        // webview hierarchy is untouched. ffi rather than AnyObject::set_class
-        // because the latter debug-asserts equal instance_size and wry's
-        // NSWindow subclass may not bitwise-match NSPanel.
-        unsafe {
-            let obj = std::ptr::from_ref(ns_window).cast::<AnyObject>().cast_mut();
-            let _ = objc2::ffi::object_setClass(obj, NSPanel::class());
-        }
-    }
-
-    // NSPanel-only bits — after the isa swap these selectors exist.
-    // SAFETY: `ns_window` is now an NSPanel (or was already).
-    let as_panel: &NSPanel = unsafe { &*std::ptr::from_ref(ns_window).cast::<NSPanel>() };
-    as_panel.setFloatingPanel(true);
-    as_panel.setBecomesKeyOnlyIfNeeded(true);
-    as_panel.setWorksWhenModal(true);
-
-    ns_window.setStyleMask(overlay_style_mask(ns_window.styleMask()));
-    ns_window.setCollectionBehavior(overlay_collection_behavior());
-    ns_window.setSharingType(overlay_sharing_type());
-    ns_window.setLevel(NSStatusWindowLevel);
-    ns_window.setHidesOnDeactivate(false);
-    ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
-    ns_window
-}
-
-fn ns_rect_to_frame(frame: objc2_foundation::NSRect) -> (f64, f64, f64, f64) {
-    (
-        frame.origin.x,
-        frame.origin.y,
-        frame.size.width,
-        frame.size.height,
-    )
-}
-
-/// Display whose frame contains `(x, y)` in AppKit global points.
-pub(crate) fn screen_containing_point(
-    screens: &[(f64, f64, f64, f64)],
-    x: f64,
-    y: f64,
-) -> Option<(f64, f64, f64, f64)> {
-    screens
-        .iter()
-        .copied()
-        .find(|&(sx, sy, sw, sh)| x >= sx && x < sx + sw && y >= sy && y < sy + sh)
-}
-
-/// Screen to place/clamp against: the display that holds a dragged origin,
-/// otherwise the focused screen. An origin that sits on no display (unplugged
-/// monitor, shrink) falls back to the focused screen so `clamp_origin` can
-/// pull the HUD back on-screen.
-fn placement_screen_frame(origin: Option<(f64, f64)>) -> (f64, f64, f64, f64) {
-    if let Some((x, y)) = origin
-        && let Some(frame) = screen_containing_point(&all_screen_frames(), x, y) {
-            return frame;
-        }
-    active_screen_frame()
-}
-
-fn all_screen_frames() -> Vec<(f64, f64, f64, f64)> {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSScreen;
-
-    let Some(mtm) = MainThreadMarker::new() else {
-        return Vec::new();
-    };
-    NSScreen::screens(mtm)
-        .iter()
-        .map(|screen| ns_rect_to_frame(screen.frame()))
-        .collect()
-}
-
-/// Screen that currently has keyboard focus (`NSScreen.main`), falling back
-/// to the first screen. Default (undragged) placement follows this so the
-/// HUD sits on the Space the user is dictating into — not always the
-/// primary monitor.
-fn active_screen_frame() -> (f64, f64, f64, f64) {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSScreen;
-
-    let Some(mtm) = MainThreadMarker::new() else {
-        return (0.0, 0.0, 0.0, 0.0);
-    };
-    let screen = NSScreen::mainScreen(mtm).or_else(|| NSScreen::screens(mtm).firstObject());
-    match screen {
-        Some(screen) => ns_rect_to_frame(screen.frame()),
-        None => (0.0, 0.0, 0.0, 0.0),
-    }
-}
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -596,28 +440,6 @@ mod tests {
         );
         assert!(!should_clear_hold_on_sync(true, false));
         assert!(!should_clear_hold_on_sync(false, false));
-    }
-
-    #[test]
-    fn overlay_collection_behavior_covers_fullscreen_spaces() {
-        use objc2_app_kit::NSWindowCollectionBehavior;
-        let behavior = overlay_collection_behavior();
-        assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces));
-        assert!(behavior.contains(NSWindowCollectionBehavior::FullScreenAuxiliary));
-        assert!(behavior.contains(NSWindowCollectionBehavior::IgnoresCycle));
-    }
-
-    #[test]
-    fn overlay_style_mask_adds_nonactivating_panel() {
-        use objc2_app_kit::NSWindowStyleMask;
-        let mask = overlay_style_mask(NSWindowStyleMask::Borderless);
-        assert!(mask.contains(NSWindowStyleMask::NonactivatingPanel));
-    }
-
-    #[test]
-    fn overlay_is_excluded_from_screen_capture() {
-        use objc2_app_kit::NSWindowSharingType;
-        assert_eq!(overlay_sharing_type(), NSWindowSharingType::None);
     }
 
     #[test]
@@ -659,7 +481,6 @@ mod tests {
 
     #[test]
     fn live_text_tail_is_utf8_safe() {
-        // Multi-byte characters must not be split mid-codepoint.
         let text = "caf\u{e9} au lait \u{2615}"; // "café au lait ☕"
         let tail = live_text_tail(text, 5);
         assert_eq!(tail.chars().count(), 5);
@@ -667,78 +488,23 @@ mod tests {
     }
 
     #[test]
-    fn frame_origin_centers_horizontally() {
-        let (x, _y) = frame_origin(0.0, 0.0, 1920.0, 1080.0, 400.0, 100.0, 40.0);
-        assert_eq!(x, (1920.0 - 400.0) / 2.0);
-    }
+    fn hold_state_lifecycle_is_failure_safe() {
+        assert!(!is_held(), "starts unheld");
 
-    #[test]
-    fn frame_origin_pins_the_top_edge_at_top_margin() {
-        let monitor_height = 1080.0;
-        let top_margin = 40.0;
-        let (_x, y) = frame_origin(0.0, 0.0, 1920.0, monitor_height, 400.0, 100.0, top_margin);
-        // AppKit's y is measured from the bottom, so the top edge sits at
-        // `y + height`; that must land exactly `top_margin` below the
-        // monitor's top (i.e. `monitor_height - top_margin`).
-        assert_eq!(y + 100.0 + top_margin, monitor_height);
-    }
+        set_hold_state(PillHoldKind::Polishing);
+        assert!(is_held());
 
-    #[test]
-    fn frame_origin_keeps_top_edge_fixed_as_height_grows() {
-        let monitor_height = 1080.0;
-        let top_margin = 40.0;
-        let (_x, y_short) =
-            frame_origin(0.0, 0.0, 1920.0, monitor_height, 400.0, 100.0, top_margin);
-        let (_x, y_tall) = frame_origin(0.0, 0.0, 1920.0, monitor_height, 400.0, 180.0, top_margin);
-        // Growing height by 80 must shift y down by exactly 80 to keep the
-        // top edge (y + height) fixed.
-        assert_eq!(y_short - y_tall, 80.0);
-    }
-
-    #[test]
-    fn frame_origin_offsets_onto_a_secondary_screen() {
-        let (x, y) = frame_origin(1920.0, 0.0, 1512.0, 982.0, 400.0, 100.0, 40.0);
-        assert_eq!(x, 1920.0 + (1512.0 - 400.0) / 2.0);
-        assert_eq!(y + 100.0 + 40.0, 982.0);
-    }
-
-    #[test]
-    fn clamp_origin_pulls_a_saved_position_back_on_screen() {
-        // Saved on a 1920×1080 display, then the display shrinks to 1280×800.
-        let (x, y) = clamp_origin(0.0, 0.0, 1280.0, 800.0, 280.0, 64.0, 1700.0, 900.0);
-        assert_eq!(x, 1280.0 - 280.0);
-        assert_eq!(y, 800.0 - 64.0);
-    }
-
-    #[test]
-    fn clamp_origin_leaves_an_on_screen_position_alone() {
-        let (x, y) = clamp_origin(0.0, 0.0, 1920.0, 1080.0, 280.0, 64.0, 100.0, 200.0);
-        assert_eq!((x, y), (100.0, 200.0));
-    }
-
-    #[test]
-    fn clamp_origin_pins_when_the_window_is_larger_than_the_screen() {
-        let (x, y) = clamp_origin(0.0, 0.0, 200.0, 50.0, 280.0, 64.0, 10.0, 10.0);
-        assert_eq!((x, y), (0.0, 0.0));
-    }
-
-    #[test]
-    fn compact_logical_size_is_the_configured_pill_window() {
-        assert_eq!((COMPACT_WIDTH, COMPACT_HEIGHT), (280.0, 64.0));
-    }
-
-    #[test]
-    fn screen_containing_point_keeps_a_dragged_origin_on_the_secondary() {
-        let screens = [(0.0, 0.0, 1920.0, 1080.0), (1920.0, 0.0, 1512.0, 982.0)];
-        assert_eq!(
-            screen_containing_point(&screens, 2200.0, 100.0),
-            Some(screens[1])
+        assert!(
+            clear_hold_state(),
+            "release reports it actually released something"
         );
-        assert_eq!(
-            screen_containing_point(&screens, 100.0, 100.0),
-            Some(screens[0])
+        assert!(!is_held());
+
+        assert!(
+            !clear_hold_state(),
+            "releasing with nothing held is a safe no-op"
         );
-        assert_eq!(screen_containing_point(&screens, 4000.0, 100.0), None);
+        assert!(!is_held());
     }
 
     #[test]
@@ -755,25 +521,21 @@ mod tests {
         store_custom_origin(None);
     }
 
-    /// Exercises the full hold lifecycle against the shared module-level
-    /// `HOLD` static in one test, so it can't race other tests touching it.
     #[test]
-    fn hold_state_lifecycle_is_failure_safe() {
-        assert!(!is_held(), "starts unheld");
-
-        set_hold_state(PillHoldKind::Polishing);
-        assert!(is_held());
-
-        assert!(
-            clear_hold_state(),
-            "release reports it actually released something"
+    fn mode_copy_matches_frontend_i18n() {
+        assert_eq!(mode_title(PillPanelMode::Dictation, false), "Dictating");
+        assert_eq!(mode_title(PillPanelMode::Dictation, true), "Dictée");
+        assert_eq!(
+            mode_title(PillPanelMode::Polishing, false),
+            "Reformulating…"
         );
-        assert!(!is_held());
-
-        assert!(
-            !clear_hold_state(),
-            "releasing with nothing held is a safe no-op, never panics or reports a false release"
+        assert_eq!(mode_title(PillPanelMode::Polishing, true), "Reformulation…");
+        assert_eq!(mode_title(PillPanelMode::Meeting, false), "");
+        assert_eq!(
+            a11y_label(PillPanelMode::Dictation, true),
+            "Dictée en cours"
         );
-        assert!(!is_held());
+        assert_eq!(stop_label(false), "Stop recording");
+        assert_eq!(stop_label(true), "Arrêter l'enregistrement");
     }
 }

@@ -212,8 +212,8 @@ pub fn show_main_window(app: &AppHandle) {
 }
 
 /// Dock reopen must restore `main` even when AppKit reports other visible
-/// windows — the pill overlay is one. Pure so a regression that gates on
-/// `has_visible_windows` fails a unit test instead of a dock click.
+/// windows — the native pill NSPanel is one. Pure so a regression that gates
+/// on `has_visible_windows` fails a unit test instead of a dock click.
 pub fn should_restore_main_on_reopen(_has_visible_windows: bool) -> bool {
     true
 }
@@ -403,8 +403,8 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CopyOutcome, DictationEntry, copy_notification_text, label, select_dictation_to_copy,
-        should_restore_main_on_reopen,
+        copy_notification_text, label, select_dictation_to_copy, should_restore_main_on_reopen,
+        CopyOutcome, DictationEntry,
     };
 
     #[test]

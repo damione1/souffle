@@ -161,7 +161,7 @@ function createTranscriptionControllerInstance() {
 
   // `app.isRecording` is true for a meeting too, but this controller only
   // owns dictation: it must never treat a meeting as "its" recording (same
-  // derivation as PillApp.svelte and meeting/controller.svelte.ts).
+  // derivation as the native HUD and meeting/controller.svelte.ts).
   let isDictating = $derived(app.recordingMode === "dictation");
 
   function cancelLearnFromEditPoll() {
@@ -480,6 +480,16 @@ function createTranscriptionControllerInstance() {
  * is aborted by the backend. No-op if the controller was never created. */
 export function notifyDictationAborted() {
   instance?.handleRecordingAborted();
+}
+
+/** The native HUD asked to stop the active dictation; run the full stop
+ * pipeline (polish + paste) so HUD stop matches the shortcut (SOU-046).
+ * Stop-only: a no-op when not dictating, so this cannot start a session
+ * or take down a meeting (SOU-044). */
+export function notifyDictationStopRequested() {
+  if (instance && instance.app.recordingMode === "dictation" && !instance.isStopping) {
+    void instance.toggleRecording(true);
+  }
 }
 
 // Singleton: survives view mount/unmount cycles so transcript and Channel

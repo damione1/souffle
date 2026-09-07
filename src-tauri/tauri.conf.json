@@ -31,22 +31,6 @@
           ],
           "state": "active"
         }
-      },
-      {
-        "label": "pill",
-        "title": "",
-        "width": 280,
-        "height": 64,
-        "resizable": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "visible": false,
-        "skipTaskbar": true,
-        "shadow": false,
-        "focus": false,
-        "acceptFirstMouse": true,
-        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {

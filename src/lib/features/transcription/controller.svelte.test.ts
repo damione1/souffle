@@ -24,7 +24,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(),
 }));
 
-import { createTranscriptionController, resetTranscriptionControllerForTest } from "./controller.svelte";
+import { createTranscriptionController, notifyDictationStopRequested, resetTranscriptionControllerForTest } from "./controller.svelte";
 import {
   startTranscriptionModelDownload,
   startTranscriptionModelLoad,
@@ -829,6 +829,47 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
     expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
     // The meeting's own state must survive untouched.
+    expect(ctrl.app.machineState.state).toBe("recording_meeting");
+  });
+
+  it("notifyDictationStopRequested stops an active dictation (HUD stop)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    expect(ctrl.app.recordingMode).toBe("dictation");
+
+    notifyDictationStopRequested();
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    });
+  });
+
+  it("notifyDictationStopRequested is a no-op while a meeting is recording (SOU-044)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+        meeting_id: "meeting-1",
+      },
+    };
+
+    notifyDictationStopRequested();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
     expect(ctrl.app.machineState.state).toBe("recording_meeting");
   });
 

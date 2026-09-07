@@ -26,6 +26,7 @@
   import {
     createTranscriptionController,
     notifyDictationAborted,
+    notifyDictationStopRequested,
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
   import { applyTheme, errorMessage } from "./lib/utils";
@@ -46,6 +47,7 @@
 
   let unlistenSystemAudio: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
+  let unlistenDictationStop: (() => void) | null = null;
   let unlistenMeetingFinalized: (() => void) | null = null;
   let unlistenUpcomingMeeting: (() => void) | null = null;
   let unlistenMeetingIdle: (() => void) | null = null;
@@ -209,6 +211,12 @@
       unlistenMeetingStop = fn;
     });
 
+    events.dictationStopRequested.listen(() => {
+      notifyDictationStopRequested();
+    }).then((fn) => {
+      unlistenDictationStop = fn;
+    });
+
     events.meetingFinalized.listen((event) => {
       notifyMeetingFinalized(event.payload.id);
     }).then((fn) => {
@@ -258,6 +266,7 @@
       unlistenPipelineError?.();
       unlistenSystemAudio?.();
       unlistenMeetingStop?.();
+      unlistenDictationStop?.();
       unlistenMeetingFinalized?.();
       unlistenUpcomingMeeting?.();
       unlistenMeetingIdle?.();

@@ -610,21 +610,6 @@ async pillRelease() : Promise<Result<null, string>> {
 }
 },
 /**
- * Resize the pill window to `width` x `height` (logical pixels). A
- * dragged position is kept (and clamped on-screen); otherwise the pill
- * stays top-centered. The frontend calls this as the live transcript
- * grows/shrinks. A single native frame change avoids the top-edge drift
- * that a separate resize-then-recenter pair produces.
- */
-async pillResize(width: number, height: number) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("pill_resize", { width, height }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Get the typed application settings.
  */
 async getSettings() : Promise<Result<AppSettings, string>> {
@@ -993,6 +978,7 @@ export const events = __makeEvents__<{
 archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
 dictationLiveText: DictationLiveText,
+dictationStopRequested: DictationStopRequested,
 inputDevicesChanged: InputDevicesChanged,
 inputPinAvailable: InputPinAvailable,
 inputPinUnavailable: InputPinUnavailable,
@@ -1018,6 +1004,7 @@ updateAvailable: UpdateAvailable
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
 dictationLiveText: "dictation-live-text",
+dictationStopRequested: "dictation-stop-requested",
 inputDevicesChanged: "input-devices-changed",
 inputPinAvailable: "input-pin-available",
 inputPinUnavailable: "input-pin-unavailable",
@@ -1278,6 +1265,13 @@ skipped: boolean;
  */
 warning: string | null }
 export type DictationPolishTemplate = { id: string; label: string; prompt: string }
+/**
+ * Emitted by the native HUD stop button to ask the dictation controller in
+ * the main window to run its normal stop pipeline (`stop_transcription` +
+ * polish + paste). Stop-only: unlike `ShortcutToggle`, this must never
+ * start a session (SOU-044 / SOU-046).
+ */
+export type DictationStopRequested = null
 export type DictionaryEntry = { id: number; term: string; 
 /**
  * How the term sounds when spoken, spelled out (e.g. "vésix" for "V6").

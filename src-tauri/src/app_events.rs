@@ -75,6 +75,13 @@ pub struct PipelineError {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct MeetingStopRequested;
 
+/// Emitted by the native HUD stop button to ask the dictation controller in
+/// the main window to run its normal stop pipeline (`stop_transcription` +
+/// polish + paste). Stop-only: unlike `ShortcutToggle`, this must never
+/// start a session (SOU-044 / SOU-046).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DictationStopRequested;
+
 /// Emitted once a stopped meeting has been fully drained and saved in the
 /// background, so the detail view can refresh from the now-complete record.
 /// `stop_meeting_recording` returns before this work finishes (decoupled stop),
