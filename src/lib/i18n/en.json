@@ -414,6 +414,7 @@
   "status_chip": {
     "ready": "Ready",
     "loading": "Loading model…",
+    "load_required": "Model not loaded",
     "downloading": "Downloading",
     "model_required": "Model required"
   },
@@ -427,6 +428,7 @@
   "settings_model": {
     "title": "Transcription model",
     "description": "Pick a model — it downloads and loads automatically. Everything runs on this Mac.",
+    "recording_locked": "Can't change the transcription model while recording.",
     "downloading": "Downloading…",
     "unload_timeout_label": "Unload model when idle",
     "unload_timeout_desc": "Frees memory after a period of no transcription activity. Reloads automatically the next time you start recording.",

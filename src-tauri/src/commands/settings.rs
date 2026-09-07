@@ -22,7 +22,13 @@ pub fn save_settings(
     state: State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<(), String> {
-    let settings = settings.sanitize_for_save()?;
+    let mut settings = settings.sanitize_for_save()?;
+    let stored = AppSettings::load(&state.db)?;
+    let recording = state
+        .current_machine_state()
+        .map(|machine| machine.is_recording())
+        .unwrap_or(false);
+    let pinned = settings.pin_transcription_while_recording(&stored, recording);
     settings.save(&state.db)?;
     crate::debug::set_transcription_debug(settings.debug_transcription);
     crate::logging::set_level(settings.log_level)?;
@@ -46,6 +52,9 @@ pub fn save_settings(
     if let Ok(machine) = state.current_machine_state() {
         crate::pill::sync(&app, &machine);
         crate::tray::sync(&app, &machine);
+    }
+    if pinned {
+        return Err("Cannot change the transcription model while recording".into());
     }
     Ok(())
 }

@@ -555,6 +555,25 @@ impl AppSettings {
         Ok(normalized)
     }
 
+    /// Keep the stored transcription triple when a recording is in progress.
+    /// Other settings in `self` are left untouched. Returns true when the
+    /// incoming triple was pinned back.
+    pub fn pin_transcription_while_recording(&mut self, stored: &Self, is_recording: bool) -> bool {
+        if !is_recording {
+            return false;
+        }
+        let unchanged = self.transcription_engine_id == stored.transcription_engine_id
+            && self.transcription_model_id == stored.transcription_model_id
+            && self.transcription_backend_id == stored.transcription_backend_id;
+        if unchanged {
+            return false;
+        }
+        self.transcription_engine_id = stored.transcription_engine_id.clone();
+        self.transcription_model_id = stored.transcription_model_id.clone();
+        self.transcription_backend_id = stored.transcription_backend_id.clone();
+        true
+    }
+
     fn sanitized(&self) -> Self {
         let mut normalized = self.clone();
         normalized.locale = normalized.locale.trim().to_string();
@@ -1090,6 +1109,36 @@ mod tests {
         assert_eq!(loaded, expected);
         #[cfg(target_os = "macos")]
         assert!(!loaded.input_priority.known.is_empty());
+    }
+
+    #[test]
+    fn pin_transcription_while_recording_keeps_stored_triple() {
+        let stored = AppSettings {
+            transcription_engine_id: "kyutai".into(),
+            transcription_model_id: "stt-1b-en_fr".into(),
+            transcription_backend_id: "candle".into(),
+            ..AppSettings::default()
+        };
+
+        let mut incoming = stored.clone();
+        incoming.theme = Theme::Light;
+        incoming.transcription_model_id = "stt-2.6b-en".into();
+        assert!(incoming.pin_transcription_while_recording(&stored, true));
+        assert_eq!(incoming.transcription_model_id, "stt-1b-en_fr");
+        assert_eq!(incoming.transcription_engine_id, "kyutai");
+        assert_eq!(incoming.transcription_backend_id, "candle");
+        assert_eq!(incoming.theme, Theme::Light);
+
+        let mut idle_switch = stored.clone();
+        idle_switch.transcription_model_id = "stt-2.6b-en".into();
+        assert!(!idle_switch.pin_transcription_while_recording(&stored, false));
+        assert_eq!(idle_switch.transcription_model_id, "stt-2.6b-en");
+
+        let mut same_triple = stored.clone();
+        same_triple.theme = Theme::Light;
+        assert!(!same_triple.pin_transcription_while_recording(&stored, true));
+        assert_eq!(same_triple.theme, Theme::Light);
+        assert_eq!(same_triple.transcription_model_id, "stt-1b-en_fr");
     }
 
     #[test]
