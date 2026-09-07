@@ -612,6 +612,7 @@ pub async fn summarize_meeting(
         &transcript.participants,
         &model,
         Some(&settings.ollama_url),
+        output_language,
     )
     .await;
 
