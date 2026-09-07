@@ -106,7 +106,12 @@
     <MeetingDetail controller={meeting} />
   {:else}
     {#if transcription.statusMessage}
-      <StatusBanner message={transcription.statusMessage} variant="warning" />
+      <StatusBanner
+        message={transcription.statusMessage}
+        actionLabel={transcription.statusActionLabel}
+        onAction={transcription.statusAction}
+        variant="warning"
+      />
     {/if}
     {#if meeting.statusMessage}
       <StatusBanner message={meeting.statusMessage} variant="warning" />

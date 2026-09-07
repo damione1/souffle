@@ -30,12 +30,7 @@ type SessionMode = "insert" | "rewrite";
  * a raw Enigo error, so we can point the user at the repair action instead
  * of just relaying the OS string.
  */
-function accessibilityPasteFailureMessage(rawMessage: string): string {
-  if (rawMessage.includes("Accessibility permission missing")) {
-    return "Paste failed: accessibility permission needed. Open Settings > Advanced > Permissions and use Repair permission.";
-  }
-  return `Paste failed: ${rawMessage}`;
-}
+
 
 function tokenizeWords(text: string): string[] {
   return text
@@ -139,6 +134,8 @@ function createTranscriptionControllerInstance() {
   let transcript = $state("");
   let tentative = $state("");
   let statusMessage = $state("");
+  let statusActionLabel = $state<string | undefined>();
+  let statusAction = $state<(() => void) | undefined>();
   let catalog = $state<TranscriptionCatalog | null>(null);
 
   // Incremented for every session start (and on abort) so segment-channel
@@ -355,8 +352,23 @@ function createTranscriptionControllerInstance() {
               );
               scheduleLearnFromEdit(finalized.text, sessionFocusedApp);
             } catch (e) {
+              // SOU-033: Graceful degradation. If auto-paste fails, still place the text on the clipboard.
+              try {
+                await navigator.clipboard.writeText(finalized.text);
+              } catch {
+                // Ignored
+              }
               const message = errorMessage(e);
-              statusMessage = accessibilityPasteFailureMessage(message);
+              if (message.includes("Accessibility permission missing")) {
+                statusMessage = "Paste failed: accessibility permission needed.";
+                statusActionLabel = "Repair";
+                statusAction = () => {
+                  app.settingsInitialTab = "advanced";
+                  app.settingsOpen = true;
+                };
+              } else {
+                statusMessage = `Paste failed: ${message}`;
+              }
               // A shortcut dictation runs from another app, so the status
               // banner above is likely not on screen: also notify outside
               // the window (SOU-053). Best-effort: a notification failure
@@ -412,6 +424,8 @@ function createTranscriptionControllerInstance() {
     transcript = "";
     tentative = "";
     statusMessage = "";
+    statusActionLabel = undefined;
+    statusAction = undefined;
     isStartingRecording = true;
     sessionGeneration += 1;
     const generation = sessionGeneration;
@@ -478,6 +492,8 @@ function createTranscriptionControllerInstance() {
     get transcript() { return transcript; },
     get tentative() { return tentative; },
     get statusMessage() { return statusMessage; },
+    get statusActionLabel() { return statusActionLabel; },
+    get statusAction() { return statusAction; },
     get catalog() { return catalog; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },
     get modelOperationState() { return app.transcriptionModelOperationState; },

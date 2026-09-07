@@ -288,6 +288,9 @@ function createMeetingControllerInstance() {
     title?: string;
     calendar?: MeetingCalendarContext;
   }) {
+    if (app.recordingMode !== "idle") {
+      return;
+    }
     if (app.transcriptionRuntimePhase !== "ready") {
       // Model may have been unloaded by the idle timeout; reload through the
       // normal load flow before recording rather than failing on start.
@@ -352,6 +355,7 @@ function createMeetingControllerInstance() {
 
   async function resumeRecording() {
     if (!meeting || !meeting.id) return;
+    if (app.recordingMode !== "idle") return;
 
     // Resuming (whether from the wake-resume banner or the ordinary flow)
     // goes through launch_meeting, which clears the backend's sleep-pause

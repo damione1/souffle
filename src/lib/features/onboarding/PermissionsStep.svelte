@@ -23,12 +23,15 @@
   let busy = $state<Record<string, boolean>>({});
   let error = $state("");
   let repairing = $state(false);
+  let repairSuccess = $state(false);
 
   /** Every write to `status` goes through here so the parent (which cannot
    * see this component's local state otherwise) learns the real permission
    * state, e.g. to gate the onboarding auto-paste default (SOU-053). */
   function setStatus(next: PermissionStatus) {
     status = next;
+    // Reset success banner if accessibility state changes back/forth
+    if (next.accessibility === "granted") repairSuccess = false;
     onStatusChange?.(next);
   }
 
@@ -97,10 +100,14 @@
    */
   async function repairAccessibility() {
     repairing = true;
+    repairSuccess = false;
     error = "";
     try {
       const next = await repairAccessibilityPermission();
       setStatus({ ...status, accessibility: next });
+      // The repair always resets TCC and prompts, so it usually returns "denied" immediately.
+      // Announce success so the user knows it worked.
+      repairSuccess = true;
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -162,7 +169,13 @@
 
       {#if row.kind === "accessibility" && s === "denied"}
         <div class="flex items-center justify-between gap-3 pl-8">
-          <p class="text-xs text-text-muted">{$t("permissions.accessibility_stale_hint")}</p>
+          <p class="text-xs text-text-muted">
+            {#if repairSuccess}
+              {$t("permissions.accessibility_repair_success")}
+            {:else}
+              {$t("permissions.accessibility_stale_hint")}
+            {/if}
+          </p>
           <button
             class="btn btn-ghost shrink-0 gap-1.5"
             disabled={repairing || busy[row.kind]}
@@ -171,6 +184,9 @@
             {#if repairing}
               <Spinner />
               {$t("permissions.checking")}
+            {:else if repairSuccess}
+              <Check size={14} />
+              {$t("permissions.repair")}
             {:else}
               {$t("permissions.repair")}
             {/if}
