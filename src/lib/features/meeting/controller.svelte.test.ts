@@ -569,10 +569,13 @@ describe("MeetingController", () => {
   });
 
   describe("applyLiveParagraphEdit", () => {
+    // Reassigned by every startRecording, so a test can feed the recording
+    // that replaced the one it started with.
+    let emit: (s: TranscriptionSegment) => void = () => {};
+
     async function recordOneParagraph() {
       mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
       mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
-      let emit: (s: TranscriptionSegment) => void = () => {};
       mockStartMeetingRecording.mockImplementation(async (_t, _c, onSegment) => {
         emit = onSegment;
       });
@@ -594,7 +597,7 @@ describe("MeetingController", () => {
       emit(liveSeg("there.", 0.3));
       emit(liveSeg("much", 30));
       emit(liveSeg("later.", 30.3));
-      return { ctrl, emit };
+      return { ctrl };
     }
 
     function liveSeg(text: string, start: number): TranscriptionSegment {
@@ -636,16 +639,31 @@ describe("MeetingController", () => {
       );
 
       const pending = ctrl.applyLiveParagraphEdit(paragraph.id, "hello world");
-      // The meeting stops and a fresh one starts: paragraph ids restart at 0
-      // and liveMeetingSegments is a new, empty array.
+
+      // The meeting stops and a fresh one starts before the edit settles.
       mockGetMeeting.mockResolvedValue(makeMeeting());
       mockApp.currentMeetingId = "live-1";
       notifyMeetingFinalized("live-1");
+      await ctrl.startRecording();
+      emit(liveSeg("brand", 0));
+      emit(liveSeg("new.", 0.3));
+      emit(liveSeg("second", 30));
+      emit(liveSeg("turn.", 30.3));
+
+      // Paragraph ids restart at 0, so the stale rollback addresses a real
+      // paragraph of this recording, not a missing one.
+      expect(ctrl.liveTranscript.committed[0].id).toBe(paragraph.id);
+
       reject(new Error("db is locked"));
       await pending;
 
-      expect(ctrl.liveMeetingSegments).toEqual([]);
-      expect(ctrl.liveTranscript.committed).toEqual([]);
+      expect(ctrl.liveTranscript.committed[0].text).toBe("brand new.");
+      expect(ctrl.liveMeetingSegments.map((s) => s.text)).toEqual([
+        "brand",
+        "new.",
+        "second",
+        "turn.",
+      ]);
       expect(ctrl.statusMessage).not.toContain("db is locked");
     });
   });

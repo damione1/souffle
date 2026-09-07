@@ -205,6 +205,13 @@ pub fn apply_live_paragraph_edit(
         return Err("Paragraph text cannot be empty".into());
     }
 
+    // Held for the whole edit. The accumulator lock alone would not do: it is
+    // dropped before the row update so a segment arriving mid-edit is not
+    // blocked on SQLite, which leaves a window where a second edit of the same
+    // segments could commit its rows first, or where the restore below could
+    // put stale words over a newer edit.
+    let _serialized = state.live_edit_lock.acquire()?;
+
     let (previous_texts, db_updates, corrections) = {
         let mut acc = state.meeting_accumulator.acquire()?;
         let Some(meeting) = acc.as_mut() else {
