@@ -141,6 +141,13 @@ function createTimelineControllerInstance() {
 
   async function removeItem(item: TimelineItem) {
     try {
+      if (
+        item.kind === "meeting" &&
+        app.machineState.state === "recording_meeting" &&
+        app.machineState.data.meeting_id === item.id
+      ) {
+        throw new Error("Cannot delete a meeting while it is recording.");
+      }
       if (item.kind === "dictation") {
         await deleteDictationEntry(item.id);
         if (expandedDictationId === item.id) expandedDictationId = null;
