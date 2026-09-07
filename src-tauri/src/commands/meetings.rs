@@ -559,6 +559,7 @@ pub async fn summarize_meeting(
 ) -> Result<(), String> {
     let transcript = state.db.load_meeting(&id)?;
     let generated_from_edited = transcript.edited_transcript.clone();
+    let generated_from_notes = transcript.notes.clone();
     let settings = AppSettings::load(&state.db)?;
 
     let (text, turn_units) = match transcript.edited_transcript {
@@ -629,6 +630,7 @@ pub async fn summarize_meeting(
         structured.as_ref(),
         &model,
         generated_from_edited.as_deref(),
+        generated_from_notes.as_deref(),
     )?;
 
     Ok(())

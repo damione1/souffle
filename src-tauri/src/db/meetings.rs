@@ -559,9 +559,9 @@ impl Database {
 
     /// Update meeting summary fields and structured summary.
     ///
-    /// `generated_from_edited` is the `edited_transcript` snapshot taken when
-    /// summarization started. If the transcript was edited during generation,
-    /// the new summary is still stored but `summary_is_stale` stays set so an
+    /// `generated_from_edited` / `generated_from_notes` are snapshots taken
+    /// when summarization started. If either changed during generation, the
+    /// new summary is still stored but `summary_is_stale` stays set so an
     /// older summary cannot be marked fresh.
     pub fn update_meeting_summary(
         &self,
@@ -570,6 +570,7 @@ impl Database {
         structured_summary: Option<&StructuredSummary>,
         model: &str,
         generated_from_edited: Option<&str>,
+        generated_from_notes: Option<&str>,
     ) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         let now = Utc::now().to_rfc3339();
@@ -578,14 +579,19 @@ impl Database {
             "UPDATE meetings
              SET summary = ?1, summary_model = ?2, summary_generated_at = ?3,
                  structured_summary = ?4,
-                 summary_is_stale = CASE WHEN edited_transcript IS NOT DISTINCT FROM ?5 THEN 0 ELSE 1 END
-             WHERE id = ?6",
+                 summary_is_stale = CASE
+                   WHEN edited_transcript IS NOT DISTINCT FROM ?5
+                    AND notes IS NOT DISTINCT FROM ?6 THEN 0
+                   ELSE 1
+                 END
+             WHERE id = ?7",
             params![
                 summary,
                 model,
                 now,
                 serialize_structured_summary(structured_summary)?,
                 generated_from_edited,
+                generated_from_notes,
                 id
             ],
         )
@@ -914,6 +920,7 @@ mod tests {
             }),
             "qwen2.5",
             None,
+            None,
         )
         .unwrap();
 
@@ -940,10 +947,18 @@ mod tests {
             }),
             "qwen2.5",
             None,
+            None,
         )
         .unwrap();
-        db.update_meeting_summary("m1", "Prose only after extract fail", None, "qwen2.5", None)
-            .unwrap();
+        db.update_meeting_summary(
+            "m1",
+            "Prose only after extract fail",
+            None,
+            "qwen2.5",
+            None,
+            None,
+        )
+        .unwrap();
 
         let loaded = db.load_meeting("m1").unwrap();
         assert_eq!(loaded.summary.as_deref(), Some("Prose only after extract fail"));
@@ -1262,8 +1277,15 @@ mod tests {
         db.save_edited_transcript("m1", Some("corrigé")).unwrap();
         assert!(db.load_meeting("m1").unwrap().summary_is_stale);
 
-        db.update_meeting_summary("m1", "fresh from corrigé", None, "qwen2.5", Some("corrigé"))
-            .unwrap();
+        db.update_meeting_summary(
+            "m1",
+            "fresh from corrigé",
+            None,
+            "qwen2.5",
+            Some("corrigé"),
+            None,
+        )
+        .unwrap();
         let loaded = db.load_meeting("m1").unwrap();
         assert_eq!(loaded.summary.as_deref(), Some("fresh from corrigé"));
         assert!(!loaded.summary_is_stale);
@@ -1285,6 +1307,7 @@ mod tests {
             None,
             "qwen2.5",
             snapshot.as_deref(),
+            None,
         )
         .unwrap();
 
@@ -1296,6 +1319,34 @@ mod tests {
         assert!(
             loaded.summary_is_stale,
             "an older summary must not be marked fresh after an edit during generation"
+        );
+    }
+
+    #[test]
+    fn update_summary_keeps_stale_when_notes_changed_during_generation() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("old".to_string());
+        db.save_meeting(&meeting).unwrap();
+
+        let notes_snapshot = meeting.notes.clone();
+        db.save_meeting_notes("m1", Some("décision : on ship vendredi"))
+            .unwrap();
+        db.update_meeting_summary(
+            "m1",
+            "summary of the old notes",
+            None,
+            "qwen2.5",
+            None,
+            notes_snapshot.as_deref(),
+        )
+        .unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.summary.as_deref(), Some("summary of the old notes"));
+        assert!(
+            loaded.summary_is_stale,
+            "an older summary must not be marked fresh after a notes edit during generation"
         );
     }
 
