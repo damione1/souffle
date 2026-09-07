@@ -97,6 +97,23 @@ impl MeetingMixer {
         self.mic_fifo.extend(tail);
         self.mic = mic;
         self.mic_to_mix = Resampler::new(mic_rate, mic_channels, MIX_RATE, mic_gain);
+
+        // During a rebuild, the `meeting_tick` is not pumping the mixer, so the
+        // tap leg (which survived the mic rebuild) accumulates system audio.
+        // Ingest it now and pad the mic leg with silence so the accumulated tap
+        // is not immediately discarded as "drift lead" on the next tick.
+        loop {
+            let n = self.tap.pop_slice(&mut self.scratch);
+            if n == 0 {
+                break;
+            }
+            let resampled = self.tap_to_mix.process(&self.scratch[..n]);
+            self.tap_fifo.extend(resampled);
+        }
+        if self.tap_fifo.len() > self.mic_fifo.len() {
+            let pad = self.tap_fifo.len() - self.mic_fifo.len();
+            self.mic_fifo.resize(self.mic_fifo.len() + pad, 0.0);
+        }
     }
 
     /// Drain both rings, mix every complete 10ms frame, and return the
