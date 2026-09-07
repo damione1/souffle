@@ -327,8 +327,8 @@ async getMeetingAudio(meetingId: string) : Promise<Result<MeetingAudioSession[],
 }
 },
 /**
- * Rename a meeting. Targets the in-memory accumulator while that meeting
- * is still recording (it only reaches the DB at stop), the DB otherwise.
+ * Rename a meeting. Updates the in-memory accumulator and immediately
+ * persists to the DB (for crash recovery).
  */
 async renameMeeting(id: string, title: string) : Promise<Result<null, string>> {
     try {
@@ -339,9 +339,8 @@ async renameMeeting(id: string, title: string) : Promise<Result<null, string>> {
 }
 },
 /**
- * Save the user's live meeting notes. Targets the in-memory accumulator
- * while that meeting is still recording (it only reaches the DB at stop),
- * the DB otherwise.
+ * Save the user's live meeting notes. Updates the in-memory accumulator
+ * and immediately persists to the DB (for crash recovery).
  */
 async saveMeetingNotes(id: string, notes: string | null) : Promise<Result<null, string>> {
     try {
