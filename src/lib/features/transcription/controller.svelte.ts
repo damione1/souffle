@@ -433,7 +433,9 @@ function createTranscriptionControllerInstance() {
         pttStopQueued = false;
         // PTT stop was queued while starting. Wait briefly for machineState
         // to sync (Tauri event to be processed by Svelte stores), then stop.
+        const queuedGeneration = generation;
         setTimeout(() => {
+          if (queuedGeneration !== sessionGeneration) return;
           if (isDictating && !isStopping) void toggleRecording(true);
         }, 50);
       }
