@@ -377,13 +377,18 @@ impl TranscriptionEngine for WhisperEngine {
             return Err(EngineError::NotInitialized);
         }
 
-        if self.audio_buffer.len() < MIN_INFERENCE_SAMPLES {
-            self.audio_buffer.clear();
+        if self.audio_buffer.is_empty() {
             return Ok(vec![]);
         }
 
-        let remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
-        let offset = self.take_window_offset(remaining.len());
+        let mut remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let original_len = remaining.len();
+        
+        if original_len < MIN_INFERENCE_SAMPLES {
+            remaining.resize(MIN_INFERENCE_SAMPLES, 0.0);
+        }
+
+        let offset = self.take_window_offset(original_len);
         let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
         let (mut segments, _) =
             Self::run_inference(&loaded.ctx, &remaining, self.detected_language.as_deref())?;
