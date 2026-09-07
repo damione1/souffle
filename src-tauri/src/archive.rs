@@ -86,7 +86,7 @@ pub fn run_archive_export(
         .map_err(|e| format!("Write dictations.json: {e}"))?;
 
     let manifest = ArchiveManifest {
-        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: crate::update_check::current_version(),
         schema_version: crate::db::schema::SCHEMA_VERSION,
         meeting_count: meetings.len() as u32,
         dictation_count: dictation_entries.len() as u32,
@@ -223,7 +223,7 @@ mod tests {
         let manifest_json = fs::read_to_string(outcome.archive_dir.join("manifest.json")).unwrap();
         let manifest: ArchiveManifest = serde_json::from_str(&manifest_json).unwrap();
         assert_eq!(manifest.meeting_count, 2);
-        assert_eq!(manifest.app_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(manifest.app_version, crate::update_check::current_version());
     }
 
     #[test]

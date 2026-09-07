@@ -89,7 +89,7 @@ pub fn collect_bundle(state: &AppState, settings: &crate::settings::AppSettings)
         .unwrap_or_else(|e| format!("error: {e}"));
 
     DiagnosticsBundle {
-        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: crate::update_check::current_version(),
         data_dir: data_dir.display().to_string(),
         log_dir: log_dir().display().to_string(),
         log_file: log_path.map(|p| p.display().to_string()),

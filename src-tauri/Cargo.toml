@@ -3,7 +3,11 @@ members = [".", "souffle-mcp", "tts-fixtures"]
 
 [package]
 name = "souffle"
-version = "0.4.0"
+# Placeholder. The release workflow rewrites this line from the release tag, so
+# a version still reading 0.0.0 at compile time means the binary was built from
+# a checkout rather than cut from a tag. `update_check::current_version` turns
+# that into "local build".
+version = "0.0.0"
 description = "Local speech-to-text desktop application"
 authors = ["Damien Goehrig"]
 license = "GPL-3.0-or-later"

@@ -25,7 +25,7 @@ vi.mock("./utils/theme", () => ({
   applyTheme: vi.fn(),
 }));
 
-import { bootstrapAppState } from "./bootstrap";
+import { LOCAL_BUILD, bootstrapAppState } from "./bootstrap";
 import { getAppState } from "./stores/app.svelte";
 import { mockSettings } from "./test-helpers/fixtures";
 import { SETUP_STORAGE_KEY } from "./features/onboarding/setup";
@@ -80,5 +80,20 @@ describe("bootstrapAppState what's new", () => {
 
     const result = await bootstrapAppState(app);
     expect(result.whatsNew).toBeNull();
+  });
+
+  it("shows no changelog for a local build, and leaves last_seen_version alone", async () => {
+    localStorage.setItem(SETUP_STORAGE_KEY, "1");
+    getSettings.mockResolvedValue({ ...mockSettings, last_seen_version: "0.10.0" });
+    getAppVersion.mockResolvedValue(LOCAL_BUILD);
+
+    const result = await bootstrapAppState(app);
+
+    expect(result.whatsNew).toBeNull();
+    // Stamping "local build" here would swallow the next real release's
+    // changelog, since that release would then differ from what was stored.
+    expect(saveSettings).not.toHaveBeenCalledWith(
+      expect.objectContaining({ last_seen_version: LOCAL_BUILD }),
+    );
   });
 });
