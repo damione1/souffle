@@ -23,6 +23,13 @@ pub const FRAME_SAMPLES: usize = 480;
 /// are discarded. Bounds clock drift between the two devices; transcription
 /// tolerates the resulting sub-frame discontinuity.
 const MAX_TAP_LEAD_SAMPLES: usize = MIX_RATE as usize / 4;
+/// RMS floor on the tap leg below which AEC must not run (SOU-063).
+/// Speakers-on / nothing-playing is the common damage case: the canceller
+/// has a silent reference and suppresses the mic instead. ~-42 dBFS —
+/// above dither, below any real playback.
+const TAP_AEC_RMS_THRESHOLD: f32 = 0.008;
+const TAP_RMS_ATTACK: f32 = 0.3;
+const TAP_RMS_DECAY: f32 = 0.9;
 
 pub struct MeetingMixer {
     mic: HeapCons<f32>,
@@ -41,6 +48,9 @@ pub struct MeetingMixer {
     aec: Option<Aec>,
     /// Tap samples discarded to bound drift; logged at session end.
     tap_discarded: u64,
+    /// Recent far-end level. Gates *applying* AEC output, not whether
+    /// the instance lives (SOU-063). A pause must not `set_aec(None)`.
+    tap_rms_ema: f32,
 }
 
 impl MeetingMixer {
@@ -68,7 +78,25 @@ impl MeetingMixer {
             scratch: vec![0.0; 4096],
             aec: None,
             tap_discarded: 0,
+            tap_rms_ema: 0.0,
         }
+    }
+
+    /// True when the tap recently carried real far-end energy.
+    /// The AEC instance stays up; this only decides whether its output
+    /// replaces the raw mic this frame.
+    pub fn tap_has_energy(&self) -> bool {
+        self.tap_rms_ema >= TAP_AEC_RMS_THRESHOLD
+    }
+
+    fn note_tap_samples(&mut self, samples: &[f32]) {
+        if samples.is_empty() {
+            self.tap_rms_ema *= TAP_RMS_DECAY;
+            return;
+        }
+        let mean_sq = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
+        self.tap_rms_ema =
+            TAP_RMS_ATTACK * mean_sq.sqrt() + (1.0 - TAP_RMS_ATTACK) * self.tap_rms_ema;
     }
 
     /// Enable/disable echo cancellation (e.g. when the output route changes
@@ -239,13 +267,19 @@ impl MeetingMixer {
             let resampled = self.mic_to_mix.process(&self.scratch[..n]);
             self.mic_fifo.extend(resampled);
         }
+        let mut tap_added = 0usize;
         loop {
             let n = self.tap.pop_slice(&mut self.scratch);
             if n == 0 {
                 break;
             }
             let resampled = self.tap_to_mix.process(&self.scratch[..n]);
+            self.note_tap_samples(&resampled);
+            tap_added += resampled.len();
             self.tap_fifo.extend(resampled);
+        }
+        if tap_added == 0 {
+            self.note_tap_samples(&[]);
         }
 
         // Bound how far the tap leg can run ahead of the mic (clock drift).
@@ -292,11 +326,20 @@ impl MeetingMixer {
 
         // AEC works on exact 10ms frames; the only shorter frames are the
         // final flush tail, where skipping cancellation is harmless.
+        // Always feed the canceller while it exists so a far-end pause
+        // does not dump convergence. Apply the output only when the tap
+        // is actually playing — otherwise emit raw mic (SOU-063 lever 2).
+        let apply_aec = self.tap_has_energy();
         if n == FRAME_SAMPLES
             && let Some(aec) = self.aec.as_mut()
         {
             aec.process_render(&tap);
-            aec.process_capture(&mut mic);
+            if apply_aec {
+                aec.process_capture(&mut mic);
+            } else {
+                let mut discarded = mic.clone();
+                aec.process_capture(&mut discarded);
+            }
         }
 
         (mic, tap)
@@ -340,6 +383,66 @@ mod tests {
         // Steady-state samples carry both sources (0.1 + 0.2).
         let mid = out[out.len() / 2];
         assert!((mid - 0.3).abs() < 0.05, "expected ~0.3, got {mid}");
+    }
+
+    #[test]
+    fn tap_energy_tracks_playback_then_decays() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+        assert!(!mixer.tap_has_energy());
+
+        tap.push_slice(&vec![0.2f32; 4_800]);
+        mic.push_slice(&vec![0.1f32; 4_800]);
+        mixer.tick();
+        assert!(mixer.tap_has_energy(), "line-level tap is above the apply floor");
+
+        for _ in 0..80 {
+            mic.push_slice(&vec![0.1f32; 480]);
+            mixer.tick();
+        }
+        assert!(
+            !mixer.tap_has_energy(),
+            "silence after playback must drop below the AEC floor"
+        );
+    }
+
+    #[test]
+    fn aec_instance_survives_far_end_pause() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, MIX_RATE);
+        mixer.set_aec(Some(Aec::new(MIX_RATE)));
+
+        tap.push_slice(&vec![0.2f32; 4_800]);
+        mic.push_slice(&vec![0.1f32; 4_800]);
+        mixer.tick();
+        assert!(mixer.aec.is_some());
+        assert!(mixer.tap_has_energy());
+
+        for _ in 0..80 {
+            mic.push_slice(&vec![0.1f32; 480]);
+            mixer.tick();
+        }
+        assert!(!mixer.tap_has_energy());
+        assert!(
+            mixer.aec.is_some(),
+            "far-end pause must not destroy the canceller"
+        );
+    }
+
+    #[test]
+    fn silent_tap_emits_raw_mic_while_aec_stays_fed() {
+        let (mut mic, _tap, mut mixer) = make_mixer(48_000, 48_000, MIX_RATE);
+        mixer.set_aec(Some(Aec::new(MIX_RATE)));
+        assert!(!mixer.tap_has_energy());
+
+        mic.push_slice(&vec![0.5f32; 4_800]);
+        let mut out = mixer.tick();
+        out.extend(mixer.flush());
+
+        assert!(mixer.aec.is_some());
+        let mid = out[out.len() / 2];
+        assert!(
+            (mid - 0.5).abs() < 0.05,
+            "below the energy floor the mic must pass through raw, got {mid}"
+        );
     }
 
     #[test]

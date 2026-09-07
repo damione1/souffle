@@ -1,8 +1,10 @@
 //! Lightweight French/English language identification for meeting segments.
 //!
 //! Heuristic-only: accent density plus stopword hits. Used to populate
-//! `segment.language` when Kyutai leaves it unset and to drive per-lane
-//! mismatch resets. Never passed to moshi as a forced language.
+//! `segment.language` when Kyutai leaves it unset. A per-lane KV wipe on
+//! mismatch is reserved for Auto (inferred prior) — an explicit Français/
+//! Anglais setting is a code-switch, not a model lock-in (SOU-060). Never
+//! passed to moshi as a forced language.
 
 use crate::settings::MeetingTranscriptionLanguage;
 
@@ -71,7 +73,14 @@ const EN_STOPWORDS: &[&str] = &[
 fn normalize_token(raw: &str) -> String {
     raw.trim()
         .trim_matches(|c: char| !c.is_alphanumeric())
-        .to_ascii_lowercase()
+        .to_lowercase()
+}
+
+fn is_french_accent(ch: char) -> bool {
+    matches!(
+        ch,
+        'é' | 'è' | 'ê' | 'ë' | 'à' | 'â' | 'ù' | 'û' | 'ô' | 'î' | 'ï' | 'ç' | 'œ' | 'æ'
+    )
 }
 
 fn score_token(token: &str) -> LangScore {
@@ -81,11 +90,8 @@ fn score_token(token: &str) -> LangScore {
     }
 
     for ch in token.chars() {
-        match ch {
-            'é' | 'è' | 'ê' | 'ë' | 'à' | 'â' | 'ù' | 'û' | 'ô' | 'î' | 'ï' | 'ç' | 'œ' | 'æ' => {
-                score.fr += 2;
-            }
-            _ => {}
+        if is_french_accent(ch) {
+            score.fr += 2;
         }
     }
 
@@ -96,7 +102,10 @@ fn score_token(token: &str) -> LangScore {
         score.en += 3;
     }
 
-    if token.ends_with("ment") || token.ends_with("tion") && token.contains('é') {
+    // `-ment` / `-tion` are weak FR cues and collide with English
+    // (`development`, `nation`). Require any French accent, not just `é`
+    // (`bâtiment`, `façonnement`).
+    if (token.ends_with("ment") || token.ends_with("tion")) && token.chars().any(is_french_accent) {
         score.fr += 1;
     }
     if token.ends_with("ing") || token.ends_with("ness") || token.ends_with("tion") {
@@ -136,6 +145,16 @@ pub fn detect_text(text: &str) -> Option<LanguageCode> {
 
 /// Consecutive words that disagree with the lane prior before forcing reset.
 pub const MISMATCH_STREAK_THRESHOLD: usize = 3;
+
+/// Whether a mismatch streak should wipe the lane KV cache.
+///
+/// Labeling (`segment.language`) always uses the detector. A wipe is only
+/// justified when Auto inferred a prior the model may have locked itself
+/// into — not when the user set Français/Anglais and someone code-switches
+/// (SOU-060).
+pub fn decide_mismatch_reset(setting: MeetingTranscriptionLanguage, streak_reached: bool) -> bool {
+    streak_reached && LanguageCode::from_setting(setting).is_none()
+}
 
 /// Rolling per-lane language state with hysteresis for mismatch resets.
 #[derive(Debug, Clone)]
@@ -193,6 +212,11 @@ impl LanguageLaneTracker {
     /// Record a word; returns true when a lane reset should be forced.
     pub fn on_word(&mut self, text: &str) -> bool {
         let Some(detected) = detect_word(text) else {
+            // Neutral / unidentifiable: expire the streak. Three English
+            // function words scattered through a minute must not accumulate
+            // to a wipe (SOU-060).
+            self.mismatch_lang = None;
+            self.mismatch_streak = 0;
             return false;
         };
 
@@ -217,7 +241,10 @@ impl LanguageLaneTracker {
             self.mismatch_streak = 1;
         }
 
-        self.mismatch_streak >= MISMATCH_STREAK_THRESHOLD
+        decide_mismatch_reset(
+            self.setting_prior,
+            self.mismatch_streak >= MISMATCH_STREAK_THRESHOLD,
+        )
     }
 }
 
@@ -290,9 +317,48 @@ mod tests {
         assert_eq!(detect_word("12"), None);
     }
 
+    fn infer_english_prior() -> LanguageLaneTracker {
+        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::Auto);
+        for _ in 0..5 {
+            assert!(!lane.on_word("the"));
+        }
+        assert_eq!(lane.effective_prior(), Some(LanguageCode::En));
+        lane
+    }
+
+    #[test]
+    fn english_ment_is_not_french() {
+        assert_ne!(detect_word("development"), Some(LanguageCode::Fr));
+        assert_eq!(detect_word("development"), None);
+        assert_eq!(detect_word("développement"), Some(LanguageCode::Fr));
+        assert_eq!(detect_word("bâtiment"), Some(LanguageCode::Fr));
+    }
+
+    #[test]
+    fn accented_capital_counts_as_french() {
+        assert_eq!(detect_word("École"), Some(LanguageCode::Fr));
+        assert_eq!(detect_word("Ça"), Some(LanguageCode::Fr));
+    }
+
+    #[test]
+    fn decide_mismatch_reset_only_for_inferred_prior() {
+        assert!(!decide_mismatch_reset(MeetingTranscriptionLanguage::En, true));
+        assert!(!decide_mismatch_reset(MeetingTranscriptionLanguage::Fr, true));
+        assert!(decide_mismatch_reset(MeetingTranscriptionLanguage::Auto, true));
+        assert!(!decide_mismatch_reset(MeetingTranscriptionLanguage::Auto, false));
+    }
+
+    #[test]
+    fn explicit_prior_never_resets_lane() {
+        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::En);
+        let words = ["bonjour", "merci", "réunion", "bonjour", "merci", "réunion"];
+        let resets = words.iter().filter(|w| lane.on_word(w)).count();
+        assert_eq!(resets, 0);
+    }
+
     #[test]
     fn mismatch_streak_triggers_after_threshold() {
-        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::En);
+        let mut lane = infer_english_prior();
         assert!(!lane.on_word("bonjour"));
         assert!(!lane.on_word("merci"));
         assert!(lane.on_word("réunion"));
@@ -300,12 +366,32 @@ mod tests {
 
     #[test]
     fn mismatch_streak_clears_on_agreement() {
-        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::En);
+        let mut lane = infer_english_prior();
         assert!(!lane.on_word("bonjour"));
         assert!(!lane.on_word("merci"));
         assert!(!lane.on_word("the"));
         assert!(!lane.on_word("réunion"));
         assert!(!lane.on_word("encore"));
+    }
+
+    #[test]
+    fn mismatch_streak_clears_on_neutral_word() {
+        let mut lane = infer_english_prior();
+        let words = [
+            "bonjour", "project", "project", "merci", "project", "réunion",
+        ];
+        let resets = words.iter().filter(|w| lane.on_word(w)).count();
+        assert_eq!(resets, 0);
+    }
+
+    #[test]
+    fn explicit_en_scattered_french_does_not_trigger() {
+        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::En);
+        let words = [
+            "bonjour", "project", "project", "merci", "project", "réunion",
+        ];
+        let resets = words.iter().filter(|w| lane.on_word(w)).count();
+        assert_eq!(resets, 0);
     }
 
     #[test]
@@ -319,5 +405,4 @@ mod tests {
         }
         assert_eq!(lane.effective_prior(), Some(LanguageCode::En));
     }
-
 }

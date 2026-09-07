@@ -947,6 +947,9 @@ impl KyutaiEngine {
                     // clock belongs to the epoch that reset is about to close.
                     let raw_start = Self::word_start_time(model, *start_time, *batch_idx);
                     let start_time = Self::monotonic_time(model, *batch_idx, raw_start);
+                    // SOU-060: `on_word` only requests a KV wipe when Auto
+                    // inferred a prior (model lock-in). Explicit Fr/En still
+                    // labels the segment above and never wipes a healthy lane.
                     let mismatch_reset = model.language_tracker.on_word(&text, *batch_idx);
                     if mismatch_reset
                         && let Err(e) =

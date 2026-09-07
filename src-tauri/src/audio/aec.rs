@@ -9,7 +9,7 @@
 //! processing module) so the backend can be swapped without touching the
 //! mixer. Works on 10ms mono frames at the mixer rate.
 
-use sonora::config::EchoCanceller;
+use sonora::config::{EchoCanceller, TransparentModeType};
 use sonora::{AudioProcessing, Config, StreamConfig};
 
 /// Coarse estimate of the delay between a render frame reaching sonora and
@@ -54,9 +54,17 @@ fn decide_rearm(attempts_so_far: u32) -> RearmDecision {
 
 fn build_apm(sample_rate: u32) -> AudioProcessing {
     let stream = StreamConfig::new(sample_rate, 1);
+    // SOU-063: NS and AGC2 stay off (`Config` defaults). `EchoCanceller`
+    // has no NLP-level knob — `transparent_mode: Hmm` is a no-echo
+    // classifier swap vs Legacy, not NLP-off. Residual NLP still runs.
     AudioProcessing::builder()
         .config(Config {
-            echo_canceller: Some(EchoCanceller::default()),
+            echo_canceller: Some(EchoCanceller {
+                transparent_mode: TransparentModeType::Hmm,
+                ..EchoCanceller::default()
+            }),
+            noise_suppression: None,
+            gain_controller2: None,
             ..Config::default()
         })
         .capture_config(stream)

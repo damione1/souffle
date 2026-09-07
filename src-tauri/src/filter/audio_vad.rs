@@ -136,14 +136,17 @@ impl AudioFilter for SileroVadFilter {
 
         self.buffer.extend_from_slice(input);
 
-        // Process complete Silero frames (480 samples = 30ms at 16kHz)
-        let mut result = self.in_speech || self.hangover_remaining > 0;
+        // Process complete Silero frames (480 samples = 30ms at 16kHz).
+        // OR-accumulate: a Whisper/Parakeet 5s block must be fed if *any*
+        // 30ms frame was speech. Overwriting with the last frame was
+        // SOU-067 — 165 of 166 verdicts discarded.
+        let already = self.in_speech || self.hangover_remaining > 0;
+        let mut frame_speech = false;
         while self.buffer.len() >= VAD_FRAME_SAMPLES {
             let frame: Vec<f32> = self.buffer.drain(..VAD_FRAME_SAMPLES).collect();
-            result = self.process_frame(&frame);
+            frame_speech |= self.process_frame(&frame);
         }
-
-        result
+        block_is_speech(already, [frame_speech])
     }
 
     fn reset(&mut self) {
@@ -151,5 +154,25 @@ impl AudioFilter for SileroVadFilter {
         self.hangover_remaining = 0;
         self.onset_count = 0;
         self.in_speech = false;
+    }
+}
+
+/// Reduce per-frame VAD decisions for one engine block: any speech frame
+/// (or an already-open hangover) feeds the whole block (SOU-067).
+fn block_is_speech(already_in_speech: bool, frame_speech: impl IntoIterator<Item = bool>) -> bool {
+    already_in_speech || frame_speech.into_iter().any(|s| s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixed_block_is_speech_if_any_frame_is() {
+        // First 30ms speech, last 30ms silence — overwrite returned silence.
+        assert!(block_is_speech(false, [true, false]));
+        assert!(block_is_speech(false, [true, false, false]));
+        assert!(!block_is_speech(false, [false, false]));
+        assert!(block_is_speech(true, [false, false]));
     }
 }

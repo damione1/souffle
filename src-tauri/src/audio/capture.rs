@@ -634,13 +634,18 @@ struct MeetingState {
 }
 
 impl MeetingState {
-    /// Engage/disengage echo cancellation when whether speaker output can
-    /// leak into the mic changes: built-in speakers versus anything else
-    /// (headphones, Bluetooth), and muted or silent versus audible.
+    /// Engage/disengage echo cancellation when the HAL output route
+    /// changes: built-in speakers versus anything else (headphones,
+    /// Bluetooth), and muted versus audible. Far-end silence is not a
+    /// route change — the mixer keeps the instance and bypasses output.
     #[cfg(target_os = "macos")]
     fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {
         use super::{aec, mixer, output_route};
 
+        // HAL route only (speakers vs headphones / mute / volume). Tap
+        // energy must not destroy the instance — a far-end pause would
+        // wipe convergence and come back as raw echo (SOU-063). The mixer
+        // keeps AEC fed and chooses cancelled vs raw mic per frame.
         let can_leak = self.tap.is_some() && output_route::output_can_leak_into_mic();
         if can_leak != self.aec_active {
             if can_leak {
