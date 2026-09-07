@@ -634,24 +634,26 @@ struct MeetingState {
 }
 
 impl MeetingState {
-    /// Engage/disengage echo cancellation when whether speaker output can
-    /// leak into the mic changes: built-in speakers versus anything else
-    /// (headphones, Bluetooth), and muted or silent versus audible.
+    /// Engage/disengage echo cancellation when the HAL output route
+    /// changes: built-in speakers versus anything else (headphones,
+    /// Bluetooth), and muted versus audible. Far-end silence is not a
+    /// route change — the mixer keeps the instance and bypasses output.
     #[cfg(target_os = "macos")]
     fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {
         use super::{aec, mixer, output_route};
 
-        let speakers_can_leak = self.tap.is_some() && output_route::output_can_leak_into_mic();
-        // SOU-063: speakers-on with nothing playing is the common damage
-        // case — AEC has no echo to cancel and suppresses the mic instead.
-        let can_leak = speakers_can_leak && self.mixer.tap_has_energy();
+        // HAL route only (speakers vs headphones / mute / volume). Tap
+        // energy must not destroy the instance — a far-end pause would
+        // wipe convergence and come back as raw echo (SOU-063). The mixer
+        // keeps AEC fed and chooses cancelled vs raw mic per frame.
+        let can_leak = self.tap.is_some() && output_route::output_can_leak_into_mic();
         if can_leak != self.aec_active {
             if can_leak {
-                info!("Speakers audible and far-end present, echo cancellation engaged");
+                info!("Speakers audible, echo cancellation engaged");
                 self.mixer
                     .set_aec(Some(aec::Aec::new_with_default_delay_hint(mixer::MIX_RATE)));
             } else {
-                info!("Output muted, off speakers, or silent, echo cancellation disengaged");
+                info!("Output muted or off speakers, echo cancellation disengaged");
                 self.mixer.set_aec(None);
             }
             self.aec_active = can_leak;
@@ -1475,11 +1477,9 @@ impl AudioCapture {
         // system-audio reference signal to cancel against.
         #[cfg(target_os = "macos")]
         let aec_active = {
-            let can_leak = tap.is_some()
-                && super::output_route::output_can_leak_into_mic()
-                && mixer.tap_has_energy();
+            let can_leak = tap.is_some() && super::output_route::output_can_leak_into_mic();
             if can_leak {
-                info!("Speakers audible and far-end present, echo cancellation engaged");
+                info!("Speakers audible, echo cancellation engaged");
                 mixer.set_aec(Some(super::aec::Aec::new_with_default_delay_hint(
                     super::mixer::MIX_RATE,
                 )));

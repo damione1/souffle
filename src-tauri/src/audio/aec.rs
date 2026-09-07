@@ -54,12 +54,9 @@ fn decide_rearm(attempts_so_far: u32) -> RearmDecision {
 
 fn build_apm(sample_rate: u32) -> AudioProcessing {
     let stream = StreamConfig::new(sample_rate, 1);
-    // SOU-063: configure AEC for ASR, not telephony. A swallowed word is
-    // a permanent transcript loss; residual echo is at worst a duplicate
-    // a text filter can drop. sonora's `Config` defaults already leave NS
-    // and AGC2 off (`None`). `EchoCanceller` has no NLP-level knob —
-    // HMM transparent mode is the exposed way to back off suppression
-    // when the filter sees no (or poorly correlated) echo.
+    // SOU-063: NS and AGC2 stay off (`Config` defaults). `EchoCanceller`
+    // has no NLP-level knob — `transparent_mode: Hmm` is a no-echo
+    // classifier swap vs Legacy, not NLP-off. Residual NLP still runs.
     AudioProcessing::builder()
         .config(Config {
             echo_canceller: Some(EchoCanceller {
