@@ -442,7 +442,7 @@
     "delete_model": "Supprimer le modèle téléchargé",
     "delete_model_confirm": "Supprimer",
     "delete_model_msg": "Les fichiers du modèle seront supprimés ; il faudra les retélécharger.",
-    "delete_model_busy": "Impossible de supprimer pendant un téléchargement ou un chargement."
+    "delete_model_busy": "Impossible de supprimer pendant un téléchargement, un chargement ou un déchargement."
   },
   "pill": {
     "dictation": "Dictée",

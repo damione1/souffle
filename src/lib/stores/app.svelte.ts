@@ -199,6 +199,7 @@ function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOp
   switch (state.state) {
     case "downloading": return "downloading";
     case "loading": return "loading";
+    case "unloading": return "unloading";
     default: return "idle";
   }
 }

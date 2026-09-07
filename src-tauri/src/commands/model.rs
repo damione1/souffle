@@ -1,12 +1,12 @@
+use tauri::ipc::Channel;
 use tauri::Manager;
 use tauri::State;
-use tauri::ipc::Channel;
 use tracing::info;
 
 use crate::engine::{
+    resolve_transcription_profile, resolve_transcription_selection, transcription_engine_catalog,
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
-    TranscriptionRuntimeStatus, resolve_transcription_profile, resolve_transcription_selection,
-    transcription_engine_catalog,
+    TranscriptionRuntimeStatus,
 };
 use crate::models;
 use crate::settings::AppSettings;
@@ -280,11 +280,8 @@ pub fn delete_model(
     let profile = resolve_transcription_selection(&selection)?;
 
     let machine = state.current_machine_state()?;
-    if matches!(
-        machine,
-        AppStateMachine::Downloading { .. } | AppStateMachine::Loading { .. }
-    ) {
-        return Err("Cannot delete a model while it is downloading or loading.".into());
+    if model_delete_blocked_by_transition(&machine) {
+        return Err("Cannot delete a model while it is downloading, loading, or unloading.".into());
     }
     if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
         return Err("Cannot delete the currently loaded model. Unload it first or switch to a different model.".into());
@@ -300,6 +297,17 @@ pub fn delete_model(
     );
 
     Ok(())
+}
+
+/// Downloading/loading/unloading all hold model files; Unloading is not
+/// `is_model_ready`, so it must be listed here or delete can race teardown.
+fn model_delete_blocked_by_transition(machine: &AppStateMachine) -> bool {
+    matches!(
+        machine,
+        AppStateMachine::Downloading { .. }
+            | AppStateMachine::Loading { .. }
+            | AppStateMachine::Unloading { .. }
+    )
 }
 
 /// Debug: feed the debug WAV through the engine to test model in isolation.
@@ -346,5 +354,38 @@ pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String>
         Ok("No words detected (model produced 0 segments)".into())
     } else {
         Ok(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile() -> TranscriptionProfile {
+        TranscriptionProfile::default()
+    }
+
+    #[test]
+    fn delete_is_blocked_while_unloading() {
+        let unloading = AppStateMachine::Unloading {
+            profile: profile(),
+            next_profile: None,
+        };
+        assert!(model_delete_blocked_by_transition(&unloading));
+        assert!(!unloading.is_model_ready());
+    }
+
+    #[test]
+    fn delete_is_blocked_while_downloading_or_loading() {
+        assert!(model_delete_blocked_by_transition(
+            &AppStateMachine::Downloading { profile: profile() }
+        ));
+        assert!(model_delete_blocked_by_transition(
+            &AppStateMachine::Loading { profile: profile() }
+        ));
+        assert!(!model_delete_blocked_by_transition(&AppStateMachine::Idle));
+        assert!(!model_delete_blocked_by_transition(
+            &AppStateMachine::Ready { profile: profile() }
+        ));
     }
 }
