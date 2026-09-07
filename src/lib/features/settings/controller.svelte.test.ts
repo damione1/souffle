@@ -462,6 +462,86 @@ describe("settings controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("download_model", expect.anything());
   });
 
+  it("selectModelOption does not persist while a meeting is recording", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+        meeting_id: "m1",
+      },
+    };
+
+    mockInvoke.mockClear();
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("load_model", expect.anything());
+    expect(ctrl.app.settings.transcription_engine_id).toBe("kyutai");
+    expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
+    expect(ctrl.app.settings.transcription_backend_id).toBe("candle");
+    expect(ctrl.statusMessage).toBe("Can't change the transcription model while recording.");
+  });
+
+  it("selectModelOption does not persist while dictation is recording", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_dictation",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+      },
+    };
+
+    mockInvoke.mockClear();
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
+    expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
+  });
+
+  it("restores the previous model triple when save_settings refuses the switch", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "save_settings") {
+        const settings = args?.settings as AppSettings;
+        if (settings.transcription_model_id !== "stt-1b-en_fr") {
+          return Promise.reject("Cannot change the transcription model while recording");
+        }
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
+
+    expect(ctrl.app.settings.transcription_engine_id).toBe("kyutai");
+    expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
+    expect(ctrl.app.settings.transcription_backend_id).toBe("candle");
+    expect(mockInvoke).not.toHaveBeenCalledWith("load_model", expect.anything());
+  });
+
   it("shortcut recording flow", async () => {
     const ctrl = createSettingsController();
     await ctrl.mount();

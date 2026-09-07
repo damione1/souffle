@@ -558,6 +558,7 @@ pub async fn summarize_meeting(
     channel: Channel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
     let transcript = state.db.load_meeting(&id)?;
+    let generated_from_edited = transcript.edited_transcript.clone();
     let settings = AppSettings::load(&state.db)?;
 
     let (text, turn_units) = match transcript.edited_transcript {
@@ -622,7 +623,13 @@ pub async fn summarize_meeting(
         tracing::warn!("Structured summary extract failed, saving prose only: {warning}");
     }
 
-    db.update_meeting_summary(&id, &summary, structured.as_ref(), &model)?;
+    db.update_meeting_summary(
+        &id,
+        &summary,
+        structured.as_ref(),
+        &model,
+        generated_from_edited.as_deref(),
+    )?;
 
     Ok(())
 }

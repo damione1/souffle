@@ -144,6 +144,7 @@
         downloadTotalBytes={controller.downloadTotalBytes}
         downloadFile={controller.downloadFile}
         unloadTimeoutMinutes={controller.app.settings.model_unload_timeout_minutes}
+        recording={controller.app.isRecording}
         onSelectModel={controller.selectModelOption}
         onUnloadTimeoutChange={controller.onModelUnloadTimeoutChange}
       />

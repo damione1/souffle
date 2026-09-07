@@ -3,6 +3,7 @@
   import { Pause, Play } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import { defaultAudioTarget, buildPlayCommand, type AudioSeekTarget } from "../audio-map";
+  import { applyPendingSeek, seekNeedsMetadata, type PendingSeek } from "../audio-seek";
   import type { MeetingAudioSession } from "../../../types";
   import { formatTimestamp } from "../../../utils";
 
@@ -24,7 +25,20 @@
   // Guards re-applying the same click twice (e.g. an unrelated prop update
   // re-running the effect) without needing seekRequestId in a closure ref.
   let lastAppliedSeekId = -1;
+  let pendingSeek: PendingSeek | null = null;
   let seekAbortController = new AbortController();
+
+  function armMetadataListener(el: HTMLAudioElement) {
+    seekAbortController.abort();
+    seekAbortController = new AbortController();
+    el.addEventListener(
+      "loadedmetadata",
+      () => {
+        pendingSeek = applyPendingSeek(el, pendingSeek);
+      },
+      { once: true, signal: seekAbortController.signal },
+    );
+  }
 
   // Show something to play as soon as sessions arrive, before any paragraph
   // has been clicked.
@@ -39,30 +53,21 @@
     if (!seekTarget || !audioEl || seekRequestId === lastAppliedSeekId) return;
     lastAppliedSeekId = seekRequestId;
 
-    seekAbortController.abort();
-    seekAbortController = new AbortController();
-
     const command = buildPlayCommand(seekTarget, currentPath);
-    const el = audioEl;
-    const applySeek = () => {
-      // In case the audio element is not yet ready even if session didn't change (edge case)
-      if (el.readyState >= 1) {
-        el.currentTime = command.seekSeconds;
-        void el.play();
-      } else {
-        el.addEventListener("loadedmetadata", () => {
-          el.currentTime = command.seekSeconds;
-          void el.play();
-        }, { once: true, signal: seekAbortController.signal });
-      }
-    };
+    pendingSeek = { seekSeconds: command.seekSeconds };
 
     if (command.sessionChanged) {
       currentPath = command.path;
-      el.addEventListener("loadedmetadata", applySeek, { once: true, signal: seekAbortController.signal });
-    } else {
-      applySeek();
     }
+
+    if (seekNeedsMetadata(audioEl.readyState, command.sessionChanged)) {
+      armMetadataListener(audioEl);
+      return;
+    }
+
+    seekAbortController.abort();
+    seekAbortController = new AbortController();
+    pendingSeek = applyPendingSeek(audioEl, pendingSeek);
   });
 
   function togglePlay() {
@@ -87,7 +92,11 @@
       onplay={() => { playing = true; }}
       onpause={() => { playing = false; }}
       ontimeupdate={() => { if (audioEl) currentTime = audioEl.currentTime; }}
-      onloadedmetadata={() => { if (audioEl) duration = audioEl.duration; }}
+      onloadedmetadata={() => {
+        if (!audioEl) return;
+        duration = audioEl.duration;
+        pendingSeek = applyPendingSeek(audioEl, pendingSeek);
+      }}
     ></audio>
     <button
       class="btn btn-icon shrink-0"

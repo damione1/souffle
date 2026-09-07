@@ -10,6 +10,12 @@
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
   import { elapsedSecondsSince, formatDuration, resolveSpeakerLabel, segmentGap } from "../../utils";
+  import {
+    leadingRemovedCount,
+    measureLeadingHeight,
+    scrollTopAfterLeadingUnmount,
+    windowedParagraphs,
+  } from "./live-paragraph-window";
 
   let {
     mode,
@@ -38,7 +44,7 @@
 
   const liveParagraphs = $derived(
     mode === "meeting"
-      ? [...meeting.liveTranscript.committed, ...meeting.liveTranscript.tail]
+      ? windowedParagraphs(meeting.liveTranscript.committed, meeting.liveTranscript.tail)
       : [],
   );
   const liveTentative = $derived(
@@ -120,6 +126,8 @@
 
   let isNearBottom = true;
   let scrollRafId: number | null = null;
+  let pendingRemovedHeight = 0;
+  let previousWindowIds: number[] = [];
 
   function handleScroll() {
     const el = transcriptEl;
@@ -135,10 +143,28 @@
     });
   }
 
+  $effect.pre(() => {
+    const nextIds = liveParagraphs.map((paragraph) => paragraph.id);
+    const el = transcriptEl;
+    if (el && !isNearBottom) {
+      const removed = leadingRemovedCount(previousWindowIds, nextIds);
+      if (removed > 0) {
+        const gap = Number.parseFloat(getComputedStyle(el).rowGap || el.style.gap || "0") || 0;
+        pendingRemovedHeight = measureLeadingHeight(el, removed, gap);
+      }
+    }
+    previousWindowIds = nextIds;
+  });
+
   $effect(() => {
     void liveText;
     void liveParagraphs;
     void liveTentative;
+    const el = transcriptEl;
+    if (el && pendingRemovedHeight > 0) {
+      el.scrollTop = scrollTopAfterLeadingUnmount(el.scrollTop, pendingRemovedHeight);
+      pendingRemovedHeight = 0;
+    }
     scheduleAutoscroll();
   });
 

@@ -414,6 +414,7 @@
   "status_chip": {
     "ready": "Prêt",
     "loading": "Chargement du modèle…",
+    "load_required": "Modèle à charger",
     "downloading": "Téléchargement",
     "model_required": "Modèle requis"
   },
@@ -427,6 +428,7 @@
   "settings_model": {
     "title": "Modèle de transcription",
     "description": "Choisissez un modèle — il se télécharge et se charge automatiquement. Tout tourne sur ce Mac.",
+    "recording_locked": "Impossible de changer de modèle pendant un enregistrement.",
     "downloading": "Téléchargement…",
     "unload_timeout_label": "Décharger le modèle en cas d'inactivité",
     "unload_timeout_desc": "Libère de la mémoire après une période sans transcription. Se recharge automatiquement au prochain enregistrement.",

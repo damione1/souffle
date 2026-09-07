@@ -25,6 +25,7 @@
     downloadTotalBytes,
     downloadFile,
     unloadTimeoutMinutes,
+    recording,
     onSelectModel,
     onUnloadTimeoutChange,
   }: {
@@ -37,13 +38,14 @@
     downloadTotalBytes: number | null;
     downloadFile: string;
     unloadTimeoutMinutes: number;
+    recording: boolean;
     onSelectModel: (key: string) => void | Promise<void>;
     onUnloadTimeoutChange: (event: Event) => void;
   } = $props();
 
   const options = $derived(listAvailableModelOptions(catalog));
   const selectedKey = $derived(`${selectedEngineId}:${selectedModelId}`);
-  const busy = $derived(operationState !== "idle");
+  const busy = $derived(operationState !== "idle" || recording);
 </script>
 
 <section class="settings-group">
@@ -66,6 +68,7 @@
       <select
         value={selectedKey}
         disabled={busy}
+        title={recording ? $t("settings_model.recording_locked") : undefined}
         onchange={async (event) => {
           const target = event.currentTarget as HTMLSelectElement;
           try {

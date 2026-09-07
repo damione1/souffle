@@ -25,6 +25,8 @@ import { listCalendars } from "../../api/calendar";
 import { requestPermission } from "../../api/permissions";
 import { setLocale } from "../../i18n";
 import { getAppState } from "../../stores/app.svelte";
+import { get } from "svelte/store";
+import { t } from "svelte-i18n";
 import type {
   AppSettings,
   AudioInputDevice,
@@ -163,7 +165,7 @@ export function createSettingsController() {
     }
   }
 
-  async function persistSettings(updater: (settings: AppSettings) => void) {
+  async function persistSettings(updater: (settings: AppSettings) => void): Promise<boolean> {
     const previousSettings = app.settings;
     const nextSettings: AppSettings = {
       ...previousSettings,
@@ -175,18 +177,27 @@ export function createSettingsController() {
       || nextSettings.transcription_model_id !== previousSettings.transcription_model_id
       || nextSettings.transcription_backend_id !== previousSettings.transcription_backend_id;
 
+    if (selectionChanged && app.isRecording) {
+      statusMessage = get(t)("settings_model.recording_locked");
+      return false;
+    }
+
     try {
       await saveSettings(nextSettings);
-      app.settings = nextSettings;
-      app.selectedDevice = nextSettings.audio_device ?? "";
-      if (selectionChanged) {
-        resetTranscriptionRuntimeState(app);
-        await loadCatalog();
-        await refreshRuntimeStatus();
-      }
     } catch (e) {
+      app.settings = previousSettings;
       statusMessage = errorMessage(e);
+      return false;
     }
+
+    app.settings = nextSettings;
+    app.selectedDevice = nextSettings.audio_device ?? "";
+    if (selectionChanged) {
+      resetTranscriptionRuntimeState(app);
+      await loadCatalog();
+      await refreshRuntimeStatus();
+    }
+    return true;
   }
 
   async function refreshDevices() {
@@ -435,11 +446,17 @@ export function createSettingsController() {
     const option = listAvailableModelOptions(catalog).find((candidate) => candidate.key === key);
     if (!option) return;
 
-    await persistSettings((settings) => {
+    if (app.isRecording) {
+      statusMessage = get(t)("settings_model.recording_locked");
+      return;
+    }
+
+    const persisted = await persistSettings((settings) => {
       settings.transcription_engine_id = option.engineId;
       settings.transcription_model_id = option.modelId;
       settings.transcription_backend_id = option.backendId;
     });
+    if (!persisted) return;
 
     // Branch on the phase the backend just reported for the newly selected
     // model, never on stored state a StateChanged event may have overwritten
