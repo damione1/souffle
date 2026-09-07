@@ -211,10 +211,9 @@ function createTranscriptionControllerInstance() {
       learnFromEditTimer = null;
       try {
         if (!app.settings.dictation_learn_from_edit) return;
-        if (targetApp) {
-          const currentApp = await frontmostAppName().catch(() => null);
-          if (currentApp && currentApp !== targetApp) return;
-        }
+        if (!targetApp) return;
+        const currentApp = await frontmostAppName().catch(() => null);
+        if (currentApp !== targetApp) return;
         const focused = (await readFocusedText())?.trim() ?? null;
         if (!focused || focused === pasted) return;
         // Whole-field AX reads include pre-existing content around the paste.
