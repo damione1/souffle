@@ -603,7 +603,7 @@ impl Database {
         let tx = conn.transaction().map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
-            "UPDATE meetings SET edited_transcript = ?1 WHERE id = ?2",
+            "UPDATE meetings SET edited_transcript = ?1, summary_is_stale = CASE WHEN summary IS NOT NULL THEN 1 ELSE summary_is_stale END WHERE id = ?2",
             params![edited_transcript, id],
         )
         .map_err(|e| format!("Update edited transcript: {e}"))?;

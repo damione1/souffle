@@ -66,7 +66,14 @@
       <select
         value={selectedKey}
         disabled={busy}
-        onchange={(event) => void onSelectModel((event.currentTarget as HTMLSelectElement).value)}
+        onchange={async (event) => {
+          const target = event.currentTarget as HTMLSelectElement;
+          try {
+            await onSelectModel(target.value);
+          } finally {
+            target.value = selectedKey;
+          }
+        }}
         class="field-select"
         aria-label={$t("settings_model.title")}
       >

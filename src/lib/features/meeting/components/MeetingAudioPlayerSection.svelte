@@ -24,6 +24,7 @@
   // Guards re-applying the same click twice (e.g. an unrelated prop update
   // re-running the effect) without needing seekRequestId in a closure ref.
   let lastAppliedSeekId = -1;
+  let seekAbortController = new AbortController();
 
   // Show something to play as soon as sessions arrive, before any paragraph
   // has been clicked.
@@ -38,16 +39,27 @@
     if (!seekTarget || !audioEl || seekRequestId === lastAppliedSeekId) return;
     lastAppliedSeekId = seekRequestId;
 
+    seekAbortController.abort();
+    seekAbortController = new AbortController();
+
     const command = buildPlayCommand(seekTarget, currentPath);
     const el = audioEl;
     const applySeek = () => {
-      el.currentTime = command.seekSeconds;
-      void el.play();
+      // In case the audio element is not yet ready even if session didn't change (edge case)
+      if (el.readyState >= 1) {
+        el.currentTime = command.seekSeconds;
+        void el.play();
+      } else {
+        el.addEventListener("loadedmetadata", () => {
+          el.currentTime = command.seekSeconds;
+          void el.play();
+        }, { once: true, signal: seekAbortController.signal });
+      }
     };
 
     if (command.sessionChanged) {
       currentPath = command.path;
-      el.addEventListener("loadedmetadata", applySeek, { once: true });
+      el.addEventListener("loadedmetadata", applySeek, { once: true, signal: seekAbortController.signal });
     } else {
       applySeek();
     }

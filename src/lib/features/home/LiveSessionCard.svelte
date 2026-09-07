@@ -21,9 +21,6 @@
     meeting: ReturnType<typeof createMeetingController>;
   } = $props();
 
-  /** Only the most recent paragraphs stay in the DOM; older ones are still in
-   * `meeting.liveTranscript.committed` but are never rendered live. */
-  const LIVE_PARAGRAPH_WINDOW = 30;
   /** Auto-scroll only kicks in when already within this many px of the bottom. */
   const NEAR_BOTTOM_PX = 40;
 
@@ -41,8 +38,7 @@
 
   const liveParagraphs = $derived(
     mode === "meeting"
-      ? [...meeting.liveTranscript.committed.slice(-LIVE_PARAGRAPH_WINDOW), ...meeting.liveTranscript.tail]
-        .slice(-LIVE_PARAGRAPH_WINDOW)
+      ? [...meeting.liveTranscript.committed, ...meeting.liveTranscript.tail]
       : [],
   );
   const liveTentative = $derived(
