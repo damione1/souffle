@@ -10,6 +10,44 @@ use crate::transcript::{
 
 use super::Database;
 
+fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> String {
+    edited_transcript
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+        .unwrap_or(segment_text)
+}
+
+fn reindex_meeting_fts(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    text: &str,
+) -> Result<(), String> {
+    tx.execute(
+        "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("Delete FTS: {e}"))?;
+    if !text.is_empty() {
+        tx.execute(
+            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+            params![text, "meeting", id],
+        )
+        .map_err(|e| format!("Insert FTS: {e}"))?;
+    }
+    Ok(())
+}
+
+fn joined_segment_text(tx: &rusqlite::Transaction<'_>, meeting_id: &str) -> Result<String, String> {
+    let mut stmt = tx
+        .prepare("SELECT text FROM segments WHERE meeting_id = ?1 ORDER BY sort_order")
+        .map_err(|e| format!("Prepare segments: {e}"))?;
+    stmt.query_map(params![meeting_id], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Query segments: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map(|texts| texts.join(" "))
+        .map_err(|e| format!("Collect segments: {e}"))
+}
+
 impl Database {
     /// Save a meeting with all its segments in a single transaction.
     /// Also indexes the full text for FTS5 search.
@@ -86,26 +124,16 @@ impl Database {
             .map_err(|e| format!("Insert segment: {e}"))?;
         }
 
-        tx.execute(
-            "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
-            params![meeting.id],
-        )
-        .map_err(|e| format!("Delete FTS: {e}"))?;
-
-        let full_text = meeting
-            .segments
-            .iter()
-            .map(|segment| segment.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        if !full_text.is_empty() {
-            tx.execute(
-                "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
-                params![full_text, "meeting", meeting.id],
-            )
-            .map_err(|e| format!("Insert FTS: {e}"))?;
-        }
+        let full_text = meeting_fts_text(
+            meeting.edited_transcript.as_deref(),
+            meeting
+                .segments
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        reindex_meeting_fts(&tx, &meeting.id, &full_text)?;
 
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
@@ -223,6 +251,21 @@ impl Database {
             )
             .map_err(|e| format!("Update segment text: {e}"))?;
         }
+
+        // Rebuild FTS only if there is no edited_transcript
+        let edited_transcript: Option<String> = tx
+            .query_row(
+                "SELECT edited_transcript FROM meetings WHERE id = ?1",
+                params![meeting_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Query edited_transcript: {e}"))?;
+
+        if edited_transcript.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
+            let full_text = joined_segment_text(&tx, meeting_id)?;
+            reindex_meeting_fts(&tx, meeting_id, &full_text)?;
+        }
+
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -556,12 +599,20 @@ impl Database {
         id: &str,
         edited_transcript: Option<&str>,
     ) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
-        conn.execute(
+        let mut conn = self.conn.acquire()?;
+        let tx = conn.transaction().map_err(|e| format!("Transaction: {e}"))?;
+
+        tx.execute(
             "UPDATE meetings SET edited_transcript = ?1 WHERE id = ?2",
             params![edited_transcript, id],
         )
         .map_err(|e| format!("Update edited transcript: {e}"))?;
+
+        let text_to_index = meeting_fts_text(edited_transcript, joined_segment_text(&tx, id)?);
+        reindex_meeting_fts(&tx, id, &text_to_index)?;
+
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+
         Ok(())
     }
 

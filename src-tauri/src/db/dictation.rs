@@ -39,20 +39,29 @@ impl Database {
 
     /// Add a new dictation entry.
     pub fn add_dictation_entry(&self, id: &str, text: &str, timestamp: &str) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
+        let mut conn = self.conn.acquire()?;
+        let tx = conn.transaction().map_err(|e| format!("Transaction: {e}"))?;
 
-        conn.execute(
-            "INSERT INTO dictation_entries (id, text, timestamp) VALUES (?1, ?2, ?3)",
+        tx.execute(
+            "INSERT INTO dictation_entries (id, text, timestamp) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET text = excluded.text, timestamp = excluded.timestamp",
             params![id, text, timestamp],
         )
-        .map_err(|e| format!("Insert: {e}"))?;
+        .map_err(|e| format!("Insert/Update dictation: {e}"))?;
 
-        // Also index in FTS5
-        conn.execute(
+        tx.execute(
+            "DELETE FROM text_search WHERE source_type = 'dictation' AND source_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("Delete FTS: {e}"))?;
+
+        tx.execute(
             "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
             params![text, "dictation", id],
         )
         .map_err(|e| format!("FTS insert: {e}"))?;
+
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
 
         Ok(())
     }
