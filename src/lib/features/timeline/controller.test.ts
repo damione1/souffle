@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { DictationEntry, MeetingListItem } from "../../types";
-import { groupByDay, toTimelineItems } from "./controller.svelte";
+import type { AppStateMachine, DictationEntry, MeetingListItem, TranscriptionProfile } from "../../types";
+import { groupByDay, liveMeetingId, toTimelineItems } from "./controller.svelte";
+
+const profile: TranscriptionProfile = {
+  engine_id: "kyutai",
+  engine_label: "Kyutai",
+  model_id: "stt-1b-en_fr",
+  model_label: "STT 1B",
+  backend_id: "candle",
+  backend_label: "Candle",
+};
 
 function dictation(id: string, timestamp: string): DictationEntry {
   return { id, text: `text ${id}`, timestamp };
@@ -49,5 +58,31 @@ describe("timeline items", () => {
     expect(groups[0].day).toBe("2026-06-12");
     expect(groups[0].items.map((item) => item.id)).toEqual(["d1", "m1"]);
     expect(groups[1].day).toBe("2026-06-11");
+  });
+});
+
+describe("liveMeetingId", () => {
+  it("matches the recording meeting", () => {
+    const state: AppStateMachine = {
+      state: "recording_meeting",
+      data: { profile, session_id: 1, meeting_id: "m1" },
+    };
+    expect(liveMeetingId(state)).toBe("m1");
+  });
+
+  it("matches the meeting still draining on stop", () => {
+    const state: AppStateMachine = {
+      state: "stopping",
+      data: { profile, was_recording: { meeting: { meeting_id: "m1" } } },
+    };
+    expect(liveMeetingId(state)).toBe("m1");
+  });
+
+  it("ignores dictation stop and idle", () => {
+    expect(liveMeetingId({
+      state: "stopping",
+      data: { profile, was_recording: "dictation" },
+    })).toBeNull();
+    expect(liveMeetingId({ state: "idle" })).toBeNull();
   });
 });

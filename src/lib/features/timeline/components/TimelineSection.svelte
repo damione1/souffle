@@ -162,7 +162,7 @@
             <TimelineItem
               {item}
               expanded={item.kind === "dictation" && controller.expandedDictationId === item.id}
-              isLive={item.kind === "meeting" && controller.app.machineState.state === "recording_meeting" && controller.app.machineState.data.meeting_id === item.id}
+              isLive={item.kind === "meeting" && controller.isLiveMeeting(item.id)}
               onOpen={() => controller.openItem(item)}
               onRemove={() => void controller.removeItem(item)}
             />

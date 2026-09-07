@@ -4,7 +4,7 @@ import {
   listDictationEntries,
 } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { DictationEntry, MeetingListItem } from "../../types";
+import type { AppStateMachine, DictationEntry, MeetingListItem } from "../../types";
 import {
   createDebouncedSearch,
   errorMessage,
@@ -27,6 +27,15 @@ export interface TimelineGroup {
   /** YYYY-MM-DD key in local time. */
   day: string;
   items: TimelineItem[];
+}
+
+/** Meeting ID that is recording or still draining on stop, else null. */
+export function liveMeetingId(state: AppStateMachine): string | null {
+  if (state.state === "recording_meeting") return state.data.meeting_id;
+  if (state.state === "stopping" && typeof state.data.was_recording === "object") {
+    return state.data.was_recording.meeting.meeting_id;
+  }
+  return null;
 }
 
 function dayKey(iso: string): string {
@@ -139,13 +148,13 @@ function createTimelineControllerInstance() {
     expandedDictationId = expandedDictationId === id ? null : id;
   }
 
+  function isLiveMeeting(id: string): boolean {
+    return liveMeetingId(app.machineState) === id;
+  }
+
   async function removeItem(item: TimelineItem) {
     try {
-      if (
-        item.kind === "meeting" &&
-        app.machineState.state === "recording_meeting" &&
-        app.machineState.data.meeting_id === item.id
-      ) {
+      if (item.kind === "meeting" && isLiveMeeting(item.id)) {
         throw new Error("Cannot delete a meeting while it is recording.");
       }
       if (item.kind === "dictation") {
@@ -181,6 +190,7 @@ function createTimelineControllerInstance() {
     get searchResults() { return search.results; },
     get isSearching() { return search.isSearching; },
     get expandedDictationId() { return expandedDictationId; },
+    isLiveMeeting,
     refresh,
     openItem,
     removeItem,
