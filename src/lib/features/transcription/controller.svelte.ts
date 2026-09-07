@@ -148,6 +148,7 @@ function createTranscriptionControllerInstance() {
   let focusedApp: string | null = null;
   let rewriteOf: string | null = null;
   let learnFromEditTimer: ReturnType<typeof setTimeout> | null = null;
+  let pttStopQueued = false;
 
   let activeProfileLabel = $derived.by(() => {
     if (!catalog) return "Transcription model";
@@ -257,7 +258,11 @@ function createTranscriptionControllerInstance() {
         }
       }),
       events.shortcutPttStop.listen(() => {
-        if (isDictating && !isStopping) void toggleRecording(true);
+        if (isStartingRecording) {
+          pttStopQueued = true;
+        } else if (isDictating && !isStopping) {
+          void toggleRecording(true);
+        }
       }),
     ]);
 
@@ -424,6 +429,14 @@ function createTranscriptionControllerInstance() {
       clearSessionContext();
     } finally {
       isStartingRecording = false;
+      if (pttStopQueued) {
+        pttStopQueued = false;
+        // PTT stop was queued while starting. Wait briefly for machineState
+        // to sync (Tauri event to be processed by Svelte stores), then stop.
+        setTimeout(() => {
+          if (isDictating && !isStopping) void toggleRecording(true);
+        }, 50);
+      }
     }
   }
 
@@ -434,6 +447,7 @@ function createTranscriptionControllerInstance() {
     sessionGeneration += 1; // cut off in-flight segments from the dead session
     isStartingRecording = false;
     isStopping = false;
+    pttStopQueued = false;
     tentative = "";
     cancelLearnFromEditPoll();
     if (transcript.trim()) {
