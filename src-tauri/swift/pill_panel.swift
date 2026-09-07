@@ -64,11 +64,19 @@ private final class WaveformView: NSView {
         // so normal talking fills the bars without clipping a shout.
         let x = max(0, CGFloat(raw))
         rms = min(1, x.squareRoot() * 1.8)
+        if reduceMotionEnabled() {
+            applyRmsToBars()
+        }
     }
 
     func setActive(_ active: Bool) {
         if active {
-            startTick()
+            if reduceMotionEnabled() {
+                stopTick()
+                applyRmsToBars()
+            } else {
+                startTick()
+            }
         } else {
             stopTick()
             rms = 0
@@ -91,7 +99,20 @@ private final class WaveformView: NSView {
         tick = nil
     }
 
+    private func applyRmsToBars() {
+        let target = max(0.08, min(1, rms))
+        for i in 0..<kWaveformBars {
+            bars[i] = target
+        }
+        needsDisplay = true
+    }
+
     private func tickAnimation() {
+        if reduceMotionEnabled() {
+            stopTick()
+            applyRmsToBars()
+            return
+        }
         let t = CACurrentMediaTime()
         for i in 0..<kWaveformBars {
             let variation = sin(t * 5 + Double(i) * 0.5) * 0.15
@@ -108,9 +129,13 @@ private final class WaveformView: NSView {
         let h = bounds.height
         guard w > 0, h > 0 else { return }
 
-        let barWidth: CGFloat = 3
-        let barGap: CGFloat = 2
-        let occupied = CGFloat(kWaveformBars) * (barWidth + barGap) - barGap
+        // Compact dictation only has ~99 pt between title and Stop; 24×3pt
+        // bars with 2 pt gaps need 118. Scale to bounds so they never overlap.
+        let n = CGFloat(kWaveformBars)
+        let scale = min(1, w / (n * 3 + (n - 1) * 2))
+        let barWidth = 3 * scale
+        let barGap = 2 * scale
+        let occupied = n * barWidth + (n - 1) * barGap
         let offsetX = (w - occupied) / 2
 
         ctx.setFillColor(kAccent.cgColor)
@@ -119,9 +144,10 @@ private final class WaveformView: NSView {
             let x = offsetX + CGFloat(i) * (barWidth + barGap)
             let y = (h - barH) / 2
             let rect = CGRect(x: x, y: y, width: barWidth, height: barH)
+            let corner = min(1.5, barWidth / 2, barH / 2)
             ctx.setAlpha(0.4 + bars[i] * 0.6)
             ctx.beginPath()
-            ctx.addPath(CGPath(roundedRect: rect, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
+            ctx.addPath(CGPath(roundedRect: rect, cornerWidth: corner, cornerHeight: corner, transform: nil))
             ctx.fillPath()
         }
         ctx.setAlpha(1)
@@ -224,6 +250,7 @@ private final class PillContentView: NSView {
         stopButton.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.9).cgColor
         stopButton.layer?.cornerRadius = 13.5
         stopButton.contentTintColor = .white
+        stopButton.refusesFirstResponder = false
         stopButton.target = self
         stopButton.action = #selector(didTapStop)
         addSubview(stopButton)
@@ -231,6 +258,8 @@ private final class PillContentView: NSView {
         applyMode(.dictation, title: "Dictating", stopLabel: "Stop recording",
                   a11yLabel: "Dictation in progress", expanded: false)
     }
+
+    var stopControl: NSView { stopButton }
 
     private func animateDot() {
         recordingDot.layer?.removeAnimation(forKey: "pulse")
@@ -318,9 +347,10 @@ private final class PillContentView: NSView {
         let text = liveLabel.stringValue
         guard isExpanded, !text.isEmpty, width > 0 else { return 0 }
         let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
+        // Match the live label's default paragraph style. A 1.15 multiple
+        // here made a 1-line tail count as 2 and grew the HUD too early.
         let para = NSMutableParagraphStyle()
         para.lineBreakMode = .byWordWrapping
-        para.lineHeightMultiple = 1.15
         let bounds = (text as NSString).boundingRect(
             with: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
@@ -418,6 +448,15 @@ private final class PillContentView: NSView {
     }
 }
 
+/// Borderless panels return `canBecomeKey == false`. Override so VoiceOver
+/// (and a click on Stop) can focus the button without making this the main
+/// window. We still never `makeKeyAndOrderFront` on show — that would steal
+/// the dictation target.
+private final class PillFloatingPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 // ---------------------------------------------------------------------------
 // MARK: - Panel singleton
 // ---------------------------------------------------------------------------
@@ -447,7 +486,7 @@ private final class PillPanel {
         guard panel == nil else { return }
 
         let initSize = CGSize(width: kCompactWidth, height: kCompactHeight)
-        let p = NSPanel(
+        let p = PillFloatingPanel(
             contentRect: CGRect(origin: .zero, size: initSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -474,6 +513,7 @@ private final class PillPanel {
             self.stopCallback?(Int32(self.currentMode.rawValue))
         }
         p.contentView = cv
+        p.initialFirstResponder = cv.stopControl
         p.setAccessibilityLabel(currentA11yLabel)
 
         NotificationCenter.default.addObserver(
@@ -527,6 +567,11 @@ private final class PillPanel {
         if let custom = lockedOrigin() {
             let top = custom.y + lastAppliedSize.height
             origin = clamp(screen: screen, size: size, x: custom.x, y: top - size.height)
+            // Keep the stored bottom-left in sync with the new size so the
+            // next resize still pins the same top. Do not record the default
+            // top-center placement as a user origin (SOU-011: a saved default
+            // survives a display change and looks "stuck").
+            setLockedOrigin(origin)
         } else {
             let cx = screen.origin.x + (screen.size.width - size.width) / 2
             let cy = screen.origin.y + screen.size.height - kTopMargin - size.height
@@ -543,7 +588,6 @@ private final class PillPanel {
         }
 
         ignoringMove = true
-        setLockedOrigin(origin)
         lastAppliedSize = size
         // Explicit animate:false — Reduce Motion and the old tao deadlock.
         panel.setFrame(CGRect(origin: origin, size: size), display: true, animate: false)
