@@ -17,7 +17,9 @@ export type SeekableMedia = {
 };
 
 function mediaSrc(el: SeekableMedia): string {
-  return el.src || el.currentSrc || "";
+  // currentSrc is the resource actually loaded. During a src swap, `src` can
+  // already point at the next file while currentSrc is still the previous one.
+  return el.currentSrc || el.src || "";
 }
 
 /** Wait for loadedmetadata when the file is swapping or metadata is not here yet. */

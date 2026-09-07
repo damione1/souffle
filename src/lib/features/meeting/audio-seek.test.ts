@@ -57,4 +57,18 @@ describe("applyPendingSeek", () => {
     expect(el.play).not.toHaveBeenCalled();
     expect(leftover).toEqual({ seekSeconds: 20, src: "/rec/c.ogg" });
   });
+
+  it("prefers currentSrc over src during a source transition", () => {
+    const el = {
+      readyState: HAVE_METADATA,
+      currentTime: 0,
+      src: "/rec/c.ogg",
+      currentSrc: "/rec/b.ogg",
+      play: vi.fn(() => undefined),
+    };
+    const leftover = applyPendingSeek(el, { seekSeconds: 20, src: "/rec/c.ogg" });
+    expect(el.currentTime).toBe(0);
+    expect(el.play).not.toHaveBeenCalled();
+    expect(leftover).toEqual({ seekSeconds: 20, src: "/rec/c.ogg" });
+  });
 });
