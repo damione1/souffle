@@ -270,7 +270,7 @@ pub fn migrate_meetings_to_v3(conn: &mut Connection) -> Result<(), String> {
             let ended_at = row.ended_at.as_deref().map(parse_datetime).transpose()?;
             let segment_count: i64 = tx
                 .query_row(
-                    "SELECT COUNT(*) FROM segments WHERE meeting_id = ?1",
+                    "SELECT COUNT(*) FROM segments_legacy WHERE meeting_id = ?1",
                     params![row.id],
                     |segment_row| segment_row.get(0),
                 )
@@ -1117,6 +1117,7 @@ mod tests {
         let meeting = db.load_meeting("legacy-meeting").unwrap();
         assert_eq!(meeting.transcription_profile.engine_label, "Custom Engine");
         assert_eq!(meeting.recording_sessions.len(), 1);
+        assert_eq!(meeting.recording_sessions[0].end_segment_index, 1);
         assert!(!meeting.summary_is_stale);
         // v8 chain ran on the same open: pre-v8 rows read back cleanly.
         assert_eq!(meeting.calendar_event_id, None);
