@@ -14,7 +14,7 @@ export function windowedParagraphs<T>(
 export function leadingRemovedCount<T>(previous: readonly T[], next: readonly T[]): number {
   if (previous.length === 0 || next.length === 0) return 0;
   const index = previous.indexOf(next[0]);
-  return index > 0 ? index : 0;
+  return index === -1 ? previous.length : index;
 }
 
 export function measureLeadingHeight(

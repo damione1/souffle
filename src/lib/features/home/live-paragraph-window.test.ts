@@ -49,6 +49,13 @@ describe("live window scroll compensation", () => {
     expect(idAtScrollTop(next, compensated)).toBe(beforeId);
   });
 
+  it("treats a fully replaced 30-item window as 30 leading unmounts", () => {
+    const previous = windowedParagraphs(ids(30), []);
+    const next = windowedParagraphs(ids(30, 100), []);
+    expect(next[0]).not.toBe(previous[0]);
+    expect(leadingRemovedCount(previous, next)).toBe(LIVE_PARAGRAPH_WINDOW);
+  });
+
   it("leaves a bottom-stuck viewport to autoscroll (compensation is a no-op at 0 unmounts)", () => {
     const previous = windowedParagraphs(ids(10), []);
     const next = windowedParagraphs(ids(11), []);

@@ -54,7 +54,7 @@
     lastAppliedSeekId = seekRequestId;
 
     const command = buildPlayCommand(seekTarget, currentPath);
-    pendingSeek = { seekSeconds: command.seekSeconds };
+    pendingSeek = { seekSeconds: command.seekSeconds, src: convertFileSrc(command.path) };
 
     if (command.sessionChanged) {
       currentPath = command.path;

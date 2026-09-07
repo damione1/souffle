@@ -494,7 +494,10 @@ impl Database {
         conn.execute(
             "UPDATE meetings
              SET notes = ?1,
-                 summary_is_stale = CASE WHEN summary IS NOT NULL THEN 1 ELSE summary_is_stale END
+                 summary_is_stale = CASE
+                   WHEN summary IS NOT NULL AND notes IS DISTINCT FROM ?1 THEN 1
+                   ELSE summary_is_stale
+                 END
              WHERE id = ?2",
             params![notes, id],
         )
@@ -622,7 +625,10 @@ impl Database {
         tx.execute(
             "UPDATE meetings
              SET edited_transcript = ?1,
-                 summary_is_stale = CASE WHEN summary IS NOT NULL THEN 1 ELSE summary_is_stale END
+                 summary_is_stale = CASE
+                   WHEN summary IS NOT NULL AND edited_transcript IS DISTINCT FROM ?1 THEN 1
+                   ELSE summary_is_stale
+                 END
              WHERE id = ?2",
             params![edited_transcript, id],
         )
@@ -1266,6 +1272,39 @@ mod tests {
 
         db.save_meeting_notes("m1", Some("remember this")).unwrap();
         assert!(!db.load_meeting("m1").unwrap().summary_is_stale);
+    }
+
+    #[test]
+    fn save_same_edited_transcript_does_not_mark_stale() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("budget recap".to_string());
+        meeting.edited_transcript = Some("forecast recap".to_string());
+        db.save_meeting(&meeting).unwrap();
+        assert!(!db.load_meeting("m1").unwrap().summary_is_stale);
+
+        db.save_edited_transcript("m1", Some("forecast recap"))
+            .unwrap();
+        assert!(
+            !db.load_meeting("m1").unwrap().summary_is_stale,
+            "re-saving the same transcript must not invalidate a fresh summary"
+        );
+    }
+
+    #[test]
+    fn save_same_meeting_notes_does_not_mark_stale() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("budget recap".to_string());
+        meeting.notes = Some("remember this".to_string());
+        db.save_meeting(&meeting).unwrap();
+        assert!(!db.load_meeting("m1").unwrap().summary_is_stale);
+
+        db.save_meeting_notes("m1", Some("remember this")).unwrap();
+        assert!(
+            !db.load_meeting("m1").unwrap().summary_is_stale,
+            "re-saving the same notes must not invalidate a fresh summary"
+        );
     }
 
     #[test]
