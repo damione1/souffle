@@ -199,12 +199,15 @@ impl EngineActorHandle {
                 model_dir,
                 reply,
             },
-            None,
+            Some(Duration::from_secs(300)), // 5 minute timeout for model loading
         )
     }
 
     pub fn unload_model(&self) -> Result<(), String> {
-        self.request(|reply| EngineCommand::UnloadModel { reply }, None)
+        self.request(
+            |reply| EngineCommand::UnloadModel { reply },
+            Some(Duration::from_secs(60)), // 1 minute timeout for unloading
+        )
     }
 
     /// Reconfigure the idle-unload timeout; `0` disables it. Fire-and-forget:
@@ -238,7 +241,7 @@ impl EngineActorHandle {
                 on_segment,
                 reply,
             },
-            None,
+            Some(Duration::from_secs(60)), // 1 minute timeout for setup
         )
     }
 
@@ -253,7 +256,7 @@ impl EngineActorHandle {
     pub fn debug_transcribe(&self, samples: Vec<f32>) -> Result<Vec<TranscriptionSegment>, String> {
         self.request(
             |reply| EngineCommand::DebugTranscribe { samples, reply },
-            None,
+            Some(Duration::from_secs(60)), // 1 minute timeout for debug transcribe
         )
     }
 
@@ -262,7 +265,7 @@ impl EngineActorHandle {
     pub fn add_session_correction(&self, correction: SessionCorrection) -> Result<(), String> {
         self.request(
             |reply| EngineCommand::AddSessionCorrection { correction, reply },
-            None,
+            Some(Duration::from_secs(5)), // 5 second timeout for light dict operations
         )
     }
 
