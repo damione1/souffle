@@ -56,7 +56,10 @@ fn build_apm(sample_rate: u32) -> AudioProcessing {
     let stream = StreamConfig::new(sample_rate, 1);
     AudioProcessing::builder()
         .config(Config {
-            echo_canceller: Some(EchoCanceller::default()),
+            echo_canceller: Some(EchoCanceller {
+                transparent_mode: sonora::config::TransparentModeType::Hmm,
+                ..EchoCanceller::default()
+            }),
             ..Config::default()
         })
         .capture_config(stream)

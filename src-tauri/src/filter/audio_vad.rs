@@ -138,12 +138,19 @@ impl AudioFilter for SileroVadFilter {
 
         // Process complete Silero frames (480 samples = 30ms at 16kHz)
         let mut result = self.in_speech || self.hangover_remaining > 0;
+        let mut processed_any = false;
         while self.buffer.len() >= VAD_FRAME_SAMPLES {
+            processed_any = true;
             let frame: Vec<f32> = self.buffer.drain(..VAD_FRAME_SAMPLES).collect();
-            result = self.process_frame(&frame);
+            let frame_result = self.process_frame(&frame);
+            result = result || frame_result;
         }
 
-        result
+        if !processed_any {
+            self.in_speech || self.hangover_remaining > 0
+        } else {
+            result
+        }
     }
 
     fn reset(&mut self) {
