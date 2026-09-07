@@ -1,0 +1,25 @@
+import { describe, expect, it } from "vitest";
+import { getAppState } from "../../stores/app.svelte";
+import { openPermissionsRepair, openSettings } from "./open";
+
+describe("openSettings", () => {
+  it("opens settings on the requested tab", () => {
+    const app = getAppState();
+    app.settingsOpen = false;
+    app.settingsInitialTab = null;
+
+    openSettings({ tab: "transcription" });
+
+    expect(app.settingsOpen).toBe(true);
+    expect(app.settingsInitialTab).toBe("transcription");
+  });
+
+  it("opens the permissions repair panel without requiring a settings tab", () => {
+    const app = getAppState();
+    app.permissionsPanelOpen = false;
+
+    openPermissionsRepair();
+
+    expect(app.permissionsPanelOpen).toBe(true);
+  });
+});

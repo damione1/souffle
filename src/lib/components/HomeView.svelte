@@ -16,6 +16,7 @@
   import { createTranscriptionController } from "../features/transcription/controller.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
   import StatusChip from "./ui/StatusChip.svelte";
+  import { openSettings } from "../features/settings/open";
 
   const app = createTimelineController().app;
   const timeline = createTimelineController();
@@ -106,10 +107,20 @@
     <MeetingDetail controller={meeting} />
   {:else}
     {#if transcription.statusMessage}
-      <StatusBanner message={transcription.statusMessage} variant="warning" />
+      <StatusBanner
+        message={transcription.statusMessage}
+        actionLabel={transcription.statusActionLabel}
+        onAction={transcription.statusAction}
+        variant="warning"
+      />
     {/if}
     {#if meeting.statusMessage}
-      <StatusBanner message={meeting.statusMessage} variant="warning" />
+      <StatusBanner
+        message={meeting.statusMessage}
+        actionLabel={meeting.statusActionLabel}
+        onAction={meeting.statusAction}
+        variant="warning"
+      />
     {/if}
 
     {#if recordingMode === "idle"}
@@ -173,10 +184,7 @@
         onStartEvent={(event) => void calendar.startFromEvent(event)}
         calendarEnabled={calendar.enabled}
         calendarPermission={calendar.permission}
-        onSetupCalendar={() => {
-          app.settingsInitialTab = "meetings";
-          app.settingsOpen = true;
-        }}
+        onSetupCalendar={() => openSettings({ tab: "meetings" })}
       />
     {:else}
       <!-- During a live session, the session card is the only focus. -->

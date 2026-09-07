@@ -23,7 +23,7 @@ import {
 } from "../../api/dictionary";
 import { listCalendars } from "../../api/calendar";
 import { requestPermission } from "../../api/permissions";
-import { setLocale } from "../../i18n";
+import { setLocale, tr } from "../../i18n";
 import { getAppState } from "../../stores/app.svelte";
 import { get } from "svelte/store";
 import { t } from "svelte-i18n";
@@ -522,6 +522,10 @@ export function createSettingsController() {
   }
 
   async function handleDeleteModel() {
+    if (app.transcriptionModelOperationState !== "idle") {
+      statusMessage = tr("settings_advanced.delete_model_busy");
+      return;
+    }
     try {
       const selection = currentTranscriptionSelection(app, catalog);
       await deleteModel(selection);

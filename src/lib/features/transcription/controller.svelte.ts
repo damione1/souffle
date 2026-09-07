@@ -1,6 +1,7 @@
 import { getAppState } from "../../stores/app.svelte";
 import {
   addDictationEntry,
+  copyText,
   getTranscriptionCatalog,
   notifyPasteFailed,
   pasteText,
@@ -15,27 +16,19 @@ import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage, segmentGap } from "../../utils";
+import { tr } from "../../i18n";
+import { openPermissionsRepair, openSettings } from "../settings/open";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
 
 const LEARN_FROM_EDIT_DELAY_MS = 4000;
 const MAX_LEARN_FROM_EDIT_PAIRS = 8;
 
-type SessionMode = "insert" | "rewrite";
+/** Exact `ACCESSIBILITY_STALE_ERROR` from clipboard.rs — copy succeeded, ⌘V is the recovery.
+ * A parenthetical suffix means the copy itself failed; that is not "Copied". */
+const ACCESSIBILITY_PASTE_COPIED = "Accessibility permission missing.";
 
-/**
- * Matches the accessibility error clipboard.rs returns when
- * `permissions::accessibility_granted()` fails at paste time (see
- * `ACCESSIBILITY_STALE_ERROR` in src-tauri/src/clipboard.rs). Distinct from
- * a raw Enigo error, so we can point the user at the repair action instead
- * of just relaying the OS string.
- */
-function accessibilityPasteFailureMessage(rawMessage: string): string {
-  if (rawMessage.includes("Accessibility permission missing")) {
-    return "Paste failed: accessibility permission needed. Open Settings > Advanced > Permissions and use Repair permission.";
-  }
-  return `Paste failed: ${rawMessage}`;
-}
+type SessionMode = "insert" | "rewrite";
 
 function tokenizeWords(text: string): string[] {
   return text
@@ -139,7 +132,23 @@ function createTranscriptionControllerInstance() {
   let transcript = $state("");
   let tentative = $state("");
   let statusMessage = $state("");
+  let statusActionLabel = $state<string | undefined>();
+  let statusAction = $state<(() => void) | undefined>();
   let catalog = $state<TranscriptionCatalog | null>(null);
+
+  function setBanner(message: string, action?: { label: string; run: () => void }) {
+    statusMessage = message;
+    statusActionLabel = action?.label;
+    statusAction = action?.run;
+  }
+
+  function clearBanner() {
+    setBanner("");
+  }
+
+  function modelRequiredBanner(message: string) {
+    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ tab: "transcription" }) });
+  }
 
   // Incremented for every session start (and on abort) so segment-channel
   // callbacks from a previous session can never write into a new one.
@@ -284,7 +293,7 @@ function createTranscriptionControllerInstance() {
         transcription_backend_id: catalog.selected_backend_id,
       };
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -292,7 +301,7 @@ function createTranscriptionControllerInstance() {
     try {
       await refreshTranscriptionRuntimeStatus(app, catalog);
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -340,7 +349,7 @@ function createTranscriptionControllerInstance() {
           sessionRewriteOf,
         );
         if (finalized.warning) {
-          statusMessage = finalized.warning;
+          setBanner(finalized.warning);
         }
 
         const saved = await saveToHistory(finalized.text);
@@ -356,7 +365,25 @@ function createTranscriptionControllerInstance() {
               scheduleLearnFromEdit(finalized.text, sessionFocusedApp);
             } catch (e) {
               const message = errorMessage(e);
-              statusMessage = accessibilityPasteFailureMessage(message);
+              // AX-missing already wrote via Rust copy_text and skipped restore.
+              // Any other paste_text failure may have scheduled RestoreBurst:
+              // copy_text cancels that restore. Never use the web clipboard
+              // here — it races the 400 ms restore.
+              if (message !== ACCESSIBILITY_PASTE_COPIED) {
+                try {
+                  await copyText(finalized.text);
+                } catch {
+                  // Best-effort; the banner still reports the paste failure.
+                }
+              }
+              if (message === ACCESSIBILITY_PASTE_COPIED) {
+                setBanner(tr("home.paste_copied"), {
+                  label: tr("permissions.repair"),
+                  run: openPermissionsRepair,
+                });
+              } else {
+                setBanner(tr("home.paste_failed", { error: message }));
+              }
               // A shortcut dictation runs from another app, so the status
               // banner above is likely not on screen: also notify outside
               // the window (SOU-053). Best-effort: a notification failure
@@ -376,7 +403,7 @@ function createTranscriptionControllerInstance() {
           }
         }
       } catch (e) {
-        statusMessage = errorMessage(e);
+        setBanner(errorMessage(e));
       } finally {
         clearSessionContext();
         if (holdForPolish) {
@@ -391,32 +418,35 @@ function createTranscriptionControllerInstance() {
       return;
     }
 
-    if (app.transcriptionRuntimePhase === "download_required") {
-      statusMessage = "Download and load the model before starting dictation.";
-      return;
-    }
-    if (app.transcriptionRuntimePhase !== "ready") {
-      // Model was unloaded (e.g. the idle timeout freed it); reload through
-      // the normal load flow before recording instead of leaving the user
-      // stuck with a disabled button.
-      statusMessage = "";
-      const ready = await ensureModelLoaded(app, catalog, (message) => { statusMessage = message; });
-      if (!ready) {
-        if (!statusMessage) statusMessage = "Load the model before starting dictation.";
+    // Flip before any await so overlapping starts cannot both pass idle and
+    // both enter start_transcription / ensureModelLoaded.
+    isStartingRecording = true;
+    clearBanner();
+    let generation = sessionGeneration;
+    try {
+      if (app.transcriptionRuntimePhase === "download_required") {
+        modelRequiredBanner(tr("home.model_required_dictation"));
         return;
       }
-    }
+      if (app.transcriptionRuntimePhase !== "ready") {
+        // Model was unloaded (e.g. the idle timeout freed it); reload through
+        // the normal load flow before recording instead of leaving the user
+        // stuck with a disabled button.
+        const ready = await ensureModelLoaded(app, catalog, (message) => { setBanner(message); });
+        if (!ready) {
+          modelRequiredBanner(statusMessage || tr("home.model_required_dictation"));
+          return;
+        }
+      }
 
-    cancelLearnFromEditPoll();
-    if (!fromShortcut) sessionMode = "insert";
-    transcript = "";
-    tentative = "";
-    statusMessage = "";
-    isStartingRecording = true;
-    sessionGeneration += 1;
-    const generation = sessionGeneration;
+      cancelLearnFromEditPoll();
+      if (!fromShortcut) sessionMode = "insert";
+      transcript = "";
+      tentative = "";
+      clearBanner();
+      sessionGeneration += 1;
+      generation = sessionGeneration;
 
-    try {
       await captureStartContext();
       await startStreamingTranscription((segment: TranscriptionSegment) => {
         if (generation !== sessionGeneration) return; // stale session
@@ -428,7 +458,7 @@ function createTranscriptionControllerInstance() {
         transcript += segmentGap(transcript, segment.text) + segment.text;
       });
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
       clearSessionContext();
     } finally {
       isStartingRecording = false;
@@ -457,16 +487,16 @@ function createTranscriptionControllerInstance() {
     cancelLearnFromEditPoll();
     if (transcript.trim()) {
       void finalizeDictationText(transcript, sessionFocusedApp, sessionRewriteOf).then(({ text, warning }) => {
-        if (warning) statusMessage = warning;
+        if (warning) setBanner(warning);
         if (text) {
           void saveToHistory(text);
-          statusMessage = "Recording was interrupted — the partial transcript was saved to history.";
+          setBanner("Recording was interrupted — the partial transcript was saved to history.");
         } else {
-          statusMessage = "Recording was interrupted.";
+          setBanner("Recording was interrupted.");
         }
       });
     } else {
-      statusMessage = "Recording was interrupted.";
+      setBanner("Recording was interrupted.");
     }
     clearSessionContext();
   }
@@ -478,6 +508,8 @@ function createTranscriptionControllerInstance() {
     get transcript() { return transcript; },
     get tentative() { return tentative; },
     get statusMessage() { return statusMessage; },
+    get statusActionLabel() { return statusActionLabel; },
+    get statusAction() { return statusAction; },
     get catalog() { return catalog; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },
     get modelOperationState() { return app.transcriptionModelOperationState; },

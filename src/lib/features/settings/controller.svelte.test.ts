@@ -1080,4 +1080,52 @@ describe("settings controller", () => {
 
     expect(ctrl.inputSampleRate).toBe(48_000);
   });
+
+  it("refuses to delete a model while a download or load is in flight", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    ctrl.app.machineState = {
+      state: "downloading",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+      },
+    };
+
+    await ctrl.handleDeleteModel();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("delete_model", expect.anything());
+    expect(ctrl.statusMessage).toMatch(/downloading, loading, or unloading/i);
+  });
+
+  it("refuses to delete a model while it is unloading", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    ctrl.app.machineState = {
+      state: "unloading",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        next_profile: null,
+      },
+    };
+
+    expect(ctrl.modelOperationState).toBe("unloading");
+    await ctrl.handleDeleteModel();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("delete_model", expect.anything());
+    expect(ctrl.statusMessage).toMatch(/unloading/i);
+  });
 });

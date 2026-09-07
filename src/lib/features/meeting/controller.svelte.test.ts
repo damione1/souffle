@@ -14,6 +14,8 @@ import { mockSettings } from "../../test-helpers/fixtures";
 
 const mockGetSummaryProvidersStatus = vi.fn<() => Promise<SummaryProvidersStatus>>();
 const mockGetTranscriptionCatalog = vi.fn<() => Promise<TranscriptionCatalog>>();
+const mockLoadModel = vi.fn<(selection: unknown) => Promise<void>>();
+const mockGetModelStatus = vi.fn<(selection: unknown) => Promise<{ phase: string; profile: unknown }>>();
 const mockStartMeetingRecording = vi.fn<
   (
     title: string,
@@ -84,6 +86,8 @@ vi.mock("../../api/summary", () => ({
 vi.mock("../../api/transcription", () => ({
   getTranscriptionCatalog: (...a: unknown[]) =>
     mockGetTranscriptionCatalog(...(a as [])),
+  loadModel: (...a: unknown[]) => mockLoadModel(...(a as [unknown])),
+  getModelStatus: (...a: unknown[]) => mockGetModelStatus(...(a as [unknown])),
 }));
 
 // ── App state mock ───────────────────────────────────────────────────
@@ -95,6 +99,10 @@ function createMockAppState() {
     isRecording: false,
     recordingMode: "idle" as string,
     transcriptionRuntimePhase: "ready" as string,
+    transcriptionModelOperationState: "idle" as string,
+    settingsOpen: false,
+    settingsInitialTab: null as string | null,
+    permissionsPanelOpen: false,
     settings: { ...mockSettings },
     selectedDevice: "",
     openMeeting: vi.fn(),
@@ -116,6 +124,11 @@ vi.mock("../transcription/catalog", () => ({
     model_label: "STT 1B",
     backend_id: "candle",
     backend_label: "Candle",
+  }),
+  toSelectedTranscriptionProfileSelection: () => ({
+    engine_id: "kyutai",
+    model_id: "stt-1b-en_fr",
+    backend_id: "candle",
   }),
 }));
 
@@ -353,6 +366,54 @@ describe("MeetingController", () => {
     expect(mockStartMeetingRecording.mock.calls[0][0]).toMatch(/^Meeting /);
     expect(mockStartMeetingRecording.mock.calls[0][1]).toBeNull();
     expect(ctrl.meeting?.title).toMatch(/^Meeting /);
+  });
+
+  it("does not double-launch when two starts overlap while the model is loading", async () => {
+    mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+    mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+    mockStartMeetingRecording.mockResolvedValue(undefined);
+    mockApp.transcriptionRuntimePhase = "load_required";
+    mockApp.transcriptionModelOperationState = "idle";
+
+    let resolveLoad: (() => void) | undefined;
+    mockLoadModel.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    mockGetModelStatus.mockImplementation(async () => {
+      mockApp.transcriptionRuntimePhase = "ready";
+      return {
+        phase: "ready",
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+      };
+    });
+
+    const ctrl = createMeetingController();
+    await ctrl.mount();
+
+    const first = ctrl.startRecording();
+    const second = ctrl.startRecording();
+
+    await vi.waitFor(() => {
+      expect(resolveLoad).toBeTypeOf("function");
+    });
+    expect(mockLoadModel).toHaveBeenCalledOnce();
+    expect(mockStartMeetingRecording).not.toHaveBeenCalled();
+
+    resolveLoad!();
+    await first;
+    await second;
+
+    expect(mockStartMeetingRecording).toHaveBeenCalledOnce();
   });
 
   it("startRecording from a calendar event uses the event title and carries participants", async () => {

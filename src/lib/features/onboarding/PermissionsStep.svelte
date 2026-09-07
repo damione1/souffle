@@ -23,12 +23,17 @@
   let busy = $state<Record<string, boolean>>({});
   let error = $state("");
   let repairing = $state(false);
+  let repairSuccess = $state(false);
+  let repairCooldown = $state(false);
+  let repairCooldownTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Every write to `status` goes through here so the parent (which cannot
    * see this component's local state otherwise) learns the real permission
    * state, e.g. to gate the onboarding auto-paste default (SOU-053). */
   function setStatus(next: PermissionStatus) {
     status = next;
+    // Reset success banner if accessibility state changes back/forth
+    if (next.accessibility === "granted") repairSuccess = false;
     onStatusChange?.(next);
   }
 
@@ -97,12 +102,22 @@
    */
   async function repairAccessibility() {
     repairing = true;
+    repairSuccess = false;
     error = "";
     try {
-      const next = await repairAccessibilityPermission();
-      setStatus({ ...status, accessibility: next });
+      await repairAccessibilityPermission();
+      // Don't overwrite accessibility with Denied: a successful reset plus
+      // prompt cannot observe the grant yet (SOU-054). The focus re-check
+      // below is what turns the row green.
+      repairSuccess = true;
+      repairCooldown = true;
+      clearTimeout(repairCooldownTimer);
+      repairCooldownTimer = setTimeout(() => {
+        repairCooldown = false;
+      }, 2500);
     } catch (e) {
       error = errorMessage(e);
+      repairSuccess = false;
     } finally {
       repairing = false;
     }
@@ -122,7 +137,10 @@
         .catch(() => {});
     };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      clearTimeout(repairCooldownTimer);
+    };
   });
 </script>
 
@@ -162,15 +180,24 @@
 
       {#if row.kind === "accessibility" && s === "denied"}
         <div class="flex items-center justify-between gap-3 pl-8">
-          <p class="text-xs text-text-muted">{$t("permissions.accessibility_stale_hint")}</p>
+          <p class="text-xs text-text-muted">
+            {#if repairSuccess}
+              {$t("permissions.accessibility_repair_success")}
+            {:else}
+              {$t("permissions.accessibility_stale_hint")}
+            {/if}
+          </p>
           <button
             class="btn btn-ghost shrink-0 gap-1.5"
-            disabled={repairing || busy[row.kind]}
+            disabled={repairing || busy[row.kind] || repairCooldown}
             onclick={repairAccessibility}
           >
             {#if repairing}
               <Spinner />
               {$t("permissions.checking")}
+            {:else if repairSuccess}
+              <Check size={14} />
+              {$t("permissions.repair")}
             {:else}
               {$t("permissions.repair")}
             {/if}

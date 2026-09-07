@@ -17,6 +17,10 @@ let settingsOpen = $state(false);
 // deep-linking into the meetings tab). Consumed once by SettingsView.
 let settingsInitialTab = $state<string | null>(null);
 
+// Permissions repair panel, mounted once in App so banners can open it
+// without going through Settings → System → Review (SOU-089).
+let permissionsPanelOpen = $state(false);
+
 // Current meeting ID (when viewing a specific meeting)
 let currentMeetingId = $state<string | null>(null);
 
@@ -195,6 +199,7 @@ function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOp
   switch (state.state) {
     case "downloading": return "downloading";
     case "loading": return "loading";
+    case "unloading": return "unloading";
     default: return "idle";
   }
 }
@@ -206,6 +211,9 @@ export function getAppState() {
 
     get settingsInitialTab() { return settingsInitialTab; },
     set settingsInitialTab(v: string | null) { settingsInitialTab = v; },
+
+    get permissionsPanelOpen() { return permissionsPanelOpen; },
+    set permissionsPanelOpen(v: boolean) { permissionsPanelOpen = v; },
 
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },
