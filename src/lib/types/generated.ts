@@ -171,6 +171,18 @@ async pasteText(text: string, delayMs: number, method: PasteMethod) : Promise<Re
 }
 },
 /**
+ * Write text to the pasteboard without pasting. Cancels a pending clipboard
+ * restore so a failed ⌘V cannot wipe the transcription 400 ms later.
+ */
+async copyText(text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("copy_text", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Called by the frontend when a shortcut-triggered dictation fails to
  * paste. A shortcut dictation is by definition run from another app, so
  * Soufflé's window is usually not what the user is looking at: the in-app

@@ -807,6 +807,14 @@ pub fn paste_text(
     crate::clipboard::paste_text(&text, delay_ms, method)
 }
 
+/// Write text to the pasteboard without pasting. Cancels a pending clipboard
+/// restore so a failed ⌘V cannot wipe the transcription 400 ms later.
+#[tauri::command]
+#[specta::specta]
+pub fn copy_text(text: String) -> Result<(), String> {
+    crate::clipboard::copy_text(&text)
+}
+
 /// Pure decision: notification text for a failed paste, split out from
 /// `notify_paste_failed` so it's testable without a live AppHandle (mirrors
 /// `copy_notification_text` in `tray.rs`).
@@ -815,8 +823,8 @@ fn paste_failure_notification_text(
     error: &str,
     saved_to_history: bool,
 ) -> (&'static str, &'static str) {
-    let accessibility_missing = error.contains("Accessibility permission missing");
-    match (french, accessibility_missing, saved_to_history) {
+    let accessibility_copied = error == crate::clipboard::ACCESSIBILITY_STALE_ERROR;
+    match (french, accessibility_copied, saved_to_history) {
         (false, true, true) => (
             "Copied — press ⌘V",
             "Accessibility permission is needed to paste automatically. Your dictation was saved to history.",
@@ -1117,6 +1125,18 @@ mod tests {
         assert_eq!(title_not_saved, "Paste failed");
         assert!(!body_not_saved.contains("Accessibility permission"));
         assert!(!body_not_saved.contains("saved to history"));
+    }
+
+    #[test]
+    fn paste_failure_notification_does_not_claim_copied_when_copy_failed() {
+        let copy_failed = format!(
+            "{} (no pasteboard)",
+            crate::clipboard::ACCESSIBILITY_STALE_ERROR
+        );
+        let (title, body) = paste_failure_notification_text(false, &copy_failed, true);
+        assert_eq!(title, "Paste failed");
+        assert!(!body.contains("Copied"));
+        assert!(body.contains("saved to history"));
     }
 
     #[test]

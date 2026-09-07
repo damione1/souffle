@@ -327,6 +327,11 @@ mod tests {
     #[test]
     fn copy_instead_of_paste_still_reports_accessibility_when_copy_fails() {
         let err = copy_instead_of_paste("hello", |_| Err("no pasteboard".into())).unwrap_err();
+        assert_ne!(
+            err.as_str(),
+            ACCESSIBILITY_STALE_ERROR,
+            "copy failure must not be the exact copied-for-⌘V signal"
+        );
         assert!(err.starts_with(ACCESSIBILITY_STALE_ERROR), "{err}");
         assert!(err.contains("no pasteboard"), "{err}");
     }

@@ -1,6 +1,7 @@
 import { getAppState } from "../../stores/app.svelte";
 import {
   addDictationEntry,
+  copyText,
   getTranscriptionCatalog,
   notifyPasteFailed,
   pasteText,
@@ -22,6 +23,10 @@ import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime"
 
 const LEARN_FROM_EDIT_DELAY_MS = 4000;
 const MAX_LEARN_FROM_EDIT_PAIRS = 8;
+
+/** Exact `ACCESSIBILITY_STALE_ERROR` from clipboard.rs — copy succeeded, ⌘V is the recovery.
+ * A parenthetical suffix means the copy itself failed; that is not "Copied". */
+const ACCESSIBILITY_PASTE_COPIED = "Accessibility permission missing.";
 
 type SessionMode = "insert" | "rewrite";
 
@@ -359,16 +364,19 @@ function createTranscriptionControllerInstance() {
               );
               scheduleLearnFromEdit(finalized.text, sessionFocusedApp);
             } catch (e) {
-              // SOU-033: Rust already left the text on the pasteboard when
-              // Accessibility is missing. The web clipboard is a fallback
-              // for other paste failures (and for tests that stub paste_text).
-              try {
-                await navigator.clipboard.writeText(finalized.text);
-              } catch {
-                // Ignored
-              }
               const message = errorMessage(e);
-              if (message.includes("Accessibility permission missing")) {
+              // AX-missing already wrote via Rust copy_text and skipped restore.
+              // Any other paste_text failure may have scheduled RestoreBurst:
+              // copy_text cancels that restore. Never use the web clipboard
+              // here — it races the 400 ms restore.
+              if (message !== ACCESSIBILITY_PASTE_COPIED) {
+                try {
+                  await copyText(finalized.text);
+                } catch {
+                  // Best-effort; the banner still reports the paste failure.
+                }
+              }
+              if (message === ACCESSIBILITY_PASTE_COPIED) {
                 setBanner(tr("home.paste_copied"), {
                   label: tr("permissions.repair"),
                   run: openPermissionsRepair,

@@ -75,6 +75,11 @@ export async function pasteText(
   await unwrap(commands.pasteText(text, delayMs, method));
 }
 
+/** Write text to the pasteboard without pasting. Cancels a pending restore. */
+export async function copyText(text: string): Promise<void> {
+  await unwrap(commands.copyText(text));
+}
+
 /** Surface a shortcut dictation's paste failure outside the app window with
  * a system notification (SOU-053): the window is usually not what the user
  * is looking at when a shortcut dictation runs. */
