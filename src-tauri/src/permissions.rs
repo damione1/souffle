@@ -12,6 +12,8 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::constants::APP_IDENTIFIER;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PermState {
@@ -45,6 +47,16 @@ pub enum PermissionKind {
     SystemAudio,
     Accessibility,
     Calendar,
+}
+
+/// Outcome of `repair_accessibility`. Distinct from `PermState` because a
+/// successful `tccutil reset` plus prompt cannot observe the user's grant:
+/// `AXIsProcessTrustedWithOptions` returns the *current* trust, which is
+/// necessarily false a few milliseconds after the TCC entry was deleted.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct RepairAccessibilityResult {
+    pub reset_performed: bool,
+    pub prompt_shown: bool,
 }
 
 /// Cheap, non-prompting snapshot for the initial onboarding render. Microphone
@@ -135,16 +147,50 @@ fn accessibility_trusted_with_prompt(_prompt: bool) -> bool {
 /// still shows as "checked" in System Settings but no longer matches, so
 /// `AXIsProcessTrusted` keeps returning false. Resetting the TCC entry and
 /// re-prompting lets macOS create a fresh, correctly-keyed one.
-pub fn repair_accessibility() -> PermState {
-    let _ = std::process::Command::new("tccutil")
-        .args(["reset", "Accessibility", "com.souffle.desktop"])
-        .output();
+///
+/// Returns what the repair *did*, not a permission verdict. The AX check
+/// after a successful reset is almost always false (the user hasn't ticked
+/// the fresh prompt yet); treating that as `Denied` made the UI claim every
+/// repair had failed, including the ones that worked (SOU-054).
+pub fn repair_accessibility() -> Result<RepairAccessibilityResult, String> {
+    repair_accessibility_with(
+        APP_IDENTIFIER,
+        tccutil_reset_accessibility,
+        accessibility_trusted_with_prompt,
+    )
+}
 
-    if accessibility_trusted_with_prompt(true) {
-        PermState::Granted
-    } else {
-        PermState::Denied
+fn tccutil_reset_accessibility(bundle_id: &str) -> Result<(), String> {
+    let output = std::process::Command::new("tccutil")
+        .args(["reset", "Accessibility", bundle_id])
+        .output()
+        .map_err(|e| format!("Failed to run tccutil: {e}"))?;
+    if output.status.success() {
+        return Ok(());
     }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let code = output.status.code().unwrap_or(-1);
+    tracing::error!(bundle_id, code, %stderr, "tccutil reset Accessibility failed");
+    Err(if stderr.is_empty() {
+        format!("tccutil reset Accessibility failed (exit {code})")
+    } else {
+        format!("tccutil reset Accessibility failed (exit {code}): {stderr}")
+    })
+}
+
+fn repair_accessibility_with(
+    bundle_id: &str,
+    reset: impl FnOnce(&str) -> Result<(), String>,
+    prompt: impl FnOnce(bool) -> bool,
+) -> Result<RepairAccessibilityResult, String> {
+    reset(bundle_id)?;
+    // Always ask macOS to show the prompt. The boolean it returns is the
+    // *current* trust, not whether the user accepted — ignore it as a verdict.
+    let _trusted = prompt(true);
+    Ok(RepairAccessibilityResult {
+        reset_performed: true,
+        prompt_shown: true,
+    })
 }
 
 // --- Microphone ---
@@ -432,5 +478,65 @@ mod tests {
             || true,
         );
         assert_eq!(result, PermState::Granted);
+    }
+
+    #[test]
+    fn repair_reports_reset_not_denied_when_ax_is_still_false() {
+        let prompted = Cell::new(false);
+        let result = repair_accessibility_with(
+            APP_IDENTIFIER,
+            |id| {
+                assert_eq!(id, APP_IDENTIFIER);
+                Ok(())
+            },
+            |prompt| {
+                assert!(prompt, "repair must request the system prompt");
+                prompted.set(true);
+                false
+            },
+        )
+        .expect("successful tccutil must not become an error");
+
+        assert!(result.reset_performed);
+        assert!(result.prompt_shown);
+        assert!(prompted.get());
+    }
+
+    #[test]
+    fn repair_surfaces_tccutil_failure_and_skips_the_prompt() {
+        let prompted = Cell::new(false);
+        let result = repair_accessibility_with(
+            "com.example.unknown",
+            |id| {
+                Err(format!(
+                    "tccutil reset Accessibility failed (exit 64): No such bundle identifier \"{id}\""
+                ))
+            },
+            |_| {
+                prompted.set(true);
+                false
+            },
+        );
+
+        assert!(result.is_err(), "a failed reset must not look like success");
+        let err = result.unwrap_err();
+        assert!(err.contains("64"), "{err}");
+        assert!(err.contains("com.example.unknown"), "{err}");
+        assert!(!prompted.get(), "do not prompt after a failed reset");
+    }
+
+    #[test]
+    fn repair_uses_the_app_bundle_id() {
+        let mut seen = None;
+        let _ = repair_accessibility_with(
+            APP_IDENTIFIER,
+            |id| {
+                seen = Some(id.to_string());
+                Ok(())
+            },
+            |_| false,
+        );
+        assert_eq!(seen.as_deref(), Some(APP_IDENTIFIER));
+        assert_eq!(APP_IDENTIFIER, "com.souffle.desktop");
     }
 }

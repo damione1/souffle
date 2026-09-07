@@ -329,7 +329,6 @@
     "generating": "Génération...",
     "regenerate_summary": "Régénérer le résumé",
     "generate_summary": "Générer le résumé",
-    "connect_ollama": "Connectez Ollama dans les Paramètres pour activer les résumés.",
     "no_summary_provider": "Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans les Paramètres.",
     "no_compatible_model": "Aucun modèle Ollama compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
     "generate_hint": "Points clés et actions, générés sur l'appareil",
@@ -442,7 +441,8 @@
     "model_storage_desc": "Supprimer les fichiers du modèle téléchargé du disque.",
     "delete_model": "Supprimer le modèle téléchargé",
     "delete_model_confirm": "Supprimer",
-    "delete_model_msg": "Les fichiers du modèle seront supprimés ; il faudra les retélécharger."
+    "delete_model_msg": "Les fichiers du modèle seront supprimés ; il faudra les retélécharger.",
+    "delete_model_busy": "Impossible de supprimer pendant un téléchargement ou un chargement."
   },
   "pill": {
     "dictation": "Dictée",
@@ -488,7 +488,12 @@
     "idle_keep_recording": "Continuer l'enregistrement",
     "live_edit_hint": "Double-cliquez sur un paragraphe pour corriger un mot mal entendu. Les occurrences suivantes seront corrigées automatiquement.",
     "live_edit_save": "Enregistrer",
-    "live_edit_cancel": "Annuler"
+    "live_edit_cancel": "Annuler",
+    "paste_copied": "Copié — presse ⌘V",
+    "paste_failed": "Collage impossible : {error}",
+    "model_required_dictation": "Télécharge et charge le modèle pour dicter.",
+    "model_required_meeting": "Charge le modèle pour lancer une réunion.",
+    "open_model": "Ouvrir le modèle"
   },
   "permissions": {
     "title": "Autoriser les permissions",

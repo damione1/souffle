@@ -24,6 +24,8 @@
   let error = $state("");
   let repairing = $state(false);
   let repairSuccess = $state(false);
+  let repairCooldown = $state(false);
+  let repairCooldownTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Every write to `status` goes through here so the parent (which cannot
    * see this component's local state otherwise) learns the real permission
@@ -103,13 +105,19 @@
     repairSuccess = false;
     error = "";
     try {
-      const next = await repairAccessibilityPermission();
-      setStatus({ ...status, accessibility: next });
-      // The repair always resets TCC and prompts, so it usually returns "denied" immediately.
-      // Announce success so the user knows it worked.
+      await repairAccessibilityPermission();
+      // Don't overwrite accessibility with Denied: a successful reset plus
+      // prompt cannot observe the grant yet (SOU-054). The focus re-check
+      // below is what turns the row green.
       repairSuccess = true;
+      repairCooldown = true;
+      clearTimeout(repairCooldownTimer);
+      repairCooldownTimer = setTimeout(() => {
+        repairCooldown = false;
+      }, 2500);
     } catch (e) {
       error = errorMessage(e);
+      repairSuccess = false;
     } finally {
       repairing = false;
     }
@@ -129,7 +137,10 @@
         .catch(() => {});
     };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      clearTimeout(repairCooldownTimer);
+    };
   });
 </script>
 
@@ -178,7 +189,7 @@
           </p>
           <button
             class="btn btn-ghost shrink-0 gap-1.5"
-            disabled={repairing || busy[row.kind]}
+            disabled={repairing || busy[row.kind] || repairCooldown}
             onclick={repairAccessibility}
           >
             {#if repairing}

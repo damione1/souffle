@@ -147,7 +147,8 @@ async fn launch_meeting(
     // The on-disk file index a recorder should write to, if recording is on.
     let recording_target = RecordingTarget {
         meeting_id: accumulator.id.clone(),
-        session_index: crate::audio::recorder::next_session_index(&accumulator.id).map_err(|e| format!("Determine session index: {e}"))?,
+        session_index: crate::audio::recorder::next_session_index(&accumulator.id)
+            .map_err(|e| format!("Determine session index: {e}"))?,
     };
 
     // Persist the header before any segments so a crash leaves a recoverable
@@ -277,16 +278,17 @@ fn start_pipeline_blocking(
     // short and user-driven, so "meeting is over" doesn't apply. This is a
     // session-start snapshot; a setting changed mid-meeting only takes effect
     // on the next meeting.
-    let idle_config = (mode == PipelineMode::Meeting && settings.meeting_autostop_enabled).then(
-        || crate::pipeline::MeetingIdleConfig {
-            silence_threshold: Some(Duration::from_secs(u64::from(
-                settings.meeting_autostop_minutes * 60,
-            ))),
-            max_duration: Some(Duration::from_secs(u64::from(
-                settings.meeting_max_duration_minutes * 60,
-            ))),
-        },
-    );
+    let idle_config =
+        (mode == PipelineMode::Meeting && settings.meeting_autostop_enabled).then(|| {
+            crate::pipeline::MeetingIdleConfig {
+                silence_threshold: Some(Duration::from_secs(u64::from(
+                    settings.meeting_autostop_minutes * 60,
+                ))),
+                max_duration: Some(Duration::from_secs(u64::from(
+                    settings.meeting_max_duration_minutes * 60,
+                ))),
+            }
+        });
 
     let config = SessionConfig {
         pipeline_config: settings.pipeline_config(),
@@ -307,9 +309,9 @@ fn start_pipeline_blocking(
     let record_path = if mode == PipelineMode::Meeting
         && settings.meeting_audio_retention != crate::settings::MeetingAudioRetention::Off
     {
-        recording_target
-            .as_ref()
-            .map(|target| crate::audio::recorder::session_path(&target.meeting_id, target.session_index))
+        recording_target.as_ref().map(|target| {
+            crate::audio::recorder::session_path(&target.meeting_id, target.session_index)
+        })
     } else {
         None
     };
@@ -545,16 +547,15 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
     // Clear the pill's live-text preview now that the session is over — the
     // dictation on_segment closure (and its accumulated text) is dropped
     // with the session, so nothing else will do this.
-    if is_dictation
-        && let Ok(app) = state.app_handle()
-    {
+    if is_dictation && let Ok(app) = state.app_handle() {
         crate::pill::push_live_text("");
-        let _ = crate::app_events::DictationLiveText { text: String::new() }.emit(&app);
+        let _ = crate::app_events::DictationLiveText {
+            text: String::new(),
+        }
+        .emit(&app);
     }
 
-    if is_dictation
-        && let Ok(settings) = AppSettings::load(&state.db)
-    {
+    if is_dictation && let Ok(settings) = AppSettings::load(&state.db) {
         crate::audio::feedback::play_dictation_feedback(
             &settings,
             crate::audio::feedback::DictationFeedbackKind::Stop,
@@ -786,7 +787,10 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
             warn!("Pipeline stop failed (meeting saved anyway): {err}");
         }
 
-        let _ = MeetingFinalized { id: id_for_task.clone() }.emit(&app);
+        let _ = MeetingFinalized {
+            id: id_for_task.clone(),
+        }
+        .emit(&app);
     });
 
     Ok(meeting_id)
@@ -806,23 +810,27 @@ pub fn paste_text(
 /// Pure decision: notification text for a failed paste, split out from
 /// `notify_paste_failed` so it's testable without a live AppHandle (mirrors
 /// `copy_notification_text` in `tray.rs`).
-fn paste_failure_notification_text(french: bool, error: &str, saved_to_history: bool) -> (&'static str, &'static str) {
+fn paste_failure_notification_text(
+    french: bool,
+    error: &str,
+    saved_to_history: bool,
+) -> (&'static str, &'static str) {
     let accessibility_missing = error.contains("Accessibility permission missing");
     match (french, accessibility_missing, saved_to_history) {
         (false, true, true) => (
-            "Paste failed",
+            "Copied — press ⌘V",
             "Accessibility permission is needed to paste automatically. Your dictation was saved to history.",
         ),
         (false, true, false) => (
-            "Paste failed",
+            "Copied — press ⌘V",
             "Accessibility permission is needed to paste automatically.",
         ),
         (true, true, true) => (
-            "Collage échoué",
+            "Copié — presse ⌘V",
             "L'autorisation Accessibilité est nécessaire pour coller automatiquement. Votre dictée a été enregistrée dans l'historique.",
         ),
         (true, true, false) => (
-            "Collage échoué",
+            "Copié — presse ⌘V",
             "L'autorisation Accessibilité est nécessaire pour coller automatiquement.",
         ),
         (false, false, true) => (
@@ -853,7 +861,11 @@ fn paste_failure_notification_text(french: bool, error: &str, saved_to_history: 
 /// notification plugin.
 #[tauri::command]
 #[specta::specta]
-pub fn notify_paste_failed(app: AppHandle, error: String, saved_to_history: bool) -> Result<(), String> {
+pub fn notify_paste_failed(
+    app: AppHandle,
+    error: String,
+    saved_to_history: bool,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     let french = AppSettings::load(&state.db)
         .map(|settings| settings.locale.starts_with("fr"))
@@ -1078,7 +1090,7 @@ mod tests {
             crate::clipboard::ACCESSIBILITY_STALE_ERROR,
             true,
         );
-        assert_eq!(title, "Paste failed");
+        assert_eq!(title, "Copied — press ⌘V");
         assert!(body.contains("Accessibility permission"));
         assert!(body.contains("saved to history"));
 
@@ -1087,19 +1099,21 @@ mod tests {
             crate::clipboard::ACCESSIBILITY_STALE_ERROR,
             false,
         );
-        assert_eq!(title_not_saved, "Paste failed");
+        assert_eq!(title_not_saved, "Copied — press ⌘V");
         assert!(body_not_saved.contains("Accessibility permission"));
         assert!(!body_not_saved.contains("saved to history"));
     }
 
     #[test]
     fn paste_failure_notification_falls_back_to_a_generic_message() {
-        let (title, body) = paste_failure_notification_text(false, "Enigo init: some OS error", true);
+        let (title, body) =
+            paste_failure_notification_text(false, "Enigo init: some OS error", true);
         assert_eq!(title, "Paste failed");
         assert!(!body.contains("Accessibility permission"));
         assert!(body.contains("saved to history"));
 
-        let (title_not_saved, body_not_saved) = paste_failure_notification_text(false, "Enigo init: some OS error", false);
+        let (title_not_saved, body_not_saved) =
+            paste_failure_notification_text(false, "Enigo init: some OS error", false);
         assert_eq!(title_not_saved, "Paste failed");
         assert!(!body_not_saved.contains("Accessibility permission"));
         assert!(!body_not_saved.contains("saved to history"));
@@ -1112,7 +1126,7 @@ mod tests {
             crate::clipboard::ACCESSIBILITY_STALE_ERROR,
             true,
         );
-        assert_eq!(title, "Collage échoué");
+        assert_eq!(title, "Copié — presse ⌘V");
         assert!(body.contains("Accessibilité"));
         assert!(body.contains("l'historique"));
 
@@ -1121,7 +1135,7 @@ mod tests {
             crate::clipboard::ACCESSIBILITY_STALE_ERROR,
             false,
         );
-        assert_eq!(title_not_saved, "Collage échoué");
+        assert_eq!(title_not_saved, "Copié — presse ⌘V");
         assert!(body_not_saved.contains("Accessibilité"));
         assert!(!body_not_saved.contains("l'historique"));
     }

@@ -1,4 +1,5 @@
-import { addMessages, init, getLocaleFromNavigator, locale } from "svelte-i18n";
+import { get } from "svelte/store";
+import { addMessages, init, getLocaleFromNavigator, locale, t } from "svelte-i18n";
 import en from "./en.json";
 import fr from "./fr.json";
 
@@ -26,6 +27,11 @@ export function setLocale(loc: string) {
   if (SUPPORTED_LOCALES.some((l) => l.id === loc)) {
     locale.set(loc);
   }
+}
+
+/** Translate from a `.ts` module (controllers) the same way `$t` does in Svelte. */
+export function tr(key: string, values?: Record<string, string | number>): string {
+  return get(t)(key, values ? { values } : undefined);
 }
 
 export { locale } from "svelte-i18n";

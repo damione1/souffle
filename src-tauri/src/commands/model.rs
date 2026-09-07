@@ -279,8 +279,13 @@ pub fn delete_model(
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
 
-    // Cannot delete the actively loaded model
     let machine = state.current_machine_state()?;
+    if matches!(
+        machine,
+        AppStateMachine::Downloading { .. } | AppStateMachine::Loading { .. }
+    ) {
+        return Err("Cannot delete a model while it is downloading or loading.".into());
+    }
     if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
         return Err("Cannot delete the currently loaded model. Unload it first or switch to a different model.".into());
     }

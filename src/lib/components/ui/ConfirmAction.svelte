@@ -7,12 +7,16 @@
     confirmLabel,
     confirmMessage,
     variant = "danger",
+    disabled = false,
+    disabledReason,
     onConfirm,
   }: {
     label: string;
     confirmLabel?: string;
     confirmMessage?: string;
     variant?: "danger" | "ghost";
+    disabled?: boolean;
+    disabledReason?: string;
     onConfirm: () => void;
   } = $props();
 
@@ -39,6 +43,8 @@
     class={`btn btn-ghost gap-[7px] px-2.5 py-1.5 text-[12.5px] ${
       variant === "danger" ? "!text-danger-strong hover:!bg-danger/10" : ""
     }`}
+    {disabled}
+    title={disabled ? disabledReason : undefined}
   >
     {#if variant === "danger"}
       <Trash2 size={14} aria-hidden="true" />

@@ -11,7 +11,7 @@ use crate::settings::PasteMethod;
 /// Shown when Accessibility is missing at paste time. Distinct from Enigo's
 /// own init error so the UI can recognize it and offer the repair action
 /// instead of just relaying a raw OS error string.
-pub const ACCESSIBILITY_STALE_ERROR: &str = "Accessibility permission missing. If Souffle is already listed and checked in System Settings > Privacy & Security > Accessibility, this is usually a stale entry left by an app update: remove Souffle with the minus button and re-add it, or use Repair permission in Souffle's Settings > Advanced > Permissions.";
+pub const ACCESSIBILITY_STALE_ERROR: &str = "Accessibility permission missing.";
 
 /// The synthetic ⌘V is asynchronous: the target app reads the pasteboard from
 /// its own run loop, and a busy app, an Electron one, or one that was just
@@ -36,7 +36,11 @@ pub fn paste_text(text: &str, delay_ms: u64, method: PasteMethod) -> Result<(), 
     }
 
     if !permissions::accessibility_granted() {
-        return Err(ACCESSIBILITY_STALE_ERROR.to_string());
+        // SOU-033: leave the transcription on the pasteboard so the user can
+        // ⌘V. Do not snapshot/restore — restoring would wipe the only copy
+        // they have. Full NSPasteboard (image/file) snapshot is still text-only;
+        // see RestoreBurst.
+        return copy_instead_of_paste(text, copy_text);
     }
 
     // Never let a background paste pop the OS permission pane on its own;
@@ -178,9 +182,26 @@ fn send_paste_keys(enigo: &mut Enigo) -> Result<(), String> {
 /// burst. Only the newest generation restores it; older restores no-op so a
 /// second paste within `CLIPBOARD_RESTORE_DELAY` cannot write the first
 /// transcription back as if it were the user's original contents.
+///
+/// Text-only (arboard). A full `NSPasteboardItem` snapshot — images, files,
+/// custom types — is the remaining SOU-033 piece; it needs a main-thread
+/// pasteboard copy and a different restore payload than `Option<String>`.
 struct RestoreBurst {
     generation: u64,
     original: Option<String>,
+}
+
+/// Accessibility is missing: write `text` for a manual ⌘V and return the
+/// distinctive error the UI matches on. The copy error is appended so a
+/// dead pasteboard is still visible, but the accessibility cause stays first.
+fn copy_instead_of_paste(
+    text: &str,
+    copy: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    match copy(text) {
+        Ok(()) => Err(ACCESSIBILITY_STALE_ERROR.to_string()),
+        Err(copy_err) => Err(format!("{ACCESSIBILITY_STALE_ERROR} ({copy_err})")),
+    }
 }
 
 impl RestoreBurst {
@@ -284,9 +305,30 @@ mod tests {
     }
 
     #[test]
-    fn accessibility_stale_error_points_to_repair() {
-        assert!(ACCESSIBILITY_STALE_ERROR.contains("Accessibility"));
-        assert!(ACCESSIBILITY_STALE_ERROR.contains("Repair permission"));
+    fn accessibility_stale_error_is_a_stable_prefix() {
+        assert!(ACCESSIBILITY_STALE_ERROR.contains("Accessibility permission missing"));
+        assert!(
+            !ACCESSIBILITY_STALE_ERROR.contains("Settings >"),
+            "itineraries belong in the UI button, not this error string"
+        );
+    }
+
+    #[test]
+    fn copy_instead_of_paste_leaves_the_transcription_and_errors() {
+        let mut copied = None;
+        let result = copy_instead_of_paste("hello", |text| {
+            copied = Some(text.to_string());
+            Ok(())
+        });
+        assert_eq!(result.unwrap_err(), ACCESSIBILITY_STALE_ERROR);
+        assert_eq!(copied.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn copy_instead_of_paste_still_reports_accessibility_when_copy_fails() {
+        let err = copy_instead_of_paste("hello", |_| Err("no pasteboard".into())).unwrap_err();
+        assert!(err.starts_with(ACCESSIBILITY_STALE_ERROR), "{err}");
+        assert!(err.contains("no pasteboard"), "{err}");
     }
 
     #[test]
@@ -446,11 +488,6 @@ mod tests {
         // take_if_current (and still holds RESTORE through the write).
         // cancel_pending_restore must not run until that lock is released,
         // or copy_text can land and then be overwritten by previous.
-        let generation = {
-            let mut burst = lock_restore();
-            burst.begin(Some("old clipboard".into())).0
-        };
-
         let barrier = Arc::new(Barrier::new(2));
         let cancel_returned = Arc::new(AtomicBool::new(false));
         let cancel_handle = {
@@ -465,6 +502,10 @@ mod tests {
 
         {
             let mut burst = lock_restore();
+            // Reset + begin under the same lock as take_if_current so a
+            // parallel spawn_restore cannot bump the generation in between.
+            *burst = RestoreBurst::new();
+            let generation = burst.begin(Some("old clipboard".into())).0;
             assert_eq!(
                 burst.take_if_current(generation),
                 Some(Some("old clipboard".into()))

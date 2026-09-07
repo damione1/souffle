@@ -39,6 +39,7 @@ export type {
   PermState,
   PermissionKind,
   PermissionStatus,
+  RepairAccessibilityResult,
   PillHoldChanged,
   PillHoldKind,
   RecordingKind,

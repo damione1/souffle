@@ -13,6 +13,7 @@
   import { bootstrapAppState } from "./lib/bootstrap";
   import { findTranscriptionModel } from "./lib/features/transcription/catalog";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
+  import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
   import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
   import UpdateAvailableDialog from "./lib/features/onboarding/UpdateAvailableDialog.svelte";
   import {
@@ -431,6 +432,10 @@
     releaseUrl={updateAvailable.releaseUrl}
     onDismiss={() => (updateAvailable = null)}
   />
+{/if}
+
+{#if app.permissionsPanelOpen}
+  <PermissionsOnboarding onClose={() => (app.permissionsPanelOpen = false)} />
 {/if}
 
 {#if !app.showOnboarding && routeToast && routeToastCopy}

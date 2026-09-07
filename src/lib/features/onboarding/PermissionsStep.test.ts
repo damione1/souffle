@@ -71,6 +71,56 @@ describe("PermissionsStep microphone denial", () => {
   });
 });
 
+describe("PermissionsStep accessibility repair", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  function accessibilityDenied(): PermissionStatus {
+    return {
+      microphone: "granted",
+      system_audio: "unknown",
+      accessibility: "denied",
+      calendar: "unknown",
+    };
+  }
+
+  it("announces success when tccutil reset succeeds", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    permissionsApi.repairAccessibilityPermission.mockResolvedValue({
+      reset_performed: true,
+      prompt_shown: true,
+    });
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Repair permission" }));
+
+    await waitFor(() => {
+      expect(within(axRow).getByText(/new prompt should appear/i)).toBeTruthy();
+    });
+    expect(permissionsApi.repairAccessibilityPermission).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim success when the repair command fails", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    permissionsApi.repairAccessibilityPermission.mockRejectedValue("tccutil reset Accessibility failed (exit 64)");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Repair permission" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/tccutil reset Accessibility failed/)).toBeTruthy();
+    });
+    expect(within(axRow).queryByText(/new prompt should appear/i)).toBeNull();
+    expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
+  });
+});
+
 describe("PermissionsStep per-row busy state", () => {
   afterEach(() => {
     cleanup();

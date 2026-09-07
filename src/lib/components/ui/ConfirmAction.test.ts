@@ -48,4 +48,14 @@ describe('ConfirmAction', () => {
 
     expect(screen.getByText('Confirm removal')).toBeTruthy();
   });
+
+  it("disables the trigger when disabled is set", () => {
+    render(ConfirmAction, {
+      props: { label: "Delete", onConfirm: vi.fn(), disabled: true, disabledReason: "busy" },
+    });
+
+    const button = screen.getByRole("button", { name: /Delete/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("busy");
+  });
 });

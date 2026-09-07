@@ -788,7 +788,7 @@ async requestPermission(kind: PermissionKind) : Promise<Result<PermState, string
  * the TCC entry is keyed to the previous code-signing identity. Runs off
  * the command thread since it shells out and may block on the prompt.
  */
-async repairAccessibilityPermission() : Promise<Result<PermState, string>> {
+async repairAccessibilityPermission() : Promise<Result<RepairAccessibilityResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("repair_accessibility_permission") };
 } catch (e) {
@@ -1512,6 +1512,13 @@ export type PipelineErrorScope =
  */
 "session"
 export type RecordingKind = "dictation" | { meeting: { meeting_id: string } }
+/**
+ * Outcome of `repair_accessibility`. Distinct from `PermState` because a
+ * successful `tccutil reset` plus prompt cannot observe the user's grant:
+ * `AXIsProcessTrustedWithOptions` returns the *current* trust, which is
+ * necessarily false a few milliseconds after the TCC entry was deleted.
+ */
+export type RepairAccessibilityResult = { reset_performed: boolean; prompt_shown: boolean }
 /**
  * Search result from FTS5 full-text search
  */

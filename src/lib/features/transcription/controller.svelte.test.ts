@@ -182,6 +182,9 @@ describe("transcription controller", () => {
     app.downloadTotalFiles = 0;
     app.selectedDevice = "";
     app.settings = { ...mockSettings };
+    app.settingsOpen = false;
+    app.settingsInitialTab = null;
+    app.permissionsPanelOpen = false;
 
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -283,7 +286,11 @@ describe("transcription controller", () => {
       error: "Accessibility permission missing.",
       savedToHistory: true,
     });
-    expect(ctrl.statusMessage).toContain("Paste failed");
+    expect(ctrl.statusMessage).toBe("Copied — press ⌘V");
+    expect(ctrl.statusActionLabel).toBe("Repair permission");
+    expect(ctrl.statusAction).toBeTypeOf("function");
+    ctrl.statusAction?.();
+    expect(ctrl.app.permissionsPanelOpen).toBe(true);
   });
 
   it("notifies outside the window when a shortcut paste fails and history fails", async () => {
@@ -473,6 +480,10 @@ describe("transcription controller", () => {
 
     expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
     expect(ctrl.statusMessage).toContain("Download and load");
+    expect(ctrl.statusActionLabel).toBe("Open model");
+    ctrl.statusAction?.();
+    expect(ctrl.app.settingsOpen).toBe(true);
+    expect(ctrl.app.settingsInitialTab).toBe("transcription");
   });
 
   it("toggleRecording guards double start", async () => {
@@ -499,6 +510,82 @@ describe("transcription controller", () => {
 
     const startCalls = mockInvoke.mock.calls.filter((call) => call[0] === "start_transcription");
     expect(startCalls).toHaveLength(1);
+  });
+
+  it("clears a stale Repair action at the start of a start attempt", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "paste_text") {
+        return Promise.reject("Accessibility permission missing.");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = {
+      ...ctrl.app.settings,
+      auto_paste: true,
+      dictation_polish_enabled: false,
+    };
+    ctrl.app.transcriptionRuntimePhase = "ready";
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+    await ctrl.toggleRecording(true);
+
+    expect(ctrl.statusActionLabel).toBe("Repair permission");
+
+    ctrl.app.machineState = { state: "idle" };
+    ctrl.app.transcriptionRuntimePhase = "download_required";
+    await ctrl.toggleRecording();
+
+    expect(ctrl.statusMessage).toContain("Download and load");
+    expect(ctrl.statusActionLabel).toBe("Open model");
+    expect(ctrl.statusActionLabel).not.toBe("Repair permission");
+  });
+
+  it("does not double-start while ensureModelLoaded is still pending", async () => {
+    let resolveLoad: (() => void) | undefined;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_model_status") {
+        return Promise.resolve({ ...fakeStatus, phase: "load_required" });
+      }
+      if (cmd === "load_model") {
+        return new Promise<void>((r) => {
+          resolveLoad = r;
+        });
+      }
+      return defaultInvoke(cmd);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.transcriptionRuntimePhase = "load_required";
+
+    const first = ctrl.toggleRecording();
+    const second = ctrl.toggleRecording();
+
+    await vi.waitFor(() => {
+      expect(resolveLoad).toBeTypeOf("function");
+    });
+    expect(mockInvoke.mock.calls.filter((call) => call[0] === "load_model")).toHaveLength(1);
+
+    resolveLoad!();
+    await first;
+    await second;
+
+    expect(mockInvoke.mock.calls.filter((call) => call[0] === "load_model")).toHaveLength(1);
   });
 
   it("model download (runtime) tracks progress", async () => {
