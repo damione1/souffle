@@ -656,6 +656,7 @@ describe("transcription controller", () => {
           transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
           return Promise.resolve(null);
         }
+        if (cmd === "frontmost_app_name") return Promise.resolve("Notes");
         if (cmd === "read_focused_text") return Promise.resolve("hello Kubernetes");
         if (cmd === "learn_from_edit") return Promise.resolve(1);
         return defaultInvoke(cmd, args);
@@ -689,6 +690,133 @@ describe("transcription controller", () => {
         original: "hello world",
         corrected: "hello Kubernetes",
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("learn_from_edit skips when the focused app changed (SOU-047)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+      let frontmost = "Notes";
+      mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === "start_transcription") {
+          transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+          return Promise.resolve(null);
+        }
+        if (cmd === "frontmost_app_name") return Promise.resolve(frontmost);
+        if (cmd === "read_focused_text") return Promise.resolve("hello Kubernetes");
+        if (cmd === "learn_from_edit") return Promise.resolve(1);
+        return defaultInvoke(cmd, args);
+      });
+
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+      ctrl.app.settings = {
+        ...ctrl.app.settings,
+        auto_paste: true,
+        dictation_polish_enabled: false,
+        dictation_learn_from_edit: true,
+      };
+
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app);
+      (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+        text: "hello world",
+        is_final: true,
+        start_ms: 0,
+        end_ms: 1000,
+      });
+      await ctrl.toggleRecording(true);
+      frontmost = "Safari";
+
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(mockInvoke).not.toHaveBeenCalledWith("learn_from_edit", expect.anything());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("learn_from_edit skips when the focused app cannot be identified (SOU-047)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+      let frontmost: string | null = "Notes";
+      mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === "start_transcription") {
+          transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+          return Promise.resolve(null);
+        }
+        if (cmd === "frontmost_app_name") return Promise.resolve(frontmost);
+        if (cmd === "read_focused_text") return Promise.resolve("hello Kubernetes");
+        if (cmd === "learn_from_edit") return Promise.resolve(1);
+        return defaultInvoke(cmd, args);
+      });
+
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+      ctrl.app.settings = {
+        ...ctrl.app.settings,
+        auto_paste: true,
+        dictation_polish_enabled: false,
+        dictation_learn_from_edit: true,
+      };
+
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app);
+      (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+        text: "hello world",
+        is_final: true,
+        start_ms: 0,
+        end_ms: 1000,
+      });
+      await ctrl.toggleRecording(true);
+      frontmost = null;
+
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(mockInvoke).not.toHaveBeenCalledWith("learn_from_edit", expect.anything());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("learn_from_edit skips when the paste target was never captured (SOU-047)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+      mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === "start_transcription") {
+          transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+          return Promise.resolve(null);
+        }
+        if (cmd === "frontmost_app_name") return Promise.resolve(null);
+        if (cmd === "read_focused_text") return Promise.resolve("hello Kubernetes");
+        if (cmd === "learn_from_edit") return Promise.resolve(1);
+        return defaultInvoke(cmd, args);
+      });
+
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+      ctrl.app.settings = {
+        ...ctrl.app.settings,
+        auto_paste: true,
+        dictation_polish_enabled: false,
+        dictation_learn_from_edit: true,
+      };
+
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app);
+      (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+        text: "hello world",
+        is_final: true,
+        start_ms: 0,
+        end_ms: 1000,
+      });
+      await ctrl.toggleRecording(true);
+
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(mockInvoke).not.toHaveBeenCalledWith("learn_from_edit", expect.anything());
     } finally {
       vi.useRealTimers();
     }
