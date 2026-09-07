@@ -111,4 +111,31 @@ mod tests {
         let results = db.search_text("Hello", 3).unwrap();
         assert_eq!(results.len(), 3);
     }
+
+    #[test]
+    fn search_prefers_edited_transcript_over_segments() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+        db.save_edited_transcript("m1", Some("Kubernetes cluster")).unwrap();
+
+        assert_eq!(db.search_text("Kubernetes", 20).unwrap().len(), 1);
+        assert!(
+            db.search_text("Hello", 20).unwrap().is_empty(),
+            "ASR text must leave FTS after an edit"
+        );
+
+        let mut again = sample_meeting("m1");
+        again.edited_transcript = Some("Kubernetes cluster".into());
+        db.save_meeting(&again).unwrap();
+        assert_eq!(
+            db.search_text("Kubernetes", 20).unwrap().len(),
+            1,
+            "save_meeting must keep the edited transcript in FTS"
+        );
+        assert!(db.search_text("Hello", 20).unwrap().is_empty());
+
+        db.save_edited_transcript("m1", None).unwrap();
+        assert_eq!(db.search_text("Hello", 20).unwrap().len(), 1);
+        assert!(db.search_text("Kubernetes", 20).unwrap().is_empty());
+    }
 }
