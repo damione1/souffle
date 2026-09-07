@@ -9,11 +9,13 @@
   let {
     item,
     expanded,
+    isLive = false,
     onOpen,
     onRemove,
   }: {
     item: TimelineItem;
     expanded: boolean;
+    isLive?: boolean;
     onOpen: () => void;
     onRemove: () => void;
   } = $props();
@@ -68,22 +70,24 @@
       {#if item.kind === "dictation"}
         <CopyButton text={item.title} />
       {/if}
-      {#if confirmingDelete}
-        <button
-          onclick={() => { confirmingDelete = false; onRemove(); }}
-          class="rounded-md px-1.5 py-0.5 text-xs text-danger-soft hover:bg-danger/15"
-        >
-          {$t("timeline.confirm_delete")}
-        </button>
-      {:else}
-        <button
-          onclick={() => (confirmingDelete = true)}
-          onblur={() => (confirmingDelete = false)}
-          class="cursor-pointer rounded-md p-1 text-text-muted hover:bg-surface-3 hover:text-danger-soft"
-          aria-label={$t("timeline.delete")}
-        >
-          <Trash2 size={14} aria-hidden="true" />
-        </button>
+      {#if !isLive}
+        {#if confirmingDelete}
+          <button
+            onclick={() => { confirmingDelete = false; onRemove(); }}
+            class="rounded-md px-1.5 py-0.5 text-xs text-danger-soft hover:bg-danger/15"
+          >
+            {$t("timeline.confirm_delete")}
+          </button>
+        {:else}
+          <button
+            onclick={() => (confirmingDelete = true)}
+            onblur={() => (confirmingDelete = false)}
+            class="cursor-pointer rounded-md p-1 text-text-muted hover:bg-surface-3 hover:text-danger-soft"
+            aria-label={$t("timeline.delete")}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        {/if}
       {/if}
     </span>
   </div>
