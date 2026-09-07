@@ -270,7 +270,7 @@ pub fn migrate_meetings_to_v3(conn: &mut Connection) -> Result<(), String> {
             let ended_at = row.ended_at.as_deref().map(parse_datetime).transpose()?;
             let segment_count: i64 = tx
                 .query_row(
-                    "SELECT COUNT(*) FROM segments WHERE meeting_id = ?1",
+                    "SELECT COUNT(*) FROM segments_legacy WHERE meeting_id = ?1",
                     params![row.id],
                     |segment_row| segment_row.get(0),
                 )
