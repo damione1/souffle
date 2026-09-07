@@ -203,7 +203,7 @@ function createTranscriptionControllerInstance() {
     }
   }
 
-  function scheduleLearnFromEdit(pasted: string) {
+  function scheduleLearnFromEdit(pasted: string, targetApp: string | null) {
     cancelLearnFromEditPoll();
     if (!app.settings.dictation_learn_from_edit || !pasted) return;
 
@@ -211,6 +211,10 @@ function createTranscriptionControllerInstance() {
       learnFromEditTimer = null;
       try {
         if (!app.settings.dictation_learn_from_edit) return;
+        if (targetApp) {
+          const currentApp = await frontmostAppName().catch(() => null);
+          if (currentApp && currentApp !== targetApp) return;
+        }
         const focused = (await readFocusedText())?.trim() ?? null;
         if (!focused || focused === pasted) return;
         // Whole-field AX reads include pre-existing content around the paste.
@@ -345,7 +349,7 @@ function createTranscriptionControllerInstance() {
                 app.settings.paste_delay_ms,
                 app.settings.paste_method,
               );
-              scheduleLearnFromEdit(finalized.text);
+              scheduleLearnFromEdit(finalized.text, sessionFocusedApp);
             } catch (e) {
               const message = errorMessage(e);
               statusMessage = accessibilityPasteFailureMessage(message);
