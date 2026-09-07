@@ -43,6 +43,9 @@ const mockSaveMeetingExport = vi.fn<
 >();
 const mockSaveMeetingAudioExport = vi.fn<(id: string) => Promise<void>>();
 const mockGetMeetingAudio = vi.fn<(id: string) => Promise<import("../../types").MeetingAudioSession[]>>();
+const mockApplyLiveParagraphEdit = vi.fn<
+  (meetingId: string, segmentIndices: number[], newText: string) => Promise<void>
+>();
 
 vi.mock("../../api/meetings", () => ({
   startMeetingRecording: (...a: unknown[]) =>
@@ -68,6 +71,8 @@ vi.mock("../../api/meetings", () => ({
   saveMeetingAudioExport: (...a: unknown[]) =>
     mockSaveMeetingAudioExport(...(a as [string])),
   getMeetingAudio: (...a: unknown[]) => mockGetMeetingAudio(...(a as [string])),
+  applyLiveParagraphEdit: (...a: unknown[]) =>
+    mockApplyLiveParagraphEdit(...(a as [string, number[], string])),
 }));
 
 vi.mock("../../api/summary", () => ({
@@ -116,6 +121,7 @@ const {
   createMeetingController,
   resetMeetingControllerForTest,
   notifyMeetingIdle,
+  notifyMeetingFinalized,
   notifySystemWokeUp,
 } = await import("./controller.svelte");
 
@@ -557,6 +563,88 @@ describe("MeetingController", () => {
 
     expect(ctrl.statusMessage).toContain("meeting not found");
     expect(ctrl.isExporting).toBe(false);
+  });
+
+  describe("applyLiveParagraphEdit", () => {
+    async function recordOneParagraph() {
+      mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+      mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+      let emit: (s: TranscriptionSegment) => void = () => {};
+      mockStartMeetingRecording.mockImplementation(async (_t, _c, onSegment) => {
+        emit = onSegment;
+      });
+
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+      await ctrl.startRecording();
+      mockApp.machineState = {
+        state: "recording_meeting",
+        data: {
+          profile: makeMeeting().transcription_profile,
+          session_id: 1,
+          meeting_id: "live-1",
+        },
+      } as import("../../types").AppStateMachine;
+
+      // Two turns far enough apart that the first one freezes into `committed`.
+      emit(liveSeg("hello", 0));
+      emit(liveSeg("there.", 0.3));
+      emit(liveSeg("much", 30));
+      emit(liveSeg("later.", 30.3));
+      return { ctrl, emit };
+    }
+
+    function liveSeg(text: string, start: number): TranscriptionSegment {
+      return {
+        text,
+        start_time: start,
+        end_time: start + 0.2,
+        is_final: true,
+        language: null,
+        confidence: null,
+        speaker: null,
+      };
+    }
+
+    it("rolls the paragraph and its segments back when the backend rejects", async () => {
+      const { ctrl } = await recordOneParagraph();
+      const paragraph = ctrl.liveTranscript.committed[0];
+      mockApplyLiveParagraphEdit.mockRejectedValue(new Error("db is locked"));
+
+      await ctrl.applyLiveParagraphEdit(paragraph.id, "hello world");
+
+      expect(ctrl.liveTranscript.committed[0].text).toBe("hello there.");
+      expect(ctrl.liveMeetingSegments.map((s) => s.text)).toEqual([
+        "hello",
+        "there.",
+        "much",
+        "later.",
+      ]);
+      expect(ctrl.statusMessage).toContain("db is locked");
+    });
+
+    it("does not roll back into the buffers of the next recording", async () => {
+      const { ctrl } = await recordOneParagraph();
+      const paragraph = ctrl.liveTranscript.committed[0];
+
+      let reject: (e: Error) => void = () => {};
+      mockApplyLiveParagraphEdit.mockImplementation(
+        () => new Promise<void>((_resolve, r) => { reject = (e) => r(e); }),
+      );
+
+      const pending = ctrl.applyLiveParagraphEdit(paragraph.id, "hello world");
+      // The meeting stops and a fresh one starts: paragraph ids restart at 0
+      // and liveMeetingSegments is a new, empty array.
+      mockGetMeeting.mockResolvedValue(makeMeeting());
+      mockApp.currentMeetingId = "live-1";
+      notifyMeetingFinalized("live-1");
+      reject(new Error("db is locked"));
+      await pending;
+
+      expect(ctrl.liveMeetingSegments).toEqual([]);
+      expect(ctrl.liveTranscript.committed).toEqual([]);
+      expect(ctrl.statusMessage).not.toContain("db is locked");
+    });
   });
 
   it("exportMeeting is a no-op while the meeting is recording", async () => {

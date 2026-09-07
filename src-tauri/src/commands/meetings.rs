@@ -204,7 +204,7 @@ pub fn apply_live_paragraph_edit(
         return Err("Paragraph text cannot be empty".into());
     }
 
-    let (original_text, db_updates, corrections) = {
+    let (previous_texts, db_updates, corrections) = {
         let mut acc = state.meeting_accumulator.acquire()?;
         let Some(meeting) = acc.as_mut() else {
             return Err("No meeting is recording".into());
@@ -227,7 +227,18 @@ pub fn apply_live_paragraph_edit(
             .map(|&index| meeting.new_segments[index].text.as_str())
             .collect::<Vec<_>>()
             .join(" ");
+        // Bail before touching anything: redistribution would still reshuffle
+        // the words across the segments, and with no database write behind it
+        // the accumulator would drift from the rows already on disk.
+        if original_text == new_text {
+            return Ok(());
+        }
         let corrections = derive_corrections_from_edit(&original_text, &new_text);
+
+        let previous_texts: Vec<(usize, String)> = indices
+            .iter()
+            .map(|&index| (index, meeting.new_segments[index].text.clone()))
+            .collect();
 
         redistribute_segment_texts_at(&mut meeting.new_segments, &indices, &new_text);
 
@@ -244,22 +255,50 @@ pub fn apply_live_paragraph_edit(
             })
             .collect();
 
-        (original_text, db_updates, corrections)
+        (previous_texts, db_updates, corrections)
     };
 
-    if original_text == new_text {
-        return Ok(());
+    // The accumulator drives the summary and the rows still to be flushed, so
+    // it must not keep an edit the transcript on disk rejected. Put the old
+    // words back before reporting the failure the UI rolls its own copy back
+    // on. The mutation stays inside the lock so a flush racing us persists the
+    // edited text rather than the text it is about to replace.
+    if let Err(e) = state.db.update_segment_texts(&meeting_id, &db_updates) {
+        restore_segment_texts(&state, &meeting_id, &previous_texts);
+        return Err(e);
     }
 
-    if !db_updates.is_empty() {
-        state.db.update_segment_texts(&meeting_id, &db_updates)?;
-    }
-
+    // The text is committed on both sides by now. A dead engine actor only
+    // costs the session rewrite rule, so do not report a failure the caller
+    // would undo a landed edit for.
     for correction in corrections {
-        state.engine_actor.add_session_correction(correction)?;
+        if let Err(e) = state.engine_actor.add_session_correction(correction) {
+            tracing::warn!(error = %e, "Live paragraph edit could not register its session correction");
+            break;
+        }
     }
 
     Ok(())
+}
+
+/// Undo a live edit in the accumulator after the database refused it.
+fn restore_segment_texts(state: &AppState, meeting_id: &str, previous: &[(usize, String)]) {
+    use crate::lock_ext::MutexExt;
+
+    let Ok(mut acc) = state.meeting_accumulator.acquire() else {
+        return;
+    };
+    let Some(meeting) = acc.as_mut() else {
+        return;
+    };
+    if meeting.id != meeting_id {
+        return;
+    }
+    for (index, text) in previous {
+        if let Some(segment) = meeting.new_segments.get_mut(*index) {
+            segment.text.clone_from(text);
+        }
+    }
 }
 
 /// Register a misspelling-to-term pair for the active recording session so
