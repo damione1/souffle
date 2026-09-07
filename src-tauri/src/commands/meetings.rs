@@ -681,7 +681,7 @@ mod live_edit {
 
     #[test]
     fn original_text_joins_listed_segments_in_display_order() {
-        let segments = vec![
+        let segments = [
             seg("hello", Some(Speaker::Me)),
             seg("hi", Some(Speaker::Them)),
             seg("how", Some(Speaker::Me)),
