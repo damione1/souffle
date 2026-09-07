@@ -18,8 +18,9 @@ private let kMaxHeight: CGFloat = 200
 private let kTopMargin: CGFloat = 40
 private let kCornerRadiusFull: CGFloat = 28
 private let kCornerRadiusMeet: CGFloat = 22
-private let kWaveformBars: Int = 12
+private let kWaveformBars: Int = 24
 private let kMaxLiveLines: Int = 5
+private let kLiveFontSize: CGFloat = 13
 
 /// Soufflé accent (`--color-accent` / #e9ae55).
 private let kAccent = NSColor(red: 233 / 255, green: 174 / 255, blue: 85 / 255, alpha: 1)
@@ -44,64 +45,90 @@ private func onMain(_ body: @escaping () -> Void) {
 }
 
 // ---------------------------------------------------------------------------
-// MARK: - Waveform layer
+// MARK: - Waveform view
 // ---------------------------------------------------------------------------
 
-/// CALayer RMS bars, centered in the layer (same geometry as the Svelte pill waveform).
-private final class WaveformLayer: CALayer {
-    private var barLayers: [CALayer] = []
-    private var levels: [Float] = Array(repeating: 0.12, count: kWaveformBars)
+/// Drawn NSView bars (not CALayer): same geometry as the Svelte pill waveform.
+/// A 30 fps tick applies the per-bar sine variation; RMS arrives from Rust.
+private final class WaveformView: NSView {
+    private var bars: [CGFloat] = Array(repeating: 0.12, count: kWaveformBars)
+    private var rms: CGFloat = 0
+    private var tick: Timer?
 
-    override init() {
-        super.init()
-        setup()
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { false }
+
+    func push(rms raw: Float) {
+        // Capture already stores rawRms*8, but conversational speech still
+        // lands ~0.1–0.3 — a 2–6px wiggle in this row. Square-root + gain
+        // so normal talking fills the bars without clipping a shout.
+        let x = max(0, CGFloat(raw))
+        rms = min(1, x.squareRoot() * 1.8)
     }
 
-    override init(layer: Any) {
-        super.init(layer: layer)
-    }
-
-    required init?(coder: NSCoder) { nil }
-
-    private func setup() {
-        backgroundColor = NSColor.clear.cgColor
-        barLayers = (0..<kWaveformBars).map { _ in
-            let layer = CALayer()
-            layer.backgroundColor = kAccent.withAlphaComponent(0.7).cgColor
-            layer.cornerRadius = 1.5
-            addSublayer(layer)
-            return layer
+    func setActive(_ active: Bool) {
+        if active {
+            startTick()
+        } else {
+            stopTick()
+            rms = 0
+            bars = Array(repeating: 0.12, count: kWaveformBars)
+            needsDisplay = true
         }
     }
 
-    func push(rms: Float) {
-        let smoothed = max(0.05, min(1, rms))
-        levels.removeFirst()
-        levels.append(smoothed)
-        setNeedsLayout()
+    private func startTick() {
+        guard tick == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            self?.tickAnimation()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        tick = timer
     }
 
-    override func layoutSublayers() {
-        super.layoutSublayers()
+    private func stopTick() {
+        tick?.invalidate()
+        tick = nil
+    }
+
+    private func tickAnimation() {
+        let t = CACurrentMediaTime()
+        for i in 0..<kWaveformBars {
+            let variation = sin(t * 5 + Double(i) * 0.5) * 0.15
+            let spread = sin(Double(i) * 0.3 + t * 3.3) * 0.1
+            let target = max(0.08, min(1, Double(rms) + variation + spread))
+            bars[i] += (CGFloat(target) - bars[i]) * 0.45
+        }
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let w = bounds.width
         let h = bounds.height
-        guard w > 0, h > 0, !barLayers.isEmpty else { return }
+        guard w > 0, h > 0 else { return }
 
         let barWidth: CGFloat = 3
-        let totalBars = CGFloat(kWaveformBars)
-        let gap = max(2, (w - barWidth * totalBars) / (totalBars + 1))
-        let occupied = barWidth * totalBars + gap * (totalBars - 1)
+        let barGap: CGFloat = 2
+        let occupied = CGFloat(kWaveformBars) * (barWidth + barGap) - barGap
         let offsetX = (w - occupied) / 2
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for (i, layer) in barLayers.enumerated() {
-            let barH = max(4, (h - 4) * CGFloat(levels[i]))
-            let x = offsetX + CGFloat(i) * (barWidth + gap)
+        ctx.setFillColor(kAccent.cgColor)
+        for i in 0..<kWaveformBars {
+            let barH = max(2, bars[i] * (h - 4))
+            let x = offsetX + CGFloat(i) * (barWidth + barGap)
             let y = (h - barH) / 2
-            layer.frame = CGRect(x: x, y: y, width: barWidth, height: barH)
+            let rect = CGRect(x: x, y: y, width: barWidth, height: barH)
+            ctx.setAlpha(0.4 + bars[i] * 0.6)
+            ctx.beginPath()
+            ctx.addPath(CGPath(roundedRect: rect, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
+            ctx.fillPath()
         }
-        CATransaction.commit()
+        ctx.setAlpha(1)
+    }
+
+    deinit {
+        stopTick()
     }
 }
 
@@ -114,10 +141,9 @@ private final class PillContentView: NSView {
     private let borderView = NSView()
     private let recordingDot = NSView()
     private let modeLabel = NSTextField(labelWithString: "")
-    let liveLabel = NSTextField(wrappingLabelWithString: "")
+    private let liveLabel = NSTextField(wrappingLabelWithString: "")
     private let stopButton = NSButton()
-    private let waveformHost = NSView()
-    private let waveform = WaveformLayer()
+    private let waveform = WaveformView()
     private let spinner = NSProgressIndicator()
 
     var stopAction: (() -> Void)?
@@ -170,21 +196,21 @@ private final class PillContentView: NSView {
         addSubview(modeLabel)
 
         liveLabel.textColor = NSColor.white.withAlphaComponent(0.70)
-        liveLabel.font = NSFont.systemFont(ofSize: 13)
+        liveLabel.font = NSFont.systemFont(ofSize: kLiveFontSize)
         liveLabel.maximumNumberOfLines = kMaxLiveLines
-        liveLabel.lineBreakMode = .byTruncatingTail
+        liveLabel.usesSingleLineMode = false
+        liveLabel.lineBreakMode = .byWordWrapping
+        liveLabel.cell?.wraps = true
+        liveLabel.cell?.truncatesLastVisibleLine = true
         liveLabel.isEditable = false
+        liveLabel.isSelectable = false
         liveLabel.isBezeled = false
         liveLabel.drawsBackground = false
         liveLabel.isHidden = true
         addSubview(liveLabel)
 
-        waveformHost.wantsLayer = true
-        waveformHost.layer?.backgroundColor = NSColor.clear.cgColor
-        waveformHost.setAccessibilityElement(false)
-        waveform.frame = CGRect(x: 0, y: 0, width: 80, height: 24)
-        waveformHost.layer?.addSublayer(waveform)
-        addSubview(waveformHost)
+        waveform.setAccessibilityElement(false)
+        addSubview(waveform)
 
         spinner.style = .spinning
         spinner.controlSize = .small
@@ -241,8 +267,9 @@ private final class PillContentView: NSView {
         modeLabel.stringValue = title
         modeLabel.isHidden = compact
 
-        waveformHost.isHidden = (mode != .dictation)
-        waveform.isHidden = (mode != .dictation)
+        let showWave = (mode == .dictation)
+        waveform.isHidden = !showWave
+        waveform.setActive(showWave)
         spinner.isHidden = (mode != .polishing)
         if mode == .polishing {
             if reduceMotionEnabled() {
@@ -284,13 +311,24 @@ private final class PillContentView: NSView {
         waveform.push(rms: level)
     }
 
+    /// Wrapped-line height for the live tail, capped at 5 lines.
+    /// Measured from the string, not `sizeThatFits` (truncating NSTextField
+    /// reports a single line and then the window still grew).
     func liveTextHeight(forWidth width: CGFloat) -> CGFloat {
-        guard isExpanded, !liveLabel.isHidden else { return 0 }
-        liveLabel.preferredMaxLayoutWidth = width
-        let fitting = liveLabel.sizeThatFits(NSSize(width: width, height: CGFloat.greatestFiniteMagnitude))
-        let lineHeight = liveLabel.font?.boundingRectForFont.height ?? 16
-        let maxH = lineHeight * CGFloat(kMaxLiveLines) + 4
-        return min(maxH, max(lineHeight, fitting.height))
+        let text = liveLabel.stringValue
+        guard isExpanded, !text.isEmpty, width > 0 else { return 0 }
+        let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byWordWrapping
+        para.lineHeightMultiple = 1.15
+        let bounds = (text as NSString).boundingRect(
+            with: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font, .paragraphStyle: para]
+        )
+        let lineH = ceil(font.ascender - font.descender + font.leading)
+        let lines = min(CGFloat(kMaxLiveLines), max(1, ceil(bounds.height / max(1, lineH))))
+        return lines * lineH
     }
 
     @objc private func didTapStop() {
@@ -330,7 +368,6 @@ private final class PillContentView: NSView {
 
         if compact {
             modeLabel.frame = .zero
-            waveformHost.frame = .zero
             waveform.frame = .zero
             spinner.frame = .zero
             liveLabel.frame = .zero
@@ -347,14 +384,13 @@ private final class PillContentView: NSView {
 
             let midX = labelX + labelW + 4
             let midW = max(24, btnX - midX - 4)
-            let waveH: CGFloat = 24
-            waveformHost.frame = CGRect(
+            let waveH: CGFloat = 32
+            waveform.frame = CGRect(
                 x: midX,
                 y: headerY + (rowH - waveH) / 2,
                 width: midW,
                 height: waveH
             )
-            waveform.frame = waveformHost.bounds
             spinner.frame = CGRect(
                 x: midX + (midW - 16) / 2,
                 y: headerY + (rowH - 16) / 2,
@@ -391,7 +427,12 @@ private final class PillPanel {
 
     private var panel: NSPanel?
     private var contentView: PillContentView?
-    private var storedOrigin: CGPoint?
+    /// Bottom-left of the last *user* placement (drag or restore). Resizes
+    /// pin the top edge using `lastAppliedSize`, not `panel.frame`, so a
+    /// setFrame echo cannot walk the HUD up the screen.
+    private var userOrigin: CGPoint?
+    private var lastAppliedSize = CGSize(width: kCompactWidth, height: kCompactHeight)
+    private var ignoringMove = false
     private let originLock = NSLock()
     private var stopCallback: PillStopCallback?
     private var currentMode: PillMode = .dictation
@@ -454,6 +495,8 @@ private final class PillPanel {
             panel.orderFrontRegardless()
         } else {
             sessionMaxHeight = kCompactHeight
+            lastAppliedSize = CGSize(width: kCompactWidth, height: kCompactHeight)
+            contentView?.setLiveText("")
             panel.orderOut(nil)
         }
     }
@@ -466,7 +509,9 @@ private final class PillPanel {
         if expanded, mode == .dictation {
             let liveW = kExpandedWidth - 16 - 10 - 8 - 16
             let liveH = contentView?.liveTextHeight(forWidth: liveW) ?? 0
-            let needed = kCompactHeight + liveH + 8
+            // Header (64) + separator padding + wrapped tail. Grow only when
+            // the line count changes, not per character.
+            let needed = kCompactHeight + 8 + liveH
             sessionMaxHeight = max(sessionMaxHeight, min(kMaxHeight, max(kCompactHeight, needed)))
             return CGSize(width: kExpandedWidth, height: sessionMaxHeight)
         }
@@ -480,16 +525,29 @@ private final class PillPanel {
         let screen = placementScreen(for: lockedOrigin())
         let origin: CGPoint
         if let custom = lockedOrigin() {
-            let currentHeight = panel.frame.height > 0 ? panel.frame.height : size.height
-            let top = custom.y + currentHeight
+            let top = custom.y + lastAppliedSize.height
             origin = clamp(screen: screen, size: size, x: custom.x, y: top - size.height)
         } else {
             let cx = screen.origin.x + (screen.size.width - size.width) / 2
             let cy = screen.origin.y + screen.size.height - kTopMargin - size.height
             origin = CGPoint(x: cx, y: cy)
         }
+
+        let sameSize = abs(size.width - lastAppliedSize.width) < 1
+            && abs(size.height - lastAppliedSize.height) < 1
+        let current = panel.frame
+        let sameOrigin = abs(origin.x - current.origin.x) < 1
+            && abs(origin.y - current.origin.y) < 1
+        if sameSize && sameOrigin {
+            return
+        }
+
+        ignoringMove = true
         setLockedOrigin(origin)
-        panel.setFrame(CGRect(origin: origin, size: size), display: true)
+        lastAppliedSize = size
+        // Explicit animate:false — Reduce Motion and the old tao deadlock.
+        panel.setFrame(CGRect(origin: origin, size: size), display: true, animate: false)
+        ignoringMove = false
     }
 
     private func clamp(screen: CGRect, size: CGSize, x: CGFloat, y: CGFloat) -> CGPoint {
@@ -547,19 +605,20 @@ private final class PillPanel {
     }
 
     @objc private func windowDidMove(_ _: Notification) {
-        guard let frame = panel?.frame else { return }
+        guard !ignoringMove, let frame = panel?.frame else { return }
         setLockedOrigin(frame.origin)
+        lastAppliedSize = frame.size
     }
 
     private func lockedOrigin() -> CGPoint? {
         originLock.lock()
         defer { originLock.unlock() }
-        return storedOrigin
+        return userOrigin
     }
 
     private func setLockedOrigin(_ origin: CGPoint?) {
         originLock.lock()
-        storedOrigin = origin
+        userOrigin = origin
         originLock.unlock()
     }
 }

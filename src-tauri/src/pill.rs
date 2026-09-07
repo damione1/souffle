@@ -205,6 +205,7 @@ fn store_custom_origin(origin: Option<(f64, f64)>) {
     }
 }
 
+#[cfg(test)]
 fn custom_origin() -> Option<(f64, f64)> {
     CUSTOM_ORIGIN.lock().ok().and_then(|guard| *guard)
 }
