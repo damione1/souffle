@@ -89,9 +89,10 @@
     "empty": "Aucune entrée dans le dictionnaire personnalisé.",
     "pronunciation": "Prononciation",
     "pronunciation_placeholder": "ex. vésix",
-    "pronunciation_desc": "Comment le terme s'entend, orthographié. Les correspondances exactes et les mots proches sont réécrits vers le terme. Séparez plusieurs graphies par des virgules, ex. vésix, vé six.",
+    "pronunciation_desc": "Comment le terme s'entend, orthographié. Les correspondances exactes et les mots proches sont réécrits vers le terme. Séparez plusieurs graphies par des virgules, ex. vésix, vézix.",
     "learn_from_edit": "Apprendre des corrections après collage",
-    "learn_from_edit_desc": "Quand le collage auto est actif, mémoriser les corrections mot à mot dans l'app cible pour les dictées suivantes."
+    "learn_from_edit_desc": "Quand le collage auto est actif, mémoriser les corrections mot à mot dans l'app cible pour les dictées suivantes.",
+    "kyutai_space_warning": "⚠️ Les alias de plusieurs mots ne fonctionneront pas sur le modèle rapide (Kyutai) qui sort mot par mot."
   },
   "settings_calendar": {
     "title": "Calendrier",

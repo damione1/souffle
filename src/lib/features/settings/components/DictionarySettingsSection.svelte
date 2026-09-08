@@ -137,6 +137,9 @@
       <Plus size={16} />
     </button>
   </div>
+  {#if newPronunciation.includes(" ")}
+    <p class="text-warning-soft text-xs mt-1">{$t("settings_dictionary.kyutai_space_warning")}</p>
+  {/if}
   {#if addError}
     <p class="text-danger-soft text-xs">{addError}</p>
   {/if}

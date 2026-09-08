@@ -93,6 +93,9 @@
         }}
       />
     </div>
+    {#if pronunciationDraft.includes(" ")}
+      <p class="mb-2 text-[11px] text-warning-soft leading-tight">{$t("settings_dictionary.kyutai_space_warning")}</p>
+    {/if}
 
     {#if saveError}
       <p class="mb-2 text-xs text-danger-soft">{saveError}</p>
