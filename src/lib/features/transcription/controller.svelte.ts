@@ -154,6 +154,7 @@ function createTranscriptionControllerInstance() {
   // callbacks from a previous session can never write into a new one.
   let sessionGeneration = 0;
   let sessionMode: SessionMode = "insert";
+  let sessionAutoPaste = false;
   let focusedApp: string | null = null;
   let rewriteOf: string | null = null;
   let learnFromEditTimer: ReturnType<typeof setTimeout> | null = null;
@@ -193,6 +194,7 @@ function createTranscriptionControllerInstance() {
     focusedApp = null;
     rewriteOf = null;
     sessionMode = "insert";
+    sessionAutoPaste = false;
     if (ceilingTimer) {
       clearTimeout(ceilingTimer);
       ceilingTimer = null;
@@ -352,6 +354,7 @@ function createTranscriptionControllerInstance() {
       const holdForPolish = app.settings.dictation_polish_enabled;
       const sessionFocusedApp = focusedApp;
       const sessionRewriteOf = rewriteOf;
+      const sessionShouldAutoPaste = sessionAutoPaste;
       if (holdForPolish) {
         try {
           await pillHold("polishing");
@@ -375,7 +378,7 @@ function createTranscriptionControllerInstance() {
         const saved = await saveToHistory(finalized.text);
 
         if (finalized.text) {
-          if (fromShortcut && app.settings.auto_paste) {
+          if (sessionShouldAutoPaste && app.settings.auto_paste) {
             try {
               await pasteText(
                 finalized.text,
@@ -460,6 +463,7 @@ function createTranscriptionControllerInstance() {
       }
 
       cancelLearnFromEditPoll();
+      sessionAutoPaste = fromShortcut;
       if (!fromShortcut) sessionMode = "insert";
       transcript = "";
       tentative = "";
@@ -562,7 +566,7 @@ export function notifyDictationAborted() {
 }
 
 /** The native HUD asked to stop the active dictation; run the full stop
- * pipeline (polish + paste) so HUD stop matches the shortcut (SOU-046).
+ * pipeline. Paste follows the session start latch, not this call (SOU-046).
  * Stop-only: a no-op when not dictating, so this cannot start a session
  * or take down a meeting (SOU-044). */
 export function notifyDictationStopRequested() {
