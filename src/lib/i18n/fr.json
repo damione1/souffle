@@ -466,7 +466,8 @@
     "lost_hint": "Soufflé utilisera le prochain microphone disponible.",
     "dismiss": "Fermer"
   },
-  "home": { "dictation_too_short": "Tiens un peu plus longtemps",
+  "home": {
+    "dictation_too_short": "Tiens un peu plus longtemps",
     "dictate": "Dicter",
     "dictate_hint": "Définissez un raccourci dans les réglages",
     "meeting": "Meeting",

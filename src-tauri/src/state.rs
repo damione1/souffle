@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::Sender;
@@ -171,6 +171,10 @@ pub struct AppState {
     /// writes, and a failed one can restore over a newer one.
     pub live_edit_lock: Mutex<()>,
     pub ptt_paused_until: Mutex<Option<chrono::DateTime<chrono::Utc>>>,
+    /// Set when `ShortcutPttStart` was emitted for the current key-down.
+    /// Release only emits `ShortcutPttStop` if this is still true, so a
+    /// paused PTT press cannot stop a dictation started another way.
+    pub ptt_start_armed: AtomicBool,
 }
 
 impl AppState {
@@ -192,6 +196,29 @@ impl AppState {
             sleep_paused_meeting_id: Mutex::new(None),
             live_edit_lock: Mutex::new(()),
             ptt_paused_until: Mutex::new(None),
+            ptt_start_armed: AtomicBool::new(false),
+        }
+    }
+
+    /// True while a 1h PTT pause is still in the future. Expired timestamps
+    /// are cleared so a later tray click cannot re-arm pause by accident.
+    pub fn ptt_is_paused(&self) -> bool {
+        let mut until = self
+            .ptt_paused_until
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        ptt_pause_is_active(&mut until)
+    }
+
+    pub fn toggle_ptt_pause(&self) {
+        let mut until = self
+            .ptt_paused_until
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if ptt_pause_is_active(&mut until) {
+            *until = None;
+        } else {
+            *until = Some(chrono::Utc::now() + chrono::Duration::hours(1));
         }
     }
 
@@ -323,6 +350,17 @@ impl AppState {
     }
 }
 
+pub(crate) fn ptt_pause_is_active(until: &mut Option<chrono::DateTime<chrono::Utc>>) -> bool {
+    match *until {
+        Some(t) if t > chrono::Utc::now() => true,
+        Some(_) => {
+            *until = None;
+            false
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,5 +463,19 @@ mod tests {
         assert_eq!(transcript.recording_sessions.len(), 1);
         assert_eq!(transcript.duration_seconds, 10.0);
         assert!(!transcript.summary_is_stale);
+    }
+
+    #[test]
+    fn expired_ptt_pause_is_cleared_and_not_active() {
+        let mut until = Some(chrono::Utc::now() - Duration::minutes(1));
+        assert!(!ptt_pause_is_active(&mut until));
+        assert!(until.is_none());
+    }
+
+    #[test]
+    fn future_ptt_pause_stays_active() {
+        let mut until = Some(chrono::Utc::now() + Duration::hours(1));
+        assert!(ptt_pause_is_active(&mut until));
+        assert!(until.is_some());
     }
 }

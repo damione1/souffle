@@ -216,6 +216,7 @@ pub struct AppSettings {
     /// After auto-paste, persist word-level edits from the focused field
     /// into the custom dictionary.
     pub dictation_learn_from_edit: bool,
+    /// Hard failsafe: stop dictation after this many seconds.
     pub dictation_ceiling_seconds: u32,
     /// Active default meeting-summary template id: used by the Generate
     /// button when the user doesn't pick another template, and by any
@@ -904,6 +905,11 @@ impl AppSettings {
         )?;
         write_json_setting(
             db,
+            DICTATION_CEILING_SECONDS_KEY,
+            &normalized.dictation_ceiling_seconds,
+        )?;
+        write_json_setting(
+            db,
             DEFAULT_SUMMARY_TEMPLATE_ID_KEY,
             &normalized.default_summary_template_id,
         )?;
@@ -1104,7 +1110,7 @@ mod tests {
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
             dictation_learn_from_edit: true,
-            dictation_ceiling_seconds: 300,
+            dictation_ceiling_seconds: 120,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: "0.0.9".into(),

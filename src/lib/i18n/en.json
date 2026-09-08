@@ -466,7 +466,8 @@
     "lost_hint": "Soufflé will use the next available microphone.",
     "dismiss": "Dismiss"
   },
-  "home": { "dictation_too_short": "Hold a little longer",
+  "home": {
+    "dictation_too_short": "Hold a little longer",
     "dictate": "Dictate",
     "dictate_hint": "Set a shortcut in Settings",
     "meeting": "Meeting",

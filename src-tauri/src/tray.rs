@@ -265,15 +265,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         has_dictation_history(app),
         None::<&str>,
     )?;
-    let is_paused = {
-        let paused = app
-            .state::<AppState>()
-            .ptt_paused_until
-            .lock()
-            .unwrap()
-            .clone();
-        paused.map(|t| t > chrono::Utc::now()).unwrap_or(false)
-    };
+    let is_paused = app.state::<AppState>().ptt_is_paused();
     let pause_ptt = MenuItem::with_id(
         app,
         "pause_ptt",
@@ -338,13 +330,10 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             }
             "pause_ptt" => {
                 let state = app.state::<AppState>();
-                let mut ptt_paused = state.ptt_paused_until.lock().unwrap();
-                let is_paused = ptt_paused.map(|t| t > chrono::Utc::now()).unwrap_or(false);
-                if is_paused {
-                    *ptt_paused = None;
-                } else {
-                    *ptt_paused = Some(chrono::Utc::now() + chrono::Duration::hours(1));
-                }
+                // Drop the pause mutex before current_machine_state/sync:
+                // sync() re-locks ptt_paused_until, and std::sync::Mutex is
+                // not reentrant.
+                state.toggle_ptt_pause();
                 if let Ok(machine) = state.current_machine_state() {
                     sync(app, &machine);
                 }
@@ -433,11 +422,7 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
         let _ = handles
             .copy_last_transcription
             .set_enabled(has_dictation_history(app));
-        let is_paused = {
-            let state = app.state::<AppState>();
-            let paused = state.ptt_paused_until.lock().unwrap().clone();
-            paused.map(|t| t > chrono::Utc::now()).unwrap_or(false)
-        };
+        let is_paused = app.state::<AppState>().ptt_is_paused();
         let _ = handles
             .pause_ptt
             .set_text(label(if is_paused { "resume_ptt" } else { "pause_1h" }, fr));

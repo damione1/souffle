@@ -119,7 +119,7 @@ let settings = $state<AppSettings>({
     { id: "brief_overview", name: "Brief overview", prompt: "" },
   ],
   last_seen_version: "",
-  dictation_ceiling_seconds: 3600,
+  dictation_ceiling_seconds: 300,
 });
 
 function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {
@@ -297,11 +297,6 @@ export function getAppState() {
     /** Open a meeting's detail view */
     openMeeting(id: string) {
       currentMeetingId = id;
-    },
-
-    openSettingsTo(tab: string) {
-      settingsInitialTab = tab;
-      settingsOpen = true;
     },
   };
 }

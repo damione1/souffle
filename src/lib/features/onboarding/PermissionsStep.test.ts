@@ -200,3 +200,42 @@ describe("PermissionsStep per-row busy state", () => {
     });
   });
 });
+
+describe("PermissionsStep permission poll", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("skips a poll tick while the previous request is in flight", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    let resolvePoll: (value: PermissionStatus) => void = () => {};
+    permissionsApi.getPermissionStatus
+      .mockResolvedValueOnce(statusWith("denied"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<PermissionStatus>((resolve) => {
+            resolvePoll = resolve;
+          }),
+      )
+      .mockResolvedValue(statusWith("granted"));
+
+    render(PermissionsStep);
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalledTimes(1));
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(permissionsApi.getPermissionStatus).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(permissionsApi.getPermissionStatus).toHaveBeenCalledTimes(2);
+
+    resolvePoll(statusWith("granted"));
+    await waitFor(() => {
+      expect(within(rowFor("Microphone")).getByText("Granted")).toBeTruthy();
+    });
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(permissionsApi.getPermissionStatus).toHaveBeenCalledTimes(3);
+  });
+});

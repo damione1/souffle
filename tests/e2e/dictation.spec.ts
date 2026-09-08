@@ -44,14 +44,35 @@ test("provisional channel (tentative text) is rendered", async ({ page }) => {
   const dictateButton = page.getByRole("button", { name: "Dictate" });
   await dictateButton.click();
 
+  await expect
+    .poll(async () => (await stubbedCalls(page)).some((call) => call.cmd === "start_transcription"))
+    .toBe(true);
   await emitTauriEvent(page, "state-changed", {
     state: "recording_dictation",
     data: { profile: PROFILE, session_id: 1 },
   });
+  await expect(page.getByText("Dictating")).toBeVisible();
 
-  await sendChannelMessage(page, "start_transcription", { text: "hello", is_final: false });
-  await expect(page.getByText("hello")).toBeVisible();
-  
-  await sendChannelMessage(page, "start_transcription", { text: "hello world", is_final: true });
+  await sendChannelMessage(page, "start_transcription", {
+    text: "hello",
+    start_time: 0,
+    end_time: 0.4,
+    is_final: false,
+    language: "en",
+    confidence: 0.9,
+    speaker: null,
+  });
+  await expect(page.locator(".opacity-50", { hasText: "hello" })).toBeVisible();
+
+  await sendChannelMessage(page, "start_transcription", {
+    text: "hello world",
+    start_time: 0,
+    end_time: 0.8,
+    is_final: true,
+    language: "en",
+    confidence: 0.9,
+    speaker: null,
+  });
   await expect(page.getByText("hello world")).toBeVisible();
+  await expect(page.locator("p .opacity-50")).toHaveCount(0);
 });

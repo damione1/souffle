@@ -1166,7 +1166,11 @@ dictation_polish_templates: DictationPolishTemplate[];
  * After auto-paste, persist word-level edits from the focused field
  * into the custom dictionary.
  */
-dictation_learn_from_edit: boolean; dictation_ceiling_seconds: number; 
+dictation_learn_from_edit: boolean; 
+/**
+ * Hard failsafe: stop dictation after this many seconds.
+ */
+dictation_ceiling_seconds: number; 
 /**
  * Active default meeting-summary template id: used by the Generate
  * button when the user doesn't pick another template, and by any

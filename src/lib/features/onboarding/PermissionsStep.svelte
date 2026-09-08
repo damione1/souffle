@@ -107,8 +107,8 @@
     try {
       await repairAccessibilityPermission();
       // Don't overwrite accessibility with Denied: a successful reset plus
-      // prompt cannot observe the grant yet (SOU-054). The focus re-check
-      // below is what turns the row green.
+      // prompt cannot observe the grant yet (SOU-054). The 600 ms poll
+      // is what turns the row green once TCC reports granted.
       repairSuccess = true;
       repairCooldown = true;
       clearTimeout(repairCooldownTimer);
@@ -126,8 +126,13 @@
   onMount(() => {
     void refreshAll();
     // Poll TCC permissions every 600ms so the UI updates live without requiring
-    // the user to switch focus back and forth (focus churn).
+    // the user to switch focus back and forth (focus churn). Skip a tick
+    // while a request is in flight so a slow snapshot cannot overwrite a
+    // newer one.
+    let pollInFlight = false;
     const timer = setInterval(() => {
+      if (pollInFlight || repairing || Object.values(busy).some(Boolean)) return;
+      pollInFlight = true;
       void getPermissionStatus()
         .then((s) => {
           // snapshot() intentionally returns "unknown" for un-probed capabilities
@@ -138,7 +143,7 @@
           if (s.microphone !== "unknown") next.microphone = s.microphone;
           if (s.system_audio !== "unknown") next.system_audio = s.system_audio;
           if (s.calendar !== "unknown") next.calendar = s.calendar;
-          
+
           if (
             next.accessibility !== status.accessibility ||
             next.microphone !== status.microphone ||
@@ -148,7 +153,10 @@
             setStatus(next);
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          pollInFlight = false;
+        });
     }, 600);
 
     return () => {

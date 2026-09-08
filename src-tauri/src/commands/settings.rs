@@ -1,4 +1,6 @@
-use tauri::{AppHandle, State};
+use std::sync::atomic::Ordering;
+
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_specta::Event;
 use tracing::info;
@@ -91,19 +93,22 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
             shortcuts.push_to_talk.as_str(),
             move |app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => {
-                    let paused = app
-                        .state::<AppState>()
-                        .ptt_paused_until
-                        .lock()
-                        .unwrap()
-                        .clone();
-                    let is_paused = paused.map(|t| t > chrono::Utc::now()).unwrap_or(false);
-                    if !is_paused {
+                    let state = app.state::<AppState>();
+                    if state.ptt_is_paused() {
+                        state.ptt_start_armed.store(false, Ordering::SeqCst);
+                    } else {
+                        state.ptt_start_armed.store(true, Ordering::SeqCst);
                         let _ = ShortcutPttStart.emit(app);
                     }
                 }
                 ShortcutState::Released => {
-                    let _ = ShortcutPttStop.emit(app);
+                    if app
+                        .state::<AppState>()
+                        .ptt_start_armed
+                        .swap(false, Ordering::SeqCst)
+                    {
+                        let _ = ShortcutPttStop.emit(app);
+                    }
                 }
             },
         )
