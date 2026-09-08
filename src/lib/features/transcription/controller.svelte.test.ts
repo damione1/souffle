@@ -685,7 +685,7 @@ describe("transcription controller", () => {
       };
       process.on("unhandledRejection", onUnhandled);
       rejectPolish(new Error("provider down"));
-      await Promise.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
       process.off("unhandledRejection", onUnhandled);
       expect(unhandled).toEqual([]);
       expect(ctrl.statusMessage).toBe("Polish took too long. Saved the original text.");

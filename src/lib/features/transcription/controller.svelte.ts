@@ -566,8 +566,8 @@ function createTranscriptionControllerInstance() {
         const savedId = await saveToHistory(rawText);
         setBanner(
           savedId
-            ? "Recording was interrupted — the partial transcript was saved to history."
-            : "Recording was interrupted.",
+            ? tr("home.recording_interrupted_saved")
+            : tr("home.recording_interrupted"),
         );
         const { text, warning } = await finalizeDictationText(
           rawText,
@@ -580,7 +580,7 @@ function createTranscriptionControllerInstance() {
         }
       })();
     } else {
-      setBanner("Recording was interrupted.");
+      setBanner(tr("home.recording_interrupted"));
     }
     clearSessionContext();
   }
