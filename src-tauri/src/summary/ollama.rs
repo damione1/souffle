@@ -53,11 +53,12 @@ pub const REDUCE_BUDGET: GenerationBudget = GenerationBudget {
 /// Polish rewrites its input, so its output length tracks the input's. A fixed
 /// bound would cut a long dictation off mid-sentence, which is worse than the
 /// unbounded generation this guard rail replaces. Twice the input estimate
-/// leaves room for the punctuation and formatting polish adds.
+/// leaves room for the punctuation and formatting polish adds. The floor used
+/// to be 512, which on a 10-word greeting was an invitation to invent a speech.
 pub fn polish_budget(input_tokens: usize) -> GenerationBudget {
     GenerationBudget {
         num_ctx: REDUCE_BUDGET.num_ctx,
-        num_predict: input_tokens.saturating_mul(2).clamp(512, 8192) as u32,
+        num_predict: input_tokens.saturating_mul(2).clamp(96, 8192) as u32,
     }
 }
 
@@ -812,7 +813,7 @@ mod tests {
         // A long dictation must not be cut off mid-sentence.
         assert_eq!(polish_budget(3000).num_predict, 6000);
         // A one-line dictation still gets room for punctuation and casing.
-        assert_eq!(polish_budget(1).num_predict, 512);
+        assert_eq!(polish_budget(1).num_predict, 96);
         // Bounded, so a runaway cannot reach the context window.
         assert!(polish_budget(usize::MAX).num_predict < REDUCE_BUDGET.num_ctx);
     }

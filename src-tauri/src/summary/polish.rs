@@ -331,16 +331,21 @@ pub fn build_polish_user_prompt(
     focused_app: Option<&str>,
     rewrite_of: Option<&str>,
 ) -> String {
-    let mut prompt = format!(
-        "Instructions:\n{}\n\nDictation transcript:\n---\n{}\n---",
-        template_prompt.trim(),
-        transcript.trim()
+    // Context first, transcript last, nothing after. Putting "Target app:"
+    // after the transcript made Apple Intelligence echo it (or keep writing).
+    let mut prompt = String::from(
+        "Reply with the cleaned dictation only. No labels, no markdown fences, no commentary.\n\n",
     );
+    prompt.push_str("Instructions:\n");
+    prompt.push_str(template_prompt.trim());
     if let Some(vocab) = format_dictionary_vocabulary(dictionary) {
         prompt.push_str("\n\n");
         prompt.push_str(&vocab);
     }
-    if let Some(name) = focused_app.map(str::trim).filter(|name| !name.is_empty()) {
+    if let Some(name) = focused_app
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && !is_own_app_name(name))
+    {
         prompt.push_str("\n\n");
         prompt.push_str("Target app: ");
         prompt.push_str(name);
@@ -352,9 +357,103 @@ pub fn build_polish_user_prompt(
         prompt.push_str("\n\n");
         prompt.push_str("Rewrite this selected text (replace it; keep meaning unless the dictation changes it):\n---\n");
         prompt.push_str(selection);
-        prompt.push_str("\n---\nThe dictation transcript is the user's spoken rewrite instructions. Output only the rewritten selection.");
+        prompt.push_str("\n---\nThe dictation transcript below is the user's spoken rewrite instructions. Output only the rewritten selection.");
     }
+    prompt.push_str("\n\nDictation transcript:\n---\n");
+    prompt.push_str(transcript.trim());
+    prompt.push_str("\n---");
     prompt
+}
+
+/// Localized names of this app. Matching Mail's tone is useful; matching
+/// Soufflé's is not, and it is what the model echoed when polish ran from
+/// the main window.
+fn is_own_app_name(name: &str) -> bool {
+    let folded: String = name
+        .trim()
+        .chars()
+        .map(|c| match c {
+            'é' | 'É' => 'e',
+            other => other,
+        })
+        .collect();
+    folded.eq_ignore_ascii_case("souffle")
+}
+
+const PROMPT_LEAK_MARKERS: &[&str] = &[
+    "Target app:",
+    "Match that app's usual tone",
+    "Do not mention the app name",
+    "Dictation transcript:",
+    "Preferred spellings / vocabulary:",
+    "Rewrite this selected text",
+    "The dictation transcript below is the user's spoken rewrite instructions",
+    "The dictation transcript is the user's spoken rewrite instructions",
+    "Reply with the cleaned dictation only",
+    "Instructions:",
+];
+
+fn find_ignore_ascii_case(hay: &str, needle: &str) -> Option<usize> {
+    hay.to_ascii_lowercase().find(&needle.to_ascii_lowercase())
+}
+
+/// Drop instruction text the model copied out of the user prompt. Markers
+/// that were actually dictated are left alone.
+fn strip_prompt_leakage(output: &str, transcript: &str) -> String {
+    let mut cut = output.len();
+    for marker in PROMPT_LEAK_MARKERS {
+        if find_ignore_ascii_case(transcript, marker).is_some() {
+            continue;
+        }
+        if let Some(idx) = find_ignore_ascii_case(output, marker) {
+            cut = cut.min(idx);
+        }
+    }
+    if find_ignore_ascii_case(transcript, "---").is_none() {
+        let mut offset = 0;
+        for line in output.split_inclusive('\n') {
+            if line.trim_end_matches(['\n', '\r']).trim() == "---" {
+                cut = cut.min(offset);
+                break;
+            }
+            offset += line.len();
+        }
+    }
+    let mut kept = output.get(..cut).unwrap_or(output).trim().to_string();
+    while let Some(stripped) = kept.strip_suffix("---") {
+        kept = stripped.trim_end().to_string();
+    }
+    kept
+}
+
+fn word_count(text: &str) -> usize {
+    text.split_whitespace()
+        .filter(|word| word.chars().any(char::is_alphanumeric))
+        .count()
+}
+
+fn expanded_too_much(input: &str, output: &str) -> bool {
+    let inn = word_count(input);
+    let out = word_count(output);
+    out > inn.saturating_add(inn / 2).saturating_add(8)
+}
+
+/// Clean / no-fillers must not invent a closing. If the model added a new
+/// paragraph, keep the first one when it still matches the dictation length.
+fn clamp_polish_expansion(template_id: &str, input: &str, output: &str) -> String {
+    if !matches!(template_id, TEMPLATE_CLEAN | TEMPLATE_NO_FILLERS) {
+        return output.to_string();
+    }
+    if !expanded_too_much(input, output) {
+        return output.to_string();
+    }
+    if let Some((first, rest)) = output.split_once("\n\n") {
+        let first = first.trim();
+        if !first.is_empty() && !rest.trim().is_empty() && !expanded_too_much(input, first) {
+            return first.to_string();
+        }
+    }
+    input.trim().to_string()
 }
 
 fn format_dictionary_vocabulary(entries: &[DictionaryEntry]) -> Option<String> {
@@ -489,11 +588,25 @@ pub async fn polish_dictation_text(
     };
 
     match parse_polish_response(&raw) {
-        Ok(text) => DictationPolishResult {
-            text: super::formatters::apply_post_polish_formatters(&text),
-            skipped: false,
-            warning: None,
-        },
+        Ok(text) => {
+            let text = super::formatters::apply_post_polish_formatters(&text);
+            let text = strip_prompt_leakage(&text, &stripped);
+            let basis = polish_output_basis(&stripped, rewrite_of);
+            let text = clamp_polish_expansion(template.id.as_str(), basis, &text);
+            if text.trim().is_empty() {
+                DictationPolishResult {
+                    text: stripped.trim().to_string(),
+                    skipped: false,
+                    warning: Some("Dictation polish returned empty text".into()),
+                }
+            } else {
+                DictationPolishResult {
+                    text,
+                    skipped: false,
+                    warning: None,
+                }
+            }
+        }
         Err(err) => DictationPolishResult {
             text: stripped.trim().to_string(),
             skipped: false,
@@ -506,9 +619,10 @@ pub async fn polish_dictation_text(
 mod tests {
     use super::{
         SUPERSEDED_CLEAN_PROMPTS, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL,
-        TEMPLATE_NO_FILLERS, build_polish_user_prompt, default_polish_templates,
-        early_polish_dictation_result, effective_template_prompt, is_blank_for_polish,
-        merge_polish_templates, parse_polish_response, polish_output_basis, strip_invisible_chars,
+        TEMPLATE_NO_FILLERS, build_polish_user_prompt, clamp_polish_expansion,
+        default_polish_templates, early_polish_dictation_result, effective_template_prompt,
+        is_blank_for_polish, is_own_app_name, merge_polish_templates, parse_polish_response,
+        polish_output_basis, strip_invisible_chars, strip_prompt_leakage,
         superseded_default_prompts,
     };
     use crate::filter::DictionaryEntry;
@@ -733,6 +847,59 @@ mod tests {
             "Match that app's usual tone and formatting conventions. Do not mention the app name in the output."
         ));
         assert!(!prompt.contains("Rewrite this selected text"));
+        let target_at = prompt.find("Target app: Mail").unwrap();
+        let transcript_at = prompt.find("Dictation transcript:").unwrap();
+        assert!(
+            target_at < transcript_at,
+            "target-app context must precede the transcript so the model cannot echo it"
+        );
+    }
+
+    #[test]
+    fn build_polish_user_prompt_omits_souffle_as_target_app() {
+        for name in ["Soufflé", "Souffle", "soufflé", " souffle "] {
+            let prompt = build_polish_user_prompt("Clean this", "hello", &[], Some(name), None);
+            assert!(
+                !prompt.contains("Target app:"),
+                "own app {name:?} must not be injected as polish context"
+            );
+        }
+        assert!(is_own_app_name("Soufflé"));
+        assert!(!is_own_app_name("Mail"));
+    }
+
+    #[test]
+    fn strip_prompt_leakage_drops_echoed_target_app_block() {
+        let transcript = "Bonjour mesdames et messieurs, chers enfants,";
+        let leaked = "Bonjour mesdames et messieurs, chers enfants,\n\n---\n\nTarget app: Soufflé\nMatch that app's usual tone and formatting conventions. Do not mention the app name in the output.";
+        assert_eq!(strip_prompt_leakage(leaked, transcript), transcript);
+    }
+
+    #[test]
+    fn strip_prompt_leakage_keeps_a_dictated_target_app_line() {
+        let transcript = "Target app: Mail\nPlease send this";
+        let output = "Target app: Mail\nPlease send this.";
+        assert_eq!(strip_prompt_leakage(output, transcript), output);
+    }
+
+    #[test]
+    fn clamp_polish_expansion_keeps_the_first_paragraph() {
+        let input = "Bonjour mesdames et messieurs, chers enfants,";
+        let output = "Bonjour, mesdames et messieurs, chers enfants,\n\nChers enfants, je vous souhaite une excellente journée. Je vous remercie pour votre attention et votre participation.";
+        assert_eq!(
+            clamp_polish_expansion(TEMPLATE_CLEAN, input, output),
+            "Bonjour, mesdames et messieurs, chers enfants,"
+        );
+    }
+
+    #[test]
+    fn clamp_polish_expansion_does_not_touch_email_template() {
+        let input = "hello";
+        let output = "Subject: Hello\n\nHello,\n\nI wanted to follow up.\n\nBest regards";
+        assert_eq!(
+            clamp_polish_expansion(TEMPLATE_EMAIL, input, output),
+            output
+        );
     }
 
     #[test]
@@ -749,7 +916,7 @@ mod tests {
         ));
         assert!(prompt.contains("---\nThe original paragraph.\n---"));
         assert!(prompt.contains(
-            "The dictation transcript is the user's spoken rewrite instructions. Output only the rewritten selection."
+            "The dictation transcript below is the user's spoken rewrite instructions. Output only the rewritten selection."
         ));
         assert!(!prompt.contains("Target app:"));
     }
