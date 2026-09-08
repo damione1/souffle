@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createLiveTranscript } from "./live-transcript.svelte";
 import { groupIntoParagraphs } from "../../utils/paragraphs";
 import type { Speaker, TranscriptionSegment } from "../../types";
@@ -138,6 +138,27 @@ describe("createLiveTranscript tentative text", () => {
     expect(live.tentative).toEqual([]);
     expect(live.tail).toHaveLength(1);
     expect(live.tail[0].text).toBe("Hello world.");
+  });
+
+  it("a final on Me does not clear Them's tentative (SOU-061)", () => {
+    const live = createLiveTranscript(PAUSE_THRESHOLD);
+    live.append(dseg("hello", 0, "them"), 0);
+    live.append(seg("wor", 2.0, { is_final: false, speaker: "them" }), 1);
+    live.append(dseg("my turn", 2.1, "me"), 1);
+    expect(live.tentative).toEqual([{ speaker: "them", text: "wor" }]);
+  });
+
+  it("expires a tentative after 5s if no final arrives", () => {
+    vi.useFakeTimers();
+    try {
+      const live = createLiveTranscript(PAUSE_THRESHOLD);
+      live.append(seg("wor", 0, { is_final: false, speaker: "them" }), 0);
+      expect(live.tentative).toEqual([{ speaker: "them", text: "wor" }]);
+      vi.advanceTimersByTime(5000);
+      expect(live.tentative).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not increment segmentCount for non-final segments", () => {
