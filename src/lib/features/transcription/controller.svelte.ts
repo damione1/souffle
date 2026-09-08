@@ -9,6 +9,7 @@ import {
   pillRelease,
   startStreamingTranscription,
   stopStreamingTranscription,
+  updateDictationEntry,
 } from "../../api/transcription";
 import { learnFromEdit } from "../../api/dictionary";
 import { frontmostAppName, readFocusedText, readSelectedText } from "../../api/focus";
@@ -23,6 +24,8 @@ import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime"
 
 const LEARN_FROM_EDIT_DELAY_MS = 4000;
 const MAX_LEARN_FROM_EDIT_PAIRS = 8;
+/** Caller-side cap so dictation stop is not bound to the 120s provider read timeout. */
+const POLISH_TIMEOUT_MS = 25_000;
 
 /** Exact `ACCESSIBILITY_STALE_ERROR` from clipboard.rs — copy succeeded, ⌘V is the recovery.
  * A parenthetical suffix means the copy itself failed; that is not "Copied". */
@@ -100,27 +103,60 @@ async function finalizeDictationText(
 
   try {
     const { polishDictation } = await import("../../api/dictation");
-    const result = await polishDictation(trimmed, focusedApp, rewriteOf);
-    return {
-      text: result.text.trim(),
-      warning: result.warning ?? undefined,
-    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // Settle polish so a late reject after timeout cannot become unhandled.
+      const polish = polishDictation(trimmed, focusedApp, rewriteOf).then(
+        (result) => ({ kind: "ok" as const, result }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
+      const outcome = await Promise.race([
+        polish,
+        new Promise<{ kind: "timeout" }>((resolve) => {
+          timer = setTimeout(() => resolve({ kind: "timeout" }), POLISH_TIMEOUT_MS);
+        }),
+      ]);
+      if (outcome.kind === "timeout") {
+        return { text: trimmed, warning: tr("home.polish_timeout") };
+      }
+      if (outcome.kind === "error") {
+        console.warn("Dictation polish failed:", outcome.error);
+        return { text: trimmed, warning: errorMessage(outcome.error) };
+      }
+      return {
+        text: outcome.result.text.trim(),
+        warning: outcome.result.warning ?? undefined,
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   } catch (e) {
     console.warn("Dictation polish failed:", e);
     return { text: trimmed, warning: errorMessage(e) };
   }
 }
 
-/** Persist a finished dictation and surface it in the timeline. */
-async function saveToHistory(text: string): Promise<boolean> {
-  if (!text.trim()) return false;
+/** Persist a finished dictation and surface it in the timeline. Returns the entry id. */
+async function saveToHistory(text: string): Promise<string | null> {
+  if (!text.trim()) return null;
   try {
-    await addDictationEntry(text.trim());
+    const id = await addDictationEntry(text.trim());
     await createTimelineController().refresh();
-    return true;
+    return id;
   } catch (e) {
     console.warn("Failed to save dictation entry:", e);
-    return false;
+    return null;
+  }
+}
+
+/** Replace an existing history row after polish. Same id, no second entry. */
+async function updateHistory(id: string, text: string): Promise<void> {
+  if (!text.trim()) return;
+  try {
+    await updateDictationEntry(id, text.trim());
+    await createTimelineController().refresh();
+  } catch (e) {
+    console.warn("Failed to update dictation entry:", e);
   }
 }
 
@@ -366,8 +402,12 @@ function createTranscriptionControllerInstance() {
       try {
         await stopStreamingTranscription();
 
+        // Persist raw first (SOU-048): a crash during polish must not drop the text.
+        const rawText = transcript.trim();
+        const savedId = await saveToHistory(rawText);
+
         const finalized = await finalizeDictationText(
-          transcript,
+          rawText,
           sessionFocusedApp,
           sessionRewriteOf,
         );
@@ -375,7 +415,10 @@ function createTranscriptionControllerInstance() {
           setBanner(finalized.warning);
         }
 
-        const saved = await saveToHistory(finalized.text);
+        if (savedId && finalized.text && finalized.text !== rawText) {
+          await updateHistory(savedId, finalized.text);
+        }
+        const saved = savedId != null;
 
         if (finalized.text) {
           if (sessionShouldAutoPaste && app.settings.auto_paste) {
@@ -511,24 +554,33 @@ function createTranscriptionControllerInstance() {
   function handleRecordingAborted() {
     const sessionFocusedApp = focusedApp;
     const sessionRewriteOf = rewriteOf;
+    const rawText = transcript.trim();
     sessionGeneration += 1; // cut off in-flight segments from the dead session
     isStartingRecording = false;
     isStopping = false;
     pttStopQueued = false;
     tentative = "";
     cancelLearnFromEditPoll();
-    if (transcript.trim()) {
-      void finalizeDictationText(transcript, sessionFocusedApp, sessionRewriteOf).then(({ text, warning }) => {
+    if (rawText) {
+      void (async () => {
+        const savedId = await saveToHistory(rawText);
+        setBanner(
+          savedId
+            ? tr("home.recording_interrupted_saved")
+            : tr("home.recording_interrupted"),
+        );
+        const { text, warning } = await finalizeDictationText(
+          rawText,
+          sessionFocusedApp,
+          sessionRewriteOf,
+        );
         if (warning) setBanner(warning);
-        if (text) {
-          void saveToHistory(text);
-          setBanner("Recording was interrupted — the partial transcript was saved to history.");
-        } else {
-          setBanner("Recording was interrupted.");
+        if (savedId && text && text !== rawText) {
+          await updateHistory(savedId, text);
         }
-      });
+      })();
     } else {
-      setBanner("Recording was interrupted.");
+      setBanner(tr("home.recording_interrupted"));
     }
     clearSessionContext();
   }

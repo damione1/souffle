@@ -64,7 +64,7 @@ export const DEFAULT_RESPONSES: Record<string, unknown> = {
   stop_meeting_recording: "meeting-e2e-1",
   start_transcription: null,
   stop_transcription: null,
-  add_dictation_entry: null,
+  add_dictation_entry: "entry-e2e-1",
   take_sleep_paused_meeting: null,
 };
 

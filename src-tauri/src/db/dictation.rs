@@ -68,6 +68,43 @@ impl Database {
         Ok(())
     }
 
+    /// Replace the text of an existing dictation entry and refresh FTS.
+    /// Keeps the original timestamp so polish does not create a second row
+    /// or jump the entry in history.
+    pub fn update_dictation_entry(&self, id: &str, text: &str) -> Result<(), String> {
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+
+        let updated = tx
+            .execute(
+                "UPDATE dictation_entries SET text = ?2 WHERE id = ?1",
+                params![id, text],
+            )
+            .map_err(|e| format!("Update dictation: {e}"))?;
+
+        if updated == 0 {
+            return Err(format!("Dictation entry not found: {id}"));
+        }
+
+        tx.execute(
+            "DELETE FROM text_search WHERE source_type = 'dictation' AND source_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("Delete FTS: {e}"))?;
+
+        tx.execute(
+            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+            params![text, "dictation", id],
+        )
+        .map_err(|e| format!("FTS insert: {e}"))?;
+
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+
+        Ok(())
+    }
+
     /// Delete a single dictation entry.
     pub fn delete_dictation_entry(&self, id: &str) -> Result<(), String> {
         let conn = self.conn.acquire()?;
@@ -186,5 +223,45 @@ mod tests {
 
         let entries = db.list_dictation_entries(3).unwrap();
         assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
+    fn update_replaces_text_in_place() {
+        let (db, _dir) = test_db();
+        db.add_dictation_entry("d1", "raw hello", "2024-01-01T00:00:00Z")
+            .unwrap();
+
+        db.update_dictation_entry("d1", "polished hello").unwrap();
+
+        let entries = db.list_dictation_entries(50).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "d1");
+        assert_eq!(entries[0].text, "polished hello");
+        assert_eq!(entries[0].timestamp, "2024-01-01T00:00:00Z");
+        assert_eq!(db.count_dictation_entries().unwrap(), 1);
+    }
+
+    #[test]
+    fn update_refreshes_fts() {
+        let (db, _dir) = test_db();
+        db.add_dictation_entry("d1", "raw hello", "2024-01-01T00:00:00Z")
+            .unwrap();
+
+        db.update_dictation_entry("d1", "polished kubernetes")
+            .unwrap();
+
+        assert!(db.search_text("raw", 20).unwrap().is_empty());
+        let results = db.search_text("kubernetes", 20).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].source_type, "dictation");
+        assert_eq!(results[0].source_id, "d1");
+    }
+
+    #[test]
+    fn update_missing_id_errors() {
+        let (db, _dir) = test_db();
+        let err = db.update_dictation_entry("missing", "nope").unwrap_err();
+        assert!(err.contains("not found"));
+        assert_eq!(db.list_dictation_entries(50).unwrap().len(), 0);
     }
 }

@@ -126,6 +126,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::search_text,
             commands::list_dictation_entries,
             commands::add_dictation_entry,
+            commands::update_dictation_entry,
             commands::delete_dictation_entry,
             commands::clear_dictation_history,
             commands::polish_dictation,
