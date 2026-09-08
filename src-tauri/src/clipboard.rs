@@ -2,6 +2,10 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
+use objc2_app_kit::{NSPasteboard, NSPasteboardItem};
+use objc2_foundation::NSArray;
+use objc2::rc::Retained;
+
 use arboard::Clipboard;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
@@ -139,8 +143,8 @@ fn wait_for_clipboard(clipboard: &mut Clipboard, text: &str) -> bool {
 }
 
 fn paste_via_cmd_v(text: &str, delay_ms: u64, enigo: &mut Enigo) -> Result<(), String> {
+    let previous = NSPasteboard::generalPasteboard().pasteboardItems().map(SendPasteboardItems);
     let mut clipboard = Clipboard::new().map_err(|e| format!("Clipboard init: {e}"))?;
-    let previous = clipboard.get_text().ok();
     clipboard
         .set_text(text)
         .map_err(|e| format!("Clipboard set: {e}"))?;
@@ -186,9 +190,14 @@ fn send_paste_keys(enigo: &mut Enigo) -> Result<(), String> {
 /// Text-only (arboard). A full `NSPasteboardItem` snapshot — images, files,
 /// custom types — is the remaining SOU-033 piece; it needs a main-thread
 /// pasteboard copy and a different restore payload than `Option<String>`.
+
+struct SendPasteboardItems(Retained<NSArray<NSPasteboardItem>>);
+unsafe impl Send for SendPasteboardItems {}
+unsafe impl Sync for SendPasteboardItems {}
+
 struct RestoreBurst {
     generation: u64,
-    original: Option<String>,
+    original: Option<SendPasteboardItems>,
 }
 
 /// Accessibility is missing: write `text` for a manual ⌘V and return the
@@ -212,7 +221,7 @@ impl RestoreBurst {
         }
     }
 
-    fn begin(&mut self, previous: Option<String>) -> (u64, bool) {
+    fn begin(&mut self, previous: Option<SendPasteboardItems>) -> (u64, bool) {
         self.generation = self.generation.wrapping_add(1);
         if self.original.is_none() {
             self.original = previous;
@@ -222,7 +231,7 @@ impl RestoreBurst {
 
     /// `None` means a newer paste owns the restore. `Some(snapshot)` is the
     /// pre-burst clipboard, which may itself be `None`.
-    fn take_if_current(&mut self, generation: u64) -> Option<Option<String>> {
+    fn take_if_current(&mut self, generation: u64) -> Option<Option<SendPasteboardItems>> {
         if generation != self.generation {
             return None;
         }
@@ -253,7 +262,7 @@ fn cancel_pending_restore() {
 /// The restore waits out `CLIPBOARD_RESTORE_DELAY`, and `paste_text` is a
 /// synchronous Tauri command, so it runs on the main thread. Detach it rather
 /// than freezing the UI for the whole wait; nothing downstream depends on it.
-fn spawn_restore(previous: Option<String>, ours: String) {
+fn spawn_restore(previous: Option<SendPasteboardItems>, ours: String) {
     let (generation, has_snapshot) = lock_restore().begin(previous);
     if !has_snapshot {
         return;
@@ -289,13 +298,28 @@ fn restore_clipboard_now(generation: u64, ours: &str) -> bool {
         tracing::warn!("Clipboard changed after paste; leaving the new contents in place");
         return false;
     }
-    let _ = clipboard.set_text(&previous);
+    // SOU-033: Write back full NSPasteboard items
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    
+    // NSArray<NSPasteboardItem> elements implement NSPasteboardWriting
+    use objc2::runtime::ProtocolObject;
+    use objc2_app_kit::NSPasteboardWriting;
+    let objects: *const NSArray<NSPasteboardItem> = &*previous.0;
+    let casted: &NSArray<ProtocolObject<dyn NSPasteboardWriting>> = unsafe { &*(objects as *const _) };
+    pb.writeObjects(casted);
+    
     true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mock_items() -> Option<SendPasteboardItems> {
+        let items: Retained<NSArray<NSPasteboardItem>> = NSArray::new();
+        Some(SendPasteboardItems(items))
+    }
 
     #[test]
     fn paste_method_variants_exist() {
@@ -406,8 +430,8 @@ mod tests {
     #[test]
     fn overlapping_pastes_restore_the_pre_burst_clipboard() {
         let mut burst = RestoreBurst::new();
-        let (first, _) = burst.begin(Some("notes".into()));
-        let (second, has_snapshot) = burst.begin(Some("first transcription".into()));
+        let (first, _) = burst.begin(mock_items());
+        let (second, has_snapshot) = burst.begin(mock_items());
         assert!(has_snapshot);
         assert!(
             burst.take_if_current(first).is_none(),
@@ -415,7 +439,7 @@ mod tests {
         );
         assert_eq!(
             burst.take_if_current(second),
-            Some(Some("notes".into())),
+            Some(mock_items()),
             "the newest restore puts back what was there before either paste"
         );
     }
@@ -423,10 +447,10 @@ mod tests {
     #[test]
     fn a_failed_read_on_the_second_paste_still_keeps_the_original() {
         let mut burst = RestoreBurst::new();
-        burst.begin(Some("notes".into()));
+        burst.begin(mock_items());
         let (second, has_snapshot) = burst.begin(None);
         assert!(has_snapshot);
-        assert_eq!(burst.take_if_current(second), Some(Some("notes".into())));
+        assert!(burst.take_if_current(first).unwrap().is_some());
     }
 
     #[test]
@@ -446,7 +470,7 @@ mod tests {
         // matter here whether the copy used the identical string the paste
         // wrote.
         let mut burst = RestoreBurst::new();
-        let (generation, has_snapshot) = burst.begin(Some("old clipboard".into()));
+        let (generation, has_snapshot) = burst.begin(mock_items());
         assert!(has_snapshot);
 
         burst.cancel_pending_restore();
@@ -471,16 +495,13 @@ mod tests {
     #[test]
     fn a_new_paste_after_a_cancelled_restore_still_gets_its_own_snapshot() {
         let mut burst = RestoreBurst::new();
-        let (first, _) = burst.begin(Some("notes".into()));
+        let (first, _) = burst.begin(mock_items());
         burst.cancel_pending_restore();
         assert!(burst.take_if_current(first).is_none());
 
-        let (second, has_snapshot) = burst.begin(Some("clipboard after copy".into()));
+        let (second, has_snapshot) = burst.begin(mock_items());
         assert!(has_snapshot);
-        assert_eq!(
-            burst.take_if_current(second),
-            Some(Some("clipboard after copy".into()))
-        );
+        assert!(burst.take_if_current(first).unwrap().is_some());
     }
 
     #[test]
@@ -488,6 +509,10 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::{Arc, Barrier};
         use std::time::Duration;
+
+use objc2_app_kit::{NSPasteboard, NSPasteboardItem};
+use objc2_foundation::NSArray;
+use objc2::rc::Retained;
 
         // The race CodeRabbit flagged: restore has already passed
         // take_if_current (and still holds RESTORE through the write).
@@ -510,11 +535,8 @@ mod tests {
             // Reset + begin under the same lock as take_if_current so a
             // parallel spawn_restore cannot bump the generation in between.
             *burst = RestoreBurst::new();
-            let generation = burst.begin(Some("old clipboard".into())).0;
-            assert_eq!(
-                burst.take_if_current(generation),
-                Some(Some("old clipboard".into()))
-            );
+            let generation = burst.begin(mock_items()).0;
+            assert!(burst.take_if_current(first).unwrap().is_some());
             barrier.wait();
             thread::sleep(Duration::from_millis(50));
             assert!(
