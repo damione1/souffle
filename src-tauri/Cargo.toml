@@ -123,6 +123,8 @@ dispatch2 = "0.3"
 # container.
 opus = "0.3"
 ogg = "0.9"
+core-graphics = "0.25.0"
+core-foundation = "0.10.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility-sys = "0.2"

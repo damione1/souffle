@@ -18,6 +18,7 @@ pub mod filter;
 pub mod frontmost;
 pub mod lid;
 pub mod lock_ext;
+mod modifier_shortcut;
 pub mod logging;
 pub mod models;
 pub mod ort_runtime;
@@ -310,6 +311,7 @@ pub fn run() {
             if let Err(e) = commands::register_shortcuts(app.handle(), &shortcuts) {
                 tracing::warn!("Failed to register shortcuts on startup: {e}");
             }
+            crate::modifier_shortcut::start_modifier_tap(app.handle().clone());
 
             match settings::AppSettings::load(&state.db) {
                 Ok(app_settings) => {

@@ -1,6 +1,6 @@
 export { formatTimestamp, formatDate, formatDuration, formatShortcutLabel, formatBytes } from "./format";
 export { elapsedSecondsSince } from "./elapsed";
-export { keyEventToShortcut, shortcutMissingModifier } from "./shortcut";
+export { keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "./shortcut";
 export { applyTheme } from "./theme";
 export { buildMeetingTranscriptBlocks, groupIntoParagraphs } from "./paragraphs";
 export type { Paragraph, TranscriptBlock } from "./paragraphs";

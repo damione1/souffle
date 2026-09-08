@@ -37,6 +37,7 @@ pub struct PermissionStatus {
     pub system_audio: PermState,
     pub accessibility: PermState,
     pub calendar: PermState,
+    pub input_monitoring: PermState,
 }
 
 /// Which capability to probe or prompt for via `request`.
@@ -47,6 +48,7 @@ pub enum PermissionKind {
     SystemAudio,
     Accessibility,
     Calendar,
+    InputMonitoring,
 }
 
 /// Outcome of `repair_accessibility`. Distinct from `PermState` because a
@@ -78,6 +80,11 @@ pub fn snapshot() -> PermissionStatus {
         // EventKit has a real read-only status API, so the snapshot is truthful
         // here (no probe needed).
         calendar: crate::calendar::authorization_state(),
+        input_monitoring: if input_monitoring_granted() {
+            PermState::Granted
+        } else {
+            PermState::Unknown
+        },
     }
 }
 
@@ -395,6 +402,16 @@ pub fn request(kind: PermissionKind) -> PermState {
             }
         }
         PermissionKind::Calendar => crate::calendar::request_access(),
+        PermissionKind::InputMonitoring => {
+            open_input_monitoring_settings();
+            // Input monitoring doesn't have a great check without triggering prompt.
+            // Actually, we can return Granted if it's already granted.
+            if input_monitoring_granted() {
+                PermState::Granted
+            } else {
+                PermState::Denied
+            }
+        }
     }
 }
 
@@ -540,3 +557,35 @@ mod tests {
         assert_eq!(APP_IDENTIFIER, "com.souffle.desktop");
     }
 }
+
+#[cfg(target_os = "macos")]
+fn input_monitoring_granted() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGPreflightListenEventAccess() -> bool;
+        fn CGRequestListenEventAccess() -> bool;
+    }
+    unsafe { CGPreflightListenEventAccess() }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn input_monitoring_granted() -> bool {
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn open_input_monitoring_settings() {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGRequestListenEventAccess() -> bool;
+    }
+    unsafe {
+        let _ = CGRequestListenEventAccess();
+    }
+    let _ = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+        .spawn();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_input_monitoring_settings() {}
