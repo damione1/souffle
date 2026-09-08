@@ -1080,6 +1080,36 @@ describe("transcription controller", () => {
     }));
   });
 
+  it("shortcut start then window stop still auto-pastes (SOU-046)", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, auto_paste: true, dictation_polish_enabled: false };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "hello", is_final: true });
+    await ctrl.toggleRecording(false);
+
+    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.objectContaining({ text: "hello" }));
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it("window start then shortcut stop does not auto-paste (SOU-046)", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, auto_paste: true, dictation_polish_enabled: false };
+
+    await ctrl.toggleRecording(false);
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "hello", is_final: true });
+    await ctrl.toggleRecording(true);
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
+  });
+
   it("abort clears tentative and saves transcript only", async () => {
     const channel = captureTranscriptionChannel();
     const ctrl = createTranscriptionController();
