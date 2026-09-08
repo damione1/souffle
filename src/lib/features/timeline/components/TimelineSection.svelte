@@ -25,6 +25,15 @@
     onSetupCalendar?: () => void;
   } = $props();
 
+  // `$props()` `controller` is a stable singleton. Direct template reads of
+  // its getters are not subscribed (unlike LiveSessionCard, which wraps
+  // `transcription.transcript` in `$derived`). Without this, filters and
+  // post-stop inserts never repaint.
+  const groups = $derived(controller.groups);
+  const isEmpty = $derived(controller.isEmpty);
+  const hasMatches = $derived(controller.hasMatches);
+  const expandedDictationId = $derived(controller.expandedDictationId);
+
   // Show the CTA when nothing today's calendar section could show:
   // integration off, or on but macOS hasn't granted access.
   const showCalendarSetupCta = $derived(
@@ -141,18 +150,18 @@
     </button>
   {/if}
 
-  {#if controller.isEmpty}
+  {#if isEmpty}
     <EmptyState
       title={$t("timeline.empty_title")}
       message={$t("timeline.empty_msg")}
     />
-  {:else if !controller.hasMatches}
+  {:else if !hasMatches}
     <EmptyState
       title={$t("timeline.no_matches_title")}
       message={$t("timeline.no_matches_msg")}
     />
   {:else}
-    {#each controller.groups as group (group.day)}
+    {#each groups as group (group.day)}
       <section class="flex flex-col gap-2.5">
         <h4 class="px-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-text-muted">
           {dayLabel(group.day)}
@@ -161,7 +170,7 @@
           {#each group.items as item (item.kind + item.id)}
             <TimelineItem
               {item}
-              expanded={item.kind === "dictation" && controller.expandedDictationId === item.id}
+              expanded={item.kind === "dictation" && expandedDictationId === item.id}
               isLive={item.kind === "meeting" && controller.isLiveMeeting(item.id)}
               onOpen={() => controller.openItem(item)}
               onRemove={() => void controller.removeItem(item)}

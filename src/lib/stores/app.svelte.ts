@@ -122,7 +122,7 @@ let settings = $state<AppSettings>({
   dictation_ceiling_seconds: 300,
 });
 
-function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {
+export function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {
   switch (state.state) {
     case "recording_dictation":
       return "dictation";
