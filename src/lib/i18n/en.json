@@ -496,7 +496,8 @@
     "paste_failed": "Paste failed: {error}",
     "model_required_dictation": "Download and load the model to start dictation.",
     "model_required_meeting": "Load the model to start a meeting.",
-    "open_model": "Open model"
+    "open_model": "Open model",
+    "polish_timeout": "Polish took too long. Saved the original text."
   },
   "permissions": {
     "title": "Grant permissions",

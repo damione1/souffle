@@ -543,11 +543,23 @@ async listDictationEntries(limit: number | null) : Promise<Result<DictationEntry
 }
 },
 /**
- * Add a dictation history entry
+ * Add a dictation history entry. Returns the generated id so a later polish
+ * pass can update the same row instead of inserting a second one.
  */
-async addDictationEntry(text: string) : Promise<Result<null, string>> {
+async addDictationEntry(text: string) : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_dictation_entry", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Replace the text of an existing dictation entry (e.g. after polish).
+ */
+async updateDictationEntry(id: string, text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_dictation_entry", { id, text }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

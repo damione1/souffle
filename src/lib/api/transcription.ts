@@ -55,8 +55,12 @@ export async function listDictationEntries(limit = 50): Promise<DictationEntry[]
   return unwrap(commands.listDictationEntries(limit));
 }
 
-export async function addDictationEntry(text: string): Promise<void> {
-  await unwrap(commands.addDictationEntry(text));
+export async function addDictationEntry(text: string): Promise<string> {
+  return unwrap(commands.addDictationEntry(text));
+}
+
+export async function updateDictationEntry(id: string, text: string): Promise<void> {
+  await unwrap(commands.updateDictationEntry(id, text));
 }
 
 export async function deleteDictationEntry(id: string): Promise<void> {

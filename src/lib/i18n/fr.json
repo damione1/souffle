@@ -496,7 +496,8 @@
     "paste_failed": "Collage impossible : {error}",
     "model_required_dictation": "Télécharge et charge le modèle pour dicter.",
     "model_required_meeting": "Charge le modèle pour lancer une réunion.",
-    "open_model": "Ouvrir le modèle"
+    "open_model": "Ouvrir le modèle",
+    "polish_timeout": "La reformulation a pris trop de temps. Le texte original a été enregistré."
   },
   "permissions": {
     "title": "Autoriser les permissions",

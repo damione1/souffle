@@ -132,6 +132,8 @@ describe("transcription controller", () => {
       case "stop_transcription":
         return Promise.resolve(null);
       case "add_dictation_entry":
+        return Promise.resolve("entry-test-id");
+      case "update_dictation_entry":
         return Promise.resolve(null);
       case "delete_dictation_entry":
         return Promise.resolve(null);
@@ -497,6 +499,142 @@ describe("transcription controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
   });
 
+  it("persists raw history before polish returns (SOU-048)", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    let resolvePolish: ((value: unknown) => void) | undefined;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "polish_dictation") {
+        return new Promise((resolve) => {
+          resolvePolish = resolve;
+        });
+      }
+      if (cmd === "add_dictation_entry") {
+        return Promise.resolve("raw-id");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+
+    const stopPromise = ctrl.toggleRecording();
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.anything());
+    expect(ctrl.isStopping).toBe(true);
+
+    await vi.waitFor(() => {
+      expect(resolvePolish).toBeTypeOf("function");
+    });
+    resolvePolish!({ text: "hello world", skipped: false, warning: null });
+    await stopPromise;
+    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.anything());
+  });
+
+  it("updates the same history row when polish returns different text (SOU-048)", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "polish_dictation") {
+        return Promise.resolve({ text: "Hello, world.", skipped: false, warning: null });
+      }
+      if (cmd === "add_dictation_entry") {
+        return Promise.resolve("raw-id");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+
+    await ctrl.toggleRecording();
+
+    const addCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "add_dictation_entry");
+    const updateCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "update_dictation_entry");
+    expect(addCalls).toHaveLength(1);
+    expect(addCalls[0][1]).toEqual({ text: "hello world" });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0][1]).toEqual({ id: "raw-id", text: "Hello, world." });
+  });
+
+  it("polish timeout returns a warning and still saved raw (SOU-048)", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    let sawAdd: () => void = () => {};
+    const addSeen = new Promise<void>((resolve) => {
+      sawAdd = resolve;
+    });
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "polish_dictation") {
+        return new Promise(() => {});
+      }
+      if (cmd === "add_dictation_entry") {
+        sawAdd();
+        return Promise.resolve("raw-id");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const stopPromise = ctrl.toggleRecording();
+      await addSeen;
+      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+
+      await vi.advanceTimersByTimeAsync(25_000);
+      await stopPromise;
+
+      expect(ctrl.statusMessage).toBe("Polish took too long. Saved the original text.");
+      expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.anything());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("toggleRecording stop holds the pill before stopping when polish is enabled, then releases it", async () => {
     const ctrl = createTranscriptionController();
     await ctrl.mount();
@@ -790,14 +928,12 @@ describe("transcription controller", () => {
 
     eventListeners["shortcut-rewrite"]?.({ payload: null });
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+      expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
+        text: "hello world",
+        focusedApp: "Safari",
+        rewriteOf: "old selection",
+      }));
     });
-
-    expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
-      text: "hello world",
-      focusedApp: "Safari",
-      rewriteOf: "old selection",
-    }));
   });
 
   it("insert start polishes with focusedApp and null rewriteOf", async () => {
@@ -1176,6 +1312,59 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", {
       text: expect.stringContaining("pending"),
     });
+  });
+
+  it("abort persists raw before polish returns (SOU-048)", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    let resolvePolish: ((value: unknown) => void) | undefined;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "polish_dictation") {
+        return new Promise((resolve) => {
+          resolvePolish = resolve;
+        });
+      }
+      if (cmd === "add_dictation_entry") {
+        return Promise.resolve("raw-id");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 500,
+    });
+
+    ctrl.handleRecordingAborted();
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello" });
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.anything());
+
+    await vi.waitFor(() => {
+      expect(resolvePolish).toBeTypeOf("function");
+    });
+    resolvePolish!({ text: "Hello.", skipped: false, warning: null });
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("update_dictation_entry", {
+        id: "raw-id",
+        text: "Hello.",
+      });
+    });
+    const addCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "add_dictation_entry");
+    expect(addCalls).toHaveLength(1);
   });
 
   it("starting a session resets leftover tentative", async () => {
