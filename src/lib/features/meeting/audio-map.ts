@@ -16,8 +16,9 @@ export interface AudioSeekTarget {
  * (`{session_index}.ogg`, listed by `get_meeting_audio`). `startTime` is the
  * paragraph's first segment's `start_time`; the transcription pipeline
  * resets each recording session's clock near zero when it starts (a fresh
- * engine/session), so that value already doubles as a seek offset into that
- * session's audio file — no extra alignment is needed.
+ * engine/session). The Rust pipeline tracks and applies an eviction offset
+ * for any frames dropped by VAD, so this value already doubles as a seek
+ * offset into that session's audio file — no extra frontend alignment is needed.
  *
  * Returns `null` when there's nothing to seek to: no session was
  * attributed to the paragraph, or that session has no matching audio file
