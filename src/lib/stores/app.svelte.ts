@@ -107,10 +107,11 @@ let settings = $state<AppSettings>({
   meeting_transcription_language: "auto",
   dictation_polish_enabled: true,
   dictation_polish_template_id: "clean",
-  // Stub prompts: real prompts live in src-tauri/src/summary/polish.rs and are
-  // loaded from the database. These placeholders are only used during the
-  // onboarding flow when getSettings() has not yet succeeded; the Rust side
-  // merges and replaces them via merge_polish_templates() on the next load.
+  // Fallback only, used when getSettings() has not yet succeeded. Prompts
+  // are empty on purpose: merge_polish_templates keeps a stored empty prompt
+  // (it is not in the superseded-builtin list), but effective_template_prompt
+  // falls back to the shipped defaults at polish time, so a bootstrap-failure
+  // path cannot persist the old stub one-liners as the live polish text.
   dictation_polish_templates: [
     { id: "clean", label: "Clean up", prompt: "" },
     { id: "email", label: "Professional email", prompt: "" },
