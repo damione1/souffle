@@ -172,7 +172,13 @@ function createTranscriptionControllerInstance() {
   let statusAction = $state<(() => void) | undefined>();
   let catalog = $state<TranscriptionCatalog | null>(null);
 
+  let tooShortBannerTimer: ReturnType<typeof setTimeout> | null = null;
+
   function setBanner(message: string, action?: { label: string; run: () => void }) {
+    if (tooShortBannerTimer) {
+      clearTimeout(tooShortBannerTimer);
+      tooShortBannerTimer = null;
+    }
     statusMessage = message;
     statusActionLabel = action?.label;
     statusAction = action?.run;
@@ -377,6 +383,10 @@ function createTranscriptionControllerInstance() {
           console.warn("Fast stop failed:", e);
         }
         setBanner(tr("home.dictation_too_short"));
+        tooShortBannerTimer = setTimeout(() => {
+          tooShortBannerTimer = null;
+          clearBanner();
+        }, 2000);
         clearSessionContext();
         isStopping = false;
         return;

@@ -1458,6 +1458,24 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
   });
 
+  it("auto-hides the too-short banner after 2s without wiping a later banner", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      expect(ctrl.statusMessage).toBe("Hold a little longer");
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(ctrl.statusMessage).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("dictation ceiling stops a long session", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
