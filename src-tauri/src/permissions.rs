@@ -64,7 +64,7 @@ pub struct RepairAccessibilityResult {
 /// triggers those explicitly via `request_permission`.
 pub fn snapshot() -> PermissionStatus {
     PermissionStatus {
-        microphone: PermState::Unknown,
+        microphone: microphone_authorization_status(),
         system_audio: if system_audio_supported() {
             PermState::Unknown
         } else {
