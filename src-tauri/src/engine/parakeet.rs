@@ -175,7 +175,7 @@ impl TranscriptionEngine for ParakeetEngine {
             return Ok(vec![]);
         }
 
-        let mut remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let mut remaining: Vec<f32> = std::mem::take(&mut self.audio_buffer);
         let original_len = remaining.len();
 
         if original_len < MIN_INFERENCE_SAMPLES {
