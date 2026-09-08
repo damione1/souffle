@@ -1110,6 +1110,46 @@ describe("transcription controller", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
   });
 
+  it("abort during finalization still pastes a shortcut-started session (SOU-046)", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    let resolvePolish: ((value: unknown) => void) | undefined;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "polish_dictation") {
+        return new Promise((resolve) => {
+          resolvePolish = resolve;
+        });
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = {
+      ...ctrl.app.settings,
+      auto_paste: true,
+      dictation_polish_enabled: true,
+    };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    transcriptionChannel?.onmessage?.({ text: "hello", is_final: true, start_ms: 0, end_ms: 500 });
+
+    const stopPromise = ctrl.toggleRecording(false);
+    await vi.waitFor(() => {
+      expect(resolvePolish).toBeTypeOf("function");
+    });
+    ctrl.handleRecordingAborted();
+    resolvePolish!({ text: "hello", skipped: false, warning: null });
+    await stopPromise;
+
+    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.objectContaining({ text: "hello" }));
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
   it("abort clears tentative and saves transcript only", async () => {
     const channel = captureTranscriptionChannel();
     const ctrl = createTranscriptionController();

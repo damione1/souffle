@@ -354,6 +354,7 @@ function createTranscriptionControllerInstance() {
       const holdForPolish = app.settings.dictation_polish_enabled;
       const sessionFocusedApp = focusedApp;
       const sessionRewriteOf = rewriteOf;
+      const sessionShouldAutoPaste = sessionAutoPaste;
       if (holdForPolish) {
         try {
           await pillHold("polishing");
@@ -377,7 +378,7 @@ function createTranscriptionControllerInstance() {
         const saved = await saveToHistory(finalized.text);
 
         if (finalized.text) {
-          if (sessionAutoPaste && app.settings.auto_paste) {
+          if (sessionShouldAutoPaste && app.settings.auto_paste) {
             try {
               await pasteText(
                 finalized.text,
