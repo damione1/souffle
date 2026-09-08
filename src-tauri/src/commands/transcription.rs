@@ -261,18 +261,46 @@ fn start_pipeline_blocking(
     // own thread to keep ONNX/Metal work off the command thread.
     let settings = crate::settings::AppSettings::load(db)?;
 
-    // Meetings also capture system audio (the other participants) when the
-    // setting is on and the OS supports Core Audio taps.
     let capture_system_audio = mode == PipelineMode::Meeting
         && settings.capture_system_audio
         && crate::platform::system_audio_capture_supported();
+
+    // SOU-082: Try to acquire the system audio tap *before* starting the session
+    // so we can downgrade to single-stream (diarize = false) if the tap fails.
+    #[cfg(target_os = "macos")]
+    let (tap_handle, tap_cons) = if capture_system_audio {
+        use ringbuf::traits::Split;
+        let (tap_prod, tap_cons) =
+            ringbuf::HeapRb::<f32>::new(crate::audio::mixer::MIX_RATE as usize * 2).split();
+        match crate::audio::system_tap::spawn_tap(tap_prod, std::time::Duration::from_secs(5)) {
+            Ok(tap) => (Some(tap), Some(tap_cons)),
+            Err(e) => {
+                tracing::warn!("System audio tap probe failed, downgrading to mic only: {e}");
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    let actual_capture_system_audio = {
+        #[cfg(target_os = "macos")]
+        {
+            capture_system_audio && tap_handle.is_some()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            capture_system_audio
+        }
+    };
+
     // Speaker labelling (Me/Them) needs a distinct system-audio leg AND an
     // engine that can transcribe two batched lanes. Only Kyutai can today; other
     // engines record meetings as a single mixed stream with no labels. This must
     // match the engine's own capability so capture and the actor agree on
     // whether to split the audio.
-    let diarize =
-        capture_system_audio && settings.transcription_engine_id == crate::engine::KYUTAI_ENGINE_ID;
+    let diarize = actual_capture_system_audio
+        && settings.transcription_engine_id == crate::engine::KYUTAI_ENGINE_ID;
 
     // Auto-stop detection only applies to meetings: dictation sessions are
     // short and user-driven, so "meeting is over" doesn't apply. This is a
@@ -321,9 +349,13 @@ fn start_pipeline_blocking(
             session_id,
             target_sample_rate: info.audio.sample_rate_hz,
             mic_gain: info.mic_gain,
-            capture_system_audio,
+            capture_system_audio: actual_capture_system_audio,
             diarize,
             record_path,
+            #[cfg(target_os = "macos")]
+            tap: tap_handle,
+            #[cfg(target_os = "macos")]
+            tap_cons,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
