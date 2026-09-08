@@ -157,6 +157,8 @@ function createTranscriptionControllerInstance() {
   let focusedApp: string | null = null;
   let rewriteOf: string | null = null;
   let learnFromEditTimer: ReturnType<typeof setTimeout> | null = null;
+  let ceilingTimer: ReturnType<typeof setTimeout> | null = null;
+  let sessionStartTime = 0;
   let pttStopQueued = false;
 
   let activeProfileLabel = $derived.by(() => {
@@ -191,9 +193,14 @@ function createTranscriptionControllerInstance() {
     focusedApp = null;
     rewriteOf = null;
     sessionMode = "insert";
+    if (ceilingTimer) {
+      clearTimeout(ceilingTimer);
+      ceilingTimer = null;
+    }
     // Nothing keeps this alive once the session that produced it is over;
     // leaving it would let a later, unrelated stop re-paste and re-save it.
     transcript = "";
+    tentative = "";
   }
 
   async function captureStartContext() {
@@ -323,6 +330,19 @@ function createTranscriptionControllerInstance() {
 
     if (isDictating) {
       isStopping = true;
+      const dictationDurationMs = Date.now() - sessionStartTime;
+      if (dictationDurationMs < 500) {
+        sessionGeneration += 1;
+        try {
+          await stopStreamingTranscription();
+        } catch (e) {
+          console.warn("Fast stop failed:", e);
+        }
+        setBanner(tr("home.dictation_too_short"));
+        clearSessionContext();
+        isStopping = false;
+        return;
+      }
 
       // Polish keeps running after the recording state ends (it's an LLM
       // call over the finalized text); hold the pill open now, before the
@@ -448,6 +468,14 @@ function createTranscriptionControllerInstance() {
       generation = sessionGeneration;
 
       await captureStartContext();
+      sessionStartTime = Date.now();
+      if (app.settings.dictation_ceiling_seconds > 0) {
+        ceilingTimer = setTimeout(() => {
+          if (isDictating && !isStopping) {
+            void toggleRecording(true);
+          }
+        }, app.settings.dictation_ceiling_seconds * 1000);
+      }
       await startStreamingTranscription((segment: TranscriptionSegment) => {
         if (generation !== sessionGeneration) return; // stale session
         if (!segment.is_final) {

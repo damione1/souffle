@@ -50,7 +50,9 @@ use souffle_lib::commands;
 use souffle_lib::constants::MIMI_FRAME_SIZE;
 use souffle_lib::db::Database;
 use souffle_lib::engine::mock::MockEngine;
-use souffle_lib::engine::{TranscriptionEngine, TranscriptionSegment, default_transcription_profile};
+use souffle_lib::engine::{
+    TranscriptionEngine, TranscriptionSegment, default_transcription_profile,
+};
 use souffle_lib::pipeline::EngineActorHandle;
 use souffle_lib::settings::AppSettings;
 use souffle_lib::state::{AppState, AudioCommand};
@@ -143,12 +145,7 @@ fn build_harness(mock: MockEngine) -> Harness {
     let (audio_cmd_tx, audio_cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
     let audio_rms = Arc::new(AtomicU32::new(0f32.to_bits()));
 
-    let app_state = AppState::new(
-        audio_cmd_tx,
-        Arc::clone(&actor),
-        Arc::clone(&db),
-        audio_rms,
-    );
+    let app_state = AppState::new(audio_cmd_tx, Arc::clone(&actor), Arc::clone(&db), audio_rms);
     bring_to_ready(&app_state, &actor);
 
     let app = tauri::test::mock_builder()
@@ -283,7 +280,9 @@ async fn meeting_stop_persists_meeting() {
 
     // The meeting row exists with ended_at set and the segment persisted —
     // the actual "stop persists a meeting" assertion.
-    let meeting = h.db.load_meeting(&meeting_id).expect("load persisted meeting");
+    let meeting =
+        h.db.load_meeting(&meeting_id)
+            .expect("load persisted meeting");
     assert_eq!(meeting.title, "Weekly Sync");
     assert!(meeting.ended_at.is_some(), "meeting should be finalized");
     assert!(
@@ -357,11 +356,10 @@ async fn dictation_round_trip() {
 
     // Mirrors what the frontend does after a dictation session ends: save
     // the assembled text to history.
-    commands::add_dictation_entry(state.clone(), full_text.clone())
-        .expect("add_dictation_entry");
+    commands::add_dictation_entry(state.clone(), full_text.clone()).expect("add_dictation_entry");
 
-    let history = commands::list_dictation_entries(state.clone(), None)
-        .expect("list_dictation_entries");
+    let history =
+        commands::list_dictation_entries(state.clone(), None).expect("list_dictation_entries");
     assert!(
         history.iter().any(|e| e.text == full_text),
         "expected the dictation entry to be saved to history, got: {:?}",
@@ -530,8 +528,12 @@ async fn failed_resume_preserves_sleep_paused_flag() {
     drop(h.audio_cmd_rx);
 
     let (_collected, channel) = collecting_channel();
-    let result = commands::resume_meeting_recording(state.clone(), "meeting-x".to_string(), channel).await;
-    assert!(result.is_err(), "resume should fail because audio cmd channel is dropped");
+    let result =
+        commands::resume_meeting_recording(state.clone(), "meeting-x".to_string(), channel).await;
+    assert!(
+        result.is_err(),
+        "resume should fail because audio cmd channel is dropped"
+    );
 
     // The flag must survive because the resume failed
     assert_eq!(

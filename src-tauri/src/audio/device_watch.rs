@@ -346,7 +346,10 @@ pub(crate) fn get_property<T>(
 /// Size in bytes of a property's data, or 0 if it can't be read (including
 /// "device doesn't have this property", e.g. streams in a scope it doesn't
 /// support).
-pub(crate) fn property_data_size(object: AudioObjectID, mut address: AudioObjectPropertyAddress) -> u32 {
+pub(crate) fn property_data_size(
+    object: AudioObjectID,
+    mut address: AudioObjectPropertyAddress,
+) -> u32 {
     let mut size: u32 = 0;
     let status = unsafe {
         AudioObjectGetPropertyDataSize(
@@ -362,7 +365,10 @@ pub(crate) fn property_data_size(object: AudioObjectID, mut address: AudioObject
 
 /// The object ID list for a variable-length `AudioObjectID` array property
 /// (e.g. `kAudioHardwarePropertyDevices`, `kAudioHardwarePropertyProcessObjectList`).
-pub(crate) fn audio_object_ids(object: AudioObjectID, address: AudioObjectPropertyAddress) -> Vec<AudioObjectID> {
+pub(crate) fn audio_object_ids(
+    object: AudioObjectID,
+    address: AudioObjectPropertyAddress,
+) -> Vec<AudioObjectID> {
     let size = property_data_size(object, address);
     let count = size as usize / size_of::<AudioObjectID>();
     if count == 0 {

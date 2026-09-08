@@ -251,7 +251,11 @@ mod tests {
     #[test]
     fn decide_rearm_allows_up_to_the_cap_then_gives_up() {
         for n in 0..MAX_REARM_ATTEMPTS {
-            assert_eq!(decide_rearm(n), RearmDecision::Rearm, "attempt {n} should rearm");
+            assert_eq!(
+                decide_rearm(n),
+                RearmDecision::Rearm,
+                "attempt {n} should rearm"
+            );
         }
         assert_eq!(decide_rearm(MAX_REARM_ATTEMPTS), RearmDecision::GiveUp);
         assert_eq!(decide_rearm(MAX_REARM_ATTEMPTS + 5), RearmDecision::GiveUp);
@@ -267,7 +271,10 @@ mod tests {
         for expected_attempt in 1..=MAX_REARM_ATTEMPTS {
             aec.handle_panic();
             assert_eq!(aec.rearm_count, expected_attempt);
-            assert!(!aec.disabled, "should still be rearming at attempt {expected_attempt}");
+            assert!(
+                !aec.disabled,
+                "should still be rearming at attempt {expected_attempt}"
+            );
         }
 
         // One panic more than the cap allows: gives up for the session.
@@ -285,7 +292,10 @@ mod tests {
         aec.process_render(&frame);
         aec.process_capture(&mut mic);
 
-        assert_eq!(mic, frame, "a disabled Aec must leave the mic frame untouched");
+        assert_eq!(
+            mic, frame,
+            "a disabled Aec must leave the mic frame untouched"
+        );
     }
 
     /// A fresh sonora instance starts with no delay hint, so a rearm must

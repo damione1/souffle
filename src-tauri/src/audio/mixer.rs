@@ -393,7 +393,10 @@ mod tests {
         tap.push_slice(&vec![0.2f32; 4_800]);
         mic.push_slice(&vec![0.1f32; 4_800]);
         mixer.tick();
-        assert!(mixer.tap_has_energy(), "line-level tap is above the apply floor");
+        assert!(
+            mixer.tap_has_energy(),
+            "line-level tap is above the apply floor"
+        );
 
         for _ in 0..80 {
             mic.push_slice(&vec![0.1f32; 480]);
@@ -575,7 +578,11 @@ mod tests {
         out.extend(mixer.flush());
 
         assert!(!out.is_empty());
-        assert_eq!(mixer.tap_discarded(), 0, "buffered tap must not be dropped as drift");
+        assert_eq!(
+            mixer.tap_discarded(),
+            0,
+            "buffered tap must not be dropped as drift"
+        );
         assert!(
             out.iter().any(|s| (*s - 0.2).abs() < 0.05),
             "replaced mic must still emit the tap that survived the rebuild"
@@ -599,7 +606,11 @@ mod tests {
         let mut out = mixer.tick();
         out.extend(mixer.flush());
 
-        assert_eq!(mixer.tap_discarded(), 0, "aligned tap must not be dropped as drift");
+        assert_eq!(
+            mixer.tap_discarded(),
+            0,
+            "aligned tap must not be dropped as drift"
+        );
         assert!(
             out.iter().any(|s| (*s - 0.3).abs() < 0.05),
             "mic already in the new ring must mix with tap, not sit after a silence pad"

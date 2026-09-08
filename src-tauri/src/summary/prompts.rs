@@ -105,7 +105,10 @@ pub fn build_structured_extract_prompt(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_reduce_prompt, build_structured_extract_prompt, build_summarize_prompt, format_participants};
+    use super::{
+        build_reduce_prompt, build_structured_extract_prompt, build_summarize_prompt,
+        format_participants,
+    };
     use crate::transcript::MeetingParticipant;
 
     #[test]

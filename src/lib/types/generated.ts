@@ -1168,6 +1168,10 @@ dictation_polish_templates: DictationPolishTemplate[];
  */
 dictation_learn_from_edit: boolean; 
 /**
+ * Hard failsafe: stop dictation after this many seconds.
+ */
+dictation_ceiling_seconds: number; 
+/**
  * Active default meeting-summary template id: used by the Generate
  * button when the user doesn't pick another template, and by any
  * automatic summarization.

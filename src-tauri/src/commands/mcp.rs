@@ -183,7 +183,9 @@ fn run_handshake(child: &mut Child) -> Result<String, String> {
 
 fn send_line(stdin: &mut impl Write, value: &serde_json::Value) -> Result<(), String> {
     writeln!(stdin, "{value}").map_err(|e| format!("Write to sidecar stdin: {e}"))?;
-    stdin.flush().map_err(|e| format!("Flush sidecar stdin: {e}"))
+    stdin
+        .flush()
+        .map_err(|e| format!("Flush sidecar stdin: {e}"))
 }
 
 fn recv_response(
@@ -217,7 +219,10 @@ mod tests {
         assert!(info.claude_desktop_snippet.contains("souffle"));
         assert_eq!(
             info.claude_code_command,
-            format!("claude mcp add souffle {}", shell_escape_path(&info.binary_path))
+            format!(
+                "claude mcp add souffle {}",
+                shell_escape_path(&info.binary_path)
+            )
         );
     }
 
@@ -241,7 +246,10 @@ mod tests {
         // developer already built it) — either way the resolver must not
         // panic and must return a path ending in the expected binary name.
         let path = resolve_mcp_binary_path();
-        assert_eq!(path.file_name().and_then(|n| n.to_str()), Some(MCP_BINARY_NAME));
+        assert_eq!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some(MCP_BINARY_NAME)
+        );
     }
 
     #[test]

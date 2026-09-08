@@ -30,6 +30,7 @@
     notifyDictationStopRequested,
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState } from "./lib/stores/app.svelte";
+  import { openSettings } from "./lib/features/settings/open";
   import { applyTheme, errorMessage } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
   import { decideShowSetupWizard, readSetupFlags } from "./lib/features/onboarding/setup";
@@ -445,6 +446,8 @@
         title={routeToastCopy.title}
         detail={routeToastCopy.detail}
         hint={routeToastCopy.hint}
+        actionLabel={routeToastCopy.hasAction ? $t("permissions.open_settings") : undefined}
+        onAction={routeToastCopy.hasAction ? () => openSettings({ tab: "audio" }) : undefined}
         onDismiss={() => micToast.dismiss()}
       />
     </div>

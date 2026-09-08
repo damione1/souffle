@@ -6,11 +6,15 @@
     title,
     detail,
     hint,
+    actionLabel,
+    onAction,
     onDismiss,
   }: {
     title: string;
     detail?: string;
     hint?: string;
+    actionLabel?: string;
+    onAction?: () => void;
     onDismiss: () => void;
   } = $props();
 </script>
@@ -26,6 +30,18 @@
     {/if}
     {#if hint}
       <p class="mt-0.5 text-xs text-white/55">{hint}</p>
+    {/if}
+    {#if actionLabel && onAction}
+      <button
+        type="button"
+        class="mt-2 rounded bg-white/20 px-2 py-1 text-xs font-semibold hover:bg-white/30 transition-colors"
+        onclick={() => {
+          onAction?.();
+          onDismiss();
+        }}
+      >
+        {actionLabel}
+      </button>
     {/if}
   </div>
   <button

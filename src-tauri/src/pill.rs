@@ -16,8 +16,8 @@
 //!   the main-window controller then runs `stop_transcription` + polish/paste.
 //!   Meetings use `MeetingStopRequested`, same path as the tray.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};

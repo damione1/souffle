@@ -1,12 +1,12 @@
-use tauri::ipc::Channel;
 use tauri::Manager;
 use tauri::State;
+use tauri::ipc::Channel;
 use tracing::info;
 
 use crate::engine::{
-    resolve_transcription_profile, resolve_transcription_selection, transcription_engine_catalog,
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
-    TranscriptionRuntimeStatus,
+    TranscriptionRuntimeStatus, resolve_transcription_profile, resolve_transcription_selection,
+    transcription_engine_catalog,
 };
 use crate::models;
 use crate::settings::AppSettings;
@@ -401,15 +401,15 @@ mod tests {
     fn delete_is_blocked_while_retry_from_ready() {
         let failed = AppStateMachine::Error {
             message: "Recording session active".into(),
-            recovery: ErrorRecovery::RetryFromReady {
-                profile: profile(),
-            },
+            recovery: ErrorRecovery::RetryFromReady { profile: profile() },
         };
         assert!(model_delete_blocked_by_transition(&failed));
         assert!(!failed.is_model_ready());
-        assert!(!model_delete_blocked_by_transition(&AppStateMachine::Error {
-            message: "download failed".into(),
-            recovery: ErrorRecovery::RetryFromIdle,
-        }));
+        assert!(!model_delete_blocked_by_transition(
+            &AppStateMachine::Error {
+                message: "download failed".into(),
+                recovery: ErrorRecovery::RetryFromIdle,
+            }
+        ));
     }
 }

@@ -40,7 +40,9 @@ impl Database {
     /// Add a new dictation entry.
     pub fn add_dictation_entry(&self, id: &str, text: &str, timestamp: &str) -> Result<(), String> {
         let mut conn = self.conn.acquire()?;
-        let tx = conn.transaction().map_err(|e| format!("Transaction: {e}"))?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
             "INSERT INTO dictation_entries (id, text, timestamp) VALUES (?1, ?2, ?3)

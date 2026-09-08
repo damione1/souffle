@@ -80,7 +80,10 @@ fn tail_file(path: &Path, max_lines: usize) -> Result<String, String> {
     Ok(ordered.join("\n"))
 }
 
-pub fn collect_bundle(state: &AppState, settings: &crate::settings::AppSettings) -> DiagnosticsBundle {
+pub fn collect_bundle(
+    state: &AppState,
+    settings: &crate::settings::AppSettings,
+) -> DiagnosticsBundle {
     let data_dir = crate::constants::app_data_dir();
     let log_path = resolve_active_log_file();
     let machine_state = state

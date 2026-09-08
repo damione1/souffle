@@ -230,6 +230,7 @@ export const mockSettings: AppSettings = {
     { id: "brief_overview", name: "Brief overview", prompt: "Brief prompt." },
   ],
   last_seen_version: "",
+  dictation_ceiling_seconds: 300,
 }
 
 export const mockShortcuts: ShortcutSettings = {

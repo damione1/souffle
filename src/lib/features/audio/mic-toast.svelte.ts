@@ -6,6 +6,7 @@ export type MicToastCopy = {
   title: string;
   detail: string;
   hint: string;
+  hasAction: boolean;
 };
 
 export type Translate = (key: string, options?: { values?: Record<string, string | number> }) => string;
@@ -19,6 +20,7 @@ export function micToastCopy(notice: InputRouteNotice, t: Translate): MicToastCo
           values: { from: notice.from_name ?? "", to: notice.to_name ?? "" },
         }),
         hint: t("mic_toast.switched_hint"),
+        hasAction: false,
       };
     case "connected": {
       const isBt = notice.transport === "bluetooth" || notice.transport === "bluetooth_le";
@@ -26,6 +28,7 @@ export function micToastCopy(notice: InputRouteNotice, t: Translate): MicToastCo
         title: t("mic_toast.connected"),
         detail: t("mic_toast.connected_detail", { values: { name: notice.to_name ?? "" } }),
         hint: t(isBt ? "mic_toast.connected_hint_bt" : "mic_toast.connected_hint"),
+        hasAction: true,
       };
     }
     case "lost":
@@ -35,6 +38,7 @@ export function micToastCopy(notice: InputRouteNotice, t: Translate): MicToastCo
           ? t("mic_toast.lost_detail", { values: { name: notice.from_name } })
           : t("mic_toast.lost_none"),
         hint: t("mic_toast.lost_hint"),
+        hasAction: notice.from_name == null,
       };
   }
 }

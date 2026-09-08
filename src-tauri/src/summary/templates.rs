@@ -173,13 +173,18 @@ mod tests {
 
     #[test]
     fn merge_empty_returns_defaults() {
-        assert_eq!(merge_summary_templates(Vec::new()), default_summary_templates());
+        assert_eq!(
+            merge_summary_templates(Vec::new()),
+            default_summary_templates()
+        );
     }
 
     #[test]
     fn resolve_requested_id_wins() {
         let mut settings = AppSettings::default();
-        settings.summary_templates.push(custom("mine", "Do it my way"));
+        settings
+            .summary_templates
+            .push(custom("mine", "Do it my way"));
 
         assert_eq!(
             resolve_summary_template_prompt(&settings, Some("mine")),
@@ -190,7 +195,9 @@ mod tests {
     #[test]
     fn resolve_unknown_or_missing_id_falls_back_to_settings_default() {
         let mut settings = AppSettings::default();
-        settings.summary_templates.push(custom("mine", "Do it my way"));
+        settings
+            .summary_templates
+            .push(custom("mine", "Do it my way"));
         settings.default_summary_template_id = "mine".to_string();
 
         assert_eq!(

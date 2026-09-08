@@ -116,6 +116,8 @@ describe("transcription controller", () => {
     model_id: "stt-1b-en_fr",
     backend_id: "candle",
   };
+  let nowOffset = 0;
+  const realDateNow = Date.now.bind(Date);
 
   function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
     switch (cmd) {
@@ -174,6 +176,9 @@ describe("transcription controller", () => {
       return Promise.resolve(mockUnlisten);
     });
 
+    nowOffset = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => realDateNow() + nowOffset);
+
     // Reset shared singleton app state between tests
     const app = getAppState();
     app.currentMeetingId = null;
@@ -203,8 +208,12 @@ describe("transcription controller", () => {
   });
 
   /** Simulate the backend emitting a StateChanged event by setting machineState */
-  function simulateRecordingStarted(app: ReturnType<typeof getAppState>) {
+  function simulateRecordingStarted(
+    app: ReturnType<typeof getAppState>,
+    elapsedMs = 600,
+  ) {
     app.machineState = { state: "recording_dictation", data: { profile: { engine_id: "kyutai", engine_label: "Kyutai", model_id: "stt-1b-en_fr", model_label: "STT 1B", backend_id: "candle", backend_label: "Candle" }, session_id: 1 } };
+    nowOffset += elapsedMs;
   }
 
   it("toggleRecording starts when loaded", async () => {
@@ -1109,6 +1118,46 @@ describe("transcription controller", () => {
     await ctrl.toggleRecording();
     expect(ctrl.tentative).toBe("");
     expect(ctrl.transcript).toBe("");
+  });
+
+  it("short dictation clears tentative and skips paste", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, auto_paste: true };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app, 0);
+    channel.emit({ text: "pending", is_final: false });
+    expect(ctrl.tentative).toBe("pending");
+
+    await ctrl.toggleRecording(true);
+
+    expect(ctrl.tentative).toBe("");
+    expect(ctrl.transcript).toBe("");
+    expect(ctrl.statusMessage).toBe("Hold a little longer");
+    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+  });
+
+  it("dictation ceiling stops a long session", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+      ctrl.app.settings = { ...ctrl.app.settings, dictation_ceiling_seconds: 2 };
+
+      await ctrl.toggleRecording();
+      simulateRecordingStarted(ctrl.app);
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shortcut-toggle is a no-op while a meeting is recording (SOU-044)", async () => {

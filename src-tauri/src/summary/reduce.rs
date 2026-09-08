@@ -57,8 +57,7 @@ pub fn plan_reduce_batches(
     let mut current: Vec<String> = part_summaries.to_vec();
 
     loop {
-        if current.len() <= 1
-            && reduce_prompt_fits(&current, None, &[], config.reduce_token_limit)
+        if current.len() <= 1 && reduce_prompt_fits(&current, None, &[], config.reduce_token_limit)
         {
             break;
         }
@@ -104,9 +103,17 @@ mod tests {
         let config = ChunkConfig::APPLE_INTELLIGENCE;
         let parts: Vec<String> = (1..=40).map(simulated_map_summary).collect();
         let batches = partition_for_reduce(&parts, config.reduce_token_limit).expect("partition");
-        assert!(batches.len() > 1, "expected multiple batches for long meetings");
+        assert!(
+            batches.len() > 1,
+            "expected multiple batches for long meetings"
+        );
         for batch in &batches {
-            assert!(reduce_prompt_fits(batch, None, &[], config.reduce_token_limit));
+            assert!(reduce_prompt_fits(
+                batch,
+                None,
+                &[],
+                config.reduce_token_limit
+            ));
         }
     }
 

@@ -18,6 +18,7 @@ struct TrayHandles {
     dictation: MenuItem<Wry>,
     meeting: MenuItem<Wry>,
     copy_last_transcription: MenuItem<Wry>,
+    pause_ptt: MenuItem<Wry>,
 }
 
 /// Monochrome template icon (black + alpha — macOS recolors it).
@@ -67,6 +68,10 @@ fn label(key: &str, fr: bool) -> &'static str {
         ("show", false) => "Show Window",
         ("show", true) => "Afficher la fenêtre",
         ("quit", false) => "Quit",
+        ("pause_1h", false) => "Pause Shortcut (1h)",
+        ("pause_1h", true) => "Pause raccourci (1 h)",
+        ("resume_ptt", false) => "Resume Shortcut",
+        ("resume_ptt", true) => "Reprendre",
         ("quit", true) => "Quitter",
         _ => "",
     }
@@ -260,6 +265,14 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         has_dictation_history(app),
         None::<&str>,
     )?;
+    let is_paused = app.state::<AppState>().ptt_is_paused();
+    let pause_ptt = MenuItem::with_id(
+        app,
+        "pause_ptt",
+        label(if is_paused { "resume_ptt" } else { "pause_1h" }, fr),
+        true,
+        None::<&str>,
+    )?;
     let separator = MenuItem::with_id(app, "sep", "─────────", false, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", label("settings", fr), true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", label("show", fr), true, None::<&str>)?;
@@ -271,6 +284,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             &toggle_dictation,
             &toggle_meeting,
             &copy_last_transcription,
+            &pause_ptt,
             &separator,
             &settings,
             &show,
@@ -282,6 +296,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         dictation: toggle_dictation,
         meeting: toggle_meeting,
         copy_last_transcription,
+        pause_ptt,
     });
 
     TrayIconBuilder::with_id(TRAY_ID)
@@ -312,6 +327,16 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             }
             "copy_last_transcription" => {
                 copy_last_transcription_to_clipboard(app);
+            }
+            "pause_ptt" => {
+                let state = app.state::<AppState>();
+                // Drop the pause mutex before current_machine_state/sync:
+                // sync() re-locks ptt_paused_until, and std::sync::Mutex is
+                // not reentrant.
+                state.toggle_ptt_pause();
+                if let Ok(machine) = state.current_machine_state() {
+                    sync(app, &machine);
+                }
             }
             "settings" => {
                 show_main_window(app);
@@ -397,14 +422,18 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
         let _ = handles
             .copy_last_transcription
             .set_enabled(has_dictation_history(app));
+        let is_paused = app.state::<AppState>().ptt_is_paused();
+        let _ = handles
+            .pause_ptt
+            .set_text(label(if is_paused { "resume_ptt" } else { "pause_1h" }, fr));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_notification_text, label, select_dictation_to_copy, should_restore_main_on_reopen,
-        CopyOutcome, DictationEntry,
+        CopyOutcome, DictationEntry, copy_notification_text, label, select_dictation_to_copy,
+        should_restore_main_on_reopen,
     };
 
     #[test]

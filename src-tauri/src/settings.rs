@@ -59,6 +59,7 @@ const LOG_LEVEL_KEY: &str = "log_level";
 const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
+const DICTATION_CEILING_SECONDS_KEY: &str = "dictation_ceiling_seconds";
 const SHORTCUT_REWRITE_KEY: &str = "shortcut_rewrite";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
@@ -215,6 +216,8 @@ pub struct AppSettings {
     /// After auto-paste, persist word-level edits from the focused field
     /// into the custom dictionary.
     pub dictation_learn_from_edit: bool,
+    /// Hard failsafe: stop dictation after this many seconds.
+    pub dictation_ceiling_seconds: u32,
     /// Active default meeting-summary template id: used by the Generate
     /// button when the user doesn't pick another template, and by any
     /// automatic summarization.
@@ -275,6 +278,7 @@ impl Default for AppSettings {
             dictation_polish_template_id: crate::summary::TEMPLATE_CLEAN.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
             dictation_learn_from_edit: true,
+            dictation_ceiling_seconds: 300,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: String::new(),
@@ -471,6 +475,11 @@ impl AppSettings {
             read_json_setting::<bool>(db, DICTATION_LEARN_FROM_EDIT_KEY)?
         {
             settings.dictation_learn_from_edit = dictation_learn_from_edit;
+        }
+        if let Some(dictation_ceiling_seconds) =
+            read_json_setting::<u32>(db, DICTATION_CEILING_SECONDS_KEY)?
+        {
+            settings.dictation_ceiling_seconds = dictation_ceiling_seconds;
         }
         if let Some(default_summary_template_id) =
             read_json_setting::<String>(db, DEFAULT_SUMMARY_TEMPLATE_ID_KEY)?
@@ -896,6 +905,11 @@ impl AppSettings {
         )?;
         write_json_setting(
             db,
+            DICTATION_CEILING_SECONDS_KEY,
+            &normalized.dictation_ceiling_seconds,
+        )?;
+        write_json_setting(
+            db,
             DEFAULT_SUMMARY_TEMPLATE_ID_KEY,
             &normalized.default_summary_template_id,
         )?;
@@ -1096,6 +1110,7 @@ mod tests {
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
             dictation_learn_from_edit: true,
+            dictation_ceiling_seconds: 120,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: "0.0.9".into(),

@@ -2,6 +2,12 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
+use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
+use objc2::{AllocAnyThread, msg_send};
+use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardWriting};
+use objc2_foundation::{NSArray, NSData, NSString};
+
 use arboard::Clipboard;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
@@ -26,6 +32,9 @@ const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(400);
 const CLIPBOARD_VERIFY_TIMEOUT: Duration = Duration::from_millis(250);
 const CLIPBOARD_VERIFY_INTERVAL: Duration = Duration::from_millis(10);
 
+const UTI_UTF8_PLAIN: &str = "public.utf8-plain-text";
+const UTI_NSSTRING_PBOARD: &str = "NSStringPboardType";
+
 /// Insert text into the active application after `delay_ms`, using either
 /// clipboard+Cmd+V or simulated keystrokes (for apps that reject synthetic paste).
 pub fn paste_text(text: &str, delay_ms: u64, method: PasteMethod) -> Result<(), String> {
@@ -38,8 +47,8 @@ pub fn paste_text(text: &str, delay_ms: u64, method: PasteMethod) -> Result<(), 
     if !permissions::accessibility_granted() {
         // SOU-033: leave the transcription on the pasteboard so the user can
         // ⌘V. Do not snapshot/restore — restoring would wipe the only copy
-        // they have. Full NSPasteboard (image/file) snapshot is still text-only;
-        // see RestoreBurst.
+        // they have. Accessibility still cannot restore rich pasteboard
+        // contents because we never took a snapshot.
         return copy_instead_of_paste(text, copy_text);
     }
 
@@ -138,9 +147,76 @@ fn wait_for_clipboard(clipboard: &mut Clipboard, text: &str) -> bool {
     false
 }
 
+/// Rust-owned pasteboard snapshot: each item is a list of (UTI, bytes).
+/// Copying the bytes before `arboard.set_text` clears the board, then
+/// writing fresh `NSPasteboardItem`s on restore. Live `NSPasteboardItem`
+/// objects are not `Send` and cannot be reused after `clearContents`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct PasteboardSnapshot(Vec<Vec<(String, Vec<u8>)>>);
+
+impl PasteboardSnapshot {
+    fn from_pasteboard() -> Option<Self> {
+        let items = NSPasteboard::generalPasteboard().pasteboardItems()?;
+        let mut out = Vec::new();
+        for item in items.iter() {
+            let mut flavors = Vec::new();
+            for ty in item.types().iter() {
+                let Some(data) = item.dataForType(&ty) else {
+                    continue;
+                };
+                flavors.push((ty.to_string(), data.to_vec()));
+            }
+            if !flavors.is_empty() {
+                out.push(flavors);
+            }
+        }
+        if out.is_empty() {
+            None
+        } else {
+            Some(Self(out))
+        }
+    }
+
+    fn first_plain_text(&self) -> Option<String> {
+        for flavors in &self.0 {
+            for (uti, bytes) in flavors {
+                if uti == UTI_UTF8_PLAIN || uti == UTI_NSSTRING_PBOARD {
+                    return String::from_utf8(bytes.clone()).ok();
+                }
+            }
+        }
+        None
+    }
+
+    fn write(&self) -> bool {
+        let pb = NSPasteboard::generalPasteboard();
+        let mut writers = Vec::with_capacity(self.0.len());
+        for flavors in &self.0 {
+            // SAFETY: `init` is NSPasteboardItem's designated initializer and
+            // returns a fully-formed item with no representations yet.
+            let item: Retained<NSPasteboardItem> =
+                unsafe { msg_send![NSPasteboardItem::alloc(), init] };
+            for (uti, bytes) in flavors {
+                let _ = item.setData_forType(&NSData::with_bytes(bytes), &NSString::from_str(uti));
+            }
+            writers.push(ProtocolObject::<dyn NSPasteboardWriting>::from_retained(
+                item,
+            ));
+        }
+        pb.clearContents();
+        let array = NSArray::from_retained_slice(&writers);
+        pb.writeObjects(&array)
+    }
+}
+
 fn paste_via_cmd_v(text: &str, delay_ms: u64, enigo: &mut Enigo) -> Result<(), String> {
+    // Snapshot before arboard clears the board. Register the restore
+    // immediately so an overlapping paste during verify/⌘V keeps the
+    // pre-burst clipboard, not the transcription.
+    let previous = PasteboardSnapshot::from_pasteboard();
+    let restore_gen = register_restore(previous);
+
     let mut clipboard = Clipboard::new().map_err(|e| format!("Clipboard init: {e}"))?;
-    let previous = clipboard.get_text().ok();
     clipboard
         .set_text(text)
         .map_err(|e| format!("Clipboard set: {e}"))?;
@@ -150,7 +226,7 @@ fn paste_via_cmd_v(text: &str, delay_ms: u64, enigo: &mut Enigo) -> Result<(), S
             timeout_ms = CLIPBOARD_VERIFY_TIMEOUT.as_millis(),
             "Clipboard did not serve the transcription in time; skipping paste"
         );
-        spawn_restore(previous, text.to_string());
+        spawn_restore(restore_gen, text.to_string());
         return Err(
             "Clipboard write did not take effect. Paste skipped so an older clipboard entry is not pasted instead."
                 .to_string(),
@@ -162,7 +238,7 @@ fn paste_via_cmd_v(text: &str, delay_ms: u64, enigo: &mut Enigo) -> Result<(), S
     let paste_result = send_paste_keys(enigo);
     // The pasteboard already holds the transcription, whether ⌘V landed or
     // not. Restore either way so a key error does not leave it there.
-    spawn_restore(previous, text.to_string());
+    spawn_restore(restore_gen, text.to_string());
     paste_result
 }
 
@@ -183,12 +259,12 @@ fn send_paste_keys(enigo: &mut Enigo) -> Result<(), String> {
 /// second paste within `CLIPBOARD_RESTORE_DELAY` cannot write the first
 /// transcription back as if it were the user's original contents.
 ///
-/// Text-only (arboard). A full `NSPasteboardItem` snapshot — images, files,
-/// custom types — is the remaining SOU-033 piece; it needs a main-thread
-/// pasteboard copy and a different restore payload than `Option<String>`.
+/// Bytes are copied out of AppKit before the pasteboard is replaced. Restore
+/// creates fresh `NSPasteboardItem`s rather than shipping live objects
+/// across threads.
 struct RestoreBurst {
     generation: u64,
-    original: Option<String>,
+    original: Option<PasteboardSnapshot>,
 }
 
 /// Accessibility is missing: write `text` for a manual ⌘V and return the
@@ -212,7 +288,7 @@ impl RestoreBurst {
         }
     }
 
-    fn begin(&mut self, previous: Option<String>) -> (u64, bool) {
+    fn begin(&mut self, previous: Option<PasteboardSnapshot>) -> (u64, bool) {
         self.generation = self.generation.wrapping_add(1);
         if self.original.is_none() {
             self.original = previous;
@@ -222,7 +298,7 @@ impl RestoreBurst {
 
     /// `None` means a newer paste owns the restore. `Some(snapshot)` is the
     /// pre-burst clipboard, which may itself be `None`.
-    fn take_if_current(&mut self, generation: u64) -> Option<Option<String>> {
+    fn take_if_current(&mut self, generation: u64) -> Option<Option<PasteboardSnapshot>> {
         if generation != self.generation {
             return None;
         }
@@ -250,21 +326,25 @@ fn cancel_pending_restore() {
     lock_restore().cancel_pending_restore();
 }
 
+fn register_restore(previous: Option<PasteboardSnapshot>) -> Option<u64> {
+    let (generation, has_snapshot) = lock_restore().begin(previous);
+    has_snapshot.then_some(generation)
+}
+
 /// The restore waits out `CLIPBOARD_RESTORE_DELAY`, and `paste_text` is a
 /// synchronous Tauri command, so it runs on the main thread. Detach it rather
 /// than freezing the UI for the whole wait; nothing downstream depends on it.
-fn spawn_restore(previous: Option<String>, ours: String) {
-    let (generation, has_snapshot) = lock_restore().begin(previous);
-    if !has_snapshot {
+fn spawn_restore(generation: Option<u64>, ours: String) {
+    let Some(generation) = generation else {
         return;
-    }
+    };
     thread::spawn(move || restore_clipboard(generation, &ours));
 }
 
 /// Put the pre-burst clipboard back after a delay long enough for ⌘V to land,
 /// and only if this generation is still current and the pasteboard still holds
 /// `ours`. Anything else means another paste, app, or the user wrote in the
-/// meantime. No-op when there was no previous text.
+/// meantime. No-op when there was no previous snapshot.
 ///
 /// Returns whether a restore was attempted (for unit tests; real AX is not
 /// exercised in CI).
@@ -289,13 +369,26 @@ fn restore_clipboard_now(generation: u64, ours: &str) -> bool {
         tracing::warn!("Clipboard changed after paste; leaving the new contents in place");
         return false;
     }
-    let _ = clipboard.set_text(&previous);
+    if previous.write() {
+        return true;
+    }
+    tracing::warn!("pasteboard restore writeObjects failed");
+    if let Some(text) = previous.first_plain_text() {
+        let _ = clipboard.set_text(&text);
+    }
     true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn text_snap(s: &str) -> Option<PasteboardSnapshot> {
+        Some(PasteboardSnapshot(vec![vec![(
+            UTI_UTF8_PLAIN.into(),
+            s.as_bytes().to_vec(),
+        )]]))
+    }
 
     #[test]
     fn paste_method_variants_exist() {
@@ -404,10 +497,26 @@ mod tests {
     }
 
     #[test]
+    fn text_snapshots_compare_by_owned_bytes() {
+        assert_eq!(text_snap("notes"), text_snap("notes"));
+        assert_ne!(text_snap("notes"), text_snap("other"));
+    }
+
+    #[test]
+    fn snapshot_keeps_two_flavors_on_one_item() {
+        let snap = PasteboardSnapshot(vec![vec![
+            (UTI_UTF8_PLAIN.into(), b"hi".to_vec()),
+            ("public.rtf".into(), b"{\\rtf}".to_vec()),
+        ]]);
+        assert_eq!(snap.0[0].len(), 2);
+        assert_eq!(snap.first_plain_text().as_deref(), Some("hi"));
+    }
+
+    #[test]
     fn overlapping_pastes_restore_the_pre_burst_clipboard() {
         let mut burst = RestoreBurst::new();
-        let (first, _) = burst.begin(Some("notes".into()));
-        let (second, has_snapshot) = burst.begin(Some("first transcription".into()));
+        let (first, _) = burst.begin(text_snap("notes"));
+        let (second, has_snapshot) = burst.begin(text_snap("first transcription"));
         assert!(has_snapshot);
         assert!(
             burst.take_if_current(first).is_none(),
@@ -415,7 +524,7 @@ mod tests {
         );
         assert_eq!(
             burst.take_if_current(second),
-            Some(Some("notes".into())),
+            Some(text_snap("notes")),
             "the newest restore puts back what was there before either paste"
         );
     }
@@ -423,10 +532,10 @@ mod tests {
     #[test]
     fn a_failed_read_on_the_second_paste_still_keeps_the_original() {
         let mut burst = RestoreBurst::new();
-        burst.begin(Some("notes".into()));
+        burst.begin(text_snap("notes"));
         let (second, has_snapshot) = burst.begin(None);
         assert!(has_snapshot);
-        assert_eq!(burst.take_if_current(second), Some(Some("notes".into())));
+        assert_eq!(burst.take_if_current(second), Some(text_snap("notes")));
     }
 
     #[test]
@@ -446,7 +555,7 @@ mod tests {
         // matter here whether the copy used the identical string the paste
         // wrote.
         let mut burst = RestoreBurst::new();
-        let (generation, has_snapshot) = burst.begin(Some("old clipboard".into()));
+        let (generation, has_snapshot) = burst.begin(text_snap("notes"));
         assert!(has_snapshot);
 
         burst.cancel_pending_restore();
@@ -471,16 +580,13 @@ mod tests {
     #[test]
     fn a_new_paste_after_a_cancelled_restore_still_gets_its_own_snapshot() {
         let mut burst = RestoreBurst::new();
-        let (first, _) = burst.begin(Some("notes".into()));
+        let (first, _) = burst.begin(text_snap("notes"));
         burst.cancel_pending_restore();
         assert!(burst.take_if_current(first).is_none());
 
-        let (second, has_snapshot) = burst.begin(Some("clipboard after copy".into()));
+        let (second, has_snapshot) = burst.begin(text_snap("later"));
         assert!(has_snapshot);
-        assert_eq!(
-            burst.take_if_current(second),
-            Some(Some("clipboard after copy".into()))
-        );
+        assert_eq!(burst.take_if_current(second), Some(text_snap("later")));
     }
 
     #[test]
@@ -510,11 +616,8 @@ mod tests {
             // Reset + begin under the same lock as take_if_current so a
             // parallel spawn_restore cannot bump the generation in between.
             *burst = RestoreBurst::new();
-            let generation = burst.begin(Some("old clipboard".into())).0;
-            assert_eq!(
-                burst.take_if_current(generation),
-                Some(Some("old clipboard".into()))
-            );
+            let generation = burst.begin(text_snap("notes")).0;
+            assert!(burst.take_if_current(generation).unwrap().is_some());
             barrier.wait();
             thread::sleep(Duration::from_millis(50));
             assert!(

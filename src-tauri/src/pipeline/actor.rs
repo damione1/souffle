@@ -139,7 +139,9 @@ impl EngineActorHandle {
         let handle = std::thread::Builder::new()
             .name("engine-actor".into())
             .spawn(move || {
-                crate::thread_qos::set_current_thread_qos(crate::thread_qos::ThreadQos::UserInitiated);
+                crate::thread_qos::set_current_thread_qos(
+                    crate::thread_qos::ThreadQos::UserInitiated,
+                );
                 EngineActor {
                     cmd_rx,
                     audio_rx,
@@ -344,11 +346,11 @@ impl LiveFilterState {
     }
 
     fn register_correction(&mut self, correction: SessionCorrection) {
-        if self
-            .session_corrections
-            .iter()
-            .any(|existing| existing.misspelling.eq_ignore_ascii_case(&correction.misspelling))
-        {
+        if self.session_corrections.iter().any(|existing| {
+            existing
+                .misspelling
+                .eq_ignore_ascii_case(&correction.misspelling)
+        }) {
             return;
         }
         self.session_corrections.push(correction);
@@ -693,7 +695,10 @@ impl EngineActor {
         // decodes with the wrong batch layout.
         let can_skip_reset = !diarize && self.state_fresh_for == Some(false);
         if can_skip_reset {
-            info!(session_id, diarize, "Engine state pre-warmed, skipping reset_state");
+            info!(
+                session_id,
+                diarize, "Engine state pre-warmed, skipping reset_state"
+            );
         } else {
             let reset_start = Instant::now();
             // Reset rebuilds streaming state with the right batch size (2 when
@@ -730,9 +735,7 @@ impl EngineActor {
             session_terms: config.session_terms,
             session_corrections: config.session_corrections,
         }));
-        let text_filters = Rc::new(RefCell::new(
-            filter_state.borrow().rebuild_chain(),
-        ));
+        let text_filters = Rc::new(RefCell::new(filter_state.borrow().rebuild_chain()));
 
         let mut health = SessionHealth::start(session_id, Arc::clone(&self.dropped_counter));
         let idle_monitor = config
@@ -1743,7 +1746,11 @@ fn notify_meeting_idle(app: &tauri::AppHandle, reason: MeetingIdleReason) {
 
     let (title, body) = match reason {
         MeetingIdleReason::Silence => (
-            if french { "Réunion probablement terminée" } else { "Meeting seems to be over" },
+            if french {
+                "Réunion probablement terminée"
+            } else {
+                "Meeting seems to be over"
+            },
             if french {
                 "Aucune parole détectée depuis un moment. L'enregistrement va bientôt s'arrêter."
             } else {
@@ -1751,7 +1758,11 @@ fn notify_meeting_idle(app: &tauri::AppHandle, reason: MeetingIdleReason) {
             },
         ),
         MeetingIdleReason::MaxDuration => (
-            if french { "Durée maximale atteinte" } else { "Maximum duration reached" },
+            if french {
+                "Durée maximale atteinte"
+            } else {
+                "Maximum duration reached"
+            },
             if french {
                 "L'enregistrement de la réunion a atteint la durée maximale et va s'arrêter."
             } else {
@@ -2014,7 +2025,10 @@ mod tests {
         mode.ingest(diarized_lane_chunk(Speaker::Me));
         assert!(mode.frame_ready(MIMI_FRAME_SIZE));
         assert_eq!(step_while_ready(&mut mode, &mut engine), 1);
-        assert_eq!(mode.them_buf.len(), DIARIZE_LAG_TOLERANCE_FRAMES.saturating_sub(1) * MIMI_FRAME_SIZE);
+        assert_eq!(
+            mode.them_buf.len(),
+            DIARIZE_LAG_TOLERANCE_FRAMES.saturating_sub(1) * MIMI_FRAME_SIZE
+        );
     }
 
     #[test]
@@ -2076,24 +2090,30 @@ mod tests {
         }
 
         assert!(mode.frame_ready(MIMI_FRAME_SIZE));
-        
+
         mode.step(&mut engine, MIMI_FRAME_SIZE).unwrap();
 
         // The partial samples should have been drained and padded
-        assert!(mode.me_buf.is_empty(), "partial me buffer should be completely drained");
+        assert!(
+            mode.me_buf.is_empty(),
+            "partial me buffer should be completely drained"
+        );
         assert_eq!(
             mode.them_buf.len(),
             DIARIZE_LAG_TOLERANCE_FRAMES * MIMI_FRAME_SIZE,
             "one them frame consumed, remaining should be left"
         );
-        
+
         assert_eq!(engine.dual_calls.len(), 1);
-        
+
         let (me_frame, them_frame) = &engine.dual_calls[0];
         assert_eq!(me_frame.len(), MIMI_FRAME_SIZE);
         assert_eq!(me_frame[0..partial_samples], vec![0.5f32; partial_samples]);
-        assert_eq!(me_frame[partial_samples..], vec![0.0f32; MIMI_FRAME_SIZE - partial_samples]);
-        
+        assert_eq!(
+            me_frame[partial_samples..],
+            vec![0.0f32; MIMI_FRAME_SIZE - partial_samples]
+        );
+
         assert_eq!(them_frame.len(), MIMI_FRAME_SIZE);
     }
 
@@ -2369,7 +2389,10 @@ mod tests {
         actor.set_unload_timeout_for_test(Duration::from_millis(50));
 
         assert!(
-            wait_for(|| unload_count.load(Ordering::SeqCst) >= 1, Duration::from_secs(2)),
+            wait_for(
+                || unload_count.load(Ordering::SeqCst) >= 1,
+                Duration::from_secs(2)
+            ),
             "engine should unload once the idle timeout elapses"
         );
     }
@@ -2389,7 +2412,10 @@ mod tests {
         actor.stop_session(Duration::from_secs(2)).expect("stop");
 
         assert!(
-            wait_for(|| unload_count.load(Ordering::SeqCst) >= 1, Duration::from_secs(2)),
+            wait_for(
+                || unload_count.load(Ordering::SeqCst) >= 1,
+                Duration::from_secs(2)
+            ),
             "timeout set mid-session must still apply once the session ends"
         );
     }
@@ -2430,7 +2456,9 @@ mod tests {
             ..session_config()
         };
         let (collected, cb) = collecting_callback();
-        actor.start_session(1, cfg, cb).expect("start with idle config");
+        actor
+            .start_session(1, cfg, cb)
+            .expect("start with idle config");
 
         // Give the actor loop a few ticks past the silence threshold with no
         // segments arriving, then confirm it is still alive and stops cleanly.
@@ -2464,7 +2492,9 @@ mod tests {
             ..session_config()
         };
         let (collected, cb) = collecting_callback();
-        actor.start_session(1, cfg, cb).expect("start with idle config");
+        actor
+            .start_session(1, cfg, cb)
+            .expect("start with idle config");
 
         std::thread::sleep(Duration::from_millis(50));
         for _ in 0..5 {
@@ -2989,7 +3019,10 @@ mod tests {
         // (so it never adds to stop latency), so poll for it instead of
         // asserting immediately.
         assert!(
-            wait_for(|| reset_count.load(Ordering::SeqCst) >= 1, Duration::from_secs(2)),
+            wait_for(
+                || reset_count.load(Ordering::SeqCst) >= 1,
+                Duration::from_secs(2)
+            ),
             "session end should pre-warm single-stream state"
         );
 
@@ -3004,7 +3037,10 @@ mod tests {
         audio_tx.send(end_of_stream(2)).unwrap();
         actor.stop_session(Duration::from_secs(2)).expect("stop 2");
         assert!(
-            wait_for(|| reset_count.load(Ordering::SeqCst) >= 2, Duration::from_secs(2)),
+            wait_for(
+                || reset_count.load(Ordering::SeqCst) >= 2,
+                Duration::from_secs(2)
+            ),
             "second session end should pre-warm again"
         );
 
@@ -3026,7 +3062,10 @@ mod tests {
             .stop_session(Duration::from_secs(2))
             .expect("stop diarized");
         assert!(
-            wait_for(|| reset_count.load(Ordering::SeqCst) >= 4, Duration::from_secs(2)),
+            wait_for(
+                || reset_count.load(Ordering::SeqCst) >= 4,
+                Duration::from_secs(2)
+            ),
             "post-session pre-warm resets back to single-stream"
         );
     }

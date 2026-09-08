@@ -12,12 +12,12 @@
 
 use std::path::{Path, PathBuf};
 
-use clap::Parser;
 use crate::constants::{SAMPLE_RATE_F64, SILENCE_SUFFIX_SAMPLES};
 use crate::engine::{
     TranscriptionEngine, TranscriptionProfile, TranscriptionSegment, collapse_whitespace,
     default_transcription_profile, resolve_transcription_profile, transcription_engine_catalog,
 };
+use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -490,7 +490,10 @@ fn list_engines(json: bool) -> i32 {
             .iter()
             .map(|e| serde_json::json!({ "id": e.id, "label": e.label }))
             .collect();
-        println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&items).unwrap_or_default()
+        );
     } else {
         for e in &catalog {
             println!("{:<10} {}", e.id, e.label);
@@ -531,7 +534,10 @@ fn list_models(json: bool) -> i32 {
                 })
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&items).unwrap_or_default()
+        );
     } else {
         for (p, installed) in &rows {
             println!(
@@ -539,7 +545,11 @@ fn list_models(json: bool) -> i32 {
                 p.engine_id,
                 p.model_id,
                 p.backend_id,
-                if *installed { "installed" } else { "not installed" }
+                if *installed {
+                    "installed"
+                } else {
+                    "not installed"
+                }
             );
         }
     }
@@ -600,7 +610,11 @@ mod tests {
 
     #[test]
     fn has_headless_flag_detects_transcribe_file() {
-        let args = vec!["souffle".to_string(), "--transcribe-file".to_string(), "x.wav".to_string()];
+        let args = vec![
+            "souffle".to_string(),
+            "--transcribe-file".to_string(),
+            "x.wav".to_string(),
+        ];
         assert!(has_headless_flag(&args));
     }
 
@@ -799,9 +813,18 @@ mod tests {
     #[test]
     fn summarize_runs_best_and_median() {
         let runs = vec![
-            RunStat { wall_ms: 100.0, rtf: 2.0 },
-            RunStat { wall_ms: 50.0, rtf: 4.0 },
-            RunStat { wall_ms: 75.0, rtf: 3.0 },
+            RunStat {
+                wall_ms: 100.0,
+                rtf: 2.0,
+            },
+            RunStat {
+                wall_ms: 50.0,
+                rtf: 4.0,
+            },
+            RunStat {
+                wall_ms: 75.0,
+                rtf: 3.0,
+            },
         ];
         let summary = summarize_runs(&runs);
         assert_eq!(summary.best_wall_ms, 50.0);
