@@ -21,7 +21,7 @@ describe('app store', () => {
     expect(state.downloadTotalFiles).toBe(0);
     expect(state.settings.theme).toBe('dark');
     expect(state.settings.auto_paste).toBe(false);
-    expect(state.settings.transcription_engine_id).toBe('');
+    expect(state.settings.transcription_engine_id).toBe('kyutai');
     expect(state.permissionsPanelOpen).toBe(false);
   });
 
