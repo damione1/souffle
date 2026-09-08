@@ -31,6 +31,12 @@ pub enum AudioCommand {
         /// setting is not off. `None` for dictation and for meetings
         /// recorded with retention off.
         record_path: Option<std::path::PathBuf>,
+        /// The pre-spawned system audio tap, if any (macOS only).
+        #[cfg(target_os = "macos")]
+        tap: Option<crate::audio::system_tap::TapHandle>,
+        /// The consumer side of the pre-spawned tap, if any (macOS only).
+        #[cfg(target_os = "macos")]
+        tap_cons: Option<ringbuf::HeapCons<f32>>,
     },
     Stop,
     SelectDevice(String),

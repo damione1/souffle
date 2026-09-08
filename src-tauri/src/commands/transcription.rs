@@ -10,7 +10,7 @@ use tauri_specta::Event;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::app_events::{MeetingFinalized, SystemWokeUp};
+use crate::app_events::{MeetingFinalized, SystemAudioStatus, SystemWokeUp};
 use crate::constants::STOP_REPLY_TIMEOUT_SECS;
 use crate::db::Database;
 use crate::engine::TranscriptionSegment;
@@ -172,6 +172,7 @@ async fn launch_meeting(
     let audio = state.audio_cmd_sender.clone();
     let db = Arc::clone(&state.db);
     let acc = Arc::clone(&state.meeting_accumulator);
+    let app = state.app_handle().ok();
     let res = tauri::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
             &actor,
@@ -182,6 +183,7 @@ async fn launch_meeting(
             session_terms,
             Some(recording_target),
             on_segment,
+            app,
         )
     })
     .await
@@ -242,6 +244,18 @@ struct RecordingTarget {
     session_index: usize,
 }
 
+/// Capture + diarize after the system-audio tap probe. A failed tap must not
+/// leave the actor in dual-lane mode (SOU-082).
+fn capture_and_diarize_after_probe(
+    capture_requested: bool,
+    tap_alive: bool,
+    engine_id: &str,
+) -> (bool, bool) {
+    let capture = capture_requested && tap_alive;
+    let diarize = capture && engine_id == crate::engine::KYUTAI_ENGINE_ID;
+    (capture, diarize)
+}
+
 /// Blocking core of starting a recording session, run via `spawn_blocking` so
 /// the long crossbeam reply wait (engine reset + filter-chain build) never
 /// blocks the Tauri command thread / window event loop. Preconditions and
@@ -256,23 +270,59 @@ fn start_pipeline_blocking(
     session_terms: Vec<String>,
     recording_target: Option<RecordingTarget>,
     on_segment: SegmentCallback,
+    app: Option<AppHandle>,
 ) -> Result<(), String> {
     // Snapshot settings and dictionary; the actor builds filter chains on its
     // own thread to keep ONNX/Metal work off the command thread.
     let settings = crate::settings::AppSettings::load(db)?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
 
-    // Meetings also capture system audio (the other participants) when the
-    // setting is on and the OS supports Core Audio taps.
     let capture_system_audio = mode == PipelineMode::Meeting
         && settings.capture_system_audio
         && crate::platform::system_audio_capture_supported();
-    // Speaker labelling (Me/Them) needs a distinct system-audio leg AND an
-    // engine that can transcribe two batched lanes. Only Kyutai can today; other
-    // engines record meetings as a single mixed stream with no labels. This must
-    // match the engine's own capability so capture and the actor agree on
-    // whether to split the audio.
-    let diarize =
-        capture_system_audio && settings.transcription_engine_id == crate::engine::KYUTAI_ENGINE_ID;
+
+    // SOU-082: Try to acquire the system audio tap *before* starting the session
+    // so we can downgrade to single-stream (diarize = false) if the tap fails.
+    #[cfg(target_os = "macos")]
+    let (tap_handle, tap_cons) = if capture_system_audio {
+        use ringbuf::traits::Split;
+        let (tap_prod, tap_cons) =
+            ringbuf::HeapRb::<f32>::new(crate::audio::mixer::MIX_RATE as usize * 2).split();
+        match crate::audio::system_tap::spawn_tap(tap_prod, std::time::Duration::from_secs(5)) {
+            Ok(tap) => (Some(tap), Some(tap_cons)),
+            Err(e) => {
+                let reason = e.to_string();
+                tracing::warn!("System audio tap probe failed, downgrading to mic only: {reason}");
+                if let Some(app) = &app {
+                    let _ = SystemAudioStatus {
+                        active: false,
+                        reason: Some(reason),
+                    }
+                    .emit(app);
+                }
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    let tap_alive = {
+        #[cfg(target_os = "macos")]
+        {
+            !capture_system_audio || tap_handle.is_some()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            true
+        }
+    };
+    let (actual_capture_system_audio, diarize) = capture_and_diarize_after_probe(
+        capture_system_audio,
+        tap_alive,
+        &settings.transcription_engine_id,
+    );
 
     // Auto-stop detection only applies to meetings: dictation sessions are
     // short and user-driven, so "meeting is over" doesn't apply. This is a
@@ -321,9 +371,13 @@ fn start_pipeline_blocking(
             session_id,
             target_sample_rate: info.audio.sample_rate_hz,
             mic_gain: info.mic_gain,
-            capture_system_audio,
+            capture_system_audio: actual_capture_system_audio,
             diarize,
             record_path,
+            #[cfg(target_os = "macos")]
+            tap: tap_handle,
+            #[cfg(target_os = "macos")]
+            tap_cons,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
@@ -468,6 +522,7 @@ pub async fn start_transcription(
     let actor = Arc::clone(&state.engine_actor);
     let audio = state.audio_cmd_sender.clone();
     let db = Arc::clone(&state.db);
+    let app = state.app_handle().ok();
     tauri::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
             &actor,
@@ -478,6 +533,7 @@ pub async fn start_transcription(
             Vec::new(),
             None,
             on_segment,
+            app,
         )
     })
     .await
@@ -970,8 +1026,8 @@ pub fn clear_sleep_paused_meeting(state: State<'_, AppState>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, dictation_live_preview,
-        paste_failure_notification_text,
+        MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, capture_and_diarize_after_probe,
+        dictation_live_preview, paste_failure_notification_text,
     };
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
     use crate::state::MeetingAccumulator;
@@ -1158,5 +1214,25 @@ mod tests {
         assert_eq!(title_not_saved, "Copié — presse ⌘V");
         assert!(body_not_saved.contains("Accessibilité"));
         assert!(!body_not_saved.contains("l'historique"));
+    }
+
+    #[test]
+    fn tap_probe_failure_downgrades_to_single_stream() {
+        assert_eq!(
+            capture_and_diarize_after_probe(true, false, crate::engine::KYUTAI_ENGINE_ID),
+            (false, false)
+        );
+        assert_eq!(
+            capture_and_diarize_after_probe(true, true, crate::engine::KYUTAI_ENGINE_ID),
+            (true, true)
+        );
+        assert_eq!(
+            capture_and_diarize_after_probe(true, true, "whisper"),
+            (true, false)
+        );
+        assert_eq!(
+            capture_and_diarize_after_probe(false, true, crate::engine::KYUTAI_ENGINE_ID),
+            (false, false)
+        );
     }
 }

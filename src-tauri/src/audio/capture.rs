@@ -965,6 +965,10 @@ impl AudioCapture {
                             capture_system_audio,
                             diarize,
                             record_path,
+                            #[cfg(target_os = "macos")]
+                            tap,
+                            #[cfg(target_os = "macos")]
+                            tap_cons,
                         } => {
                             if let Err(e) = capture.start(
                                 session_id,
@@ -973,6 +977,10 @@ impl AudioCapture {
                                 capture_system_audio,
                                 diarize,
                                 record_path,
+                                #[cfg(target_os = "macos")]
+                                tap,
+                                #[cfg(target_os = "macos")]
+                                tap_cons,
                             ) {
                                 warn!("Failed to start audio capture: {e}");
                             }
@@ -1097,6 +1105,8 @@ impl AudioCapture {
         capture_system_audio: bool,
         diarize: bool,
         record_path: Option<PathBuf>,
+        #[cfg(target_os = "macos")] tap: Option<crate::audio::system_tap::TapHandle>,
+        #[cfg(target_os = "macos")] tap_cons: Option<ringbuf::HeapCons<f32>>,
     ) -> Result<(), String> {
         let is_new_session = self
             .active_params
@@ -1177,6 +1187,10 @@ impl AudioCapture {
                 target_sample_rate,
                 mic_gain,
                 diarize,
+                #[cfg(target_os = "macos")]
+                tap,
+                #[cfg(target_os = "macos")]
+                tap_cons,
             );
         }
 
@@ -1374,6 +1388,7 @@ impl AudioCapture {
     /// Meeting mode: the cpal callback only pushes raw samples into a ring
     /// buffer; a system-audio tap fills a second ring; `meeting_tick()` on
     /// this thread resamples, mixes, and forwards to the engine.
+    #[allow(clippy::too_many_arguments)]
     fn start_meeting(
         &mut self,
         device: &Device,
@@ -1382,6 +1397,8 @@ impl AudioCapture {
         target_sample_rate: u32,
         mic_gain: f32,
         diarize: bool,
+        #[cfg(target_os = "macos")] pre_spawned_tap: Option<crate::audio::system_tap::TapHandle>,
+        #[cfg(target_os = "macos")] pre_spawned_tap_cons: Option<ringbuf::HeapCons<f32>>,
     ) -> Result<(), String> {
         let sample_rate = config.sample_rate;
         let channels = config.channels;
@@ -1441,25 +1458,34 @@ impl AudioCapture {
             return Ok(());
         }
 
-        let (tap_prod, tap_cons) = HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
-
         #[cfg(target_os = "macos")]
-        let (tap, tap_rate) = match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
-            Ok(tap) => {
-                let rate = tap.sample_rate;
-                emit_system_audio_status(self.app.as_ref(), true, None);
-                (Some(tap), rate)
-            }
-            Err(e) => {
-                warn!("System audio capture unavailable, recording mic only: {e}");
-                emit_system_audio_status(self.app.as_ref(), false, Some(e));
-                (None, super::mixer::MIX_RATE)
+        let (tap, tap_rate, tap_cons) = if let Some(tap) = pre_spawned_tap {
+            let rate = tap.sample_rate;
+            emit_system_audio_status(self.app.as_ref(), true, None);
+            (Some(tap), rate, pre_spawned_tap_cons.unwrap())
+        } else {
+            let (tap_prod, tap_cons) =
+                HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
+            match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
+                Ok(tap) => {
+                    let rate = tap.sample_rate;
+                    emit_system_audio_status(self.app.as_ref(), true, None);
+                    (Some(tap), rate, tap_cons)
+                }
+                Err(e) => {
+                    warn!("System audio capture unavailable, recording mic only: {e}");
+                    emit_system_audio_status(self.app.as_ref(), false, Some(e));
+                    (None, super::mixer::MIX_RATE, tap_cons)
+                }
             }
         };
+
         #[cfg(not(target_os = "macos"))]
-        let tap_rate = {
+        let (tap_rate, tap_cons) = {
+            let (tap_prod, tap_cons) =
+                HeapRb::<f32>::new(super::mixer::MIX_RATE as usize * 2).split();
             drop(tap_prod);
-            super::mixer::MIX_RATE
+            (super::mixer::MIX_RATE, tap_cons)
         };
 
         let mut mixer = MeetingMixer::new(
@@ -1576,6 +1602,10 @@ impl AudioCapture {
             params.capture_system_audio,
             params.diarize,
             params.record_path.clone(),
+            #[cfg(target_os = "macos")]
+            None,
+            #[cfg(target_os = "macos")]
+            None,
         ) {
             Ok(()) => {
                 self.clear_mic_loss_ladder();
