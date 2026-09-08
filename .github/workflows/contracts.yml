@@ -50,9 +50,7 @@ jobs:
       # a &str into a String while the other added a caller. Only the merged
       # tree catches that, so run the suites here as well as locally.
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      # clippy -D warnings is SOU-031 remainder: existing lints (e.g.
-      # manual_repeat_n in filter) still fail a clean tree. Don't turn it
-      # on until those are fixed in their own PR.
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
       - run: npm test
       - run: npm run check
