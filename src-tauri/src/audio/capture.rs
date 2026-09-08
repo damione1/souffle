@@ -1388,6 +1388,7 @@ impl AudioCapture {
     /// Meeting mode: the cpal callback only pushes raw samples into a ring
     /// buffer; a system-audio tap fills a second ring; `meeting_tick()` on
     /// this thread resamples, mixes, and forwards to the engine.
+    #[allow(clippy::too_many_arguments)]
     fn start_meeting(
         &mut self,
         device: &Device,
@@ -1601,6 +1602,10 @@ impl AudioCapture {
             params.capture_system_audio,
             params.diarize,
             params.record_path.clone(),
+            #[cfg(target_os = "macos")]
+            None,
+            #[cfg(target_os = "macos")]
+            None,
         ) {
             Ok(()) => {
                 self.clear_mic_loss_ladder();
