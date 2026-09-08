@@ -2,7 +2,7 @@
  * (`CommandOrControl+Shift+Space`). Returns null for modifier-only or
  * unmapped keys. */
 export function modifierToShortcut(event: KeyboardEvent): string | null {
-  if (event.key === "Fn" || event.key === "Clear" /* Globe sometimes maps to Clear in browsers? wait, just use code/key */) return "Fn";
+  if (event.key === "Fn" || event.code === "Fn" || event.key === "Clear") return "Fn";
   if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
     return event.code; // e.g. MetaLeft, AltRight
   }

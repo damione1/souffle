@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -20,7 +20,7 @@ pub fn start_modifier_tap(app: AppHandle) {
         // Wait a little before starting to ensure AppState is registered
         std::thread::sleep(Duration::from_millis(500));
         let app_clone = app.clone();
-        
+
         let tap_port_ptr = Arc::new(AtomicUsize::new(0));
         let tap_port_clone = tap_port_ptr.clone();
 
@@ -65,21 +65,12 @@ pub fn start_modifier_tap(app: AppHandle) {
                     return CallbackResult::Keep;
                 };
 
-                let keycode = event.get_integer_value_field(core_graphics::event::EventField::KEYBOARD_EVENT_KEYCODE);
+                let keycode = event.get_integer_value_field(
+                    core_graphics::event::EventField::KEYBOARD_EVENT_KEYCODE,
+                );
                 let flags = event.get_flags();
 
-                let is_match = matches!(
-                    (shortcut.as_str(), keycode),
-                    ("Fn", 63) |
-                    ("MetaLeft", 55) |
-                    ("MetaRight", 54) |
-                    ("ShiftLeft", 56) |
-                    ("ShiftRight", 60) |
-                    ("AltLeft", 58) |
-                    ("AltRight", 61) |
-                    ("ControlLeft", 59) |
-                    ("ControlRight", 62)
-                );
+                let is_match = shortcut_matches_keycode(&shortcut, keycode);
 
                 if !is_match {
                     return CallbackResult::Keep;
@@ -96,27 +87,15 @@ pub fn start_modifier_tap(app: AppHandle) {
                     };
 
                     if is_pressed {
-                        if state.ptt_is_paused() {
-                            state.ptt_start_armed.store(false, Ordering::SeqCst);
-                        } else {
-                            state.ptt_start_armed.store(true, Ordering::SeqCst);
-                            let _ = ShortcutPttStart.emit(&app_clone);
-                        }
-                    } else {
-                        if state.ptt_start_armed.swap(false, Ordering::SeqCst) {
-                            let _ = ShortcutPttStop.emit(&app_clone);
-                        }
+                        emit_ptt_start(state, &app_clone);
+                    } else if state.ptt_start_armed.swap(false, Ordering::SeqCst) {
+                        let _ = ShortcutPttStop.emit(&app_clone);
                     }
                     return CallbackResult::Drop;
                 }
 
                 if matches!(event_type, CGEventType::KeyDown) {
-                    if state.ptt_is_paused() {
-                        state.ptt_start_armed.store(false, Ordering::SeqCst);
-                    } else {
-                        state.ptt_start_armed.store(true, Ordering::SeqCst);
-                        let _ = ShortcutPttStart.emit(&app_clone);
-                    }
+                    emit_ptt_start(state, &app_clone);
                     return CallbackResult::Drop;
                 } else if matches!(event_type, CGEventType::KeyUp) {
                     if state.ptt_start_armed.swap(false, Ordering::SeqCst) {
@@ -132,10 +111,15 @@ pub fn start_modifier_tap(app: AppHandle) {
         match tap_result {
             Ok(tap) => {
                 info!("Modifier CGEventTap installed");
-                tap_port_ptr.store(tap.mach_port().as_concrete_TypeRef() as usize, Ordering::Relaxed);
+                tap_port_ptr.store(
+                    tap.mach_port().as_concrete_TypeRef() as usize,
+                    Ordering::Relaxed,
+                );
                 let loop_source = tap.mach_port().create_runloop_source(0).unwrap();
                 let current_loop = core_foundation::runloop::CFRunLoop::get_current();
-                current_loop.add_source(&loop_source, unsafe { core_foundation::runloop::kCFRunLoopCommonModes });
+                current_loop.add_source(&loop_source, unsafe {
+                    core_foundation::runloop::kCFRunLoopCommonModes
+                });
                 tap.enable();
                 core_foundation::runloop::CFRunLoop::run_current();
             }
@@ -144,4 +128,69 @@ pub fn start_modifier_tap(app: AppHandle) {
             }
         }
     });
+}
+
+fn emit_ptt_start(state: &AppState, app: &AppHandle) {
+    if state.ptt_is_paused() {
+        state.ptt_start_armed.store(false, Ordering::SeqCst);
+        return;
+    }
+    // Key-repeat (and extra FlagsChanged) must not re-emit Start.
+    if !state.ptt_start_armed.swap(true, Ordering::SeqCst) {
+        let _ = ShortcutPttStart.emit(app);
+    }
+}
+
+/// macOS virtual keycodes for modifier-only PTT and F5–F12 (SOU-032).
+fn shortcut_matches_keycode(shortcut: &str, keycode: i64) -> bool {
+    matches!(
+        (shortcut, keycode),
+        ("Fn", 63)
+            | ("MetaLeft", 55)
+            | ("MetaRight", 54)
+            | ("ShiftLeft", 56)
+            | ("ShiftRight", 60)
+            | ("AltLeft", 58)
+            | ("AltRight", 61)
+            | ("ControlLeft", 59)
+            | ("ControlRight", 62)
+            | ("F5", 96)
+            | ("F6", 97)
+            | ("F7", 98)
+            | ("F8", 100)
+            | ("F9", 101)
+            | ("F10", 109)
+            | ("F11", 103)
+            | ("F12", 111)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shortcut_matches_keycode;
+
+    #[test]
+    fn modifier_and_fn_keycodes() {
+        assert!(shortcut_matches_keycode("Fn", 63));
+        assert!(shortcut_matches_keycode("MetaLeft", 55));
+        assert!(shortcut_matches_keycode("ControlRight", 62));
+        assert!(!shortcut_matches_keycode("Fn", 55));
+    }
+
+    #[test]
+    fn f_keys_f5_through_f12() {
+        for (name, code) in [
+            ("F5", 96),
+            ("F6", 97),
+            ("F7", 98),
+            ("F8", 100),
+            ("F9", 101),
+            ("F10", 109),
+            ("F11", 103),
+            ("F12", 111),
+        ] {
+            assert!(shortcut_matches_keycode(name, code), "{name}");
+        }
+        assert!(!shortcut_matches_keycode("F5", 122));
+    }
 }

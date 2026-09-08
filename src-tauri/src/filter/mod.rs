@@ -284,7 +284,7 @@ mod tests {
                     + (t * 360.0 * std::f32::consts::TAU).sin() * 0.1,
             );
         }
-        block.extend(std::iter::repeat_n(0.0f32, 480 * 16));
+        block.extend(std::iter::repeat(0.0f32).take(480 * 16));
 
         let mut probe = match audio_vad::SileroVadFilter::new(&model_path, 16_000) {
             Ok(v) => v,

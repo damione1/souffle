@@ -88,15 +88,25 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
         info!(shortcut = shortcuts.rewrite, "Rewrite shortcut registered");
     }
 
-    
     let is_modifier = matches!(
         shortcuts.push_to_talk.as_str(),
-        "Fn" | "MetaLeft" | "MetaRight" | "ControlLeft" | "ControlRight" | "AltLeft" | "AltRight" | "ShiftLeft" | "ShiftRight"
+        "Fn" | "MetaLeft"
+            | "MetaRight"
+            | "ControlLeft"
+            | "ControlRight"
+            | "AltLeft"
+            | "AltRight"
+            | "ShiftLeft"
+            | "ShiftRight"
     );
 
     if let Some(state) = app.try_state::<AppState>() {
         let mut lock = state.modifier_ptt_shortcut.write().unwrap();
-        *lock = if is_modifier { Some(shortcuts.push_to_talk.clone()) } else { None };
+        *lock = if is_modifier {
+            Some(shortcuts.push_to_talk.clone())
+        } else {
+            None
+        };
     }
 
     if !shortcuts.push_to_talk.is_empty() && !is_modifier {
