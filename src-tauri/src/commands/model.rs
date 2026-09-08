@@ -11,7 +11,7 @@ use crate::engine::{
 use crate::models;
 use crate::settings::AppSettings;
 use crate::state::AppState;
-use crate::state_machine::{AppStateMachine, StateAction};
+use crate::state_machine::{AppStateMachine, ErrorRecovery, StateAction};
 
 /// Drop the loaded engine so the machine can leave Ready. On actor error,
 /// Fail out of Unloading — never leave that corridor without UnloadComplete.
@@ -279,8 +279,13 @@ pub fn delete_model(
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
 
-    // Cannot delete the actively loaded model
     let machine = state.current_machine_state()?;
+    if model_delete_blocked_by_transition(&machine) {
+        return Err(
+            "Cannot delete a model while it is downloading, loading, unloading, or recovering from a failed unload."
+                .into(),
+        );
+    }
     if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
         return Err("Cannot delete the currently loaded model. Unload it first or switch to a different model.".into());
     }
@@ -295,6 +300,22 @@ pub fn delete_model(
     );
 
     Ok(())
+}
+
+/// Downloading/loading/unloading all hold model files; Unloading and
+/// RetryFromReady are not `is_model_ready`, so they must be listed here or
+/// delete can race teardown (or delete files still held after a failed unload).
+fn model_delete_blocked_by_transition(machine: &AppStateMachine) -> bool {
+    matches!(
+        machine,
+        AppStateMachine::Downloading { .. }
+            | AppStateMachine::Loading { .. }
+            | AppStateMachine::Unloading { .. }
+            | AppStateMachine::Error {
+                recovery: ErrorRecovery::RetryFromReady { .. },
+                ..
+            }
+    )
 }
 
 /// Debug: feed the debug WAV through the engine to test model in isolation.
@@ -341,5 +362,54 @@ pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String>
         Ok("No words detected (model produced 0 segments)".into())
     } else {
         Ok(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile() -> TranscriptionProfile {
+        TranscriptionProfile::default()
+    }
+
+    #[test]
+    fn delete_is_blocked_while_unloading() {
+        let unloading = AppStateMachine::Unloading {
+            profile: profile(),
+            next_profile: None,
+        };
+        assert!(model_delete_blocked_by_transition(&unloading));
+        assert!(!unloading.is_model_ready());
+    }
+
+    #[test]
+    fn delete_is_blocked_while_downloading_or_loading() {
+        assert!(model_delete_blocked_by_transition(
+            &AppStateMachine::Downloading { profile: profile() }
+        ));
+        assert!(model_delete_blocked_by_transition(
+            &AppStateMachine::Loading { profile: profile() }
+        ));
+        assert!(!model_delete_blocked_by_transition(&AppStateMachine::Idle));
+        assert!(!model_delete_blocked_by_transition(
+            &AppStateMachine::Ready { profile: profile() }
+        ));
+    }
+
+    #[test]
+    fn delete_is_blocked_while_retry_from_ready() {
+        let failed = AppStateMachine::Error {
+            message: "Recording session active".into(),
+            recovery: ErrorRecovery::RetryFromReady { profile: profile() },
+        };
+        assert!(model_delete_blocked_by_transition(&failed));
+        assert!(!failed.is_model_ready());
+        assert!(!model_delete_blocked_by_transition(
+            &AppStateMachine::Error {
+                message: "download failed".into(),
+                recovery: ErrorRecovery::RetryFromIdle,
+            }
+        ));
     }
 }

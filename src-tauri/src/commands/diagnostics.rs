@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::diagnostics::{collect_bundle, format_bundle_text, tail_log_file, DiagnosticsBundle};
+use crate::diagnostics::{DiagnosticsBundle, collect_bundle, format_bundle_text, tail_log_file};
 use crate::settings::AppSettings;
 use crate::state::AppState;
 use crate::update_check::UpdateCheckResult;

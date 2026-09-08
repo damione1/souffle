@@ -91,6 +91,7 @@ const defaultSettings: AppSettings = {
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
   ],
   dictation_learn_from_edit: true,
+  dictation_ceiling_seconds: 300,
   default_summary_template_id: "default",
   summary_templates: [
     { id: "default", name: "Default", prompt: "Default summary prompt." },
@@ -460,6 +461,86 @@ describe("settings controller", () => {
       selection: { engine_id: "kyutai", model_id: "stt-2.6b-en", backend_id: "candle" },
     });
     expect(mockInvoke).not.toHaveBeenCalledWith("download_model", expect.anything());
+  });
+
+  it("selectModelOption does not persist while a meeting is recording", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+        meeting_id: "m1",
+      },
+    };
+
+    mockInvoke.mockClear();
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("load_model", expect.anything());
+    expect(ctrl.app.settings.transcription_engine_id).toBe("kyutai");
+    expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
+    expect(ctrl.app.settings.transcription_backend_id).toBe("candle");
+    expect(ctrl.statusMessage).toBe("Can't change the transcription model while recording.");
+  });
+
+  it("selectModelOption does not persist while dictation is recording", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_dictation",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+      },
+    };
+
+    mockInvoke.mockClear();
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
+    expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
+  });
+
+  it("restores the previous model triple when save_settings refuses the switch", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "save_settings") {
+        const settings = args?.settings as AppSettings;
+        if (settings.transcription_model_id !== "stt-1b-en_fr") {
+          return Promise.reject("Cannot change the transcription model while recording");
+        }
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    await ctrl.selectModelOption("kyutai:stt-2.6b-en");
+
+    expect(ctrl.app.settings.transcription_engine_id).toBe("kyutai");
+    expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
+    expect(ctrl.app.settings.transcription_backend_id).toBe("candle");
+    expect(mockInvoke).not.toHaveBeenCalledWith("load_model", expect.anything());
   });
 
   it("shortcut recording flow", async () => {
@@ -999,5 +1080,53 @@ describe("settings controller", () => {
     await Promise.all([mounted, switched]);
 
     expect(ctrl.inputSampleRate).toBe(48_000);
+  });
+
+  it("refuses to delete a model while a download or load is in flight", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    ctrl.app.machineState = {
+      state: "downloading",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+      },
+    };
+
+    await ctrl.handleDeleteModel();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("delete_model", expect.anything());
+    expect(ctrl.statusMessage).toMatch(/downloading, loading, or unloading/i);
+  });
+
+  it("refuses to delete a model while it is unloading", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+    ctrl.app.machineState = {
+      state: "unloading",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        next_profile: null,
+      },
+    };
+
+    expect(ctrl.modelOperationState).toBe("unloading");
+    await ctrl.handleDeleteModel();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("delete_model", expect.anything());
+    expect(ctrl.statusMessage).toMatch(/unloading/i);
   });
 });

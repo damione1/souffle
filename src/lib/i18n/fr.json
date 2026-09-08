@@ -329,7 +329,6 @@
     "generating": "Génération...",
     "regenerate_summary": "Régénérer le résumé",
     "generate_summary": "Générer le résumé",
-    "connect_ollama": "Connectez Ollama dans les Paramètres pour activer les résumés.",
     "no_summary_provider": "Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans les Paramètres.",
     "no_compatible_model": "Aucun modèle Ollama compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
     "generate_hint": "Points clés et actions, générés sur l'appareil",
@@ -414,6 +413,7 @@
   "status_chip": {
     "ready": "Prêt",
     "loading": "Chargement du modèle…",
+    "load_required": "Modèle à charger",
     "downloading": "Téléchargement",
     "model_required": "Modèle requis"
   },
@@ -427,6 +427,7 @@
   "settings_model": {
     "title": "Modèle de transcription",
     "description": "Choisissez un modèle — il se télécharge et se charge automatiquement. Tout tourne sur ce Mac.",
+    "recording_locked": "Impossible de changer de modèle pendant un enregistrement.",
     "downloading": "Téléchargement…",
     "unload_timeout_label": "Décharger le modèle en cas d'inactivité",
     "unload_timeout_desc": "Libère de la mémoire après une période sans transcription. Se recharge automatiquement au prochain enregistrement.",
@@ -442,7 +443,8 @@
     "model_storage_desc": "Supprimer les fichiers du modèle téléchargé du disque.",
     "delete_model": "Supprimer le modèle téléchargé",
     "delete_model_confirm": "Supprimer",
-    "delete_model_msg": "Les fichiers du modèle seront supprimés ; il faudra les retélécharger."
+    "delete_model_msg": "Les fichiers du modèle seront supprimés ; il faudra les retélécharger.",
+    "delete_model_busy": "Impossible de supprimer pendant un téléchargement, un chargement ou un déchargement."
   },
   "pill": {
     "dictation": "Dictée",
@@ -465,6 +467,7 @@
     "dismiss": "Fermer"
   },
   "home": {
+    "dictation_too_short": "Tiens un peu plus longtemps",
     "dictate": "Dicter",
     "dictate_hint": "Définissez un raccourci dans les réglages",
     "meeting": "Meeting",
@@ -488,19 +491,27 @@
     "idle_keep_recording": "Continuer l'enregistrement",
     "live_edit_hint": "Double-cliquez sur un paragraphe pour corriger un mot mal entendu. Les occurrences suivantes seront corrigées automatiquement.",
     "live_edit_save": "Enregistrer",
-    "live_edit_cancel": "Annuler"
+    "live_edit_cancel": "Annuler",
+    "paste_copied": "Copié — presse ⌘V",
+    "paste_failed": "Collage impossible : {error}",
+    "model_required_dictation": "Télécharge et charge le modèle pour dicter.",
+    "model_required_meeting": "Charge le modèle pour lancer une réunion.",
+    "open_model": "Ouvrir le modèle",
+    "polish_timeout": "La reformulation a pris trop de temps. Le texte original a été enregistré.",
+    "recording_interrupted": "L'enregistrement a été interrompu.",
+    "recording_interrupted_saved": "L'enregistrement a été interrompu. Le transcript partiel a été enregistré."
   },
   "permissions": {
     "title": "Autoriser les permissions",
     "subtitle": "Soufflé a besoin de quelques permissions macOS pour enregistrer et coller. Accordez-les maintenant pour éviter les interruptions.",
     "mic_label": "Microphone",
-    "mic_desc": "Enregistrer votre voix pour la dictée et les meetings.",
+    "mic_desc": "Enregistrer votre voix pour la dictée et les meetings. Soufflé n'écoute que pendant la prise.",
     "mic_denied_hint": "L'accès au microphone a été refusé, et macOS ne redemandera pas. Autorisez-le dans Réglages Système > Confidentialité et sécurité > Microphone, puis revenez ici.",
     "mic_no_device_hint": "Aucun microphone détecté. Connectez-en un, ou choisissez une autre entrée dans Réglages > Audio.",
     "system_label": "Audio système",
-    "system_desc": "Capturer les autres participants pendant les meetings.",
+    "system_desc": "Capturer les autres participants pendant les meetings. Actif uniquement en réunion.",
     "accessibility_label": "Accessibilité",
-    "accessibility_desc": "Coller les transcriptions automatiquement avec ⌘V.",
+    "accessibility_desc": "Coller les transcriptions automatiquement avec ⌘V. Soufflé ne lit pas votre écran.",
     "grant": "Autoriser",
     "open_settings": "Ouvrir Réglages",
     "granted": "Accordé",
@@ -510,6 +521,7 @@
     "skip_hint": "Vous pourrez les accorder plus tard.",
     "accessibility_stale_hint": "Déjà coché dans Réglages mais toujours refusé ? macOS peut conserver une entrée obsolète après une mise à jour. Essayez Réparer, ou retirez Souffle avec le bouton moins puis rajoutez-le.",
     "repair": "Réparer la permission",
+    "accessibility_repair_success": "Une nouvelle demande va s'afficher. Cochez la case pour terminer la réparation.",
     "settings_title": "Permissions",
     "settings_desc": "Revérifier ou réparer les permissions macOS si le collage ou l'enregistrement cesse de fonctionner après une mise à jour.",
     "review": "Vérifier les permissions"

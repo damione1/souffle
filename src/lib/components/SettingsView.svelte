@@ -16,12 +16,11 @@
   import PermissionsSettingsSection from "../features/settings/components/PermissionsSettingsSection.svelte";
   import SummaryTemplatesSettingsSection from "../features/settings/components/SummaryTemplatesSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
+  import { type SettingsTab } from "../features/settings/open";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
   import { events } from "../api/generated";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
-
-  type SettingsTab = "transcription" | "ai" | "audio" | "interface" | "meetings" | "system";
 
   const TABS: { id: SettingsTab; labelKey: string }[] = [
     { id: "transcription", labelKey: "settings.tab_transcription" },
@@ -144,6 +143,7 @@
         downloadTotalBytes={controller.downloadTotalBytes}
         downloadFile={controller.downloadFile}
         unloadTimeoutMinutes={controller.app.settings.model_unload_timeout_minutes}
+        recording={controller.app.isRecording}
         onSelectModel={controller.selectModelOption}
         onUnloadTimeoutChange={controller.onModelUnloadTimeoutChange}
       />
@@ -311,6 +311,8 @@
               confirmLabel={$t("settings_advanced.delete_model_confirm")}
               confirmMessage={$t("settings_advanced.delete_model_msg")}
               variant="danger"
+              disabled={controller.modelOperationState !== "idle"}
+              disabledReason={$t("settings_advanced.delete_model_busy")}
               onConfirm={controller.handleDeleteModel}
             />
           </div>

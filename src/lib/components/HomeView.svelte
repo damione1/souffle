@@ -14,8 +14,10 @@
   import { createTimelineController } from "../features/timeline/controller.svelte";
   import TimelineSection from "../features/timeline/components/TimelineSection.svelte";
   import { createTranscriptionController } from "../features/transcription/controller.svelte";
+  import { deriveRecordingMode } from "../stores/app.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
   import StatusChip from "./ui/StatusChip.svelte";
+  import { openSettings } from "../features/settings/open";
 
   const app = createTimelineController().app;
   const timeline = createTimelineController();
@@ -25,7 +27,7 @@
 
   let dictationShortcut = $state("");
 
-  const recordingMode = $derived(app.recordingMode);
+  const recordingMode = $derived(deriveRecordingMode(app.machineState));
   // While recording, the live card on the home screen is the surface;
   // the meeting detail only takes over once the session has stopped.
   const showMeetingDetail = $derived(
@@ -36,6 +38,7 @@
   // still allows starting: the start flow reloads it on demand. Only
   // "download_required" (nothing on disk yet) truly blocks starting.
   const modelReady = $derived(app.transcriptionRuntimePhase !== "download_required");
+  const kindFilter = $derived(timeline.kindFilter);
 
   onMount(() => {
     void timeline.refresh();
@@ -92,7 +95,9 @@
     settingsWasOpen = open;
   });
 
-  // Refresh the timeline whenever a recording ends or a detail closes.
+  // Refresh when a recording ends or a detail closes. Dictation save also
+  // refreshes after the insert; a stale idle fetch must not win (see
+  // timeline refresh generation).
   $effect(() => {
     if (recordingMode === "idle" && !showMeetingDetail) {
       void timeline.refresh();
@@ -106,10 +111,20 @@
     <MeetingDetail controller={meeting} />
   {:else}
     {#if transcription.statusMessage}
-      <StatusBanner message={transcription.statusMessage} variant="warning" />
+      <StatusBanner
+        message={transcription.statusMessage}
+        actionLabel={transcription.statusActionLabel}
+        onAction={transcription.statusAction}
+        variant="warning"
+      />
     {/if}
     {#if meeting.statusMessage}
-      <StatusBanner message={meeting.statusMessage} variant="warning" />
+      <StatusBanner
+        message={meeting.statusMessage}
+        actionLabel={meeting.statusActionLabel}
+        onAction={meeting.statusAction}
+        variant="warning"
+      />
     {/if}
 
     {#if recordingMode === "idle"}
@@ -150,8 +165,8 @@
           <button
             type="button"
             class="btn btn-sm btn-ghost"
-            class:btn-active={timeline.kindFilter === kind}
-            aria-pressed={timeline.kindFilter === kind}
+            class:btn-active={kindFilter === kind}
+            aria-pressed={kindFilter === kind}
             onclick={() => { timeline.kindFilter = kind; }}
           >
             {$t(`home.filter_${kind}`)}
@@ -173,10 +188,7 @@
         onStartEvent={(event) => void calendar.startFromEvent(event)}
         calendarEnabled={calendar.enabled}
         calendarPermission={calendar.permission}
-        onSetupCalendar={() => {
-          app.settingsInitialTab = "meetings";
-          app.settingsOpen = true;
-        }}
+        onSetupCalendar={() => openSettings({ tab: "meetings" })}
       />
     {:else}
       <!-- During a live session, the session card is the only focus. -->

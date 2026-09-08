@@ -171,6 +171,18 @@ async pasteText(text: string, delayMs: number, method: PasteMethod) : Promise<Re
 }
 },
 /**
+ * Write text to the pasteboard without pasting. Cancels a pending clipboard
+ * restore so a failed ⌘V cannot wipe the transcription 400 ms later.
+ */
+async copyText(text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("copy_text", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Called by the frontend when a shortcut-triggered dictation fails to
  * paste. A shortcut dictation is by definition run from another app, so
  * Soufflé's window is usually not what the user is looking at: the in-app
@@ -327,8 +339,8 @@ async getMeetingAudio(meetingId: string) : Promise<Result<MeetingAudioSession[],
 }
 },
 /**
- * Rename a meeting. Targets the in-memory accumulator while that meeting
- * is still recording (it only reaches the DB at stop), the DB otherwise.
+ * Rename a meeting. Updates the in-memory accumulator and immediately
+ * persists to the DB (for crash recovery).
  */
 async renameMeeting(id: string, title: string) : Promise<Result<null, string>> {
     try {
@@ -339,9 +351,8 @@ async renameMeeting(id: string, title: string) : Promise<Result<null, string>> {
 }
 },
 /**
- * Save the user's live meeting notes. Targets the in-memory accumulator
- * while that meeting is still recording (it only reaches the DB at stop),
- * the DB otherwise.
+ * Save the user's live meeting notes. Updates the in-memory accumulator
+ * and immediately persists to the DB (for crash recovery).
  */
 async saveMeetingNotes(id: string, notes: string | null) : Promise<Result<null, string>> {
     try {
@@ -532,11 +543,23 @@ async listDictationEntries(limit: number | null) : Promise<Result<DictationEntry
 }
 },
 /**
- * Add a dictation history entry
+ * Add a dictation history entry. Returns the generated id so a later polish
+ * pass can update the same row instead of inserting a second one.
  */
-async addDictationEntry(text: string) : Promise<Result<null, string>> {
+async addDictationEntry(text: string) : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_dictation_entry", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Replace the text of an existing dictation entry (e.g. after polish).
+ */
+async updateDictationEntry(id: string, text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_dictation_entry", { id, text }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -789,7 +812,7 @@ async requestPermission(kind: PermissionKind) : Promise<Result<PermState, string
  * the TCC entry is keyed to the previous code-signing identity. Runs off
  * the command thread since it shells out and may block on the prompt.
  */
-async repairAccessibilityPermission() : Promise<Result<PermState, string>> {
+async repairAccessibilityPermission() : Promise<Result<RepairAccessibilityResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("repair_accessibility_permission") };
 } catch (e) {
@@ -1157,6 +1180,10 @@ dictation_polish_templates: DictationPolishTemplate[];
  */
 dictation_learn_from_edit: boolean; 
 /**
+ * Hard failsafe: stop dictation after this many seconds.
+ */
+dictation_ceiling_seconds: number; 
+/**
  * Active default meeting-summary template id: used by the Generate
  * button when the user doesn't pick another template, and by any
  * automatic summarization.
@@ -1513,6 +1540,13 @@ export type PipelineErrorScope =
  */
 "session"
 export type RecordingKind = "dictation" | { meeting: { meeting_id: string } }
+/**
+ * Outcome of `repair_accessibility`. Distinct from `PermState` because a
+ * successful `tccutil reset` plus prompt cannot observe the user's grant:
+ * `AXIsProcessTrustedWithOptions` returns the *current* trust, which is
+ * necessarily false a few milliseconds after the TCC entry was deleted.
+ */
+export type RepairAccessibilityResult = { reset_performed: boolean; prompt_shown: boolean }
 /**
  * Search result from FTS5 full-text search
  */

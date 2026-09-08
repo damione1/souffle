@@ -515,7 +515,7 @@ mod tests {
                 message: "Unload failed".into(),
             })
             .unwrap();
-        
+
         match &failed {
             AppStateMachine::Error {
                 recovery: ErrorRecovery::RetryFromReady { profile: p },

@@ -28,9 +28,7 @@ const PARAGRAPH_GAP_SECONDS: f64 = 1.5;
 
 #[derive(Debug, Error)]
 pub enum McpDbError {
-    #[error(
-        "Souffle database not found at {0}. Launch Souffle at least once so it can create it."
-    )]
+    #[error("Souffle database not found at {0}. Launch Souffle at least once so it can create it.")]
     NotFound(PathBuf),
     #[error("Open database: {0}")]
     Open(#[source] rusqlite::Error),
@@ -202,10 +200,7 @@ impl MeetingRow {
     }
 
     fn participant_names(&self) -> Vec<String> {
-        self.participants()
-            .into_iter()
-            .map(|p| p.name)
-            .collect()
+        self.participants().into_iter().map(|p| p.name).collect()
     }
 
     fn structured_summary(&self) -> Option<StructuredSummary> {
@@ -360,13 +355,21 @@ impl McpDb {
             None
         };
 
-        let summary = if include.summary { row.summary.clone() } else { None };
+        let summary = if include.summary {
+            row.summary.clone()
+        } else {
+            None
+        };
         let structured_summary = if include.summary {
             row.structured_summary()
         } else {
             None
         };
-        let notes = if include.notes { row.notes.clone() } else { None };
+        let notes = if include.notes {
+            row.notes.clone()
+        } else {
+            None
+        };
         let metadata = if include.metadata {
             Some(MeetingMetadata {
                 calendar_event_id: row.calendar_event_id.clone(),
@@ -568,7 +571,12 @@ fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
     for seg in segments {
         let end = seg.end_time.max(seg.start_time);
         let Some(speaker) = seg.speaker.as_deref() else {
-            turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
+            turns.push(Turn {
+                start: seg.start_time,
+                last_end: end,
+                segments: vec![seg],
+                interrupted: false,
+            });
             continue;
         };
 
@@ -587,7 +595,12 @@ fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
                 open.remove(speaker);
             }
         } else {
-            turns.push(Turn { start: seg.start_time, last_end: end, segments: vec![seg], interrupted: false });
+            turns.push(Turn {
+                start: seg.start_time,
+                last_end: end,
+                segments: vec![seg],
+                interrupted: false,
+            });
             open.insert(speaker, turns.len() - 1);
             for (&other_speaker, &idx) in open.iter() {
                 if other_speaker != speaker {
@@ -597,7 +610,11 @@ fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
         }
     }
 
-    turns.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    turns.sort_by(|a, b| {
+        a.start
+            .partial_cmp(&b.start)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     turns.into_iter().flat_map(|t| t.segments).collect()
 }
 
@@ -799,14 +816,38 @@ mod tests {
     #[test]
     fn list_meetings_orders_newest_first_and_respects_limit() {
         let (conn, _dir, path) = fixture_db();
-        insert_meeting(&conn, "m1", "First", "2026-01-01T10:00:00+00:00", &[("hi", 0.0, 1.0, None)], None);
-        insert_meeting(&conn, "m2", "Second", "2026-01-02T10:00:00+00:00", &[("hi", 0.0, 1.0, None)], None);
-        insert_meeting(&conn, "m3", "Third", "2026-01-03T10:00:00+00:00", &[("hi", 0.0, 1.0, None)], None);
+        insert_meeting(
+            &conn,
+            "m1",
+            "First",
+            "2026-01-01T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m2",
+            "Second",
+            "2026-01-02T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m3",
+            "Third",
+            "2026-01-03T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
         let all = db.list_meetings(None, None, None, 20).unwrap();
-        assert_eq!(all.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["m3", "m2", "m1"]);
+        assert_eq!(
+            all.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["m3", "m2", "m1"]
+        );
 
         let limited = db.list_meetings(None, None, None, 2).unwrap();
         assert_eq!(limited.len(), 2);
@@ -815,8 +856,22 @@ mod tests {
     #[test]
     fn list_meetings_filters_by_date_range() {
         let (conn, _dir, path) = fixture_db();
-        insert_meeting(&conn, "m1", "First", "2026-01-01T10:00:00+00:00", &[("hi", 0.0, 1.0, None)], None);
-        insert_meeting(&conn, "m2", "Second", "2026-02-01T10:00:00+00:00", &[("hi", 0.0, 1.0, None)], None);
+        insert_meeting(
+            &conn,
+            "m1",
+            "First",
+            "2026-01-01T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m2",
+            "Second",
+            "2026-02-01T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
@@ -830,8 +885,22 @@ mod tests {
     #[test]
     fn list_meetings_filters_by_query() {
         let (conn, _dir, path) = fixture_db();
-        insert_meeting(&conn, "m1", "First", "2026-01-01T10:00:00+00:00", &[("budget review", 0.0, 1.0, None)], None);
-        insert_meeting(&conn, "m2", "Second", "2026-01-02T10:00:00+00:00", &[("standup notes", 0.0, 1.0, None)], None);
+        insert_meeting(
+            &conn,
+            "m1",
+            "First",
+            "2026-01-01T10:00:00+00:00",
+            &[("budget review", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m2",
+            "Second",
+            "2026-01-02T10:00:00+00:00",
+            &[("standup notes", 0.0, 1.0, None)],
+            None,
+        );
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
@@ -878,7 +947,11 @@ mod tests {
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
-        let transcript = db.get_meeting("m1", IncludeSet::all()).unwrap().transcript.unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
         let me_pos = transcript.find("Me: First line").expect("me segment");
         let them_pos = transcript.find("Them: Second line").expect("them segment");
         let me2_pos = transcript.find("Me: Third line").expect("me segment 2");
@@ -934,11 +1007,12 @@ mod tests {
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
-        let transcript = db.get_meeting("m1", IncludeSet::all()).unwrap().transcript.unwrap();
-        assert_eq!(
-            transcript,
-            "Me: hello how are you\n\nThem: hi good thanks"
-        );
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
+        assert_eq!(transcript, "Me: hello how are you\n\nThem: hi good thanks");
     }
 
     #[test]
@@ -965,7 +1039,11 @@ mod tests {
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
-        let transcript = db.get_meeting("m1", IncludeSet::all()).unwrap().transcript.unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
         assert_eq!(
             transcript,
             "Me: Let me explain the whole plan in detail because it's complicated.\n\nThem: wait\n\nMe: So let's start now"
@@ -995,7 +1073,11 @@ mod tests {
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
-        let transcript = db.get_meeting("m1", IncludeSet::all()).unwrap().transcript.unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
         assert_eq!(
             transcript,
             "Me: First point. Second part continues and concludes.\n\nThem: quick question\n\nMe: New topic starts"
@@ -1031,7 +1113,9 @@ mod tests {
 
         let db = McpDb::open(&path).unwrap();
         let names = vec!["summary".to_string()];
-        let detail = db.get_meeting("m1", IncludeSet::from_names(Some(&names))).unwrap();
+        let detail = db
+            .get_meeting("m1", IncludeSet::from_names(Some(&names)))
+            .unwrap();
         assert_eq!(detail.summary.as_deref(), Some("a summary"));
         assert!(detail.transcript.is_none());
         assert!(detail.notes.is_none());
@@ -1092,8 +1176,22 @@ mod tests {
     #[test]
     fn latest_meeting_picks_most_recent() {
         let (conn, _dir, path) = fixture_db();
-        insert_meeting(&conn, "m1", "First", "2026-01-01T10:00:00+00:00", &[("hi", 0.0, 1.0, None)], None);
-        insert_meeting(&conn, "m2", "Second", "2026-01-05T10:00:00+00:00", &[("hi", 0.0, 1.0, None)], None);
+        insert_meeting(
+            &conn,
+            "m1",
+            "First",
+            "2026-01-01T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m2",
+            "Second",
+            "2026-01-05T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
@@ -1106,13 +1204,23 @@ mod tests {
         let (conn, _dir, path) = fixture_db();
         drop(conn);
         let db = McpDb::open(&path).unwrap();
-        assert!(matches!(db.latest_meeting(IncludeSet::all()), Err(McpDbError::NoMeetings)));
+        assert!(matches!(
+            db.latest_meeting(IncludeSet::all()),
+            Err(McpDbError::NoMeetings)
+        ));
     }
 
     #[test]
     fn search_meetings_returns_snippets() {
         let (conn, _dir, path) = fixture_db();
-        insert_meeting(&conn, "m1", "Standup", "2026-01-01T10:00:00+00:00", &[("we discussed the roadmap today", 0.0, 1.0, None)], None);
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[("we discussed the roadmap today", 0.0, 1.0, None)],
+            None,
+        );
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
@@ -1147,7 +1255,12 @@ mod tests {
     fn list_dictations_respects_limit() {
         let (conn, _dir, path) = fixture_db();
         for i in 0..5 {
-            insert_dictation(&conn, &format!("d{i}"), "note", &format!("2026-01-0{}T10:00:00+00:00", i + 1));
+            insert_dictation(
+                &conn,
+                &format!("d{i}"),
+                "note",
+                &format!("2026-01-0{}T10:00:00+00:00", i + 1),
+            );
         }
         drop(conn);
 

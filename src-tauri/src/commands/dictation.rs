@@ -16,15 +16,29 @@ pub fn list_dictation_entries(
     state.db.list_dictation_entries(limit.unwrap_or(50))
 }
 
-/// Add a dictation history entry
+/// Add a dictation history entry. Returns the generated id so a later polish
+/// pass can update the same row instead of inserting a second one.
 #[tauri::command]
 #[specta::specta]
-pub fn add_dictation_entry(state: State<'_, AppState>, text: String) -> Result<(), String> {
+pub fn add_dictation_entry(state: State<'_, AppState>, text: String) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
     state.db.add_dictation_entry(&id, &text, &timestamp)?;
     // The Idle transition also syncs the tray, but it fires before this write
     // (the frontend saves history only after stop resolves).
+    sync_tray(&state);
+    Ok(id)
+}
+
+/// Replace the text of an existing dictation entry (e.g. after polish).
+#[tauri::command]
+#[specta::specta]
+pub fn update_dictation_entry(
+    state: State<'_, AppState>,
+    id: String,
+    text: String,
+) -> Result<(), String> {
+    state.db.update_dictation_entry(&id, &text)?;
     sync_tray(&state);
     Ok(())
 }

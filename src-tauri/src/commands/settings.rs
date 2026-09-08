@@ -1,4 +1,6 @@
-use tauri::{AppHandle, State};
+use std::sync::atomic::Ordering;
+
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_specta::Event;
 use tracing::info;
@@ -22,7 +24,13 @@ pub fn save_settings(
     state: State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<(), String> {
-    let settings = settings.sanitize_for_save()?;
+    let mut settings = settings.sanitize_for_save()?;
+    let stored = AppSettings::load(&state.db)?;
+    let recording = state
+        .current_machine_state()
+        .map(|machine| machine.is_recording())
+        .unwrap_or(false);
+    let pinned = settings.pin_transcription_while_recording(&stored, recording);
     settings.save(&state.db)?;
     crate::debug::set_transcription_debug(settings.debug_transcription);
     crate::logging::set_level(settings.log_level)?;
@@ -46,6 +54,9 @@ pub fn save_settings(
     if let Ok(machine) = state.current_machine_state() {
         crate::pill::sync(&app, &machine);
         crate::tray::sync(&app, &machine);
+    }
+    if pinned {
+        return Err("Cannot change the transcription model while recording".into());
     }
     Ok(())
 }
@@ -82,10 +93,22 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
             shortcuts.push_to_talk.as_str(),
             move |app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => {
-                    let _ = ShortcutPttStart.emit(app);
+                    let state = app.state::<AppState>();
+                    if state.ptt_is_paused() {
+                        state.ptt_start_armed.store(false, Ordering::SeqCst);
+                    } else {
+                        state.ptt_start_armed.store(true, Ordering::SeqCst);
+                        let _ = ShortcutPttStart.emit(app);
+                    }
                 }
                 ShortcutState::Released => {
-                    let _ = ShortcutPttStop.emit(app);
+                    if app
+                        .state::<AppState>()
+                        .ptt_start_armed
+                        .swap(false, Ordering::SeqCst)
+                    {
+                        let _ = ShortcutPttStop.emit(app);
+                    }
                 }
             },
         )

@@ -46,11 +46,7 @@ pub fn set_selected_text(text: &str) -> Result<bool, String> {
 
 /// Empty AX strings are treated as "nothing selected / nothing to report".
 fn nonempty_ax_string(s: String) -> Option<String> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
+    if s.is_empty() { None } else { Some(s) }
 }
 
 #[cfg(target_os = "macos")]
@@ -95,7 +91,7 @@ fn macos_set_selected_text(text: &str) -> Result<bool, String> {
 /// so they are released on drop (no leaks).
 #[cfg(target_os = "macos")]
 fn focused_element() -> Option<objc2_core_foundation::CFRetained<objc2_core_foundation::CFType>> {
-    use accessibility_sys::{kAXFocusedUIElementAttribute, AXUIElementCreateSystemWide};
+    use accessibility_sys::{AXUIElementCreateSystemWide, kAXFocusedUIElementAttribute};
 
     let system_raw = unsafe { AXUIElementCreateSystemWide() };
     let system = retain_created(system_raw)?;
@@ -127,7 +123,7 @@ fn copy_attribute(
     element: &objc2_core_foundation::CFRetained<objc2_core_foundation::CFType>,
     attribute: &'static str,
 ) -> Option<objc2_core_foundation::CFRetained<objc2_core_foundation::CFType>> {
-    use accessibility_sys::{kAXErrorSuccess, AXUIElementCopyAttributeValue};
+    use accessibility_sys::{AXUIElementCopyAttributeValue, kAXErrorSuccess};
     use objc2_core_foundation::{CFRetained, CFString, CFType};
     use std::ptr::NonNull;
 
@@ -165,7 +161,7 @@ fn set_string_attribute(
     attribute: &'static str,
     text: &str,
 ) -> bool {
-    use accessibility_sys::{kAXErrorSuccess, AXUIElementSetAttributeValue};
+    use accessibility_sys::{AXUIElementSetAttributeValue, kAXErrorSuccess};
     use objc2_core_foundation::{CFRetained, CFString};
 
     let name = CFString::from_static_str(attribute);

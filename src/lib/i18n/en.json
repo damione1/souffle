@@ -329,7 +329,6 @@
     "generating": "Generating...",
     "regenerate_summary": "Re-generate Summary",
     "generate_summary": "Generate Summary",
-    "connect_ollama": "Connect Ollama in Settings to enable summaries.",
     "no_summary_provider": "No summarization provider is available. Enable Apple Intelligence or connect Ollama in Settings.",
     "no_compatible_model": "No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries.",
     "generate_hint": "Key points and action items, generated on device",
@@ -414,6 +413,7 @@
   "status_chip": {
     "ready": "Ready",
     "loading": "Loading model…",
+    "load_required": "Model not loaded",
     "downloading": "Downloading",
     "model_required": "Model required"
   },
@@ -427,6 +427,7 @@
   "settings_model": {
     "title": "Transcription model",
     "description": "Pick a model — it downloads and loads automatically. Everything runs on this Mac.",
+    "recording_locked": "Can't change the transcription model while recording.",
     "downloading": "Downloading…",
     "unload_timeout_label": "Unload model when idle",
     "unload_timeout_desc": "Frees memory after a period of no transcription activity. Reloads automatically the next time you start recording.",
@@ -442,7 +443,8 @@
     "model_storage_desc": "Remove the downloaded model files from disk.",
     "delete_model": "Delete downloaded model",
     "delete_model_confirm": "Delete",
-    "delete_model_msg": "The model files will be removed; you'll need to download them again."
+    "delete_model_msg": "The model files will be removed; you'll need to download them again.",
+    "delete_model_busy": "Can't delete while the model is downloading, loading, or unloading."
   },
   "pill": {
     "dictation": "Dictating",
@@ -465,6 +467,7 @@
     "dismiss": "Dismiss"
   },
   "home": {
+    "dictation_too_short": "Hold a little longer",
     "dictate": "Dictate",
     "dictate_hint": "Set a shortcut in Settings",
     "meeting": "Meeting",
@@ -488,19 +491,27 @@
     "idle_keep_recording": "Keep recording",
     "live_edit_hint": "Double-click a paragraph to fix a misheard word. Later occurrences are corrected automatically.",
     "live_edit_save": "Save",
-    "live_edit_cancel": "Cancel"
+    "live_edit_cancel": "Cancel",
+    "paste_copied": "Copied — press ⌘V",
+    "paste_failed": "Paste failed: {error}",
+    "model_required_dictation": "Download and load the model to start dictation.",
+    "model_required_meeting": "Load the model to start a meeting.",
+    "open_model": "Open model",
+    "polish_timeout": "Polish took too long. Saved the original text.",
+    "recording_interrupted": "Recording was interrupted.",
+    "recording_interrupted_saved": "Recording was interrupted. The partial transcript was saved to history."
   },
   "permissions": {
     "title": "Grant permissions",
     "subtitle": "Soufflé needs a few macOS permissions to record and paste. Grant them now to avoid interruptions later.",
     "mic_label": "Microphone",
-    "mic_desc": "Record your voice for dictation and meetings.",
+    "mic_desc": "Record your voice for dictation and meetings. Soufflé only listens while recording.",
     "mic_denied_hint": "Microphone access was denied, and macOS won't ask again. Allow it under System Settings > Privacy & Security > Microphone, then come back here.",
     "mic_no_device_hint": "No microphone was found. Connect one, or pick a different input in Settings > Audio.",
     "system_label": "System audio",
-    "system_desc": "Capture other participants during meetings.",
+    "system_desc": "Capture other participants during meetings. Only active during a meeting.",
     "accessibility_label": "Accessibility",
-    "accessibility_desc": "Paste transcriptions automatically with ⌘V.",
+    "accessibility_desc": "Paste transcriptions automatically with ⌘V. Soufflé doesn't read your screen.",
     "grant": "Grant",
     "open_settings": "Open Settings",
     "granted": "Granted",
@@ -510,6 +521,7 @@
     "skip_hint": "You can grant these later when prompted.",
     "accessibility_stale_hint": "Already checked in Settings but still failing? macOS can keep a stale entry after an app update. Try Repair, or remove Souffle with the minus button and re-add it.",
     "repair": "Repair permission",
+    "accessibility_repair_success": "A new prompt should appear shortly. Check the box to finish the repair.",
     "settings_title": "Permissions",
     "settings_desc": "Re-check or repair macOS permissions if pasting or recording stops working after an update.",
     "review": "Review permissions"

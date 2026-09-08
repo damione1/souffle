@@ -116,9 +116,8 @@ pub fn get_meeting_audio(
         .collect())
 }
 
-/// Save the user's live meeting notes. Targets the in-memory accumulator
-/// while that meeting is still recording (it only reaches the DB at stop),
-/// the DB otherwise.
+/// Save the user's live meeting notes. Updates the in-memory accumulator
+/// and immediately persists to the DB (for crash recovery).
 #[tauri::command]
 #[specta::specta]
 pub fn save_meeting_notes(
@@ -136,16 +135,15 @@ pub fn save_meeting_notes(
         if let Some(ref mut meeting) = *acc
             && meeting.id == id
         {
-            meeting.notes = notes;
-            return Ok(());
+            meeting.notes = notes.clone();
         }
     }
 
     state.db.save_meeting_notes(&id, notes.as_deref())
 }
 
-/// Rename a meeting. Targets the in-memory accumulator while that meeting
-/// is still recording (it only reaches the DB at stop), the DB otherwise.
+/// Rename a meeting. Updates the in-memory accumulator and immediately
+/// persists to the DB (for crash recovery).
 #[tauri::command]
 #[specta::specta]
 pub fn rename_meeting(state: State<'_, AppState>, id: String, title: String) -> Result<(), String> {
@@ -160,8 +158,7 @@ pub fn rename_meeting(state: State<'_, AppState>, id: String, title: String) -> 
         if let Some(ref mut meeting) = *acc
             && meeting.id == id
         {
-            meeting.title = title;
-            return Ok(());
+            meeting.title = title.clone();
         }
     }
 
@@ -561,6 +558,8 @@ pub async fn summarize_meeting(
     channel: Channel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
     let transcript = state.db.load_meeting(&id)?;
+    let generated_from_edited = transcript.edited_transcript.clone();
+    let generated_from_notes = transcript.notes.clone();
     let settings = AppSettings::load(&state.db)?;
 
     let (text, turn_units) = match transcript.edited_transcript {
@@ -615,6 +614,7 @@ pub async fn summarize_meeting(
         &transcript.participants,
         &model,
         Some(&settings.ollama_url),
+        output_language,
     )
     .await;
 
@@ -624,7 +624,14 @@ pub async fn summarize_meeting(
         tracing::warn!("Structured summary extract failed, saving prose only: {warning}");
     }
 
-    db.update_meeting_summary(&id, &summary, structured.as_ref(), &model)?;
+    db.update_meeting_summary(
+        &id,
+        &summary,
+        structured.as_ref(),
+        &model,
+        generated_from_edited.as_deref(),
+        generated_from_notes.as_deref(),
+    )?;
 
     Ok(())
 }

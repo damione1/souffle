@@ -19,10 +19,12 @@ import {
 import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
+import { tr } from "../../i18n";
 import type { AppStateMachine, ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummaryProviderChoice, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
 import { ensureModelLoaded } from "../transcription/runtime";
+import { openSettings } from "../settings/open";
 import { type AudioSeekTarget, resolveAudioSeekTarget } from "./audio-map";
 import { createLiveTranscript } from "./live-transcript.svelte";
 import { redistributeSegmentTexts } from "./live-edit";
@@ -63,6 +65,8 @@ function createMeetingControllerInstance() {
   const app = getAppState();
 
   let statusMessage = $state("");
+  let statusActionLabel = $state<string | undefined>();
+  let statusAction = $state<(() => void) | undefined>();
   let ollamaAvailable = $state(false);
   let appleIntelligenceAvailable = $state(false);
   let summaryModels = $state<SummaryModelDescriptor[]>([]);
@@ -111,11 +115,13 @@ function createMeetingControllerInstance() {
   // recording"); suppresses further banners until a segment re-arms it.
   let idleDismissed = $state(false);
 
-  let isRecordingMeeting = $derived(
-    app.machineState.state === "recording_meeting"
-    || (app.machineState.state === "stopping"
-        && typeof app.machineState.data?.was_recording === "object"),
-  );
+  function recordingMeetingActive(): boolean {
+    const state = app.machineState;
+    return (
+      state.state === "recording_meeting"
+      || (state.state === "stopping" && typeof state.data?.was_recording === "object")
+    );
+  }
   // Incremental grouper for the compact live view (LiveSessionCard): bounded
   // work per segment instead of re-grouping the whole meeting each time.
   const liveTranscript = createLiveTranscript(1.5);
@@ -151,17 +157,17 @@ function createMeetingControllerInstance() {
   // guards against double-stop. `stopRequested` covers the brief gap before the
   // machine reports "stopping".
   let stopRequested = $state(false);
-  let isStopping = $derived(stopRequested || app.machineState.state === "stopping");
-  // "load_required" stays resumable: resumeRecording reloads the model on
-  // demand, same as a fresh start after an idle unload.
-  let canResumeRecording = $derived(
-    Boolean(meeting?.id)
-    && !isRecordingMeeting
-    && !isLoadingMeeting
-    && !isSummarizing
-    && (app.transcriptionRuntimePhase === "ready"
-      || app.transcriptionRuntimePhase === "load_required"),
-  );
+  function stoppingNow(): boolean {
+    return stopRequested || app.machineState.state === "stopping";
+  }
+  function canResumeNow(): boolean {
+    return Boolean(meeting?.id)
+      && !recordingMeetingActive()
+      && !isLoadingMeeting
+      && !isSummarizing
+      && (app.transcriptionRuntimePhase === "ready"
+        || app.transcriptionRuntimePhase === "load_required");
+  }
 
   async function mount() {
     await Promise.all([refreshSummaryProviders(), loadTranscriptionCatalog()]);
@@ -171,12 +177,12 @@ function createMeetingControllerInstance() {
     try {
       transcriptionCatalog = await getTranscriptionCatalog();
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
   async function onMeetingSelectionChange(id: string | null) {
-    if (id && (!meeting || meeting.id !== id) && !isRecordingMeeting) {
+    if (id && (!meeting || meeting.id !== id) && !recordingMeetingActive()) {
       await loadMeeting(id);
     }
   }
@@ -215,7 +221,7 @@ function createMeetingControllerInstance() {
       // block loading the meeting itself, the player bar just stays hidden.
       audioSessions = await getMeetingAudio(id).catch(() => []);
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     } finally {
       isLoadingMeeting = false;
     }
@@ -258,7 +264,7 @@ function createMeetingControllerInstance() {
       await saveMeetingNotes(id, notesDraft.trim() || null);
       notesSaveState = "saved";
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
       notesSaveState = "idle";
     }
   }
@@ -284,25 +290,54 @@ function createMeetingControllerInstance() {
     }
   }
 
+  function setBanner(message: string, action?: { label: string; run: () => void }) {
+    statusMessage = message;
+    statusActionLabel = action?.label;
+    statusAction = action?.run;
+  }
+
+  function clearBanner() {
+    setBanner("");
+  }
+
+  function modelRequiredBanner(message: string) {
+    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ tab: "transcription" }) });
+  }
+
+  /** Shared by start and resume so overlapping clicks cannot both pass idle
+   * and both enter launch_meeting after ensureModelLoaded. */
+  let launchInFlight = false;
+
+  function beginLaunch(): boolean {
+    if (app.recordingMode !== "idle" || launchInFlight) return false;
+    launchInFlight = true;
+    return true;
+  }
+
+  function endLaunch() {
+    launchInFlight = false;
+  }
+
   async function startRecording(options?: {
     title?: string;
     calendar?: MeetingCalendarContext;
   }) {
-    if (app.transcriptionRuntimePhase !== "ready") {
-      // Model may have been unloaded by the idle timeout; reload through the
-      // normal load flow before recording rather than failing on start.
-      statusMessage = "";
-      const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { statusMessage = message; });
-      if (!ready) {
-        if (!statusMessage) statusMessage = "Load the model before starting a meeting.";
-        return;
-      }
-    }
+    if (!beginLaunch()) return;
+    clearBanner();
     try {
+      if (app.transcriptionRuntimePhase !== "ready") {
+        // Model may have been unloaded by the idle timeout; reload through the
+        // normal load flow before recording rather than failing on start.
+        const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { setBanner(message); });
+        if (!ready) {
+          modelRequiredBanner(statusMessage || tr("home.model_required_meeting"));
+          return;
+        }
+      }
       const title = options?.title?.trim() || defaultMeetingTitle();
       const calendar = options?.calendar ?? null;
       resetLiveBuffers();
-      statusMessage = "";
+      clearBanner();
       summaryStream = "";
       meeting = null;
       notesDraft = "";
@@ -345,13 +380,16 @@ function createMeetingControllerInstance() {
         participants: calendar?.participants ?? [],
       };
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
       resetLiveBuffers();
+    } finally {
+      endLaunch();
     }
   }
 
   async function resumeRecording() {
     if (!meeting || !meeting.id) return;
+    if (!beginLaunch()) return;
 
     // Resuming (whether from the wake-resume banner or the ordinary flow)
     // goes through launch_meeting, which clears the backend's sleep-pause
@@ -359,10 +397,13 @@ function createMeetingControllerInstance() {
     if (wakeResumeFallbackMeetingId === meeting.id) wakeResumeFallbackMeetingId = null;
 
     try {
-      const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { statusMessage = message; });
-      if (!ready) return;
+      const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { setBanner(message); });
+      if (!ready) {
+        modelRequiredBanner(statusMessage || tr("home.model_required_meeting"));
+        return;
+      }
       resetLiveBuffers();
-      statusMessage = "";
+      clearBanner();
       summaryStream = "";
       clearIdleState();
 
@@ -374,13 +415,15 @@ function createMeetingControllerInstance() {
         clearIdleState();
       });
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
       resetLiveBuffers();
+    } finally {
+      endLaunch();
     }
   }
 
   async function stopRecording() {
-    if (isStopping) return; // guard against double-stop
+    if (stoppingNow()) return; // guard against double-stop
     stopRequested = true;
     clearIdleState();
     try {
@@ -403,7 +446,7 @@ function createMeetingControllerInstance() {
         // Header may not be queryable yet in a rare race; finalize reloads it.
       }
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     } finally {
       stopRequested = false;
     }
@@ -427,18 +470,19 @@ function createMeetingControllerInstance() {
     audioSessions = [];
     app.currentMeetingId = null;
     clearIdleState();
-    statusMessage =
-      "Recording was interrupted — the meeting recorded so far was saved to history.";
+    setBanner(
+      "Recording was interrupted — the meeting recorded so far was saved to history.",
+    );
   }
 
   /** The backend detected the meeting has probably ended (silence or the
    * max-duration failsafe). Ignored outside an active meeting recording. */
   function handleMeetingIdle(payload: MeetingIdle) {
-    if (!isRecordingMeeting) return;
+    if (!recordingMeetingActive()) return;
 
     if (payload.reason === "max_duration") {
-      if (isStopping) return;
-      statusMessage = "Maximum meeting duration reached. Stopping the recording.";
+      if (stoppingNow()) return;
+      setBanner("Maximum meeting duration reached. Stopping the recording.");
       void stopRecording();
       return;
     }
@@ -472,7 +516,7 @@ function createMeetingControllerInstance() {
     try {
       await addDictionaryEntry(trimmedTerm, trimmedPronunciation, null);
       if (
-        isRecordingMeeting
+        recordingMeetingActive()
         && trimmedPronunciation
         && trimmedPronunciation.toLowerCase() !== trimmedTerm.toLowerCase()
       ) {
@@ -483,14 +527,14 @@ function createMeetingControllerInstance() {
         }
       }
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
       throw e;
     }
   }
 
   async function applyLiveParagraphEdit(paragraphId: number, newText: string) {
     const trimmed = newText.trim();
-    if (!trimmed || !isRecordingMeeting) return;
+    if (!trimmed || !recordingMeetingActive()) return;
 
     const current = [...liveTranscript.committed, ...liveTranscript.tail]
       .find((paragraph) => paragraph.id === paragraphId);
@@ -525,7 +569,7 @@ function createMeetingControllerInstance() {
       for (let i = 0; i < indices.length; i++) {
         liveMeetingSegments[indices[i]].text = previousSegmentTexts[i];
       }
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -557,12 +601,12 @@ function createMeetingControllerInstance() {
         try {
           meetingId = await peekSleepPausedMeeting();
         } catch (e) {
-          statusMessage = errorMessage(e);
+          setBanner(errorMessage(e));
           return;
         }
         if (!meetingId) return;
 
-        if (isRecordingMeeting) {
+        if (recordingMeetingActive()) {
           armPendingWakeResume(meetingId);
           return;
         }
@@ -615,7 +659,7 @@ function createMeetingControllerInstance() {
     // the meeting loaded (canResumeRecording) so the user can retry by hand.
     await resumeRecording();
     if (!statusMessage) {
-      statusMessage = "Recording resumed after sleep.";
+      setBanner("Recording resumed after sleep.");
     }
   }
 
@@ -627,7 +671,7 @@ function createMeetingControllerInstance() {
     wakeResumeFallbackMeetingId = meetingId;
     await loadMeeting(meetingId);
     if (!meeting || meeting.id !== meetingId) return; // load failed; loadMeeting already reported it
-    statusMessage = "Sleep interrupted this meeting. Resume recording to continue.";
+    setBanner("Sleep interrupted this meeting. Resume recording to continue.");
   }
 
   /** Leave the detail view: clear the open meeting and return to the list. */
@@ -644,7 +688,7 @@ function createMeetingControllerInstance() {
     audioSessions = [];
     seekTarget = null;
     resetLiveBuffers();
-    statusMessage = "";
+    clearBanner();
     summaryStream = "";
     app.currentMeetingId = null;
   }
@@ -664,7 +708,7 @@ function createMeetingControllerInstance() {
       await applyMeetingRename(id, trimmed);
       meeting = { ...meeting, title: trimmed };
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -677,7 +721,7 @@ function createMeetingControllerInstance() {
     summaryStage = null;
     summaryStageCurrent = null;
     summaryStageTotal = null;
-    statusMessage = "";
+    clearBanner();
 
     try {
       // Stream tokens for live preview only. Completion is driven by the
@@ -696,7 +740,7 @@ function createMeetingControllerInstance() {
       meeting = loadedMeeting;
       syncSelectedModel(meeting.summary_model);
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     } finally {
       isSummarizing = false;
       summaryStage = null;
@@ -727,7 +771,7 @@ function createMeetingControllerInstance() {
       isEditingTranscript = false;
       editedTranscriptDraft = "";
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -744,7 +788,7 @@ function createMeetingControllerInstance() {
       await saveEditedTranscript(meeting.id, null);
       meeting = await getMeeting(meeting.id);
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -754,7 +798,7 @@ function createMeetingControllerInstance() {
       await removeMeeting(meeting.id);
       closeMeeting();
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -764,13 +808,13 @@ function createMeetingControllerInstance() {
    * panel cannot swallow it.
    */
   async function exportMeeting(format: ExportFormat) {
-    if (!meeting || !meeting.id || isRecordingMeeting) return;
+    if (!meeting || !meeting.id || recordingMeetingActive()) return;
     isExporting = true;
-    statusMessage = "";
+    clearBanner();
     try {
       await saveMeetingExport(meeting.id, format);
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     } finally {
       isExporting = false;
     }
@@ -782,13 +826,13 @@ function createMeetingControllerInstance() {
    * webview parenting issue as markdown/subtitle export.
    */
   async function exportMeetingAudio() {
-    if (!meeting || !meeting.id || isRecordingMeeting || audioSessions.length === 0) return;
+    if (!meeting || !meeting.id || recordingMeetingActive() || audioSessions.length === 0) return;
     isExporting = true;
-    statusMessage = "";
+    clearBanner();
     try {
       await saveMeetingAudioExport(meeting.id);
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     } finally {
       isExporting = false;
     }
@@ -797,6 +841,8 @@ function createMeetingControllerInstance() {
   return {
     get app() { return app; },
     get statusMessage() { return statusMessage; },
+    get statusActionLabel() { return statusActionLabel; },
+    get statusAction() { return statusAction; },
     get ollamaAvailable() { return ollamaAvailable; },
     get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },
     get summaryAvailable() { return summaryModels.length > 0; },
@@ -811,7 +857,7 @@ function createMeetingControllerInstance() {
     get summaryStage() { return summaryStage; },
     get summaryStageCurrent() { return summaryStageCurrent; },
     get summaryStageTotal() { return summaryStageTotal; },
-    get isRecordingMeeting() { return isRecordingMeeting; },
+    get isRecordingMeeting() { return recordingMeetingActive(); },
     get liveTranscript() { return liveTranscript; },
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
@@ -820,8 +866,8 @@ function createMeetingControllerInstance() {
     get seekRequestId() { return seekRequestId; },
     requestAudioSeek,
     get isLoadingMeeting() { return isLoadingMeeting; },
-    get isStopping() { return isStopping; },
-    get canResumeRecording() { return canResumeRecording; },
+    get isStopping() { return stoppingNow(); },
+    get canResumeRecording() { return canResumeNow(); },
     get isEditingTranscript() { return isEditingTranscript; },
     get isExporting() { return isExporting; },
     get editedTranscriptDraft() { return editedTranscriptDraft; },

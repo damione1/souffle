@@ -91,7 +91,11 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
     let meeting = build_meeting();
     app_db.save_meeting(&meeting).unwrap();
     app_db
-        .add_dictation_entry("dict-1", "Buy milk on the way home", "2026-01-01T09:00:00+00:00")
+        .add_dictation_entry(
+            "dict-1",
+            "Buy milk on the way home",
+            "2026-01-01T09:00:00+00:00",
+        )
         .unwrap();
     drop(app_db);
 
@@ -106,7 +110,9 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
     assert!(list[0].has_summary);
     assert!(list[0].has_notes);
 
-    let detail = sidecar.get_meeting("contract-1", IncludeSet::all()).unwrap();
+    let detail = sidecar
+        .get_meeting("contract-1", IncludeSet::all())
+        .unwrap();
     assert_eq!(detail.title, "Contract Test Meeting");
     let transcript = detail.transcript.unwrap();
     assert!(transcript.contains("Hello from the contract test meeting."));
@@ -116,17 +122,29 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
         Some("A short summary of the contract test meeting.")
     );
     let structured = detail.structured_summary.expect("structured summary");
-    assert_eq!(structured.decisions, vec!["Proceed with schema contract test"]);
+    assert_eq!(
+        structured.decisions,
+        vec!["Proceed with schema contract test"]
+    );
     assert_eq!(structured.action_items.len(), 1);
     assert_eq!(structured.action_items[0].text, "Keep MCP in sync");
-    assert_eq!(structured.action_items[0].owner.as_deref(), Some("Alice Martin"));
+    assert_eq!(
+        structured.action_items[0].owner.as_deref(),
+        Some("Alice Martin")
+    );
     assert_eq!(structured.open_questions, vec!["Any drift?"]);
-    assert_eq!(detail.notes.as_deref(), Some("Remember to check the schema."));
+    assert_eq!(
+        detail.notes.as_deref(),
+        Some("Remember to check the schema.")
+    );
     let metadata = detail.metadata.unwrap();
     assert_eq!(metadata.calendar_event_id.as_deref(), Some("evt-contract"));
     assert_eq!(metadata.participants.len(), 1);
     assert_eq!(metadata.participants[0].name, "Alice Martin");
-    assert_eq!(metadata.participants[0].email.as_deref(), Some("alice@example.com"));
+    assert_eq!(
+        metadata.participants[0].email.as_deref(),
+        Some("alice@example.com")
+    );
     assert!(metadata.participants[0].is_organizer);
     assert_eq!(metadata.summary_model.as_deref(), Some("qwen2.5"));
     assert_eq!(metadata.segment_count, 2);

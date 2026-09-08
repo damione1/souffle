@@ -175,6 +175,7 @@ impl WhisperEngine {
     fn run_inference(
         ctx: &WhisperContext,
         audio: &[f32],
+        rms_audio: &[f32],
         language: Option<&str>,
     ) -> Result<(Vec<TranscriptionSegment>, Option<String>), EngineError> {
         if audio.is_empty() {
@@ -258,7 +259,7 @@ impl WhisperEngine {
             });
         }
 
-        segments = drop_silent_or_hallucinated_window(segments, audio);
+        segments = drop_silent_or_hallucinated_window(segments, rms_audio);
 
         Ok((segments, detected_lang))
     }
@@ -353,6 +354,7 @@ impl TranscriptionEngine for WhisperEngine {
                 Self::run_inference(
                     &loaded.ctx,
                     &to_process,
+                    &to_process,
                     effective_lang.as_deref().or(language),
                 )?
             };
@@ -360,12 +362,7 @@ impl TranscriptionEngine for WhisperEngine {
                 seg.start_time += offset;
                 seg.end_time += offset;
             }
-            remember_detected_language(
-                &mut self.detected_language,
-                language,
-                detected,
-                &segments,
-            );
+            remember_detected_language(&mut self.detected_language, language, detected, &segments);
             all_segments.extend(segments);
         }
 
@@ -377,16 +374,24 @@ impl TranscriptionEngine for WhisperEngine {
             return Err(EngineError::NotInitialized);
         }
 
-        if self.audio_buffer.len() < MIN_INFERENCE_SAMPLES {
-            self.audio_buffer.clear();
+        if self.audio_buffer.is_empty() {
             return Ok(vec![]);
         }
 
-        let remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
-        let offset = self.take_window_offset(remaining.len());
+        let mut remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
+        let original_len = remaining.len();
+        if original_len < MIN_INFERENCE_SAMPLES {
+            remaining.resize(MIN_INFERENCE_SAMPLES, 0.0);
+        }
+
+        let offset = self.take_window_offset(original_len);
         let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
-        let (mut segments, _) =
-            Self::run_inference(&loaded.ctx, &remaining, self.detected_language.as_deref())?;
+        let (mut segments, _) = Self::run_inference(
+            &loaded.ctx,
+            &remaining,
+            &remaining[..original_len],
+            self.detected_language.as_deref(),
+        )?;
         for seg in &mut segments {
             seg.start_time += offset;
             seg.end_time += offset;
@@ -483,7 +488,10 @@ mod tests {
     fn filtered_leading_window_does_not_cache_language() {
         let mut cached = None;
         remember_detected_language(&mut cached, None, Some("en".into()), &[]);
-        assert!(cached.is_none(), "hallucinated window must not lock language");
+        assert!(
+            cached.is_none(),
+            "hallucinated window must not lock language"
+        );
 
         let speech = [TranscriptionSegment {
             text: "Bonjour à tous".into(),
@@ -564,6 +572,31 @@ mod tests {
         let kept = drop_silent_or_hallucinated_window(segs, &speech);
         assert_eq!(kept.len(), 1);
         assert!(kept[0].text.contains("joining"));
+    }
+
+    #[test]
+    fn silence_gate_on_flush_uses_unpadded_samples() {
+        // Quiet speech tail above the floor; zero-padding to 1s dilutes RMS below it.
+        let speech: Vec<f32> = (0..800).map(|i| (i as f32 * 0.1).sin() * 0.001).collect();
+        assert!(pcm_rms(&speech) >= SILENCE_RMS_FLOOR);
+        let mut padded = speech.clone();
+        padded.resize(MIN_INFERENCE_SAMPLES, 0.0);
+        assert!(pcm_rms(&padded) < SILENCE_RMS_FLOOR);
+
+        let segs = vec![TranscriptionSegment {
+            text: "okay".into(),
+            start_time: 0.0,
+            end_time: 0.05,
+            is_final: true,
+            language: Some("en".into()),
+            confidence: Some(0.8),
+            speaker: None,
+        }];
+        assert_eq!(
+            drop_silent_or_hallucinated_window(segs.clone(), &speech).len(),
+            1
+        );
+        assert!(drop_silent_or_hallucinated_window(segs, &padded).is_empty());
     }
 
     #[test]

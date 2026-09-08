@@ -34,7 +34,10 @@ fn newest_mtime(dir: &Path) -> Option<SystemTime> {
 /// newest file is older than `policy`'s window, as of `now`. Best-effort:
 /// missing/unreadable entries are skipped rather than failing the sweep.
 fn sweep_dir(root: &Path, policy: MeetingAudioRetention, now: SystemTime) {
-    if matches!(policy, MeetingAudioRetention::Off | MeetingAudioRetention::KeepForever) {
+    if matches!(
+        policy,
+        MeetingAudioRetention::Off | MeetingAudioRetention::KeepForever
+    ) {
         return;
     }
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -54,7 +57,9 @@ fn sweep_dir(root: &Path, policy: MeetingAudioRetention, now: SystemTime) {
         }
         match std::fs::remove_dir_all(&path) {
             Ok(()) => tracing::info!(dir = %path.display(), "Deleted expired meeting recording"),
-            Err(e) => tracing::warn!(dir = %path.display(), "Failed to delete expired meeting recording: {e}"),
+            Err(e) => {
+                tracing::warn!(dir = %path.display(), "Failed to delete expired meeting recording: {e}")
+            }
         }
     }
 }
@@ -95,7 +100,10 @@ mod tests {
 
     fn touch_with_age(path: &Path, age: Duration, now: SystemTime) {
         std::fs::write(path, b"opus data").expect("write");
-        let file = std::fs::File::options().write(true).open(path).expect("open");
+        let file = std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open");
         file.set_modified(now - age).expect("set_modified");
     }
 
@@ -123,12 +131,22 @@ mod tests {
 
         let recent_meeting = root.path().join("recent-meeting");
         std::fs::create_dir_all(&recent_meeting).expect("mkdir");
-        touch_with_age(&recent_meeting.join("0.ogg"), Duration::from_secs(3600), now);
+        touch_with_age(
+            &recent_meeting.join("0.ogg"),
+            Duration::from_secs(3600),
+            now,
+        );
 
         sweep_dir(root.path(), MeetingAudioRetention::Keep7d, now);
 
-        assert!(!old_meeting.exists(), "expired meeting recording must be deleted");
-        assert!(recent_meeting.exists(), "recent meeting recording must survive");
+        assert!(
+            !old_meeting.exists(),
+            "expired meeting recording must be deleted"
+        );
+        assert!(
+            recent_meeting.exists(),
+            "recent meeting recording must survive"
+        );
     }
 
     #[test]
@@ -143,7 +161,10 @@ mod tests {
 
         sweep_dir(root.path(), MeetingAudioRetention::Keep7d, now);
 
-        assert!(meeting.exists(), "a meeting with any recent session file must survive");
+        assert!(
+            meeting.exists(),
+            "a meeting with any recent session file must survive"
+        );
     }
 
     #[test]
@@ -155,7 +176,10 @@ mod tests {
         touch_with_age(&meeting.join("0.ogg"), DAY * 365, now);
 
         sweep_dir(root.path(), MeetingAudioRetention::Off, now);
-        assert!(meeting.exists(), "off must never delete existing recordings");
+        assert!(
+            meeting.exists(),
+            "off must never delete existing recordings"
+        );
 
         sweep_dir(root.path(), MeetingAudioRetention::KeepForever, now);
         assert!(meeting.exists(), "forever must never delete");

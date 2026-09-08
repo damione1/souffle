@@ -270,7 +270,7 @@ pub fn migrate_meetings_to_v3(conn: &mut Connection) -> Result<(), String> {
             let ended_at = row.ended_at.as_deref().map(parse_datetime).transpose()?;
             let segment_count: i64 = tx
                 .query_row(
-                    "SELECT COUNT(*) FROM segments WHERE meeting_id = ?1",
+                    "SELECT COUNT(*) FROM segments_legacy WHERE meeting_id = ?1",
                     params![row.id],
                     |segment_row| segment_row.get(0),
                 )
@@ -502,8 +502,11 @@ pub fn migrate_speaker_embeddings_to_v13(conn: &Connection) -> Result<(), String
     .map_err(|e| format!("Purge orphaned speakers: {e}"))?;
 
     if !speakers_has_is_me_column(conn)? {
-        conn.execute("ALTER TABLE speakers ADD COLUMN is_me INTEGER NOT NULL DEFAULT 0", [])
-            .map_err(|e| format!("Add is_me column: {e}"))?;
+        conn.execute(
+            "ALTER TABLE speakers ADD COLUMN is_me INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(|e| format!("Add is_me column: {e}"))?;
     }
 
     conn.execute_batch(CREATE_SPEAKER_EMBEDDINGS)
@@ -958,7 +961,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(table_exists, "v13 migration should create speaker_embeddings");
+        assert!(
+            table_exists,
+            "v13 migration should create speaker_embeddings"
+        );
 
         let seeded_count: i64 = conn
             .query_row(
@@ -973,7 +979,9 @@ mod tests {
         );
 
         let is_me: i64 = conn
-            .query_row("SELECT is_me FROM speakers WHERE id = 1", [], |row| row.get(0))
+            .query_row("SELECT is_me FROM speakers WHERE id = 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(is_me, 0, "is_me should default to 0");
     }
@@ -1064,7 +1072,9 @@ mod tests {
         );
 
         let is_me: i64 = conn
-            .query_row("SELECT is_me FROM speakers WHERE id = 1", [], |row| row.get(0))
+            .query_row("SELECT is_me FROM speakers WHERE id = 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(is_me, 0, "is_me should default to 0 for existing rows");
     }
@@ -1117,6 +1127,7 @@ mod tests {
         let meeting = db.load_meeting("legacy-meeting").unwrap();
         assert_eq!(meeting.transcription_profile.engine_label, "Custom Engine");
         assert_eq!(meeting.recording_sessions.len(), 1);
+        assert_eq!(meeting.recording_sessions[0].end_segment_index, 1);
         assert!(!meeting.summary_is_stale);
         // v8 chain ran on the same open: pre-v8 rows read back cleanly.
         assert_eq!(meeting.calendar_event_id, None);

@@ -44,6 +44,22 @@ private func onMain(_ body: @escaping () -> Void) {
     }
 }
 
+/// Stretchable rounded-rect mask for `NSVisualEffectView`.
+/// Clipping vibrancy with `layer.cornerRadius` + `masksToBounds` composites
+/// against black and leaves a dark fringe; `maskImage` punches real alpha.
+private func stretchableRoundedMask(radius: CGFloat) -> NSImage {
+    let cap = ceil(radius)
+    let side = cap * 2 + 1
+    let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
+        NSColor.black.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+        return true
+    }
+    image.resizingMode = .stretch
+    image.capInsets = NSEdgeInsets(top: cap, left: cap, bottom: cap, right: cap)
+    return image
+}
+
 // ---------------------------------------------------------------------------
 // MARK: - Waveform view
 // ---------------------------------------------------------------------------
@@ -168,7 +184,7 @@ private final class PillContentView: NSView {
     private let recordingDot = NSView()
     private let modeLabel = NSTextField(labelWithString: "")
     private let liveLabel = NSTextField(wrappingLabelWithString: "")
-    private let stopButton = NSButton()
+    private let stopButton = FirstMouseButton()
     private let waveform = WaveformView()
     private let spinner = NSProgressIndicator()
 
@@ -177,8 +193,13 @@ private final class PillContentView: NSView {
     var isExpanded: Bool = false
     var stopLabel: String = "Stop recording"
     var a11yLabel: String = "Dictation in progress"
+    private var chromeRadius: CGFloat = -1
 
     override var isFlipped: Bool { true }
+    override var isOpaque: Bool { false }
+    /// The old Tauri pill window set `acceptFirstMouse: true`. Without it a
+    /// click on a non-activating HUD is eaten (focus only, no Stop).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -194,18 +215,16 @@ private final class PillContentView: NSView {
         blurView.material = .hudWindow
         blurView.blendingMode = .behindWindow
         blurView.state = .active
-        blurView.wantsLayer = true
-        blurView.layer?.cornerRadius = kCornerRadiusFull
-        blurView.layer?.masksToBounds = true
         addSubview(blurView)
 
         borderView.wantsLayer = true
         borderView.layer?.backgroundColor = NSColor.clear.cgColor
         borderView.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
         borderView.layer?.borderWidth = 1
-        borderView.layer?.cornerRadius = kCornerRadiusFull
         borderView.layer?.masksToBounds = true
         addSubview(borderView)
+
+        applyChrome(radius: kCornerRadiusFull)
 
         recordingDot.wantsLayer = true
         recordingDot.layer?.backgroundColor = NSColor.systemRed.cgColor
@@ -284,9 +303,7 @@ private final class PillContentView: NSView {
         self.a11yLabel = a11yLabel
 
         let compact = (mode == .meeting && !expanded)
-        let radius = compact ? kCornerRadiusMeet : kCornerRadiusFull
-        blurView.layer?.cornerRadius = radius
-        borderView.layer?.cornerRadius = radius
+        applyChrome(radius: compact ? kCornerRadiusMeet : kCornerRadiusFull)
 
         recordingDot.isHidden = (mode == .polishing)
         if !recordingDot.isHidden {
@@ -338,6 +355,14 @@ private final class PillContentView: NSView {
 
     func pushRMS(_ level: Float) {
         waveform.push(rms: level)
+    }
+
+    private func applyChrome(radius: CGFloat) {
+        guard radius != chromeRadius else { return }
+        chromeRadius = radius
+        blurView.maskImage = stretchableRoundedMask(radius: radius)
+        borderView.layer?.cornerRadius = radius
+        borderView.layer?.cornerCurve = .continuous
     }
 
     /// Wrapped-line height for the live tail, capped at 5 lines.
@@ -443,9 +468,30 @@ private final class PillContentView: NSView {
         }
     }
 
+    /// Chrome clicks drag; only the Stop button is a real control. Child
+    /// views (blur, border, waveform) must not eat the first mouse-down.
+    /// `point` is in this view's coordinates (`frame` of the button is too).
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if !stopButton.isHidden, stopButton.frame.contains(point) {
+            return stopButton
+        }
+        return self
+    }
+
     override func mouseDown(with event: NSEvent) {
+        let loc = convert(event.locationInWindow, from: nil)
+        if !stopButton.isHidden, stopButton.frame.contains(loc) {
+            stopButton.mouseDown(with: event)
+            return
+        }
         window?.performDrag(with: event)
     }
+}
+
+/// Same `acceptsFirstMouse` as the pill window: a background NSButton
+/// otherwise swallows the first click.
+private final class FirstMouseButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 /// Borderless panels return `canBecomeKey == false`. Override so VoiceOver
@@ -495,8 +541,12 @@ private final class PillPanel {
         p.isFloatingPanel = true
         p.becomesKeyOnlyIfNeeded = true
         p.worksWhenModal = true
-        p.isMovableByWindowBackground = true
-        p.hasShadow = true
+        // Drag is handled in `PillContentView.mouseDown` (chrome only).
+        // `isMovableByWindowBackground` eats the first click on Stop.
+        p.isMovableByWindowBackground = false
+        // The old Tauri pill window was `"shadow": false`. A native window
+        // shadow on a 64pt HUD reads as a hard black rim, not a drop shadow.
+        p.hasShadow = false
         p.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)))
         p.backgroundColor = .clear
         p.isOpaque = false

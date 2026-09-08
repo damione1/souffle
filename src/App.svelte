@@ -13,6 +13,7 @@
   import { bootstrapAppState } from "./lib/bootstrap";
   import { findTranscriptionModel } from "./lib/features/transcription/catalog";
   import OnboardingView from "./lib/features/onboarding/OnboardingView.svelte";
+  import PermissionsOnboarding from "./lib/features/onboarding/PermissionsOnboarding.svelte";
   import WhatsNewDialog from "./lib/features/onboarding/WhatsNewDialog.svelte";
   import UpdateAvailableDialog from "./lib/features/onboarding/UpdateAvailableDialog.svelte";
   import {
@@ -28,7 +29,8 @@
     notifyDictationAborted,
     notifyDictationStopRequested,
   } from "./lib/features/transcription/controller.svelte";
-  import { getAppState } from "./lib/stores/app.svelte";
+  import { getAppState, deriveRecordingMode } from "./lib/stores/app.svelte";
+  import { openSettings } from "./lib/features/settings/open";
   import { applyTheme, errorMessage } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
   import { decideShowSetupWizard, readSetupFlags } from "./lib/features/onboarding/setup";
@@ -57,6 +59,7 @@
   const healthDegraded = $derived(
     app.transcriptionHealth !== null && app.transcriptionHealth.status !== "healthy",
   );
+  const recordingMode = $derived(deriveRecordingMode(app.machineState));
 
   const machineError = $derived(
     app.machineState.state === "error" ? app.machineState.data : null,
@@ -313,7 +316,7 @@
       <span class="font-heading text-[14.5px] font-semibold" data-tauri-drag-region>Soufflé</span>
     </div>
     <span class="flex-1" data-tauri-drag-region></span>
-    {#if app.recordingMode !== "idle"}
+    {#if recordingMode !== "idle"}
       <span
         class="inline-flex items-center gap-[7px] rounded-full bg-danger/14 px-[11px] py-[5px] text-xs font-semibold text-danger-soft outline-1 outline-danger/30"
       >
@@ -353,6 +356,12 @@
 
   <div class="flex flex-1 flex-col min-w-0 overflow-hidden">
     <main class="flex-1 overflow-y-auto px-7 pb-[34px] pt-[26px]">
+      <!-- Keep HomeView mounted. Its singleton controllers own `$derived`
+           values; destroying the view (settings `{#if}`) froze them on
+           Svelte 5.55+ and left the live session card stuck after stop. -->
+      <div class:hidden={app.settingsOpen}>
+        <HomeView />
+      </div>
       {#if app.settingsOpen}
         <div class="mx-auto flex w-full max-w-[720px] flex-col gap-[22px]">
           <button
@@ -365,8 +374,6 @@
           <h1 class="text-[23px] font-bold">{$t("settings.title")}</h1>
           <SettingsView />
         </div>
-      {:else}
-        <HomeView />
       {/if}
     </main>
 
@@ -433,6 +440,10 @@
   />
 {/if}
 
+{#if app.permissionsPanelOpen}
+  <PermissionsOnboarding onClose={() => (app.permissionsPanelOpen = false)} />
+{/if}
+
 {#if !app.showOnboarding && routeToast && routeToastCopy}
   <div class="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
     <div class="pointer-events-auto">
@@ -440,6 +451,8 @@
         title={routeToastCopy.title}
         detail={routeToastCopy.detail}
         hint={routeToastCopy.hint}
+        actionLabel={routeToastCopy.hasAction ? $t("permissions.open_settings") : undefined}
+        onAction={routeToastCopy.hasAction ? () => openSettings({ tab: "audio" }) : undefined}
         onDismiss={() => micToast.dismiss()}
       />
     </div>

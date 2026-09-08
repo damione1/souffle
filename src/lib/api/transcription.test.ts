@@ -21,6 +21,7 @@ import {
   stopStreamingTranscription,
   listDictationEntries,
   addDictationEntry,
+  updateDictationEntry,
   deleteDictationEntry,
   clearDictationHistory,
   pasteText,
@@ -105,12 +106,21 @@ describe('transcription API', () => {
     expect(result).toEqual(entries);
   });
 
-  it('addDictationEntry passes text', async () => {
-    mockInvoke.mockResolvedValue(null);
+  it('addDictationEntry passes text and returns the id', async () => {
+    mockInvoke.mockResolvedValue('entry-42');
 
-    await addDictationEntry('test text');
+    const id = await addDictationEntry('test text');
 
     expect(mockInvoke).toHaveBeenCalledWith('add_dictation_entry', expect.objectContaining({ text: 'test text' }), undefined);
+    expect(id).toBe('entry-42');
+  });
+
+  it('updateDictationEntry passes id and text', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await updateDictationEntry('entry-42', 'polished text');
+
+    expect(mockInvoke).toHaveBeenCalledWith('update_dictation_entry', expect.objectContaining({ id: 'entry-42', text: 'polished text' }), undefined);
   });
 
   it('deleteDictationEntry passes id', async () => {

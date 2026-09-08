@@ -35,7 +35,12 @@
 
 <div class="flex flex-col gap-[18px]">
   {#if controller.statusMessage}
-    <StatusBanner message={controller.statusMessage} variant="warning" />
+    <StatusBanner
+      message={controller.statusMessage}
+      actionLabel={controller.statusActionLabel}
+      onAction={controller.statusAction}
+      variant="warning"
+    />
   {/if}
 
   {#if controller.isLoadingMeeting || !controller.meeting}

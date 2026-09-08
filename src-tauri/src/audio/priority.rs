@@ -14,7 +14,9 @@ pub struct KnownDevice {
 }
 
 /// User-declared input routing preferences (UID-based).
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, specta::Type,
+)]
 pub struct InputPriority {
     /// Preferred device UIDs, highest priority first.
     pub priorities: Vec<String>,
@@ -51,7 +53,11 @@ fn is_connected<'a>(devices: &'a [AudioInputDevice], uid: &str) -> Option<&'a Au
     devices.iter().find(|device| device.uid == uid)
 }
 
-fn is_auto_eligible(device: &AudioInputDevice, hidden: &[String], allow_bluetooth_mic: bool) -> bool {
+fn is_auto_eligible(
+    device: &AudioInputDevice,
+    hidden: &[String],
+    allow_bluetooth_mic: bool,
+) -> bool {
     !hidden.iter().any(|uid| uid == &device.uid)
         && (allow_bluetooth_mic || !is_bluetooth_transport(device.transport))
 }
@@ -64,7 +70,11 @@ pub fn touch_known(priority: &mut InputPriority, connected: &[AudioInputDevice])
         .unwrap_or(0);
 
     for device in connected {
-        if let Some(known) = priority.known.iter_mut().find(|entry| entry.uid == device.uid) {
+        if let Some(known) = priority
+            .known
+            .iter_mut()
+            .find(|entry| entry.uid == device.uid)
+        {
             known.name = device.name.clone();
             known.last_seen = now;
         } else {
@@ -87,12 +97,18 @@ pub fn touch_known(priority: &mut InputPriority, connected: &[AudioInputDevice])
 /// auto-eligible (all hidden, or Bluetooth-only with Bluetooth disallowed).
 /// The caller decides that fallback: capture opens the OS default anyway so
 /// recording still works, and never rebuilds toward a `None` resolution.
-pub fn resolve_input(connected: &[AudioInputDevice], params: ResolveInputParams<'_>) -> Option<String> {
+pub fn resolve_input(
+    connected: &[AudioInputDevice],
+    params: ResolveInputParams<'_>,
+) -> Option<String> {
     if connected.is_empty() {
         return None;
     }
 
-    if let Some(pin) = params.pin.filter(|uid| is_connected(connected, uid).is_some()) {
+    if let Some(pin) = params
+        .pin
+        .filter(|uid| is_connected(connected, uid).is_some())
+    {
         return Some(pin.to_string());
     }
 
@@ -112,7 +128,11 @@ pub fn resolve_input(connected: &[AudioInputDevice], params: ResolveInputParams<
         }
     }
 
-    resolve_default(connected, &params.priority.hidden, params.allow_bluetooth_mic)
+    resolve_default(
+        connected,
+        &params.priority.hidden,
+        params.allow_bluetooth_mic,
+    )
 }
 
 fn resolve_default(
@@ -146,7 +166,12 @@ fn resolve_default(
 mod tests {
     use super::*;
 
-    fn device(uid: &str, name: &str, transport: TransportType, is_default: bool) -> AudioInputDevice {
+    fn device(
+        uid: &str,
+        name: &str,
+        transport: TransportType,
+        is_default: bool,
+    ) -> AudioInputDevice {
         AudioInputDevice {
             uid: uid.into(),
             name: name.into(),
@@ -226,7 +251,13 @@ mod tests {
         assert_eq!(
             resolve_input(
                 &connected,
-                params(Some("builtin"), Some("webcam"), true, &empty_priority(), false),
+                params(
+                    Some("builtin"),
+                    Some("webcam"),
+                    true,
+                    &empty_priority(),
+                    false
+                ),
             ),
             Some("builtin".into()),
         );

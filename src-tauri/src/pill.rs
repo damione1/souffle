@@ -16,8 +16,8 @@
 //!   the main-window controller then runs `stop_transcription` + polish/paste.
 //!   Meetings use `MeetingStopRequested`, same path as the tray.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
@@ -30,7 +30,7 @@ use crate::app_events::{
 use crate::db::Database;
 use crate::settings::PILL_POSITION_KEY;
 use crate::state::AppState;
-use crate::state_machine::AppStateMachine;
+use crate::state_machine::{AppStateMachine, RecordingKind};
 
 // ---------------------------------------------------------------------------
 // FFI (pill_bridge.h / pill_panel.swift)
@@ -135,29 +135,66 @@ pub fn create_panel(app: &AppHandle) {
 fn install_stop_callback(app: AppHandle) {
     STOP_APP_HANDLE.set(std::sync::Mutex::new(Some(app))).ok();
 
-    unsafe extern "C" fn on_stop(recording_mode: i32) {
-        let Some(guard) = STOP_APP_HANDLE.get() else {
-            return;
-        };
-        let Ok(guard) = guard.lock() else {
-            return;
-        };
-        let Some(app) = guard.as_ref() else {
-            return;
+    unsafe extern "C" fn on_stop(_recording_mode: i32) {
+        let app = {
+            let Some(guard) = STOP_APP_HANDLE.get() else {
+                return;
+            };
+            let Ok(guard) = guard.lock() else {
+                return;
+            };
+            let Some(app) = guard.as_ref() else {
+                return;
+            };
+            app.clone()
         };
 
-        if recording_mode == PillPanelMode::Meeting as i32 {
-            let _ = MeetingStopRequested.emit(app);
-        } else {
-            // Stop-only. Never ShortcutToggle: that can start a new dictation
-            // or (historically) take down a meeting (SOU-044 / SOU-046).
-            let _ = DictationStopRequested.emit(app);
+        let Ok(machine) = app.state::<AppState>().current_machine_state() else {
+            return;
+        };
+        // Trust the machine, not Swift's latched mode. A stale dictation
+        // mode during a meeting made HUD Stop a no-op (logs: session 8
+        // died without ever seeing stop_meeting_recording).
+        match hud_stop_target(&machine) {
+            Some(HudStopTarget::Meeting) => {
+                tracing::info!("HUD stop routed to meeting");
+                let _ = MeetingStopRequested.emit(&app);
+            }
+            Some(HudStopTarget::Dictation) => {
+                tracing::info!("HUD stop routed to dictation");
+                let _ = DictationStopRequested.emit(&app);
+            }
+            None => {
+                tracing::info!("HUD stop ignored (not recording)");
+            }
         }
     }
 
     // SAFETY: `on_stop` is a plain C function pointer; Swift may call it
     // from the main thread. AppHandle is Send + Sync.
     unsafe { pill_panel_set_stop_callback(Some(on_stop)) };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HudStopTarget {
+    Meeting,
+    Dictation,
+}
+
+fn hud_stop_target(machine: &AppStateMachine) -> Option<HudStopTarget> {
+    match machine {
+        AppStateMachine::RecordingMeeting { .. }
+        | AppStateMachine::Stopping {
+            was_recording: RecordingKind::Meeting { .. },
+            ..
+        } => Some(HudStopTarget::Meeting),
+        AppStateMachine::RecordingDictation { .. }
+        | AppStateMachine::Stopping {
+            was_recording: RecordingKind::Dictation,
+            ..
+        } => Some(HudStopTarget::Dictation),
+        _ => None,
+    }
 }
 
 static STOP_APP_HANDLE: std::sync::OnceLock<std::sync::Mutex<Option<AppHandle>>> =
@@ -520,6 +557,47 @@ mod tests {
         assert_eq!(custom_origin(), Some((100.5, 200.25)));
         set_hidden(false);
         store_custom_origin(None);
+    }
+
+    #[test]
+    fn hud_stop_follows_the_machine_not_swift_mode() {
+        let profile = crate::engine::TranscriptionProfile::default();
+        assert_eq!(
+            hud_stop_target(&AppStateMachine::RecordingMeeting {
+                profile: profile.clone(),
+                session_id: 1,
+                meeting_id: "m1".into(),
+            }),
+            Some(HudStopTarget::Meeting)
+        );
+        assert_eq!(
+            hud_stop_target(&AppStateMachine::Stopping {
+                profile: profile.clone(),
+                was_recording: RecordingKind::Meeting {
+                    meeting_id: "m1".into(),
+                },
+            }),
+            Some(HudStopTarget::Meeting)
+        );
+        assert_eq!(
+            hud_stop_target(&AppStateMachine::RecordingDictation {
+                profile: profile.clone(),
+                session_id: 1,
+            }),
+            Some(HudStopTarget::Dictation)
+        );
+        assert_eq!(
+            hud_stop_target(&AppStateMachine::Stopping {
+                profile: profile.clone(),
+                was_recording: RecordingKind::Dictation,
+            }),
+            Some(HudStopTarget::Dictation)
+        );
+        assert_eq!(
+            hud_stop_target(&AppStateMachine::Ready { profile }),
+            None,
+            "a zombie HUD click after stop must not start a session"
+        );
     }
 
     #[test]

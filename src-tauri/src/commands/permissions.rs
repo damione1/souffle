@@ -1,4 +1,6 @@
-use crate::permissions::{self, PermState, PermissionKind, PermissionStatus};
+use crate::permissions::{
+    self, PermState, PermissionKind, PermissionStatus, RepairAccessibilityResult,
+};
 
 /// Cheap, non-prompting snapshot for the onboarding's initial render.
 #[tauri::command]
@@ -24,8 +26,8 @@ pub async fn request_permission(kind: PermissionKind) -> Result<PermState, Strin
 /// the command thread since it shells out and may block on the prompt.
 #[tauri::command]
 #[specta::specta]
-pub async fn repair_accessibility_permission() -> Result<PermState, String> {
+pub async fn repair_accessibility_permission() -> Result<RepairAccessibilityResult, String> {
     tauri::async_runtime::spawn_blocking(permissions::repair_accessibility)
         .await
-        .map_err(|e| format!("Accessibility repair failed: {e}"))
+        .map_err(|e| format!("Accessibility repair failed: {e}"))?
 }

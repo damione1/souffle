@@ -121,14 +121,17 @@ impl SouffleMcpServer {
     ) -> Result<Json<MeetingListResult>, String> {
         let limit = clamp_limit(args.limit, 20);
         self.db
-            .list_meetings(args.query.as_deref(), args.from.as_deref(), args.to.as_deref(), limit)
+            .list_meetings(
+                args.query.as_deref(),
+                args.from.as_deref(),
+                args.to.as_deref(),
+                limit,
+            )
             .map(|meetings| Json(MeetingListResult { meetings }))
             .map_err(|e| e.to_string())
     }
 
-    #[tool(
-        description = "Get a single meeting's transcript, summary, notes, and metadata by id."
-    )]
+    #[tool(description = "Get a single meeting's transcript, summary, notes, and metadata by id.")]
     async fn get_meeting(
         &self,
         Parameters(args): Parameters<GetMeetingArgs>,

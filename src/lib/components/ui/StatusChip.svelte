@@ -23,9 +23,8 @@
 
   const status = $derived.by((): { key: string; tone: "ready" | "busy" | "attention" } => {
     if (operationState === "downloading") return { key: "status_chip.downloading", tone: "busy" };
-    if (operationState === "loading" || phase === "load_required") {
-      return { key: "status_chip.loading", tone: "busy" };
-    }
+    if (operationState === "loading") return { key: "status_chip.loading", tone: "busy" };
+    if (phase === "load_required") return { key: "status_chip.load_required", tone: "attention" };
     if (phase === "ready") return { key: "status_chip.ready", tone: "ready" };
     return { key: "status_chip.model_required", tone: "attention" };
   });

@@ -55,8 +55,12 @@ export async function listDictationEntries(limit = 50): Promise<DictationEntry[]
   return unwrap(commands.listDictationEntries(limit));
 }
 
-export async function addDictationEntry(text: string): Promise<void> {
-  await unwrap(commands.addDictationEntry(text));
+export async function addDictationEntry(text: string): Promise<string> {
+  return unwrap(commands.addDictationEntry(text));
+}
+
+export async function updateDictationEntry(id: string, text: string): Promise<void> {
+  await unwrap(commands.updateDictationEntry(id, text));
 }
 
 export async function deleteDictationEntry(id: string): Promise<void> {
@@ -73,6 +77,11 @@ export async function pasteText(
   method: PasteMethod = "clipboard",
 ): Promise<void> {
   await unwrap(commands.pasteText(text, delayMs, method));
+}
+
+/** Write text to the pasteboard without pasting. Cancels a pending restore. */
+export async function copyText(text: string): Promise<void> {
+  await unwrap(commands.copyText(text));
 }
 
 /** Surface a shortcut dictation's paste failure outside the app window with

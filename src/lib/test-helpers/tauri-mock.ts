@@ -47,7 +47,8 @@ export interface TranscriptionApiMock {
   startStreamingTranscription: ReturnType<typeof vi.fn<(onSegment: (s: TranscriptionSegment) => void) => Promise<void>>>;
   stopStreamingTranscription: ReturnType<typeof vi.fn<() => Promise<void>>>;
   listDictationEntries: ReturnType<typeof vi.fn<(limit?: number) => Promise<DictationEntry[]>>>;
-  addDictationEntry: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>;
+  addDictationEntry: ReturnType<typeof vi.fn<(text: string) => Promise<string>>>;
+  updateDictationEntry: ReturnType<typeof vi.fn<(id: string, text: string) => Promise<void>>>;
   deleteDictationEntry: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
   clearDictationHistory: ReturnType<typeof vi.fn<() => Promise<void>>>;
   pasteText: ReturnType<typeof vi.fn<(text: string, delayMs: number, method?: string) => Promise<void>>>;
@@ -64,7 +65,8 @@ export function createTranscriptionApiMock(
     startStreamingTranscription: vi.fn<(onSegment: (s: TranscriptionSegment) => void) => Promise<void>>().mockResolvedValue(undefined),
     stopStreamingTranscription: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     listDictationEntries: vi.fn<(limit?: number) => Promise<DictationEntry[]>>().mockResolvedValue([mockDictationEntry]),
-    addDictationEntry: vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined),
+    addDictationEntry: vi.fn<(text: string) => Promise<string>>().mockResolvedValue("entry-1"),
+    updateDictationEntry: vi.fn<(id: string, text: string) => Promise<void>>().mockResolvedValue(undefined),
     deleteDictationEntry: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
     clearDictationHistory: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     pasteText: vi.fn<(text: string, delayMs: number, method?: string) => Promise<void>>().mockResolvedValue(undefined),

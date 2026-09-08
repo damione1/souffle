@@ -64,7 +64,7 @@ export const DEFAULT_RESPONSES: Record<string, unknown> = {
   stop_meeting_recording: "meeting-e2e-1",
   start_transcription: null,
   stop_transcription: null,
-  add_dictation_entry: null,
+  add_dictation_entry: "entry-e2e-1",
   take_sleep_paused_meeting: null,
 };
 
@@ -214,7 +214,7 @@ export async function emitTauriEvent(page: Page, event: string, payload: unknown
 
 /** Push a streamed message through the `Channel` captured for `cmd` (the
  * command name whose args included a `Channel`, e.g. `start_meeting_recording`). */
-export async function sendChannelMessage(page: Page, cmd: string, message: unknown, index = 0): Promise<void> {
+export async function sendChannelMessage(page: Page, cmd: string, message: unknown, index?: number): Promise<void> {
   await page.evaluate(
     ([cmd, message, index]) => {
       const stub = (window as any).__soufflStub;
@@ -222,7 +222,12 @@ export async function sendChannelMessage(page: Page, cmd: string, message: unkno
       if (!channel) {
         throw new Error(`[tauri-stub] no channel captured for command "${cmd}"`);
       }
-      stub.runCallback(channel.id, { message, index });
+      // Tauri Channel delivers in `index` order and queues out-of-order
+      // payloads. A second message with the default 0 is never flushed.
+      const seq = (stub.channelSeq ??= {});
+      const nextIndex = typeof index === "number" ? index : (seq[cmd as string] ?? 0);
+      seq[cmd as string] = nextIndex + 1;
+      stub.runCallback(channel.id, { message, index: nextIndex });
     },
     [cmd, message, index] as const,
   );

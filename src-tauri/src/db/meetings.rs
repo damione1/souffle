@@ -10,6 +10,40 @@ use crate::transcript::{
 
 use super::Database;
 
+fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> String {
+    edited_transcript
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+        .unwrap_or(segment_text)
+}
+
+fn reindex_meeting_fts(tx: &rusqlite::Transaction<'_>, id: &str, text: &str) -> Result<(), String> {
+    tx.execute(
+        "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("Delete FTS: {e}"))?;
+    if !text.is_empty() {
+        tx.execute(
+            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+            params![text, "meeting", id],
+        )
+        .map_err(|e| format!("Insert FTS: {e}"))?;
+    }
+    Ok(())
+}
+
+fn joined_segment_text(tx: &rusqlite::Transaction<'_>, meeting_id: &str) -> Result<String, String> {
+    let mut stmt = tx
+        .prepare("SELECT text FROM segments WHERE meeting_id = ?1 ORDER BY sort_order")
+        .map_err(|e| format!("Prepare segments: {e}"))?;
+    stmt.query_map(params![meeting_id], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Query segments: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map(|texts| texts.join(" "))
+        .map_err(|e| format!("Collect segments: {e}"))
+}
+
 impl Database {
     /// Save a meeting with all its segments in a single transaction.
     /// Also indexes the full text for FTS5 search.
@@ -86,26 +120,16 @@ impl Database {
             .map_err(|e| format!("Insert segment: {e}"))?;
         }
 
-        tx.execute(
-            "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
-            params![meeting.id],
-        )
-        .map_err(|e| format!("Delete FTS: {e}"))?;
-
-        let full_text = meeting
-            .segments
-            .iter()
-            .map(|segment| segment.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        if !full_text.is_empty() {
-            tx.execute(
-                "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
-                params![full_text, "meeting", meeting.id],
-            )
-            .map_err(|e| format!("Insert FTS: {e}"))?;
-        }
+        let full_text = meeting_fts_text(
+            meeting.edited_transcript.as_deref(),
+            meeting
+                .segments
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        reindex_meeting_fts(&tx, &meeting.id, &full_text)?;
 
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
@@ -223,6 +247,25 @@ impl Database {
             )
             .map_err(|e| format!("Update segment text: {e}"))?;
         }
+
+        // Rebuild FTS only if there is no edited_transcript
+        let edited_transcript: Option<String> = tx
+            .query_row(
+                "SELECT edited_transcript FROM meetings WHERE id = ?1",
+                params![meeting_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Query edited_transcript: {e}"))?;
+
+        if edited_transcript
+            .as_ref()
+            .map(|t| t.is_empty())
+            .unwrap_or(true)
+        {
+            let full_text = joined_segment_text(&tx, meeting_id)?;
+            reindex_meeting_fts(&tx, meeting_id, &full_text)?;
+        }
+
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -449,7 +492,13 @@ impl Database {
     pub fn save_meeting_notes(&self, id: &str, notes: Option<&str>) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
-            "UPDATE meetings SET notes = ?1 WHERE id = ?2",
+            "UPDATE meetings
+             SET notes = ?1,
+                 summary_is_stale = CASE
+                   WHEN summary IS NOT NULL AND notes IS DISTINCT FROM ?1 THEN 1
+                   ELSE summary_is_stale
+                 END
+             WHERE id = ?2",
             params![notes, id],
         )
         .map_err(|e| format!("Update meeting notes: {e}"))?;
@@ -511,27 +560,41 @@ impl Database {
         Ok(())
     }
 
-    /// Update meeting summary fields, structured summary, and clear the stale flag.
+    /// Update meeting summary fields and structured summary.
+    ///
+    /// `generated_from_edited` / `generated_from_notes` are snapshots taken
+    /// when summarization started. If either changed during generation, the
+    /// new summary is still stored but `summary_is_stale` stays set so an
+    /// older summary cannot be marked fresh.
     pub fn update_meeting_summary(
         &self,
         id: &str,
         summary: &str,
         structured_summary: Option<&StructuredSummary>,
         model: &str,
+        generated_from_edited: Option<&str>,
+        generated_from_notes: Option<&str>,
     ) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
             "UPDATE meetings
-             SET summary = ?1, summary_is_stale = 0, summary_model = ?2, summary_generated_at = ?3,
-                 structured_summary = ?4
-             WHERE id = ?5",
+             SET summary = ?1, summary_model = ?2, summary_generated_at = ?3,
+                 structured_summary = ?4,
+                 summary_is_stale = CASE
+                   WHEN edited_transcript IS NOT DISTINCT FROM ?5
+                    AND notes IS NOT DISTINCT FROM ?6 THEN 0
+                   ELSE 1
+                 END
+             WHERE id = ?7",
             params![
                 summary,
                 model,
                 now,
                 serialize_structured_summary(structured_summary)?,
+                generated_from_edited,
+                generated_from_notes,
                 id
             ],
         )
@@ -556,12 +619,28 @@ impl Database {
         id: &str,
         edited_transcript: Option<&str>,
     ) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
-        conn.execute(
-            "UPDATE meetings SET edited_transcript = ?1 WHERE id = ?2",
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
+
+        tx.execute(
+            "UPDATE meetings
+             SET edited_transcript = ?1,
+                 summary_is_stale = CASE
+                   WHEN summary IS NOT NULL AND edited_transcript IS DISTINCT FROM ?1 THEN 1
+                   ELSE summary_is_stale
+                 END
+             WHERE id = ?2",
             params![edited_transcript, id],
         )
         .map_err(|e| format!("Update edited transcript: {e}"))?;
+
+        let text_to_index = meeting_fts_text(edited_transcript, joined_segment_text(&tx, id)?);
+        reindex_meeting_fts(&tx, id, &text_to_index)?;
+
+        tx.commit().map_err(|e| format!("Commit: {e}"))?;
+
         Ok(())
     }
 
@@ -603,7 +682,11 @@ impl Database {
     /// archive export tests exercise the "skip one bad meeting, keep going"
     /// path without a hand-rolled fake `Database`.
     #[cfg(test)]
-    pub fn insert_corrupt_meeting_for_test(&self, id: &str, started_at: &str) -> Result<(), String> {
+    pub fn insert_corrupt_meeting_for_test(
+        &self,
+        id: &str,
+        started_at: &str,
+    ) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
             "INSERT INTO meetings (
@@ -848,6 +931,8 @@ mod tests {
                 open_questions: vec![],
             }),
             "qwen2.5",
+            None,
+            None,
         )
         .unwrap();
 
@@ -873,13 +958,25 @@ mod tests {
                 open_questions: vec![],
             }),
             "qwen2.5",
+            None,
+            None,
         )
         .unwrap();
-        db.update_meeting_summary("m1", "Prose only after extract fail", None, "qwen2.5")
-            .unwrap();
+        db.update_meeting_summary(
+            "m1",
+            "Prose only after extract fail",
+            None,
+            "qwen2.5",
+            None,
+            None,
+        )
+        .unwrap();
 
         let loaded = db.load_meeting("m1").unwrap();
-        assert_eq!(loaded.summary.as_deref(), Some("Prose only after extract fail"));
+        assert_eq!(
+            loaded.summary.as_deref(),
+            Some("Prose only after extract fail")
+        );
         assert!(loaded.structured_summary.is_none());
     }
 
@@ -1135,6 +1232,172 @@ mod tests {
         let edited = db.load_edited_transcript("m1").unwrap();
         assert!(edited.is_none());
     }
+
+    #[test]
+    fn save_edited_transcript_marks_summary_stale_when_summary_exists() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("budget recap".to_string());
+        db.save_meeting(&meeting).unwrap();
+        assert!(!db.load_meeting("m1").unwrap().summary_is_stale);
+
+        db.save_edited_transcript("m1", Some("forecast recap"))
+            .unwrap();
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.edited_transcript.as_deref(), Some("forecast recap"));
+        assert!(loaded.summary_is_stale);
+    }
+
+    #[test]
+    fn save_edited_transcript_does_not_mark_stale_without_summary() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+
+        db.save_edited_transcript("m1", Some("corrigé")).unwrap();
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.edited_transcript.as_deref(), Some("corrigé"));
+        assert!(!loaded.summary_is_stale);
+    }
+
+    #[test]
+    fn save_meeting_notes_marks_summary_stale_when_summary_exists() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("budget recap".to_string());
+        db.save_meeting(&meeting).unwrap();
+        assert!(!db.load_meeting("m1").unwrap().summary_is_stale);
+
+        db.save_meeting_notes("m1", Some("décision : on ship vendredi"))
+            .unwrap();
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.notes.as_deref(), Some("décision : on ship vendredi"));
+        assert!(loaded.summary_is_stale);
+    }
+
+    #[test]
+    fn save_meeting_notes_does_not_mark_stale_without_summary() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m1")).unwrap();
+
+        db.save_meeting_notes("m1", Some("remember this")).unwrap();
+        assert!(!db.load_meeting("m1").unwrap().summary_is_stale);
+    }
+
+    #[test]
+    fn save_same_edited_transcript_does_not_mark_stale() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("budget recap".to_string());
+        meeting.edited_transcript = Some("forecast recap".to_string());
+        db.save_meeting(&meeting).unwrap();
+        assert!(!db.load_meeting("m1").unwrap().summary_is_stale);
+
+        db.save_edited_transcript("m1", Some("forecast recap"))
+            .unwrap();
+        assert!(
+            !db.load_meeting("m1").unwrap().summary_is_stale,
+            "re-saving the same transcript must not invalidate a fresh summary"
+        );
+    }
+
+    #[test]
+    fn save_same_meeting_notes_does_not_mark_stale() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("budget recap".to_string());
+        meeting.notes = Some("remember this".to_string());
+        db.save_meeting(&meeting).unwrap();
+        assert!(!db.load_meeting("m1").unwrap().summary_is_stale);
+
+        db.save_meeting_notes("m1", Some("remember this")).unwrap();
+        assert!(
+            !db.load_meeting("m1").unwrap().summary_is_stale,
+            "re-saving the same notes must not invalidate a fresh summary"
+        );
+    }
+
+    #[test]
+    fn update_summary_clears_stale_when_transcript_matches_generation_snapshot() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("old".to_string());
+        db.save_meeting(&meeting).unwrap();
+        db.save_edited_transcript("m1", Some("corrigé")).unwrap();
+        assert!(db.load_meeting("m1").unwrap().summary_is_stale);
+
+        db.update_meeting_summary(
+            "m1",
+            "fresh from corrigé",
+            None,
+            "qwen2.5",
+            Some("corrigé"),
+            None,
+        )
+        .unwrap();
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.summary.as_deref(), Some("fresh from corrigé"));
+        assert!(!loaded.summary_is_stale);
+    }
+
+    #[test]
+    fn update_summary_keeps_stale_when_transcript_changed_during_generation() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("old".to_string());
+        db.save_meeting(&meeting).unwrap();
+
+        // Generation started from the unedited segments.
+        let snapshot = meeting.edited_transcript.clone();
+        db.save_edited_transcript("m1", Some("corrigé")).unwrap();
+        db.update_meeting_summary(
+            "m1",
+            "summary of the old transcript",
+            None,
+            "qwen2.5",
+            snapshot.as_deref(),
+            None,
+        )
+        .unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(
+            loaded.summary.as_deref(),
+            Some("summary of the old transcript")
+        );
+        assert!(
+            loaded.summary_is_stale,
+            "an older summary must not be marked fresh after an edit during generation"
+        );
+    }
+
+    #[test]
+    fn update_summary_keeps_stale_when_notes_changed_during_generation() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m1");
+        meeting.summary = Some("old".to_string());
+        db.save_meeting(&meeting).unwrap();
+
+        let notes_snapshot = meeting.notes.clone();
+        db.save_meeting_notes("m1", Some("décision : on ship vendredi"))
+            .unwrap();
+        db.update_meeting_summary(
+            "m1",
+            "summary of the old notes",
+            None,
+            "qwen2.5",
+            None,
+            notes_snapshot.as_deref(),
+        )
+        .unwrap();
+
+        let loaded = db.load_meeting("m1").unwrap();
+        assert_eq!(loaded.summary.as_deref(), Some("summary of the old notes"));
+        assert!(
+            loaded.summary_is_stale,
+            "an older summary must not be marked fresh after a notes edit during generation"
+        );
+    }
+
     #[test]
     fn recover_unfinished_preserves_shell_when_audio_check_fails() {
         let (db, _dir) = test_db();

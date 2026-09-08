@@ -1,6 +1,7 @@
 import { getAppState } from "../../stores/app.svelte";
 import {
   addDictationEntry,
+  copyText,
   getTranscriptionCatalog,
   notifyPasteFailed,
   pasteText,
@@ -8,6 +9,7 @@ import {
   pillRelease,
   startStreamingTranscription,
   stopStreamingTranscription,
+  updateDictationEntry,
 } from "../../api/transcription";
 import { learnFromEdit } from "../../api/dictionary";
 import { frontmostAppName, readFocusedText, readSelectedText } from "../../api/focus";
@@ -15,27 +17,21 @@ import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage, segmentGap } from "../../utils";
+import { tr } from "../../i18n";
+import { openPermissionsRepair, openSettings } from "../settings/open";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
 
 const LEARN_FROM_EDIT_DELAY_MS = 4000;
 const MAX_LEARN_FROM_EDIT_PAIRS = 8;
+/** Caller-side cap so dictation stop is not bound to the 120s provider read timeout. */
+const POLISH_TIMEOUT_MS = 25_000;
+
+/** Exact `ACCESSIBILITY_STALE_ERROR` from clipboard.rs — copy succeeded, ⌘V is the recovery.
+ * A parenthetical suffix means the copy itself failed; that is not "Copied". */
+const ACCESSIBILITY_PASTE_COPIED = "Accessibility permission missing.";
 
 type SessionMode = "insert" | "rewrite";
-
-/**
- * Matches the accessibility error clipboard.rs returns when
- * `permissions::accessibility_granted()` fails at paste time (see
- * `ACCESSIBILITY_STALE_ERROR` in src-tauri/src/clipboard.rs). Distinct from
- * a raw Enigo error, so we can point the user at the repair action instead
- * of just relaying the OS string.
- */
-function accessibilityPasteFailureMessage(rawMessage: string): string {
-  if (rawMessage.includes("Accessibility permission missing")) {
-    return "Paste failed: accessibility permission needed. Open Settings > Advanced > Permissions and use Repair permission.";
-  }
-  return `Paste failed: ${rawMessage}`;
-}
 
 function tokenizeWords(text: string): string[] {
   return text
@@ -107,27 +103,60 @@ async function finalizeDictationText(
 
   try {
     const { polishDictation } = await import("../../api/dictation");
-    const result = await polishDictation(trimmed, focusedApp, rewriteOf);
-    return {
-      text: result.text.trim(),
-      warning: result.warning ?? undefined,
-    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // Settle polish so a late reject after timeout cannot become unhandled.
+      const polish = polishDictation(trimmed, focusedApp, rewriteOf).then(
+        (result) => ({ kind: "ok" as const, result }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
+      const outcome = await Promise.race([
+        polish,
+        new Promise<{ kind: "timeout" }>((resolve) => {
+          timer = setTimeout(() => resolve({ kind: "timeout" }), POLISH_TIMEOUT_MS);
+        }),
+      ]);
+      if (outcome.kind === "timeout") {
+        return { text: trimmed, warning: tr("home.polish_timeout") };
+      }
+      if (outcome.kind === "error") {
+        console.warn("Dictation polish failed:", outcome.error);
+        return { text: trimmed, warning: errorMessage(outcome.error) };
+      }
+      return {
+        text: outcome.result.text.trim(),
+        warning: outcome.result.warning ?? undefined,
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   } catch (e) {
     console.warn("Dictation polish failed:", e);
     return { text: trimmed, warning: errorMessage(e) };
   }
 }
 
-/** Persist a finished dictation and surface it in the timeline. */
-async function saveToHistory(text: string): Promise<boolean> {
-  if (!text.trim()) return false;
+/** Persist a finished dictation and surface it in the timeline. Returns the entry id. */
+async function saveToHistory(text: string): Promise<string | null> {
+  if (!text.trim()) return null;
   try {
-    await addDictationEntry(text.trim());
+    const id = await addDictationEntry(text.trim());
     await createTimelineController().refresh();
-    return true;
+    return id;
   } catch (e) {
     console.warn("Failed to save dictation entry:", e);
-    return false;
+    return null;
+  }
+}
+
+/** Replace an existing history row after polish. Same id, no second entry. */
+async function updateHistory(id: string, text: string): Promise<void> {
+  if (!text.trim()) return;
+  try {
+    await updateDictationEntry(id, text.trim());
+    await createTimelineController().refresh();
+  } catch (e) {
+    console.warn("Failed to update dictation entry:", e);
   }
 }
 
@@ -139,15 +168,35 @@ function createTranscriptionControllerInstance() {
   let transcript = $state("");
   let tentative = $state("");
   let statusMessage = $state("");
+  let statusActionLabel = $state<string | undefined>();
+  let statusAction = $state<(() => void) | undefined>();
   let catalog = $state<TranscriptionCatalog | null>(null);
+
+  function setBanner(message: string, action?: { label: string; run: () => void }) {
+    statusMessage = message;
+    statusActionLabel = action?.label;
+    statusAction = action?.run;
+  }
+
+  function clearBanner() {
+    setBanner("");
+  }
+
+  function modelRequiredBanner(message: string) {
+    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ tab: "transcription" }) });
+  }
 
   // Incremented for every session start (and on abort) so segment-channel
   // callbacks from a previous session can never write into a new one.
   let sessionGeneration = 0;
   let sessionMode: SessionMode = "insert";
+  let sessionAutoPaste = false;
   let focusedApp: string | null = null;
   let rewriteOf: string | null = null;
   let learnFromEditTimer: ReturnType<typeof setTimeout> | null = null;
+  let ceilingTimer: ReturnType<typeof setTimeout> | null = null;
+  let sessionStartTime = 0;
+  let pttStopQueued = false;
 
   let activeProfileLabel = $derived.by(() => {
     if (!catalog) return "Transcription model";
@@ -181,9 +230,15 @@ function createTranscriptionControllerInstance() {
     focusedApp = null;
     rewriteOf = null;
     sessionMode = "insert";
+    sessionAutoPaste = false;
+    if (ceilingTimer) {
+      clearTimeout(ceilingTimer);
+      ceilingTimer = null;
+    }
     // Nothing keeps this alive once the session that produced it is over;
     // leaving it would let a later, unrelated stop re-paste and re-save it.
     transcript = "";
+    tentative = "";
   }
 
   async function captureStartContext() {
@@ -203,7 +258,7 @@ function createTranscriptionControllerInstance() {
     }
   }
 
-  function scheduleLearnFromEdit(pasted: string) {
+  function scheduleLearnFromEdit(pasted: string, targetApp: string | null) {
     cancelLearnFromEditPoll();
     if (!app.settings.dictation_learn_from_edit || !pasted) return;
 
@@ -211,6 +266,9 @@ function createTranscriptionControllerInstance() {
       learnFromEditTimer = null;
       try {
         if (!app.settings.dictation_learn_from_edit) return;
+        if (!targetApp) return;
+        const currentApp = await frontmostAppName().catch(() => null);
+        if (currentApp !== targetApp) return;
         const focused = (await readFocusedText())?.trim() ?? null;
         if (!focused || focused === pasted) return;
         // Whole-field AX reads include pre-existing content around the paste.
@@ -257,7 +315,11 @@ function createTranscriptionControllerInstance() {
         }
       }),
       events.shortcutPttStop.listen(() => {
-        if (isDictating && !isStopping) void toggleRecording(true);
+        if (isStartingRecording) {
+          pttStopQueued = true;
+        } else if (isDictating && !isStopping) {
+          void toggleRecording(true);
+        }
       }),
     ]);
 
@@ -276,7 +338,7 @@ function createTranscriptionControllerInstance() {
         transcription_backend_id: catalog.selected_backend_id,
       };
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -284,7 +346,7 @@ function createTranscriptionControllerInstance() {
     try {
       await refreshTranscriptionRuntimeStatus(app, catalog);
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
     }
   }
 
@@ -306,6 +368,19 @@ function createTranscriptionControllerInstance() {
 
     if (isDictating) {
       isStopping = true;
+      const dictationDurationMs = Date.now() - sessionStartTime;
+      if (dictationDurationMs < 500) {
+        sessionGeneration += 1;
+        try {
+          await stopStreamingTranscription();
+        } catch (e) {
+          console.warn("Fast stop failed:", e);
+        }
+        setBanner(tr("home.dictation_too_short"));
+        clearSessionContext();
+        isStopping = false;
+        return;
+      }
 
       // Polish keeps running after the recording state ends (it's an LLM
       // call over the finalized text); hold the pill open now, before the
@@ -315,6 +390,7 @@ function createTranscriptionControllerInstance() {
       const holdForPolish = app.settings.dictation_polish_enabled;
       const sessionFocusedApp = focusedApp;
       const sessionRewriteOf = rewriteOf;
+      const sessionShouldAutoPaste = sessionAutoPaste;
       if (holdForPolish) {
         try {
           await pillHold("polishing");
@@ -326,29 +402,54 @@ function createTranscriptionControllerInstance() {
       try {
         await stopStreamingTranscription();
 
+        // Persist raw first (SOU-048): a crash during polish must not drop the text.
+        const rawText = transcript.trim();
+        const savedId = await saveToHistory(rawText);
+
         const finalized = await finalizeDictationText(
-          transcript,
+          rawText,
           sessionFocusedApp,
           sessionRewriteOf,
         );
         if (finalized.warning) {
-          statusMessage = finalized.warning;
+          setBanner(finalized.warning);
         }
 
-        const saved = await saveToHistory(finalized.text);
+        if (savedId && finalized.text && finalized.text !== rawText) {
+          await updateHistory(savedId, finalized.text);
+        }
+        const saved = savedId != null;
 
         if (finalized.text) {
-          if (fromShortcut && app.settings.auto_paste) {
+          if (sessionShouldAutoPaste && app.settings.auto_paste) {
             try {
               await pasteText(
                 finalized.text,
                 app.settings.paste_delay_ms,
                 app.settings.paste_method,
               );
-              scheduleLearnFromEdit(finalized.text);
+              scheduleLearnFromEdit(finalized.text, sessionFocusedApp);
             } catch (e) {
               const message = errorMessage(e);
-              statusMessage = accessibilityPasteFailureMessage(message);
+              // AX-missing already wrote via Rust copy_text and skipped restore.
+              // Any other paste_text failure may have scheduled RestoreBurst:
+              // copy_text cancels that restore. Never use the web clipboard
+              // here — it races the 400 ms restore.
+              if (message !== ACCESSIBILITY_PASTE_COPIED) {
+                try {
+                  await copyText(finalized.text);
+                } catch {
+                  // Best-effort; the banner still reports the paste failure.
+                }
+              }
+              if (message === ACCESSIBILITY_PASTE_COPIED) {
+                setBanner(tr("home.paste_copied"), {
+                  label: tr("permissions.repair"),
+                  run: openPermissionsRepair,
+                });
+              } else {
+                setBanner(tr("home.paste_failed", { error: message }));
+              }
               // A shortcut dictation runs from another app, so the status
               // banner above is likely not on screen: also notify outside
               // the window (SOU-053). Best-effort: a notification failure
@@ -368,7 +469,7 @@ function createTranscriptionControllerInstance() {
           }
         }
       } catch (e) {
-        statusMessage = errorMessage(e);
+        setBanner(errorMessage(e));
       } finally {
         clearSessionContext();
         if (holdForPolish) {
@@ -383,33 +484,45 @@ function createTranscriptionControllerInstance() {
       return;
     }
 
-    if (app.transcriptionRuntimePhase === "download_required") {
-      statusMessage = "Download and load the model before starting dictation.";
-      return;
-    }
-    if (app.transcriptionRuntimePhase !== "ready") {
-      // Model was unloaded (e.g. the idle timeout freed it); reload through
-      // the normal load flow before recording instead of leaving the user
-      // stuck with a disabled button.
-      statusMessage = "";
-      const ready = await ensureModelLoaded(app, catalog, (message) => { statusMessage = message; });
-      if (!ready) {
-        if (!statusMessage) statusMessage = "Load the model before starting dictation.";
+    // Flip before any await so overlapping starts cannot both pass idle and
+    // both enter start_transcription / ensureModelLoaded.
+    isStartingRecording = true;
+    clearBanner();
+    let generation = sessionGeneration;
+    try {
+      if (app.transcriptionRuntimePhase === "download_required") {
+        modelRequiredBanner(tr("home.model_required_dictation"));
         return;
       }
-    }
+      if (app.transcriptionRuntimePhase !== "ready") {
+        // Model was unloaded (e.g. the idle timeout freed it); reload through
+        // the normal load flow before recording instead of leaving the user
+        // stuck with a disabled button.
+        const ready = await ensureModelLoaded(app, catalog, (message) => { setBanner(message); });
+        if (!ready) {
+          modelRequiredBanner(statusMessage || tr("home.model_required_dictation"));
+          return;
+        }
+      }
 
-    cancelLearnFromEditPoll();
-    if (!fromShortcut) sessionMode = "insert";
-    transcript = "";
-    tentative = "";
-    statusMessage = "";
-    isStartingRecording = true;
-    sessionGeneration += 1;
-    const generation = sessionGeneration;
+      cancelLearnFromEditPoll();
+      sessionAutoPaste = fromShortcut;
+      if (!fromShortcut) sessionMode = "insert";
+      transcript = "";
+      tentative = "";
+      clearBanner();
+      sessionGeneration += 1;
+      generation = sessionGeneration;
 
-    try {
       await captureStartContext();
+      sessionStartTime = Date.now();
+      if (app.settings.dictation_ceiling_seconds > 0) {
+        ceilingTimer = setTimeout(() => {
+          if (isDictating && !isStopping) {
+            void toggleRecording(true);
+          }
+        }, app.settings.dictation_ceiling_seconds * 1000);
+      }
       await startStreamingTranscription((segment: TranscriptionSegment) => {
         if (generation !== sessionGeneration) return; // stale session
         if (!segment.is_final) {
@@ -420,10 +533,20 @@ function createTranscriptionControllerInstance() {
         transcript += segmentGap(transcript, segment.text) + segment.text;
       });
     } catch (e) {
-      statusMessage = errorMessage(e);
+      setBanner(errorMessage(e));
       clearSessionContext();
     } finally {
       isStartingRecording = false;
+      if (pttStopQueued) {
+        pttStopQueued = false;
+        // PTT stop was queued while starting. Wait briefly for machineState
+        // to sync (Tauri event to be processed by Svelte stores), then stop.
+        const queuedGeneration = generation;
+        setTimeout(() => {
+          if (queuedGeneration !== sessionGeneration) return;
+          if (isDictating && !isStopping) void toggleRecording(true);
+        }, 50);
+      }
     }
   }
 
@@ -431,23 +554,33 @@ function createTranscriptionControllerInstance() {
   function handleRecordingAborted() {
     const sessionFocusedApp = focusedApp;
     const sessionRewriteOf = rewriteOf;
+    const rawText = transcript.trim();
     sessionGeneration += 1; // cut off in-flight segments from the dead session
     isStartingRecording = false;
     isStopping = false;
+    pttStopQueued = false;
     tentative = "";
     cancelLearnFromEditPoll();
-    if (transcript.trim()) {
-      void finalizeDictationText(transcript, sessionFocusedApp, sessionRewriteOf).then(({ text, warning }) => {
-        if (warning) statusMessage = warning;
-        if (text) {
-          void saveToHistory(text);
-          statusMessage = "Recording was interrupted — the partial transcript was saved to history.";
-        } else {
-          statusMessage = "Recording was interrupted.";
+    if (rawText) {
+      void (async () => {
+        const savedId = await saveToHistory(rawText);
+        setBanner(
+          savedId
+            ? tr("home.recording_interrupted_saved")
+            : tr("home.recording_interrupted"),
+        );
+        const { text, warning } = await finalizeDictationText(
+          rawText,
+          sessionFocusedApp,
+          sessionRewriteOf,
+        );
+        if (warning) setBanner(warning);
+        if (savedId && text && text !== rawText) {
+          await updateHistory(savedId, text);
         }
-      });
+      })();
     } else {
-      statusMessage = "Recording was interrupted.";
+      setBanner(tr("home.recording_interrupted"));
     }
     clearSessionContext();
   }
@@ -459,6 +592,8 @@ function createTranscriptionControllerInstance() {
     get transcript() { return transcript; },
     get tentative() { return tentative; },
     get statusMessage() { return statusMessage; },
+    get statusActionLabel() { return statusActionLabel; },
+    get statusAction() { return statusAction; },
     get catalog() { return catalog; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },
     get modelOperationState() { return app.transcriptionModelOperationState; },
@@ -483,7 +618,7 @@ export function notifyDictationAborted() {
 }
 
 /** The native HUD asked to stop the active dictation; run the full stop
- * pipeline (polish + paste) so HUD stop matches the shortcut (SOU-046).
+ * pipeline. Paste follows the session start latch, not this call (SOU-046).
  * Stop-only: a no-op when not dictating, so this cannot start a session
  * or take down a meeting (SOU-044). */
 export function notifyDictationStopRequested() {

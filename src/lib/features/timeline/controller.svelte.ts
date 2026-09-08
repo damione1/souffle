@@ -4,7 +4,7 @@ import {
   listDictationEntries,
 } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { DictationEntry, MeetingListItem } from "../../types";
+import type { AppStateMachine, DictationEntry, MeetingListItem } from "../../types";
 import {
   createDebouncedSearch,
   errorMessage,
@@ -27,6 +27,15 @@ export interface TimelineGroup {
   /** YYYY-MM-DD key in local time. */
   day: string;
   items: TimelineItem[];
+}
+
+/** Meeting ID that is recording or still draining on stop, else null. */
+export function liveMeetingId(state: AppStateMachine): string | null {
+  if (state.state === "recording_meeting") return state.data.meeting_id;
+  if (state.state === "stopping" && typeof state.data.was_recording === "object") {
+    return state.data.was_recording.meeting.meeting_id;
+  }
+  return null;
 }
 
 function dayKey(iso: string): string {
@@ -90,13 +99,16 @@ function createTimelineControllerInstance() {
   let expandedDictationId = $state<string | null>(null);
   const search = createDebouncedSearch(250, 40);
 
-  const items = $derived(toTimelineItems(dictations, meetings));
+  function currentItems(): TimelineItem[] {
+    return toTimelineItems(dictations, meetings);
+  }
 
-  const filteredItems = $derived.by(() => {
+  function currentFilteredItems(): TimelineItem[] {
     const query = searchQuery.trim().toLowerCase();
+    const source = currentItems();
     const byKind = kindFilter === "all"
-      ? items
-      : items.filter((item) => item.kind === kindFilter);
+      ? source
+      : source.filter((item) => item.kind === kindFilter);
 
     if (!query) return byKind;
 
@@ -110,22 +122,28 @@ function createTimelineControllerInstance() {
       );
     }
 
-    // Local fallback while the FTS query is in flight.
     return byKind.filter((item) => item.title.toLowerCase().includes(query));
-  });
+  }
 
-  const groups = $derived(groupByDay(filteredItems));
+  // HomeView refreshes as soon as the machine goes idle; dictation save
+  // refreshes after the row is written. Without a generation token the
+  // idle fetch (started before the insert) can land last and hide the
+  // new entry until the next launch.
+  let refreshGeneration = 0;
 
   async function refresh() {
+    const generation = ++refreshGeneration;
     try {
       const [dictationEntries, meetingItems] = await Promise.all([
         listDictationEntries(200),
         listMeetings(),
       ]);
+      if (generation !== refreshGeneration) return;
       dictations = dictationEntries;
       meetings = meetingItems;
       statusMessage = "";
     } catch (e) {
+      if (generation !== refreshGeneration) return;
       statusMessage = errorMessage(e);
     }
   }
@@ -139,8 +157,15 @@ function createTimelineControllerInstance() {
     expandedDictationId = expandedDictationId === id ? null : id;
   }
 
+  function isLiveMeeting(id: string): boolean {
+    return liveMeetingId(app.machineState) === id;
+  }
+
   async function removeItem(item: TimelineItem) {
     try {
+      if (item.kind === "meeting" && isLiveMeeting(item.id)) {
+        throw new Error("Cannot delete a meeting while it is recording.");
+      }
       if (item.kind === "dictation") {
         await deleteDictationEntry(item.id);
         if (expandedDictationId === item.id) expandedDictationId = null;
@@ -164,9 +189,12 @@ function createTimelineControllerInstance() {
   return {
     get app() { return app; },
     get statusMessage() { return statusMessage; },
-    get groups() { return groups; },
-    get isEmpty() { return items.length === 0; },
-    get hasMatches() { return filteredItems.length > 0; },
+    // Getters, not `$derived`: this controller is a singleton. `$derived`
+    // created while HomeView is mounted is owned by that view; Svelte 5.55+
+    // freezes it when the view unmounts (settings used to destroy HomeView).
+    get groups() { return groupByDay(currentFilteredItems()); },
+    get isEmpty() { return currentItems().length === 0; },
+    get hasMatches() { return currentFilteredItems().length > 0; },
     get searchQuery() { return searchQuery; },
     set searchQuery(value: string) { onSearchQueryChange(value); },
     get kindFilter() { return kindFilter; },
@@ -174,6 +202,7 @@ function createTimelineControllerInstance() {
     get searchResults() { return search.results; },
     get isSearching() { return search.isSearching; },
     get expandedDictationId() { return expandedDictationId; },
+    isLiveMeeting,
     refresh,
     openItem,
     removeItem,
