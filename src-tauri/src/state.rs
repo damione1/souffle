@@ -170,6 +170,7 @@ pub struct AppState {
     /// their database writes in the opposite order to their accumulator
     /// writes, and a failed one can restore over a newer one.
     pub live_edit_lock: Mutex<()>,
+    pub ptt_paused_until: Mutex<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
 impl AppState {
@@ -190,6 +191,7 @@ impl AppState {
             app_handle: Mutex::new(None),
             sleep_paused_meeting_id: Mutex::new(None),
             live_edit_lock: Mutex::new(()),
+            ptt_paused_until: Mutex::new(None),
         }
     }
 

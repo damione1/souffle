@@ -16,7 +16,11 @@ use crate::state::AppState;
 /// while for a large history.
 #[tauri::command]
 #[specta::specta]
-pub fn export_archive(app: AppHandle, state: State<'_, AppState>, dest_dir: String) -> Result<(), String> {
+pub fn export_archive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    dest_dir: String,
+) -> Result<(), String> {
     let dest_path = PathBuf::from(&dest_dir);
     if !dest_path.is_dir() {
         return Err(format!("Destination is not a directory: {dest_dir}"));

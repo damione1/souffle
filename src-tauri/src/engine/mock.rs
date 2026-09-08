@@ -195,7 +195,7 @@ impl TranscriptionEngine for MockEngine {
         them: &[f32],
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
         self.dual_calls.push((me.to_vec(), them.to_vec()));
-        
+
         let tagged = |speaker: Speaker, text: &str| TranscriptionSegment {
             text: text.to_string(),
             start_time: 0.0,

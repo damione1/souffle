@@ -3,8 +3,8 @@ use serde::Deserialize;
 use crate::transcript::{MeetingParticipant, StructuredActionItem, StructuredSummary};
 
 use super::{
-    SummaryProviderKind, SummarizeProgress, build_structured_extract_prompt, generate_with_provider,
-    resolve_provider,
+    SummarizeProgress, SummaryProviderKind, build_structured_extract_prompt,
+    generate_with_provider, resolve_provider,
 };
 
 #[derive(Debug, Deserialize)]
@@ -107,8 +107,8 @@ pub fn extract_json_payload(raw: &str) -> &str {
 
 pub fn parse_structured_summary_response(raw: &str) -> Result<StructuredSummary, String> {
     let payload = extract_json_payload(raw);
-    let wire: StructuredSummaryWire = serde_json::from_str(payload)
-        .map_err(|e| format!("Parse structured summary JSON: {e}"))?;
+    let wire: StructuredSummaryWire =
+        serde_json::from_str(payload).map_err(|e| format!("Parse structured summary JSON: {e}"))?;
     Ok(wire_to_structured_summary(wire))
 }
 
@@ -191,7 +191,9 @@ mod tests {
     #[test]
     fn extract_json_payload_slices_outer_braces_from_chatty_prefix() {
         assert_eq!(
-            extract_json_payload("Here is the JSON:\n{\"decisions\":[],\"action_items\":[],\"open_questions\":[]}"),
+            extract_json_payload(
+                "Here is the JSON:\n{\"decisions\":[],\"action_items\":[],\"open_questions\":[]}"
+            ),
             "{\"decisions\":[],\"action_items\":[],\"open_questions\":[]}"
         );
     }

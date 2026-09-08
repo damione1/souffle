@@ -52,14 +52,95 @@ impl LangScore {
 }
 
 const FR_STOPWORDS: &[&str] = &[
-    "le", "la", "les", "de", "des", "du", "un", "une", "et", "est", "en", "que", "qui", "dans",
-    "pour", "pas", "sur", "avec", "ce", "cette", "mon", "ma", "mes", "ton", "ta", "tes", "son",
-    "sa", "ses", "nous", "vous", "ils", "elles", "je", "tu", "il", "elle", "on", "ne", "au", "aux",
-    "ou", "mais", "donc", "car", "comme", "plus", "tout", "tous", "toute", "toutes", "chez", "bien",
-    "très", "aussi", "être", "avoir", "faire", "dit", "peut", "sont", "été", "c'est", "qu'il",
-    "qu'on", "d'un", "d'une", "l'on", "l'un", "l'une", "bonjour", "merci", "réunion", "reunion",
-    "oui", "non", "alors", "voilà", "voila", "parce", "quoi", "comment", "pourquoi", "maintenant",
-    "aujourd'hui", "demain", "hier", "français", "francais",
+    "le",
+    "la",
+    "les",
+    "de",
+    "des",
+    "du",
+    "un",
+    "une",
+    "et",
+    "est",
+    "en",
+    "que",
+    "qui",
+    "dans",
+    "pour",
+    "pas",
+    "sur",
+    "avec",
+    "ce",
+    "cette",
+    "mon",
+    "ma",
+    "mes",
+    "ton",
+    "ta",
+    "tes",
+    "son",
+    "sa",
+    "ses",
+    "nous",
+    "vous",
+    "ils",
+    "elles",
+    "je",
+    "tu",
+    "il",
+    "elle",
+    "on",
+    "ne",
+    "au",
+    "aux",
+    "ou",
+    "mais",
+    "donc",
+    "car",
+    "comme",
+    "plus",
+    "tout",
+    "tous",
+    "toute",
+    "toutes",
+    "chez",
+    "bien",
+    "très",
+    "aussi",
+    "être",
+    "avoir",
+    "faire",
+    "dit",
+    "peut",
+    "sont",
+    "été",
+    "c'est",
+    "qu'il",
+    "qu'on",
+    "d'un",
+    "d'une",
+    "l'on",
+    "l'un",
+    "l'une",
+    "bonjour",
+    "merci",
+    "réunion",
+    "reunion",
+    "oui",
+    "non",
+    "alors",
+    "voilà",
+    "voila",
+    "parce",
+    "quoi",
+    "comment",
+    "pourquoi",
+    "maintenant",
+    "aujourd'hui",
+    "demain",
+    "hier",
+    "français",
+    "francais",
 ];
 
 const EN_STOPWORDS: &[&str] = &[
@@ -302,13 +383,19 @@ mod tests {
     fn detect_french_accents_and_stopwords() {
         assert_eq!(detect_word("réunion"), Some(LanguageCode::Fr));
         assert_eq!(detect_word("bonjour"), Some(LanguageCode::Fr));
-        assert_eq!(detect_text("le projet est très bien"), Some(LanguageCode::Fr));
+        assert_eq!(
+            detect_text("le projet est très bien"),
+            Some(LanguageCode::Fr)
+        );
     }
 
     #[test]
     fn detect_english_stopwords() {
         assert_eq!(detect_word("the"), Some(LanguageCode::En));
-        assert_eq!(detect_text("the meeting is about planning"), Some(LanguageCode::En));
+        assert_eq!(
+            detect_text("the meeting is about planning"),
+            Some(LanguageCode::En)
+        );
     }
 
     #[test]
@@ -342,10 +429,22 @@ mod tests {
 
     #[test]
     fn decide_mismatch_reset_only_for_inferred_prior() {
-        assert!(!decide_mismatch_reset(MeetingTranscriptionLanguage::En, true));
-        assert!(!decide_mismatch_reset(MeetingTranscriptionLanguage::Fr, true));
-        assert!(decide_mismatch_reset(MeetingTranscriptionLanguage::Auto, true));
-        assert!(!decide_mismatch_reset(MeetingTranscriptionLanguage::Auto, false));
+        assert!(!decide_mismatch_reset(
+            MeetingTranscriptionLanguage::En,
+            true
+        ));
+        assert!(!decide_mismatch_reset(
+            MeetingTranscriptionLanguage::Fr,
+            true
+        ));
+        assert!(decide_mismatch_reset(
+            MeetingTranscriptionLanguage::Auto,
+            true
+        ));
+        assert!(!decide_mismatch_reset(
+            MeetingTranscriptionLanguage::Auto,
+            false
+        ));
     }
 
     #[test]

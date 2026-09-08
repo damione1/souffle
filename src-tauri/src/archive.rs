@@ -126,7 +126,8 @@ fn write_meeting_folder(db: &Database, archive_dir: &Path, meeting_id: &str) -> 
         .map_err(|e| format!("Write transcript.md: {e}"))?;
 
     let json = export::render_meeting(&meeting, ExportFormat::Json)?;
-    fs::write(meeting_dir.join("meeting.json"), json).map_err(|e| format!("Write meeting.json: {e}"))?;
+    fs::write(meeting_dir.join("meeting.json"), json)
+        .map_err(|e| format!("Write meeting.json: {e}"))?;
 
     Ok(())
 }
@@ -155,8 +156,14 @@ mod tests {
         assert_eq!(outcome.manifest.meeting_count, 0);
         assert_eq!(outcome.manifest.dictation_count, 0);
         assert_eq!(outcome.manifest.errors, 0);
-        assert_eq!(outcome.manifest.schema_version, crate::db::schema::SCHEMA_VERSION);
-        assert_eq!(outcome.archive_dir.file_name().unwrap(), "souffle-export-2026-07-09");
+        assert_eq!(
+            outcome.manifest.schema_version,
+            crate::db::schema::SCHEMA_VERSION
+        );
+        assert_eq!(
+            outcome.archive_dir.file_name().unwrap(),
+            "souffle-export-2026-07-09"
+        );
 
         let dictations = fs::read_to_string(outcome.archive_dir.join("dictations.json")).unwrap();
         assert_eq!(dictations.trim(), "[]");
@@ -214,7 +221,8 @@ mod tests {
                 .exists()
         );
 
-        let dictations_json = fs::read_to_string(outcome.archive_dir.join("dictations.json")).unwrap();
+        let dictations_json =
+            fs::read_to_string(outcome.archive_dir.join("dictations.json")).unwrap();
         let dictations: Vec<crate::db::dictation::DictationEntry> =
             serde_json::from_str(&dictations_json).unwrap();
         assert_eq!(dictations.len(), 2);
@@ -265,7 +273,10 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(outcome.manifest.meeting_count, 2, "counts the attempted total");
+        assert_eq!(
+            outcome.manifest.meeting_count, 2,
+            "counts the attempted total"
+        );
         assert_eq!(outcome.manifest.errors, 1);
         assert!(outcome.archive_dir.join("2026-07-01-good-meeting").exists());
         // Progress still reaches (total, total) despite the mid-run failure.
@@ -280,7 +291,13 @@ mod tests {
         let first = run_archive_export(&db, dest.path(), fixed_now(), |_, _| {}).unwrap();
         let second = run_archive_export(&db, dest.path(), fixed_now(), |_, _| {}).unwrap();
 
-        assert_eq!(first.archive_dir.file_name().unwrap(), "souffle-export-2026-07-09");
-        assert_eq!(second.archive_dir.file_name().unwrap(), "souffle-export-2026-07-09-2");
+        assert_eq!(
+            first.archive_dir.file_name().unwrap(),
+            "souffle-export-2026-07-09"
+        );
+        assert_eq!(
+            second.archive_dir.file_name().unwrap(),
+            "souffle-export-2026-07-09-2"
+        );
     }
 }

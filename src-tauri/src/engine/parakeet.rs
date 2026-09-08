@@ -177,7 +177,7 @@ impl TranscriptionEngine for ParakeetEngine {
 
         let mut remaining: Vec<f32> = self.audio_buffer.drain(..).collect();
         let original_len = remaining.len();
-        
+
         if original_len < MIN_INFERENCE_SAMPLES {
             remaining.resize(MIN_INFERENCE_SAMPLES, 0.0);
         }

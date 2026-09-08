@@ -362,12 +362,7 @@ impl TranscriptionEngine for WhisperEngine {
                 seg.start_time += offset;
                 seg.end_time += offset;
             }
-            remember_detected_language(
-                &mut self.detected_language,
-                language,
-                detected,
-                &segments,
-            );
+            remember_detected_language(&mut self.detected_language, language, detected, &segments);
             all_segments.extend(segments);
         }
 
@@ -493,7 +488,10 @@ mod tests {
     fn filtered_leading_window_does_not_cache_language() {
         let mut cached = None;
         remember_detected_language(&mut cached, None, Some("en".into()), &[]);
-        assert!(cached.is_none(), "hallucinated window must not lock language");
+        assert!(
+            cached.is_none(),
+            "hallucinated window must not lock language"
+        );
 
         let speech = [TranscriptionSegment {
             text: "Bonjour à tous".into(),

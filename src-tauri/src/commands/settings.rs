@@ -91,7 +91,16 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
             shortcuts.push_to_talk.as_str(),
             move |app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => {
-                    let _ = ShortcutPttStart.emit(app);
+                    let paused = app
+                        .state::<AppState>()
+                        .ptt_paused_until
+                        .lock()
+                        .unwrap()
+                        .clone();
+                    let is_paused = paused.map(|t| t > chrono::Utc::now()).unwrap_or(false);
+                    if !is_paused {
+                        let _ = ShortcutPttStart.emit(app);
+                    }
                 }
                 ShortcutState::Released => {
                     let _ = ShortcutPttStop.emit(app);

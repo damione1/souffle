@@ -13,9 +13,9 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
-use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use ogg::writing::{PacketWriteEndInfo, PacketWriter};
@@ -89,7 +89,11 @@ pub fn list_session_files_in(dir: &std::path::Path) -> std::io::Result<Vec<(usiz
         if path.extension().and_then(|ext| ext.to_str()) != Some("ogg") {
             continue;
         }
-        let Some(session_index) = path.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse::<usize>().ok()) else {
+        let Some(session_index) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse::<usize>().ok())
+        else {
             continue;
         };
         if !ogg_file_has_audio(&path) {
@@ -459,7 +463,13 @@ impl MeetingRecorder {
     /// audio-capture thread that calls this.
     pub fn push(&self, samples: &[f32]) {
         if let Some(sender) = &self.sender {
-            try_push_chunk(sender, &self.dropped, &self.samples_received, &self.shutdown, samples);
+            try_push_chunk(
+                sender,
+                &self.dropped,
+                &self.samples_received,
+                &self.shutdown,
+                samples,
+            );
         }
     }
 
@@ -540,7 +550,8 @@ mod tests {
 
         let empty0 = dir.path().join("0.ogg");
         let file0 = std::fs::File::create(&empty0).expect("create");
-        let mut writer0 = OggOpusWriter::new(std::io::BufWriter::new(file0), 16_000).expect("writer");
+        let mut writer0 =
+            OggOpusWriter::new(std::io::BufWriter::new(file0), 16_000).expect("writer");
         writer0.write_chunk(&sine(0.1, 16_000)).unwrap();
         writer0.finish().expect("finish");
         drop(writer0);
@@ -558,7 +569,11 @@ mod tests {
     #[test]
     fn list_session_files_in_missing_dir_is_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
-        assert!(list_session_files_in(&dir.path().join("missing")).unwrap().is_empty());
+        assert!(
+            list_session_files_in(&dir.path().join("missing"))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -661,7 +676,10 @@ mod tests {
         writer.finish().expect("finish");
         drop(writer);
 
-        assert!(ogg_file_has_audio(&path), "partial frame should be recognized as having audio");
+        assert!(
+            ogg_file_has_audio(&path),
+            "partial frame should be recognized as having audio"
+        );
     }
 
     #[test]
@@ -680,22 +698,22 @@ mod tests {
         assert!(!bytes.is_empty());
         assert_eq!(&bytes[0..4], b"OggS");
     }
-    
+
     #[test]
     fn recorder_joins_cleanly_even_if_push_handle_retained() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("retained.ogg");
-        
+
         let recorder = MeetingRecorder::start(path.clone(), 24_000, 1).expect("start");
         let retained_handle = recorder.push_handle().expect("handle");
-        
+
         retained_handle.push(&sine(0.1, 24_000));
-        
+
         drop(recorder); // should trigger Finish and join
-        
+
         // Pushing after drop should be rejected immediately due to shutdown flag
         retained_handle.push(&sine(0.1, 24_000));
-        
+
         let bytes = std::fs::read(&path).expect("recording file must exist");
         assert!(!bytes.is_empty());
         assert_eq!(&bytes[0..4], b"OggS");
@@ -728,4 +746,3 @@ mod tests {
         );
     }
 }
-

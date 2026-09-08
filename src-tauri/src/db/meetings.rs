@@ -17,11 +17,7 @@ fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> St
         .unwrap_or(segment_text)
 }
 
-fn reindex_meeting_fts(
-    tx: &rusqlite::Transaction<'_>,
-    id: &str,
-    text: &str,
-) -> Result<(), String> {
+fn reindex_meeting_fts(tx: &rusqlite::Transaction<'_>, id: &str, text: &str) -> Result<(), String> {
     tx.execute(
         "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
         params![id],
@@ -261,7 +257,11 @@ impl Database {
             )
             .map_err(|e| format!("Query edited_transcript: {e}"))?;
 
-        if edited_transcript.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
+        if edited_transcript
+            .as_ref()
+            .map(|t| t.is_empty())
+            .unwrap_or(true)
+        {
             let full_text = joined_segment_text(&tx, meeting_id)?;
             reindex_meeting_fts(&tx, meeting_id, &full_text)?;
         }
@@ -620,7 +620,9 @@ impl Database {
         edited_transcript: Option<&str>,
     ) -> Result<(), String> {
         let mut conn = self.conn.acquire()?;
-        let tx = conn.transaction().map_err(|e| format!("Transaction: {e}"))?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
             "UPDATE meetings
@@ -680,7 +682,11 @@ impl Database {
     /// archive export tests exercise the "skip one bad meeting, keep going"
     /// path without a hand-rolled fake `Database`.
     #[cfg(test)]
-    pub fn insert_corrupt_meeting_for_test(&self, id: &str, started_at: &str) -> Result<(), String> {
+    pub fn insert_corrupt_meeting_for_test(
+        &self,
+        id: &str,
+        started_at: &str,
+    ) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
             "INSERT INTO meetings (
@@ -967,7 +973,10 @@ mod tests {
         .unwrap();
 
         let loaded = db.load_meeting("m1").unwrap();
-        assert_eq!(loaded.summary.as_deref(), Some("Prose only after extract fail"));
+        assert_eq!(
+            loaded.summary.as_deref(),
+            Some("Prose only after extract fail")
+        );
         assert!(loaded.structured_summary.is_none());
     }
 

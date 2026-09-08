@@ -116,7 +116,8 @@ mod tests {
     fn search_prefers_edited_transcript_over_segments() {
         let (db, _dir) = test_db();
         db.save_meeting(&sample_meeting("m1")).unwrap();
-        db.save_edited_transcript("m1", Some("Kubernetes cluster")).unwrap();
+        db.save_edited_transcript("m1", Some("Kubernetes cluster"))
+            .unwrap();
 
         assert_eq!(db.search_text("Kubernetes", 20).unwrap().len(), 1);
         assert!(

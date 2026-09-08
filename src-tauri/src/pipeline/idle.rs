@@ -136,7 +136,10 @@ impl MeetingIdleMonitor {
 mod tests {
     use super::*;
 
-    fn monitor(silence: Option<Duration>, max_duration: Option<Duration>) -> (MeetingIdleMonitor, Instant) {
+    fn monitor(
+        silence: Option<Duration>,
+        max_duration: Option<Duration>,
+    ) -> (MeetingIdleMonitor, Instant) {
         let start = Instant::now();
         let config = MeetingIdleConfig {
             silence_threshold: silence,
@@ -180,10 +183,7 @@ mod tests {
         assert_eq!(second.reason, MeetingIdleReason::Silence);
 
         // Another 30s later: signals again.
-        assert!(
-            m.tick(first_signal_at + Duration::from_secs(60))
-                .is_some()
-        );
+        assert!(m.tick(first_signal_at + Duration::from_secs(60)).is_some());
     }
 
     #[test]
@@ -242,7 +242,10 @@ mod tests {
 
     #[test]
     fn max_duration_takes_priority_over_silence_in_same_tick() {
-        let (mut m, start) = monitor(Some(Duration::from_secs(60)), Some(Duration::from_secs(120)));
+        let (mut m, start) = monitor(
+            Some(Duration::from_secs(60)),
+            Some(Duration::from_secs(120)),
+        );
         let now = start + Duration::from_secs(121);
         let signal = m.tick(now).expect("should signal");
         assert_eq!(signal.reason, MeetingIdleReason::MaxDuration);

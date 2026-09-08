@@ -1455,15 +1455,23 @@ mod tests {
 
     #[test]
     fn extra_heads_probe_matches_the_1b_tensor_name_only() {
-        assert!(has_extra_heads_tensor(["extra_heads.0.weight", "text_emb.weight"]));
-        assert!(!has_extra_heads_tensor(["text_emb.weight", "out_norm.weight"]));
+        assert!(has_extra_heads_tensor([
+            "extra_heads.0.weight",
+            "text_emb.weight"
+        ]));
+        assert!(!has_extra_heads_tensor([
+            "text_emb.weight",
+            "out_norm.weight"
+        ]));
         assert!(!has_extra_heads_tensor(Vec::<&str>::new()));
     }
 
     #[test]
     fn checkpoint_has_semantic_vad_handles_missing_file_gracefully() {
         // Should return false rather than erroring out
-        assert!(!KyutaiEngine::checkpoint_has_semantic_vad(std::path::Path::new("/does/not/exist.safetensors")));
+        assert!(!KyutaiEngine::checkpoint_has_semantic_vad(
+            std::path::Path::new("/does/not/exist.safetensors")
+        ));
     }
 
     #[test]
@@ -1472,11 +1480,11 @@ mod tests {
         let speech = vec![0.2f32; MIMI_FRAME_SIZE];
         let nan_speech = vec![f32::NAN; MIMI_FRAME_SIZE];
         let empty: Vec<f32> = vec![];
-        
+
         assert!(is_energy_pause(&silence));
         assert!(!is_energy_pause(&speech));
         assert!(!is_energy_pause(&nan_speech)); // NaN is not < threshold
-        
+
         assert_eq!(pcm_rms(&empty), 0.0);
         assert!(is_energy_pause(&empty));
     }

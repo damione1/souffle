@@ -23,7 +23,9 @@ pub fn install_sleep_observers(
 ) {
     use std::ptr::NonNull;
 
-    use objc2_app_kit::{NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceWillSleepNotification};
+    use objc2_app_kit::{
+        NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceWillSleepNotification,
+    };
     use objc2_foundation::NSNotification;
 
     let center = NSWorkspace::sharedWorkspace().notificationCenter();
