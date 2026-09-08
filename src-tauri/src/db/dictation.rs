@@ -247,7 +247,8 @@ mod tests {
         db.add_dictation_entry("d1", "raw hello", "2024-01-01T00:00:00Z")
             .unwrap();
 
-        db.update_dictation_entry("d1", "polished kubernetes").unwrap();
+        db.update_dictation_entry("d1", "polished kubernetes")
+            .unwrap();
 
         assert!(db.search_text("raw", 20).unwrap().is_empty());
         let results = db.search_text("kubernetes", 20).unwrap();
