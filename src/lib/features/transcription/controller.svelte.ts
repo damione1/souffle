@@ -104,23 +104,32 @@ async function finalizeDictationText(
   try {
     const { polishDictation } = await import("../../api/dictation");
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const outcome = await Promise.race([
-      polishDictation(trimmed, focusedApp, rewriteOf).then((result) => ({
-        kind: "ok" as const,
-        result,
-      })),
-      new Promise<{ kind: "timeout" }>((resolve) => {
-        timer = setTimeout(() => resolve({ kind: "timeout" }), POLISH_TIMEOUT_MS);
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
-    if (outcome.kind === "timeout") {
-      return { text: trimmed, warning: tr("home.polish_timeout") };
+    try {
+      // Settle polish so a late reject after timeout cannot become unhandled.
+      const polish = polishDictation(trimmed, focusedApp, rewriteOf).then(
+        (result) => ({ kind: "ok" as const, result }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
+      const outcome = await Promise.race([
+        polish,
+        new Promise<{ kind: "timeout" }>((resolve) => {
+          timer = setTimeout(() => resolve({ kind: "timeout" }), POLISH_TIMEOUT_MS);
+        }),
+      ]);
+      if (outcome.kind === "timeout") {
+        return { text: trimmed, warning: tr("home.polish_timeout") };
+      }
+      if (outcome.kind === "error") {
+        console.warn("Dictation polish failed:", outcome.error);
+        return { text: trimmed, warning: errorMessage(outcome.error) };
+      }
+      return {
+        text: outcome.result.text.trim(),
+        warning: outcome.result.warning ?? undefined,
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    return {
-      text: outcome.result.text.trim(),
-      warning: outcome.result.warning ?? undefined,
-    };
   } catch (e) {
     console.warn("Dictation polish failed:", e);
     return { text: trimmed, warning: errorMessage(e) };

@@ -635,6 +635,65 @@ describe("transcription controller", () => {
     }
   });
 
+  it("late polish rejection after timeout is swallowed (SOU-048)", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    let rejectPolish: (err: unknown) => void = () => {};
+    let sawAdd: () => void = () => {};
+    const addSeen = new Promise<void>((resolve) => {
+      sawAdd = resolve;
+    });
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "polish_dictation") {
+        return new Promise((_, reject) => {
+          rejectPolish = reject;
+        });
+      }
+      if (cmd === "add_dictation_entry") {
+        sawAdd();
+        return Promise.resolve("raw-id");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const stopPromise = ctrl.toggleRecording();
+      await addSeen;
+      await vi.advanceTimersByTimeAsync(25_000);
+      await stopPromise;
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", onUnhandled);
+      rejectPolish(new Error("provider down"));
+      await Promise.resolve();
+      process.off("unhandledRejection", onUnhandled);
+      expect(unhandled).toEqual([]);
+      expect(ctrl.statusMessage).toBe("Polish took too long. Saved the original text.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("toggleRecording stop holds the pill before stopping when polish is enabled, then releases it", async () => {
     const ctrl = createTranscriptionController();
     await ctrl.mount();
