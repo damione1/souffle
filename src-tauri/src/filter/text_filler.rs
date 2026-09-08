@@ -6,7 +6,8 @@ use super::{TextFilter, TextFilterKind};
 
 /// Filler word pattern: English + French fillers, case-insensitive, word-boundary.
 static FILLER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(uh+|um+|euh+|heu+|hm+|hmm+|hum+|ah+|hein)\b").expect("filler regex must compile")
+    Regex::new(r"(?i)\b(uh+|um+|euh+|heu+|hm+|hmm+|hum+|ah+|hein)\b")
+        .expect("filler regex must compile")
 });
 
 pub struct FillerRemovalFilter;
@@ -27,19 +28,21 @@ impl TextFilter for FillerRemovalFilter {
         if replaced == text {
             return text.to_string();
         }
-        
+
         let collapsed = crate::engine::collapse_whitespace(&replaced);
         let mut result = collapsed;
-        
-        static MULTI_COMMA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:,\s*){2,}").unwrap());
+
+        static MULTI_COMMA: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(?:,\s*){2,}").unwrap());
         result = MULTI_COMMA.replace_all(&result, ", ").into_owned();
-        
+
         static MULTI_DOT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:\.\s*){2,}").unwrap());
         result = MULTI_DOT.replace_all(&result, ". ").into_owned();
-        
-        static LEADING_PUNC: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[,\.;]\s*").unwrap());
+
+        static LEADING_PUNC: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"^\s*[,\.;]\s*").unwrap());
         result = LEADING_PUNC.replace_all(&result, "").into_owned();
-        
+
         result.trim().to_string()
     }
 }
@@ -98,7 +101,10 @@ mod tests {
     #[test]
     fn orphan_punctuation_cleanup() {
         let f = FillerRemovalFilter::new();
-        assert_eq!(f.apply("Euh, je pense que, euh, c'est bon."), "je pense que, c'est bon.");
+        assert_eq!(
+            f.apply("Euh, je pense que, euh, c'est bon."),
+            "je pense que, c'est bon."
+        );
         assert_eq!(f.apply("So, um, I think"), "So, I think");
     }
 }
