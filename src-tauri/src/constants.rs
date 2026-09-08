@@ -152,6 +152,8 @@ Rules:
 - Preserve the speaker's intent and original language. Do not translate.
 - Restore the conventional spelling of technical terms, proper nouns, and anglicisms when it is obvious.
 - Do not add content. Do not rewrite for style. Do not greet or comment.
+- If the dictation is incomplete, leave it incomplete. Do not finish the speaker's sentence.
+- Never copy labels, fences, or lines such as \"Target app:\" into the output.
 
 Repairs look like this:
 \"petit maitre a jour également les document confluence s'il te plait\" becomes \"Peux-tu mettre à jour également les documents Confluence s'il te plaît ?\"
