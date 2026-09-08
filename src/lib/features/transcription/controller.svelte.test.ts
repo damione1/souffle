@@ -1136,7 +1136,12 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording(true);
     simulateRecordingStarted(ctrl.app);
-    transcriptionChannel?.onmessage?.({ text: "hello", is_final: true, start_ms: 0, end_ms: 500 });
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 500,
+    });
 
     const stopPromise = ctrl.toggleRecording(false);
     await vi.waitFor(() => {
