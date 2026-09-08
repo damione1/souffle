@@ -130,12 +130,12 @@ describe("createLiveTranscript tentative text", () => {
   it("sets tentative on a non-final segment and clears it on the next final", () => {
     const live = createLiveTranscript(PAUSE_THRESHOLD);
     live.append(seg("Hello wor", 0, { is_final: false }), 0);
-    expect(live.tentative).toBe("Hello wor");
+    expect(live.tentative).toEqual([{ speaker: null, text: "Hello wor" }]);
     expect(live.committed).toEqual([]);
     expect(live.tail).toEqual([]);
 
     live.append(seg("Hello world.", 0), 0);
-    expect(live.tentative).toBe("");
+    expect(live.tentative).toEqual([]);
     expect(live.tail).toHaveLength(1);
     expect(live.tail[0].text).toBe("Hello world.");
   });
@@ -161,13 +161,13 @@ describe("createLiveTranscript reset", () => {
     live.append(seg("partial", 8.0, { is_final: false }), 4);
 
     expect(live.committed.length + live.tail.length).toBeGreaterThan(0);
-    expect(live.tentative).toBe("partial");
+    expect(live.tentative).toEqual([{ speaker: null, text: "partial" }]);
 
     live.reset();
 
     expect(live.committed).toEqual([]);
     expect(live.tail).toEqual([]);
-    expect(live.tentative).toBe("");
+    expect(live.tentative).toEqual([]);
     expect(live.segmentCount).toBe(0);
 
     // Grouper is fully usable again after reset.
