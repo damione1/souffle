@@ -115,11 +115,13 @@ function createMeetingControllerInstance() {
   // recording"); suppresses further banners until a segment re-arms it.
   let idleDismissed = $state(false);
 
-  let isRecordingMeeting = $derived(
-    app.machineState.state === "recording_meeting"
-    || (app.machineState.state === "stopping"
-        && typeof app.machineState.data?.was_recording === "object"),
-  );
+  function recordingMeetingActive(): boolean {
+    const state = app.machineState;
+    return (
+      state.state === "recording_meeting"
+      || (state.state === "stopping" && typeof state.data?.was_recording === "object")
+    );
+  }
   // Incremental grouper for the compact live view (LiveSessionCard): bounded
   // work per segment instead of re-grouping the whole meeting each time.
   const liveTranscript = createLiveTranscript(1.5);
@@ -155,17 +157,17 @@ function createMeetingControllerInstance() {
   // guards against double-stop. `stopRequested` covers the brief gap before the
   // machine reports "stopping".
   let stopRequested = $state(false);
-  let isStopping = $derived(stopRequested || app.machineState.state === "stopping");
-  // "load_required" stays resumable: resumeRecording reloads the model on
-  // demand, same as a fresh start after an idle unload.
-  let canResumeRecording = $derived(
-    Boolean(meeting?.id)
-    && !isRecordingMeeting
-    && !isLoadingMeeting
-    && !isSummarizing
-    && (app.transcriptionRuntimePhase === "ready"
-      || app.transcriptionRuntimePhase === "load_required"),
-  );
+  function stoppingNow(): boolean {
+    return stopRequested || app.machineState.state === "stopping";
+  }
+  function canResumeNow(): boolean {
+    return Boolean(meeting?.id)
+      && !recordingMeetingActive()
+      && !isLoadingMeeting
+      && !isSummarizing
+      && (app.transcriptionRuntimePhase === "ready"
+        || app.transcriptionRuntimePhase === "load_required");
+  }
 
   async function mount() {
     await Promise.all([refreshSummaryProviders(), loadTranscriptionCatalog()]);
@@ -180,7 +182,7 @@ function createMeetingControllerInstance() {
   }
 
   async function onMeetingSelectionChange(id: string | null) {
-    if (id && (!meeting || meeting.id !== id) && !isRecordingMeeting) {
+    if (id && (!meeting || meeting.id !== id) && !recordingMeetingActive()) {
       await loadMeeting(id);
     }
   }
@@ -421,7 +423,7 @@ function createMeetingControllerInstance() {
   }
 
   async function stopRecording() {
-    if (isStopping) return; // guard against double-stop
+    if (stoppingNow()) return; // guard against double-stop
     stopRequested = true;
     clearIdleState();
     try {
@@ -476,10 +478,10 @@ function createMeetingControllerInstance() {
   /** The backend detected the meeting has probably ended (silence or the
    * max-duration failsafe). Ignored outside an active meeting recording. */
   function handleMeetingIdle(payload: MeetingIdle) {
-    if (!isRecordingMeeting) return;
+    if (!recordingMeetingActive()) return;
 
     if (payload.reason === "max_duration") {
-      if (isStopping) return;
+      if (stoppingNow()) return;
       setBanner("Maximum meeting duration reached. Stopping the recording.");
       void stopRecording();
       return;
@@ -514,7 +516,7 @@ function createMeetingControllerInstance() {
     try {
       await addDictionaryEntry(trimmedTerm, trimmedPronunciation, null);
       if (
-        isRecordingMeeting
+        recordingMeetingActive()
         && trimmedPronunciation
         && trimmedPronunciation.toLowerCase() !== trimmedTerm.toLowerCase()
       ) {
@@ -532,7 +534,7 @@ function createMeetingControllerInstance() {
 
   async function applyLiveParagraphEdit(paragraphId: number, newText: string) {
     const trimmed = newText.trim();
-    if (!trimmed || !isRecordingMeeting) return;
+    if (!trimmed || !recordingMeetingActive()) return;
 
     const current = [...liveTranscript.committed, ...liveTranscript.tail]
       .find((paragraph) => paragraph.id === paragraphId);
@@ -604,7 +606,7 @@ function createMeetingControllerInstance() {
         }
         if (!meetingId) return;
 
-        if (isRecordingMeeting) {
+        if (recordingMeetingActive()) {
           armPendingWakeResume(meetingId);
           return;
         }
@@ -806,7 +808,7 @@ function createMeetingControllerInstance() {
    * panel cannot swallow it.
    */
   async function exportMeeting(format: ExportFormat) {
-    if (!meeting || !meeting.id || isRecordingMeeting) return;
+    if (!meeting || !meeting.id || recordingMeetingActive()) return;
     isExporting = true;
     clearBanner();
     try {
@@ -824,7 +826,7 @@ function createMeetingControllerInstance() {
    * webview parenting issue as markdown/subtitle export.
    */
   async function exportMeetingAudio() {
-    if (!meeting || !meeting.id || isRecordingMeeting || audioSessions.length === 0) return;
+    if (!meeting || !meeting.id || recordingMeetingActive() || audioSessions.length === 0) return;
     isExporting = true;
     clearBanner();
     try {
@@ -855,7 +857,7 @@ function createMeetingControllerInstance() {
     get summaryStage() { return summaryStage; },
     get summaryStageCurrent() { return summaryStageCurrent; },
     get summaryStageTotal() { return summaryStageTotal; },
-    get isRecordingMeeting() { return isRecordingMeeting; },
+    get isRecordingMeeting() { return recordingMeetingActive(); },
     get liveTranscript() { return liveTranscript; },
     get liveMeetingSegments() { return liveMeetingSegments; },
     get meeting() { return meeting; },
@@ -864,8 +866,8 @@ function createMeetingControllerInstance() {
     get seekRequestId() { return seekRequestId; },
     requestAudioSeek,
     get isLoadingMeeting() { return isLoadingMeeting; },
-    get isStopping() { return isStopping; },
-    get canResumeRecording() { return canResumeRecording; },
+    get isStopping() { return stoppingNow(); },
+    get canResumeRecording() { return canResumeNow(); },
     get isEditingTranscript() { return isEditingTranscript; },
     get isExporting() { return isExporting; },
     get editedTranscriptDraft() { return editedTranscriptDraft; },
