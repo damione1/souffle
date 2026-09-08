@@ -377,6 +377,7 @@ function createTranscriptionControllerInstance() {
           console.warn("Fast stop failed:", e);
         }
         setBanner(tr("home.dictation_too_short"));
+        setTimeout(() => clearBanner(), 2000);
         clearSessionContext();
         isStopping = false;
         return;
