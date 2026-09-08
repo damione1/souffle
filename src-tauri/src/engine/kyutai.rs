@@ -29,7 +29,7 @@ const ENERGY_PAUSE_RMS: f32 = 0.01;
 const EXTRA_HEADS_PROBE_TENSOR: &str = "extra_heads.0.weight";
 /// Safety margin (frames) on top of the ASR delay before trusting the VAD
 /// pause streak: semantic VAD can fire slightly before speech fully clears.
-const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
+const VAD_FLUSH_MARGIN_FRAMES: usize = 10;
 /// Soft refresh fires at this fraction of `config.context` when pausing
 /// (Kyutai/Unmute recommend clearing KV between speech turns).
 const REFRESH_SOFT_CONTEXT_NUM: usize = 6;
