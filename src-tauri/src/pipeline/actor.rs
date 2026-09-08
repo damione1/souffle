@@ -998,7 +998,7 @@ impl SingleMode {
             let duration = evicted.len() as f64 / self.sample_rate as f64;
             self.eviction_offset_seconds += duration;
             self.vad_evicted += 1;
-            
+
             if self.vad_evicted == 1 {
                 tracing::warn!(
                     "VAD eviction: first frame lost ({}s total so far). Transcript clock correction active.",
@@ -1025,7 +1025,10 @@ impl SingleMode {
         Ok(segments)
     }
 
-    fn apply_eviction_offset(&self, mut segments: Vec<TranscriptionSegment>) -> Vec<TranscriptionSegment> {
+    fn apply_eviction_offset(
+        &self,
+        mut segments: Vec<TranscriptionSegment>,
+    ) -> Vec<TranscriptionSegment> {
         if self.eviction_offset_seconds > 0.0 {
             for seg in &mut segments {
                 seg.start_time += self.eviction_offset_seconds;
@@ -3148,10 +3151,13 @@ mod tests {
     #[test]
     fn single_mode_vad_aggregation_test_sou_067() {
         let chunk_size = MIMI_FRAME_SIZE;
-        let chain = crate::filter::AudioFilterChain::new(vec![Box::new(MockVadFilter { call_count: 0 })]);
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(MockVadFilter { call_count: 0 })]);
         let mut mode = SingleMode::new(chain, 0, 4, 16000);
         let mut engine = MockEngine::new();
-        engine.transcribe_responses.push_back(Ok(vec![seg("speech")]));
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("speech")]));
 
         mode.ingest(AudioChunk {
             session_id: 1,
@@ -3169,13 +3175,14 @@ mod tests {
     fn single_mode_eviction_offsets_emitted_segments() {
         let chunk_size = 16000 * 5;
         let sample_rate = 16000;
-        
+
         let speech = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let chain = crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
-        
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+
         let mut mode = SingleMode::new(chain, 0, 1, sample_rate);
         let mut engine = MockEngine::new();
-        
+
         let make_frame = || AudioChunk {
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
@@ -3195,7 +3202,7 @@ mod tests {
         assert_eq!(mode.eviction_offset_seconds, 5.0);
 
         speech.store(true, Ordering::SeqCst);
-        
+
         let mut replayed = seg("replayed");
         replayed.start_time = 1.0;
         replayed.end_time = 2.0;
@@ -3208,12 +3215,12 @@ mod tests {
 
         mode.ingest(make_frame());
         let segments = mode.step(&mut engine, chunk_size).unwrap().unwrap();
-        
+
         assert_eq!(segments.len(), 2);
         assert_eq!(segments[0].text, "replayed");
         assert_eq!(segments[0].start_time, 6.0);
         assert_eq!(segments[0].end_time, 7.0);
-        
+
         assert_eq!(segments[1].text, "live");
         assert_eq!(segments[1].start_time, 10.0);
         assert_eq!(segments[1].end_time, 11.0);
