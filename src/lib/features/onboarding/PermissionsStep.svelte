@@ -27,13 +27,36 @@
   let repairCooldown = $state(false);
   let repairCooldownTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /**
+   * The "stale TCC entry" diagnosis is only plausible once the user has tried
+   * to grant Accessibility and come back with it still refused. On a fresh
+   * install nothing was ever granted: there is no stale entry, no row to
+   * remove with the minus button, and the Repair it advertises resets an
+   * entry that does not exist, so it can only fail (SOU-055).
+   *
+   * Two independent triggers, because the click on Open Settings alone is not
+   * one: `request_permission` returns Denied synchronously while System
+   * Settings is still opening. A blur/focus pair is the honest signal ("you
+   * went there and came back without it"); the attempt count is the fallback
+   * for a webview that never sees one, so Repair stays reachable either way.
+   */
+  let accessibilityAttempts = $state(0);
+  let leftAfterAttempt = $state(false);
+  let returnedStillDenied = $state(false);
+  const showStaleHint = $derived(returnedStillDenied || accessibilityAttempts >= 2);
+
   /** Every write to `status` goes through here so the parent (which cannot
    * see this component's local state otherwise) learns the real permission
    * state, e.g. to gate the onboarding auto-paste default (SOU-053). */
   function setStatus(next: PermissionStatus) {
     status = next;
     // Reset success banner if accessibility state changes back/forth
-    if (next.accessibility === "granted") repairSuccess = false;
+    if (next.accessibility === "granted") {
+      repairSuccess = false;
+      accessibilityAttempts = 0;
+      leftAfterAttempt = false;
+      returnedStillDenied = false;
+    }
     onStatusChange?.(next);
   }
 
@@ -87,6 +110,7 @@
   async function grant(kind: PermissionKind) {
     busy[kind] = true;
     error = "";
+    if (kind === "accessibility") accessibilityAttempts += 1;
     try {
       const next = await requestPermission(kind);
       setStatus({ ...status, [kind]: next });
@@ -159,9 +183,26 @@
         });
     }, 600);
 
+    // "Went to System Settings and came back without it" is the only moment
+    // the stale-entry diagnosis is worth showing. Tracked as a pair so a
+    // window that regains focus without ever having lost it (the synchronous
+    // Denied that `request_permission` returns) does not count as a return.
+    const onBlur = () => {
+      if (accessibilityAttempts > 0) leftAfterAttempt = true;
+    };
+    const onFocus = () => {
+      if (leftAfterAttempt && status.accessibility === "denied") {
+        returnedStillDenied = true;
+      }
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+
     return () => {
       clearInterval(timer);
       clearTimeout(repairCooldownTimer);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
     };
   });
 </script>
@@ -205,25 +246,29 @@
           <p class="text-xs text-text-muted">
             {#if repairSuccess}
               {$t("permissions.accessibility_repair_success")}
-            {:else}
+            {:else if showStaleHint}
               {$t("permissions.accessibility_stale_hint")}
+            {:else}
+              {$t("permissions.accessibility_denied_hint")}
             {/if}
           </p>
-          <button
-            class="btn btn-ghost shrink-0 gap-1.5"
-            disabled={repairing || busy[row.kind] || repairCooldown}
-            onclick={repairAccessibility}
-          >
-            {#if repairing}
-              <Spinner />
-              {$t("permissions.checking")}
-            {:else if repairSuccess}
-              <Check size={14} />
-              {$t("permissions.repair")}
-            {:else}
-              {$t("permissions.repair")}
-            {/if}
-          </button>
+          {#if repairSuccess || showStaleHint}
+            <button
+              class="btn btn-ghost shrink-0 gap-1.5"
+              disabled={repairing || busy[row.kind] || repairCooldown}
+              onclick={repairAccessibility}
+            >
+              {#if repairing}
+                <Spinner />
+                {$t("permissions.checking")}
+              {:else if repairSuccess}
+                <Check size={14} />
+                {$t("permissions.repair")}
+              {:else}
+                {$t("permissions.repair")}
+              {/if}
+            </button>
+          {/if}
         </div>
       {:else if row.kind === "microphone" && s === "denied"}
         <div class="flex items-center justify-between gap-3 pl-8">
