@@ -1,0 +1,25 @@
+--- src-tauri/src/pipeline/actor.rs
++++ src-tauri/src/pipeline/actor.rs
+@@ -1130,12 +1130,15 @@
+     /// keep padding it with silence until it receives audio again.
+     pad_me: bool,
+     pad_them: bool,
++    me_filters: crate::filter::AudioFilterChain,
++    them_filters: crate::filter::AudioFilterChain,
+ }
+ 
+ impl DiarizedMode {
+     /// Creates a new `DiarizedMode` session with empty buffers and no padding armed.
+-    fn new() -> Self {
++    fn new(me_filters: crate::filter::AudioFilterChain, them_filters: crate::filter::AudioFilterChain) -> Self {
+         Self {
+             me_buf: Vec::new(),
+             them_buf: Vec::new(),
+             me_samples_received: 0,
+             them_samples_received: 0,
+             pad_me: false,
+             pad_them: false,
++            me_filters,
++            them_filters,
+         }
+     }

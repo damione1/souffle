@@ -91,6 +91,7 @@ const defaultSettings: AppSettings = {
     { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
   ],
   dictation_learn_from_edit: true,
+  dictation_ceiling_seconds: 3600,
   default_summary_template_id: "default",
   summary_templates: [
     { id: "default", name: "Default", prompt: "Default summary prompt." },

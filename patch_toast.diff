@@ -1,0 +1,32 @@
+--- src/lib/components/ui/Toast.svelte
++++ src/lib/components/ui/Toast.svelte
+@@ -7,8 +7,10 @@
+     title,
+     detail,
+     hint,
++    actionLabel,
++    onAction,
+     onDismiss,
+   }: {
+     title: string;
+     detail?: string;
+     hint?: string;
++    actionLabel?: string;
++    onAction?: () => void;
+     onDismiss: () => void;
+   } = $props();
+@@ -27,4 +29,15 @@
+     {#if hint}
+       <p class="mt-0.5 text-xs text-white/55">{hint}</p>
+     {/if}
++    {#if actionLabel && onAction}
++      <button
++        type="button"
++        class="mt-1.5 text-xs font-medium text-accent hover:text-accent/80 hover:underline"
++        onclick={() => { onAction(); onDismiss(); }}
++      >
++        {actionLabel}
++      </button>
++    {/if}
+   </div>
+   <button

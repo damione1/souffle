@@ -445,6 +445,8 @@
         title={routeToastCopy.title}
         detail={routeToastCopy.detail}
         hint={routeToastCopy.hint}
+        actionLabel={routeToastCopy.hasAction ? $t("common.open_settings") : undefined}
+        onAction={routeToastCopy.hasAction ? () => app.openSettingsTo("interface") : undefined}
         onDismiss={() => micToast.dismiss()}
       />
     </div>
