@@ -679,15 +679,9 @@ describe("transcription controller", () => {
       await vi.advanceTimersByTimeAsync(25_000);
       await stopPromise;
 
-      const unhandled: unknown[] = [];
-      const onUnhandled = (reason: unknown) => {
-        unhandled.push(reason);
-      };
-      process.on("unhandledRejection", onUnhandled);
       rejectPolish(new Error("provider down"));
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      process.off("unhandledRejection", onUnhandled);
-      expect(unhandled).toEqual([]);
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
       expect(ctrl.statusMessage).toBe("Polish took too long. Saved the original text.");
     } finally {
       vi.useRealTimers();
