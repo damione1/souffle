@@ -519,6 +519,7 @@
     "checking": "Vérification…",
     "continue": "Continuer",
     "skip_hint": "Vous pourrez les accorder plus tard.",
+    "accessibility_denied_hint": "Soufflé n'est pas encore autorisé. Cliquez sur Ouvrir Réglages, cochez Soufflé dans la liste Accessibilité, puis revenez ici.",
     "accessibility_stale_hint": "Déjà coché dans Réglages mais toujours refusé ? macOS peut conserver une entrée obsolète après une mise à jour. Essayez Réparer, ou retirez Souffle avec le bouton moins puis rajoutez-le.",
     "repair": "Réparer la permission",
     "accessibility_repair_success": "Une nouvelle demande va s'afficher. Cochez la case pour terminer la réparation.",

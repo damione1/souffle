@@ -86,6 +86,20 @@ describe("PermissionsStep accessibility repair", () => {
     };
   }
 
+  /** Repair is only offered once the stale-entry diagnosis applies: the user
+   * clicked Open Settings, left, and came back with it still refused. */
+  async function reachRepair(): Promise<HTMLElement> {
+    const axRow = rowFor("Accessibility");
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+    await fireEvent.blur(window);
+    await fireEvent.focus(window);
+    await waitFor(() =>
+      expect(within(axRow).getByRole("button", { name: "Repair permission" })).toBeTruthy(),
+    );
+    return axRow;
+  }
+
   it("announces success when tccutil reset succeeds", async () => {
     permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
     permissionsApi.repairAccessibilityPermission.mockResolvedValue({
@@ -95,7 +109,7 @@ describe("PermissionsStep accessibility repair", () => {
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
-    const axRow = rowFor("Accessibility");
+    const axRow = await reachRepair();
     await fireEvent.click(within(axRow).getByRole("button", { name: "Repair permission" }));
 
     await waitFor(() => {
@@ -110,7 +124,7 @@ describe("PermissionsStep accessibility repair", () => {
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
-    const axRow = rowFor("Accessibility");
+    const axRow = await reachRepair();
     await fireEvent.click(within(axRow).getByRole("button", { name: "Repair permission" }));
 
     await waitFor(() => {
@@ -118,6 +132,112 @@ describe("PermissionsStep accessibility repair", () => {
     });
     expect(within(axRow).queryByText(/new prompt should appear/i)).toBeNull();
     expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
+  });
+});
+
+describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  function accessibilityDenied(): PermissionStatus {
+    return {
+      microphone: "granted",
+      system_audio: "unknown",
+      accessibility: "denied",
+      calendar: "unknown",
+    };
+  }
+
+  it("does not diagnose a stale TCC entry before the user has tried anything", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+
+    const axRow = rowFor("Accessibility");
+    expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
+    expect(within(axRow).queryByRole("button", { name: "Repair permission" })).toBeNull();
+    expect(within(axRow).getByText(/tick Soufflé in the Accessibility list/i)).toBeTruthy();
+  });
+
+  it("still does not diagnose it right after Open Settings, before the user comes back", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    // request_permission answers Denied synchronously while System Settings
+    // is still opening; that answer says nothing about the user's intent.
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+
+    await waitFor(() => expect(permissionsApi.requestPermission).toHaveBeenCalledWith("accessibility"));
+    expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
+    expect(within(axRow).queryByRole("button", { name: "Repair permission" })).toBeNull();
+  });
+
+  it("diagnoses it once the user has left for Settings and come back still refused", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+    await fireEvent.blur(window);
+    await fireEvent.focus(window);
+
+    await waitFor(() => {
+      expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
+    });
+    expect(within(axRow).getByRole("button", { name: "Repair permission" })).toBeTruthy();
+  });
+
+  it("diagnoses it on a second attempt even without a blur/focus pair", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    const openSettings = () =>
+      fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+
+    await openSettings();
+    expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
+    await openSettings();
+
+    await waitFor(() => {
+      expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
+    });
+  });
+
+  it("drops the diagnosis again once the permission is granted", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+    await fireEvent.blur(window);
+    await fireEvent.focus(window);
+    await waitFor(() => expect(within(axRow).getByText(/stale entry/i)).toBeTruthy());
+
+    // The 600 ms poll reports the grant.
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      ...accessibilityDenied(),
+      accessibility: "granted",
+    });
+    await waitFor(
+      () => {
+        expect(within(axRow).getByText("Granted")).toBeTruthy();
+      },
+      { timeout: 3000 },
+    );
+    expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
   });
 });
 

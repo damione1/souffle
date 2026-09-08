@@ -519,6 +519,7 @@
     "checking": "Checking…",
     "continue": "Continue",
     "skip_hint": "You can grant these later when prompted.",
+    "accessibility_denied_hint": "Soufflé is not allowed yet. Click Open Settings, then tick Soufflé in the Accessibility list and come back here.",
     "accessibility_stale_hint": "Already checked in Settings but still failing? macOS can keep a stale entry after an app update. Try Repair, or remove Souffle with the minus button and re-add it.",
     "repair": "Repair permission",
     "accessibility_repair_success": "A new prompt should appear shortly. Check the box to finish the repair.",
