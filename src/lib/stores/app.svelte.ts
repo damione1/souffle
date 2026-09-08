@@ -65,7 +65,9 @@ let downloadTotalFiles = $state(0);
 let downloadedBytes = $state(0);
 let downloadTotalBytes = $state<number | null>(null);
 
-// Settings with defaults
+// Settings with defaults matching AppSettings::default() in src-tauri/src/settings.rs.
+// getSettings() overwrites these on every successful bootstrap; these are only
+// active if the backend is unreachable on first launch (onboarding flow).
 let settings = $state<AppSettings>({
   theme: "dark",
   locale: "",
@@ -81,9 +83,10 @@ let settings = $state<AppSettings>({
   clamshell_audio_device: null,
   input_priority: { priorities: [], hidden: [], known: [] },
   allow_bluetooth_mic: false,
-  transcription_engine_id: "",
-  transcription_model_id: "",
-  transcription_backend_id: "",
+  // Matches KYUTAI_ENGINE_ID / KYUTAI_MODEL_ID / CANDLE_BACKEND_ID in engine/mod.rs
+  transcription_engine_id: "kyutai",
+  transcription_model_id: "stt-1b-en_fr",
+  transcription_backend_id: "candle",
   vad_enabled: true,
   filler_removal: true,
   stutter_collapse: false,
@@ -104,15 +107,21 @@ let settings = $state<AppSettings>({
   meeting_transcription_language: "auto",
   dictation_polish_enabled: true,
   dictation_polish_template_id: "clean",
+  // Fallback only, used when getSettings() has not yet succeeded. Prompts
+  // are empty on purpose: merge_polish_templates keeps a stored empty prompt
+  // (it is not in the superseded-builtin list), but effective_template_prompt
+  // falls back to the shipped defaults at polish time, so a bootstrap-failure
+  // path cannot persist the old stub one-liners as the live polish text.
   dictation_polish_templates: [
-    { id: "clean", label: "Clean up", prompt: "Clean without rewriting." },
-    { id: "email", label: "Professional email", prompt: "Rewrite as email." },
-    { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
-    { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
+    { id: "clean", label: "Clean up", prompt: "" },
+    { id: "email", label: "Professional email", prompt: "" },
+    { id: "bullets", label: "Bullet points", prompt: "" },
+    { id: "no_fillers", label: "Remove fillers", prompt: "" },
   ],
   auto_update_check_enabled: true,
   dictation_learn_from_edit: true,
   default_summary_template_id: "default",
+  // Stub prompts: same rationale as dictation_polish_templates above.
   summary_templates: [
     { id: "default", name: "Default", prompt: "" },
     { id: "detailed_minutes", name: "Detailed minutes", prompt: "" },
