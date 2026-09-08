@@ -85,4 +85,14 @@ mod tests {
         let f = StutterCollapseFilter::new();
         assert_eq!(f.apply(""), "");
     }
+
+    #[test]
+    fn kyutai_stutter_limitation() {
+        // Stutter collapse only works within a single call.
+        // When processed word-by-word (like Kyutai), it cannot see the repetition across segments.
+        let f = StutterCollapseFilter::new();
+        assert_eq!(f.apply("le"), "le");
+        assert_eq!(f.apply("le"), "le");
+        assert_eq!(f.apply("le"), "le");
+    }
 }

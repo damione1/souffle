@@ -89,9 +89,10 @@
     "empty": "No custom dictionary entries yet.",
     "pronunciation": "Pronunciation",
     "pronunciation_placeholder": "e.g. vaysix",
-    "pronunciation_desc": "How the term sounds, spelled out. Exact matches and similar-sounding words are rewritten to the term. Comma-separate several heard spellings, e.g. vaysix, vee six.",
+    "pronunciation_desc": "How the term sounds, spelled out. Exact matches and similar-sounding words are rewritten to the term. Comma-separate several heard spellings, e.g. vaysix, veysix.",
     "learn_from_edit": "Learn from edits after paste",
-    "learn_from_edit_desc": "When auto-paste is on, remember word-level fixes you make in the target app so later dictations match."
+    "learn_from_edit_desc": "When auto-paste is on, remember word-level fixes you make in the target app so later dictations match.",
+    "kyutai_space_warning": "⚠️ Multi-word aliases won't match on the fast model (Kyutai) which outputs word by word."
   },
   "settings_calendar": {
     "title": "Calendar",
