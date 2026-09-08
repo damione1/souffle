@@ -147,6 +147,7 @@ describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
       system_audio: "unknown",
       accessibility: "denied",
       calendar: "unknown",
+      input_monitoring: "unknown",
     };
   }
 
