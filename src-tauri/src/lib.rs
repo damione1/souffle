@@ -448,10 +448,8 @@ pub fn run() {
                 tauri::RunEvent::Reopen {
                     has_visible_windows,
                     ..
-                } => {
-                    if tray::should_restore_main_on_reopen(has_visible_windows) {
-                        tray::show_main_window(app);
-                    }
+                } if tray::should_restore_main_on_reopen(has_visible_windows) => {
+                    tray::show_main_window(app);
                 }
                 _ => {}
             }

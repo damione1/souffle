@@ -147,6 +147,10 @@ pub fn download_model(
         .build()
         .map_err(|e| format!("HTTP client init: {e}"))?;
 
+    // completed_files is a progress counter (pre-count of config.json, then
+    // one bump per downloaded file), not a loop index — clippy's zip rewrite
+    // would obscure that.
+    #[allow(clippy::explicit_counter_loop)]
     for repo_file in &files_to_download {
         info!(file = %repo_file, "Downloading");
 

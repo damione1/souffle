@@ -1159,11 +1159,7 @@ impl DiarizedMode {
 
     /// Calculates the number of full `chunk_size` frames in the buffer.
     fn full_frames(buf: &[f32], chunk_size: usize) -> usize {
-        if chunk_size == 0 {
-            0
-        } else {
-            buf.len() / chunk_size
-        }
+        buf.len().checked_div(chunk_size).unwrap_or(0)
     }
 
     /// Takes one full `chunk_size` frame from the buffer if available.
