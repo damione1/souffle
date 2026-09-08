@@ -53,7 +53,7 @@ pub fn start_modifier_tap(app: AppHandle) {
                 }
 
                 let state = match app_clone.try_state::<AppState>() {
-                    Some(s) => s.inner().clone(),
+                    Some(s) => s.inner(),
                     None => return CallbackResult::Keep,
                 };
                 let current_shortcut = {
@@ -68,25 +68,25 @@ pub fn start_modifier_tap(app: AppHandle) {
                 let keycode = event.get_integer_value_field(core_graphics::event::EventField::KEYBOARD_EVENT_KEYCODE);
                 let flags = event.get_flags();
 
-                let is_match = match (shortcut.as_str(), keycode as i64) {
-                    ("Fn", 63) => true,
-                    ("MetaLeft", 55) => true,
-                    ("MetaRight", 54) => true,
-                    ("ShiftLeft", 56) => true,
-                    ("ShiftRight", 60) => true,
-                    ("AltLeft", 58) => true,
-                    ("AltRight", 61) => true,
-                    ("ControlLeft", 59) => true,
-                    ("ControlRight", 62) => true,
-                    _ => false,
-                };
+                let is_match = matches!(
+                    (shortcut.as_str(), keycode),
+                    ("Fn", 63) |
+                    ("MetaLeft", 55) |
+                    ("MetaRight", 54) |
+                    ("ShiftLeft", 56) |
+                    ("ShiftRight", 60) |
+                    ("AltLeft", 58) |
+                    ("AltRight", 61) |
+                    ("ControlLeft", 59) |
+                    ("ControlRight", 62)
+                );
 
                 if !is_match {
                     return CallbackResult::Keep;
                 }
 
                 if matches!(event_type, CGEventType::FlagsChanged) {
-                    let is_pressed = match keycode as i64 {
+                    let is_pressed = match keycode {
                         55 | 54 => flags.contains(CGEventFlags::CGEventFlagCommand),
                         56 | 60 => flags.contains(CGEventFlags::CGEventFlagShift),
                         58 | 61 => flags.contains(CGEventFlags::CGEventFlagAlternate),

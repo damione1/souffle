@@ -416,6 +416,7 @@ pub fn request(kind: PermissionKind) -> PermState {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use std::cell::Cell;
@@ -563,6 +564,7 @@ fn input_monitoring_granted() -> bool {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
         fn CGPreflightListenEventAccess() -> bool;
+        #[allow(dead_code)]
         fn CGRequestListenEventAccess() -> bool;
     }
     unsafe { CGPreflightListenEventAccess() }
@@ -577,6 +579,7 @@ fn input_monitoring_granted() -> bool {
 fn open_input_monitoring_settings() {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
+        #[allow(dead_code)]
         fn CGRequestListenEventAccess() -> bool;
     }
     unsafe {

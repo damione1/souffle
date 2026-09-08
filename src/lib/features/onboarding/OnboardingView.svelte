@@ -48,7 +48,7 @@
   });
 </script>
 
-<svelte:window onkeydown={(event) => controller.handleKeyDown(event)} onkeyup={(event) => controller.handleKeyUp?.(event)} />
+<svelte:window onkeydown={(event) => controller.handleKeyDown(event)} />
 
 <div class="flex h-screen items-center justify-center p-8">
   <div class="surface-card flex w-full max-w-lg flex-col gap-6 p-8">

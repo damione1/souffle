@@ -19,7 +19,7 @@ function statusWith(microphone: PermState): PermissionStatus {
     microphone,
     system_audio: "unknown",
     accessibility: "granted",
-    calendar: "unknown",
+    calendar: "unknown", input_monitoring: "granted",
   };
 }
 
@@ -82,7 +82,7 @@ describe("PermissionsStep accessibility repair", () => {
       microphone: "granted",
       system_audio: "unknown",
       accessibility: "denied",
-      calendar: "unknown",
+      calendar: "unknown", input_monitoring: "granted",
     };
   }
 

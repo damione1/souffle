@@ -154,7 +154,7 @@ describe("createOnboardingController", () => {
     permissionsApi.getPermissionStatus.mockResolvedValue({
       microphone: "granted",
       system_audio: "granted",
-      accessibility: "granted",
+      accessibility: "granted", input_monitoring: "granted",
       calendar: "unknown",
     });
     const ctrl = createOnboardingController();
@@ -197,7 +197,7 @@ describe("createOnboardingController", () => {
     permissionsApi.getPermissionStatus.mockResolvedValue({
       microphone: "granted",
       system_audio: "granted",
-      accessibility: "granted",
+      accessibility: "granted", input_monitoring: "granted",
       calendar: "unknown",
     });
     const ctrl = createOnboardingController();
@@ -226,7 +226,7 @@ describe("createOnboardingController", () => {
     ctrl.onPermissionsStatusChange({
       microphone: "granted",
       system_audio: "granted",
-      accessibility: "granted",
+      accessibility: "granted", input_monitoring: "granted",
       calendar: "unknown",
     });
     expect(ctrl.autoPaste).toBe(true);
@@ -246,7 +246,7 @@ describe("createOnboardingController", () => {
     permissionsApi.getPermissionStatus.mockResolvedValue({
       microphone: "granted",
       system_audio: "granted",
-      accessibility: "granted",
+      accessibility: "granted", input_monitoring: "granted",
       calendar: "unknown",
     });
     const ctrl = createOnboardingController();
