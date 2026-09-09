@@ -788,17 +788,51 @@ mod tests {
 /// Echo-cancellation efficiency bench, run through the exact mixer
 /// integration (10ms frames at `MIX_RATE`, `split_frame`'s render-then-capture
 /// ordering) rather than the `Aec` wrapper in isolation. All but the short
-/// `broadband_echo_is_cancelled_through_the_mixer` are ignored by default:
-/// several seconds of synthetic audio at 48kHz is too slow for the normal
-/// test loop. Run them explicitly with:
+/// `broadband_echo_is_cancelled_through_the_mixer` and the measurement
+/// self-check are ignored by default: several seconds of synthetic audio at
+/// 48kHz is too slow for the normal test loop. Run them explicitly with:
 ///   cargo test --release --manifest-path src-tauri/Cargo.toml audio::mixer::aec_bench -- --ignored --nocapture
+///
+/// How the measurement works (SOU-112). The bench generates the user's voice
+/// and the far-end render itself, so it knows exactly what the acoustic path
+/// added to the mic (`echo`) and exactly what the user said (`voice`). The
+/// residual after cancellation is `output - reference`, and ERLE is the
+/// energy of the uncancelled echo over that residual: positive means the
+/// output ended up closer to the voice than the uncancelled mic would have
+/// been, 0dB means cancellation changed nothing. Four references are
+/// reported side by side:
+/// - `raw`: the voice at its generation index, against the raw echo. Sonora
+///   delays its output by a fixed lag and its enforced high-pass filter
+///   shifts the phase of every voice component (143 degrees at 120Hz, still
+///   21 degrees at 1kHz); `output - voice` counts both as damage. Kept for
+///   continuity with the 2026-07-18 numbers.
+/// - `lag-aligned`: the voice delayed by the measured pipeline lag. Removes
+///   the delay, still counts the high-pass filter's phase. This is what the
+///   bench called "aligned" before SOU-112, except that its lag came from a
+///   cross-correlation with the voice, capped at 240 samples and pulled by
+///   the same phase shift: it reported 170 where the impulse probe finds 430.
+/// - `compensated`: the voice run through a fresh `Aec` with a silent far
+///   end, i.e. through the fixed part of sonora's chain (high-pass filter
+///   and block delay) with nothing to cancel, against the echo run through
+///   the same chain. `fixed_chain_reference_is_linear` checks that this path
+///   is a plain linear filter, so the reference cannot absorb adaptive
+///   behaviour. The reference follows the mixer's raw/cancelled blend frame
+///   by frame, so frames where the mixer held the raw mic (a far-end pause)
+///   are compared with the raw voice. What is left in `output -
+///   compensated` is residual echo plus what cancellation itself did to
+///   the voice.
+/// - `misaligned control`: the compensated reference shifted by the measured
+///   lag. If compensation measures anything, this collapses.
 #[cfg(test)]
 mod aec_bench {
+    use std::f32::consts::TAU;
+
     use ringbuf::HeapRb;
     use ringbuf::traits::{Producer, Split};
 
     use super::*;
     use crate::audio::aec::Aec;
+    use crate::audio::resampler::Resampler;
 
     /// Deterministic xorshift64 PRNG so the bench is reproducible without an
     /// external `rand` dependency.
@@ -816,8 +850,104 @@ mod aec_bench {
         }
     }
 
-    /// Musical-ish frequencies with decreasing amplitude, meant to stand in
-    /// for video/music playback content (broadband, not a pure tone).
+    /// A synthetic talker: a harmonic series on a slowly wobbling
+    /// fundamental, tilted like speech, amplitude-modulated at syllable rate,
+    /// with a little low-passed breath noise under it. Broadband, and a fair
+    /// stand-in for the *near* end, whose exact content the bench must know.
+    /// It is not a fair stand-in for the *far* end: AEC3 freezes filter
+    /// adaptation when any FFT bin dominates its neighbours for more than
+    /// 10 blocks (`RenderSignalAnalyzer::poor_signal_excitation`), and a
+    /// sustained harmonic series does exactly that. The far end is real
+    /// speech (`Render::Speech`); the synthetic one stays as an adverse
+    /// diagnostic.
+    struct Talker {
+        /// Mean fundamental, in Hz.
+        f0_hz: f32,
+        /// Fractional pitch wobble and its rate in Hz.
+        vibrato: (f32, f32),
+        /// Syllabic amplitude modulation rate in Hz; the envelope never drops
+        /// below `SYLLABLE_FLOOR`.
+        syllable_hz: f32,
+        /// Harmonics are generated up to this frequency ...
+        max_harmonic_hz: f32,
+        /// ... with this spectral tilt.
+        tilt_db_per_octave: f32,
+        /// Low-passed noise mixed under the harmonics.
+        noise_amp: f32,
+        /// RMS of the harmonic part before the syllable envelope.
+        rms: f32,
+        seed: u64,
+    }
+
+    const SYLLABLE_FLOOR: f32 = 0.3;
+
+    /// Near end: the user at the mic. The fundamental sits well above the
+    /// enforced high-pass filter's transition band: sonora's 48kHz HPF is
+    /// flat in magnitude above ~110Hz, and the pre-SOU-112 fixture's 120Hz
+    /// fundamental was already there in magnitude (-0.01dB), so what the
+    /// voice-only bench charged to the HPF was its phase, not attenuation.
+    /// A higher fundamental shrinks that share (120 degrees at 210Hz against
+    /// 143 at 120Hz) but does not remove it; the compensated reference does.
+    const NEAR_TALKER: Talker = Talker {
+        f0_hz: 210.0,
+        vibrato: (0.03, 5.5),
+        syllable_hz: 4.0,
+        max_harmonic_hz: 4000.0,
+        tilt_db_per_octave: -6.0,
+        noise_amp: 0.02,
+        rms: 0.14,
+        seed: 0xBEEF,
+    };
+
+    /// A sustained lower voice for `Render::SustainedHarmonics`. Its 125Hz
+    /// fundamental lands every harmonic on one of AEC3's 125Hz FFT bins,
+    /// the worst case for the poor-excitation detector.
+    const FAR_TALKER: Talker = Talker {
+        f0_hz: 125.0,
+        vibrato: (0.04, 4.5),
+        syllable_hz: 3.3,
+        max_harmonic_hz: 5000.0,
+        tilt_db_per_octave: -6.0,
+        noise_amp: 0.05,
+        rms: 0.24,
+        seed: 0xC0FFEE,
+    };
+
+    fn synth_talker(len: usize, sample_rate: u32, talker: &Talker) -> Vec<f32> {
+        let mut rng = Xorshift(talker.seed);
+        let fs = sample_rate as f32;
+        let n_harmonics = (talker.max_harmonic_hz / talker.f0_hz).floor().max(1.0) as usize;
+        let amps: Vec<f32> = (1..=n_harmonics)
+            .map(|k| 10f32.powf(talker.tilt_db_per_octave * (k as f32).log2() / 20.0))
+            .collect();
+        let norm = talker.rms / (amps.iter().map(|a| a * a).sum::<f32>() / 2.0).sqrt();
+        let mut phase = 0.0f32;
+        let mut noise_state = 0.0f32;
+        (0..len)
+            .map(|i| {
+                let t = i as f32 / fs;
+                let f0 =
+                    talker.f0_hz * (1.0 + talker.vibrato.0 * (TAU * talker.vibrato.1 * t).sin());
+                phase = (phase + TAU * f0 / fs) % TAU;
+                let harmonic: f32 = amps
+                    .iter()
+                    .enumerate()
+                    .map(|(k, a)| a * ((k + 1) as f32 * phase).sin())
+                    .sum();
+                let envelope = SYLLABLE_FLOOR
+                    + (1.0 - SYLLABLE_FLOOR) * 0.5 * (1.0 + (TAU * talker.syllable_hz * t).sin());
+                // One-pole low-pass on white noise: broadens the spectrum
+                // without the harshness of raw white noise.
+                noise_state = 0.9 * noise_state + 0.1 * rng.next_unit();
+                (norm * harmonic * envelope + talker.noise_amp * noise_state).clamp(-1.0, 1.0)
+            })
+            .collect()
+    }
+
+    /// The pre-SOU-112 far-end fixture: five stationary tones standing in
+    /// for video/music playback. Kept as a documented adverse case
+    /// (`tonal_render_diagnostic`) so the history of measurements stays
+    /// comparable; AEC3 does not adapt on it.
     const VIDEO_FREQS: &[(f32, f32)] = &[
         (220.0, 0.22),
         (523.0, 0.18),
@@ -826,25 +956,9 @@ mod aec_bench {
         (2637.0, 0.07),
     ];
 
-    /// A voice fundamental plus harmonics, distinct from `VIDEO_FREQS`, to
-    /// stand in for the user's own speech (near-end, double-talk). Kept well
-    /// under full scale together with the echo so `capture`'s clamp to
-    /// [-1, 1] is a safety net, not a routine clipper: real gain-staged mic
-    /// input doesn't clip, and clipping would distort capture in a way no
-    /// linear AEC can undo, swamping the echo-cancellation measurement with
-    /// an unrelated clipping artifact.
-    const VOICE_FREQS: &[(f32, f32)] = &[
-        (120.0, 0.15),
-        (240.0, 0.10),
-        (360.0, 0.06),
-        (480.0, 0.04),
-        (720.0, 0.025),
-    ];
-
-    /// Sum of sinusoids at `freqs` plus a touch of low-pass-filtered noise,
-    /// so the signal has broadband content like real speech/video audio
-    /// rather than a single tone.
-    fn synth_wideband(
+    /// Sum of sinusoids at `freqs` plus low-pass-filtered noise. With no
+    /// `freqs` this is the noise-like far end of the broadband benches.
+    fn synth_tones(
         len: usize,
         sample_rate: u32,
         freqs: &[(f32, f32)],
@@ -858,28 +972,176 @@ mod aec_bench {
                 let t = i as f32 / sample_rate as f32;
                 let tonal: f32 = freqs
                     .iter()
-                    .map(|(freq, amp)| amp * (t * freq * std::f32::consts::TAU).sin())
+                    .map(|(freq, amp)| amp * (t * freq * TAU).sin())
                     .sum();
-                // One-pole low-pass on white noise: broadens the spectrum
-                // without the harshness of raw white noise.
                 noise_state = 0.9 * noise_state + 0.1 * rng.next_unit();
                 (tonal + noise_amp * noise_state).clamp(-1.0, 1.0)
             })
             .collect()
     }
 
-    /// Longest output lag the alignment scan considers. Sonora's AEC3 adds a
-    /// fixed pipeline delay (band split/merge plus the 80-sample sub-frame to
-    /// 64-sample block reframing) of a few ms, well under this bound. The
-    /// bound must also stay under the voice's fundamental period (120 Hz,
-    /// 400 samples) or the correlation peak can alias by one period.
-    const MAX_ALIGN_LAG: usize = FRAME_SAMPLES / 2;
+    /// Real speech: the SOU-030 fixtures are two French sentences from the
+    /// macOS `Thomas` voice at 16kHz (f0 around 130Hz, a 300ms pause in the
+    /// middle, natural consonants and level). Wideband 16kHz is also what a
+    /// meeting client actually plays. Resampled to `MIX_RATE` with the
+    /// production resampler and looped to `len` at its native level.
+    const FAR_SPEECH_WAV: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fixtures/audio/sou-030/hesitation-b-gap0300ms.wav"
+    );
+    const NEAR_SPEECH_WAV: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fixtures/audio/sou-030/hesitation-a-gap0300ms.wav"
+    );
+
+    fn load_speech(path: &str, len: usize) -> Vec<f32> {
+        let mut reader =
+            hound::WavReader::open(path).unwrap_or_else(|e| panic!("open {path}: {e}"));
+        let spec = reader.spec();
+        assert_eq!(spec.channels, 1, "{path}: expected a mono fixture");
+        assert_eq!(spec.sample_format, hound::SampleFormat::Int);
+        let scale = 1.0 / (1u32 << (spec.bits_per_sample - 1)) as f32;
+        let pcm: Vec<f32> = reader
+            .samples::<i32>()
+            .map(|s| s.expect("readable sample") as f32 * scale)
+            .collect();
+        let mut resampler = Resampler::new(spec.sample_rate, 1, MIX_RATE, 1.0);
+        let mut clip = resampler.process(&pcm);
+        clip.extend(resampler.flush());
+        assert!(!clip.is_empty(), "{path}: resampled to nothing");
+        clip.iter().copied().cycle().take(len).collect()
+    }
+
+    /// What plays on the speakers.
+    #[derive(Clone, Copy)]
+    enum Render {
+        /// Real speech (`FAR_SPEECH_WAV`): the meeting case.
+        Speech,
+        /// Low-passed noise at this level: the case AEC3 is built for.
+        Noise(f32),
+        /// `VIDEO_FREQS` over a little noise: the pre-SOU-112 fixture.
+        Tones,
+        /// `FAR_TALKER`: broadband but stationary enough to trip AEC3's
+        /// poor-excitation gate.
+        SustainedHarmonics,
+    }
+
+    fn synth_render(len: usize, sample_rate: u32, render: Render) -> Vec<f32> {
+        match render {
+            Render::Speech => load_speech(FAR_SPEECH_WAV, len),
+            Render::Noise(level) => synth_tones(len, sample_rate, &[], level, 0xC0FFEE),
+            Render::Tones => synth_tones(len, sample_rate, VIDEO_FREQS, 0.05, 0xC0FFEE),
+            Render::SustainedHarmonics => synth_talker(len, sample_rate, &FAR_TALKER),
+        }
+    }
+
+    /// What the user says into the mic.
+    #[derive(Clone, Copy)]
+    enum Voice {
+        /// `NEAR_TALKER`, scaled by `BenchCase::voice_scale`.
+        Synthetic,
+        /// Real speech (`NEAR_SPEECH_WAV`), scaled likewise.
+        Speech,
+    }
+
+    fn synth_voice(len: usize, sample_rate: u32, voice: Voice, scale: f32) -> Vec<f32> {
+        if scale == 0.0 {
+            return vec![0.0; len];
+        }
+        let raw = match voice {
+            Voice::Synthetic => synth_talker(len, sample_rate, &NEAR_TALKER),
+            Voice::Speech => load_speech(NEAR_SPEECH_WAV, len),
+        };
+        raw.into_iter().map(|s| s * scale).collect()
+    }
+
+    /// Frames of silence fed before probing so sonora is past its start-up
+    /// state (`initial_state_seconds` in AEC3 is well under a second).
+    const PROBE_WARMUP_FRAMES: usize = 100;
+    /// How many frames after the impulse the probe looks for its peak. The
+    /// lag is under one frame; anything beyond two is a broken pipeline.
+    const PROBE_WINDOW_FRAMES: usize = 4;
+
+    /// Sonora's response to a unit impulse through a fresh `Aec` with a
+    /// silent far end, normalised to the impulse, from the impulse onwards.
+    /// With nothing to cancel, this is the fixed part of its chain: the
+    /// high-pass filter's impulse response (first sample 0.92 for the
+    /// cascade sonora uses at 48kHz, then a small negative tail) delayed by
+    /// the block-processing lag.
+    fn probe_pipeline_response() -> Vec<f32> {
+        let mut aec = Aec::new(MIX_RATE);
+        let silence = vec![0.0f32; FRAME_SAMPLES];
+        for _ in 0..PROBE_WARMUP_FRAMES {
+            aec.process_render(&silence);
+            let mut mic = silence.clone();
+            aec.process_capture(&mut mic);
+        }
+        let impulse = 0.5f32;
+        let mut out = Vec::with_capacity(PROBE_WINDOW_FRAMES * FRAME_SAMPLES);
+        for f in 0..PROBE_WINDOW_FRAMES {
+            aec.process_render(&silence);
+            let mut mic = silence.clone();
+            if f == 0 {
+                mic[0] = impulse;
+            }
+            aec.process_capture(&mut mic);
+            out.extend(mic.iter().map(|s| s / impulse));
+        }
+        out
+    }
+
+    /// Sonora's fixed output delay, measured rather than assumed: where the
+    /// probe response peaks, and how tall that peak is.
+    fn probe_pipeline_lag() -> (usize, f32) {
+        let response = probe_pipeline_response();
+        response
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (i, s.abs()))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("probe window is not empty")
+    }
+
+    /// `x` through a fresh `Aec` with a silent far end, through the same
+    /// wrapper and call order as `split_frame`. Sonora has nothing to
+    /// cancel, so what comes out is the fixed part of its chain (the enforced
+    /// high-pass filter and the block-processing delay) applied to `x`: the
+    /// reference the compensated figures are measured against.
+    fn fixed_chain_reference(x: &[f32]) -> Vec<f32> {
+        let mut aec = Aec::new(MIX_RATE);
+        let silence = vec![0.0f32; FRAME_SAMPLES];
+        let mut out = Vec::with_capacity(x.len());
+        for frame in x.chunks_exact(FRAME_SAMPLES) {
+            aec.process_render(&silence);
+            let mut mic = frame.to_vec();
+            aec.process_capture(&mut mic);
+            out.extend(mic);
+        }
+        out
+    }
+
+    /// `x` delayed by `lag` samples, zero-filled at the start.
+    fn delayed(x: &[f32], lag: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; x.len()];
+        let lag = lag.min(x.len());
+        out[lag..].copy_from_slice(&x[..x.len() - lag]);
+        out
+    }
+
+    fn energy(x: &[f32]) -> f32 {
+        x.iter().map(|s| s * s).sum()
+    }
+
+    fn db(ratio: f32) -> f32 {
+        10.0 * ratio.log10()
+    }
 
     /// One synthetic run through `MeetingMixer`; see `run_echo_bench`.
     struct BenchCase {
         /// Mirrors what `Aec` passes to `set_stream_delay_ms`; `None`
         /// measures the hint-free baseline.
         expected_delay_hint_ms: Option<i32>,
+        voice: Voice,
         /// Near-end voice level; `0.0` isolates echo-only cancellation.
         voice_scale: f32,
         /// Acoustic path: how much of the render leaks into the mic ...
@@ -887,62 +1149,77 @@ mod aec_bench {
         /// ... and how late.
         delay_ms: u32,
         duration_s: f32,
-        /// Far-end content: tonal components and the level of the low-passed
-        /// noise mixed under them.
-        render_freqs: &'static [(f32, f32)],
-        render_noise: f32,
+        render: Render,
     }
 
     struct BenchResult {
-        /// Energy of the injected echo over the post-convergence window
-        /// against energy of `output - voice` with `voice` taken at its
-        /// generation index. The 2026-07-18 metric, kept for comparison: any
-        /// fixed output lag shows up here as voice "damage".
-        raw_erle_db: f32,
-        /// Same ratio with `voice` delayed by `lag_samples`, so a constant
-        /// pipeline delay no longer counts against the canceller. What is
-        /// left is residual echo plus genuine voice distortion.
-        aligned_erle_db: f32,
-        /// Aligned residual against the voice itself: how far the output is
-        /// from the voice the user actually produced, in dB (negative is
-        /// good). With no echo path this is pure voice distortion.
-        residual_vs_voice_db: f32,
-        /// Output lag found by cross-correlating the output with `voice`
-        /// (0 when there is no voice to correlate against).
+        /// Sonora's fixed output delay from `probe_pipeline_lag`, and how
+        /// tall the probe peak was relative to the impulse.
         lag_samples: usize,
+        lag_probe_peak: f32,
+        /// ERLE against the voice at its generation index: the 2026-07-18
+        /// metric, which counts the pipeline lag and the high-pass filter's
+        /// phase as voice damage.
+        raw_erle_db: f32,
+        /// ERLE against the voice delayed by `lag_samples`: the pre-SOU-112
+        /// "aligned" figure, still counting the high-pass filter's phase.
+        lag_aligned_erle_db: f32,
+        /// ERLE of the echo through the fixed chain over `output -
+        /// fixed_chain_reference(voice)`: residual echo plus what
+        /// cancellation itself did to the voice, nothing else. 0dB is a
+        /// canceller that changed nothing.
+        compensated_erle_db: f32,
+        /// Negative control: the compensated metric with its reference
+        /// shifted by `lag_samples`. Must collapse relative to `compensated`.
+        misaligned_erle_db: f32,
+        /// What the fixed chain alone (no cancellation) does to the voice,
+        /// relative to the voice, in dB: the share of the old metric that
+        /// was never the canceller's doing.
+        fixed_chain_cost_db: f32,
+        /// Compensated residual relative to the voice itself, in dB. With no
+        /// echo path this is pure voice distortion by the canceller.
+        residual_vs_voice_db: f32,
+        /// The same with the reference misaligned by `lag_samples`: the
+        /// negative control's figure when there is no echo to normalise by.
+        misaligned_residual_vs_voice_db: f32,
+        /// Output level over the tail relative to the fixed-chain voice, in
+        /// dB. Distortion leaves this near 0dB; suppression pulls it down.
+        output_level_db: f32,
+        /// Split of the compensated residual, both relative to the
+        /// uncancelled echo: the part coherent with the echo frame by frame
+        /// (echo the canceller left, counted fully when only scaled, partly
+        /// when filtered) and everything else, which is what cancellation
+        /// did to the voice plus anything nonlinear.
+        residual_echo_like_db: f32,
+        residual_other_db: f32,
         /// Sonora's own view after the run: estimated render/capture delay,
         /// echo return loss enhancement and divergent filter fraction.
         stats: (Option<i32>, Option<f64>, Option<f64>),
-        /// First frame after which a 500ms window of aligned residual stays
-        /// below -10dB of the echo in that window.
+        /// First frame after which a 500ms window of compensated residual
+        /// stays below -10dB of the echo in that window.
         converge_frame: Option<usize>,
+        /// Mean of the mixer's raw/cancelled blend over the tail: 1.0 when
+        /// the canceller's output was applied throughout, 0.0 when the
+        /// mixer held the raw mic throughout.
+        applied_fraction: f32,
     }
 
-    /// Feeds a synthetic "video playing on the speakers while the user
-    /// talks" scenario through `MeetingMixer` and reports (does not just
-    /// assert) how effectively the AEC integration attenuates the echo:
-    /// approximate ERLE post-convergence and roughly when convergence
-    /// happens.
+    /// Feeds a "remote participant on the speakers while the user talks"
+    /// scenario through `MeetingMixer` and reports (does not just assert)
+    /// how effectively the AEC integration attenuates the echo: ERLE
+    /// post-convergence under each reference of `BenchResult`, and roughly
+    /// when convergence happens.
     fn run_echo_bench(case: BenchCase) -> BenchResult {
         let sample_rate = MIX_RATE;
         let delay_samples = (sample_rate as usize * case.delay_ms as usize) / 1000;
-        let total_samples = (sample_rate as f32 * case.duration_s) as usize;
+        let n_frames = (sample_rate as f32 * case.duration_s) as usize / FRAME_SAMPLES;
+        let total_samples = n_frames * FRAME_SAMPLES;
 
-        let render = synth_wideband(
-            total_samples,
-            sample_rate,
-            case.render_freqs,
-            case.render_noise,
-            0xC0FFEE,
-        );
-        let voice: Vec<f32> = synth_wideband(total_samples, sample_rate, VOICE_FREQS, 0.02, 0xBEEF)
-            .into_iter()
-            .map(|s| s * case.voice_scale)
-            .collect();
+        let render = synth_render(total_samples, sample_rate, case.render);
+        let voice = synth_voice(total_samples, sample_rate, case.voice, case.voice_scale);
 
         // Ground truth: exactly what the acoustic path adds to the mic and
-        // exactly what the user said, so residual echo can be estimated
-        // after the fact as `output - voice` (see comment below).
+        // exactly what the user said.
         let echo: Vec<f32> = (0..total_samples)
             .map(|n| {
                 if n >= delay_samples {
@@ -955,6 +1232,10 @@ mod aec_bench {
         let capture: Vec<f32> = (0..total_samples)
             .map(|n| (voice[n] + echo[n]).clamp(-1.0, 1.0))
             .collect();
+
+        let (lag_samples, lag_probe_peak) = probe_pipeline_lag();
+        let voice_ref = fixed_chain_reference(&voice);
+        let echo_ref = fixed_chain_reference(&echo);
 
         let (mut mic_prod, mic_cons) = HeapRb::<f32>::new(sample_rate as usize).split();
         let (mut tap_prod, tap_cons) = HeapRb::<f32>::new(sample_rate as usize).split();
@@ -975,9 +1256,13 @@ mod aec_bench {
         }
         mixer.set_aec(Some(aec));
 
-        let n_frames = total_samples / FRAME_SAMPLES;
-        let mut output = Vec::with_capacity(n_frames * FRAME_SAMPLES);
-
+        let mut output = Vec::with_capacity(total_samples);
+        // The mixer's raw/cancelled blend at the end of each frame. The
+        // mixer holds the raw mic while the tap carries no energy (SOU-063
+        // lever 2), which a speech far end does in every pause, and the
+        // frames where it did must be compared with the raw voice (no lag,
+        // no high-pass filter), not with the fixed chain.
+        let mut blend = Vec::with_capacity(n_frames);
         for f in 0..n_frames {
             let start = f * FRAME_SAMPLES;
             let end = start + FRAME_SAMPLES;
@@ -991,61 +1276,77 @@ mod aec_bench {
                 "matching rates should pass one 10ms frame through per tick"
             );
             output.extend(me);
+            blend.push(mixer.aec_mix);
         }
 
         // Post-convergence window: last quarter of the run.
         let tail = n_frames / 4;
         let tail_start = (n_frames - tail) * FRAME_SAMPLES;
 
-        // The canceller delays its output by a fixed amount. Find it by
-        // cross-correlating the output with the voice we generated over the
-        // post-convergence window: the echo shares no component with the
-        // voice, so the peak sits at the pipeline lag.
-        let lag_samples = if case.voice_scale > 0.0 {
-            (0..=MAX_ALIGN_LAG)
-                .map(|lag| {
-                    let corr: f32 = (tail_start..output.len())
-                        .map(|n| output[n] * voice[n - lag])
-                        .sum();
-                    (lag, corr)
-                })
-                .max_by(|a, b| a.1.total_cmp(&b.1))
-                .map_or(0, |(lag, _)| lag)
-        } else {
-            0
-        };
-
-        // Residual echo estimate: the AEC doesn't know `voice` separately,
-        // but we generated it, so subtracting it from the output isolates
-        // what the AEC left behind (residual echo plus any voice distortion
-        // the AEC itself introduced). `raw` compares against the voice at
-        // its generation index, `aligned` against the voice `lag_samples`
-        // earlier.
-        let frame_energy = |f: usize, lag: usize| -> (f32, f32) {
-            let start = f * FRAME_SAMPLES;
-            let end = start + FRAME_SAMPLES;
-            let echo_energy: f32 = echo[start..end].iter().map(|s| s * s).sum();
-            let residual_energy: f32 = (start..end)
+        // References that follow the path the mixer actually took, frame by
+        // frame. The one-frame ramp inside a switching frame is not
+        // modelled, so a switch costs a small error in that frame only.
+        let blended = |raw: &[f32], through_chain: &[f32]| -> Vec<f32> {
+            (0..total_samples)
                 .map(|n| {
-                    let v = if n >= lag { voice[n - lag] } else { 0.0 };
-                    (output[n] - v).powi(2)
+                    let mix = blend[n / FRAME_SAMPLES];
+                    raw[n] + (through_chain[n] - raw[n]) * mix
                 })
-                .sum();
-            (echo_energy, residual_energy)
+                .collect()
         };
-        let erle_db = |lag: usize| -> f32 {
-            let (pre, post) = (n_frames - tail..n_frames)
-                .map(|f| frame_energy(f, lag))
-                .fold((0.0f32, 0.0f32), |acc, (e, r)| (acc.0 + e, acc.1 + r));
-            10.0 * (pre / post.max(1e-9)).log10()
+        let voice_ref = blended(&voice, &voice_ref);
+        let echo_ref = blended(&echo, &echo_ref);
+        let applied_fraction = blend[n_frames - tail..].iter().sum::<f32>() / tail.max(1) as f32;
+
+        let residual_energy = |from: usize, to: usize, reference: &[f32]| -> f32 {
+            (from..to).map(|n| (output[n] - reference[n]).powi(2)).sum()
         };
-        let raw_erle_db = erle_db(0);
-        let aligned_erle_db = erle_db(lag_samples);
-        let voice_energy: f32 = voice[tail_start..].iter().map(|s| s * s).sum();
-        let aligned_residual: f32 = (n_frames - tail..n_frames)
-            .map(|f| frame_energy(f, lag_samples).1)
-            .sum();
-        let residual_vs_voice_db = 10.0 * (aligned_residual / voice_energy.max(1e-9)).log10();
+        let erle_db = |uncancelled: &[f32], reference: &[f32]| -> f32 {
+            let pre = energy(&uncancelled[tail_start..]);
+            let post = residual_energy(tail_start, total_samples, reference);
+            db(pre / post.max(1e-9))
+        };
+        let raw_erle_db = erle_db(&echo, &voice);
+        let lag_aligned_voice = delayed(&voice, lag_samples);
+        let lag_aligned_erle_db = erle_db(&echo, &lag_aligned_voice);
+        let compensated_erle_db = erle_db(&echo_ref, &voice_ref);
+        let misaligned_voice_ref = delayed(&voice_ref, lag_samples);
+        let misaligned_erle_db = erle_db(&echo_ref, &misaligned_voice_ref);
+
+        let voice_energy = energy(&voice[tail_start..]).max(1e-9);
+        let fixed_chain_cost_db = db((tail_start..total_samples)
+            .map(|n| (voice_ref[n] - lag_aligned_voice[n]).powi(2))
+            .sum::<f32>()
+            / voice_energy);
+        let residual_vs_voice_db =
+            db(residual_energy(tail_start, total_samples, &voice_ref) / voice_energy);
+        let misaligned_residual_vs_voice_db =
+            db(residual_energy(tail_start, total_samples, &misaligned_voice_ref) / voice_energy);
+        let output_level_db =
+            db(energy(&output[tail_start..]) / energy(&voice_ref[tail_start..]).max(1e-9));
+
+        // Per-frame scalar projection of the compensated residual onto the
+        // uncancelled echo: a time-varying gain is allowed, spectral
+        // colouring is not, so `echo_like` is a floor on the echo left.
+        let (mut echo_like, mut residual_total) = (0.0f32, 0.0f32);
+        for f in n_frames - tail..n_frames {
+            let (start, end) = (f * FRAME_SAMPLES, (f + 1) * FRAME_SAMPLES);
+            let residual: Vec<f32> = (start..end).map(|n| output[n] - voice_ref[n]).collect();
+            let echo_energy = energy(&echo_ref[start..end]);
+            if echo_energy > 1e-12 {
+                let dot: f32 = residual
+                    .iter()
+                    .zip(&echo_ref[start..end])
+                    .map(|(r, e)| r * e)
+                    .sum();
+                echo_like += dot * dot / echo_energy;
+            }
+            residual_total += energy(&residual);
+        }
+        let uncancelled = energy(&echo_ref[tail_start..]).max(1e-9);
+        let residual_echo_like_db = db(echo_like / uncancelled);
+        let residual_other_db = db((residual_total - echo_like).max(0.0) / uncancelled);
+
         let stats = mixer
             .aec
             .as_ref()
@@ -1060,45 +1361,73 @@ mod aec_bench {
             .unwrap_or_default();
 
         // Convergence point: first frame after which a 500ms sliding window
-        // of aligned residual energy stays below 10% (-10dB) of the echo
-        // energy in that same window.
+        // of compensated residual energy stays below 10% (-10dB) of the
+        // uncancelled echo energy in that same window.
         let sustain_frames = 50;
         let per_frame: Vec<(f32, f32)> = (0..n_frames)
-            .map(|f| frame_energy(f, lag_samples))
+            .map(|f| {
+                let start = f * FRAME_SAMPLES;
+                let end = start + FRAME_SAMPLES;
+                (
+                    energy(&echo_ref[start..end]),
+                    residual_energy(start, end, &voice_ref),
+                )
+            })
             .collect();
-        let mut converge_frame = None;
-        for i in 0..n_frames.saturating_sub(sustain_frames) {
+        let converge_frame = (0..n_frames.saturating_sub(sustain_frames)).find(|&i| {
             let (window_pre, window_post) = per_frame[i..i + sustain_frames]
                 .iter()
                 .fold((0.0f32, 0.0f32), |acc, (e, r)| (acc.0 + e, acc.1 + r));
-            if window_post < window_pre * 0.1 {
-                converge_frame = Some(i);
-                break;
-            }
-        }
+            window_post < window_pre * 0.1
+        });
 
         BenchResult {
-            raw_erle_db,
-            aligned_erle_db,
-            residual_vs_voice_db,
             lag_samples,
-            converge_frame,
+            lag_probe_peak,
+            raw_erle_db,
+            lag_aligned_erle_db,
+            compensated_erle_db,
+            misaligned_erle_db,
+            fixed_chain_cost_db,
+            residual_vs_voice_db,
+            misaligned_residual_vs_voice_db,
+            output_level_db,
+            residual_echo_like_db,
+            residual_other_db,
             stats,
+            converge_frame,
+            applied_fraction,
         }
     }
 
     fn report(label: &str, r: &BenchResult) {
         println!(
-            "AEC bench ({label}): ERLE post-convergence = {:.1} dB aligned ({:.1} dB raw), \
-             residual vs voice = {:.1} dB, output lag = {} samples, convergence at ~{}, \
+            "AEC bench ({label}):\n  \
+             pipeline lag = {} samples ({:.1} ms), probe peak = {:.2}\n  \
+             ERLE post-convergence: raw = {:.1} dB | lag-aligned = {:.1} dB | \
+             compensated = {:.1} dB | misaligned control = {:.1} dB\n  \
+             fixed chain vs voice = {:.1} dB, residual vs voice = {:.1} dB \
+             (misaligned: {:.1} dB), output level vs voice = {:.1} dB, convergence at ~{}\n  \
+             residual vs uncancelled echo: echo-like = {:.1} dB, other (voice damage) = {:.1} dB\n  \
+             cancelled output applied over {:.0}% of the tail, \
              sonora: delay={:?}ms erle={:?} divergent={:?}",
-            r.aligned_erle_db,
-            r.raw_erle_db,
-            r.residual_vs_voice_db,
             r.lag_samples,
+            r.lag_samples as f32 * 1000.0 / MIX_RATE as f32,
+            r.lag_probe_peak,
+            r.raw_erle_db,
+            r.lag_aligned_erle_db,
+            r.compensated_erle_db,
+            r.misaligned_erle_db,
+            r.fixed_chain_cost_db,
+            r.residual_vs_voice_db,
+            r.misaligned_residual_vs_voice_db,
+            r.output_level_db,
             r.converge_frame
                 .map(|f| format!("{}ms", f * 10))
                 .unwrap_or_else(|| "never".to_string()),
+            r.residual_echo_like_db,
+            r.residual_other_db,
+            r.applied_fraction * 100.0,
             r.stats.0,
             r.stats.1,
             r.stats.2,
@@ -1107,44 +1436,54 @@ mod aec_bench {
 
     // Target for the double-talk benches (SOU-063 AC1): the output must end
     // up closer to the user's voice than the uncancelled echo would have
-    // left it, so the aligned ERLE must be positive. Not met today; the
-    // two benches below fail when run explicitly and print what they got.
+    // left it, so the compensated ERLE must be positive. Not met; the
+    // double-talk benches fail when run explicitly and print what they got.
     //
-    // Measured (debug build, this bench, 2026-09-09, `build_apm` at 48kHz):
-    // double-talk -3.6dB aligned / -9.9dB raw, with or without the
-    // `stream_delay_ms` hint; echo-only +4.5dB; voice-only passthrough
-    // leaves the output 4.2dB under the voice with nothing to cancel. Where
-    // the numbers come from:
-    // - 6.3dB of the raw figure is sonora's fixed 170-sample output lag
-    //   counted as voice damage by `output - voice` (the 2026-07-18 metric);
-    //   `raw_erle_db` keeps it for comparison, `aligned_erle_db` removes it.
-    // - Sonora's own metrics show the linear filter never converging on this
-    //   far end (ERLE 0.18dB, delay estimate 0-32ms for a 50ms path): AEC3
-    //   holds adaptation back on narrowband render, and `VIDEO_FREQS` is
-    //   five stationary tones. `wideband_broadband_render_diagnostic` runs
-    //   the same path with a noise-like far end and cancels 39dB.
-    // - What is left is mostly the enforced high-pass filter on the 120Hz
-    //   fundamental of `VOICE_FREQS` (see `build_apm` for why it stays on).
+    // Measured 2026-09-09 (release build, `build_apm` at 48kHz, SOU-112
+    // measurement), compensated unless stated. The mixer holds the raw mic
+    // in the far end's pauses (14% of the tail on the speech fixture), and
+    // the reference follows it; without that the same runs read -4.0dB and
+    // -10.7dB, i.e. the old metric was still charging the canceller for the
+    // lag and filter of frames it never touched.
+    // - speech far end, synthetic near end: +2.2dB (-7.5dB lag-aligned,
+    //   -9.7dB raw) with the 50ms `stream_delay_ms` hint, +2.4dB without.
+    //   The canceller takes 8.8dB off the echo and puts 3.3dB less than the
+    //   echo's energy into the voice; sonora's own ERLE stays at 2.7dB and
+    //   its delay estimate at 32ms for a 50ms path, because the near end
+    //   never pauses. Marginal: hints of 0, 80 or 120ms make it negative.
+    // - real speech both sides: -6.5dB. Sonora finds the delay (48ms) and
+    //   converges in the near end's pauses, then during double talk takes
+    //   only 2.9dB off the echo and puts 6.0dB *more* than the echo's
+    //   energy into the voice (residual -0.9dB of the voice at an almost
+    //   unchanged level: distortion, not gain).
+    // - echo only, speech far end: +69dB. Cancellation itself works.
+    // - the pre-SOU-112 tonal fixture: 0.0dB. AEC3 never adapted on it, so
+    //   its -3.6dB "aligned" / -9.9dB raw were the high-pass filter's phase
+    //   and a mis-measured lag, not the canceller. On the far end it does
+    //   adapt on, the realistic double-talk case is still negative.
     const DOUBLE_TALK_ERLE_TARGET_DB: f32 = 0.0;
 
     fn double_talk(expected_delay_hint_ms: Option<i32>) -> BenchCase {
         BenchCase {
             expected_delay_hint_ms,
+            voice: Voice::Synthetic,
             voice_scale: 1.0,
             echo_gain: 0.3,
             delay_ms: 50,
             duration_s: 8.0,
-            render_freqs: VIDEO_FREQS,
-            render_noise: 0.05,
+            render: Render::Speech,
         }
     }
 
-    fn broadband_render(case: BenchCase) -> BenchCase {
-        BenchCase {
-            render_freqs: &[],
-            render_noise: 0.4,
-            ..case
-        }
+    fn assert_double_talk_target(r: &BenchResult) {
+        assert!(
+            r.compensated_erle_db > DOUBLE_TALK_ERLE_TARGET_DB,
+            "double-talk output is further from the voice than the echo was: {:.1} dB \
+             compensated ({:.1} dB lag-aligned, {:.1} dB raw)",
+            r.compensated_erle_db,
+            r.lag_aligned_erle_db,
+            r.raw_erle_db
+        );
     }
 
     /// Regression floor for `broadband_echo_is_cancelled_through_the_mixer`:
@@ -1159,88 +1498,256 @@ mod aec_bench {
     /// debug build.
     #[test]
     fn broadband_echo_is_cancelled_through_the_mixer() {
-        let r = run_echo_bench(broadband_render(BenchCase {
+        let r = run_echo_bench(BenchCase {
             voice_scale: 0.0,
             duration_s: 3.0,
+            render: Render::Noise(0.4),
             ..double_talk(Some(50))
-        }));
+        });
         report("echo only, broadband render, 3s, 50ms hint", &r);
         assert!(
-            r.aligned_erle_db > BROADBAND_ECHO_ERLE_FLOOR_DB,
+            r.compensated_erle_db > BROADBAND_ECHO_ERLE_FLOOR_DB,
             "broadband echo cancellation regressed: got {:.1} dB",
-            r.aligned_erle_db
+            r.compensated_erle_db
+        );
+    }
+
+    /// Ceiling on how far the silent-far-end path may be from additive
+    /// before the compensated reference stops being trustworthy. -40dB
+    /// leaves room for float rounding and AEC3's -96dBFS comfort-noise
+    /// floor; anything adaptive would show up tens of dB higher.
+    const REFERENCE_LINEARITY_CEILING_DB: f32 = -40.0;
+
+    /// Measurement self-check, in the default loop because the compensated
+    /// figure is only honest if its reference is a fixed linear filter. The
+    /// metric relies on `chain(voice + echo) == chain(voice) + chain(echo)`,
+    /// so that is what is checked, on two unrelated signals; and the impulse
+    /// probe must find a lag that looks like a delayed high-pass response.
+    #[test]
+    fn fixed_chain_reference_is_linear() {
+        let response = probe_pipeline_response();
+        let (lag, peak) = probe_pipeline_lag();
+        assert!(lag > 0, "the pipeline lag probe found no delay at all");
+        assert!(
+            lag < FRAME_SAMPLES * 2,
+            "pipeline lag {lag} samples is beyond two frames; the probe is not seeing the impulse"
+        );
+        assert!(
+            (0.8..=1.0).contains(&peak),
+            "probe peak {peak:.2} does not look like a high-pass impulse response (~0.92)"
+        );
+        let before = &response[lag.saturating_sub(2)..lag];
+        let after = &response[lag..(lag + 4).min(response.len())];
+
+        let len = MIX_RATE as usize; // 1s
+        let a = synth_talker(len, MIX_RATE, &NEAR_TALKER);
+        let b = synth_talker(len, MIX_RATE, &FAR_TALKER);
+        let sum: Vec<f32> = a.iter().zip(&b).map(|(x, y)| x + y).collect();
+        let chain_a = fixed_chain_reference(&a);
+        let chain_b = fixed_chain_reference(&b);
+        let chain_sum = fixed_chain_reference(&sum);
+        // Skip the first quarter: sonora's start-up state may not be linear.
+        let from = len / 4;
+        let deviation: f32 = (from..len)
+            .map(|n| (chain_sum[n] - chain_a[n] - chain_b[n]).powi(2))
+            .sum();
+        let deviation_db = db(deviation / energy(&chain_sum[from..]).max(1e-9));
+        println!(
+            "AEC bench reference: lag = {lag} samples, probe response {before:.3?} | \
+             {after:.3?}, additivity deviation = {deviation_db:.1} dB"
+        );
+        assert!(
+            deviation_db < REFERENCE_LINEARITY_CEILING_DB,
+            "the silent-far-end path is not additive ({deviation_db:.1} dB): it is doing \
+             something adaptive and cannot serve as the compensated reference"
         );
     }
 
     #[test]
     #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
-    fn wideband_echo_attenuation_baseline() {
+    fn double_talk_baseline() {
         let r = run_echo_bench(double_talk(None));
-        report("no stream_delay_ms hint, 50ms acoustic delay", &r);
-        assert!(
-            r.aligned_erle_db > DOUBLE_TALK_ERLE_TARGET_DB,
-            "double-talk output is further from the voice than the echo was: {:.1} dB aligned \
-             ({:.1} dB raw)",
-            r.aligned_erle_db,
-            r.raw_erle_db
+        report(
+            "double talk, speech render, no stream_delay_ms hint, 50ms acoustic delay",
+            &r,
         );
+        assert_double_talk_target(&r);
     }
 
     #[test]
     #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
-    fn wideband_echo_attenuation_with_delay_hint() {
+    fn double_talk_with_delay_hint() {
         let r = run_echo_bench(double_talk(Some(50)));
-        report("50ms stream_delay_ms hint, 50ms acoustic delay", &r);
+        report(
+            "double talk, speech render, 50ms stream_delay_ms hint, 50ms acoustic delay",
+            &r,
+        );
+        assert_double_talk_target(&r);
+    }
+
+    /// How closely the mixer's Me leg must track the fixed-chain reference
+    /// when the canceller has nothing to do, and how far the misaligned
+    /// control must fall from there. A one-sample misalignment of 4kHz
+    /// content already costs tens of dB, so 20dB is a loose bound on the
+    /// collapse; -30dB is a loose bound on the match (measured -54dB).
+    const CONTROL_MATCH_CEILING_DB: f32 = -30.0;
+    const CONTROL_MIN_COLLAPSE_DB: f32 = 20.0;
+
+    /// Negative control (SOU-112): validates the ruler on a known object.
+    /// With no echo path and a far end AEC3 will not adapt on (its
+    /// poor-excitation gate freezes on `SustainedHarmonics`), the canceller
+    /// is transparent and the Me leg through `split_frame` must equal the
+    /// fixed-chain reference sample for sample, which is only true if the
+    /// reference has the same lag and the same filter as the real path.
+    /// Reintroducing the measured pipeline lag into that reference must
+    /// then collapse the figure. On the double-talk case the same shift is
+    /// reported but not asserted: once the canceller has suppressed the
+    /// voice, misaligning the reference changes little, and that is a fact
+    /// about the canceller, not about the measurement.
+    #[test]
+    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
+    fn misaligned_reference_collapses_compensated_erle() {
+        let r = run_echo_bench(BenchCase {
+            echo_gain: 0.0,
+            render: Render::SustainedHarmonics,
+            ..double_talk(Some(50))
+        });
+        report(
+            "negative control, voice only, sustained harmonic render, no echo path",
+            &r,
+        );
         assert!(
-            r.aligned_erle_db > DOUBLE_TALK_ERLE_TARGET_DB,
-            "double-talk output is further from the voice than the echo was: {:.1} dB aligned \
-             ({:.1} dB raw)",
-            r.aligned_erle_db,
-            r.raw_erle_db
+            r.residual_vs_voice_db < CONTROL_MATCH_CEILING_DB,
+            "with nothing to cancel the Me leg should equal the fixed-chain reference, but \
+             differs by {:.1} dB of the voice: the reference has a different lag or filter \
+             than the real path",
+            r.residual_vs_voice_db
+        );
+        let collapse = r.misaligned_residual_vs_voice_db - r.residual_vs_voice_db;
+        assert!(
+            collapse > CONTROL_MIN_COLLAPSE_DB,
+            "shifting the reference by the {}-sample pipeline lag only moved the residual by \
+             {collapse:.1} dB; the compensation is not measuring alignment",
+            r.lag_samples
+        );
+
+        let r = run_echo_bench(double_talk(Some(50)));
+        report(
+            "negative control, double talk, speech render, 50ms hint",
+            &r,
+        );
+        println!(
+            "  misaligning the reference moves the double-talk ERLE by {:.1} dB",
+            r.compensated_erle_db - r.misaligned_erle_db
         );
     }
 
-    /// Diagnostic: the double-talk scenario with a noise-like far end instead
-    /// of the five stationary tones of `VIDEO_FREQS`, to separate what AEC3
-    /// can do from what this fixture lets it do.
+    /// Real speech on both sides (the user reads one SOU-030 sentence while
+    /// the other plays on the speakers): the most realistic double-talk
+    /// case, held to the same target. The near-end voice has a ~130Hz
+    /// fundamental inside the high-pass filter's phase shift, which the
+    /// compensated reference makes irrelevant (`fixed chain vs voice` shows
+    /// what the raw metric would have charged for it); its pauses also give
+    /// AEC3 near-end-free windows to adapt in, which the continuous
+    /// synthetic near end of `double_talk_with_delay_hint` does not.
     #[test]
     #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
-    fn wideband_broadband_render_diagnostic() {
-        let r = run_echo_bench(broadband_render(double_talk(Some(50))));
-        report("double talk, broadband render, 50ms hint", &r);
-        let r = run_echo_bench(broadband_render(BenchCase {
-            voice_scale: 0.0,
+    fn double_talk_real_speech_both_sides() {
+        let r = run_echo_bench(BenchCase {
+            voice: Voice::Speech,
             ..double_talk(Some(50))
-        }));
-        report("echo only, broadband render, 50ms hint", &r);
+        });
+        report("double talk, real speech near and far, 50ms hint", &r);
+        assert_double_talk_target(&r);
+    }
+
+    /// Diagnostic: the double-talk scenario with a noise-like far end, to
+    /// separate what AEC3 can do from what a speech far end lets it do.
+    #[test]
+    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
+    fn double_talk_broadband_render_diagnostic() {
+        let r = run_echo_bench(BenchCase {
+            render: Render::Noise(0.4),
+            ..double_talk(Some(50))
+        });
+        report("double talk, broadband noise render, 50ms hint", &r);
+    }
+
+    /// Diagnostic: the pre-SOU-112 fixture (five stationary tones on the
+    /// speakers), kept as the known adverse case. Measured -3.6dB
+    /// lag-aligned / -9.9dB raw on 2026-09-09 with sonora's delay estimate
+    /// stuck at 0ms: AEC3 does not adapt on a narrowband, stationary render.
+    #[test]
+    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
+    fn tonal_render_diagnostic() {
+        let r = run_echo_bench(BenchCase {
+            render: Render::Tones,
+            ..double_talk(Some(50))
+        });
+        report(
+            "double talk, tonal render (pre-SOU-112 fixture), 50ms hint",
+            &r,
+        );
+    }
+
+    /// Diagnostic: a broadband but sustained harmonic far end. Every
+    /// harmonic sits on one of AEC3's FFT bins, so its poor-excitation gate
+    /// freezes adaptation: broadband is not enough, the render has to move
+    /// the way speech does.
+    #[test]
+    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
+    fn sustained_harmonics_render_diagnostic() {
+        let r = run_echo_bench(BenchCase {
+            render: Render::SustainedHarmonics,
+            ..double_talk(Some(50))
+        });
+        report("double talk, sustained harmonic render, 50ms hint", &r);
+        let r = run_echo_bench(BenchCase {
+            voice_scale: 0.0,
+            render: Render::SustainedHarmonics,
+            ..double_talk(Some(50))
+        });
+        report("echo only, sustained harmonic render, 50ms hint", &r);
     }
 
     /// Diagnostic (not a hard requirement): isolates echo-only cancellation
-    /// (no near-end voice) through the exact same mixer integration, to tell
-    /// whether a poor double-talk result comes from echo cancellation itself
-    /// or from the double-talk/voice interaction. Measured: +3.6dB with the
-    /// 32kHz internal rate, +4.5dB at 48kHz.
+    /// (no near-end voice) on the speech far end through the exact same
+    /// mixer integration, to tell whether a poor double-talk result comes
+    /// from echo cancellation itself or from the double-talk interaction.
     #[test]
     #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
-    fn wideband_echo_attenuation_no_voice_diagnostic() {
+    fn echo_only_speech_render_diagnostic() {
         let r = run_echo_bench(BenchCase {
             voice_scale: 0.0,
             ..double_talk(Some(50))
         });
-        report("echo only, no voice, 50ms hint, 50ms acoustic delay", &r);
+        report(
+            "echo only, speech render, 50ms hint, 50ms acoustic delay",
+            &r,
+        );
     }
 
     /// Diagnostic: voice only, render playing but no acoustic coupling
-    /// (headphones-like). There is no echo to remove, so `aligned` residual
-    /// is purely what the canceller does to the voice it should pass
-    /// through untouched, and `raw` vs `aligned` exposes the pipeline lag.
+    /// (headphones-like). There is no echo to remove, so the compensated
+    /// residual is purely what the canceller does to a voice it should pass
+    /// through untouched, and `fixed chain vs voice` is what the enforced
+    /// high-pass filter alone costs the raw metric.
     #[test]
     #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
-    fn wideband_voice_passthrough_diagnostic() {
+    fn voice_passthrough_diagnostic() {
         let r = run_echo_bench(BenchCase {
             echo_gain: 0.0,
             ..double_talk(Some(50))
         });
-        report("voice only, no echo path, 50ms hint", &r);
+        report("voice only, speech render, no echo path, 50ms hint", &r);
+        let r = run_echo_bench(BenchCase {
+            echo_gain: 0.0,
+            render: Render::Noise(0.4),
+            ..double_talk(Some(50))
+        });
+        report(
+            "voice only, broadband noise render, no echo path, 50ms hint",
+            &r,
+        );
     }
 }
