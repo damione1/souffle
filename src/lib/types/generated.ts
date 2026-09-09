@@ -1151,7 +1151,7 @@ meeting_autostop_minutes: number;
  * Hard failsafe: stop the meeting after this many minutes regardless of
  * speech activity.
  */
-meeting_max_duration_minutes: number; 
+meeting_max_duration_minutes: number; autostart_enabled: boolean; 
 /**
  * Opt-in recording of meeting audio to compressed files on disk, and
  * for how long they're kept. Off by default.

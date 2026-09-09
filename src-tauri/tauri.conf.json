@@ -23,6 +23,7 @@
         "fullscreen": false,
         "center": true,
         "transparent": true,
+        "visible": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "windowEffects": {

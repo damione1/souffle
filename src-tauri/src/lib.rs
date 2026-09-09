@@ -2,6 +2,7 @@ pub mod app_events;
 pub mod apple_intelligence;
 pub mod archive;
 pub mod audio;
+pub mod autostart;
 pub mod ax_text;
 pub mod calendar;
 pub mod cli;
@@ -417,6 +418,10 @@ pub fn run() {
                         let _ = window.hide();
                     }
                 });
+            }
+
+            if !crate::autostart::is_launched_at_login() {
+                tray::show_main_window(app.handle());
             }
 
             tray::setup_tray(app.handle())?;

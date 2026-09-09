@@ -292,6 +292,7 @@ export function createOnboardingController() {
         await persistSettings((settings) => {
           settings.auto_paste = autoPaste;
           settings.audio_device = selectedDevice || null;
+          settings.autostart_enabled = true;
         });
       }
     } catch (e) {

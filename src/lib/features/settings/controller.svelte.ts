@@ -564,6 +564,17 @@ export function createSettingsController() {
     });
   }
 
+  function onAutostartChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.autostart_enabled = checked;
+    }).catch(() => {
+      // Revert if OS rejects it
+      event.preventDefault();
+      (event.target as HTMLInputElement).checked = !checked;
+    });
+  }
+
   function onAutoUpdateCheckChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -1050,6 +1061,7 @@ export function createSettingsController() {
     onLocaleChange,
     onAutoPasteChange,
     onLearnFromEditChange,
+    onAutostartChange,
     onAutoUpdateCheckChange,
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,

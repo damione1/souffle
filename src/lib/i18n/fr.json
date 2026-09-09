@@ -194,6 +194,11 @@
     "downloading_model": "Téléchargement de {model}…",
     "pull_failed": "Impossible de télécharger le modèle : {error}"
   },
+  "settings_startup": {
+    "title": "Démarrage",
+    "autostart": "Lancer à l'ouverture de session",
+    "autostart_desc": "Ouvrir Soufflé automatiquement au démarrage du Mac."
+  },
   "settings_diagnostics": {
     "title": "Diagnostics",
     "log_level": "Niveau de journal",
