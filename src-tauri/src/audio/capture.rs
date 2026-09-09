@@ -17,7 +17,15 @@ use crate::audio::priority::{InputPriority, ResolveInputParams, resolve_input};
 use crate::state::AudioCommand;
 
 /// Tell the frontend whether the system-audio leg of a meeting is live.
+pub fn get_system_audio_status() -> Option<(bool, Option<String>)> {
+    SYSTEM_AUDIO_STATUS.lock().unwrap().clone()
+}
+static SYSTEM_AUDIO_STATUS: std::sync::Mutex<Option<(bool, Option<String>)>> = std::sync::Mutex::new(None);
+
+
+/// Tell the frontend whether the system-audio leg of a meeting is live.
 fn emit_system_audio_status(app: Option<&tauri::AppHandle>, active: bool, reason: Option<String>) {
+    *SYSTEM_AUDIO_STATUS.lock().unwrap() = Some((active, reason.clone()));
     use tauri_specta::Event;
     if let Some(app) = app {
         let _ = crate::app_events::SystemAudioStatus { active, reason }.emit(app);

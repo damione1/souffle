@@ -39,6 +39,12 @@ async downloadModel(selection: TranscriptionProfileSelection, channel: TAURI_CHA
     else return { status: "error", error: e  as any };
 }
 },
+async getDownloadProgress() : Promise<DownloadProgress | null> {
+    return await TAURI_INVOKE("get_download_progress");
+},
+async getSystemAudioStatus() : Promise<[boolean, string | null] | null> {
+    return await TAURI_INVOKE("get_system_audio_status");
+},
 /**
  * Delete a downloaded model from disk.
  */

@@ -93,6 +93,14 @@ pub fn recover_state(state: State<'_, AppState>) -> Result<AppStateMachine, Stri
     state.apply_transition(StateAction::Recover)
 }
 
+static LAST_DOWNLOAD_PROGRESS: std::sync::Mutex<Option<crate::models::DownloadProgress>> = std::sync::Mutex::new(None);
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_download_progress() -> Option<crate::models::DownloadProgress> {
+    LAST_DOWNLOAD_PROGRESS.lock().unwrap().clone()
+}
+
 /// Download the selected transcription model.
 /// Progress is streamed back via the Channel API.
 #[tauri::command]
@@ -123,15 +131,16 @@ pub fn download_model(
             let _ = state.apply_transition(StateAction::DownloadComplete);
         }
 
-        channel
-            .send(models::DownloadProgress {
-                file: "all".into(),
-                downloaded_bytes: 0,
-                total_bytes: None,
-                completed_files: 1,
-                total_files: 1,
-                status: models::DownloadStatus::Complete,
-            })
+        let prog = models::DownloadProgress {
+            file: "all".into(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+            completed_files: 1,
+            total_files: 1,
+            status: models::DownloadStatus::Complete,
+        };
+        *LAST_DOWNLOAD_PROGRESS.lock().unwrap() = Some(prog.clone());
+        channel.send(prog)
             .map_err(|e| format!("Channel send: {e}"))?;
         return Ok(());
     }
@@ -164,6 +173,7 @@ pub fn download_model(
         .name("model-download".into())
         .spawn(move || {
             let result = models::download_model(&profile, |progress| {
+                *LAST_DOWNLOAD_PROGRESS.lock().unwrap() = Some(progress.clone());
                 let _ = channel_clone.send(progress);
             });
 
@@ -178,25 +188,29 @@ pub fn download_model(
             match result {
                 Ok(()) => {
                     apply(StateAction::DownloadComplete);
-                    let _ = channel_clone.send(models::DownloadProgress {
+                    let prog = models::DownloadProgress {
                         file: "all".into(),
                         downloaded_bytes: 0,
                         total_bytes: None,
                         completed_files: 1,
                         total_files: 1,
                         status: models::DownloadStatus::Complete,
-                    });
+                    };
+                    *LAST_DOWNLOAD_PROGRESS.lock().unwrap() = Some(prog.clone());
+                    let _ = channel_clone.send(prog);
                 }
                 Err(e) => {
                     apply(StateAction::Fail { message: e.clone() });
-                    let _ = channel_clone.send(models::DownloadProgress {
+                    let prog = models::DownloadProgress {
                         file: "error".into(),
                         downloaded_bytes: 0,
                         total_bytes: None,
                         completed_files: 0,
                         total_files: 1,
-                        status: models::DownloadStatus::Error(e),
-                    });
+                        status: models::DownloadStatus::Error(e.clone()),
+                    };
+                    *LAST_DOWNLOAD_PROGRESS.lock().unwrap() = Some(prog.clone());
+                    let _ = channel_clone.send(prog);
                 }
             }
         })

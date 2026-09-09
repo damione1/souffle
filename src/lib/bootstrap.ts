@@ -1,6 +1,7 @@
 import { getSettings, saveSettings, selectAudioDevice } from "./api/settings";
 import { getAppVersion } from "./api/diagnostics";
-import { getMachineState } from "./api/transcription";
+import { getMachineState, pillRelease } from "./api/transcription";
+import { commands } from "./api/generated";
 import { runStartupModelFlow } from "./features/transcription/runtime";
 import { readSetupFlags } from "./features/onboarding/setup";
 import { setLocale } from "./i18n";
@@ -24,6 +25,18 @@ export async function bootstrapAppState(
     app.machineState = await getMachineState();
   } catch {
     // Backend not ready yet — StateChanged events will sync us.
+  }
+
+  if (app.machineState?.state !== "recording_dictation" && app.machineState?.state !== "recording_meeting") {
+    pillRelease().catch(() => {});
+  }
+  if (app.machineState?.state === "recording_meeting") {
+    commands.getSystemAudioStatus().then((res) => {
+      if (res) {
+        const [active, reason] = res;
+        app.systemAudioStatus = { active, reason };
+      }
+    });
   }
 
   const settings = await getSettings();

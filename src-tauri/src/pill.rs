@@ -478,6 +478,9 @@ mod tests {
         );
         assert!(!should_clear_hold_on_sync(true, false));
         assert!(!should_clear_hold_on_sync(false, false));
+
+        // The bug: HOLD active + Ready + no rising edge = pill stays visible
+        assert!(should_show_pill(false, true, false), "Pill zombie until clear_hold (fixed by bootstrap)");
     }
 
     #[test]

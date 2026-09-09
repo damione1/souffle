@@ -15,8 +15,10 @@ vi.mock("./api/settings", () => ({
 vi.mock("./api/diagnostics", () => ({
   getAppVersion,
 }));
+vi.mock("./api/generated", () => ({ commands: { getSystemAudioStatus: vi.fn().mockResolvedValue(null) } }));
 vi.mock("./api/transcription", () => ({
   getMachineState: vi.fn().mockResolvedValue({ state: "idle" }),
+  pillRelease: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("./features/transcription/runtime", () => ({
   runStartupModelFlow,

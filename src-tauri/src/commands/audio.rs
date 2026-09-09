@@ -235,3 +235,9 @@ fn record_system_audio_wav(seconds: u32) -> Result<String, String> {
 fn record_system_audio_wav(_seconds: u32) -> Result<String, String> {
     Err("System audio capture is only supported on macOS".into())
 }
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_system_audio_status() -> Option<(bool, Option<String>)> {
+    crate::audio::capture::get_system_audio_status()
+}

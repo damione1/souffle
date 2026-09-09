@@ -1,3 +1,4 @@
+import { getAppState } from "../../stores/app.svelte";
 import type { TranscriptionRuntimePhase } from "../../types";
 
 export const PERMISSIONS_STORAGE_KEY = "permissionsOnboarded";
@@ -56,7 +57,10 @@ export function decideShowSetupWizard(
   phase: TranscriptionRuntimePhase,
   flags: SetupFlags,
 ): boolean {
-  if (flags.setupDone) return phase === "download_required";
+  const app = getAppState();
+  if (flags.setupDone) {
+    return phase === "download_required" && app.machineState?.state !== "downloading";
+  }
   if (flags.permissionsDone && phase !== "download_required") return false;
   return true;
 }
