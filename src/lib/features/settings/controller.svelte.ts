@@ -39,7 +39,7 @@ import type {
   Theme,
   TranscriptionCatalog,
 } from "../../types";
-import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, shortcutMissingModifier } from "../../utils";
+import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "../../utils";
 import {
   buildMicrophoneList,
   keepConnectedDevices,
@@ -916,6 +916,8 @@ export function createSettingsController() {
     else rewriteShortcut = value;
   }
 
+  let modifierDownEvent: KeyboardEvent | null = null;
+
   function handleKeyDown(event: KeyboardEvent) {
     if (!recordingField) return;
     event.preventDefault();
@@ -923,14 +925,24 @@ export function createSettingsController() {
 
     if (event.key === "Escape") {
       recordingField = null;
+      modifierDownEvent = null;
       return;
     }
 
     if (event.key === "Backspace" || event.key === "Delete") {
       applyShortcutValue(recordingField, "");
       recordingField = null;
+      modifierDownEvent = null;
       void saveShortcutSettings();
       return;
+    }
+
+    const modOnly = modifierToShortcut(event);
+    if (modOnly) {
+      modifierDownEvent = event;
+      return;
+    } else {
+      modifierDownEvent = null;
     }
 
     const shortcut = keyEventToShortcut(event);
@@ -944,6 +956,17 @@ export function createSettingsController() {
     applyShortcutValue(recordingField, shortcut);
     recordingField = null;
     void saveShortcutSettings();
+  }
+
+  function handleKeyUp(event: KeyboardEvent) {
+    if (!recordingField) return;
+    const modOnly = modifierToShortcut(event);
+    if (modOnly && modifierDownEvent && modifierDownEvent.key === event.key) {
+      applyShortcutValue(recordingField, modOnly);
+      recordingField = null;
+      modifierDownEvent = null;
+      void saveShortcutSettings();
+    }
   }
 
   async function saveShortcutSettings() {
@@ -1062,6 +1085,7 @@ export function createSettingsController() {
     handleUpdateDictionaryEntry,
     startRecording,
     handleKeyDown,
+    handleKeyUp,
     clearShortcut,
     formatShortcut,
   };

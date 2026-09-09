@@ -90,6 +90,7 @@
 </script>
 
 <svelte:window
+  onkeyup={(event) => controller.handleKeyUp?.(event)}
   onkeydown={(event) => {
     controller.handleKeyDown(event);
     // Escape closes the settings screen unless it just cancelled a

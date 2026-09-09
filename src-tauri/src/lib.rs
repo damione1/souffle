@@ -20,6 +20,7 @@ pub mod lid;
 pub mod lock_ext;
 pub mod logging;
 pub mod models;
+mod modifier_shortcut;
 pub mod ort_runtime;
 pub mod permissions;
 pub mod pill;
@@ -310,6 +311,7 @@ pub fn run() {
             if let Err(e) = commands::register_shortcuts(app.handle(), &shortcuts) {
                 tracing::warn!("Failed to register shortcuts on startup: {e}");
             }
+            crate::modifier_shortcut::start_modifier_tap(app.handle().clone());
 
             match settings::AppSettings::load(&state.db) {
                 Ok(app_settings) => {

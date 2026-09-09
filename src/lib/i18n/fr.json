@@ -513,6 +513,8 @@
     "system_desc": "Capturer les autres participants pendant les meetings. Actif uniquement en réunion.",
     "accessibility_label": "Accessibilité",
     "accessibility_desc": "Coller les transcriptions automatiquement avec ⌘V. Soufflé ne lit pas votre écran.",
+    "input_monitoring_label": "Surveillance de l'entrée",
+    "input_monitoring_desc": "Capturer le raccourci sur une seule touche (ex: fn, cmd), le reste passe.",
     "grant": "Autoriser",
     "open_settings": "Ouvrir Réglages",
     "granted": "Accordé",

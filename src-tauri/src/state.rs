@@ -181,6 +181,7 @@ pub struct AppState {
     /// Release only emits `ShortcutPttStop` if this is still true, so a
     /// paused PTT press cannot stop a dictation started another way.
     pub ptt_start_armed: AtomicBool,
+    pub modifier_ptt_shortcut: std::sync::Arc<std::sync::RwLock<Option<String>>>,
 }
 
 impl AppState {
@@ -203,6 +204,7 @@ impl AppState {
             live_edit_lock: Mutex::new(()),
             ptt_paused_until: Mutex::new(None),
             ptt_start_armed: AtomicBool::new(false),
+            modifier_ptt_shortcut: std::sync::Arc::new(std::sync::RwLock::new(None)),
         }
     }
 

@@ -19,7 +19,7 @@ function statusWith(microphone: PermState): PermissionStatus {
     microphone,
     system_audio: "unknown",
     accessibility: "granted",
-    calendar: "unknown",
+    calendar: "unknown", input_monitoring: "granted",
   };
 }
 
@@ -59,6 +59,15 @@ describe("PermissionsStep microphone denial", () => {
     expect(within(micRow).queryByRole("button", { name: "Open Settings" })).toBeNull();
   });
 
+  it("lists Input Monitoring so single-key PTT can be granted", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWith("granted"));
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    expect(screen.getByText("Input Monitoring")).toBeTruthy();
+    expect(screen.getByText(/single-key shortcut/)).toBeTruthy();
+  });
+
   it("does not show the denied hint for an unrelated state", async () => {
     permissionsApi.getPermissionStatus.mockResolvedValue(statusWith("unknown"));
     render(PermissionsStep);
@@ -82,7 +91,7 @@ describe("PermissionsStep accessibility repair", () => {
       microphone: "granted",
       system_audio: "unknown",
       accessibility: "denied",
-      calendar: "unknown",
+      calendar: "unknown", input_monitoring: "granted",
     };
   }
 
@@ -147,6 +156,7 @@ describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
       system_audio: "unknown",
       accessibility: "denied",
       calendar: "unknown",
+      input_monitoring: "unknown",
     };
   }
 

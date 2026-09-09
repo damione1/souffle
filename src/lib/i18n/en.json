@@ -513,6 +513,8 @@
     "system_desc": "Capture other participants during meetings. Only active during a meeting.",
     "accessibility_label": "Accessibility",
     "accessibility_desc": "Paste transcriptions automatically with ⌘V. Soufflé doesn't read your screen.",
+    "input_monitoring_label": "Input Monitoring",
+    "input_monitoring_desc": "Capture the single-key shortcut (e.g. fn, cmd), while letting other keys pass.",
     "grant": "Grant",
     "open_settings": "Open Settings",
     "granted": "Granted",
