@@ -51,6 +51,8 @@ pub struct MeetingMixer {
     /// Recent far-end level. Gates *applying* AEC output, not whether
     /// the instance lives (SOU-063). A pause must not `set_aec(None)`.
     tap_rms_ema: f32,
+    /// Crossfade state between raw mic (0.0) and AEC cancelled mic (1.0).
+    aec_mix: f32,
 }
 
 impl MeetingMixer {
@@ -79,6 +81,7 @@ impl MeetingMixer {
             aec: None,
             tap_discarded: 0,
             tap_rms_ema: 0.0,
+            aec_mix: 0.0,
         }
     }
 
@@ -330,16 +333,29 @@ impl MeetingMixer {
         // does not dump convergence. Apply the output only when the tap
         // is actually playing — otherwise emit raw mic (SOU-063 lever 2).
         let apply_aec = self.tap_has_energy();
+        let target_mix = if apply_aec { 1.0 } else { 0.0 };
+
         if n == FRAME_SAMPLES
             && let Some(aec) = self.aec.as_mut()
         {
             aec.process_render(&tap);
-            if apply_aec {
-                aec.process_capture(&mut mic);
-            } else {
-                let mut discarded = mic.clone();
-                aec.process_capture(&mut discarded);
+            let mut cancelled = mic.clone();
+            aec.process_capture(&mut cancelled);
+
+            // Crossfade to avoid clicks from NLP toggling.
+            // Fade over ~10 frames (100ms): step is 0.1 per frame.
+            let step = (target_mix - self.aec_mix).signum() * 0.1;
+            
+            for (raw, canc) in mic.iter_mut().zip(cancelled) {
+                if (target_mix - self.aec_mix).abs() > 1e-4 {
+                    self.aec_mix = (self.aec_mix + step / FRAME_SAMPLES as f32).clamp(0.0, 1.0);
+                } else {
+                    self.aec_mix = target_mix;
+                }
+                *raw = *raw * (1.0 - self.aec_mix) + canc * self.aec_mix;
             }
+        } else {
+            self.aec_mix = target_mix;
         }
 
         (mic, tap)

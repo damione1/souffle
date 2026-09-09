@@ -666,11 +666,11 @@ impl MeetingState {
     fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {
         use super::{aec, mixer, output_route};
 
-        // HAL route only (speakers vs headphones / mute / volume). Tap
+        // HAL route only (speakers vs headphones). Tap
         // energy must not destroy the instance — a far-end pause would
         // wipe convergence and come back as raw echo (SOU-063). The mixer
         // keeps AEC fed and chooses cancelled vs raw mic per frame.
-        let can_leak = self.tap.is_some() && output_route::output_can_leak_into_mic();
+        let can_leak = self.tap.is_some() && output_route::default_output_device().map(|dev| output_route::output_is_builtin_speakers(dev)).unwrap_or(false);
         if can_leak != self.aec_active {
             if can_leak {
                 info!("Speakers audible, echo cancellation engaged");
@@ -1527,7 +1527,7 @@ impl AudioCapture {
         // system-audio reference signal to cancel against.
         #[cfg(target_os = "macos")]
         let aec_active = {
-            let can_leak = tap.is_some() && super::output_route::output_can_leak_into_mic();
+            let can_leak = tap.is_some() && super::output_route::default_output_device().map(|dev| super::output_route::output_is_builtin_speakers(dev)).unwrap_or(false);
             if can_leak {
                 info!("Speakers audible, echo cancellation engaged");
                 mixer.set_aec(Some(super::aec::Aec::new_with_default_delay_hint(
