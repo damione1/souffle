@@ -6,6 +6,7 @@ use tauri_specta::Event;
 use tracing::info;
 
 use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutRewrite, ShortcutToggle};
+use crate::modifier_shortcut::is_native_ptt_shortcut;
 use crate::settings::{AppSettings, ShortcutSettings};
 use crate::state::AppState;
 
@@ -88,28 +89,18 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
         info!(shortcut = shortcuts.rewrite, "Rewrite shortcut registered");
     }
 
-    let is_modifier = matches!(
-        shortcuts.push_to_talk.as_str(),
-        "Fn" | "MetaLeft"
-            | "MetaRight"
-            | "ControlLeft"
-            | "ControlRight"
-            | "AltLeft"
-            | "AltRight"
-            | "ShiftLeft"
-            | "ShiftRight"
-    );
+    let is_native = is_native_ptt_shortcut(&shortcuts.push_to_talk);
 
     if let Some(state) = app.try_state::<AppState>() {
         let mut lock = state.modifier_ptt_shortcut.write().unwrap();
-        *lock = if is_modifier {
+        *lock = if is_native {
             Some(shortcuts.push_to_talk.clone())
         } else {
             None
         };
     }
 
-    if !shortcuts.push_to_talk.is_empty() && !is_modifier {
+    if !shortcuts.push_to_talk.is_empty() && !is_native {
         gs.on_shortcut(
             shortcuts.push_to_talk.as_str(),
             move |app, _shortcut, event| match event.state {

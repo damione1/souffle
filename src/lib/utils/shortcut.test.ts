@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keyEventToShortcut, shortcutMissingModifier } from "./shortcut";
+import { keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "./shortcut";
 
 function key(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent("keydown", init);
@@ -25,6 +25,23 @@ describe("keyEventToShortcut", () => {
 
   it("maps function keys without a modifier", () => {
     expect(keyEventToShortcut(key({ key: "F6", code: "F6" }))).toBe("F6");
+  });
+});
+
+describe("modifierToShortcut", () => {
+  it("maps left/right modifiers via code", () => {
+    expect(modifierToShortcut(key({ key: "Meta", code: "MetaLeft" }))).toBe("MetaLeft");
+    expect(modifierToShortcut(key({ key: "Alt", code: "AltRight" }))).toBe("AltRight");
+  });
+
+  it("maps fn / Globe, including the Clear key some layouts report", () => {
+    expect(modifierToShortcut(key({ key: "Fn", code: "Fn" }))).toBe("Fn");
+    expect(modifierToShortcut(key({ key: "Clear", code: "NumLock" }))).toBe("Fn");
+  });
+
+  it("ignores ordinary keys", () => {
+    expect(modifierToShortcut(key({ key: "F5", code: "F5" }))).toBeNull();
+    expect(modifierToShortcut(key({ key: "a", code: "KeyA" }))).toBeNull();
   });
 });
 

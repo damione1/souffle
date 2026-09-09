@@ -404,8 +404,6 @@ pub fn request(kind: PermissionKind) -> PermState {
         PermissionKind::Calendar => crate::calendar::request_access(),
         PermissionKind::InputMonitoring => {
             open_input_monitoring_settings();
-            // Input monitoring doesn't have a great check without triggering prompt.
-            // Actually, we can return Granted if it's already granted.
             if input_monitoring_granted() {
                 PermState::Granted
             } else {
