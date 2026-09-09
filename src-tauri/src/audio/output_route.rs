@@ -99,7 +99,7 @@ fn output_address(selector: u32) -> AudioObjectPropertyAddress {
 /// than headphones or an external device. Built-in transport covers both
 /// the speakers and the headphone jack; the data source ('ispk' vs 'hdpn')
 /// tells them apart. If the device doesn't report one, assume speakers.
-pub fn output_is_builtin_speakers(device: AudioObjectID) -> bool {
+fn output_is_builtin_speakers(device: AudioObjectID) -> bool {
     let mut transport: u32 = 0;
     if get_property(
         device,

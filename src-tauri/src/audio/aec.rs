@@ -9,7 +9,7 @@
 //! processing module) so the backend can be swapped without touching the
 //! mixer. Works on 10ms mono frames at the mixer rate.
 
-use sonora::config::{EchoCanceller, TransparentModeType};
+use sonora::config::{EchoCanceller, MaxProcessingRate, Pipeline, TransparentModeType};
 use sonora::{AudioProcessing, Config, StreamConfig};
 
 /// Coarse estimate of the delay between a render frame reaching sonora and
@@ -54,14 +54,31 @@ fn decide_rearm(attempts_so_far: u32) -> RearmDecision {
 
 fn build_apm(sample_rate: u32) -> AudioProcessing {
     let stream = StreamConfig::new(sample_rate, 1);
-    // SOU-063: NS and AGC2 stay off (`Config` defaults). `EchoCanceller`
+    // SOU-063: the chain feeds an ASR, not a phone call, so everything that
+    // is not echo removal is off: NS and AGC2 stay `None`. `EchoCanceller`
     // has no NLP-level knob — `transparent_mode: Hmm` is a no-echo
-    // classifier swap vs Legacy, not NLP-off. Residual NLP still runs.
+    // classifier swap vs Legacy, not NLP-off; the mixer bench measures no
+    // difference between the two. Residual NLP still runs.
+    //
+    // `Pipeline::default()` caps the internal rate at 32kHz, which makes
+    // sonora resample the 48kHz mic and render down and back up around the
+    // canceller. Processing at the mixer rate removes that round trip;
+    // the bench measures +0.9dB echo-only ERLE and no downside.
+    //
+    // The high-pass filter stays on (`enforce_high_pass_filtering`). It is
+    // the single largest cost to the near-end voice the bench can see
+    // (about 4dB of a 120Hz fundamental, `wideband_voice_passthrough_
+    // diagnostic`), but with it off AEC3's delay estimator lands 140-230ms
+    // away from the true path and echo-only cancellation drops to 0dB.
     AudioProcessing::builder()
         .config(Config {
+            pipeline: Pipeline {
+                maximum_internal_processing_rate: MaxProcessingRate::Rate48kHz,
+                ..Pipeline::default()
+            },
             echo_canceller: Some(EchoCanceller {
                 transparent_mode: TransparentModeType::Hmm,
-                ..EchoCanceller::default()
+                enforce_high_pass_filtering: true,
             }),
             noise_suppression: None,
             gain_controller2: None,
@@ -131,6 +148,13 @@ impl Aec {
         if let Some(delay_ms) = self.expected_delay_ms {
             let _ = self.apm.set_stream_delay_ms(delay_ms);
         }
+    }
+
+    /// Sonora's own running metrics (estimated delay, ERLE, filter
+    /// divergence), for the mixer bench to print next to its measurement.
+    #[cfg(test)]
+    pub(crate) fn statistics(&self) -> &sonora::AudioProcessingStats {
+        self.apm.statistics()
     }
 
     /// Feed a 10ms far-end frame (the system audio about to leave the

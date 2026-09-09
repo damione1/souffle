@@ -30,6 +30,9 @@ const MAX_TAP_LEAD_SAMPLES: usize = MIX_RATE as usize / 4;
 const TAP_AEC_RMS_THRESHOLD: f32 = 0.008;
 const TAP_RMS_ATTACK: f32 = 0.3;
 const TAP_RMS_DECAY: f32 = 0.9;
+/// Per-sample increment of the raw/cancelled blend: a full switch takes
+/// exactly one 10ms frame (SOU-063).
+const AEC_FADE_STEP: f32 = 1.0 / FRAME_SAMPLES as f32;
 
 pub struct MeetingMixer {
     mic: HeapCons<f32>,
@@ -51,8 +54,13 @@ pub struct MeetingMixer {
     /// Recent far-end level. Gates *applying* AEC output, not whether
     /// the instance lives (SOU-063). A pause must not `set_aec(None)`.
     tap_rms_ema: f32,
-    /// Crossfade state between raw mic (0.0) and AEC cancelled mic (1.0).
+    /// Blend between raw mic (0.0) and cancelled mic (1.0), moved by
+    /// `AEC_FADE_STEP` per sample toward the current target so a switch
+    /// never lands a step in the recording (SOU-063).
     aec_mix: f32,
+    /// `set_aec(None)` arrived while cancelled output was still being
+    /// applied: keep the instance one more frame to fade it out, then drop.
+    aec_retiring: bool,
 }
 
 impl MeetingMixer {
@@ -82,6 +90,7 @@ impl MeetingMixer {
             tap_discarded: 0,
             tap_rms_ema: 0.0,
             aec_mix: 0.0,
+            aec_retiring: false,
         }
     }
 
@@ -104,9 +113,23 @@ impl MeetingMixer {
 
     /// Enable/disable echo cancellation (e.g. when the output route changes
     /// between speakers and headphones mid-session). Passing a fresh `Aec`
-    /// also resets convergence state.
+    /// also resets convergence state, so its output fades in from the raw
+    /// mic. Passing `None` while cancelled output is being applied keeps the
+    /// old instance for the one frame it takes to fade back to raw mic.
     pub fn set_aec(&mut self, aec: Option<Aec>) {
-        self.aec = aec;
+        match aec {
+            Some(aec) => {
+                self.aec = Some(aec);
+                self.aec_mix = 0.0;
+                self.aec_retiring = false;
+            }
+            None if self.aec.is_some() && self.aec_mix > 0.0 => self.aec_retiring = true,
+            None => {
+                self.aec = None;
+                self.aec_mix = 0.0;
+                self.aec_retiring = false;
+            }
+        }
     }
 
     /// Swap the microphone ring after a mid-session rebuild. The tap ring,
@@ -332,8 +355,14 @@ impl MeetingMixer {
         // Always feed the canceller while it exists so a far-end pause
         // does not dump convergence. Apply the output only when the tap
         // is actually playing — otherwise emit raw mic (SOU-063 lever 2).
-        let apply_aec = self.tap_has_energy();
-        let target_mix = if apply_aec { 1.0 } else { 0.0 };
+        // Either way the switch is a linear ramp one frame long, not a
+        // cut: the cancelled and raw signals can differ by a lot, and a
+        // step at the boundary would end up in the recording.
+        let target_mix = if self.tap_has_energy() && !self.aec_retiring {
+            1.0
+        } else {
+            0.0
+        };
 
         if n == FRAME_SAMPLES
             && let Some(aec) = self.aec.as_mut()
@@ -342,20 +371,23 @@ impl MeetingMixer {
             let mut cancelled = mic.clone();
             aec.process_capture(&mut cancelled);
 
-            // Crossfade to avoid clicks from NLP toggling.
-            // Fade over ~10 frames (100ms): step is 0.1 per frame.
-            let step = (target_mix - self.aec_mix).signum() * 0.1;
-            
-            for (raw, canc) in mic.iter_mut().zip(cancelled) {
-                if (target_mix - self.aec_mix).abs() > 1e-4 {
-                    self.aec_mix = (self.aec_mix + step / FRAME_SAMPLES as f32).clamp(0.0, 1.0);
-                } else {
-                    self.aec_mix = target_mix;
+            for (raw, canc) in mic.iter_mut().zip(&cancelled) {
+                if self.aec_mix < target_mix {
+                    self.aec_mix = (self.aec_mix + AEC_FADE_STEP).min(target_mix);
+                } else if self.aec_mix > target_mix {
+                    self.aec_mix = (self.aec_mix - AEC_FADE_STEP).max(target_mix);
                 }
-                *raw = *raw * (1.0 - self.aec_mix) + canc * self.aec_mix;
+                *raw += (canc - *raw) * self.aec_mix;
             }
-        } else {
-            self.aec_mix = target_mix;
+            if self.aec_retiring && self.aec_mix <= 0.0 {
+                self.aec = None;
+                self.aec_retiring = false;
+            }
+        } else if self.aec_retiring {
+            // Flush tail: nothing more to fade over, drop now.
+            self.aec = None;
+            self.aec_mix = 0.0;
+            self.aec_retiring = false;
         }
 
         (mic, tap)
@@ -461,6 +493,74 @@ mod tests {
         assert!(
             (mid - 0.5).abs() < 0.05,
             "below the energy floor the mic must pass through raw, got {mid}"
+        );
+    }
+
+    /// Ceiling on the sample-to-sample step the Me leg may show when the
+    /// canceller's output starts or stops being applied (SOU-063 AC3). The
+    /// switch in `aec_switch_fades_instead_of_stepping` is ~0.5 between the
+    /// two sources; the one-frame ramp spreads it over 480 samples.
+    const AEC_SWITCH_MAX_STEP: f32 = 0.01;
+
+    /// Engage the canceller, then retire it with `set_aec(None)`: neither
+    /// boundary may land a discontinuity in the Me leg. A DC mic and a DC tap
+    /// keep sonora's output predictable — its high-pass filter drives the
+    /// cancelled leg to ~0 while the raw leg stays at 0.5 — so the two
+    /// sources differ by ~0.5 at the switch and the fade has something to
+    /// prove. No model, no real audio.
+    #[test]
+    fn aec_switch_fades_instead_of_stepping() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, MIX_RATE);
+        mixer.set_aec(Some(Aec::new(MIX_RATE)));
+
+        // Silent far end first: the instance is fed and runs its start-up
+        // transient while the blend still sits on the raw mic.
+        let mut out = Vec::new();
+        for _ in 0..20 {
+            mic.push_slice(&vec![0.5f32; FRAME_SAMPLES]);
+            out.extend(mixer.tick_split().0);
+        }
+        assert_eq!(mixer.aec_mix, 0.0);
+        let switch_from = out.len();
+
+        for _ in 0..40 {
+            mic.push_slice(&vec![0.5f32; FRAME_SAMPLES]);
+            tap.push_slice(&vec![0.3f32; FRAME_SAMPLES]);
+            out.extend(mixer.tick_split().0);
+        }
+        assert_eq!(mixer.aec_mix, 1.0, "tap energy must have engaged the blend");
+        let engaged = *out.last().unwrap();
+        assert!(
+            (engaged - 0.5).abs() > 0.2,
+            "cancelled leg should differ from raw mic, got {engaged}"
+        );
+
+        mixer.set_aec(None);
+        assert!(
+            mixer.aec.is_some(),
+            "instance must survive until the fade completes"
+        );
+        for _ in 0..5 {
+            mic.push_slice(&vec![0.5f32; FRAME_SAMPLES]);
+            tap.push_slice(&vec![0.3f32; FRAME_SAMPLES]);
+            out.extend(mixer.tick_split().0);
+        }
+        assert!(mixer.aec.is_none(), "retired instance must be dropped");
+        assert_eq!(mixer.aec_mix, 0.0);
+        let raw = *out.last().unwrap();
+        assert!(
+            (raw - 0.5).abs() < 1e-3,
+            "after the fade the mic must be raw, got {raw}"
+        );
+
+        let (at, max_step) = out[switch_from - 1..]
+            .windows(2)
+            .enumerate()
+            .map(|(i, w)| (switch_from - 1 + i, (w[1] - w[0]).abs()))
+            .fold((0, 0.0f32), |acc, s| if s.1 > acc.1 { s } else { acc });
+        assert!(
+            max_step < AEC_SWITCH_MAX_STEP,
+            "switching left a {max_step} step at sample {at}"
         );
     }
 
@@ -687,9 +787,10 @@ mod tests {
 
 /// Echo-cancellation efficiency bench, run through the exact mixer
 /// integration (10ms frames at `MIX_RATE`, `split_frame`'s render-then-capture
-/// ordering) rather than the `Aec` wrapper in isolation. Ignored by default:
+/// ordering) rather than the `Aec` wrapper in isolation. All but the short
+/// `broadband_echo_is_cancelled_through_the_mixer` are ignored by default:
 /// several seconds of synthetic audio at 48kHz is too slow for the normal
-/// test loop. Run explicitly with:
+/// test loop. Run them explicitly with:
 ///   cargo test --release --manifest-path src-tauri/Cargo.toml audio::mixer::aec_bench -- --ignored --nocapture
 #[cfg(test)]
 mod aec_bench {
@@ -767,28 +868,76 @@ mod aec_bench {
             .collect()
     }
 
+    /// Longest output lag the alignment scan considers. Sonora's AEC3 adds a
+    /// fixed pipeline delay (band split/merge plus the 80-sample sub-frame to
+    /// 64-sample block reframing) of a few ms, well under this bound. The
+    /// bound must also stay under the voice's fundamental period (120 Hz,
+    /// 400 samples) or the correlation peak can alias by one period.
+    const MAX_ALIGN_LAG: usize = FRAME_SAMPLES / 2;
+
+    /// One synthetic run through `MeetingMixer`; see `run_echo_bench`.
+    struct BenchCase {
+        /// Mirrors what `Aec` passes to `set_stream_delay_ms`; `None`
+        /// measures the hint-free baseline.
+        expected_delay_hint_ms: Option<i32>,
+        /// Near-end voice level; `0.0` isolates echo-only cancellation.
+        voice_scale: f32,
+        /// Acoustic path: how much of the render leaks into the mic ...
+        echo_gain: f32,
+        /// ... and how late.
+        delay_ms: u32,
+        duration_s: f32,
+        /// Far-end content: tonal components and the level of the low-passed
+        /// noise mixed under them.
+        render_freqs: &'static [(f32, f32)],
+        render_noise: f32,
+    }
+
+    struct BenchResult {
+        /// Energy of the injected echo over the post-convergence window
+        /// against energy of `output - voice` with `voice` taken at its
+        /// generation index. The 2026-07-18 metric, kept for comparison: any
+        /// fixed output lag shows up here as voice "damage".
+        raw_erle_db: f32,
+        /// Same ratio with `voice` delayed by `lag_samples`, so a constant
+        /// pipeline delay no longer counts against the canceller. What is
+        /// left is residual echo plus genuine voice distortion.
+        aligned_erle_db: f32,
+        /// Aligned residual against the voice itself: how far the output is
+        /// from the voice the user actually produced, in dB (negative is
+        /// good). With no echo path this is pure voice distortion.
+        residual_vs_voice_db: f32,
+        /// Output lag found by cross-correlating the output with `voice`
+        /// (0 when there is no voice to correlate against).
+        lag_samples: usize,
+        /// Sonora's own view after the run: estimated render/capture delay,
+        /// echo return loss enhancement and divergent filter fraction.
+        stats: (Option<i32>, Option<f64>, Option<f64>),
+        /// First frame after which a 500ms window of aligned residual stays
+        /// below -10dB of the echo in that window.
+        converge_frame: Option<usize>,
+    }
+
     /// Feeds a synthetic "video playing on the speakers while the user
     /// talks" scenario through `MeetingMixer` and reports (does not just
     /// assert) how effectively the AEC integration attenuates the echo:
     /// approximate ERLE post-convergence and roughly when convergence
-    /// happens. `expected_delay_hint_ms` mirrors what `Aec` would pass to
-    /// `set_stream_delay_ms` when that hint is wired up; pass `None` to
-    /// measure the current (no hint) baseline.
-    fn run_echo_bench(
-        expected_delay_hint_ms: Option<i32>,
-        voice_scale: f32,
-        delay_ms: u32,
-    ) -> (f32, Option<usize>) {
+    /// happens.
+    fn run_echo_bench(case: BenchCase) -> BenchResult {
         let sample_rate = MIX_RATE;
-        let delay_samples = (sample_rate as usize * delay_ms as usize) / 1000;
-        let attenuation = 0.3f32;
-        let duration_s = 8.0f32;
-        let total_samples = (sample_rate as f32 * duration_s) as usize;
+        let delay_samples = (sample_rate as usize * case.delay_ms as usize) / 1000;
+        let total_samples = (sample_rate as f32 * case.duration_s) as usize;
 
-        let render = synth_wideband(total_samples, sample_rate, VIDEO_FREQS, 0.05, 0xC0FFEE);
+        let render = synth_wideband(
+            total_samples,
+            sample_rate,
+            case.render_freqs,
+            case.render_noise,
+            0xC0FFEE,
+        );
         let voice: Vec<f32> = synth_wideband(total_samples, sample_rate, VOICE_FREQS, 0.02, 0xBEEF)
             .into_iter()
-            .map(|s| s * voice_scale)
+            .map(|s| s * case.voice_scale)
             .collect();
 
         // Ground truth: exactly what the acoustic path adds to the mic and
@@ -797,7 +946,7 @@ mod aec_bench {
         let echo: Vec<f32> = (0..total_samples)
             .map(|n| {
                 if n >= delay_samples {
-                    render[n - delay_samples] * attenuation
+                    render[n - delay_samples] * case.echo_gain
                 } else {
                     0.0
                 }
@@ -821,14 +970,13 @@ mod aec_bench {
             sample_rate,
         );
         let mut aec = Aec::new(sample_rate);
-        if let Some(hint) = expected_delay_hint_ms {
+        if let Some(hint) = case.expected_delay_hint_ms {
             aec.set_expected_delay_ms(hint);
         }
         mixer.set_aec(Some(aec));
 
         let n_frames = total_samples / FRAME_SAMPLES;
-        let mut echo_energy_per_frame = Vec::with_capacity(n_frames);
-        let mut residual_energy_per_frame = Vec::with_capacity(n_frames);
+        let mut output = Vec::with_capacity(n_frames * FRAME_SAMPLES);
 
         for f in 0..n_frames {
             let start = f * FRAME_SAMPLES;
@@ -842,108 +990,257 @@ mod aec_bench {
                 FRAME_SAMPLES,
                 "matching rates should pass one 10ms frame through per tick"
             );
-
-            let echo_energy: f32 = echo[start..end].iter().map(|s| s * s).sum();
-            // Residual echo estimate: the AEC doesn't know `voice` separately,
-            // but we generated it, so subtracting it from the output isolates
-            // what the AEC left behind (residual echo plus any voice
-            // distortion the AEC itself introduced).
-            let residual_energy: f32 = me
-                .iter()
-                .zip(&voice[start..end])
-                .map(|(o, v)| (o - v).powi(2))
-                .sum();
-
-            echo_energy_per_frame.push(echo_energy);
-            residual_energy_per_frame.push(residual_energy);
+            output.extend(me);
         }
 
         // Post-convergence window: last quarter of the run.
         let tail = n_frames / 4;
-        let pre: f32 = echo_energy_per_frame[n_frames - tail..].iter().sum();
-        let post: f32 = residual_energy_per_frame[n_frames - tail..].iter().sum();
-        let erle_db = 10.0 * (pre / post.max(1e-9)).log10();
+        let tail_start = (n_frames - tail) * FRAME_SAMPLES;
+
+        // The canceller delays its output by a fixed amount. Find it by
+        // cross-correlating the output with the voice we generated over the
+        // post-convergence window: the echo shares no component with the
+        // voice, so the peak sits at the pipeline lag.
+        let lag_samples = if case.voice_scale > 0.0 {
+            (0..=MAX_ALIGN_LAG)
+                .map(|lag| {
+                    let corr: f32 = (tail_start..output.len())
+                        .map(|n| output[n] * voice[n - lag])
+                        .sum();
+                    (lag, corr)
+                })
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map_or(0, |(lag, _)| lag)
+        } else {
+            0
+        };
+
+        // Residual echo estimate: the AEC doesn't know `voice` separately,
+        // but we generated it, so subtracting it from the output isolates
+        // what the AEC left behind (residual echo plus any voice distortion
+        // the AEC itself introduced). `raw` compares against the voice at
+        // its generation index, `aligned` against the voice `lag_samples`
+        // earlier.
+        let frame_energy = |f: usize, lag: usize| -> (f32, f32) {
+            let start = f * FRAME_SAMPLES;
+            let end = start + FRAME_SAMPLES;
+            let echo_energy: f32 = echo[start..end].iter().map(|s| s * s).sum();
+            let residual_energy: f32 = (start..end)
+                .map(|n| {
+                    let v = if n >= lag { voice[n - lag] } else { 0.0 };
+                    (output[n] - v).powi(2)
+                })
+                .sum();
+            (echo_energy, residual_energy)
+        };
+        let erle_db = |lag: usize| -> f32 {
+            let (pre, post) = (n_frames - tail..n_frames)
+                .map(|f| frame_energy(f, lag))
+                .fold((0.0f32, 0.0f32), |acc, (e, r)| (acc.0 + e, acc.1 + r));
+            10.0 * (pre / post.max(1e-9)).log10()
+        };
+        let raw_erle_db = erle_db(0);
+        let aligned_erle_db = erle_db(lag_samples);
+        let voice_energy: f32 = voice[tail_start..].iter().map(|s| s * s).sum();
+        let aligned_residual: f32 = (n_frames - tail..n_frames)
+            .map(|f| frame_energy(f, lag_samples).1)
+            .sum();
+        let residual_vs_voice_db = 10.0 * (aligned_residual / voice_energy.max(1e-9)).log10();
+        let stats = mixer
+            .aec
+            .as_ref()
+            .map(|aec| {
+                let s = aec.statistics();
+                (
+                    s.delay_ms,
+                    s.echo_return_loss_enhancement,
+                    s.divergent_filter_fraction,
+                )
+            })
+            .unwrap_or_default();
 
         // Convergence point: first frame after which a 500ms sliding window
-        // of residual energy stays below 10% (-10dB) of the echo energy in
-        // that same window.
+        // of aligned residual energy stays below 10% (-10dB) of the echo
+        // energy in that same window.
         let sustain_frames = 50;
+        let per_frame: Vec<(f32, f32)> = (0..n_frames)
+            .map(|f| frame_energy(f, lag_samples))
+            .collect();
         let mut converge_frame = None;
         for i in 0..n_frames.saturating_sub(sustain_frames) {
-            let window_pre: f32 = echo_energy_per_frame[i..i + sustain_frames].iter().sum();
-            let window_post: f32 = residual_energy_per_frame[i..i + sustain_frames]
+            let (window_pre, window_post) = per_frame[i..i + sustain_frames]
                 .iter()
-                .sum();
+                .fold((0.0f32, 0.0f32), |acc, (e, r)| (acc.0 + e, acc.1 + r));
             if window_post < window_pre * 0.1 {
                 converge_frame = Some(i);
                 break;
             }
         }
 
-        (erle_db, converge_frame)
+        BenchResult {
+            raw_erle_db,
+            aligned_erle_db,
+            residual_vs_voice_db,
+            lag_samples,
+            converge_frame,
+            stats,
+        }
     }
 
-    // Measured baselines (release build, this bench, 2026-07-18): double-talk
-    // (voice + echo together) comes out around -10dB, i.e. sonora's NLP stage
-    // leaves the output *further* from clean voice than the raw uncancelled
-    // echo would have been, both with and without the `stream_delay_ms` hint.
-    // Echo-only (no voice, see the diagnostic below) attenuates by a modest
-    // +3.6dB. That's weak for AEC3 and corroborates the production incident's
-    // report of echo passing through even before the crate panicked; it is
-    // not something this fix attempts to solve (see the investigation
-    // writeup). These asserts are regression floors against the measured
-    // baseline, not aspirational targets — tighten them if cancellation
-    // quality is improved later.
-    const DOUBLE_TALK_ERLE_FLOOR_DB: f32 = -14.0;
+    fn report(label: &str, r: &BenchResult) {
+        println!(
+            "AEC bench ({label}): ERLE post-convergence = {:.1} dB aligned ({:.1} dB raw), \
+             residual vs voice = {:.1} dB, output lag = {} samples, convergence at ~{}, \
+             sonora: delay={:?}ms erle={:?} divergent={:?}",
+            r.aligned_erle_db,
+            r.raw_erle_db,
+            r.residual_vs_voice_db,
+            r.lag_samples,
+            r.converge_frame
+                .map(|f| format!("{}ms", f * 10))
+                .unwrap_or_else(|| "never".to_string()),
+            r.stats.0,
+            r.stats.1,
+            r.stats.2,
+        );
+    }
+
+    // Target for the double-talk benches (SOU-063 AC1): the output must end
+    // up closer to the user's voice than the uncancelled echo would have
+    // left it, so the aligned ERLE must be positive. Not met today; the
+    // two benches below fail when run explicitly and print what they got.
+    //
+    // Measured (debug build, this bench, 2026-09-09, `build_apm` at 48kHz):
+    // double-talk -3.6dB aligned / -9.9dB raw, with or without the
+    // `stream_delay_ms` hint; echo-only +4.5dB; voice-only passthrough
+    // leaves the output 4.2dB under the voice with nothing to cancel. Where
+    // the numbers come from:
+    // - 6.3dB of the raw figure is sonora's fixed 170-sample output lag
+    //   counted as voice damage by `output - voice` (the 2026-07-18 metric);
+    //   `raw_erle_db` keeps it for comparison, `aligned_erle_db` removes it.
+    // - Sonora's own metrics show the linear filter never converging on this
+    //   far end (ERLE 0.18dB, delay estimate 0-32ms for a 50ms path): AEC3
+    //   holds adaptation back on narrowband render, and `VIDEO_FREQS` is
+    //   five stationary tones. `wideband_broadband_render_diagnostic` runs
+    //   the same path with a noise-like far end and cancels 39dB.
+    // - What is left is mostly the enforced high-pass filter on the 120Hz
+    //   fundamental of `VOICE_FREQS` (see `build_apm` for why it stays on).
+    const DOUBLE_TALK_ERLE_TARGET_DB: f32 = 0.0;
+
+    fn double_talk(expected_delay_hint_ms: Option<i32>) -> BenchCase {
+        BenchCase {
+            expected_delay_hint_ms,
+            voice_scale: 1.0,
+            echo_gain: 0.3,
+            delay_ms: 50,
+            duration_s: 8.0,
+            render_freqs: VIDEO_FREQS,
+            render_noise: 0.05,
+        }
+    }
+
+    fn broadband_render(case: BenchCase) -> BenchCase {
+        BenchCase {
+            render_freqs: &[],
+            render_noise: 0.4,
+            ..case
+        }
+    }
+
+    /// Regression floor for `broadband_echo_is_cancelled_through_the_mixer`:
+    /// measured 38.9dB on 8s, see the test for the 3s figure. Anything under
+    /// this means the render/capture plumbing through `split_frame` broke,
+    /// not that AEC3 got marginally worse.
+    const BROADBAND_ECHO_ERLE_FLOOR_DB: f32 = 20.0;
+
+    /// The one AEC bench in the default test loop (SOU-063 AC2). Echo only,
+    /// noise-like far end, 3s: the case AEC3 is built for, run through the
+    /// real mixer integration rather than the `Aec` wrapper alone. ~1s in a
+    /// debug build.
+    #[test]
+    fn broadband_echo_is_cancelled_through_the_mixer() {
+        let r = run_echo_bench(broadband_render(BenchCase {
+            voice_scale: 0.0,
+            duration_s: 3.0,
+            ..double_talk(Some(50))
+        }));
+        report("echo only, broadband render, 3s, 50ms hint", &r);
+        assert!(
+            r.aligned_erle_db > BROADBAND_ECHO_ERLE_FLOOR_DB,
+            "broadband echo cancellation regressed: got {:.1} dB",
+            r.aligned_erle_db
+        );
+    }
 
     #[test]
     #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_baseline() {
-        let (erle_db, converge_frame) = run_echo_bench(None, 1.0, 50);
-        println!(
-            "AEC bench (no stream_delay_ms hint, 50ms acoustic delay): ERLE post-convergence = \
-             {erle_db:.1} dB, convergence at ~{}ms",
-            converge_frame
-                .map(|f| f * 10)
-                .map_or("never".to_string(), |ms| ms.to_string())
-        );
+        let r = run_echo_bench(double_talk(None));
+        report("no stream_delay_ms hint, 50ms acoustic delay", &r);
         assert!(
-            erle_db > DOUBLE_TALK_ERLE_FLOOR_DB,
-            "double-talk ERLE regressed below the measured baseline: got {erle_db:.1} dB"
+            r.aligned_erle_db > DOUBLE_TALK_ERLE_TARGET_DB,
+            "double-talk output is further from the voice than the echo was: {:.1} dB aligned \
+             ({:.1} dB raw)",
+            r.aligned_erle_db,
+            r.raw_erle_db
         );
     }
 
     #[test]
     #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_with_delay_hint() {
-        let (erle_db, converge_frame) = run_echo_bench(Some(50), 1.0, 50);
-        println!(
-            "AEC bench (50ms stream_delay_ms hint, 50ms acoustic delay): ERLE post-convergence = \
-             {erle_db:.1} dB, convergence at ~{}ms",
-            converge_frame
-                .map(|f| f * 10)
-                .map_or("never".to_string(), |ms| ms.to_string())
-        );
+        let r = run_echo_bench(double_talk(Some(50)));
+        report("50ms stream_delay_ms hint, 50ms acoustic delay", &r);
         assert!(
-            erle_db > DOUBLE_TALK_ERLE_FLOOR_DB,
-            "double-talk ERLE regressed below the measured baseline: got {erle_db:.1} dB"
+            r.aligned_erle_db > DOUBLE_TALK_ERLE_TARGET_DB,
+            "double-talk output is further from the voice than the echo was: {:.1} dB aligned \
+             ({:.1} dB raw)",
+            r.aligned_erle_db,
+            r.raw_erle_db
         );
+    }
+
+    /// Diagnostic: the double-talk scenario with a noise-like far end instead
+    /// of the five stationary tones of `VIDEO_FREQS`, to separate what AEC3
+    /// can do from what this fixture lets it do.
+    #[test]
+    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
+    fn wideband_broadband_render_diagnostic() {
+        let r = run_echo_bench(broadband_render(double_talk(Some(50))));
+        report("double talk, broadband render, 50ms hint", &r);
+        let r = run_echo_bench(broadband_render(BenchCase {
+            voice_scale: 0.0,
+            ..double_talk(Some(50))
+        }));
+        report("echo only, broadband render, 50ms hint", &r);
     }
 
     /// Diagnostic (not a hard requirement): isolates echo-only cancellation
     /// (no near-end voice) through the exact same mixer integration, to tell
     /// whether a poor double-talk result comes from echo cancellation itself
-    /// or from the double-talk/voice interaction. Measured baseline: +3.6dB.
+    /// or from the double-talk/voice interaction. Measured: +3.6dB with the
+    /// 32kHz internal rate, +4.5dB at 48kHz.
     #[test]
     #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_no_voice_diagnostic() {
-        let (erle_db, converge_frame) = run_echo_bench(Some(50), 0.0, 50);
-        println!(
-            "AEC bench (echo only, no voice, 50ms hint, 50ms acoustic delay): ERLE \
-             post-convergence = {erle_db:.1} dB, convergence at ~{}ms",
-            converge_frame
-                .map(|f| f * 10)
-                .map_or("never".to_string(), |ms| ms.to_string())
-        );
+        let r = run_echo_bench(BenchCase {
+            voice_scale: 0.0,
+            ..double_talk(Some(50))
+        });
+        report("echo only, no voice, 50ms hint, 50ms acoustic delay", &r);
+    }
+
+    /// Diagnostic: voice only, render playing but no acoustic coupling
+    /// (headphones-like). There is no echo to remove, so `aligned` residual
+    /// is purely what the canceller does to the voice it should pass
+    /// through untouched, and `raw` vs `aligned` exposes the pipeline lag.
+    #[test]
+    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
+    fn wideband_voice_passthrough_diagnostic() {
+        let r = run_echo_bench(BenchCase {
+            echo_gain: 0.0,
+            ..double_talk(Some(50))
+        });
+        report("voice only, no echo path, 50ms hint", &r);
     }
 }

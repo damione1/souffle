@@ -115,7 +115,7 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = [
 # Sleep/wake observers (NSWorkspace notifications)
 objc2-app-kit = "0.3"
 ringbuf = "0.5"
-sonora = { git = "https://github.com/dignifiedquire/sonora", rev = "a024d6ef8351add55be5e8b1d6cc35f555787660", version = "0.2.0" }
+sonora = "0.1"
 block2 = "0.6"
 dispatch2 = "0.3"
 

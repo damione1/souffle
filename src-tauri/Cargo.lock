@@ -6447,8 +6447,8 @@ dependencies = [
 
 [[package]]
 name = "sonora"
-version = "0.2.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=a024d6ef8351add55be5e8b1d6cc35f555787660#a024d6ef8351add55be5e8b1d6cc35f555787660"
+version = "0.1.0"
+source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
 dependencies = [
  "sonora-aec3",
  "sonora-agc2",
@@ -6460,8 +6460,8 @@ dependencies = [
 
 [[package]]
 name = "sonora-aec3"
-version = "0.2.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=a024d6ef8351add55be5e8b1d6cc35f555787660#a024d6ef8351add55be5e8b1d6cc35f555787660"
+version = "0.1.0"
+source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
 dependencies = [
  "sonora-common-audio",
  "sonora-fft",
@@ -6470,8 +6470,8 @@ dependencies = [
 
 [[package]]
 name = "sonora-agc2"
-version = "0.2.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=a024d6ef8351add55be5e8b1d6cc35f555787660#a024d6ef8351add55be5e8b1d6cc35f555787660"
+version = "0.1.0"
+source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
 dependencies = [
  "bytemuck",
  "derive_more 2.1.1",
@@ -6483,8 +6483,8 @@ dependencies = [
 
 [[package]]
 name = "sonora-common-audio"
-version = "0.2.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=a024d6ef8351add55be5e8b1d6cc35f555787660#a024d6ef8351add55be5e8b1d6cc35f555787660"
+version = "0.1.0"
+source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
 dependencies = [
  "derive_more 2.1.1",
  "sonora-simd",
@@ -6492,21 +6492,21 @@ dependencies = [
 
 [[package]]
 name = "sonora-fft"
-version = "0.2.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=a024d6ef8351add55be5e8b1d6cc35f555787660#a024d6ef8351add55be5e8b1d6cc35f555787660"
+version = "0.1.0"
+source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
 
 [[package]]
 name = "sonora-ns"
-version = "0.2.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=a024d6ef8351add55be5e8b1d6cc35f555787660#a024d6ef8351add55be5e8b1d6cc35f555787660"
+version = "0.1.0"
+source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
 dependencies = [
  "sonora-fft",
 ]
 
 [[package]]
 name = "sonora-simd"
-version = "0.2.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=a024d6ef8351add55be5e8b1d6cc35f555787660#a024d6ef8351add55be5e8b1d6cc35f555787660"
+version = "0.1.0"
+source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
 dependencies = [
  "cpufeatures 0.3.0",
 ]
@@ -9506,38 +9506,3 @@ dependencies = [
  "syn 2.0.117",
  "winnow 0.7.15",
 ]
-
-[[patch.unused]]
-name = "sonora"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-
-[[patch.unused]]
-name = "sonora-aec3"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-
-[[patch.unused]]
-name = "sonora-agc2"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-
-[[patch.unused]]
-name = "sonora-common-audio"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-
-[[patch.unused]]
-name = "sonora-fft"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-
-[[patch.unused]]
-name = "sonora-ns"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-
-[[patch.unused]]
-name = "sonora-simd"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
