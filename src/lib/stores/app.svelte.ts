@@ -103,6 +103,7 @@ let settings = $state<AppSettings>({
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
+  autostart_enabled: false,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
   dictation_polish_enabled: true,

@@ -194,6 +194,11 @@
     "downloading_model": "Downloading {model}…",
     "pull_failed": "Could not download the model: {error}"
   },
+  "settings_startup": {
+    "title": "Startup",
+    "autostart": "Launch at login",
+    "autostart_desc": "Open Soufflé automatically when you start your Mac."
+  },
   "settings_diagnostics": {
     "title": "Diagnostics",
     "log_level": "Log level",

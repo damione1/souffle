@@ -24,6 +24,7 @@ import {
   startTranscriptionModelDownload,
 } from "../transcription/runtime";
 import {
+  decideAutostartOnFinish,
   markSetupComplete,
   readSetupFlags,
   wizardSteps,
@@ -292,6 +293,12 @@ export function createOnboardingController() {
         await persistSettings((settings) => {
           settings.auto_paste = autoPaste;
           settings.audio_device = selectedDevice || null;
+          // SOU-036: the backend registers the login item before it writes
+          // the setting, so a refusal here surfaces as a save error above.
+          settings.autostart_enabled = decideAutostartOnFinish(
+            recoveryOnly,
+            settings.autostart_enabled,
+          );
         });
       }
     } catch (e) {

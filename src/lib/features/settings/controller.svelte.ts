@@ -564,6 +564,20 @@ export function createSettingsController() {
     });
   }
 
+  /** SOU-036: the backend registers/unregisters the login item before it
+   * writes the setting, so a rejected save means SMAppService refused.
+   * `persistSettings` never throws — it reports the failure as `false`,
+   * restores `app.settings`, and puts the reason in `statusMessage` — so the
+   * only thing left to undo here is the checkbox itself. */
+  async function onAutostartChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const checked = target.checked;
+    const persisted = await persistSettings((settings) => {
+      settings.autostart_enabled = checked;
+    });
+    if (!persisted) target.checked = !checked;
+  }
+
   function onAutoUpdateCheckChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -1050,6 +1064,7 @@ export function createSettingsController() {
     onLocaleChange,
     onAutoPasteChange,
     onLearnFromEditChange,
+    onAutostartChange,
     onAutoUpdateCheckChange,
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,

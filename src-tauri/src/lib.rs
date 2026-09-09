@@ -2,6 +2,7 @@ pub mod app_events;
 pub mod apple_intelligence;
 pub mod archive;
 pub mod audio;
+pub mod autostart;
 pub mod ax_text;
 pub mod calendar;
 pub mod cli;

@@ -68,6 +68,15 @@ export function decideShowSetupWizard(
   return true;
 }
 
+/** SOU-036: what `autostart_enabled` should be once the wizard finishes.
+ * A fresh install leaves the wizard with the login item registered; a
+ * recovery run (model re-download on an already set-up install) keeps
+ * whatever is stored, because an absent key on an existing install must not
+ * turn into "on" without a gesture from the user. */
+export function decideAutostartOnFinish(recoveryOnly: boolean, current: boolean): boolean {
+  return recoveryOnly ? current : true;
+}
+
 /** First-run walks permissions (if needed) → mic → model → shortcut.
  * Re-download after a deleted model is model-only. */
 export function wizardSteps(flags: SetupFlags): SetupStep[] {

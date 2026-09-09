@@ -47,6 +47,7 @@ pub const PILL_POSITION_KEY: &str = "pill_position";
 const MEETING_AUTOSTOP_ENABLED_KEY: &str = "meeting_autostop_enabled";
 const MEETING_AUTOSTOP_MINUTES_KEY: &str = "meeting_autostop_minutes";
 const MEETING_MAX_DURATION_MINUTES_KEY: &str = "meeting_max_duration_minutes";
+const AUTOSTART_ENABLED_KEY: &str = "autostart_enabled";
 const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
@@ -201,6 +202,10 @@ pub struct AppSettings {
     /// Hard failsafe: stop the meeting after this many minutes regardless of
     /// speech activity.
     pub meeting_max_duration_minutes: u32,
+    /// Launch Soufflé at login (SMAppService login item, SOU-036). The stored
+    /// value is a fallback only: `get_settings` overwrites it with the state
+    /// the system reports, and an absent key means "never asked", not "on".
+    pub autostart_enabled: bool,
     /// Opt-in recording of meeting audio to compressed files on disk, and
     /// for how long they're kept. Off by default.
     pub meeting_audio_retention: MeetingAudioRetention,
@@ -272,6 +277,7 @@ impl Default for AppSettings {
             meeting_autostop_enabled: true,
             meeting_autostop_minutes: 10,
             meeting_max_duration_minutes: 240,
+            autostart_enabled: false,
             meeting_audio_retention: MeetingAudioRetention::default(),
             meeting_transcription_language: MeetingTranscriptionLanguage::default(),
             dictation_polish_enabled: true,
@@ -442,6 +448,9 @@ impl AppSettings {
             read_json_setting::<u32>(db, MEETING_MAX_DURATION_MINUTES_KEY)?
         {
             settings.meeting_max_duration_minutes = meeting_max_duration_minutes;
+        }
+        if let Some(autostart_enabled) = read_json_setting::<bool>(db, AUTOSTART_ENABLED_KEY)? {
+            settings.autostart_enabled = autostart_enabled;
         }
         if let Some(meeting_audio_retention) =
             read_json_setting::<MeetingAudioRetention>(db, MEETING_AUDIO_RETENTION_KEY)?
@@ -873,6 +882,7 @@ impl AppSettings {
             MEETING_MAX_DURATION_MINUTES_KEY,
             &normalized.meeting_max_duration_minutes,
         )?;
+        write_json_setting(db, AUTOSTART_ENABLED_KEY, &normalized.autostart_enabled)?;
         write_json_setting(
             db,
             MEETING_AUDIO_RETENTION_KEY,
@@ -1104,6 +1114,7 @@ mod tests {
             meeting_autostop_enabled: false,
             meeting_autostop_minutes: 15,
             meeting_max_duration_minutes: 120,
+            autostart_enabled: true,
             meeting_audio_retention: MeetingAudioRetention::Keep30d,
             meeting_transcription_language: super::MeetingTranscriptionLanguage::Fr,
             dictation_polish_enabled: true,
@@ -1154,6 +1165,45 @@ mod tests {
         assert!(!same_triple.pin_transcription_while_recording(&stored, true));
         assert_eq!(same_triple.theme, Theme::Light);
         assert_eq!(same_triple.transcription_model_id, "stt-1b-en_fr");
+    }
+
+    // SOU-036: an install that never saw the setting has no key at all. That
+    // must load as "off" — the login item is only ever registered after a
+    // deliberate gesture (toggle or fresh-install wizard), never by default.
+    #[test]
+    fn autostart_absent_key_loads_as_disabled() {
+        let (db, _dir) = test_db();
+        assert_eq!(
+            db.get_setting("autostart_enabled").expect("get setting"),
+            None
+        );
+
+        let loaded = AppSettings::load(&db).expect("load settings");
+        assert!(!loaded.autostart_enabled);
+    }
+
+    #[test]
+    fn autostart_explicit_value_round_trips() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            autostart_enabled: true,
+            ..AppSettings::default()
+        };
+        settings.save(&db).expect("save settings");
+        assert!(AppSettings::load(&db).expect("load").autostart_enabled);
+
+        // An explicit `false` is written too, so it stays distinguishable
+        // from the never-written key above.
+        let settings = AppSettings {
+            autostart_enabled: false,
+            ..AppSettings::default()
+        };
+        settings.save(&db).expect("save settings");
+        assert_eq!(
+            db.get_setting("autostart_enabled").expect("get setting"),
+            Some("false".into())
+        );
+        assert!(!AppSettings::load(&db).expect("load").autostart_enabled);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
+  import AutostartSettingsSection from "../features/settings/components/AutostartSettingsSection.svelte";
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
   import CalendarSettingsSection from "../features/settings/components/CalendarSettingsSection.svelte";
@@ -288,6 +289,11 @@
         onAutostartEnabledChange={controller.onCalendarAutostartEnabledChange}
       />
     {:else}
+      <AutostartSettingsSection
+        autostartEnabled={controller.app.settings.autostart_enabled}
+        onAutostartChange={controller.onAutostartChange}
+      />
+
       <PermissionsSettingsSection />
 
       <DiagnosticsSettingsSection

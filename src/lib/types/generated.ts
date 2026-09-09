@@ -1169,6 +1169,12 @@ meeting_autostop_minutes: number;
  */
 meeting_max_duration_minutes: number; 
 /**
+ * Launch Soufflé at login (SMAppService login item, SOU-036). The stored
+ * value is a fallback only: `get_settings` overwrites it with the state
+ * the system reports, and an absent key means "never asked", not "on".
+ */
+autostart_enabled: boolean; 
+/**
  * Opt-in recording of meeting audio to compressed files on disk, and
  * for how long they're kept. Off by default.
  */
