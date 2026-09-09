@@ -301,7 +301,7 @@ function createMeetingControllerInstance() {
   }
 
   function modelRequiredBanner(message: string) {
-    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ tab: "transcription" }) });
+    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ anchor: "transcription.model" }) });
   }
 
   /** Shared by start and resume so overlapping clicks cannot both pass idle

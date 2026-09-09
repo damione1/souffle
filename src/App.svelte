@@ -452,7 +452,7 @@
         detail={routeToastCopy.detail}
         hint={routeToastCopy.hint}
         actionLabel={routeToastCopy.hasAction ? $t("permissions.open_settings") : undefined}
-        onAction={routeToastCopy.hasAction ? () => openSettings({ tab: "audio" }) : undefined}
+        onAction={routeToastCopy.hasAction ? () => openSettings({ anchor: "audio.mic" }) : undefined}
         onDismiss={() => micToast.dismiss()}
       />
     </div>

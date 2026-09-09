@@ -17,6 +17,7 @@
   import SummaryTemplatesSettingsSection from "../features/settings/components/SummaryTemplatesSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { type SettingsTab } from "../features/settings/open";
+  import { type SettingsAnchor, tabForAnchor } from "../features/settings/anchors";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
   import { events } from "../api/generated";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
@@ -33,10 +34,11 @@
 
   const controller = createSettingsController();
   let activeTab = $state<SettingsTab>(
-    (controller.app.settingsInitialTab as SettingsTab | null) ?? "transcription",
+    controller.app.settingsInitialAnchor ? tabForAnchor(controller.app.settingsInitialAnchor) : "transcription"
   );
+  let targetAnchor = controller.app.settingsInitialAnchor;
   // Deep-link is one-shot: don't stick future normal opens to this tab.
-  controller.app.settingsInitialTab = null;
+  controller.app.settingsInitialAnchor = null;
 
   let selectedTranscriptionLabel = $derived(
     formatSelectedTranscriptionLabel(

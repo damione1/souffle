@@ -189,7 +189,7 @@ function createTranscriptionControllerInstance() {
   }
 
   function modelRequiredBanner(message: string) {
-    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ tab: "transcription" }) });
+    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ anchor: "transcription.model" }) });
   }
 
   // Incremented for every session start (and on abort) so segment-channel

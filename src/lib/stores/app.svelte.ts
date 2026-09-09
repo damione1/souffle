@@ -1,3 +1,4 @@
+import type { SettingsAnchor } from "../features/settings/anchors";
 import type {
   AppSettings,
   AppStateMachine,
@@ -15,7 +16,7 @@ let settingsOpen = $state(false);
 
 // Tab to land on the next time settings opens (e.g. a "set up calendar" CTA
 // deep-linking into the meetings tab). Consumed once by SettingsView.
-let settingsInitialTab = $state<string | null>(null);
+let settingsInitialAnchor = $state<SettingsAnchor | null>(null);
 
 // Permissions repair panel, mounted once in App so banners can open it
 // without going through Settings → System → Review (SOU-089).
@@ -219,8 +220,8 @@ export function getAppState() {
     get settingsOpen() { return settingsOpen; },
     set settingsOpen(v: boolean) { settingsOpen = v; },
 
-    get settingsInitialTab() { return settingsInitialTab; },
-    set settingsInitialTab(v: string | null) { settingsInitialTab = v; },
+    get settingsInitialAnchor() { return settingsInitialAnchor; },
+    set settingsInitialAnchor(v: SettingsAnchor | null) { settingsInitialAnchor = v; },
 
     get permissionsPanelOpen() { return permissionsPanelOpen; },
     set permissionsPanelOpen(v: boolean) { permissionsPanelOpen = v; },

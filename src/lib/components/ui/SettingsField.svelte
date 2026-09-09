@@ -7,7 +7,9 @@
     htmlFor,
     disabled = false,
     control,
+    anchor,
   }: {
+    anchor?: string;
     label: string;
     description?: string;
     htmlFor?: string;
@@ -16,7 +18,7 @@
   } = $props();
 </script>
 
-<div class="flex items-center justify-between gap-4" class:opacity-50={disabled}>
+<div id={anchor} class="flex items-center justify-between gap-4 transition-colors duration-700" class:opacity-50={disabled}>
   <div class="flex min-w-0 flex-1 flex-col gap-0.5">
     {#if htmlFor}
       <label for={htmlFor} class="setting-label">{label}</label>

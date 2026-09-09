@@ -6,12 +6,12 @@ describe("openSettings", () => {
   it("opens settings on the requested tab", () => {
     const app = getAppState();
     app.settingsOpen = false;
-    app.settingsInitialTab = null;
+    app.settingsInitialAnchor = null;
 
-    openSettings({ tab: "transcription" });
+    openSettings({ anchor: "transcription.model" });
 
     expect(app.settingsOpen).toBe(true);
-    expect(app.settingsInitialTab).toBe("transcription");
+    expect(app.settingsInitialAnchor).toBe("transcription.model");
   });
 
   it("opens the permissions repair panel without requiring a settings tab", () => {

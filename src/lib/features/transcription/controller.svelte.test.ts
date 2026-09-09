@@ -192,7 +192,7 @@ describe("transcription controller", () => {
     app.selectedDevice = "";
     app.settings = { ...mockSettings };
     app.settingsOpen = false;
-    app.settingsInitialTab = null;
+    app.settingsInitialAnchor = null;
     app.permissionsPanelOpen = false;
 
     Object.assign(navigator, {
@@ -773,7 +773,7 @@ describe("transcription controller", () => {
     expect(ctrl.statusActionLabel).toBe("Open model");
     ctrl.statusAction?.();
     expect(ctrl.app.settingsOpen).toBe(true);
-    expect(ctrl.app.settingsInitialTab).toBe("transcription");
+    expect(ctrl.app.settingsInitialAnchor).toBe("transcription.model");
   });
 
   it("toggleRecording guards double start", async () => {
