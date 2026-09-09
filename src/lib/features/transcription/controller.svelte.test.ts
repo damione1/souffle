@@ -137,6 +137,8 @@ describe("transcription controller", () => {
         return Promise.resolve(null);
       case "delete_dictation_entry":
         return Promise.resolve(null);
+      case "list_snippets":
+        return Promise.resolve([]);
       case "clear_dictation_history":
         return Promise.resolve(null);
       case "paste_text":
@@ -1651,5 +1653,39 @@ describe("transcription controller", () => {
 
     expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
     expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+  });
+
+  it("applies snippet exactly matching the start of dictation", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "list_snippets") {
+        return Promise.resolve([{ id: 1, trigger: "signature mail", expansion: "Cordialement, Damien", created_at: "" }]);
+      }
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    
+    // Test that 'signature mail' triggers the expansion, skipping polish
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({ text: "Signature mail, et à bientôt.", is_final: true });
+    
+    await ctrl.toggleRecording();
+    
+    // Polish shouldn't be called because snippets match
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+    // Should be saved with the expansion
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("update_dictation_entry", expect.objectContaining({
+        text: "Cordialement, Damien, et à bientôt."
+      }));
+    });
   });
 });

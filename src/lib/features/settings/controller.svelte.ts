@@ -21,6 +21,12 @@ import {
   updateDictionaryEntry as apiUpdateDictionaryEntry,
   deleteDictionaryEntry as apiDeleteDictionaryEntry,
 } from "../../api/dictionary";
+import {
+  listSnippets,
+  addSnippet as apiAddSnippet,
+  updateSnippet as apiUpdateSnippet,
+  deleteSnippet as apiDeleteSnippet,
+} from "../../api/snippets";
 import { listCalendars } from "../../api/calendar";
 import { requestPermission } from "../../api/permissions";
 import { setLocale, tr } from "../../i18n";
@@ -38,6 +44,7 @@ import type {
   ShortcutSettings,
   Theme,
   TranscriptionCatalog,
+  SnippetEntry,
 } from "../../types";
 import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "../../utils";
 import {
@@ -95,6 +102,7 @@ export function createSettingsController() {
   let shortcutError = $state("");
 
   let dictionaryEntries = $state<DictionaryEntry[]>([]);
+  let snippetEntries = $state<SnippetEntry[]>([]);
 
   let calendars = $state<CalendarInfo[]>([]);
   let calendarPermission = $state<PermState>("unknown");
@@ -115,6 +123,7 @@ export function createSettingsController() {
       refreshSummaryProviders(),
       loadCatalog(),
       loadDictionary(),
+      loadSnippets(),
       loadCalendars(),
     ]);
     await refreshRuntimeStatus();
@@ -901,6 +910,31 @@ export function createSettingsController() {
     );
   }
 
+  async function loadSnippets() {
+    try {
+      snippetEntries = await listSnippets();
+    } catch (e) {
+      console.warn("Failed to load snippets:", e);
+    }
+  }
+
+  async function handleAddSnippet(trigger: string, expansion: string) {
+    const entry = await apiAddSnippet(trigger, expansion);
+    snippetEntries = [...snippetEntries, entry].sort((a, b) => a.trigger.localeCompare(b.trigger));
+  }
+
+  async function handleDeleteSnippet(id: number) {
+    await apiDeleteSnippet(id);
+    snippetEntries = snippetEntries.filter((e) => e.id !== id);
+  }
+
+  async function handleUpdateSnippet(id: number, trigger: string, expansion: string) {
+    await apiUpdateSnippet(id, trigger, expansion);
+    snippetEntries = snippetEntries.map((entry) =>
+      entry.id === id ? { ...entry, trigger, expansion } : entry,
+    );
+  }
+
   function formatShortcut(shortcut: string): string {
     return formatShortcutLabel(shortcut) || "Not set";
   }
@@ -1083,6 +1117,10 @@ export function createSettingsController() {
     handleAddDictionaryEntry,
     handleDeleteDictionaryEntry,
     handleUpdateDictionaryEntry,
+    get snippetEntries() { return snippetEntries; },
+    handleAddSnippet,
+    handleDeleteSnippet,
+    handleUpdateSnippet,
     startRecording,
     handleKeyDown,
     handleKeyUp,

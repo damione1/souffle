@@ -6,6 +6,7 @@
   import CalendarSettingsSection from "../features/settings/components/CalendarSettingsSection.svelte";
   import DataSettingsSection from "../features/settings/components/DataSettingsSection.svelte";
   import DictionarySettingsSection from "../features/settings/components/DictionarySettingsSection.svelte";
+  import SnippetsSettingsSection from "../features/settings/components/SnippetsSettingsSection.svelte";
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
@@ -156,6 +157,13 @@
         onAdd={controller.handleAddDictionaryEntry}
         onDelete={controller.handleDeleteDictionaryEntry}
         onUpdate={controller.handleUpdateDictionaryEntry}
+      />
+
+      <SnippetsSettingsSection
+        entries={controller.snippetEntries}
+        onAdd={controller.handleAddSnippet}
+        onDelete={controller.handleDeleteSnippet}
+        onUpdate={controller.handleUpdateSnippet}
       />
     {:else if activeTab === "ai"}
       <IntelligenceSettingsSection

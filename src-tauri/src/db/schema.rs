@@ -6,7 +6,7 @@ use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_p
 
 /// Schema version 13: `speaker_embeddings` table for multi-embedding speaker
 /// matching, replacing the single running-mean centroid on `speakers`.
-pub const SCHEMA_VERSION: i64 = 14;
+pub const SCHEMA_VERSION: i64 = 15;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -120,6 +120,8 @@ pub const CREATE_DICTIONARY: &str = "
         UNIQUE(term)
     );
 ";
+
+pub const CREATE_SNIPPETS: &str = "\n    CREATE TABLE IF NOT EXISTS snippets (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        trigger TEXT NOT NULL COLLATE NOCASE,\n        expansion TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        UNIQUE(trigger)\n    );\n";
 
 /// Leftover unused table from the dropped persistent-speaker feature.
 /// The v12/v13 migrations that created it stay in the chain so existing
@@ -491,6 +493,8 @@ pub fn migrate_model_unload_default_to_v14(conn: &Connection) -> Result<(), Stri
     Ok(())
 }
 
+pub fn migrate_snippets_to_v15(conn: &Connection) -> Result<(), String> { conn.execute_batch(CREATE_SNIPPETS).map_err(|e| format!("Create snippets table: {e}"))?; Ok(()) }
+
 pub fn migrate_speaker_embeddings_to_v13(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "DELETE FROM speakers WHERE id NOT IN (
@@ -739,6 +743,32 @@ mod tests {
         assert!(
             columns.iter().any(|column| column == "structured_summary"),
             "v11 migration should add structured_summary column"
+        );
+    }
+
+    #[test]
+    fn v14_migrate_to_v15_adds_snippets_table() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (14)", [])
+            .unwrap();
+        drop(conn);
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='snippets'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            table_exists,
+            "v15 migration should add snippets table"
         );
     }
 
