@@ -236,8 +236,11 @@ fn record_system_audio_wav(_seconds: u32) -> Result<String, String> {
     Err("System audio capture is only supported on macOS".into())
 }
 
+/// Last system-audio leg status of the current meeting, for a webview that
+/// reloaded after the `SystemAudioStatus` event already fired (SOU-073).
+/// `None` outside a meeting session or before the tap was first attempted.
 #[tauri::command]
 #[specta::specta]
-pub fn get_system_audio_status() -> Option<(bool, Option<String>)> {
-    crate::audio::capture::get_system_audio_status()
+pub fn get_system_audio_status() -> Option<crate::app_events::SystemAudioStatus> {
+    crate::audio::capture::system_audio_status()
 }

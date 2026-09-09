@@ -1,8 +1,12 @@
-import { getSettings, saveSettings, selectAudioDevice } from "./api/settings";
+import {
+  getSettings,
+  getSystemAudioStatus,
+  saveSettings,
+  selectAudioDevice,
+} from "./api/settings";
 import { getAppVersion } from "./api/diagnostics";
-import { getMachineState, pillRelease } from "./api/transcription";
-import { commands } from "./api/generated";
-import { runStartupModelFlow } from "./features/transcription/runtime";
+import { getDownloadProgress, getMachineState, pillRelease } from "./api/transcription";
+import { applyDownloadProgress, runStartupModelFlow } from "./features/transcription/runtime";
 import { readSetupFlags } from "./features/onboarding/setup";
 import { setLocale } from "./i18n";
 import { getAppState } from "./stores/app.svelte";
@@ -27,17 +31,7 @@ export async function bootstrapAppState(
     // Backend not ready yet — StateChanged events will sync us.
   }
 
-  if (app.machineState?.state !== "recording_dictation" && app.machineState?.state !== "recording_meeting") {
-    pillRelease().catch(() => {});
-  }
-  if (app.machineState?.state === "recording_meeting") {
-    commands.getSystemAudioStatus().then((res) => {
-      if (res) {
-        const [active, reason] = res;
-        app.systemAudioStatus = { active, reason };
-      }
-    });
-  }
+  await resyncAfterReload(app);
 
   const settings = await getSettings();
   app.settings = settings;
@@ -91,6 +85,43 @@ export async function bootstrapAppState(
       releaseNotes: whatsNewFallback(currentVersion),
     },
   };
+}
+
+/** The truths a webview reload loses with the page while the backend keeps
+ * running (SOU-073): the pill HOLD whose release call lived in the destroyed
+ * dictation controller, the download gauge whose Channel died, and the
+ * system-audio badge whose event already fired. Each is a read, never a
+ * rebuild, and each failure is swallowed like the machine sync above. */
+async function resyncAfterReload(app: ReturnType<typeof getAppState>): Promise<void> {
+  const state = app.machineState.state;
+
+  // A hold left by an interrupted polish has nobody left to release it, and
+  // `pill::sync` only drops it on the next idle → recording edge. Never
+  // release during a session: that would hide a live meeting's pill.
+  if (state !== "recording_dictation" && state !== "recording_meeting") {
+    try {
+      await pillRelease();
+    } catch {
+      // Nothing held, or backend not ready: the pill is not showing anyway.
+    }
+  }
+
+  if (state === "downloading") {
+    try {
+      const progress = await getDownloadProgress();
+      if (progress) applyDownloadProgress(app, progress);
+    } catch {
+      // Gauge stays at zero; the download itself is unaffected.
+    }
+  }
+
+  if (state === "recording_meeting") {
+    try {
+      app.systemAudioStatus = await getSystemAudioStatus();
+    } catch {
+      // Badge stays hidden until the next tap rebuild emits.
+    }
+  }
 }
 
 export function whatsNewFallback(version: string): string {

@@ -61,13 +61,13 @@ describe("decideShowSetupWizard", () => {
       decideShowSetupWizard("download_required", {
         permissionsDone: false,
         setupDone: false,
-      }),
+      }, "idle"),
     ).toBe(true);
   });
 
   it("keeps showing after the model is ready until the wizard is finished", () => {
     expect(
-      decideShowSetupWizard("ready", { permissionsDone: false, setupDone: false }),
+      decideShowSetupWizard("ready", { permissionsDone: false, setupDone: false }, "ready"),
     ).toBe(true);
   });
 
@@ -76,13 +76,13 @@ describe("decideShowSetupWizard", () => {
       decideShowSetupWizard("download_required", {
         permissionsDone: true,
         setupDone: false,
-      }),
+      }, "idle"),
     ).toBe(true);
   });
 
   it("hides for migrated existing users", () => {
     expect(
-      decideShowSetupWizard("ready", { permissionsDone: true, setupDone: true }),
+      decideShowSetupWizard("ready", { permissionsDone: true, setupDone: true }, "ready"),
     ).toBe(false);
   });
 
@@ -91,7 +91,26 @@ describe("decideShowSetupWizard", () => {
       decideShowSetupWizard("download_required", {
         permissionsDone: true,
         setupDone: true,
-      }),
+      }, "idle"),
+    ).toBe(true);
+  });
+
+  it("stays closed on a webview reload while the backend is still downloading (SOU-073)", () => {
+    // Files on disk are incomplete, so the phase reads "download_required",
+    // but the machine is mid-download: reopening would stack the wizard over
+    // a download that is about to finish.
+    expect(
+      decideShowSetupWizard("download_required", {
+        permissionsDone: true,
+        setupDone: true,
+      }, "downloading"),
+    ).toBe(false);
+    // A first run is different: the wizard is what is running the download.
+    expect(
+      decideShowSetupWizard("download_required", {
+        permissionsDone: true,
+        setupDone: false,
+      }, "downloading"),
     ).toBe(true);
   });
 });

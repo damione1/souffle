@@ -39,10 +39,20 @@ async downloadModel(selection: TranscriptionProfileSelection, channel: TAURI_CHA
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Snapshot of the in-flight model download, for a webview that reloaded
+ * while the machine was `Downloading` and lost its progress Channel.
+ * `None` until the first download of the process starts.
+ */
 async getDownloadProgress() : Promise<DownloadProgress | null> {
     return await TAURI_INVOKE("get_download_progress");
 },
-async getSystemAudioStatus() : Promise<[boolean, string | null] | null> {
+/**
+ * Last system-audio leg status of the current meeting, for a webview that
+ * reloaded after the `SystemAudioStatus` event already fired (SOU-073).
+ * `None` outside a meeting session or before the tap was first attempted.
+ */
+async getSystemAudioStatus() : Promise<SystemAudioStatus | null> {
     return await TAURI_INVOKE("get_system_audio_status");
 },
 /**

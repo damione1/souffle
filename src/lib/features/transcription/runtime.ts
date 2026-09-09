@@ -6,6 +6,7 @@ import {
   loadModel,
 } from "../../api/transcription";
 import type {
+  AppStateMachine,
   DownloadProgress,
   TranscriptionCatalog,
   TranscriptionRuntimePhase,
@@ -60,6 +61,23 @@ export async function refreshTranscriptionRuntimeStatus(
   return status.phase;
 }
 
+/** Whether a download's progress Channel is alive in this webview. A reload
+ * drops it with the page, and the download thread then finishes into a dead
+ * callback: no autoLoad, no counter reset (SOU-073). */
+let downloadChannelLive = false;
+
+/** Mirror one progress report into the download counters. Shared by the live
+ * Channel callback and by the bootstrap resync after a webview reload. */
+export function applyDownloadProgress(app: AppState, progress: DownloadProgress): void {
+  app.downloadFile = progress.file;
+  app.downloadCompletedFiles = progress.completed_files;
+  app.downloadTotalFiles = progress.total_files;
+  app.downloadedBytes = progress.downloaded_bytes;
+  if (progress.total_bytes !== null) {
+    app.downloadTotalBytes = progress.total_bytes;
+  }
+}
+
 export async function startTranscriptionModelDownload(
   app: AppState,
   catalog: TranscriptionCatalog | null,
@@ -75,24 +93,21 @@ export async function startTranscriptionModelDownload(
   app.downloadTotalBytes = null;
   setStatusMessage("");
 
+  downloadChannelLive = true;
   try {
     await downloadModel(
       currentTranscriptionSelection(app, catalog),
       (progress: DownloadProgress) => {
-        app.downloadFile = progress.file;
-        app.downloadCompletedFiles = progress.completed_files;
-        app.downloadTotalFiles = progress.total_files;
-        app.downloadedBytes = progress.downloaded_bytes;
-        if (progress.total_bytes !== null) {
-          app.downloadTotalBytes = progress.total_bytes;
-        }
+        applyDownloadProgress(app, progress);
 
         if (typeof progress.status === "object" && "error" in progress.status) {
+          downloadChannelLive = false;
           setStatusMessage(`Download error: ${progress.status.error}`);
           return;
         }
 
         if (progress.status === "complete" && progress.file === "all") {
+          downloadChannelLive = false;
           app.downloadFile = "";
           app.downloadedBytes = 0;
           app.downloadTotalBytes = null;
@@ -114,8 +129,50 @@ export async function startTranscriptionModelDownload(
       },
     );
   } catch (error) {
+    downloadChannelLive = false;
     setStatusMessage(errorMessage(error));
   }
+}
+
+/** Whether a `StateChanged` marks a download finishing into a dead Channel.
+ * Only the downloading → downloaded edge counts: an idle-timeout unload also
+ * lands on `downloaded` (via `unloading`) and must not reload what it just
+ * freed, and a repeated event has no edge to fire on. */
+export function shouldLoadAfterOrphanedDownload(
+  previous: AppStateMachine["state"],
+  next: AppStateMachine["state"],
+  phase: TranscriptionRuntimePhase,
+  channelLive: boolean,
+): boolean {
+  return (
+    previous === "downloading"
+    && next === "downloaded"
+    && phase === "load_required"
+    && !channelLive
+  );
+}
+
+/** Safety net for the autoLoad a webview reload lost with its progress
+ * Channel (SOU-073). Called from the global StateChanged listener with the
+ * machine state before and after the event. Loads at most once per
+ * download; if `runStartupModelFlow` raced it, `load_model` reuses the
+ * engine already loaded and the silent status callback shows no error. */
+export function loadAfterOrphanedDownload(
+  app: AppState,
+  previous: AppStateMachine,
+  next: AppStateMachine,
+): void {
+  if (
+    !shouldLoadAfterOrphanedDownload(
+      previous.state,
+      next.state,
+      app.transcriptionRuntimePhase,
+      downloadChannelLive,
+    )
+  ) {
+    return;
+  }
+  void startTranscriptionModelLoad(app, null, () => {});
 }
 
 /// What to do with the selected model when the app starts.
@@ -137,7 +194,11 @@ function applySetupWizardVisibility(app: AppState): void {
   if (shouldMigrateSetupComplete(app.transcriptionRuntimePhase, flags)) {
     markSetupComplete();
   }
-  app.showOnboarding = decideShowSetupWizard(app.transcriptionRuntimePhase, readSetupFlags());
+  app.showOnboarding = decideShowSetupWizard(
+    app.transcriptionRuntimePhase,
+    readSetupFlags(),
+    app.machineState.state,
+  );
 }
 
 /** Startup flow: auto-load the last-selected model, or surface onboarding

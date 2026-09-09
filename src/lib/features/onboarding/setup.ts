@@ -1,5 +1,4 @@
-import { getAppState } from "../../stores/app.svelte";
-import type { TranscriptionRuntimePhase } from "../../types";
+import type { AppStateMachine, TranscriptionRuntimePhase } from "../../types";
 
 export const PERMISSIONS_STORAGE_KEY = "permissionsOnboarded";
 export const SETUP_STORAGE_KEY = "setupOnboarded";
@@ -56,10 +55,14 @@ export function shouldMigrateSetupComplete(
 export function decideShowSetupWizard(
   phase: TranscriptionRuntimePhase,
   flags: SetupFlags,
+  machineState: AppStateMachine["state"],
 ): boolean {
-  const app = getAppState();
   if (flags.setupDone) {
-    return phase === "download_required" && app.machineState?.state !== "downloading";
+    // Model-only recovery after the user deleted the files. Not while the
+    // backend is still downloading: a webview reload mid-download reports
+    // "download_required" too, and must not reopen the wizard over a
+    // download that is about to finish (SOU-073).
+    return phase === "download_required" && machineState !== "downloading";
   }
   if (flags.permissionsDone && phase !== "download_required") return false;
   return true;

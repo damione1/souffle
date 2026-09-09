@@ -16,19 +16,35 @@ use crate::audio::device::AudioInputDevice;
 use crate::audio::priority::{InputPriority, ResolveInputParams, resolve_input};
 use crate::state::AudioCommand;
 
-/// Tell the frontend whether the system-audio leg of a meeting is live.
-pub fn get_system_audio_status() -> Option<(bool, Option<String>)> {
-    SYSTEM_AUDIO_STATUS.lock().unwrap().clone()
-}
-static SYSTEM_AUDIO_STATUS: std::sync::Mutex<Option<(bool, Option<String>)>> = std::sync::Mutex::new(None);
+/// Last `SystemAudioStatus` emitted for the current meeting session. The
+/// event is edge-triggered (only `spawn_tap` emits it), so a webview that
+/// reloads mid-meeting has nothing to listen to until the next leg rebuild;
+/// bootstrap reads this snapshot instead (SOU-073). Cleared in `stop` so a
+/// stale reason can't outlive its session.
+static SYSTEM_AUDIO_STATUS: Mutex<Option<crate::app_events::SystemAudioStatus>> = Mutex::new(None);
 
+/// Snapshot of the system-audio leg for `commands::get_system_audio_status`.
+/// A read, never a rebuild: it does not touch the capture thread.
+pub fn system_audio_status() -> Option<crate::app_events::SystemAudioStatus> {
+    SYSTEM_AUDIO_STATUS
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+fn store_system_audio_status(status: Option<crate::app_events::SystemAudioStatus>) {
+    if let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() {
+        *guard = status;
+    }
+}
 
 /// Tell the frontend whether the system-audio leg of a meeting is live.
 fn emit_system_audio_status(app: Option<&tauri::AppHandle>, active: bool, reason: Option<String>) {
-    *SYSTEM_AUDIO_STATUS.lock().unwrap() = Some((active, reason.clone()));
     use tauri_specta::Event;
+    let status = crate::app_events::SystemAudioStatus { active, reason };
+    store_system_audio_status(Some(status.clone()));
     if let Some(app) = app {
-        let _ = crate::app_events::SystemAudioStatus { active, reason }.emit(app);
+        let _ = status.emit(app);
     }
 }
 
@@ -1997,6 +2013,7 @@ impl AudioCapture {
         // and a Bluetooth headset can leave HFP/mono for A2DP stereo.
         let had_stream = self.release_capture_stream();
 
+        store_system_audio_status(None);
         if let Some(mut meeting) = self.meeting.take() {
             // Tear down the tap first so its ring stops filling; then one
             // final flush drains both rings and all resampler tails.

@@ -454,6 +454,15 @@ fn persist_position(app: &tauri::AppHandle) {
 mod tests {
     use super::*;
 
+    /// `HOLD` is process-global and tests run in parallel: every test that
+    /// touches it takes this guard so they cannot observe each other's hold.
+    fn hold_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static SERIAL: Mutex<()> = Mutex::new(());
+        SERIAL
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn should_show_pill_when_recording_or_held() {
         assert!(should_show_pill(true, false, false));
@@ -479,8 +488,25 @@ mod tests {
         assert!(!should_clear_hold_on_sync(true, false));
         assert!(!should_clear_hold_on_sync(false, false));
 
-        // The bug: HOLD active + Ready + no rising edge = pill stays visible
-        assert!(should_show_pill(false, true, false), "Pill zombie until clear_hold (fixed by bootstrap)");
+        // SOU-073: the webview reloads while dictation polish holds the pill.
+        // The machine is already Ready and stays there, so `sync` sees no
+        // rising edge and never clears the hold: the pill stays up with no
+        // dictation controller left to release it.
+        let _serial = hold_test_guard();
+        set_hold_state(PillHoldKind::Polishing);
+        let cleared_by_sync = should_clear_hold_on_sync(false, false);
+        assert!(!cleared_by_sync);
+        assert!(
+            should_show_pill(false, is_held(), false),
+            "a hold left over from before the reload keeps the pill visible"
+        );
+        // Bootstrap calls `pill_release` when the machine is not recording,
+        // which is what finally hides it.
+        assert!(clear_hold_state());
+        assert!(
+            !should_show_pill(false, is_held(), false),
+            "after the explicit release the pill is hidden"
+        );
     }
 
     #[test]
@@ -530,6 +556,7 @@ mod tests {
 
     #[test]
     fn hold_state_lifecycle_is_failure_safe() {
+        let _serial = hold_test_guard();
         assert!(!is_held(), "starts unheld");
 
         set_hold_state(PillHoldKind::Polishing);
