@@ -21,7 +21,7 @@ import { tr } from "../../i18n";
 import { openPermissionsRepair, openSettings } from "../settings/open";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
-import { listSnippets } from "../../api/snippets";
+import { applySnippet, refreshSnippets } from "./snippets";
 
 const LEARN_FROM_EDIT_DELAY_MS = 4000;
 const MAX_LEARN_FROM_EDIT_PAIRS = 8;
@@ -86,7 +86,7 @@ function countCorrectionPairs(original: string, corrected: string): number {
   return count;
 }
 
-/** Finalize dictation text: invisible-char strip, optional LLM polish, skip-if-blank. */
+/** Finalize dictation text: invisible-char strip, snippet expansion, optional LLM polish, skip-if-blank. */
 async function finalizeDictationText(
   rawText: string,
   focusedApp: string | null,
@@ -97,54 +97,18 @@ async function finalizeDictationText(
     return { text: "" };
   }
 
-  try {
-    const snippets = await listSnippets().catch(() => []);
-    if (snippets.length > 0) {
-      // Sort by length descending to match longest first
-      snippets.sort((a, b) => b.trigger.length - a.trigger.length);
-      
-      const stripAccents = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      const textNormalized = stripAccents(trimmed);
+  const app = getAppState();
 
-      for (const snippet of snippets) {
-        const triggerNormalized = stripAccents(snippet.trigger);
-        if (textNormalized.startsWith(triggerNormalized)) {
-          const nextChar = textNormalized[triggerNormalized.length];
-          // Check word boundary: end of string or not a letter/number
-          if (nextChar === undefined || !/[\p{L}\p{N}]/u.test(nextChar)) {
-            let remainder = trimmed.slice(snippet.trigger.length).trimStart();
-            // Also trim leading punctuation from remainder if we want? The ticket says:
-            // "Dire « signature mail, et à bientôt » colle le bloc puis « et à bientôt »."
-            // So we just trimStart space.
-            let expandedText = snippet.expansion;
-            if (remainder) {
-              // Whisper often puts punctuation attached to the trigger, e.g. "signature mail,". 
-              // Wait, if the trigger is "signature mail", `triggerNormalized` is length 14.
-              // `textNormalized` is "signature mail, et a bientot".
-              // `nextChar` is `,` which is not a letter/number. It matches!
-              // `remainder` is ", et à bientôt".
-              // `expandedText` will be "expansion, et à bientôt". Wait, we probably want to strip the leading punctuation if it was attached to the word?
-              // The ticket says "colle le bloc puis « et à bientôt »". So it should probably be "expansion et à bientôt" or "expansion, et à bientôt".
-              // Concaténation "telle quelle". Let's just do `snippet.expansion + remainder`.
-              // Actually, `remainder` still has the comma. That's fine.
-              if (/^[.,!?:]/.test(remainder)) {
-                // If it starts with punctuation, just append it
-                expandedText += remainder;
-              } else {
-                // Otherwise append with space
-                expandedText += " " + remainder;
-              }
-            }
-            return { text: expandedText };
-          }
-        }
-      }
+  // Voice snippet (SOU-035): a registered trigger at the start of the raw
+  // transcript pastes its expansion as-is and skips the polish. Rewrite mode
+  // dictates an instruction over a selection, not a trigger, so it is exempt.
+  if (!rewriteOf) {
+    const expanded = applySnippet(trimmed, app.snippets);
+    if (expanded !== null) {
+      return { text: expanded };
     }
-  } catch (e) {
-    console.warn("Failed to apply snippets:", e);
   }
 
-  const app = getAppState();
   if (!app.settings.dictation_polish_enabled) {
     return { text: trimmed };
   }
@@ -342,6 +306,7 @@ function createTranscriptionControllerInstance() {
   async function mount() {
     await refreshCatalog();
     await refreshRuntimeStatus();
+    await refreshSnippets();
 
     const unlisten = await Promise.all([
       events.shortcutToggle.listen(() => {

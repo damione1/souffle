@@ -1,10 +1,23 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
 
 use crate::lock_ext::MutexExt;
 
 use super::Database;
+
+/// Case- and accent-insensitive key a trigger is unique on. Mirrors
+/// `foldSnippetTrigger` in `src/lib/features/transcription/snippets.ts` so
+/// the store cannot hold two triggers the matcher would treat as one.
+pub fn fold_trigger(trigger: &str) -> String {
+    trigger
+        .nfd()
+        .filter(|c| !is_combining_mark(*c))
+        .collect::<String>()
+        .to_lowercase()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SnippetEntry {
@@ -35,18 +48,14 @@ impl Database {
         Ok(entries)
     }
 
-    pub fn add_snippet(
-        &self,
-        trigger: &str,
-        expansion: &str,
-    ) -> Result<SnippetEntry, String> {
+    pub fn add_snippet(&self, trigger: &str, expansion: &str) -> Result<SnippetEntry, String> {
         let conn = self.conn.acquire()?;
         let now = chrono::Utc::now().to_rfc3339();
         let trigger = trigger.trim();
 
         conn.execute(
-            "INSERT INTO snippets (trigger, expansion, created_at) VALUES (?1, ?2, ?3)",
-            params![trigger, expansion, now],
+            "INSERT INTO snippets (trigger, trigger_key, expansion, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![trigger, fold_trigger(trigger), expansion, now],
         )
         .map_err(|e| format!("Insert snippet entry: {e}"))?;
 
@@ -59,19 +68,14 @@ impl Database {
         })
     }
 
-    pub fn update_snippet(
-        &self,
-        id: i64,
-        trigger: &str,
-        expansion: &str,
-    ) -> Result<(), String> {
+    pub fn update_snippet(&self, id: i64, trigger: &str, expansion: &str) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         let trigger = trigger.trim();
 
         let updated = conn
             .execute(
-                "UPDATE snippets SET trigger = ?1, expansion = ?2 WHERE id = ?3",
-                params![trigger, expansion, id],
+                "UPDATE snippets SET trigger = ?1, trigger_key = ?2, expansion = ?3 WHERE id = ?4",
+                params![trigger, fold_trigger(trigger), expansion, id],
             )
             .map_err(|e| format!("Update snippet entry: {e}"))?;
 
@@ -96,16 +100,23 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
+    use super::fold_trigger;
     use crate::test_helpers::fixtures::test_db;
+
+    #[test]
+    fn fold_trigger_drops_case_and_accents() {
+        assert_eq!(fold_trigger("Signature Mail"), "signature mail");
+        assert_eq!(fold_trigger("Résumé"), "resume");
+        // Decomposed input folds to the same key as precomposed input.
+        assert_eq!(fold_trigger("re\u{301}sume\u{301}"), fold_trigger("résumé"));
+    }
 
     #[test]
     fn snippets_crud() {
         let (db, _dir) = test_db();
 
         // Add
-        let entry = db
-            .add_snippet("brb", "be right back")
-            .unwrap();
+        let entry = db.add_snippet("brb", "be right back").unwrap();
         assert_eq!(entry.trigger, "brb");
         assert_eq!(entry.expansion, "be right back");
 
@@ -131,5 +142,21 @@ mod tests {
         db.add_snippet("omg", "oh my god").unwrap();
         let result = db.add_snippet("omg", "oh my gosh");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn snippets_unique_trigger_folds_case_and_accents() {
+        let (db, _dir) = test_db();
+        db.add_snippet("café", "Café de la Paix").unwrap();
+        assert!(db.add_snippet("CAFE", "another").is_err());
+        assert!(db.add_snippet("Cafe\u{301}", "another").is_err());
+
+        // Renaming onto an existing folded key is refused the same way.
+        let other = db.add_snippet("bureau", "Bureau 12").unwrap();
+        assert!(db.update_snippet(other.id, "Café", "x").is_err());
+        let entries = db.list_snippets().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].trigger, "bureau");
+        assert_eq!(entries[1].trigger, "café");
     }
 }

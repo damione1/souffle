@@ -771,6 +771,9 @@ async clearDictionary() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Lists all voice snippets from the database.
+ */
 async listSnippets() : Promise<Result<SnippetEntry[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_snippets") };
@@ -779,6 +782,9 @@ async listSnippets() : Promise<Result<SnippetEntry[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Adds a new voice snippet (spoken trigger → pasted expansion).
+ */
 async addSnippet(trigger: string, expansion: string) : Promise<Result<SnippetEntry, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_snippet", { trigger, expansion }) };
@@ -787,6 +793,9 @@ async addSnippet(trigger: string, expansion: string) : Promise<Result<SnippetEnt
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Updates an existing voice snippet's trigger and expansion.
+ */
 async updateSnippet(id: number, trigger: string, expansion: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_snippet", { id, trigger, expansion }) };
@@ -795,6 +804,9 @@ async updateSnippet(id: number, trigger: string, expansion: string) : Promise<Re
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Deletes a specific voice snippet by ID.
+ */
 async deleteSnippet(id: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_snippet", { id }) };

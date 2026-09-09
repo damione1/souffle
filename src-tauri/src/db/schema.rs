@@ -121,7 +121,18 @@ pub const CREATE_DICTIONARY: &str = "
     );
 ";
 
-pub const CREATE_SNIPPETS: &str = "\n    CREATE TABLE IF NOT EXISTS snippets (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        trigger TEXT NOT NULL COLLATE NOCASE,\n        expansion TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        UNIQUE(trigger)\n    );\n";
+/// Voice snippets (SOU-035). `trigger_key` is the case- and accent-folded
+/// form of `trigger` (see `db::snippets::fold_trigger`); uniqueness lives on
+/// it so two triggers the matcher cannot tell apart never coexist.
+pub const CREATE_SNIPPETS: &str = "
+    CREATE TABLE IF NOT EXISTS snippets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger TEXT NOT NULL,
+        trigger_key TEXT NOT NULL UNIQUE,
+        expansion TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+";
 
 /// Leftover unused table from the dropped persistent-speaker feature.
 /// The v12/v13 migrations that created it stay in the chain so existing
@@ -493,7 +504,11 @@ pub fn migrate_model_unload_default_to_v14(conn: &Connection) -> Result<(), Stri
     Ok(())
 }
 
-pub fn migrate_snippets_to_v15(conn: &Connection) -> Result<(), String> { conn.execute_batch(CREATE_SNIPPETS).map_err(|e| format!("Create snippets table: {e}"))?; Ok(()) }
+pub fn migrate_snippets_to_v15(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(CREATE_SNIPPETS)
+        .map_err(|e| format!("Create snippets table: {e}"))?;
+    Ok(())
+}
 
 pub fn migrate_speaker_embeddings_to_v13(conn: &Connection) -> Result<(), String> {
     conn.execute(
@@ -766,9 +781,18 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        assert!(table_exists, "v15 migration should add snippets table");
+
+        let has_trigger_key: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('snippets') WHERE name = 'trigger_key'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert!(
-            table_exists,
-            "v15 migration should add snippets table"
+            has_trigger_key,
+            "v15 snippets table should carry the folded trigger_key column"
         );
     }
 

@@ -22,7 +22,6 @@ import {
   deleteDictionaryEntry as apiDeleteDictionaryEntry,
 } from "../../api/dictionary";
 import {
-  listSnippets,
   addSnippet as apiAddSnippet,
   updateSnippet as apiUpdateSnippet,
   deleteSnippet as apiDeleteSnippet,
@@ -44,7 +43,6 @@ import type {
   ShortcutSettings,
   Theme,
   TranscriptionCatalog,
-  SnippetEntry,
 } from "../../types";
 import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "../../utils";
 import {
@@ -67,6 +65,7 @@ import {
   startTranscriptionModelDownload,
   startTranscriptionModelLoad,
 } from "../transcription/runtime";
+import { refreshSnippets } from "../transcription/snippets";
 
 export function createSettingsController() {
   const app = getAppState();
@@ -102,7 +101,6 @@ export function createSettingsController() {
   let shortcutError = $state("");
 
   let dictionaryEntries = $state<DictionaryEntry[]>([]);
-  let snippetEntries = $state<SnippetEntry[]>([]);
 
   let calendars = $state<CalendarInfo[]>([]);
   let calendarPermission = $state<PermState>("unknown");
@@ -123,7 +121,7 @@ export function createSettingsController() {
       refreshSummaryProviders(),
       loadCatalog(),
       loadDictionary(),
-      loadSnippets(),
+      refreshSnippets(),
       loadCalendars(),
     ]);
     await refreshRuntimeStatus();
@@ -910,29 +908,23 @@ export function createSettingsController() {
     );
   }
 
-  async function loadSnippets() {
-    try {
-      snippetEntries = await listSnippets();
-    } catch (e) {
-      console.warn("Failed to load snippets:", e);
-    }
-  }
-
+  // Snippets live in the app store so dictation finalization reads the same
+  // list this sheet edits, without an IPC call of its own (SOU-035 AC4).
   async function handleAddSnippet(trigger: string, expansion: string) {
     const entry = await apiAddSnippet(trigger, expansion);
-    snippetEntries = [...snippetEntries, entry].sort((a, b) => a.trigger.localeCompare(b.trigger));
+    app.snippets = [...app.snippets, entry].sort((a, b) => a.trigger.localeCompare(b.trigger));
   }
 
   async function handleDeleteSnippet(id: number) {
     await apiDeleteSnippet(id);
-    snippetEntries = snippetEntries.filter((e) => e.id !== id);
+    app.snippets = app.snippets.filter((e) => e.id !== id);
   }
 
   async function handleUpdateSnippet(id: number, trigger: string, expansion: string) {
     await apiUpdateSnippet(id, trigger, expansion);
-    snippetEntries = snippetEntries.map((entry) =>
-      entry.id === id ? { ...entry, trigger, expansion } : entry,
-    );
+    app.snippets = app.snippets
+      .map((entry) => (entry.id === id ? { ...entry, trigger, expansion } : entry))
+      .sort((a, b) => a.trigger.localeCompare(b.trigger));
   }
 
   function formatShortcut(shortcut: string): string {
@@ -1117,7 +1109,7 @@ export function createSettingsController() {
     handleAddDictionaryEntry,
     handleDeleteDictionaryEntry,
     handleUpdateDictionaryEntry,
-    get snippetEntries() { return snippetEntries; },
+    get snippetEntries() { return app.snippets; },
     handleAddSnippet,
     handleDeleteSnippet,
     handleUpdateSnippet,
