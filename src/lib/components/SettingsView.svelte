@@ -22,6 +22,7 @@
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
   import { events } from "../api/generated";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
+  import SettingsField from "./ui/SettingsField.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
 
   const TABS: { id: SettingsTab; labelKey: string }[] = [
@@ -315,6 +316,26 @@
         retention={controller.app.settings.meeting_audio_retention}
         onRetentionChange={controller.onMeetingAudioRetentionChange}
       />
+
+      <section class="settings-group">
+        <h3>{$t("settings_advanced.audio_processing")}</h3>
+        <div class="settings-rows">
+          <SettingsField
+            label={$t("settings_advanced.echo_cancellation")}
+            description={$t("settings_advanced.echo_cancellation_desc")}
+          >
+            {#snippet control()}
+              <input
+                type="checkbox"
+                checked={controller.app.settings.echo_cancellation_enabled}
+                onchange={controller.onEchoCancellationChange}
+                class="switch"
+                aria-label={$t("settings_advanced.echo_cancellation")}
+              />
+            {/snippet}
+          </SettingsField>
+        </div>
+      </section>
 
       <section class="settings-group">
         <h3>{$t("settings_advanced.model_storage")}</h3>

@@ -354,11 +354,15 @@ impl MeetingMixer {
         // final flush tail, where skipping cancellation is harmless.
         // Always feed the canceller while it exists so a far-end pause
         // does not dump convergence. Apply the output only when the tap
-        // is actually playing — otherwise emit raw mic (SOU-063 lever 2).
+        // is actually playing (SOU-063 lever 2) and sonora reports it has
+        // found the echo path (SOU-113 AC2): an unconverged canceller has
+        // nothing to subtract and suppresses the voice instead, so until
+        // then the raw mic goes out while the instance keeps adapting.
         // Either way the switch is a linear ramp one frame long, not a
         // cut: the cancelled and raw signals can differ by a lot, and a
         // step at the boundary would end up in the recording.
-        let target_mix = if self.tap_has_energy() && !self.aec_retiring {
+        let adapted = self.aec.as_ref().is_some_and(Aec::has_adapted);
+        let target_mix = if self.tap_has_energy() && adapted && !self.aec_retiring {
             1.0
         } else {
             0.0
@@ -496,6 +500,34 @@ mod tests {
         );
     }
 
+    /// A canceller that has not found the echo path must not touch the mic
+    /// even while the tap plays (SOU-113 AC2), the same way a silent tap
+    /// keeps the raw mic; the instance stays fed so it can still converge.
+    #[test]
+    fn unconverged_aec_leaves_the_mic_raw_while_tap_plays() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, MIX_RATE);
+        mixer.set_aec(Some(Aec::new(MIX_RATE)));
+
+        let mut out = Vec::new();
+        for _ in 0..40 {
+            mic.push_slice(&vec![0.5f32; FRAME_SAMPLES]);
+            tap.push_slice(&vec![0.3f32; FRAME_SAMPLES]);
+            out.extend(mixer.tick_split().0);
+        }
+        assert!(mixer.tap_has_energy(), "the tap is playing");
+        assert!(
+            !mixer.aec.as_ref().unwrap().has_adapted(),
+            "DC gives sonora nothing to converge on"
+        );
+        assert_eq!(mixer.aec_mix, 0.0, "the blend must stay on the raw mic");
+        let last = *out.last().unwrap();
+        assert!(
+            (last - 0.5).abs() < 1e-3,
+            "unconverged canceller must not alter the mic, got {last}"
+        );
+        assert!(mixer.aec.is_some(), "the instance must stay alive and fed");
+    }
+
     /// Ceiling on the sample-to-sample step the Me leg may show when the
     /// canceller's output starts or stops being applied (SOU-063 AC3). The
     /// switch in `aec_switch_fades_instead_of_stepping` is ~0.5 between the
@@ -511,7 +543,11 @@ mod tests {
     #[test]
     fn aec_switch_fades_instead_of_stepping() {
         let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, MIX_RATE);
-        mixer.set_aec(Some(Aec::new(MIX_RATE)));
+        // DC signals give sonora no echo path to converge on, so the
+        // adaptation gate is bypassed: this test is about the fade.
+        let mut aec = Aec::new(MIX_RATE);
+        aec.assume_adapted();
+        mixer.set_aec(Some(aec));
 
         // Silent far end first: the instance is fed and runs its start-up
         // transient while the blend still sits on the raw mic.
@@ -831,7 +867,7 @@ mod aec_bench {
     use ringbuf::traits::{Producer, Split};
 
     use super::*;
-    use crate::audio::aec::Aec;
+    use crate::audio::aec::{ADAPTED_ERLE_DB, Aec};
     use crate::audio::resampler::Resampler;
 
     /// Deterministic xorshift64 PRNG so the bench is reproducible without an
@@ -1150,6 +1186,13 @@ mod aec_bench {
         delay_ms: u32,
         duration_s: f32,
         render: Render,
+        /// Sonora configuration to build the `Aec` with; `None` is what
+        /// production runs (`Aec::new`).
+        config: Option<sonora::Config>,
+        /// Keep the mixer's adaptation gate (`Aec::has_adapted`) in front
+        /// of the canceller, i.e. measure the production path. `false`
+        /// bypasses it and measures the canceller itself.
+        apply_gate: bool,
     }
 
     struct BenchResult {
@@ -1250,18 +1293,25 @@ mod aec_bench {
             sample_rate,
             sample_rate,
         );
-        let mut aec = Aec::new(sample_rate);
+        let mut aec = match case.config {
+            Some(config) => Aec::new_with_config(sample_rate, config),
+            None => Aec::new(sample_rate),
+        };
         if let Some(hint) = case.expected_delay_hint_ms {
             aec.set_expected_delay_ms(hint);
+        }
+        if !case.apply_gate {
+            aec.assume_adapted();
         }
         mixer.set_aec(Some(aec));
 
         let mut output = Vec::with_capacity(total_samples);
         // The mixer's raw/cancelled blend at the end of each frame. The
         // mixer holds the raw mic while the tap carries no energy (SOU-063
-        // lever 2), which a speech far end does in every pause, and the
-        // frames where it did must be compared with the raw voice (no lag,
-        // no high-pass filter), not with the fixed chain.
+        // lever 2), which a speech far end does in every pause, and while
+        // sonora has not adapted (SOU-113 AC2, unless `apply_gate` is off);
+        // the frames where it did must be compared with the raw voice (no
+        // lag, no high-pass filter), not with the fixed chain.
         let mut blend = Vec::with_capacity(n_frames);
         for f in 0..n_frames {
             let start = f * FRAME_SAMPLES;
@@ -1461,6 +1511,23 @@ mod aec_bench {
     //   its -3.6dB "aligned" / -9.9dB raw were the high-pass filter's phase
     //   and a mis-measured lag, not the canceller. On the far end it does
     //   adapt on, the realistic double-talk case is still negative.
+    //
+    // SOU-113: `public_config_sweep_diagnostic` runs every setting sonora
+    // exposes (transparent mode, internal rate, HPF on/off/split-band,
+    // capture pre/post gain, pre-amplifier, NS, AGC2) and five delay hints
+    // through the same measurement. On real speech both sides nothing gets
+    // above -6.0dB (hint 0; production -6.5dB); on the synthetic near end
+    // the best is +3.8dB (capture pre-gain 0.5, against +2.2dB) and the
+    // spread across delay hints alone is -0.7 to +2.4dB. HPF off and NS
+    // make both cases 4-5dB worse. The NLP stage that does the damage sits
+    // in `EchoCanceller3Config`, which sonora does not expose. Hence
+    // SOU-063 AC4: the canceller is off by default behind an advanced
+    // setting, and these benches stay, target unchanged, to document the
+    // figure. With the adaptation gate in place (`gated_production_path_
+    // diagnostic`) both double-talk cases hold the raw mic (0.0dB): sonora's
+    // ERLE estimate never reaches `ADAPTED_ERLE_DB` while the near end is
+    // active, so a user who turns the setting on gets echo removed while
+    // listening and the raw mic while talking over someone.
     const DOUBLE_TALK_ERLE_TARGET_DB: f32 = 0.0;
 
     fn double_talk(expected_delay_hint_ms: Option<i32>) -> BenchCase {
@@ -1472,6 +1539,8 @@ mod aec_bench {
             delay_ms: 50,
             duration_s: 8.0,
             render: Render::Speech,
+            config: None,
+            apply_gate: false,
         }
     }
 
@@ -1494,7 +1563,11 @@ mod aec_bench {
 
     /// The one AEC bench in the default test loop (SOU-063 AC2). Echo only,
     /// noise-like far end, 3s: the case AEC3 is built for, run through the
-    /// real mixer integration rather than the `Aec` wrapper alone. ~1s in a
+    /// real mixer integration rather than the `Aec` wrapper alone. The
+    /// adaptation gate is bypassed so the figure is the canceller's; the
+    /// same run then has to have pushed sonora's own ERLE estimate past
+    /// the gate's threshold, or a gate that never opens (a canceller that
+    /// is silently never applied) would pass every other test. ~1s in a
     /// debug build.
     #[test]
     fn broadband_echo_is_cancelled_through_the_mixer() {
@@ -1509,6 +1582,12 @@ mod aec_bench {
             r.compensated_erle_db > BROADBAND_ECHO_ERLE_FLOOR_DB,
             "broadband echo cancellation regressed: got {:.1} dB",
             r.compensated_erle_db
+        );
+        assert!(
+            r.stats.1.is_some_and(|erle| erle >= ADAPTED_ERLE_DB),
+            "sonora's ERLE estimate {:?} dB never crossed the adaptation gate ({ADAPTED_ERLE_DB} dB) \
+             on a converging run: the gate would never apply the canceller",
+            r.stats.1
         );
     }
 
@@ -1725,6 +1804,204 @@ mod aec_bench {
             "echo only, speech render, 50ms hint, 50ms acoustic delay",
             &r,
         );
+    }
+
+    /// Diagnostic (SOU-113 AC2): the same three cases through the production
+    /// path, adaptation gate included, measured against a reference that
+    /// follows the mixer's blend frame by frame. Where the canceller never
+    /// converges the gate holds the raw mic and the figure sits at 0dB
+    /// (nothing removed, nothing damaged); where it converges in the near
+    /// end's pauses the gate opens and the double-talk damage comes
+    /// through. The gate cannot make the figure positive: it only bounds
+    /// it between 0dB and the canceller's own.
+    #[test]
+    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
+    fn gated_production_path_diagnostic() {
+        let r = run_echo_bench(BenchCase {
+            apply_gate: true,
+            ..double_talk(Some(50))
+        });
+        report("gated, double talk, speech render, 50ms hint", &r);
+        let r = run_echo_bench(BenchCase {
+            voice: Voice::Speech,
+            apply_gate: true,
+            ..double_talk(Some(50))
+        });
+        report(
+            "gated, double talk, real speech near and far, 50ms hint",
+            &r,
+        );
+        let r = run_echo_bench(BenchCase {
+            voice_scale: 0.0,
+            apply_gate: true,
+            ..double_talk(Some(50))
+        });
+        report("gated, echo only, speech render, 50ms hint", &r);
+    }
+
+    /// Every setting sonora exposes publicly, as deviations from what
+    /// production runs. `EchoCanceller3Config` (filter lengths, suppressor
+    /// thresholds, the NLP stage) is `pub(crate)` inside sonora and not on
+    /// this list because it cannot be reached. The builder's
+    /// `echo_detector` flag only feeds statistics and is left out too.
+    fn public_config_variants() -> Vec<(&'static str, sonora::Config)> {
+        use sonora::config::{
+            CaptureLevelAdjustment, EchoCanceller, HighPassFilter, MaxProcessingRate,
+            NoiseSuppression, NoiseSuppressionLevel, Pipeline, PreAmplifier, TransparentModeType,
+        };
+        let production = || sonora::Config {
+            pipeline: Pipeline {
+                maximum_internal_processing_rate: MaxProcessingRate::Rate48kHz,
+                ..Pipeline::default()
+            },
+            echo_canceller: Some(EchoCanceller {
+                transparent_mode: TransparentModeType::Hmm,
+                enforce_high_pass_filtering: true,
+            }),
+            noise_suppression: None,
+            gain_controller2: None,
+            ..sonora::Config::default()
+        };
+        let ec = |transparent_mode, enforce_high_pass_filtering| {
+            Some(EchoCanceller {
+                transparent_mode,
+                enforce_high_pass_filtering,
+            })
+        };
+        vec![
+            ("production (48kHz, Hmm, HPF enforced)", production()),
+            (
+                "transparent mode Legacy",
+                sonora::Config {
+                    echo_canceller: ec(TransparentModeType::Legacy, true),
+                    ..production()
+                },
+            ),
+            (
+                "internal rate 32kHz",
+                sonora::Config {
+                    pipeline: Pipeline::default(),
+                    ..production()
+                },
+            ),
+            (
+                "HPF off",
+                sonora::Config {
+                    echo_canceller: ec(TransparentModeType::Hmm, false),
+                    high_pass_filter: None,
+                    ..production()
+                },
+            ),
+            (
+                "HPF on split band only",
+                sonora::Config {
+                    high_pass_filter: Some(HighPassFilter {
+                        apply_in_full_band: false,
+                    }),
+                    ..production()
+                },
+            ),
+            (
+                "capture pre-gain 0.5 (post 2.0)",
+                sonora::Config {
+                    capture_level_adjustment: Some(CaptureLevelAdjustment {
+                        pre_gain_factor: 0.5,
+                        post_gain_factor: 2.0,
+                        analog_mic_gain_emulation: None,
+                    }),
+                    ..production()
+                },
+            ),
+            (
+                "capture pre-gain 2.0 (post 0.5)",
+                sonora::Config {
+                    capture_level_adjustment: Some(CaptureLevelAdjustment {
+                        pre_gain_factor: 2.0,
+                        post_gain_factor: 0.5,
+                        analog_mic_gain_emulation: None,
+                    }),
+                    ..production()
+                },
+            ),
+            (
+                "pre-amplifier 0.5",
+                sonora::Config {
+                    pre_amplifier: Some(PreAmplifier {
+                        fixed_gain_factor: 0.5,
+                    }),
+                    ..production()
+                },
+            ),
+            (
+                "noise suppression Low",
+                sonora::Config {
+                    noise_suppression: Some(NoiseSuppression {
+                        level: NoiseSuppressionLevel::Low,
+                        analyze_linear_aec_output_when_available: true,
+                    }),
+                    ..production()
+                },
+            ),
+            (
+                "AGC2 fixed digital 0dB",
+                sonora::Config {
+                    gain_controller2: Some(sonora::config::GainController2::default()),
+                    ..production()
+                },
+            ),
+        ]
+    }
+
+    /// Diagnostic (SOU-113): every public sonora setting, and every
+    /// `stream_delay_ms` hint, judged by the compensated double-talk figure
+    /// on both double-talk cases plus echo-only as a sanity check. The
+    /// pre-amplifier variant scales the output too, so its figures are
+    /// against a reference at the wrong level and only its sign matters.
+    #[test]
+    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
+    fn public_config_sweep_diagnostic() {
+        println!(
+            "config sweep: compensated ERLE dB (echo-like / other) [sonora erle, delay] for \
+             double talk speech+synthetic | double talk real speech both sides | echo only speech"
+        );
+        let summary = |r: &BenchResult| {
+            format!(
+                "{:+6.1} ({:+5.1}/{:+5.1}) [{:.1}, {:?}]",
+                r.compensated_erle_db,
+                r.residual_echo_like_db,
+                r.residual_other_db,
+                r.stats.1.unwrap_or(f64::NAN),
+                r.stats.0.unwrap_or(-1),
+            )
+        };
+        let run = |label: &str, config: Option<sonora::Config>, hint: Option<i32>| {
+            let a = run_echo_bench(BenchCase {
+                config: config.clone(),
+                ..double_talk(hint)
+            });
+            let b = run_echo_bench(BenchCase {
+                voice: Voice::Speech,
+                config: config.clone(),
+                ..double_talk(hint)
+            });
+            let c = run_echo_bench(BenchCase {
+                voice_scale: 0.0,
+                config,
+                ..double_talk(hint)
+            });
+            println!(
+                "  {label:<40} {} | {} | {}",
+                summary(&a),
+                summary(&b),
+                summary(&c)
+            );
+        };
+        for (label, config) in public_config_variants() {
+            run(label, Some(config), Some(50));
+        }
+        for hint in [None, Some(0), Some(20), Some(80), Some(120)] {
+            run(&format!("production, delay hint {hint:?}"), None, hint);
+        }
     }
 
     /// Diagnostic: voice only, render playing but no acoustic coupling

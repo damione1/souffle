@@ -752,6 +752,13 @@ export function createSettingsController() {
     });
   }
 
+  function onEchoCancellationChange(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    void persistSettings((settings) => {
+      settings.echo_cancellation_enabled = checked;
+    });
+  }
+
   function onModelUnloadTimeoutChange(event: Event) {
     const value = parseInt((event.target as HTMLSelectElement).value, 10);
     if (!Number.isFinite(value)) return;
@@ -1082,6 +1089,7 @@ export function createSettingsController() {
     onRemoveDevice: removeInputDevice,
     onResetDevices: resetInputDevices,
     onAllowBluetoothMicChange,
+    onEchoCancellationChange,
     refreshSummaryProviders,
     downloadRecommendedOllamaModel,
     selectModelOption,

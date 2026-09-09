@@ -341,6 +341,11 @@ pub fn run() {
                             priority: app_settings.input_priority,
                             allow_bluetooth_mic: app_settings.allow_bluetooth_mic,
                         });
+                    let _ = state
+                        .audio_cmd_sender
+                        .send(state::AudioCommand::SetEchoCancellation(
+                            app_settings.echo_cancellation_enabled,
+                        ));
                     // Directory walk over recordings/ can take a moment with
                     // a large history; never block startup on it.
                     let retention = app_settings.meeting_audio_retention;

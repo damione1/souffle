@@ -62,6 +62,11 @@ pub fn save_settings(
             priority: settings.input_priority.clone(),
             allow_bluetooth_mic: settings.allow_bluetooth_mic,
         });
+    let _ = state
+        .audio_cmd_sender
+        .send(crate::state::AudioCommand::SetEchoCancellation(
+            settings.echo_cancellation_enabled,
+        ));
     crate::pill::set_hidden(settings.pill_hidden);
     // A locale change must relabel the tray menu immediately. Hide/show of
     // the recording overlay is applied on the same pass.

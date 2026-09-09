@@ -459,6 +459,9 @@
   "settings_advanced": {
     "title": "Advanced",
     "description": "Audio processing, integrations, and diagnostics. Defaults work well.",
+    "audio_processing": "Audio processing",
+    "echo_cancellation": "Echo cancellation on speakers",
+    "echo_cancellation_desc": "Try to remove the other participants' voices from your microphone when the meeting plays through the built-in speakers. Off by default: with this canceller your own words come out damaged whenever you speak over someone. Turn it on only if the echo bothers you more than that.",
     "model_storage": "Model storage",
     "model_storage_desc": "Remove the downloaded model files from disk.",
     "delete_model": "Delete downloaded model",

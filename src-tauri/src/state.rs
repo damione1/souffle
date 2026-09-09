@@ -51,6 +51,10 @@ pub enum AudioCommand {
         priority: crate::audio::InputPriority,
         allow_bluetooth_mic: bool,
     },
+    /// The advanced echo-cancellation setting. Sent at startup and whenever
+    /// it changes; a live meeting engages or retires the canceller through
+    /// the same faded path as an output-route change (SOU-113).
+    SetEchoCancellation(bool),
     /// Give the audio thread an AppHandle so meeting mode can emit
     /// SystemAudioStatus events.
     AttachApp(AppHandle),

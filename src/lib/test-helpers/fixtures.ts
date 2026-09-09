@@ -200,6 +200,7 @@ export const mockSettings: AppSettings = {
   stutter_collapse: false,
   dictionary_correction: true,
   capture_system_audio: true,
+  echo_cancellation_enabled: false,
   calendar_integration_enabled: false,
   calendar_selected_ids: [],
   calendar_reminder_minutes: 2,

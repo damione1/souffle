@@ -657,27 +657,51 @@ struct MeetingState {
     last_tap_attempt: Instant,
 }
 
+/// Whether a meeting should hold a live echo canceller: the advanced
+/// setting is on (off by default, SOU-063 AC4), there is a system-audio
+/// tap to cancel against, and the HAL route can leak speakers into the
+/// mic. `route_can_leak` is a closure so a disabled setting never pays for
+/// the CoreAudio query. Far-end energy and sonora's convergence are not
+/// inputs here: they decide per frame in the mixer whether the live
+/// instance's output is applied, never whether the instance exists.
+fn aec_should_engage(
+    setting_enabled: bool,
+    tap_present: bool,
+    route_can_leak: impl FnOnce() -> bool,
+) -> bool {
+    setting_enabled && tap_present && route_can_leak()
+}
+
 impl MeetingState {
     /// Engage/disengage echo cancellation when the HAL output route
     /// changes: built-in speakers versus anything else (headphones,
-    /// Bluetooth), and muted versus audible. Far-end silence is not a
-    /// route change — the mixer keeps the instance and bypasses output.
+    /// Bluetooth), and muted versus audible; or when the user flips the
+    /// advanced setting mid-meeting (SOU-113 AC4), which takes the same
+    /// path. Far-end silence is not a route change — the mixer keeps the
+    /// instance and bypasses output.
     #[cfg(target_os = "macos")]
-    fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {
+    fn check_output_route(&mut self, setting_enabled: bool, _app: Option<&tauri::AppHandle>) {
         use super::{aec, mixer, output_route};
 
         // HAL route only (speakers vs headphones / mute / volume). Tap
         // energy must not destroy the instance — a far-end pause would
         // wipe convergence and come back as raw echo (SOU-063). The mixer
         // keeps AEC fed and chooses cancelled vs raw mic per frame.
-        let can_leak = self.tap.is_some() && output_route::output_can_leak_into_mic();
+        let can_leak = aec_should_engage(
+            setting_enabled,
+            self.tap.is_some(),
+            output_route::output_can_leak_into_mic,
+        );
         if can_leak != self.aec_active {
             if can_leak {
-                info!("Speakers audible, echo cancellation engaged");
+                info!("Speakers audible and echo cancellation enabled, engaging it");
                 self.mixer
                     .set_aec(Some(aec::Aec::new_with_default_delay_hint(mixer::MIX_RATE)));
-            } else {
+            } else if setting_enabled {
                 info!("Output muted or off speakers, echo cancellation disengaged");
+                self.mixer.set_aec(None);
+            } else {
+                info!("Echo cancellation turned off in settings, disengaged");
                 self.mixer.set_aec(None);
             }
             self.aec_active = can_leak;
@@ -685,7 +709,31 @@ impl MeetingState {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {}
+    fn check_output_route(&mut self, _setting_enabled: bool, _app: Option<&tauri::AppHandle>) {}
+}
+
+#[cfg(test)]
+mod aec_engagement_tests {
+    use super::aec_should_engage;
+
+    /// The default (setting off) never engages the canceller, whatever the
+    /// route says (SOU-063 AC4), and never even asks the HAL.
+    #[test]
+    fn setting_off_never_engages() {
+        assert!(!aec_should_engage(false, true, || {
+            panic!("route must not be queried when the setting is off")
+        }));
+        assert!(!aec_should_engage(false, false, || true));
+    }
+
+    /// With the setting on, the route gating of SOU-063 AC5 still applies:
+    /// no tap or a non-leaking route means no canceller.
+    #[test]
+    fn setting_on_still_requires_tap_and_leaking_route() {
+        assert!(aec_should_engage(true, true, || true));
+        assert!(!aec_should_engage(true, false, || true));
+        assert!(!aec_should_engage(true, true, || false));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -821,6 +869,11 @@ pub struct AudioCapture {
     input_priority: InputPriority,
     /// When false, skip Bluetooth inputs during automatic device selection.
     allow_bluetooth_mic: bool,
+    /// The advanced echo-cancellation setting (`AppSettings::
+    /// echo_cancellation_enabled`). Off by default (SOU-063 AC4); a
+    /// change mid-meeting engages or retires the canceller through the
+    /// same faded path as an output-route change.
+    echo_cancellation_enabled: bool,
     active_session_id: Arc<AtomicU64>,
     audio_rms: Arc<AtomicU32>,
     /// Shared with the cpal callback so stop() can flush the resampler tail
@@ -908,6 +961,7 @@ impl AudioCapture {
                     clamshell_device: None,
                     input_priority: InputPriority::default(),
                     allow_bluetooth_mic: false,
+                    echo_cancellation_enabled: false,
                     active_session_id: Arc::new(AtomicU64::new(0)),
                     audio_rms,
                     resampler: None,
@@ -1043,6 +1097,15 @@ impl AudioCapture {
                             capture.allow_bluetooth_mic = allow_bluetooth_mic;
                             if capture.refresh_input_route() {
                                 break;
+                            }
+                        }
+                        AudioCommand::SetEchoCancellation(enabled) => {
+                            capture.echo_cancellation_enabled = enabled;
+                            // Apply now rather than at the next 2s route
+                            // check, through the same faded path.
+                            let app = capture.app.clone();
+                            if let Some(meeting) = capture.meeting.as_mut() {
+                                meeting.check_output_route(enabled, app.as_ref());
                             }
                         }
                         AudioCommand::AttachApp(app) => {
@@ -1527,12 +1590,18 @@ impl AudioCapture {
         // system-audio reference signal to cancel against.
         #[cfg(target_os = "macos")]
         let aec_active = {
-            let can_leak = tap.is_some() && super::output_route::output_can_leak_into_mic();
+            let can_leak = aec_should_engage(
+                self.echo_cancellation_enabled,
+                tap.is_some(),
+                super::output_route::output_can_leak_into_mic,
+            );
             if can_leak {
-                info!("Speakers audible, echo cancellation engaged");
+                info!("Speakers audible and echo cancellation enabled, engaging it");
                 mixer.set_aec(Some(super::aec::Aec::new_with_default_delay_hint(
                     super::mixer::MIX_RATE,
                 )));
+            } else if !self.echo_cancellation_enabled && tap.is_some() {
+                info!("Echo cancellation is off in settings (default); mic goes through raw");
             }
             can_leak
         };
@@ -1768,7 +1837,7 @@ impl AudioCapture {
             };
             meeting.ticks += 1;
             if meeting.ticks.is_multiple_of(ROUTE_CHECK_TICKS) {
-                meeting.check_output_route(self.app.as_ref());
+                meeting.check_output_route(self.echo_cancellation_enabled, self.app.as_ref());
             }
             if meeting.diarize {
                 let (me, them) = if tap_clock {

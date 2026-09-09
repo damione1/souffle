@@ -32,6 +32,15 @@ pub const EXPECTED_ACOUSTIC_DELAY_MS: i32 = 50;
 /// letting a pathological, repeatedly-panicking input spin forever.
 const MAX_REARM_ATTEMPTS: u32 = 3;
 
+/// Sonora's running echo-return-loss-enhancement estimate (its own fullband
+/// ERLE, refreshed on every capture call) below which the canceller has not
+/// adapted and its output must not replace the raw mic (SOU-113 AC2).
+/// Measured in the mixer bench: a fresh instance reports 0.2dB, one stuck
+/// in continuous double talk 2-4dB, one converged on a speech or noise far
+/// end 12-33dB. 6dB (echo power quartered) is the line between "has not
+/// found the echo path" and "is removing echo".
+pub const ADAPTED_ERLE_DB: f64 = 6.0;
+
 /// What a panic during a sonora call should do next, given how many times
 /// this session has already rearmed. Pure decision function, kept free of
 /// `Aec`'s state so it can be unit-tested directly (mirrors `decide_mic_loss`
@@ -52,38 +61,47 @@ fn decide_rearm(attempts_so_far: u32) -> RearmDecision {
     }
 }
 
-fn build_apm(sample_rate: u32) -> AudioProcessing {
+/// The sonora configuration every real caller runs. Everything sonora
+/// exposes publicly is here or deliberately left at its default; the
+/// AEC3-internal tuning (`EchoCanceller3Config`, including the NLP stage)
+/// is not reachable through sonora's API.
+///
+/// SOU-063: the chain feeds an ASR, not a phone call, so everything that
+/// is not echo removal is off: NS and AGC2 stay `None`. `EchoCanceller`
+/// has no NLP-level knob — `transparent_mode: Hmm` is a no-echo
+/// classifier swap vs Legacy, not NLP-off; the mixer bench measures no
+/// difference between the two. Residual NLP still runs.
+///
+/// `Pipeline::default()` caps the internal rate at 32kHz, which makes
+/// sonora resample the 48kHz mic and render down and back up around the
+/// canceller. Processing at the mixer rate removes that round trip;
+/// the bench measures +0.9dB echo-only ERLE and no downside.
+///
+/// The high-pass filter stays on (`enforce_high_pass_filtering`). With it
+/// off AEC3's delay estimator lands 140-230ms away from the true path and
+/// echo-only cancellation drops to 0dB. Its cost to the near-end voice is
+/// a phase shift, not attenuation (flat above ~110Hz at 48kHz), and the
+/// mixer bench measures against a reference that has it too.
+fn production_config() -> Config {
+    Config {
+        pipeline: Pipeline {
+            maximum_internal_processing_rate: MaxProcessingRate::Rate48kHz,
+            ..Pipeline::default()
+        },
+        echo_canceller: Some(EchoCanceller {
+            transparent_mode: TransparentModeType::Hmm,
+            enforce_high_pass_filtering: true,
+        }),
+        noise_suppression: None,
+        gain_controller2: None,
+        ..Config::default()
+    }
+}
+
+fn build_apm(sample_rate: u32, config: &Config) -> AudioProcessing {
     let stream = StreamConfig::new(sample_rate, 1);
-    // SOU-063: the chain feeds an ASR, not a phone call, so everything that
-    // is not echo removal is off: NS and AGC2 stay `None`. `EchoCanceller`
-    // has no NLP-level knob — `transparent_mode: Hmm` is a no-echo
-    // classifier swap vs Legacy, not NLP-off; the mixer bench measures no
-    // difference between the two. Residual NLP still runs.
-    //
-    // `Pipeline::default()` caps the internal rate at 32kHz, which makes
-    // sonora resample the 48kHz mic and render down and back up around the
-    // canceller. Processing at the mixer rate removes that round trip;
-    // the bench measures +0.9dB echo-only ERLE and no downside.
-    //
-    // The high-pass filter stays on (`enforce_high_pass_filtering`). It is
-    // the single largest cost to the near-end voice the bench can see
-    // (about 4dB of a 120Hz fundamental, `wideband_voice_passthrough_
-    // diagnostic`), but with it off AEC3's delay estimator lands 140-230ms
-    // away from the true path and echo-only cancellation drops to 0dB.
     AudioProcessing::builder()
-        .config(Config {
-            pipeline: Pipeline {
-                maximum_internal_processing_rate: MaxProcessingRate::Rate48kHz,
-                ..Pipeline::default()
-            },
-            echo_canceller: Some(EchoCanceller {
-                transparent_mode: TransparentModeType::Hmm,
-                enforce_high_pass_filtering: true,
-            }),
-            noise_suppression: None,
-            gain_controller2: None,
-            ..Config::default()
-        })
+        .config(config.clone())
         .capture_config(stream)
         .render_config(stream)
         .build()
@@ -91,6 +109,8 @@ fn build_apm(sample_rate: u32) -> AudioProcessing {
 
 pub struct Aec {
     apm: AudioProcessing,
+    /// What `apm` was built with; a rearm rebuilds the same thing.
+    config: Config,
     sample_rate: u32,
     /// 10ms at the configured sample rate.
     frame_len: usize,
@@ -108,20 +128,63 @@ pub struct Aec {
     /// enhancement, so once it can't recover we stop calling it and let the
     /// mic pass through uncancelled rather than risk taking down the session.
     disabled: bool,
+    /// Test hook: report `has_adapted` regardless of sonora's estimate.
+    #[cfg(test)]
+    adapted_override: bool,
 }
 
 impl Aec {
     pub fn new(sample_rate: u32) -> Self {
+        Self::with_config(sample_rate, production_config())
+    }
+
+    /// Same as `new` with an arbitrary sonora configuration, for the mixer
+    /// bench to sweep sonora's public settings against the same
+    /// measurement production is judged by.
+    #[cfg(test)]
+    pub(crate) fn new_with_config(sample_rate: u32, config: Config) -> Self {
+        Self::with_config(sample_rate, config)
+    }
+
+    fn with_config(sample_rate: u32, config: Config) -> Self {
         let frame_len = sample_rate as usize / 100;
         Self {
-            apm: build_apm(sample_rate),
+            apm: build_apm(sample_rate, &config),
+            config,
             sample_rate,
             frame_len,
             render_out: vec![0.0; frame_len],
             expected_delay_ms: None,
             rearm_count: 0,
             disabled: false,
+            #[cfg(test)]
+            adapted_override: false,
         }
+    }
+
+    /// Whether sonora has converged on the echo path far enough that its
+    /// output beats the raw mic (`ADAPTED_ERLE_DB`). False for a fresh
+    /// instance, for one that lost the path, and for a disabled one; the
+    /// mixer then keeps the raw mic and lets the instance keep adapting.
+    pub fn has_adapted(&self) -> bool {
+        #[cfg(test)]
+        if self.adapted_override {
+            return true;
+        }
+        !self.disabled
+            && self
+                .apm
+                .statistics()
+                .echo_return_loss_enhancement
+                .is_some_and(|erle_db| erle_db >= ADAPTED_ERLE_DB)
+    }
+
+    /// Bypass `has_adapted`, for tests that exercise the applied path on an
+    /// instance with nothing to converge on (DC fixtures) and for benches
+    /// that measure the canceller itself rather than the gate in front of it.
+    #[cfg(test)]
+    pub(crate) fn assume_adapted(&mut self) {
+        self.adapted_override = true;
     }
 
     /// Builds an `Aec` with `EXPECTED_ACOUSTIC_DELAY_MS` applied. What every
@@ -206,7 +269,7 @@ impl Aec {
                      Convergence is lost and will take a few seconds to rebuild.",
                     self.rearm_count
                 );
-                self.apm = build_apm(self.sample_rate);
+                self.apm = build_apm(self.sample_rate, &self.config);
                 self.apply_delay_hint();
             }
             RearmDecision::GiveUp => {
@@ -270,6 +333,28 @@ mod tests {
             leaked_energy_late < leaked_energy_early * 0.2,
             "echo should converge: early={leaked_energy_early}, late={leaked_energy_late}"
         );
+    }
+
+    /// A fresh instance has no echo-path estimate, so the mixer must not
+    /// apply its output; the test hook is what lets DC-fixture tests through.
+    #[test]
+    fn fresh_instance_has_not_adapted() {
+        let mut aec = Aec::new(48_000);
+        assert!(!aec.has_adapted(), "nothing processed yet");
+
+        let silence = vec![0.0f32; aec.frame_len];
+        for _ in 0..50 {
+            aec.process_render(&silence);
+            let mut mic = silence.clone();
+            aec.process_capture(&mut mic);
+        }
+        assert!(
+            !aec.has_adapted(),
+            "silence gives sonora nothing to converge on"
+        );
+
+        aec.assume_adapted();
+        assert!(aec.has_adapted());
     }
 
     #[test]

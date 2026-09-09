@@ -459,6 +459,9 @@
   "settings_advanced": {
     "title": "Avancé",
     "description": "Traitement audio, intégrations et diagnostics. Les valeurs par défaut conviennent.",
+    "audio_processing": "Traitement audio",
+    "echo_cancellation": "Annulation d'écho sur haut-parleurs",
+    "echo_cancellation_desc": "Tenter de retirer la voix des autres participants de votre micro quand la réunion sort par les haut-parleurs internes. Désactivée par défaut : avec cet annuleur, vos propres mots ressortent abîmés dès que vous parlez en même temps que quelqu'un. À n'activer que si l'écho vous gêne plus que cela.",
     "model_storage": "Stockage du modèle",
     "model_storage_desc": "Supprimer les fichiers du modèle téléchargé du disque.",
     "delete_model": "Supprimer le modèle téléchargé",

@@ -1157,6 +1157,14 @@ allow_bluetooth_mic: boolean; transcription_engine_id: string; transcription_mod
  */
 capture_system_audio: boolean; 
 /**
+ * Meeting mode: run sonora's echo canceller on the microphone while
+ * the meeting plays through the built-in speakers. Off by default
+ * (SOU-063 AC4): measured in double talk, the canceller damages the
+ * user's own voice more than it removes echo, and a residual echo is
+ * the better input for transcription. Advanced setting.
+ */
+echo_cancellation_enabled: boolean; 
+/**
  * Calendar integration is opt-in: it reads the user's calendar, so it
  * stays off until explicitly enabled (which triggers the TCC prompt).
  */

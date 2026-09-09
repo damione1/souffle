@@ -29,6 +29,7 @@ const FILLER_REMOVAL_KEY: &str = "filler_removal";
 const STUTTER_COLLAPSE_KEY: &str = "stutter_collapse";
 const DICTIONARY_CORRECTION_KEY: &str = "dictionary_correction";
 const CAPTURE_SYSTEM_AUDIO_KEY: &str = "capture_system_audio";
+const ECHO_CANCELLATION_ENABLED_KEY: &str = "echo_cancellation_enabled";
 const CALENDAR_INTEGRATION_ENABLED_KEY: &str = "calendar_integration_enabled";
 const CALENDAR_SELECTED_IDS_KEY: &str = "calendar_selected_ids";
 const CALENDAR_REMINDER_MINUTES_KEY: &str = "calendar_reminder_minutes";
@@ -170,6 +171,12 @@ pub struct AppSettings {
     /// Meeting mode: capture system audio (other participants) alongside
     /// the microphone via a Core Audio tap.
     pub capture_system_audio: bool,
+    /// Meeting mode: run sonora's echo canceller on the microphone while
+    /// the meeting plays through the built-in speakers. Off by default
+    /// (SOU-063 AC4): measured in double talk, the canceller damages the
+    /// user's own voice more than it removes echo, and a residual echo is
+    /// the better input for transcription. Advanced setting.
+    pub echo_cancellation_enabled: bool,
     /// Calendar integration is opt-in: it reads the user's calendar, so it
     /// stays off until explicitly enabled (which triggers the TCC prompt).
     pub calendar_integration_enabled: bool,
@@ -265,6 +272,7 @@ impl Default for AppSettings {
             stutter_collapse: false,
             dictionary_correction: true,
             capture_system_audio: true,
+            echo_cancellation_enabled: false,
             calendar_integration_enabled: false,
             calendar_selected_ids: Vec::new(),
             calendar_reminder_minutes: 2,
@@ -390,6 +398,11 @@ impl AppSettings {
         if let Some(capture_system_audio) = read_json_setting::<bool>(db, CAPTURE_SYSTEM_AUDIO_KEY)?
         {
             settings.capture_system_audio = capture_system_audio;
+        }
+        if let Some(echo_cancellation_enabled) =
+            read_json_setting::<bool>(db, ECHO_CANCELLATION_ENABLED_KEY)?
+        {
+            settings.echo_cancellation_enabled = echo_cancellation_enabled;
         }
         if let Some(calendar_integration_enabled) =
             read_json_setting::<bool>(db, CALENDAR_INTEGRATION_ENABLED_KEY)?
@@ -828,6 +841,11 @@ impl AppSettings {
         )?;
         write_json_setting(
             db,
+            ECHO_CANCELLATION_ENABLED_KEY,
+            &normalized.echo_cancellation_enabled,
+        )?;
+        write_json_setting(
+            db,
             CALENDAR_INTEGRATION_ENABLED_KEY,
             &normalized.calendar_integration_enabled,
         )?;
@@ -1103,6 +1121,7 @@ mod tests {
             stutter_collapse: false,
             dictionary_correction: true,
             capture_system_audio: true,
+            echo_cancellation_enabled: true,
             calendar_integration_enabled: true,
             calendar_selected_ids: vec!["cal-1".into(), "cal-2".into()],
             calendar_reminder_minutes: 5,
