@@ -1,14 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getSettings, saveSettings, getAppVersion, runStartupModelFlow } = vi.hoisted(() => ({
+const {
+  getSettings,
+  saveSettings,
+  getAppVersion,
+  runStartupModelFlow,
+  getMachineState,
+  pillRelease,
+  getDownloadProgress,
+  getSystemAudioStatus,
+} = vi.hoisted(() => ({
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
   getAppVersion: vi.fn(),
   runStartupModelFlow: vi.fn(),
+  getMachineState: vi.fn<() => Promise<AppStateMachine>>(async () => ({ state: "idle" })),
+  pillRelease: vi.fn<() => Promise<void>>(async () => undefined),
+  getDownloadProgress: vi.fn<() => Promise<DownloadProgress | null>>(async () => null),
+  getSystemAudioStatus: vi.fn<() => Promise<SystemAudioStatus | null>>(async () => null),
 }));
 
 vi.mock("./api/settings", () => ({
   getSettings,
+  getSystemAudioStatus,
   saveSettings,
   selectAudioDevice: vi.fn(),
 }));
@@ -16,9 +30,14 @@ vi.mock("./api/diagnostics", () => ({
   getAppVersion,
 }));
 vi.mock("./api/transcription", () => ({
-  getMachineState: vi.fn().mockResolvedValue({ state: "idle" }),
+  getDownloadProgress,
+  getMachineState,
+  pillRelease,
 }));
-vi.mock("./features/transcription/runtime", () => ({
+// Keep the real `applyDownloadProgress`: the resync test below checks the
+// counters it writes, not that it was called.
+vi.mock("./features/transcription/runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./features/transcription/runtime")>()),
   runStartupModelFlow,
 }));
 vi.mock("./utils/theme", () => ({
@@ -27,8 +46,9 @@ vi.mock("./utils/theme", () => ({
 
 import { LOCAL_BUILD, bootstrapAppState } from "./bootstrap";
 import { getAppState } from "./stores/app.svelte";
-import { mockSettings } from "./test-helpers/fixtures";
+import { mockRuntimeStatus, mockSettings } from "./test-helpers/fixtures";
 import { SETUP_STORAGE_KEY } from "./features/onboarding/setup";
+import type { AppStateMachine, DownloadProgress, SystemAudioStatus } from "./types";
 
 describe("bootstrapAppState what's new", () => {
   const app = getAppState();
@@ -95,5 +115,124 @@ describe("bootstrapAppState what's new", () => {
     expect(saveSettings).not.toHaveBeenCalledWith(
       expect.objectContaining({ last_seen_version: LOCAL_BUILD }),
     );
+  });
+});
+
+// A webview reload (crash of the render process, or ⌘R in dev) while the
+// backend keeps running: the machine enum is synced, and so must be the three
+// stores that used to restart from zero.
+describe("bootstrapAppState webview reload resync (SOU-073)", () => {
+  const app = getAppState();
+  const profile = mockRuntimeStatus.profile;
+  const downloading: AppStateMachine = { state: "downloading", data: { profile } };
+  const meeting: AppStateMachine = {
+    state: "recording_meeting",
+    data: { profile, session_id: 1, meeting_id: "m1" },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    app.settings = { ...mockSettings };
+    app.machineState = { state: "idle" };
+    app.systemAudioStatus = null;
+    app.downloadFile = "";
+    app.downloadCompletedFiles = 0;
+    app.downloadTotalFiles = 0;
+    app.downloadedBytes = 0;
+    app.downloadTotalBytes = null;
+    getSettings.mockResolvedValue({ ...mockSettings });
+    saveSettings.mockResolvedValue(undefined);
+    getAppVersion.mockResolvedValue("0.4.0");
+    runStartupModelFlow.mockResolvedValue(undefined);
+  });
+
+  it("releases a pill hold left over from before the reload when not recording", async () => {
+    // Dictation polish held the pill, then the page died before its
+    // pillRelease: the machine is Ready and `pill::sync` sees no rising edge.
+    getMachineState.mockResolvedValueOnce({ state: "ready", data: { profile } });
+
+    await bootstrapAppState(app);
+
+    expect(pillRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("never releases the pill while a session is recording", async () => {
+    getMachineState.mockResolvedValueOnce(meeting);
+    await bootstrapAppState(app);
+
+    getMachineState.mockResolvedValueOnce({
+      state: "recording_dictation",
+      data: { profile, session_id: 2 },
+    });
+    await bootstrapAppState(app);
+
+    expect(pillRelease).not.toHaveBeenCalled();
+  });
+
+  it("restores the download gauge from the backend snapshot while a download is in flight", async () => {
+    getMachineState.mockResolvedValueOnce(downloading);
+    getDownloadProgress.mockResolvedValueOnce({
+      file: "model.safetensors",
+      downloaded_bytes: 300,
+      total_bytes: 1000,
+      completed_files: 1,
+      total_files: 3,
+      status: "downloading",
+    });
+
+    await bootstrapAppState(app);
+
+    expect(app.downloadFile).toBe("model.safetensors");
+    expect(app.downloadedBytes).toBe(300);
+    expect(app.downloadTotalBytes).toBe(1000);
+    expect(app.downloadCompletedFiles).toBe(1);
+    expect(app.downloadTotalFiles).toBe(3);
+  });
+
+  it("does not read the download snapshot when nothing is downloading", async () => {
+    getMachineState.mockResolvedValueOnce({ state: "ready", data: { profile } });
+
+    await bootstrapAppState(app);
+
+    expect(getDownloadProgress).not.toHaveBeenCalled();
+    expect(app.downloadedBytes).toBe(0);
+  });
+
+  it("restores the system-audio badge for a meeting the previous webview started", async () => {
+    getMachineState.mockResolvedValueOnce(meeting);
+    getSystemAudioStatus.mockResolvedValueOnce({
+      active: false,
+      reason: "Screen Recording permission denied",
+    });
+
+    await bootstrapAppState(app);
+
+    expect(app.systemAudioStatus).toEqual({
+      active: false,
+      reason: "Screen Recording permission denied",
+    });
+  });
+
+  it("leaves the system-audio badge alone outside a meeting", async () => {
+    getMachineState.mockResolvedValueOnce({ state: "ready", data: { profile } });
+
+    await bootstrapAppState(app);
+
+    expect(getSystemAudioStatus).not.toHaveBeenCalled();
+    expect(app.systemAudioStatus).toBeNull();
+  });
+
+  it("keeps booting when a resync read fails", async () => {
+    getMachineState.mockResolvedValueOnce(meeting);
+    getSystemAudioStatus.mockRejectedValueOnce(new Error("backend busy"));
+
+    await expect(bootstrapAppState(app)).resolves.toEqual({ whatsNew: null });
+    expect(runStartupModelFlow).toHaveBeenCalledTimes(1);
+
+    getMachineState.mockResolvedValueOnce({ state: "ready", data: { profile } });
+    pillRelease.mockRejectedValueOnce(new Error("backend busy"));
+
+    await expect(bootstrapAppState(app)).resolves.toEqual({ whatsNew: null });
   });
 });

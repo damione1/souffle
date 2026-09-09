@@ -1,5 +1,10 @@
 import { commands, unwrap } from "./generated";
-import type { AppSettings, AudioInputDevice, ShortcutSettings } from "../types";
+import type {
+  AppSettings,
+  AudioInputDevice,
+  ShortcutSettings,
+  SystemAudioStatus,
+} from "../types";
 
 export async function getSettings(): Promise<AppSettings> {
   return unwrap(commands.getSettings());
@@ -35,6 +40,13 @@ export async function resetInputSampleRate(deviceUid: string): Promise<number> {
 
 export async function getSystemAudioSupport(): Promise<boolean> {
   return commands.getSystemAudioSupport();
+}
+
+/** Last system-audio leg status of the current meeting. The event only fires
+ * when the tap is (re)built, so a webview reloaded mid-meeting reads this
+ * snapshot instead (SOU-073). `null` outside a meeting session. */
+export async function getSystemAudioStatus(): Promise<SystemAudioStatus | null> {
+  return commands.getSystemAudioStatus();
 }
 
 export async function isLaptop(): Promise<boolean> {
