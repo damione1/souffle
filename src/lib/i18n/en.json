@@ -94,6 +94,20 @@
     "learn_from_edit_desc": "When auto-paste is on, remember word-level fixes you make in the target app so later dictations match.",
     "kyutai_space_warning": "⚠️ Multi-word aliases won't match on the fast model (Kyutai) which outputs word by word."
   },
+  "settings_snippets": {
+    "title": "Voice snippets",
+    "description": "Say a trigger phrase at the start of a dictation to paste a block of text in its place. Comparison ignores case and accents; no AI polish runs when a snippet matches.",
+    "trigger": "Trigger",
+    "trigger_placeholder": "e.g. email signature",
+    "expansion": "Expansion",
+    "expansion_placeholder": "The text to paste...",
+    "add_entry": "Add snippet",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "empty": "No snippets yet."
+  },
   "settings_calendar": {
     "title": "Calendar",
     "description": "Connect the macOS Calendar to see today's meetings and start transcriptions from them. Read-only: any account synced in Calendar.app (iCloud, Google, Outlook) works, nothing leaves your Mac.",

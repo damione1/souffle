@@ -79,6 +79,9 @@ whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }
 
 # Phase 4: SQLite unified storage
 rusqlite = { version = "0.33", features = ["bundled-full"] }
+# Accent folding for snippet trigger uniqueness (SOU-035), mirrors the
+# NFD + strip-marks fold the frontend matcher applies.
+unicode-normalization = "0.1"
 
 # Pipeline quality filters + Parakeet (all share the bundled ONNX Runtime
 # dylib via ort load-dynamic — never link onnxruntime statically here, its

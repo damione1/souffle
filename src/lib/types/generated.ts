@@ -788,6 +788,50 @@ async clearDictionary() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Lists all voice snippets from the database.
+ */
+async listSnippets() : Promise<Result<SnippetEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_snippets") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Adds a new voice snippet (spoken trigger → pasted expansion).
+ */
+async addSnippet(trigger: string, expansion: string) : Promise<Result<SnippetEntry, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_snippet", { trigger, expansion }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Updates an existing voice snippet's trigger and expansion.
+ */
+async updateSnippet(id: number, trigger: string, expansion: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_snippet", { id, trigger, expansion }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Deletes a specific voice snippet by ID.
+ */
+async deleteSnippet(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_snippet", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Persist word-level misspelling→term pairs from a post-paste edit.
  */
 async learnFromEdit(original: string, corrected: string) : Promise<Result<number, string>> {
@@ -1585,6 +1629,7 @@ export type ShortcutSettings = { toggle: string; push_to_talk: string;
  */
 rewrite: string }
 export type ShortcutToggle = null
+export type SnippetEntry = { id: number; trigger: string; expansion: string; created_at: string }
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.
