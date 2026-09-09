@@ -12,11 +12,11 @@
 </script>
 
 <section class="settings-group">
-  <h3>{$t("settings_system.startup")}</h3>
+  <h3>{$t("settings_startup.title")}</h3>
   <div class="settings-rows">
     <SettingsField
-      label={$t("settings_system.autostart")}
-      description={$t("settings_system.autostart_desc")}
+      label={$t("settings_startup.autostart")}
+      description={$t("settings_startup.autostart_desc")}
     >
       {#snippet control()}
         <input
@@ -24,7 +24,7 @@
           checked={autostartEnabled}
           onchange={onAutostartChange}
           class="switch"
-          aria-label={$t("settings_system.autostart")}
+          aria-label={$t("settings_startup.autostart")}
         />
       {/snippet}
     </SettingsField>

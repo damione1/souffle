@@ -420,10 +420,6 @@ pub fn run() {
                 });
             }
 
-            if !crate::autostart::is_launched_at_login() {
-                tray::show_main_window(app.handle());
-            }
-
             tray::setup_tray(app.handle())?;
             calendar::scheduler::spawn(app.handle().clone());
             update_check::scheduler::spawn(app.handle().clone());

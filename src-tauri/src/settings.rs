@@ -202,6 +202,9 @@ pub struct AppSettings {
     /// Hard failsafe: stop the meeting after this many minutes regardless of
     /// speech activity.
     pub meeting_max_duration_minutes: u32,
+    /// Launch Soufflé at login (SMAppService login item, SOU-036). The stored
+    /// value is a fallback only: `get_settings` overwrites it with the state
+    /// the system reports, and an absent key means "never asked", not "on".
     pub autostart_enabled: bool,
     /// Opt-in recording of meeting audio to compressed files on disk, and
     /// for how long they're kept. Off by default.
@@ -446,9 +449,7 @@ impl AppSettings {
         {
             settings.meeting_max_duration_minutes = meeting_max_duration_minutes;
         }
-        if let Some(autostart_enabled) =
-            read_json_setting::<bool>(db, AUTOSTART_ENABLED_KEY)?
-        {
+        if let Some(autostart_enabled) = read_json_setting::<bool>(db, AUTOSTART_ENABLED_KEY)? {
             settings.autostart_enabled = autostart_enabled;
         }
         if let Some(meeting_audio_retention) =
@@ -881,11 +882,7 @@ impl AppSettings {
             MEETING_MAX_DURATION_MINUTES_KEY,
             &normalized.meeting_max_duration_minutes,
         )?;
-        write_json_setting(
-            db,
-            AUTOSTART_ENABLED_KEY,
-            &normalized.autostart_enabled,
-        )?;
+        write_json_setting(db, AUTOSTART_ENABLED_KEY, &normalized.autostart_enabled)?;
         write_json_setting(
             db,
             MEETING_AUDIO_RETENTION_KEY,
@@ -1168,6 +1165,45 @@ mod tests {
         assert!(!same_triple.pin_transcription_while_recording(&stored, true));
         assert_eq!(same_triple.theme, Theme::Light);
         assert_eq!(same_triple.transcription_model_id, "stt-1b-en_fr");
+    }
+
+    // SOU-036: an install that never saw the setting has no key at all. That
+    // must load as "off" — the login item is only ever registered after a
+    // deliberate gesture (toggle or fresh-install wizard), never by default.
+    #[test]
+    fn autostart_absent_key_loads_as_disabled() {
+        let (db, _dir) = test_db();
+        assert_eq!(
+            db.get_setting("autostart_enabled").expect("get setting"),
+            None
+        );
+
+        let loaded = AppSettings::load(&db).expect("load settings");
+        assert!(!loaded.autostart_enabled);
+    }
+
+    #[test]
+    fn autostart_explicit_value_round_trips() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            autostart_enabled: true,
+            ..AppSettings::default()
+        };
+        settings.save(&db).expect("save settings");
+        assert!(AppSettings::load(&db).expect("load").autostart_enabled);
+
+        // An explicit `false` is written too, so it stays distinguishable
+        // from the never-written key above.
+        let settings = AppSettings {
+            autostart_enabled: false,
+            ..AppSettings::default()
+        };
+        settings.save(&db).expect("save settings");
+        assert_eq!(
+            db.get_setting("autostart_enabled").expect("get setting"),
+            Some("false".into())
+        );
+        assert!(!AppSettings::load(&db).expect("load").autostart_enabled);
     }
 
     #[test]

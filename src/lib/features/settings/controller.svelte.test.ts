@@ -720,6 +720,41 @@ describe("settings controller", () => {
     expect(ctrl.calendars).toEqual([{ id: "cal-1", title: "Work", source_title: "iCloud" }]);
   });
 
+  it("persists the autostart toggle when the login item registers", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    const target = { checked: true };
+    await ctrl.onAutostartChange({ target } as unknown as Event);
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+      settings: expect.objectContaining({ autostart_enabled: true }),
+    }));
+    expect(target.checked).toBe(true);
+    expect(ctrl.app.settings.autostart_enabled).toBe(true);
+  });
+
+  // SOU-036 AC4: SMAppService refused, so the backend wrote nothing. The
+  // switch must go back where it was and the reason must be shown.
+  it("reverts the autostart toggle and shows the reason when the login item is refused", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "save_settings") {
+        return Promise.reject("Failed to register login item: Operation not permitted");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    const target = { checked: true };
+    await ctrl.onAutostartChange({ target } as unknown as Event);
+
+    expect(target.checked).toBe(false);
+    expect(ctrl.app.settings.autostart_enabled).toBe(false);
+    expect(ctrl.statusMessage).toMatch(/Failed to register login item/);
+  });
+
   it("enabling calendar integration does not persist when permission is denied", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "request_permission") return Promise.resolve("denied");
