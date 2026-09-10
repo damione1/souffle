@@ -113,7 +113,7 @@ mod macos {
         map_status(unsafe { EKEventStore::authorizationStatusForEntityType(EKEntityType::Event) })
     }
 
-    fn open_calendar_settings() {
+    pub fn open_calendar_settings() {
         let _ = std::process::Command::new("open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
             .spawn();
@@ -299,7 +299,7 @@ mod macos {
 }
 
 #[cfg(target_os = "macos")]
-pub use macos::{authorization_state, fetch_todays_events, list_calendars, request_access};
+pub use macos::{authorization_state, fetch_todays_events, list_calendars, open_calendar_settings, request_access};
 
 #[cfg(not(target_os = "macos"))]
 pub fn authorization_state() -> PermState {
@@ -310,6 +310,9 @@ pub fn authorization_state() -> PermState {
 pub fn request_access() -> PermState {
     PermState::Unsupported
 }
+
+#[cfg(not(target_os = "macos"))]
+pub fn open_calendar_settings() {}
 
 #[cfg(not(target_os = "macos"))]
 pub fn list_calendars() -> Result<Vec<CalendarInfo>, String> {

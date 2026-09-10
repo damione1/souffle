@@ -43,3 +43,10 @@ pub async fn list_todays_calendar_events(
         events,
     })
 }
+
+/// Open the macOS System Settings to the Calendars privacy pane.
+#[tauri::command]
+#[specta::specta]
+pub fn open_calendar_settings() {
+    crate::calendar::open_calendar_settings();
+}

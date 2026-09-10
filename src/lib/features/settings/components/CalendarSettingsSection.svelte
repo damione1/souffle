@@ -3,6 +3,7 @@
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { CalendarInfo, PermState } from "../../../types";
+  import { commands } from "../../../api/generated";
 
   let {
     enabled,
@@ -53,7 +54,11 @@
   </SettingsField>
 
   {#if permission === "denied"}
-    <StatusBanner message={$t("settings_calendar.permission_denied")} />
+    <StatusBanner
+      message={$t("settings_calendar.permission_denied")}
+      actionLabel={$t("permissions.open_settings")}
+      onAction={() => commands.openCalendarSettings()}
+    />
   {/if}
 
   {#if enabled && permission === "granted"}

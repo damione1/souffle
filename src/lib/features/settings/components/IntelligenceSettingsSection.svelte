@@ -5,6 +5,8 @@
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { SummaryModelDescriptor, SummaryProviderChoice } from "../../../types";
   import { ollamaModelPickerState } from "../ollama-model-picker";
+  import { openSettings } from "../open";
+  import { commands } from "../../../api/generated";
 
   let {
     ollamaUrl,
@@ -149,6 +151,8 @@
       message={appleIntelligenceHintKey === "settings_intelligence.ai_reason_unknown"
         ? $t(appleIntelligenceHintKey, { values: { code: appleIntelligenceUnavailableReason } })
         : $t(appleIntelligenceHintKey)}
+      actionLabel={appleIntelligenceUnavailableReason === "apple_intelligence_not_enabled" ? $t("permissions.open_settings") : undefined}
+      onAction={appleIntelligenceUnavailableReason === "apple_intelligence_not_enabled" ? () => commands.openAppleIntelligenceSettings() : undefined}
     />
   {/if}
 
@@ -201,9 +205,17 @@
 
   {#if showOllamaSetup}
     {#if ollamaModels.length > 0}
-      <StatusBanner message={$t("settings_intelligence.no_compatible_model")} />
+      <StatusBanner
+        message={$t("settings_intelligence.no_compatible_model")}
+        actionLabel={$t("permissions.open_settings")}
+        onAction={() => openSettings({ anchor: "ai.provider" })}
+      />
     {:else}
-      <StatusBanner message={$t("settings_intelligence.no_model_installed")} />
+      <StatusBanner
+        message={$t("settings_intelligence.no_model_installed")}
+        actionLabel={$t("permissions.open_settings")}
+        onAction={() => openSettings({ anchor: "ai.provider" })}
+      />
     {/if}
     {#if ollamaPullError}
       <StatusBanner variant="danger" message={$t("settings_intelligence.pull_failed", { values: { error: ollamaPullError } })} />

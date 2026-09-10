@@ -11,6 +11,7 @@
   } from "../../api/permissions";
   import type { PermissionStatus, PermState } from "../../types";
   import { errorMessage } from "../../utils";
+  import { openSettings } from "../settings/open";
 
   let { onStatusChange }: { onStatusChange?: (status: PermissionStatus) => void } = $props();
 
@@ -299,6 +300,12 @@
       {:else if row.kind === "microphone" && s === "no_device"}
         <div class="flex items-center gap-3 pl-8">
           <p class="text-xs text-text-muted">{$t("permissions.mic_no_device_hint")}</p>
+          <button
+            class="btn btn-ghost shrink-0 gap-1.5"
+            onclick={() => openSettings({ anchor: "audio.mic" })}
+          >
+            {$t("permissions.open_settings")}
+          </button>
         </div>
       {/if}
     </div>

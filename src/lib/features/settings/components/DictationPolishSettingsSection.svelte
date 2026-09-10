@@ -3,6 +3,7 @@
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { DictationPolishTemplate } from "../../../types";
+  import { openSettings } from "../open";
 
   const builtInLabelKeys: Record<string, string> = {
     clean: "settings_dictation_polish.template_clean",
