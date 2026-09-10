@@ -78,6 +78,11 @@ pub struct MeetingStopRequested;
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct DictationStopRequested;
 
+/// Emitted when Escape is pressed during a cancelable (toggle) dictation.
+/// Discards the take: no polish, no history row, no paste (SOU-117).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DictationCancelRequested;
+
 /// Emitted once a stopped meeting has been fully drained and saved in the
 /// background, so the detail view can refresh from the now-complete record.
 /// `stop_meeting_recording` returns before this work finishes (decoupled stop),

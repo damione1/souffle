@@ -12,6 +12,7 @@ pub mod constants;
 pub mod db;
 pub mod debug;
 pub mod diagnostics;
+pub mod dictation_cancel;
 pub mod engine;
 pub mod errors;
 pub mod export;
@@ -188,6 +189,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::AudioLevel,
             app_events::MeetingStopRequested,
             app_events::DictationStopRequested,
+            app_events::DictationCancelRequested,
             app_events::MeetingFinalized,
             app_events::UpcomingMeeting,
             app_events::TodayCalendarUpdated,

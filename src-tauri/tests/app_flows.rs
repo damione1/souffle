@@ -317,7 +317,7 @@ async fn dictation_round_trip() {
 
     let (collected, channel) = collecting_channel();
 
-    commands::start_transcription(state.clone(), channel)
+    commands::start_transcription(state.clone(), channel, false)
         .await
         .expect("start_transcription");
 

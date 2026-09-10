@@ -499,6 +499,7 @@
   },
   "home": {
     "dictation_too_short": "Tiens un peu plus longtemps",
+    "dictation_discarded": "Dictée abandonnée",
     "dictate": "Dicter",
     "dictate_hint": "Définissez un raccourci",
     "meeting": "Meeting",

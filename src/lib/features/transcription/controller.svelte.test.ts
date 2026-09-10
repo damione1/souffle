@@ -25,7 +25,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(),
 }));
 
-import { createTranscriptionController, notifyDictationStopRequested, resetTranscriptionControllerForTest } from "./controller.svelte";
+import { createTranscriptionController, notifyDictationCancelRequested, notifyDictationStopRequested, resetTranscriptionControllerForTest } from "./controller.svelte";
 import {
   startTranscriptionModelDownload,
   startTranscriptionModelLoad,
@@ -1648,6 +1648,172 @@ describe("transcription controller", () => {
 
     expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
     expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    expect(ctrl.app.machineState.state).toBe("recording_meeting");
+  });
+
+  it("toggle dictation asks the backend to arm Escape cancel (SOU-117)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "start_transcription",
+      expect.objectContaining({ cancelOnEscape: true }),
+    );
+  });
+
+  it("PTT dictation does not arm Escape cancel (SOU-117)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    eventListeners["shortcut-ptt-start"]?.({ payload: null });
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "start_transcription",
+        expect.objectContaining({ cancelOnEscape: false }),
+      );
+    });
+  });
+
+  it("notifyDictationCancelRequested stops without history, polish, or paste (SOU-117)", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, auto_paste: true, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "hello world", is_final: true });
+
+    notifyDictationCancelRequested();
+    await vi.waitFor(() => {
+      expect(ctrl.statusMessage).toBe("Dictation discarded");
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("pill_hold", expect.anything());
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(ctrl.transcript).toBe("");
+  });
+
+  it("a late segment after cancel cannot revive the take (SOU-117)", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "keep me", is_final: true });
+
+    notifyDictationCancelRequested();
+    await vi.waitFor(() => {
+      expect(ctrl.transcript).toBe("");
+    });
+
+    channel.emit({ text: "late word", is_final: true });
+    expect(ctrl.transcript).toBe("");
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+  });
+
+  it("abort during cancel does not persist or polish (SOU-117)", async () => {
+    let releaseStop: (() => void) | undefined;
+    const channel = captureTranscriptionChannel();
+    const innerInvoke = mockInvoke.getMockImplementation()!;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "stop_transcription") {
+        return new Promise<void>((r) => { releaseStop = r; });
+      }
+      return innerInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "do not save me", is_final: true });
+
+    notifyDictationCancelRequested();
+    await vi.waitFor(() => {
+      expect(releaseStop).toBeTypeOf("function");
+    });
+
+    ctrl.handleRecordingAborted();
+    releaseStop!();
+    await vi.waitFor(() => {
+      expect(ctrl.statusMessage).toBe("Dictation discarded");
+    });
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+  });
+
+  it("cancels while start_transcription is still in flight (SOU-117)", async () => {
+    let releaseStart: (() => void) | undefined;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        return new Promise<void>((r) => { releaseStart = r; });
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    const start = ctrl.toggleRecording();
+    await vi.waitFor(() => {
+      expect(releaseStart).toBeTypeOf("function");
+    });
+
+    notifyDictationCancelRequested();
+    releaseStart!();
+    await start;
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+  });
+
+  it("notifyDictationCancelRequested is a no-op while idle (SOU-117)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    notifyDictationCancelRequested();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+  });
+
+  it("notifyDictationCancelRequested is a no-op while a meeting is recording (SOU-117)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+        meeting_id: "meeting-1",
+      },
+    };
+
+    notifyDictationCancelRequested();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
     expect(ctrl.app.machineState.state).toBe("recording_meeting");
   });
 

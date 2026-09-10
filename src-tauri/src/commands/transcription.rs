@@ -490,11 +490,15 @@ fn build_dictation_on_segment(
 ///
 /// `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
 /// blocking wait runs off-thread and the window never freezes.
+///
+/// `cancel_on_escape` arms the transient Escape binding for toggle dictation
+/// (SOU-117). Push-to-talk passes false: releasing the PTT key is its cancel.
 #[tauri::command]
 #[specta::specta]
 pub async fn start_transcription(
     state: State<'_, AppState>,
     channel: Channel<crate::engine::TranscriptionSegment>,
+    cancel_on_escape: bool,
 ) -> Result<(), String> {
     info!("Starting streaming transcription");
 
@@ -540,6 +544,12 @@ pub async fn start_transcription(
     .map_err(|e| format!("Join start task: {e}"))??;
 
     state.apply_transition(StateAction::StartDictation { session_id })?;
+    crate::dictation_cancel::set_wanted(cancel_on_escape);
+    if let Ok(app) = state.app_handle()
+        && let Ok(machine) = state.current_machine_state()
+    {
+        crate::dictation_cancel::sync(&app, &machine);
+    }
 
     if let Ok(settings) = AppSettings::load(&state.db) {
         crate::audio::feedback::play_dictation_feedback(
