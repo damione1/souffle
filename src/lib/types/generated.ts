@@ -1557,6 +1557,13 @@ export type MeetingRecordingSession = { id: string; started_at: string; ended_at
  */
 export type MeetingStopRequested = null
 /**
+ * What the system-audio leg did over a recording. Kept across resumes by
+ * [`worse_system_audio`], so this is the *worst* verdict any of the
+ * meeting's sessions reached, and `samples` / `signal_samples` are the ones
+ * measured during that session, not a total over the meeting (SOU-119).
+ */
+export type MeetingSystemAudio = { active: boolean; reason: string | null; reason_code: SystemAudioReason | null; samples: number; signal_samples: number }
+/**
  * Full meeting transcript stored as JSON
  */
 export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; structured_summary: StructuredSummary | null; edited_transcript: string | null; 
@@ -1573,7 +1580,12 @@ calendar_event_id: string | null;
  * Attendees captured from the calendar event; shown in the UI and fed
  * into the summary prompt.
  */
-participants: MeetingParticipant[] }
+participants: MeetingParticipant[]; 
+/**
+ * What the system-audio leg did over the recording. `None` on meetings
+ * recorded before this was tracked (SOU-119).
+ */
+system_audio: MeetingSystemAudio | null }
 /**
  * How long recorded meeting audio is kept on disk before the startup sweep
  * deletes it. Opt-in: recording itself only happens when this is not `Off`.
@@ -1731,6 +1743,51 @@ apple_intelligence_unavailable_reason: string | null; models: SummaryModelDescri
  */
 export type SummaryTemplate = { id: string; name: string; prompt: string }
 /**
+ * Why the system-audio leg of a meeting is not carrying the other
+ * participants. Machine-readable so the UI can say it in the user's
+ * language instead of showing a raw CoreAudio error (SOU-119).
+ * 
+ * The order of the variants is the order of severity used by
+ * [`worse_system_audio`]: later means "less of a system-audio leg".
+ */
+export type SystemAudioReason = 
+/**
+ * The tap delivered audio all session, and every sample was silence.
+ */
+"silent" | 
+/**
+ * The tap ran without ever delivering a frame: its dispatch queue never
+ * fired, which is not the same as delivering silence.
+ */
+"no_samples" | 
+/**
+ * The tap was lost mid-session and could not be started again.
+ */
+"tap_lost" | 
+/**
+ * The capture session failed to start after the tap was acquired (e.g.
+ * the microphone went away), taking the tap down with it.
+ */
+"start_failed" | 
+/**
+ * The tap probe run before the session started failed (SOU-082).
+ */
+"probe_failed" | 
+/**
+ * Reserved for a verified TCC denial. CreateProcessTap failing is not
+ * that: a wedged coreaudiod returns the same error while permission is
+ * still granted. Do not assign this from an error-string prefix.
+ */
+"permission_denied" | 
+/**
+ * `capture_system_audio` is off in the settings, so no tap was tried.
+ */
+"disabled" | 
+/**
+ * The OS is too old for process taps (macOS < 14.4, or not macOS).
+ */
+"unsupported"
+/**
  * State of the system-audio capture leg of a meeting session, emitted when
  * the session starts and whenever the leg changes (e.g. tap rebuild after
  * an output device switch).
@@ -1739,7 +1796,22 @@ export type SystemAudioStatus = { active: boolean;
 /**
  * Present when inactive because of an error (e.g. permission denied).
  */
-reason: string | null }
+reason: string | null; 
+/**
+ * Why the leg is inactive, when that is known.
+ */
+reason_code: SystemAudioReason | null; 
+/**
+ * Frames the leg has delivered so far this session, silence included.
+ * Zero while `active` is true means the tap's queue never fired.
+ */
+samples: number; 
+/**
+ * Of those, how many carried far-end signal. A tap on the device clock
+ * delivers frames whether or not anything plays, so this, not `samples`,
+ * is what says the other participants were actually heard (SOU-119).
+ */
+signal_samples: number }
 /**
  * The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
  * The frontend calls `peek_sleep_paused_meeting` on receiving this (and again

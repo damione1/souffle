@@ -29,6 +29,7 @@ import { openSettings } from "../settings/open";
 import { type AudioSeekTarget, resolveAudioSeekTarget } from "./audio-map";
 import { createLiveTranscript } from "./live-transcript.svelte";
 import { redistributeSegmentTexts } from "./live-edit";
+import { provisionalSystemAudio } from "./system-audio";
 
 function defaultMeetingTitle(): string {
   return `Meeting ${new Date().toLocaleDateString()}`;
@@ -414,6 +415,9 @@ function createMeetingControllerInstance() {
         notes: null,
         calendar_event_id: calendar?.event_id ?? null,
         participants: calendar?.participants ?? [],
+        // Filled in by the backend when the meeting is saved (SOU-119); the
+        // live badge reads app.systemAudioStatus instead.
+        system_audio: null,
       };
     } catch (e) {
       setBanner({ type: "transient", message: errorMessage(e) });
@@ -475,7 +479,14 @@ function createMeetingControllerInstance() {
       // segments are already on disk from incremental persistence; the
       // `meetingFinalized` event reloads the authoritative version.
       try {
-        meeting = await getMeeting(id);
+        const loaded = await getMeeting(id);
+        // That header row was written while recording, so its system-audio
+        // verdict is still empty; stand in with the live status until the
+        // authoritative save lands, or a degraded meeting loses its notice
+        // for a moment (SOU-119).
+        meeting = loaded.system_audio
+          ? loaded
+          : { ...loaded, system_audio: provisionalSystemAudio(app.systemAudioStatus) };
         syncSelectedModel(meeting.summary_model);
         notesDraft = meeting.notes ?? "";
       } catch {

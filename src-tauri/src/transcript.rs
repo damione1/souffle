@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
+use crate::app_events::MeetingSystemAudio;
 use crate::engine::{
     TranscriptionProfile, TranscriptionSegment, default_transcription_profile,
     resolve_transcription_profile,
@@ -105,6 +106,9 @@ pub struct MeetingTranscript {
     /// Attendees captured from the calendar event; shown in the UI and fed
     /// into the summary prompt.
     pub participants: Vec<MeetingParticipant>,
+    /// What the system-audio leg did over the recording. `None` on meetings
+    /// recorded before this was tracked (SOU-119).
+    pub system_audio: Option<MeetingSystemAudio>,
 }
 
 /// Calendar context passed by the frontend when starting a meeting from a
@@ -148,6 +152,8 @@ struct MeetingTranscriptWire {
     calendar_event_id: Option<String>,
     #[serde(default)]
     participants: Vec<MeetingParticipant>,
+    #[serde(default)]
+    system_audio: Option<MeetingSystemAudio>,
 }
 
 impl<'de> Deserialize<'de> for MeetingTranscript {
@@ -188,6 +194,7 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             notes: wire.notes,
             calendar_event_id: wire.calendar_event_id,
             participants: wire.participants,
+            system_audio: wire.system_audio,
         })
     }
 }
@@ -312,6 +319,7 @@ mod tests {
             notes: None,
             calendar_event_id: None,
             participants: Vec::new(),
+            system_audio: None,
         };
 
         let json = serde_json::to_string(&meeting).unwrap();
@@ -353,6 +361,7 @@ mod tests {
             notes: None,
             calendar_event_id: None,
             participants: Vec::new(),
+            system_audio: None,
         };
 
         let item = MeetingListItem::from(&transcript);

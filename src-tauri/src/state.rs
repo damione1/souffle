@@ -139,6 +139,9 @@ impl MeetingAccumulator {
             notes: self.notes,
             calendar_event_id: self.calendar_event_id,
             participants: self.participants,
+            // Filled in by whoever stops the session: only they can read the
+            // capture snapshot before it is cleared (SOU-119).
+            system_audio: None,
         }
     }
 }
@@ -308,7 +311,12 @@ impl AppState {
     /// the PipelineError event (the pipeline layer owns that event; this is
     /// the app-level cleanup that follows it).
     pub fn abort_active_session(&self, message: String) {
+        // Read the verdict before discarding it. After AudioGone the capture
+        // thread is already gone, so Stop is a no-op and would otherwise
+        // leave this snapshot for the next meeting (SOU-119).
+        let system_audio = crate::audio::capture::session_system_audio();
         let _ = self.audio_cmd_sender.send(AudioCommand::Stop);
+        crate::audio::capture::discard_system_audio_status();
 
         // Salvage an in-progress meeting: stop_meeting_recording can no
         // longer run once the machine is in Error, so the accumulated
@@ -319,7 +327,11 @@ impl AppState {
             .ok()
             .and_then(|mut guard| guard.take());
         if let Some(meeting) = accumulator {
-            let transcript = meeting.into_transcript(chrono::Utc::now());
+            let mut transcript = meeting.into_transcript(chrono::Utc::now());
+            transcript.system_audio = crate::app_events::worse_system_audio(
+                self.db.meeting_system_audio(&transcript.id).unwrap_or(None),
+                system_audio,
+            );
             match self.db.save_meeting(&transcript) {
                 Ok(()) => info!(
                     id = %transcript.id,

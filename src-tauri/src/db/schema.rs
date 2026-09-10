@@ -4,9 +4,9 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 13: `speaker_embeddings` table for multi-embedding speaker
-/// matching, replacing the single running-mean centroid on `speakers`.
-pub const SCHEMA_VERSION: i64 = 15;
+/// Schema version 16: `meetings.system_audio` holds what the system-audio
+/// leg did over the recording, so a mic-only meeting still says why.
+pub const SCHEMA_VERSION: i64 = 16;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -768,6 +768,9 @@ mod tests {
 
         let conn = Connection::open(&db_path).unwrap();
         conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        // Every real v14 database has a meetings table, and later migrations
+        // alter it.
+        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
         conn.execute("INSERT INTO schema_version (version) VALUES (14)", [])
             .unwrap();
         drop(conn);
@@ -793,6 +796,53 @@ mod tests {
         assert!(
             has_trigger_key,
             "v15 snippets table should carry the folded trigger_key column"
+        );
+    }
+
+    /// SOU-119: the verdict column is added by a plain ALTER, and existing
+    /// meetings keep their row with a NULL value. No value is computed from
+    /// the table, which is how the v3 migration went wrong (SOU-076).
+    #[test]
+    fn v15_migrate_to_v16_adds_system_audio_column() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute(
+            "INSERT INTO meetings (
+                id, title, started_at, ended_at, duration_seconds,
+                transcription_profile, recording_sessions, summary_is_stale
+             ) VALUES ('old', 'Before v16', '2026-01-01T00:00:00Z', NULL, 12.0, '{}', '[]', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (15)", [])
+            .unwrap();
+        drop(conn);
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let has_column: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('meetings') WHERE name = 'system_audio'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(has_column, "v16 migration should add system_audio column");
+
+        let value: Option<String> = conn
+            .query_row(
+                "SELECT system_audio FROM meetings WHERE id = 'old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            value.is_none(),
+            "a pre-v16 meeting must stay unknown, not be given an invented verdict"
         );
     }
 

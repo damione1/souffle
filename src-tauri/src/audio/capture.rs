@@ -17,19 +17,102 @@ use crate::audio::priority::{InputPriority, ResolveInputParams, resolve_input};
 use crate::state::AudioCommand;
 
 /// Last `SystemAudioStatus` emitted for the current meeting session. The
-/// event is edge-triggered (only `spawn_tap` emits it), so a webview that
-/// reloads mid-meeting has nothing to listen to until the next leg rebuild;
+/// event is edge-triggered (it only fires when the leg is decided or
+/// changes), so a webview that reloads mid-meeting has nothing to listen to;
 /// bootstrap reads this snapshot instead (SOU-073). Cleared in `stop` so a
 /// stale reason can't outlive its session.
 static SYSTEM_AUDIO_STATUS: Mutex<Option<crate::app_events::SystemAudioStatus>> = Mutex::new(None);
 
+/// Frames the system-audio leg has delivered in the current session, and how
+/// many of them carried far-end signal. Written by the meeting tick on the
+/// capture thread and read from command threads, hence atomics: they must
+/// never make a real-time callback wait (SOU-119).
+static SYSTEM_AUDIO_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static SYSTEM_AUDIO_SIGNAL: AtomicU64 = AtomicU64::new(0);
+
+/// The session those counters belong to. A stop that times out can leave the
+/// old session's tick running past the next session's start; without this,
+/// its totals would land on the new meeting and hide a silent leg.
+static SYSTEM_AUDIO_SESSION: AtomicU64 = AtomicU64::new(0);
+
 /// Snapshot of the system-audio leg for `commands::get_system_audio_status`.
-/// A read, never a rebuild: it does not touch the capture thread.
+/// A read, never a rebuild: it does not touch the capture thread. The counts
+/// are refreshed on the way out, since the stored status only holds them as
+/// of the last emit.
 pub fn system_audio_status() -> Option<crate::app_events::SystemAudioStatus> {
-    SYSTEM_AUDIO_STATUS
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
+    let Ok(guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return None;
+    };
+    let mut status = (*guard).clone()?;
+    status.samples = SYSTEM_AUDIO_SAMPLES.load(Ordering::Relaxed);
+    status.signal_samples = SYSTEM_AUDIO_SIGNAL.load(Ordering::Relaxed);
+    Some(status)
+}
+
+/// `(frames delivered, frames carrying signal)` so far in this session.
+pub fn system_audio_counts() -> (u64, u64) {
+    (
+        SYSTEM_AUDIO_SAMPLES.load(Ordering::Relaxed),
+        SYSTEM_AUDIO_SIGNAL.load(Ordering::Relaxed),
+    )
+}
+
+/// Start a new session's tallies and drop any leftover snapshot. Called once
+/// where the session is set up, never on a mic rebuild or a tap retry.
+/// Clearing here is what stops an aborted meeting's reason from showing on
+/// the next one: `Stop` is a no-op once the capture thread has already
+/// exited (AudioGone).
+pub fn begin_system_audio_session(session_id: u64) {
+    let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return;
+    };
+    SYSTEM_AUDIO_SESSION.store(session_id, Ordering::Relaxed);
+    SYSTEM_AUDIO_SAMPLES.store(0, Ordering::Relaxed);
+    SYSTEM_AUDIO_SIGNAL.store(0, Ordering::Relaxed);
+    *guard = None;
+}
+
+/// Publish the running totals of `session_id`. A tick belonging to an older
+/// session is ignored rather than allowed to overwrite the current one.
+/// Takes the snapshot lock so a concurrent `begin` cannot zero the session
+/// id between the check and the store (both run on the capture tick / command
+/// threads, never in the IOProc).
+fn publish_system_audio_counts(session_id: u64, samples: u64, signal: u64) {
+    let Ok(_guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return;
+    };
+    if SYSTEM_AUDIO_SESSION.load(Ordering::Relaxed) != session_id {
+        return;
+    }
+    SYSTEM_AUDIO_SAMPLES.store(samples, Ordering::Relaxed);
+    SYSTEM_AUDIO_SIGNAL.store(signal, Ordering::Relaxed);
+}
+
+/// What to persist on the meeting about its system-audio leg. Must be read
+/// before the capture stop clears the session snapshot, so it misses
+/// whatever the final flush still drains: a tick's worth of frames, which
+/// changes no verdict here (SOU-119).
+pub fn session_system_audio() -> Option<crate::app_events::MeetingSystemAudio> {
+    let status = system_audio_status()?;
+    let mut audio = crate::app_events::MeetingSystemAudio {
+        active: status.active,
+        reason: status.reason,
+        reason_code: status.reason_code,
+        samples: status.samples,
+        signal_samples: status.signal_samples,
+    };
+    if audio.active && audio.signal_samples == 0 && audio.reason_code.is_none() {
+        // A tap on the device clock delivers frames whether or not anything
+        // plays, so these two are genuinely different failures: nothing came
+        // out of the queue at all, versus everything that came out was
+        // silence.
+        audio.reason_code = Some(if audio.samples == 0 {
+            crate::app_events::SystemAudioReason::NoSamples
+        } else {
+            crate::app_events::SystemAudioReason::Silent
+        });
+    }
+    Some(audio)
 }
 
 fn store_system_audio_status(status: Option<crate::app_events::SystemAudioStatus>) {
@@ -38,13 +121,74 @@ fn store_system_audio_status(status: Option<crate::app_events::SystemAudioStatus
     }
 }
 
-/// Tell the frontend whether the system-audio leg of a meeting is live.
-fn emit_system_audio_status(app: Option<&tauri::AppHandle>, active: bool, reason: Option<String>) {
+/// Drop the snapshot only if it still belongs to `session_id`. A stop that
+/// times out can run after the next session has already published its own
+/// status; clearing unconditionally would hide that meeting's reason.
+fn clear_system_audio_status_if_current_session(session_id: u64) {
+    let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return;
+    };
+    if SYSTEM_AUDIO_SESSION.load(Ordering::Relaxed) == session_id {
+        *guard = None;
+    }
+}
+
+/// Drop the snapshot after it has been persisted (abort salvage). The
+/// capture thread may already be gone, so `Stop` will never clear it.
+pub fn discard_system_audio_status() {
+    store_system_audio_status(None);
+}
+
+/// Tell the frontend whether the system-audio leg of a meeting is live, and
+/// remember it for a webview that reloads afterwards. Every path that gives
+/// up on system audio goes through here, including the ones that decide it
+/// before the capture thread is even asked to start (SOU-119).
+pub fn emit_system_audio_status(
+    app: Option<&tauri::AppHandle>,
+    active: bool,
+    reason_code: Option<crate::app_events::SystemAudioReason>,
+    reason: Option<String>,
+) {
     use tauri_specta::Event;
-    let status = crate::app_events::SystemAudioStatus { active, reason };
-    store_system_audio_status(Some(status.clone()));
+    let status = {
+        let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() else {
+            return;
+        };
+        let status = crate::app_events::SystemAudioStatus {
+            active,
+            reason,
+            reason_code,
+            samples: SYSTEM_AUDIO_SAMPLES.load(Ordering::Relaxed),
+            signal_samples: SYSTEM_AUDIO_SIGNAL.load(Ordering::Relaxed),
+        };
+        *guard = Some(status.clone());
+        status
+    };
     if let Some(app) = app {
         let _ = status.emit(app);
+    }
+}
+
+/// Test-only access to the process-wide session statics above. Every test
+/// that touches them takes [`LOCK`] first, whichever module it lives in.
+#[cfg(test)]
+pub(crate) mod status_test_support {
+    use super::*;
+
+    pub(crate) static LOCK: Mutex<()> = Mutex::new(());
+
+    /// Back to "no session has ever run".
+    pub(crate) fn reset() {
+        store_system_audio_status(None);
+        begin_system_audio_session(0);
+    }
+
+    pub(crate) fn set_counts(samples: u64, signal: u64) {
+        publish_system_audio_counts(
+            SYSTEM_AUDIO_SESSION.load(Ordering::Relaxed),
+            samples,
+            signal,
+        );
     }
 }
 
@@ -185,6 +329,20 @@ fn should_reuse_meeting(
         return false;
     }
     tap_owned || !tap_retry_ready
+}
+
+/// Why the system-audio leg is gone after a tap (re)start failed inside a
+/// running session. An unsupported OS (a real version check) explains more
+/// than "the tap went away"; everything else, including CreateProcessTap,
+/// is a lost tap. `PermissionDenied` stays in the match so a future
+/// verified TCC check still surfaces instead of being flattened.
+#[cfg(target_os = "macos")]
+fn mid_session_tap_reason(error: &str) -> crate::app_events::SystemAudioReason {
+    use crate::app_events::SystemAudioReason;
+    match crate::audio::system_tap::failure_reason(error) {
+        reason @ (SystemAudioReason::PermissionDenied | SystemAudioReason::Unsupported) => reason,
+        _ => SystemAudioReason::TapLost,
+    }
 }
 
 /// Count a rebuild failure only when `min_interval` has elapsed since the
@@ -580,6 +738,175 @@ impl AudioLevelThrottle {
 }
 
 #[cfg(test)]
+mod system_audio_status_tests {
+    use super::status_test_support::{LOCK, reset, set_counts};
+    use super::*;
+    use crate::app_events::SystemAudioReason;
+
+    #[test]
+    fn stored_status_reports_the_live_counts() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        emit_system_audio_status(None, true, None, None);
+        let stored = system_audio_status().unwrap();
+        assert_eq!((stored.samples, stored.signal_samples), (0, 0));
+
+        set_counts(96_000, 4_800);
+        let stored = system_audio_status().unwrap();
+        assert_eq!((stored.samples, stored.signal_samples), (96_000, 4_800));
+    }
+
+    /// SOU-119 AC8, the case the ticket exists for: the tap is up and the
+    /// device clock keeps handing over frames, all of them silence.
+    #[test]
+    fn a_tap_delivering_only_silence_is_judged_silent() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        emit_system_audio_status(None, true, None, None);
+        set_counts(48_000 * 3_600, 0);
+
+        let audio = session_system_audio().expect("verdict must exist");
+        assert!(audio.active, "the tap did run");
+        assert!(audio.samples > 0, "and it did deliver frames");
+        assert_eq!(audio.reason_code, Some(SystemAudioReason::Silent));
+        assert!(audio.degraded());
+    }
+
+    /// And the other half of AC8: no frame at all is a different failure.
+    #[test]
+    fn a_tap_that_delivered_nothing_is_told_apart_from_a_silent_one() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        emit_system_audio_status(None, true, None, None);
+
+        let audio = session_system_audio().expect("verdict must exist");
+        assert_eq!(audio.samples, 0);
+        assert_eq!(audio.reason_code, Some(SystemAudioReason::NoSamples));
+        assert!(audio.degraded());
+    }
+
+    /// SOU-119 AC6: a leg that carried audio leaves nothing to warn about.
+    #[test]
+    fn healthy_leg_is_persisted_without_a_reason() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        emit_system_audio_status(None, true, None, None);
+        set_counts(96_000, 96_000);
+
+        let audio = session_system_audio().expect("verdict must exist");
+        assert!(audio.active);
+        assert_eq!(audio.signal_samples, 96_000);
+        assert_eq!(audio.reason_code, None);
+        assert!(!audio.degraded());
+    }
+
+    #[test]
+    fn inactive_verdict_keeps_its_own_reason() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        emit_system_audio_status(
+            None,
+            false,
+            Some(SystemAudioReason::TapLost),
+            Some("aggregate device vanished".into()),
+        );
+
+        let audio = session_system_audio().expect("verdict must exist");
+        assert!(!audio.active);
+        assert_eq!(audio.reason_code, Some(SystemAudioReason::TapLost));
+        assert_eq!(audio.reason.as_deref(), Some("aggregate device vanished"));
+        assert!(audio.degraded());
+    }
+
+    /// The stop path clears the snapshot so a stale reason cannot outlive its
+    /// session; whatever is persisted must be read before that.
+    #[test]
+    fn cleared_snapshot_yields_no_verdict() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        assert!(session_system_audio().is_none());
+    }
+
+    /// A stop that times out leaves the previous session's tick running past
+    /// the next session's start. Its totals must not land on the new meeting
+    /// and hide a silent leg.
+    #[test]
+    fn a_tick_from_a_previous_session_cannot_write_the_new_ones_counts() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        begin_system_audio_session(7);
+        publish_system_audio_counts(7, 48_000, 48_000);
+        begin_system_audio_session(8);
+        publish_system_audio_counts(7, 96_000, 96_000);
+
+        assert_eq!(system_audio_counts(), (0, 0));
+        publish_system_audio_counts(8, 480, 0);
+        assert_eq!(system_audio_counts(), (480, 0));
+    }
+
+    #[test]
+    fn a_mid_session_tap_failure_keeps_the_reason_that_explains_most() {
+        assert_eq!(
+            mid_session_tap_reason("AudioDeviceStart failed (-66748)"),
+            SystemAudioReason::TapLost
+        );
+        assert_eq!(
+            mid_session_tap_reason("AudioHardwareCreateProcessTap failed (560227702)"),
+            SystemAudioReason::TapLost,
+            "CreateProcessTap is not a verified permission denial"
+        );
+        assert_eq!(
+            mid_session_tap_reason("System audio capture requires macOS 14.4 or later"),
+            SystemAudioReason::Unsupported
+        );
+    }
+
+    /// A timed-out stop of session 7 must not wipe session 8's snapshot.
+    #[test]
+    fn stop_does_not_clear_a_newer_session_snapshot() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        begin_system_audio_session(7);
+        emit_system_audio_status(None, false, Some(SystemAudioReason::Disabled), None);
+        begin_system_audio_session(8);
+        emit_system_audio_status(None, true, None, None);
+
+        clear_system_audio_status_if_current_session(7);
+        let stored = system_audio_status().expect("session 8 snapshot must survive");
+        assert!(stored.active, "the late stop of 7 must not clear 8");
+
+        clear_system_audio_status_if_current_session(8);
+        assert!(system_audio_status().is_none());
+    }
+
+    /// An abort that never reaches `stop()` (AudioGone) must not leave its
+    /// reason for the next meeting to inherit.
+    #[test]
+    fn begin_drops_the_previous_session_snapshot() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        begin_system_audio_session(7);
+        emit_system_audio_status(None, false, Some(SystemAudioReason::Disabled), None);
+        assert!(system_audio_status().is_some());
+
+        begin_system_audio_session(8);
+        assert!(
+            system_audio_status().is_none(),
+            "session 8 must start with no snapshot until it emits its own"
+        );
+    }
+}
+
+#[cfg(test)]
 mod level_throttle_tests {
     use super::*;
 
@@ -831,6 +1158,11 @@ pub struct AudioCapture {
     dropped_counter: Arc<AtomicU64>,
     /// Active meeting-mode session (mic + system audio mixed on this thread).
     meeting: Option<MeetingState>,
+    /// System-audio tallies of the mixers this session has already retired,
+    /// so a mid-session mixer rebuild adds to the session total instead of
+    /// restarting it (SOU-119). Only ever touched on the capture thread.
+    retired_tap_samples: u64,
+    retired_tap_signal: u64,
     /// Encodes meeting audio to disk when the retention setting is not off.
     /// Lives outside `MeetingState` (not torn down/rebuilt with it) because
     /// a mic rebuild mid-session must keep recording to the same file —
@@ -913,6 +1245,8 @@ impl AudioCapture {
                     resampler: None,
                     dropped_counter,
                     meeting: None,
+                    retired_tap_samples: 0,
+                    retired_tap_signal: 0,
                     recorder: None,
                     app: None,
                     active_params: None,
@@ -1007,6 +1341,7 @@ impl AudioCapture {
                                 tap_cons,
                             ) {
                                 warn!("Failed to start audio capture: {e}");
+                                capture.report_start_failure(capture_system_audio, &e);
                             }
                         }
                         AudioCommand::Stop => {
@@ -1153,7 +1488,12 @@ impl AudioCapture {
             self.tap_owned_for_reuse(),
             self.tap_retry_ready(),
         ) {
+            self.retire_meeting_counts(session_id);
             self.meeting.take();
+        }
+        if is_new_session {
+            self.retired_tap_samples = 0;
+            self.retired_tap_signal = 0;
         }
         self.sync_recorder(session_id, record_path.as_deref(), target_sample_rate);
 
@@ -1485,7 +1825,7 @@ impl AudioCapture {
         #[cfg(target_os = "macos")]
         let (tap, tap_rate, tap_cons) = if let Some(tap) = pre_spawned_tap {
             let rate = tap.sample_rate;
-            emit_system_audio_status(self.app.as_ref(), true, None);
+            emit_system_audio_status(self.app.as_ref(), true, None, None);
             (Some(tap), rate, pre_spawned_tap_cons.unwrap())
         } else {
             let (tap_prod, tap_cons) =
@@ -1493,12 +1833,17 @@ impl AudioCapture {
             match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
                 Ok(tap) => {
                     let rate = tap.sample_rate;
-                    emit_system_audio_status(self.app.as_ref(), true, None);
+                    emit_system_audio_status(self.app.as_ref(), true, None, None);
                     (Some(tap), rate, tap_cons)
                 }
                 Err(e) => {
                     warn!("System audio capture unavailable, recording mic only: {e}");
-                    emit_system_audio_status(self.app.as_ref(), false, Some(e));
+                    emit_system_audio_status(
+                        self.app.as_ref(),
+                        false,
+                        Some(mid_session_tap_reason(&e)),
+                        Some(e),
+                    );
                     (None, super::mixer::MIX_RATE, tap_cons)
                 }
             }
@@ -1644,6 +1989,12 @@ impl AudioCapture {
                 false
             }
             Err(e) => {
+                // start() may have dropped the tap before failing (no owned
+                // handle and the retry window was open). The Start command
+                // path reports that; this rebuild path used not to, so a
+                // mid-meeting mic reopen that took the tap with it left the
+                // snapshot saying the leg was still up.
+                self.report_start_failure(params.capture_system_audio, &e);
                 let (n, counted_at) = count_rebuild_failure(
                     self.mic_rebuild_failures,
                     self.last_counted_failure,
@@ -1742,6 +2093,39 @@ impl AudioCapture {
         }
     }
 
+    /// A session that asked for system audio but failed to start has just
+    /// dropped the tap handle with everything else, so the leg is gone with
+    /// nothing said about it (SOU-119 AC1). A mic rebuild that fails while
+    /// the tap survives is a different story: the meeting keeps its system
+    /// audio and the health check retries, so it must not raise a false
+    /// mic-only warning mid-meeting.
+    fn report_start_failure(&self, capture_system_audio: bool, error: &str) {
+        if !capture_system_audio || self.tap_is_live() {
+            return;
+        }
+        emit_system_audio_status(
+            self.app.as_ref(),
+            false,
+            Some(crate::app_events::SystemAudioReason::StartFailed),
+            Some(error.to_string()),
+        );
+    }
+
+    /// Carry the tallies of a mixer about to be dropped into the session
+    /// total, so a mid-session mixer rebuild adds up instead of starting
+    /// over. Only for a mixer of `session_id`: one left over from an earlier
+    /// session belongs to nobody's total (SOU-119).
+    fn retire_meeting_counts(&mut self, session_id: u64) {
+        let Some(meeting) = self.meeting.as_ref() else {
+            return;
+        };
+        if meeting.session_id != session_id {
+            return;
+        }
+        self.retired_tap_samples += meeting.mixer.tap_ingested();
+        self.retired_tap_signal += meeting.mixer.tap_signal();
+    }
+
     /// Missing tap + retry window elapsed. `spawn_tap` blocks up to 5s, so
     /// this must stay false on the 2s health cadence after a failed spawn.
     fn tap_retry_ready(&self) -> bool {
@@ -1770,6 +2154,13 @@ impl AudioCapture {
             if meeting.ticks.is_multiple_of(ROUTE_CHECK_TICKS) {
                 meeting.check_output_route(self.app.as_ref());
             }
+            // Session totals: this mixer's tallies on top of the ones any
+            // mixer retired mid-session left behind (SOU-119).
+            publish_system_audio_counts(
+                meeting.session_id,
+                self.retired_tap_samples + meeting.mixer.tap_ingested(),
+                self.retired_tap_signal + meeting.mixer.tap_signal(),
+            );
             if meeting.diarize {
                 let (me, them) = if tap_clock {
                     meeting.mixer.tick_split_on_tap_clock()
@@ -2013,7 +2404,7 @@ impl AudioCapture {
         // and a Bluetooth headset can leave HFP/mono for A2DP stereo.
         let had_stream = self.release_capture_stream();
 
-        store_system_audio_status(None);
+        clear_system_audio_status_if_current_session(session_id);
         if let Some(mut meeting) = self.meeting.take() {
             // Tear down the tap first so its ring stops filling; then one
             // final flush drains both rings and all resampler tails.

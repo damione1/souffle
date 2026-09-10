@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { ArrowLeft, ChevronDown, Download, Pencil, Square, Users } from "@lucide/svelte";
+  import { ArrowLeft, ChevronDown, Download, MicOff, Pencil, Square, Users } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import type { ExportFormat, MeetingTranscript } from "../../../types";
   import { formatDate, formatDuration } from "../../../utils";
+  import { liveSystemAudioNotice, pastSystemAudioNotice } from "../system-audio";
   import Spinner from "../../../components/ui/Spinner.svelte";
 
   let {
@@ -40,6 +41,13 @@
     onExport: (format: ExportFormat) => void | Promise<void>;
     onExportAudio: () => void | Promise<void>;
   } = $props();
+
+  // The reason is spelled out, not hidden in a tooltip (SOU-119 AC5): the
+  // live status while recording, what was persisted on the meeting after.
+  let liveNotice = $derived(liveSystemAudioNotice(systemAudioStatus));
+  let notice = $derived(
+    isRecordingMeeting ? liveNotice : pastSystemAudioNotice(meeting.system_audio),
+  );
 
   let isEditingTitle = $state(false);
   let titleDraft = $state("");
@@ -97,12 +105,12 @@
     {#if isRecordingMeeting}
       <span class="inline-flex items-center gap-2 self-start rounded-full bg-danger/13 px-[13px] py-1.5 text-[12.5px] font-semibold text-danger-soft outline-1 outline-danger/28">
         <span class="recording-dot"></span> {$t("meeting_header.recording_badge")}
-        {#if systemAudioStatus}
-          {#if systemAudioStatus.active}
-            <span class="font-normal text-text-muted">· {$t("meeting_header.system_audio_active")}</span>
-          {:else}
-            <span class="font-normal text-text-muted" title={systemAudioStatus.reason ?? ""}>· {$t("meeting_header.system_audio_unavailable")}</span>
-          {/if}
+        {#if systemAudioStatus?.active}
+          <span class="font-normal text-text-muted">· {$t("meeting_header.system_audio_active")}</span>
+        {:else if liveNotice}
+          <span class="font-normal text-text-muted" title={liveNotice.detail ?? ""}
+            >· {$t("meeting_header.system_audio_unavailable")}</span
+          >
         {/if}
       </span>
     {/if}
@@ -147,6 +155,23 @@
         title={meeting.transcription_profile.engine_label}
       >{meeting.transcription_profile.model_label}</span>
     </div>
+    {#if notice}
+      <p
+        class="flex items-start gap-[7px] rounded-[9px] bg-warning/10 px-[11px] py-[7px] text-[12.5px] text-text-secondary outline-1 outline-warning/25"
+        title={notice.detail ?? ""}
+      >
+        <MicOff size={14} class="mt-px shrink-0 text-warning" aria-hidden="true" />
+        <span>
+          {#if !isRecordingMeeting}
+            <!-- The live badge above already says "mic only"; a finished
+                 meeting has no badge, so it needs the label here. -->
+            <span class="font-semibold">{$t("meeting_header.system_audio_mic_only")}</span>
+          {/if}
+          {$t(notice.key)}
+        </span>
+      </p>
+    {/if}
+
     {#if meeting.participants.length > 0}
       <div class="mt-px flex items-center gap-[7px] flex-wrap">
         <Users size={13} class="shrink-0 text-text-muted" aria-hidden="true" />
