@@ -276,33 +276,14 @@
       </div>
 
       {#if row.kind === "accessibility" && s === "denied"}
-        <div class="flex items-center justify-between gap-3 pl-8">
+        <div class="pl-8">
           <p class="text-xs text-text-muted">
-            {#if repairSuccess}
-              {$t("permissions.accessibility_repair_success")}
-            {:else if showStaleHint}
+            {#if showStaleHint}
               {$t("permissions.accessibility_stale_hint")}
             {:else}
               {$t("permissions.accessibility_denied_hint")}
             {/if}
           </p>
-          {#if repairSuccess || showStaleHint}
-            <button
-              class="btn btn-ghost shrink-0 gap-1.5"
-              disabled={repairing || busy[row.kind] || repairCooldown}
-              onclick={repairAccessibility}
-            >
-              {#if repairing}
-                <Spinner />
-                {$t("permissions.checking")}
-              {:else if repairSuccess}
-                <Check size={14} />
-                {$t("permissions.repair")}
-              {:else}
-                {$t("permissions.repair")}
-              {/if}
-            </button>
-          {/if}
         </div>
       {:else if row.kind === "microphone" && s === "denied"}
         <div class="flex items-center justify-between gap-3 pl-8">
@@ -333,6 +314,28 @@
       {/if}
     </div>
   {/each}
+
+  <div class="flex items-center justify-between gap-3 px-1 pt-1">
+    <p class="text-xs text-text-muted">
+      {#if repairSuccess}
+        {$t("permissions.accessibility_repair_success")}
+      {:else}
+        {$t("permissions.issues_prompt")}
+      {/if}
+    </p>
+    <button
+      class="btn btn-ghost shrink-0 gap-1.5"
+      disabled={repairing || repairCooldown}
+      onclick={repairAccessibility}
+    >
+      {#if repairing}
+        <Spinner />
+        {$t("permissions.checking")}
+      {:else}
+        {$t("permissions.repair")}
+      {/if}
+    </button>
+  </div>
 </div>
 
 {#if error}

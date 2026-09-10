@@ -388,16 +388,26 @@ fn accessibility_trusted_with_prompt(_prompt: bool) -> bool {
 /// the fresh prompt yet); treating that as `Denied` made the UI claim every
 /// repair had failed, including the ones that worked (SOU-054).
 pub fn repair_accessibility() -> Result<RepairAccessibilityResult, String> {
-    repair_accessibility_with(
-        APP_IDENTIFIER,
-        tccutil_reset_accessibility,
-        accessibility_trusted_with_prompt,
-    )
+    tccutil_reset_service("Accessibility", APP_IDENTIFIER)?;
+    // Input Monitoring has the same stale-identity problem. A missing row
+    // is not a failure: tccutil still succeeds for a known bundle id.
+    if let Err(e) = tccutil_reset_service("ListenEvent", APP_IDENTIFIER) {
+        tracing::warn!(error = %e, "tccutil reset ListenEvent skipped");
+    }
+    // HID first: AXIsProcessTrustedWithOptions beforehand makes
+    // IOHIDRequestAccess a no-op (FB7381305).
+    #[cfg(target_os = "macos")]
+    on_main(request_listen_event_access_now);
+    let _ = accessibility_trusted_with_prompt(true);
+    Ok(RepairAccessibilityResult {
+        reset_performed: true,
+        prompt_shown: true,
+    })
 }
 
-fn tccutil_reset_accessibility(bundle_id: &str) -> Result<(), String> {
+fn tccutil_reset_service(service: &str, bundle_id: &str) -> Result<(), String> {
     let output = std::process::Command::new("tccutil")
-        .args(["reset", "Accessibility", bundle_id])
+        .args(["reset", service, bundle_id])
         .output()
         .map_err(|e| format!("Failed to run tccutil: {e}"))?;
     if output.status.success() {
@@ -405,14 +415,15 @@ fn tccutil_reset_accessibility(bundle_id: &str) -> Result<(), String> {
     }
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let code = output.status.code().unwrap_or(-1);
-    tracing::error!(bundle_id, code, %stderr, "tccutil reset Accessibility failed");
+    tracing::error!(bundle_id, service, code, %stderr, "tccutil reset failed");
     Err(if stderr.is_empty() {
-        format!("tccutil reset Accessibility failed (exit {code})")
+        format!("tccutil reset {service} failed (exit {code})")
     } else {
-        format!("tccutil reset Accessibility failed (exit {code}): {stderr}")
+        format!("tccutil reset {service} failed (exit {code}): {stderr}")
     })
 }
 
+#[cfg(test)]
 fn repair_accessibility_with(
     bundle_id: &str,
     reset: impl FnOnce(&str) -> Result<(), String>,
