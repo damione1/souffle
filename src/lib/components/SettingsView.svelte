@@ -287,6 +287,7 @@
         pttShortcut={controller.pttShortcut}
         recordingField={controller.recordingField}
         shortcutError={controller.shortcutError}
+        modifierTapStatus={controller.app.modifierTapStatus}
         onThemeChange={controller.onThemeChange}
         onLocaleChange={controller.onLocaleChange}
         onAutoPasteChange={controller.onAutoPasteChange}

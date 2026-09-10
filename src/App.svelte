@@ -50,6 +50,7 @@
   let unlistenPipelineError: (() => void) | null = null;
 
   let unlistenSystemAudio: (() => void) | null = null;
+  let unlistenModifierTap: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
   let unlistenDictationStop: (() => void) | null = null;
   let unlistenMeetingFinalized: (() => void) | null = null;
@@ -233,6 +234,12 @@
       unlistenSystemAudio = fn;
     });
 
+    events.modifierTapStatus.listen((event) => {
+      app.modifierTapStatus = event.payload;
+    }).then((fn) => {
+      unlistenModifierTap = fn;
+    });
+
     events.meetingStopRequested.listen(() => {
       notifyMeetingStopRequested();
     }).then((fn) => {
@@ -294,6 +301,7 @@
       unlistenHealth?.();
       unlistenPipelineError?.();
       unlistenSystemAudio?.();
+      unlistenModifierTap?.();
       unlistenMeetingStop?.();
       unlistenDictationStop?.();
       unlistenMeetingFinalized?.();

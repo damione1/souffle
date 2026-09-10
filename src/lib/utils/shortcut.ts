@@ -32,6 +32,41 @@ export function shortcutMissingModifier(event: KeyboardEvent): boolean {
   );
 }
 
+/** Mirrors `modifier_shortcut::is_native_ptt_shortcut` — single-key bindings
+ * that need the CGEventTap (and Accessibility), not the global-shortcut plugin. */
+const NATIVE_PTT_SHORTCUTS = new Set([
+  "Fn",
+  "MetaLeft",
+  "MetaRight",
+  "ShiftLeft",
+  "ShiftRight",
+  "AltLeft",
+  "AltRight",
+  "ControlLeft",
+  "ControlRight",
+  "F5",
+  "F6",
+  "F7",
+  "F8",
+  "F9",
+  "F10",
+  "F11",
+  "F12",
+]);
+
+export function isNativePttShortcut(shortcut: string): boolean {
+  return NATIVE_PTT_SHORTCUTS.has(shortcut);
+}
+
+/** Settings banner for a bound native PTT key when the tap is known missing.
+ * `null` status = not yet attempted (startup delay); do not flash (SOU-116). */
+export function shouldShowNativeTapBanner(
+  pttShortcut: string,
+  tapStatus: { installed: boolean } | null,
+): boolean {
+  return isNativePttShortcut(pttShortcut) && tapStatus?.installed === false;
+}
+
 function mapKey(code: string, key: string): string | null {
   if (/^F\d{1,2}$/.test(key)) return key;
   if (code.startsWith("Key")) return code.slice(3);
