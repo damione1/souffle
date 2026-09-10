@@ -100,8 +100,10 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
                 _ => None,
             };
         }
+        // Key-repeat latch for Toggle. Do not touch `ptt_start_armed`: a
+        // settings save while native PTT is held would swallow the release
+        // and leave dictation running (SOU-115 AC6).
         state.toggle_armed.store(false, Ordering::SeqCst);
-        state.ptt_start_armed.store(false, Ordering::SeqCst);
     }
 
     if toggle_target == ShortcutRegistrationTarget::Plugin {
