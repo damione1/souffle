@@ -9,16 +9,47 @@
 //! (`AXIsProcessTrusted`), and is granted only via System Settings, so its
 //! "request" just opens the relevant pane.
 
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::constants::APP_IDENTIFIER;
 use crate::db::Database;
+
+/// Pause between the TCC insert call and `open` of System Settings. The
+/// insert is asynchronous; opening the pane in the same turn shows a stale
+/// list (empty, or a differently-signed Soufflé already ticked).
+const TCC_INSERT_SETTLE: Duration = Duration::from_millis(400);
+
+/// `kIOHIDRequestTypeListenEvent` / `kIOHIDRequestTypePostEvent`.
+const HID_LISTEN_EVENT: u32 = 1;
+const HID_POST_EVENT: u32 = 0;
+
+/// `IOHIDCheckAccess` result. Accessibility (PostEvent) includes listen
+/// rights, so `Granted` on ListenEvent is not the same as a row in
+/// Input Monitoring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HidAccess {
+    Granted,
+    Denied,
+    Unknown,
+}
 
 /// Last observed system-audio tap permission. There is no read-only TCC
 /// API for Core Audio taps, so a successful probe is remembered and the
 /// snapshot returns it without mounting a tap (SOU-120).
 const SYSTEM_AUDIO_PERMISSION_KEY: &str = "system_audio_permission";
+
+/// Remembered Input Monitoring grant. `IOHIDCheckAccess(ListenEvent)` is
+/// true whenever Accessibility is trusted, so a live check cannot tell a
+/// real Input Monitoring row from AX covering listen. After the user
+/// toggles the row, macOS quits and relaunches the app: a pid change
+/// since we opened the pane is that signal.
+const INPUT_MONITORING_PERMISSION_KEY: &str = "input_monitoring_permission";
+const INPUT_MONITORING_PROMPT_PID_KEY: &str = "input_monitoring_prompt_pid";
+const INPUT_MONITORING_PROMPT_UNIX_KEY: &str = "input_monitoring_prompt_unix";
+const INPUT_MONITORING_RESTART_WINDOW_SECS: u64 = 15 * 60;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -88,11 +119,7 @@ pub fn snapshot(db: &Database) -> PermissionStatus {
         // EventKit has a real read-only status API, so the snapshot is truthful
         // here (no probe needed).
         calendar: crate::calendar::authorization_state(),
-        input_monitoring: if input_monitoring_granted() {
-            PermState::Granted
-        } else {
-            PermState::Unknown
-        },
+        input_monitoring: resolve_input_monitoring(db),
     }
 }
 
@@ -132,6 +159,287 @@ fn system_audio_supported() -> bool {
     crate::platform::system_audio_capture_supported()
 }
 
+/// Input Monitoring snapshot. `CGPreflightListenEventAccess` and
+/// `IOHIDCheckAccess(ListenEvent)` return Granted when Accessibility is
+/// already trusted, even if System Settings has no Soufflé row (DTS,
+/// May 2026: Accessibility grants post *and* listen). That was the
+/// false "Granted" pill.
+fn input_monitoring_snapshot_state(
+    listen: HidAccess,
+    accessibility_trusted: bool,
+    post: HidAccess,
+) -> PermState {
+    match listen {
+        HidAccess::Denied => PermState::Denied,
+        HidAccess::Unknown => PermState::Unknown,
+        HidAccess::Granted => {
+            if accessibility_trusted || post == HidAccess::Granted {
+                PermState::Unknown
+            } else {
+                PermState::Granted
+            }
+        }
+    }
+}
+
+fn resolve_input_monitoring(db: &Database) -> PermState {
+    let listen = iohid_listen_access();
+    let live =
+        input_monitoring_snapshot_state(listen, accessibility_granted(), iohid_post_access());
+    let remembered = load_remembered_input_monitoring(db);
+    let prompt = load_input_monitoring_prompt(db);
+    let now_unix = unix_now();
+    let state = input_monitoring_effective_state(
+        live,
+        listen,
+        remembered,
+        prompt,
+        std::process::id(),
+        now_unix,
+    );
+    if state == PermState::Granted && remembered != Some(PermState::Granted) {
+        remember_input_monitoring(db, PermState::Granted);
+        clear_input_monitoring_prompt(db);
+    }
+    state
+}
+
+/// Accessibility already includes listen rights, so `IOHIDRequestAccess`
+/// is a no-op and the Input Monitoring list stays empty. Reset ListenEvent
+/// first so this click can insert a row for *this* binary.
+fn prepare_listen_event_insert(
+    accessibility_trusted: bool,
+    listen: HidAccess,
+    reset_listen: impl FnOnce(),
+    request: impl FnOnce(),
+) {
+    if accessibility_trusted || listen == HidAccess::Granted {
+        reset_listen();
+    }
+    request();
+}
+
+/// Combine the live HID check with a remembered grant and the "Quit and
+/// Reopen" restart macOS issues after toggling Input Monitoring.
+fn input_monitoring_effective_state(
+    live: PermState,
+    listen: HidAccess,
+    remembered: Option<PermState>,
+    prompt: Option<(u32, u64)>,
+    now_pid: u32,
+    now_unix: u64,
+) -> PermState {
+    if live == PermState::Granted || live == PermState::Denied {
+        return live;
+    }
+    if remembered == Some(PermState::Granted) {
+        return PermState::Granted;
+    }
+    if listen == HidAccess::Granted
+        && let Some((pid, unix)) = prompt
+        && pid != now_pid
+        && now_unix.saturating_sub(unix) <= INPUT_MONITORING_RESTART_WINDOW_SECS
+    {
+        return PermState::Granted;
+    }
+    PermState::Unknown
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn load_remembered_input_monitoring(db: &Database) -> Option<PermState> {
+    let raw = db
+        .get_setting(INPUT_MONITORING_PERMISSION_KEY)
+        .ok()
+        .flatten()?;
+    match serde_json::from_str::<PermState>(&raw) {
+        Ok(PermState::Granted) => Some(PermState::Granted),
+        _ => None,
+    }
+}
+
+fn remember_input_monitoring(db: &Database, state: PermState) {
+    if state != PermState::Granted {
+        return;
+    }
+    if let Ok(raw) = serde_json::to_string(&state)
+        && let Err(e) = db.set_setting(INPUT_MONITORING_PERMISSION_KEY, &raw)
+    {
+        tracing::warn!(error = %e, "Failed to persist input monitoring permission");
+    }
+}
+
+fn load_input_monitoring_prompt(db: &Database) -> Option<(u32, u64)> {
+    let pid = db
+        .get_setting(INPUT_MONITORING_PROMPT_PID_KEY)
+        .ok()
+        .flatten()?
+        .parse()
+        .ok()?;
+    let unix = db
+        .get_setting(INPUT_MONITORING_PROMPT_UNIX_KEY)
+        .ok()
+        .flatten()?
+        .parse()
+        .ok()?;
+    Some((pid, unix))
+}
+
+fn clear_input_monitoring_prompt(db: &Database) {
+    let _ = db.set_setting(INPUT_MONITORING_PROMPT_PID_KEY, "");
+    let _ = db.set_setting(INPUT_MONITORING_PROMPT_UNIX_KEY, "");
+}
+
+/// Call when the user opens the Input Monitoring pane. After macOS quits
+/// and relaunches, `resolve_input_monitoring` treats a pid change as a grant.
+pub fn note_input_monitoring_prompt(db: &Database) {
+    let _ = db.set_setting(
+        INPUT_MONITORING_PROMPT_PID_KEY,
+        &std::process::id().to_string(),
+    );
+    let _ = db.set_setting(INPUT_MONITORING_PROMPT_UNIX_KEY, &unix_now().to_string());
+}
+
+pub fn clear_input_monitoring_memory(db: &Database) {
+    let _ = db.set_setting(INPUT_MONITORING_PERMISSION_KEY, "");
+    clear_input_monitoring_prompt(db);
+}
+
+/// TCC prompts (`AXIsProcessTrustedWithOptions`, `CGRequestListenEventAccess`,
+/// `IOHIDRequestAccess`) only insert this process into System Settings when
+/// they run on the main thread. `request_permission` is `spawn_blocking`, so
+/// hop. Reads (`AXIsProcessTrusted`, `CGPreflightListenEventAccess`) stay on
+/// the caller: `cargo test` has no main runloop, and a `dispatch_sync` there
+/// hangs (SOU-122 AC3).
+///
+/// Main-thread is necessary but not sufficient after an in-place rebuild:
+/// Launch Services must point at *this* binary, Input Monitoring needs
+/// `NSInputMonitoringUsageDescription`, and System Settings must not open
+/// before TCC has committed the new row.
+#[cfg(target_os = "macos")]
+fn on_main<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+    on_main_with(is_main_thread(), f)
+}
+
+#[cfg(target_os = "macos")]
+fn on_main_with<R: Send>(already_main: bool, f: impl FnOnce() -> R + Send) -> R {
+    if already_main {
+        return f();
+    }
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    dispatch2::DispatchQueue::main().exec_sync(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv().expect("main queue dropped a TCC hop")
+}
+
+#[cfg(target_os = "macos")]
+fn is_main_thread() -> bool {
+    unsafe extern "C" {
+        fn pthread_main_np() -> i32;
+    }
+    unsafe { pthread_main_np() != 0 }
+}
+
+/// Walk `.../Name.app/Contents/MacOS/<exe>` up to the `.app` bundle.
+/// A bare debug binary (`target/debug/souffle`) has no bundle to register.
+fn app_bundle_path_from_exe(exe: &Path) -> Option<&Path> {
+    let macos_dir = exe.parent()?;
+    if macos_dir.file_name()?.to_str() != Some("MacOS") {
+        return None;
+    }
+    let contents = macos_dir.parent()?;
+    if contents.file_name()?.to_str() != Some("Contents") {
+        return None;
+    }
+    let app = contents.parent()?;
+    if app.extension()?.to_str() != Some("app") {
+        return None;
+    }
+    Some(app)
+}
+
+fn current_app_bundle_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    app_bundle_path_from_exe(&exe).map(Path::to_path_buf)
+}
+
+/// Re-register this `.app` with Launch Services so TCC / System Settings
+/// resolve the current binary after an in-place rebuild. No-op outside a
+/// bundle, and no-op off macOS. Safe to call more than once.
+pub fn register_with_launch_services() {
+    #[cfg(target_os = "macos")]
+    register_current_bundle_with_launch_services();
+}
+
+/// Insert this process into the Input Monitoring and Accessibility lists
+/// before the UI can poll AX. `IOHIDRequestAccess` must run first:
+/// `AXIsProcessTrustedWithOptions` beforehand makes the HID request a
+/// no-op and the Input Monitoring pane opens empty (FB7381305).
+pub fn seed_tcc_clients() {
+    #[cfg(target_os = "macos")]
+    on_main(|| {
+        register_current_bundle_with_launch_services();
+        if iohid_check_access(HID_LISTEN_EVENT) == HidAccess::Unknown {
+            request_listen_event_access_now();
+        }
+        let _ = accessibility_trusted_with_prompt_now(false);
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn register_current_bundle_with_launch_services() {
+    use core_foundation::base::TCFType;
+    use core_foundation::url::CFURL;
+
+    let Some(path) = current_app_bundle_path() else {
+        return;
+    };
+    // Apple's recipe for an overwritten bundle: bump mtime, then
+    // LSRegisterURL(..., true), so the next TCC lookup is this binary.
+    let _ = std::fs::File::open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    let Some(url) = CFURL::from_path(&path, true) else {
+        tracing::warn!(path = %path.display(), "CFURL for app bundle failed");
+        return;
+    };
+    #[link(name = "CoreServices", kind = "framework")]
+    unsafe extern "C" {
+        fn LSRegisterURL(in_url: core_foundation::url::CFURLRef, in_update: u8) -> i32;
+    }
+    let status = unsafe { LSRegisterURL(url.as_concrete_TypeRef(), 1) };
+    if status != 0 {
+        tracing::warn!(status, path = %path.display(), "LSRegisterURL failed");
+    }
+}
+
+fn wait_for_tcc_insert() {
+    if cfg!(test) {
+        return;
+    }
+    std::thread::sleep(TCC_INSERT_SETTLE);
+}
+
+fn open_privacy_pane(pane: &str) {
+    let _ = std::process::Command::new("open")
+        .arg(format!(
+            "x-apple.systempreferences:com.apple.preference.security?{pane}"
+        ))
+        .spawn();
+}
+
+/// Prompt (and any Launch Services registration) first, let TCC commit the
+/// row, then open the pane. Opening in the same turn shows a stale list.
+fn prompt_then_open_settings(prompt: impl FnOnce(), wait: impl FnOnce(), open: impl FnOnce()) {
+    prompt();
+    wait();
+    open();
+}
+
 // --- Accessibility (synthesized Cmd+V paste) ---
 
 #[cfg(target_os = "macos")]
@@ -150,12 +458,15 @@ pub fn accessibility_granted() -> bool {
 
 #[cfg(target_os = "macos")]
 fn open_accessibility_settings() {
-    // Prompt first so macOS inserts Soufflé into the Accessibility list
-    // (same pattern as `CGRequestListenEventAccess` before Input Monitoring).
-    let _ = accessibility_trusted_with_prompt(true);
-    let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        .spawn();
+    prompt_then_open_settings(
+        || {
+            on_main(|| {
+                let _ = accessibility_trusted_with_prompt_now(true);
+            });
+        },
+        wait_for_tcc_insert,
+        || open_privacy_pane("Privacy_Accessibility"),
+    );
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -168,8 +479,15 @@ fn open_accessibility_settings() {}
 /// `tccutil reset` has cleared out a stale one.
 #[cfg(target_os = "macos")]
 fn accessibility_trusted_with_prompt(prompt: bool) -> bool {
+    on_main(move || accessibility_trusted_with_prompt_now(prompt))
+}
+
+#[cfg(target_os = "macos")]
+fn accessibility_trusted_with_prompt_now(prompt: bool) -> bool {
     use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString};
     use std::ffi::c_void;
+
+    register_current_bundle_with_launch_services();
 
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
@@ -203,16 +521,27 @@ fn accessibility_trusted_with_prompt(_prompt: bool) -> bool {
 /// the fresh prompt yet); treating that as `Denied` made the UI claim every
 /// repair had failed, including the ones that worked (SOU-054).
 pub fn repair_accessibility() -> Result<RepairAccessibilityResult, String> {
-    repair_accessibility_with(
-        APP_IDENTIFIER,
-        tccutil_reset_accessibility,
-        accessibility_trusted_with_prompt,
-    )
+    let bundle_id = crate::constants::running_app_identifier();
+    tccutil_reset_service("Accessibility", &bundle_id)?;
+    // Input Monitoring has the same stale-identity problem. A missing row
+    // is not a failure: tccutil still succeeds for a known bundle id.
+    if let Err(e) = tccutil_reset_service("ListenEvent", &bundle_id) {
+        tracing::warn!(error = %e, "tccutil reset ListenEvent skipped");
+    }
+    // HID first: AXIsProcessTrustedWithOptions beforehand makes
+    // IOHIDRequestAccess a no-op (FB7381305).
+    #[cfg(target_os = "macos")]
+    on_main(request_listen_event_access_now);
+    let _ = accessibility_trusted_with_prompt(true);
+    Ok(RepairAccessibilityResult {
+        reset_performed: true,
+        prompt_shown: true,
+    })
 }
 
-fn tccutil_reset_accessibility(bundle_id: &str) -> Result<(), String> {
+fn tccutil_reset_service(service: &str, bundle_id: &str) -> Result<(), String> {
     let output = std::process::Command::new("tccutil")
-        .args(["reset", "Accessibility", bundle_id])
+        .args(["reset", service, bundle_id])
         .output()
         .map_err(|e| format!("Failed to run tccutil: {e}"))?;
     if output.status.success() {
@@ -220,14 +549,15 @@ fn tccutil_reset_accessibility(bundle_id: &str) -> Result<(), String> {
     }
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let code = output.status.code().unwrap_or(-1);
-    tracing::error!(bundle_id, code, %stderr, "tccutil reset Accessibility failed");
+    tracing::error!(bundle_id, service, code, %stderr, "tccutil reset failed");
     Err(if stderr.is_empty() {
-        format!("tccutil reset Accessibility failed (exit {code})")
+        format!("tccutil reset {service} failed (exit {code})")
     } else {
-        format!("tccutil reset Accessibility failed (exit {code}): {stderr}")
+        format!("tccutil reset {service} failed (exit {code}): {stderr}")
     })
 }
 
+#[cfg(test)]
 fn repair_accessibility_with(
     bundle_id: &str,
     reset: impl FnOnce(&str) -> Result<(), String>,
@@ -447,11 +777,11 @@ pub fn request(kind: PermissionKind) -> PermState {
         PermissionKind::Calendar => crate::calendar::request_access(),
         PermissionKind::InputMonitoring => {
             open_input_monitoring_settings();
-            if input_monitoring_granted() {
-                PermState::Granted
-            } else {
-                PermState::Denied
-            }
+            input_monitoring_snapshot_state(
+                iohid_listen_access(),
+                accessibility_granted(),
+                iohid_post_access(),
+            )
         }
     }
 }
@@ -460,6 +790,7 @@ pub fn request(kind: PermissionKind) -> PermState {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::constants::APP_IDENTIFIER;
     use std::cell::Cell;
 
     /// The onboarding UI matches on this exact string (`s === "denied"`), so
@@ -468,6 +799,200 @@ mod tests {
     fn perm_state_denied_serializes_snake_case() {
         let json = serde_json::to_string(&PermState::Denied).unwrap();
         assert_eq!(json, "\"denied\"");
+    }
+
+    #[test]
+    fn on_main_runs_inline_when_already_on_the_main_thread() {
+        // cargo test worker threads have no dispatch runloop. Hopping
+        // (`already_main: false`) would hang; the production path uses
+        // `pthread_main_np` so a test must only exercise the inline arm.
+        let ran = std::sync::atomic::AtomicBool::new(false);
+        on_main_with(true, || {
+            ran.store(true, std::sync::atomic::Ordering::SeqCst)
+        });
+        assert!(ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn tcc_prompt_runs_before_the_settings_pane_opens() {
+        use std::cell::RefCell;
+        let order = RefCell::new(Vec::new());
+        prompt_then_open_settings(
+            || order.borrow_mut().push("prompt"),
+            || order.borrow_mut().push("wait"),
+            || order.borrow_mut().push("open"),
+        );
+        assert_eq!(
+            *order.borrow(),
+            ["prompt", "wait", "open"],
+            "System Settings must not open in the same turn as the TCC insert"
+        );
+    }
+
+    #[test]
+    fn app_bundle_path_walks_contents_macos() {
+        let exe = Path::new("/tmp/Soufflé.app/Contents/MacOS/souffle");
+        assert_eq!(
+            app_bundle_path_from_exe(exe),
+            Some(Path::new("/tmp/Soufflé.app"))
+        );
+    }
+
+    #[test]
+    fn app_bundle_path_rejects_a_bare_debug_binary() {
+        assert_eq!(
+            app_bundle_path_from_exe(Path::new("/tmp/target/debug/souffle")),
+            None
+        );
+        assert_eq!(
+            app_bundle_path_from_exe(Path::new("/tmp/Soufflé.app/Contents/MacOS")),
+            None,
+            "the MacOS directory itself is not the executable"
+        );
+    }
+
+    #[test]
+    fn info_plist_declares_input_monitoring_usage() {
+        let plist = std::fs::read_to_string(format!("{}/Info.plist", env!("CARGO_MANIFEST_DIR")))
+            .expect("src-tauri/Info.plist");
+        assert!(
+            plist.contains("<key>NSInputMonitoringUsageDescription</key>"),
+            "IOHIDRequestAccess does not insert the Input Monitoring row without this key"
+        );
+        assert!(
+            plist.contains("keyboard and mouse events"),
+            "usage string should describe Input Monitoring, not a different permission"
+        );
+    }
+
+    #[test]
+    fn input_monitoring_is_not_granted_when_accessibility_covers_listen() {
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, true, HidAccess::Granted),
+            PermState::Unknown,
+            "Accessibility includes listen; that is not an Input Monitoring row"
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, true, HidAccess::Unknown),
+            PermState::Unknown
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Granted),
+            PermState::Unknown
+        );
+    }
+
+    #[test]
+    fn input_monitoring_granted_only_when_listen_is_not_inherited_from_ax() {
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Unknown),
+            PermState::Granted
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Denied),
+            PermState::Granted
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Unknown, false, HidAccess::Unknown),
+            PermState::Unknown
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Denied, false, HidAccess::Unknown),
+            PermState::Denied
+        );
+    }
+
+    #[test]
+    fn input_monitoring_stays_open_settings_in_the_same_process_after_opening_the_pane() {
+        let live = PermState::Unknown;
+        assert_eq!(
+            input_monitoring_effective_state(
+                live,
+                HidAccess::Granted,
+                None,
+                Some((42, 1_000)),
+                42,
+                1_010,
+            ),
+            PermState::Unknown,
+            "AX covering listen plus opening the pane is not a grant"
+        );
+    }
+
+    #[test]
+    fn input_monitoring_is_granted_after_the_tcc_quit_and_reopen() {
+        let live = PermState::Unknown;
+        assert_eq!(
+            input_monitoring_effective_state(
+                live,
+                HidAccess::Granted,
+                None,
+                Some((42, 1_000)),
+                99,
+                1_030,
+            ),
+            PermState::Granted,
+        );
+    }
+
+    #[test]
+    fn input_monitoring_restart_signal_expires() {
+        let live = PermState::Unknown;
+        assert_eq!(
+            input_monitoring_effective_state(
+                live,
+                HidAccess::Granted,
+                None,
+                Some((42, 1_000)),
+                99,
+                1_000 + INPUT_MONITORING_RESTART_WINDOW_SECS + 1,
+            ),
+            PermState::Unknown,
+        );
+    }
+
+    #[test]
+    fn listen_event_insert_resets_when_accessibility_already_covers_listen() {
+        use std::cell::Cell;
+        let reset = Cell::new(false);
+        let requested = Cell::new(false);
+        prepare_listen_event_insert(
+            true,
+            HidAccess::Granted,
+            || reset.set(true),
+            || requested.set(true),
+        );
+        assert!(
+            reset.get(),
+            "must clear ListenEvent or IOHIDRequestAccess is a no-op"
+        );
+        assert!(requested.get());
+    }
+
+    #[test]
+    fn listen_event_insert_does_not_reset_on_a_fresh_unknown() {
+        use std::cell::Cell;
+        let reset = Cell::new(false);
+        prepare_listen_event_insert(false, HidAccess::Unknown, || reset.set(true), || {});
+        assert!(
+            !reset.get(),
+            "first insert must not tccutil reset a service that has no row"
+        );
+    }
+
+    #[test]
+    fn input_monitoring_remembered_grant_survives_later_launches() {
+        assert_eq!(
+            input_monitoring_effective_state(
+                PermState::Unknown,
+                HidAccess::Granted,
+                Some(PermState::Granted),
+                None,
+                7,
+                9_000,
+            ),
+            PermState::Granted,
+        );
     }
 
     /// `NoDevice` must serialize to its own value, distinct from `Denied`:
@@ -665,34 +1190,73 @@ mod tests {
 }
 
 #[cfg(target_os = "macos")]
-fn input_monitoring_granted() -> bool {
-    #[link(name = "CoreGraphics", kind = "framework")]
+fn iohid_check_access(request_type: u32) -> HidAccess {
+    #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
-        fn CGPreflightListenEventAccess() -> bool;
-        #[allow(dead_code)]
-        fn CGRequestListenEventAccess() -> bool;
+        fn IOHIDCheckAccess(request_type: u32) -> u32;
     }
-    unsafe { CGPreflightListenEventAccess() }
+    match unsafe { IOHIDCheckAccess(request_type) } {
+        0 => HidAccess::Granted,
+        1 => HidAccess::Denied,
+        _ => HidAccess::Unknown,
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn input_monitoring_granted() -> bool {
-    true
+fn iohid_check_access(_request_type: u32) -> HidAccess {
+    HidAccess::Granted
+}
+
+fn iohid_listen_access() -> HidAccess {
+    iohid_check_access(HID_LISTEN_EVENT)
+}
+
+fn iohid_post_access() -> HidAccess {
+    iohid_check_access(HID_POST_EVENT)
+}
+
+#[cfg(target_os = "macos")]
+fn request_listen_event_access_now() {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGRequestListenEventAccess() -> bool;
+    }
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOHIDRequestAccess(request_type: u32) -> bool;
+    }
+    register_current_bundle_with_launch_services();
+    // DTS (May 2026): IOHIDRequestAccess is the API that inserts the
+    // Input Monitoring row. CGRequestListenEventAccess is the older
+    // CoreGraphics equivalent. Do not create a listen-only tap here:
+    // with Accessibility already granted the tap succeeds and
+    // CGPreflightListenEventAccess then reports Granted with no row
+    // in the Input Monitoring list.
+    unsafe {
+        let _ = IOHIDRequestAccess(HID_LISTEN_EVENT);
+        let _ = CGRequestListenEventAccess();
+    }
 }
 
 #[cfg(target_os = "macos")]
 fn open_input_monitoring_settings() {
-    #[link(name = "CoreGraphics", kind = "framework")]
-    unsafe extern "C" {
-        #[allow(dead_code)]
-        fn CGRequestListenEventAccess() -> bool;
-    }
-    unsafe {
-        let _ = CGRequestListenEventAccess();
-    }
-    let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-        .spawn();
+    // tccutil must not run on the main thread. A Default CGEventTap
+    // (Accessibility) sits on that runloop; blocking it stalls WindowServer
+    // and freezes the whole session with a cold CPU.
+    prepare_listen_event_insert(
+        accessibility_granted(),
+        iohid_check_access(HID_LISTEN_EVENT),
+        || {
+            let id = crate::constants::running_app_identifier();
+            let _ = tccutil_reset_service("ListenEvent", &id);
+        },
+        || {},
+    );
+    prompt_then_open_settings(
+        || on_main(request_listen_event_access_now),
+        wait_for_tcc_insert,
+        || open_privacy_pane("Privacy_ListenEvent"),
+    );
 }
 
 #[cfg(not(target_os = "macos"))]

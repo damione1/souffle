@@ -24,6 +24,9 @@ pub async fn request_permission(
 ) -> Result<PermState, String> {
     let db = Arc::clone(&state.db);
     tauri::async_runtime::spawn_blocking(move || {
+        if kind == PermissionKind::InputMonitoring {
+            permissions::note_input_monitoring_prompt(&db);
+        }
         let result = permissions::request(kind);
         if kind == PermissionKind::SystemAudio {
             permissions::remember_system_audio(&db, result);
@@ -41,8 +44,15 @@ pub async fn request_permission(
 /// the command thread since it shells out and may block on the prompt.
 #[tauri::command]
 #[specta::specta]
-pub async fn repair_accessibility_permission() -> Result<RepairAccessibilityResult, String> {
-    tauri::async_runtime::spawn_blocking(permissions::repair_accessibility)
-        .await
-        .map_err(|e| format!("Accessibility repair failed: {e}"))?
+pub async fn repair_accessibility_permission(
+    state: State<'_, AppState>,
+) -> Result<RepairAccessibilityResult, String> {
+    let db = Arc::clone(&state.db);
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = permissions::repair_accessibility();
+        permissions::clear_input_monitoring_memory(&db);
+        result
+    })
+    .await
+    .map_err(|e| format!("Accessibility repair failed: {e}"))?
 }

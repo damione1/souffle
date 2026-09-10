@@ -163,6 +163,12 @@ npm install
 npm run tauri dev
 ```
 
+Debug builds are **Soufflé Nightly** (`com.souffle.desktop.nightly`) so they sit next to the installed app with their own TCC rows. After a code change:
+
+```bash
+make nightly
+```
+
 ## License
 
 Copyright (c) 2026 Damien Goehrig.

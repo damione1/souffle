@@ -61,6 +61,46 @@ private func stretchableRoundedMask(radius: CGFloat) -> NSImage {
     return image
 }
 
+/// Width of the live-text column in the expanded dictation pill.
+/// Keep in lockstep with `layout()`: hPad 16 + dot 10 + 8, trailing hPad 16.
+private func liveTextColumnWidth() -> CGFloat {
+    kExpandedWidth - 16 - 10 - 8 - 16
+}
+
+/// Keep the last `maxLines` of wrapped text so the newest words stay on
+/// screen. NSTextField draws from the start of `stringValue` and would
+/// otherwise show the oldest five lines of a longer tail (SOU-122).
+private func lastWrappedLines(
+    _ text: String,
+    width: CGFloat,
+    maxLines: Int,
+    font: NSFont
+) -> String {
+    guard !text.isEmpty, width > 0, maxLines > 0 else { return text }
+    let storage = NSTextStorage(string: text, attributes: [.font: font])
+    let manager = NSLayoutManager()
+    let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+    container.lineFragmentPadding = 0
+    container.maximumNumberOfLines = 0
+    manager.addTextContainer(container)
+    storage.addLayoutManager(manager)
+    let glyphCount = manager.numberOfGlyphs
+    guard glyphCount > 0 else { return text }
+    var starts: [Int] = []
+    manager.enumerateLineFragments(
+        forGlyphRange: NSRange(location: 0, length: glyphCount)
+    ) { _, usedRect, _, glyphRange, _ in
+        guard usedRect.height > 0, glyphRange.length > 0 else { return }
+        let chars = manager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        starts.append(chars.location)
+    }
+    guard starts.count > maxLines else { return text }
+    let from = starts[starts.count - maxLines]
+    let ns = text as NSString
+    guard from < ns.length else { return text }
+    return ns.substring(from: from)
+}
+
 // ---------------------------------------------------------------------------
 // MARK: - Waveform view
 // ---------------------------------------------------------------------------
@@ -256,7 +296,10 @@ private final class PillContentView: NSView {
         liveLabel.usesSingleLineMode = false
         liveLabel.lineBreakMode = .byWordWrapping
         liveLabel.cell?.wraps = true
-        liveLabel.cell?.truncatesLastVisibleLine = true
+        // We feed only the last kMaxLiveLines of wrapped text, so the newest
+        // words sit on the last visible line. Truncating the last line would
+        // hide the end of the dictation (SOU-122).
+        liveLabel.cell?.truncatesLastVisibleLine = false
         liveLabel.isEditable = false
         liveLabel.isSelectable = false
         liveLabel.isBezeled = false
@@ -359,7 +402,13 @@ private final class PillContentView: NSView {
 
     func setLiveText(_ text: String) {
         let expanded = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        liveLabel.stringValue = text
+        let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
+        liveLabel.stringValue = lastWrappedLines(
+            text,
+            width: liveTextColumnWidth(),
+            maxLines: kMaxLiveLines,
+            font: font
+        )
         applyMode(currentMode, title: modeLabel.stringValue, stopLabel: stopLabel,
                   a11yLabel: a11yLabel, expanded: expanded)
     }
@@ -376,15 +425,13 @@ private final class PillContentView: NSView {
         borderView.layer?.cornerCurve = .continuous
     }
 
-    /// Wrapped-line height for the live tail, capped at 5 lines.
-    /// Measured from the string, not `sizeThatFits` (truncating NSTextField
-    /// reports a single line and then the window still grew).
+    /// Wrapped-line height for the live tail. The string is already the last
+    /// kMaxLiveLines (see `setLiveText`); 2 pt slack so the last descender
+    /// is not clipped (SOU-122).
     func liveTextHeight(forWidth width: CGFloat) -> CGFloat {
         let text = liveLabel.stringValue
         guard isExpanded, !text.isEmpty, width > 0 else { return 0 }
         let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
-        // Match the live label's default paragraph style. A 1.15 multiple
-        // here made a 1-line tail count as 2 and grew the HUD too early.
         let para = NSMutableParagraphStyle()
         para.lineBreakMode = .byWordWrapping
         let bounds = (text as NSString).boundingRect(
@@ -394,7 +441,7 @@ private final class PillContentView: NSView {
         )
         let lineH = ceil(font.ascender - font.descender + font.leading)
         let lines = min(CGFloat(kMaxLiveLines), max(1, ceil(bounds.height / max(1, lineH))))
-        return lines * lineH
+        return lines * lineH + 2
     }
 
     @objc private func didTapStop() {
@@ -619,7 +666,7 @@ private final class PillPanel {
             return CGSize(width: kMeetingWidth, height: kMeetingHeight)
         }
         if expanded, mode == .dictation {
-            let liveW = kExpandedWidth - 16 - 10 - 8 - 16
+            let liveW = liveTextColumnWidth()
             let liveH = contentView?.liveTextHeight(forWidth: liveW) ?? 0
             // Header (64) + separator padding + wrapped tail. Grow only when
             // the line count changes, not per character.

@@ -98,19 +98,21 @@ describe("PermissionsStep accessibility repair", () => {
     };
   }
 
-  /** Repair is only offered once the stale-entry diagnosis applies: the user
-   * clicked Open Settings, left, and came back with it still refused. */
-  async function reachRepair(): Promise<HTMLElement> {
-    const axRow = rowFor("Accessibility");
-    permissionsApi.requestPermission.mockResolvedValue("denied");
-    await fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
-    await fireEvent.blur(window);
-    await fireEvent.focus(window);
-    await waitFor(() =>
-      expect(within(axRow).getByRole("button", { name: "Repair permission" })).toBeTruthy(),
-    );
-    return axRow;
+  function repairButton(): HTMLElement {
+    return screen.getByRole("button", { name: "Repair permissions" });
   }
+
+  it("keeps Repair permissions visible under the list on first paint", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    expect(screen.getByText("Permissions issues?")).toBeTruthy();
+    expect(repairButton()).toBeTruthy();
+    expect(
+      within(rowFor("Accessibility")).queryByRole("button", { name: "Repair permissions" }),
+    ).toBeNull();
+  });
 
   it("announces success when tccutil reset succeeds", async () => {
     permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
@@ -121,11 +123,10 @@ describe("PermissionsStep accessibility repair", () => {
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
-    const axRow = await reachRepair();
-    await fireEvent.click(within(axRow).getByRole("button", { name: "Repair permission" }));
+    await fireEvent.click(repairButton());
 
     await waitFor(() => {
-      expect(within(axRow).getByText(/new prompt should appear/i)).toBeTruthy();
+      expect(screen.getByText(/new prompt should appear/i)).toBeTruthy();
     });
     expect(permissionsApi.repairAccessibilityPermission).toHaveBeenCalledOnce();
   });
@@ -136,14 +137,13 @@ describe("PermissionsStep accessibility repair", () => {
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
-    const axRow = await reachRepair();
-    await fireEvent.click(within(axRow).getByRole("button", { name: "Repair permission" }));
+    await fireEvent.click(repairButton());
 
     await waitFor(() => {
       expect(screen.getByText(/tccutil reset Accessibility failed/)).toBeTruthy();
     });
-    expect(within(axRow).queryByText(/new prompt should appear/i)).toBeNull();
-    expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
+    expect(screen.queryByText(/new prompt should appear/i)).toBeNull();
+    expect(screen.getByText("Permissions issues?")).toBeTruthy();
   });
 });
 
@@ -171,8 +171,9 @@ describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
 
     const axRow = rowFor("Accessibility");
     expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
-    expect(within(axRow).queryByRole("button", { name: "Repair permission" })).toBeNull();
+    expect(within(axRow).queryByRole("button", { name: "Repair permissions" })).toBeNull();
     expect(within(axRow).getByText(/tick Soufflé in the Accessibility list/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Repair permissions" })).toBeTruthy();
   });
 
   it("still does not diagnose it right after Open Settings, before the user comes back", async () => {
@@ -188,7 +189,7 @@ describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
 
     await waitFor(() => expect(permissionsApi.requestPermission).toHaveBeenCalledWith("accessibility"));
     expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
-    expect(within(axRow).queryByRole("button", { name: "Repair permission" })).toBeNull();
+    expect(within(axRow).queryByRole("button", { name: "Repair permissions" })).toBeNull();
   });
 
   it("diagnoses it once the user has left for Settings and come back still refused", async () => {
@@ -205,7 +206,7 @@ describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
     await waitFor(() => {
       expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
     });
-    expect(within(axRow).getByRole("button", { name: "Repair permission" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Repair permissions" })).toBeTruthy();
   });
 
   it("diagnoses it on a second attempt even without a blur/focus pair", async () => {

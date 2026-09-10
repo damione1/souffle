@@ -307,7 +307,7 @@ describe("transcription controller", () => {
       savedToHistory: true,
     });
     expect(ctrl.statusMessage).toBe("Copied — press ⌘V");
-    expect(ctrl.statusActionLabel).toBe("Repair permission");
+    expect(ctrl.statusActionLabel).toBe("Repair permissions");
     expect(ctrl.statusAction).toBeTypeOf("function");
     ctrl.statusAction?.();
     expect(ctrl.app.permissionsPanelOpen).toBe(true);
@@ -347,7 +347,7 @@ describe("transcription controller", () => {
     });
     await ctrl.toggleRecording(true);
 
-    expect(ctrl.statusActionLabel).toBe("Repair permission");
+    expect(ctrl.statusActionLabel).toBe("Repair permissions");
 
     // What the app-level snapshot does when the user grants it in System Settings.
     ctrl.app.appPermissions = {
@@ -891,7 +891,7 @@ describe("transcription controller", () => {
 
     expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
-    expect(ctrl.statusActionLabel).toBe("Repair permission");
+    expect(ctrl.statusActionLabel).toBe("Repair permissions");
 
     ctrl.app.machineState = { state: "idle" };
     ctrl.app.transcriptionRuntimePhase = "download_required";
@@ -899,7 +899,7 @@ describe("transcription controller", () => {
 
     expect(ctrl.statusMessage).toContain("Download and load");
     expect(ctrl.statusActionLabel).toBe("Open model");
-    expect(ctrl.statusActionLabel).not.toBe("Repair permission");
+    expect(ctrl.statusActionLabel).not.toBe("Repair permissions");
   });
 
   it("does not double-start while ensureModelLoaded is still pending", async () => {
