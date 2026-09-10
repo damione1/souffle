@@ -16,6 +16,10 @@ concurrency:
 jobs:
   generated-contracts:
     runs-on: macos-latest
+    # The job normally finishes in ~13 min. Without a cap, a hung step runs to
+    # GitHub's 6 h default, and macOS minutes bill at 10x: one stuck run costs
+    # more than a month of green ones.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v6.0.1
@@ -51,6 +55,11 @@ jobs:
       # tree catches that, so run the suites here as well as locally.
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+      # Silero's two ort tests have hung here indefinitely: whichever thread
+      # wins the `Once` in `ensure_ort_initialized` can stall inside
+      # `ort::init_from`, and every other thread then blocks on that `Once`
+      # with no timeout. Fail the step instead of holding the runner.
       - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+        timeout-minutes: 15
       - run: npm test
       - run: npm run check

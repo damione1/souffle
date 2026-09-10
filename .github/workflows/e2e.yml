@@ -17,6 +17,7 @@ jobs:
     # Frontend-only smoke suite (IPC is stubbed, see tests/e2e/tauri-stub.ts):
     # no Rust build needed, so a Linux runner is fine and cheaper than macOS.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v6.0.1
