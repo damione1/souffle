@@ -60,7 +60,7 @@
   } = $props();
 
   const showNativeTapBanner = $derived(
-    shouldShowNativeTapBanner(pttShortcut, modifierTapStatus),
+    shouldShowNativeTapBanner(pttShortcut, modifierTapStatus, toggleShortcut),
   );
 </script>
 

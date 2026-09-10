@@ -49,7 +49,24 @@ describe("InterfaceSettingsSection native tap banner (SOU-116)", () => {
 
     expect(
       screen.getByText(
-        /push-to-talk shortcut won't work until Accessibility is granted/i,
+        /single-key shortcut won't work until Accessibility is granted/i,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("shows the banner when Toggle is native and the tap is missing (SOU-115)", () => {
+    render(InterfaceSettingsSection, {
+      props: {
+        ...baseProps,
+        toggleShortcut: "Fn",
+        pttShortcut: "",
+        modifierTapStatus: { installed: false },
+      },
+    });
+
+    expect(
+      screen.getByText(
+        /single-key shortcut won't work until Accessibility is granted/i,
       ),
     ).toBeTruthy();
   });
@@ -65,7 +82,7 @@ describe("InterfaceSettingsSection native tap banner (SOU-116)", () => {
 
     expect(
       screen.queryByText(
-        /push-to-talk shortcut won't work until Accessibility is granted/i,
+        /single-key shortcut won't work until Accessibility is granted/i,
       ),
     ).toBeNull();
   });
