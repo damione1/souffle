@@ -15,7 +15,7 @@ use tracing::warn;
 use crate::app_events::{
     DictationCancelRequested, ShortcutPttStart, ShortcutPttStop, ShortcutToggle,
 };
-use crate::modifier_shortcut::is_native_ptt_shortcut;
+use crate::modifier_shortcut::is_native_shortcut;
 use crate::settings::ShortcutSettings;
 use crate::state::AppState;
 use crate::state_machine::AppStateMachine;
@@ -126,7 +126,7 @@ fn restore_user_escape(app: &AppHandle) {
         return;
     }
 
-    if shortcuts.push_to_talk != ESCAPE || is_native_ptt_shortcut(&shortcuts.push_to_talk) {
+    if shortcuts.push_to_talk != ESCAPE || is_native_shortcut(&shortcuts.push_to_talk) {
         return;
     }
     if let Err(e) = gs.on_shortcut(ESCAPE, |app, _shortcut, event| match event.state {
