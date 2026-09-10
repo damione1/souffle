@@ -51,7 +51,7 @@
 <section class="settings-group">
   <h3>{$t("settings_model.title")}</h3>
   <div class="settings-rows">
-    <div class="flex items-center justify-between gap-4">
+    <div id="transcription.model" data-settings-anchor="transcription.model" class="flex items-center justify-between gap-4">
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <span class="setting-label">{$t("settings_model.title")}</span>
         <span class="setting-desc">{$t("settings_model.description")}</span>

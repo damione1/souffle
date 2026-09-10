@@ -45,6 +45,7 @@
   <h3>{$t("settings_calendar.title")}</h3>
   <div class="settings-rows">
   <SettingsField
+    anchor="meetings.calendar"
     label={$t("settings_calendar.enable_label")}
     description={$t("settings_calendar.enable_desc")}
   >
@@ -56,7 +57,7 @@
   {#if permission === "denied"}
     <StatusBanner
       message={$t("settings_calendar.permission_denied")}
-      actionLabel={$t("permissions.open_settings")}
+      actionLabel={$t("permissions.open_system_settings")}
       onAction={() => commands.openCalendarSettings()}
     />
   {/if}

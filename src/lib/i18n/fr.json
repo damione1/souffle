@@ -162,6 +162,7 @@
     "enabled": "Nettoyer la dictée avec l'IA",
     "enabled_desc": "Passe LLM locale après transcription pour corriger ponctuation, termes techniques et autocorrections parlées — sans changer le sens.",
     "no_provider": "Aucun fournisseur de résumés disponible. Configurez Ollama ou activez Apple Intelligence.",
+    "open_provider": "Choisir un fournisseur",
     "template": "Modèle de style",
     "template_clean": "Nettoyage",
     "template_email": "E-mail professionnel",
@@ -277,8 +278,7 @@
     "update_available": "La version {version} est disponible.",
     "download_update": "Télécharger sur GitHub",
     "auto_check": "Vérifier les mises à jour chaque jour",
-    "auto_check_desc": "Demande à GitHub une fois par jour si une version plus récente existe, et affiche une fenêtre le cas échéant. Rien n'est téléchargé ni installé.",
-    "no_summary_provider": "Aucun moteur de résumé disponible. Activez Apple Intelligence ou connectez Ollama."
+    "auto_check_desc": "Demande à GitHub une fois par jour si une version plus récente existe, et affiche une fenêtre le cas échéant. Rien n'est téléchargé ni installé."
   },
   "whats_new": {
     "title": "Nouveautés",
@@ -350,7 +350,7 @@
     "generating": "Génération...",
     "regenerate_summary": "Régénérer le résumé",
     "generate_summary": "Générer le résumé",
-    "no_summary_provider": "Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans les Paramètres.",
+    "no_summary_provider": "Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama.",
     "no_compatible_model": "Aucun modèle Ollama compatible trouvé. Installez un modèle comme Llama ou Mistral pour activer les résumés.",
     "generate_hint": "Points clés et actions, générés sur l'appareil",
     "generate_cta": "Générer",
@@ -536,6 +536,7 @@
     "input_monitoring_label": "Surveillance de l'entrée",
     "input_monitoring_desc": "Capturer le raccourci sur une seule touche (ex: fn, cmd), le reste passe.",
     "grant": "Autoriser",
+    "open_system_settings": "Ouvrir les Réglages Système",
     "open_settings": "Ouvrir Réglages",
     "granted": "Accordé",
     "not_supported": "Non pris en charge",

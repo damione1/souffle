@@ -127,12 +127,15 @@
     }
   }
 
-  
+  /** Refresh the app-wide permission snapshot. Read-only (`AXIsProcessTrusted`
+   * and friends, no prompt), so it is cheap enough to run on every focus: it is
+   * what lets a banner clear when the user grants a permission from System
+   * Settings without ever reopening the permissions panel (SOU-089 AC6). */
   async function syncPermissions() {
     try {
       app.appPermissions = await getPermissionStatus();
     } catch {
-      // Best-effort
+      // Best-effort: a failed snapshot just leaves the last known state.
     }
   }
 

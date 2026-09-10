@@ -15,6 +15,7 @@ import { learnFromEdit } from "../../api/dictionary";
 import { frontmostAppName, readFocusedText, readSelectedText } from "../../api/focus";
 import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
+import type { StatusReason } from "../../types/status";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage, segmentGap } from "../../utils";
 import { tr } from "../../i18n";
@@ -179,12 +180,12 @@ function createTranscriptionControllerInstance() {
   let isStopping = $state(false);
   let transcript = $state("");
   let tentative = $state("");
-  let statusReason = $state<import("../../types").StatusReason | null>(null);
+  let statusReason = $state<StatusReason | null>(null);
   let catalog = $state<TranscriptionCatalog | null>(null);
 
   let tooShortBannerTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function setBanner(reason: import("../../types").StatusReason | null) {
+  function setBanner(reason: StatusReason | null) {
     if (tooShortBannerTimer) {
       clearTimeout(tooShortBannerTimer);
       tooShortBannerTimer = null;
@@ -299,16 +300,29 @@ function createTranscriptionControllerInstance() {
     }, LEARN_FROM_EDIT_DELAY_MS);
   }
 
-  let effectRoot: (() => void) | null = null;
-  async function mount() {
-    effectRoot = $effect.root(() => {
+  // Auto-dismiss: a banner whose cause is gone (permission granted from System
+  // Settings, model finished loading) clears itself, without waiting for the
+  // next session (SOU-089 AC6).
+  let disposeAutoDismiss: (() => void) | null = null;
+  function startAutoDismiss() {
+    if (disposeAutoDismiss) return;
+    disposeAutoDismiss = $effect.root(() => {
       $effect(() => {
-        if (!statusReason) return;
-        if (statusReason.type === "accessibility_denied" && app.appPermissions?.accessibility === "granted") clearBanner();
-        if (statusReason.type === "mic_denied" && app.appPermissions?.microphone === "granted") clearBanner();
-        if (statusReason.type === "no_model" && app.transcriptionRuntimePhase === "ready") clearBanner();
+        // Read once: clearBanner() nulls statusReason, so a second test against
+        // it in the same pass would dereference null.
+        const reason = statusReason;
+        if (!reason) return;
+
+        const resolved =
+          (reason.type === "accessibility_denied" && app.appPermissions?.accessibility === "granted")
+          || (reason.type === "no_model" && app.transcriptionRuntimePhase === "ready");
+        if (resolved) clearBanner();
       });
     });
+  }
+
+  async function mount() {
+    startAutoDismiss();
     await refreshCatalog();
     await refreshRuntimeStatus();
     await refreshSnippets();
@@ -349,7 +363,8 @@ function createTranscriptionControllerInstance() {
 
     return () => {
       unlisten.forEach((fn) => fn());
-      effectRoot?.();
+      disposeAutoDismiss?.();
+      disposeAutoDismiss = null;
     };
   }
 
@@ -606,6 +621,7 @@ function createTranscriptionControllerInstance() {
     }
     clearSessionContext();
   }
+
   return {
     get app() { return app; },
     get isStartingRecording() { return isStartingRecording; },

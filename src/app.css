@@ -459,6 +459,26 @@ img {
   background: var(--color-surface-2);
 }
 
+/* ─── Deep-link highlight: the row an alert sent the user to ─── */
+/* Inset: `.settings-rows` clips its children, so an outward ring would be cut
+   off on the row the deep link actually landed on. */
+.settings-anchor-highlight {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+  outline-offset: -2px;
+  border-radius: var(--radius-default);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  transition:
+    outline-color 350ms ease,
+    background-color 350ms ease;
+}
+
+/* The ring stays; only the fade in and out goes away. */
+@media (prefers-reduced-motion: reduce) {
+  .settings-anchor-highlight {
+    transition: none;
+  }
+}
+
 /* ─── Settings groups: uppercase label above a card of divided rows ─── */
 .settings-group {
   display: flex;

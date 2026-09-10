@@ -162,6 +162,7 @@
     "enabled": "Clean dictation with AI",
     "enabled_desc": "Run a local LLM pass after transcription to fix punctuation, technical terms, and spoken corrections — without rewriting your meaning.",
     "no_provider": "No summarization provider is available. Configure Ollama or enable Apple Intelligence.",
+    "open_provider": "Choose a provider",
     "template": "Style template",
     "template_clean": "Clean up",
     "template_email": "Professional email",
@@ -277,8 +278,7 @@
     "update_available": "Version {version} is available.",
     "download_update": "Download on GitHub",
     "auto_check": "Check daily for updates",
-    "auto_check_desc": "Ask GitHub once a day whether a newer version exists, and show a dialog when there is one. Nothing is downloaded or installed.",
-    "no_summary_provider": "No summarization provider is available. Enable Apple Intelligence or connect Ollama."
+    "auto_check_desc": "Ask GitHub once a day whether a newer version exists, and show a dialog when there is one. Nothing is downloaded or installed."
   },
   "whats_new": {
     "title": "What's New",
@@ -350,7 +350,7 @@
     "generating": "Generating...",
     "regenerate_summary": "Re-generate Summary",
     "generate_summary": "Generate Summary",
-    "no_summary_provider": "No summarization provider is available. Enable Apple Intelligence or connect Ollama in Settings.",
+    "no_summary_provider": "No summarization provider is available. Enable Apple Intelligence or connect Ollama.",
     "no_compatible_model": "No compatible Ollama model found. Install a model like Llama or Mistral to enable summaries.",
     "generate_hint": "Key points and action items, generated on device",
     "generate_cta": "Generate",
@@ -536,6 +536,7 @@
     "input_monitoring_label": "Input Monitoring",
     "input_monitoring_desc": "Capture the single-key shortcut (e.g. fn, cmd), while letting other keys pass.",
     "grant": "Grant",
+    "open_system_settings": "Open System Settings",
     "open_settings": "Open Settings",
     "granted": "Granted",
     "not_supported": "Not supported",

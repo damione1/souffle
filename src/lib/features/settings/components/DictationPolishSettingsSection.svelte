@@ -45,6 +45,7 @@
   <p class="text-sm text-text-muted mb-3">{$t("settings_dictation_polish.description")}</p>
   <div class="settings-rows">
     <SettingsField
+      anchor="ai.dictation_polish"
       label={$t("settings_dictation_polish.enabled")}
       description={$t("settings_dictation_polish.enabled_desc")}
     >
@@ -60,7 +61,11 @@
     </SettingsField>
 
     {#if enabled && !providerAvailable}
-      <StatusBanner message={$t("settings_dictation_polish.no_provider")} />
+      <StatusBanner
+        message={$t("settings_dictation_polish.no_provider")}
+        actionLabel={$t("settings_dictation_polish.open_provider")}
+        onAction={() => openSettings({ anchor: "ai.provider" })}
+      />
     {/if}
 
     {#if enabled && templates.length > 0}

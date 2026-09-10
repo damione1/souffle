@@ -20,6 +20,7 @@ import { getSummaryProvidersStatus } from "../../api/summary";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
 import { tr } from "../../i18n";
+import type { StatusReason } from "../../types/status";
 import type { AppStateMachine, ExportFormat, MeetingAudioSession, MeetingCalendarContext, MeetingIdle, MeetingTranscript, SummaryModelDescriptor, SummaryProviderChoice, SummarizeProgress, TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage } from "../../utils";
 import { toSelectedTranscriptionProfile } from "../transcription/catalog";
@@ -64,7 +65,7 @@ function modelsForSummaryProvider(
 function createMeetingControllerInstance() {
   const app = getAppState();
 
-  let statusReason = $state<import("../../types").StatusReason | null>(null);
+  let statusReason = $state<StatusReason | null>(null);
   let ollamaAvailable = $state(false);
   let appleIntelligenceAvailable = $state(false);
   let summaryModels = $state<SummaryModelDescriptor[]>([]);
@@ -167,16 +168,29 @@ function createMeetingControllerInstance() {
         || app.transcriptionRuntimePhase === "load_required");
   }
 
-  let effectRoot: (() => void) | null = null;
-  async function mount() {
-    effectRoot = $effect.root(() => {
+  // The controller is a singleton and HomeView mounts it on every visit, so
+  // the auto-dismiss root is created once and kept: recreating it per mount
+  // would stack a live effect per navigation.
+  let disposeAutoDismiss: (() => void) | null = null;
+  function startAutoDismiss() {
+    if (disposeAutoDismiss) return;
+    disposeAutoDismiss = $effect.root(() => {
       $effect(() => {
-        if (!statusReason) return;
-        if (statusReason.type === "accessibility_denied" && app.appPermissions?.accessibility === "granted") clearBanner();
-        if (statusReason.type === "mic_denied" && app.appPermissions?.microphone === "granted") clearBanner();
-        if (statusReason.type === "no_model" && app.transcriptionRuntimePhase === "ready") clearBanner();
+        // Read once: clearBanner() nulls statusReason, so a second test against
+        // it in the same pass would dereference null.
+        const reason = statusReason;
+        if (!reason) return;
+
+        const resolved =
+          (reason.type === "accessibility_denied" && app.appPermissions?.accessibility === "granted")
+          || (reason.type === "no_model" && app.transcriptionRuntimePhase === "ready");
+        if (resolved) clearBanner();
       });
     });
+  }
+
+  async function mount() {
+    startAutoDismiss();
     await Promise.all([refreshSummaryProviders(), loadTranscriptionCatalog()]);
   }
 
@@ -297,7 +311,7 @@ function createMeetingControllerInstance() {
     }
   }
 
-  function setBanner(reason: import("../../types").StatusReason | null) {
+  function setBanner(reason: StatusReason | null) {
     statusReason = reason;
   }
 
@@ -840,6 +854,7 @@ function createMeetingControllerInstance() {
       isExporting = false;
     }
   }
+
   return {
     get app() { return app; },
     get statusMessage() { return statusReason?.message ?? ""; },

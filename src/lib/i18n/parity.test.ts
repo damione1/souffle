@@ -52,38 +52,34 @@ describe("i18n locales", () => {
       .map(([key, files]) => `${key} (${[...files].join(", ")})`);
     expect(missing).toEqual([]);
   });
-});
 
-  it("does not contain written paths to settings", () => {
-    const allowedPathKeys = [
+  /** SOU-089 AC7: an alert names a button, never a route. A written itinerary
+   * goes stale in silence (SOU-056 shipped a path to a tab that no longer
+   * existed); this fails the moment one is reintroduced. */
+  it("has no written settings path in either locale", () => {
+    // Both exceptions are legitimate arrows: a unit range and a device change.
+    const allowed = new Set([
       "settings_audio.sample_rate_high_warning",
       "mic_toast.switched_detail",
-    ];
-    
-    const checkPaths = (localeName: string, flattened: Record<string, string>) => {
-      for (const [key, value] of Object.entries(flattened)) {
-        if (allowedPathKeys.includes(key)) continue;
-        
-        if (value.includes("Settings >") || value.includes("Réglages >") || value.includes("→")) {
-          throw new Error(`[${localeName}] Key "${key}" contains an explicit settings path: "${value}"`);
+    ]);
+
+    const values = (obj: Record<string, unknown>, prefix = ""): [string, string][] =>
+      Object.entries(obj).flatMap(([key, value]) =>
+        value !== null && typeof value === "object"
+          ? values(value as Record<string, unknown>, `${prefix}${key}.`)
+          : ([[`${prefix}${key}`, String(value)]] as [string, string][]),
+      );
+
+    const offenders: string[] = [];
+    for (const [locale, dict] of [["en", en], ["fr", fr]] as const) {
+      for (const [key, value] of values(dict as Record<string, unknown>)) {
+        if (allowed.has(key)) continue;
+        if (/Settings >|Réglages >|→/.test(value)) {
+          offenders.push(`[${locale}] ${key}: ${value}`);
         }
       }
-    };
-    
-    // Create flattened objects holding the actual string values
-    const flattenValues = (obj: Record<string, unknown>, prefix = ""): Record<string, string> => {
-      return Object.entries(obj).reduce((acc, [key, value]) => {
-        if (value !== null && typeof value === "object") {
-          return { ...acc, ...flattenValues(value as Record<string, unknown>, `${prefix}${key}.`) };
-        }
-        acc[`${prefix}${key}`] = value as string;
-        return acc;
-      }, {} as Record<string, string>);
-    };
+    }
 
-    const flatEn = flattenValues(en);
-    const flatFr = flattenValues(fr);
-
-    checkPaths("en", flatEn);
-    checkPaths("fr", flatFr);
+    expect(offenders).toEqual([]);
   });
+});

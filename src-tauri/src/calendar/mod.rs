@@ -299,7 +299,10 @@ mod macos {
 }
 
 #[cfg(target_os = "macos")]
-pub use macos::{authorization_state, fetch_todays_events, list_calendars, open_calendar_settings, request_access};
+pub use macos::{
+    authorization_state, fetch_todays_events, list_calendars, open_calendar_settings,
+    request_access,
+};
 
 #[cfg(not(target_os = "macos"))]
 pub fn authorization_state() -> PermState {

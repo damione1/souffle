@@ -12,8 +12,11 @@
   import type { PermissionStatus, PermState } from "../../types";
   import { errorMessage } from "../../utils";
   import { openSettings } from "../settings/open";
+  import { getAppState } from "../../stores/app.svelte";
 
   let { onStatusChange }: { onStatusChange?: (status: PermissionStatus) => void } = $props();
+
+  const app = getAppState();
 
   let status = $state<PermissionStatus>({
     microphone: "unknown",
@@ -52,6 +55,9 @@
    * state, e.g. to gate the onboarding auto-paste default (SOU-053). */
   function setStatus(next: PermissionStatus) {
     status = next;
+    // Publish upward: this component already polls TCC every 600 ms, so the
+    // app-level snapshot rides on it rather than starting a second poll.
+    app.appPermissions = next;
     // Reset success banner if accessibility state changes back/forth
     if (next.accessibility === "granted") {
       repairSuccess = false;

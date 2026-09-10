@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { t } from "svelte-i18n";
   import AutostartSettingsSection from "../features/settings/components/AutostartSettingsSection.svelte";
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
@@ -19,7 +19,7 @@
   import SummaryTemplatesSettingsSection from "../features/settings/components/SummaryTemplatesSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { type SettingsTab } from "../features/settings/open";
-  import { type SettingsAnchor, tabForAnchor } from "../features/settings/anchors";
+  import { focusAnchor, tabForAnchor } from "../features/settings/anchors";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
   import { events } from "../api/generated";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
@@ -35,12 +35,14 @@
   ];
 
   const controller = createSettingsController();
-  let activeTab = $state<SettingsTab>(
-    controller.app.settingsInitialAnchor ? tabForAnchor(controller.app.settingsInitialAnchor) : "transcription"
-  );
-  let targetAnchor = controller.app.settingsInitialAnchor;
-  // Deep-link is one-shot: don't stick future normal opens to this tab.
+  // Deep-link is one-shot: the anchor is read here and cleared immediately, so
+  // the next ordinary open still lands on Transcription with nothing highlighted.
+  const initialAnchor = controller.app.settingsInitialAnchor;
   controller.app.settingsInitialAnchor = null;
+
+  let activeTab = $state<SettingsTab>(
+    initialAnchor ? tabForAnchor(initialAnchor) : "transcription",
+  );
 
   let selectedTranscriptionLabel = $derived(
     formatSelectedTranscriptionLabel(
@@ -60,6 +62,16 @@
     void controller.mount();
 
     let cancelled = false;
+    let clearHighlight: (() => void) | null = null;
+
+    if (initialAnchor) {
+      // The tab panel is rendered by the same pass that runs onMount; wait for
+      // the DOM to settle before looking the anchored row up.
+      void tick().then(() => {
+        if (!cancelled) clearHighlight = focusAnchor(initialAnchor);
+      });
+    }
+
     const unlisteners: Array<() => void> = [];
 
     const register = (promise: Promise<() => void>) => {
@@ -86,6 +98,7 @@
 
     return () => {
       cancelled = true;
+      clearHighlight?.();
       for (const unlisten of unlisteners) {
         unlisten();
       }
