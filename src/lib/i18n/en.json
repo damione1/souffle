@@ -141,8 +141,6 @@
     "paste_method_clipboard": "Clipboard (⌘V)",
     "paste_method_type": "Simulated typing",
     "paste_method_ax": "Focused field",
-    "rewrite": "Rewrite selection",
-    "rewrite_desc": "Press to dictate a rewrite of the selected text. Pastes over the selection instead of inserting.",
     "paste_delay": "Paste delay (ms)",
     "paste_delay_desc": "Wait time before pasting. Increase if the text lands in the wrong app.",
     "toggle_recording": "Toggle recording",

@@ -237,7 +237,6 @@ export const mockSettings: AppSettings = {
 export const mockShortcuts: ShortcutSettings = {
   toggle: "CommandOrControl+Shift+S",
   push_to_talk: "CommandOrControl+Shift+Space",
-  rewrite: "",
 };
 
 // ---------------------------------------------------------------------------

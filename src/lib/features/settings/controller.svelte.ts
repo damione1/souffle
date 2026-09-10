@@ -96,8 +96,7 @@ export function createSettingsController() {
 
   let toggleShortcut = $state("CommandOrControl+Shift+Space");
   let pttShortcut = $state("");
-  let rewriteShortcut = $state("");
-  let recordingField = $state<"toggle" | "ptt" | "rewrite" | null>(null);
+  let recordingField = $state<"toggle" | "ptt" | null>(null);
   let shortcutError = $state("");
 
   let dictionaryEntries = $state<DictionaryEntry[]>([]);
@@ -166,7 +165,6 @@ export function createSettingsController() {
       const shortcuts = await getShortcuts();
       toggleShortcut = shortcuts.toggle;
       pttShortcut = shortcuts.push_to_talk;
-      rewriteShortcut = shortcuts.rewrite;
     } catch (e) {
       console.warn("Failed to load shortcuts:", e);
     }
@@ -945,15 +943,14 @@ export function createSettingsController() {
     return formatShortcutLabel(shortcut) || "Not set";
   }
 
-  function startRecording(field: "toggle" | "ptt" | "rewrite") {
+  function startRecording(field: "toggle" | "ptt") {
     recordingField = field;
     shortcutError = "";
   }
 
-  function applyShortcutValue(field: "toggle" | "ptt" | "rewrite", value: string) {
+  function applyShortcutValue(field: "toggle" | "ptt", value: string) {
     if (field === "toggle") toggleShortcut = value;
-    else if (field === "ptt") pttShortcut = value;
-    else rewriteShortcut = value;
+    else pttShortcut = value;
   }
 
   let modifierDownEvent: KeyboardEvent | null = null;
@@ -1015,14 +1012,13 @@ export function createSettingsController() {
       await persistShortcutSettings({
         toggle: toggleShortcut,
         push_to_talk: pttShortcut,
-        rewrite: rewriteShortcut,
       } satisfies ShortcutSettings);
     } catch (e) {
       shortcutError = errorMessage(e);
     }
   }
 
-  async function clearShortcut(field: "toggle" | "ptt" | "rewrite") {
+  async function clearShortcut(field: "toggle" | "ptt") {
     applyShortcutValue(field, "");
     await saveShortcutSettings();
   }
@@ -1060,7 +1056,6 @@ export function createSettingsController() {
     get downloadTotalBytes() { return app.downloadTotalBytes; },
     get toggleShortcut() { return toggleShortcut; },
     get pttShortcut() { return pttShortcut; },
-    get rewriteShortcut() { return rewriteShortcut; },
     get recordingField() { return recordingField; },
     get shortcutError() { return shortcutError; },
     get dictionaryEntries() { return dictionaryEntries; },

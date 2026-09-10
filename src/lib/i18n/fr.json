@@ -141,8 +141,6 @@
     "paste_method_clipboard": "Presse-papiers (⌘V)",
     "paste_method_type": "Frappe simulée",
     "paste_method_ax": "Champ ciblé",
-    "rewrite": "Réécrire la sélection",
-    "rewrite_desc": "Appuyez pour dicter une réécriture du texte sélectionné. Colle par-dessus la sélection au lieu d'insérer.",
     "paste_delay": "Délai de collage (ms)",
     "paste_delay_desc": "Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.",
     "toggle_recording": "Basculer l'enregistrement",

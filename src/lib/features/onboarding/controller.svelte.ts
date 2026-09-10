@@ -48,7 +48,6 @@ export function createOnboardingController() {
 
   let toggleShortcut = $state("CommandOrControl+Shift+Space");
   let pushToTalk = $state("");
-  let rewrite = $state("");
   let recordingShortcut = $state(false);
   let shortcutError = $state("");
   // Mirrors the backend default (settings.rs) until the real Accessibility
@@ -119,7 +118,6 @@ export function createOnboardingController() {
       const shortcuts = await getShortcuts();
       toggleShortcut = shortcuts.toggle || "CommandOrControl+Shift+Space";
       pushToTalk = shortcuts.push_to_talk;
-      rewrite = shortcuts.rewrite;
     } catch {
       // Keep the built-in default.
     }
@@ -204,7 +202,6 @@ export function createOnboardingController() {
       await saveShortcuts({
         toggle: value,
         push_to_talk: pushToTalk,
-        rewrite,
       });
     } catch (e) {
       shortcutError = errorMessage(e);
