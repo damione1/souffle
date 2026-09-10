@@ -98,6 +98,14 @@ pub struct SystemAudioStatus {
     pub reason: Option<String>,
 }
 
+/// Whether the native single-key PTT `CGEventTap` is installed. Edge-triggered
+/// on install success/failure; a webview that reloads reads the snapshot via
+/// `get_modifier_tap_status` (SOU-116, same pattern as `SystemAudioStatus`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Event)]
+pub struct ModifierTapStatus {
+    pub installed: bool,
+}
+
 /// Current microphone/meeting input level (RMS, 0.0-1.0), pushed by the audio
 /// thread while a capture session is active so the waveform UI doesn't need
 /// to poll `get_audio_level` over IPC.

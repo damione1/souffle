@@ -1,5 +1,6 @@
 import {
   getSettings,
+  getModifierTapStatus,
   getSystemAudioStatus,
   saveSettings,
   selectAudioDevice,
@@ -121,6 +122,15 @@ async function resyncAfterReload(app: ReturnType<typeof getAppState>): Promise<v
     } catch {
       // Badge stays hidden until the next tap rebuild emits.
     }
+  }
+
+  // Native PTT tap status is edge-triggered; restore after webview reload
+  // so the settings banner can reappear without waiting for the next retry
+  // (SOU-116 / AC7).
+  try {
+    app.modifierTapStatus = await getModifierTapStatus();
+  } catch {
+    // Banner stays hidden until the next install attempt emits.
   }
 }
 

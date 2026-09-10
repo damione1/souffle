@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -12,8 +13,26 @@ use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 use tracing::{error, info};
 
-use crate::app_events::{ShortcutPttStart, ShortcutPttStop};
+use crate::app_events::{ModifierTapStatus, ShortcutPttStart, ShortcutPttStop};
 use crate::state::AppState;
+
+/// Last `ModifierTapStatus` emitted. The event is edge-triggered (install
+/// success/failure), so a webview that reloads has nothing to listen to until
+/// the next retry; bootstrap reads this snapshot instead (SOU-116).
+static MODIFIER_TAP_STATUS: Mutex<Option<ModifierTapStatus>> = Mutex::new(None);
+
+/// Snapshot for `commands::get_modifier_tap_status`. A read, never a rebuild.
+pub fn modifier_tap_status() -> Option<ModifierTapStatus> {
+    MODIFIER_TAP_STATUS.lock().ok().and_then(|guard| *guard)
+}
+
+fn store_and_emit_modifier_tap_status(app: &AppHandle, installed: bool) {
+    let status = ModifierTapStatus { installed };
+    if let Ok(mut guard) = MODIFIER_TAP_STATUS.lock() {
+        *guard = Some(status);
+    }
+    let _ = status.emit(app);
+}
 
 /// Single-key PTT bindings that the plugin cannot register. Combos stay on
 /// `tauri-plugin-global-shortcut` (SOU-032).
@@ -42,15 +61,18 @@ pub(crate) fn is_native_ptt_shortcut(shortcut: &str) -> bool {
 pub fn start_modifier_tap(app: AppHandle) {
     thread::spawn(move || {
         // Wait a little before starting to ensure AppState is registered.
+        // Status is not emitted during this window so the settings banner
+        // cannot flash on every launch (SOU-116 risk zone).
         thread::sleep(Duration::from_millis(500));
         let mut warned = false;
         loop {
             if install_and_run(app.clone()) {
                 return;
             }
+            store_and_emit_modifier_tap_status(&app, false);
             if !warned {
                 error!(
-                    "Failed to install modifier CGEventTap. Is Input Monitoring granted? Retrying."
+                    "Failed to install modifier CGEventTap. Is Accessibility granted? Retrying."
                 );
                 warned = true;
             }
@@ -62,6 +84,9 @@ pub fn start_modifier_tap(app: AppHandle) {
 fn install_and_run(app: AppHandle) -> bool {
     let tap_port_ptr = Arc::new(AtomicUsize::new(0));
     let tap_port_clone = tap_port_ptr.clone();
+    // Callback takes ownership of `app`; keep a handle for status emits after
+    // install succeeds or the runloop source fails to attach.
+    let app_for_status = app.clone();
 
     let tap_result = CGEventTap::new(
         CGEventTapLocation::HID,
@@ -146,11 +171,13 @@ fn install_and_run(app: AppHandle) -> bool {
     match tap_result {
         Ok(tap) => {
             info!("Modifier CGEventTap installed");
+            store_and_emit_modifier_tap_status(&app_for_status, true);
             tap_port_ptr.store(
                 tap.mach_port().as_concrete_TypeRef() as usize,
                 Ordering::Relaxed,
             );
             let Ok(loop_source) = tap.mach_port().create_runloop_source(0) else {
+                store_and_emit_modifier_tap_status(&app_for_status, false);
                 return false;
             };
             let current_loop = core_foundation::runloop::CFRunLoop::get_current();

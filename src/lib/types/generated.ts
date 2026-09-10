@@ -56,6 +56,14 @@ async getSystemAudioStatus() : Promise<SystemAudioStatus | null> {
     return await TAURI_INVOKE("get_system_audio_status");
 },
 /**
+ * Last native PTT `CGEventTap` install status, for a webview that reloaded
+ * after the `ModifierTapStatus` event already fired (SOU-116). `None` before
+ * the first install attempt (including the startup delay).
+ */
+async getModifierTapStatus() : Promise<ModifierTapStatus | null> {
+    return await TAURI_INVOKE("get_modifier_tap_status");
+},
+/**
  * Delete a downloaded model from disk.
  */
 async deleteModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {
@@ -1081,6 +1089,7 @@ inputRouteNotice: InputRouteNotice,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
 meetingStopRequested: MeetingStopRequested,
+modifierTapStatus: ModifierTapStatus,
 navigate: Navigate,
 pillHoldChanged: PillHoldChanged,
 pipelineError: PipelineError,
@@ -1106,6 +1115,7 @@ inputRouteNotice: "input-route-notice",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
 meetingStopRequested: "meeting-stop-requested",
+modifierTapStatus: "modifier-tap-status",
 navigate: "navigate",
 pillHoldChanged: "pill-hold-changed",
 pipelineError: "pipeline-error",
@@ -1562,6 +1572,12 @@ participants: MeetingParticipant[] }
  */
 export type MeetingTranscriptionLanguage = "auto" | "en" | "fr"
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
+/**
+ * Whether the native single-key PTT `CGEventTap` is installed. Edge-triggered
+ * on install success/failure; a webview that reloads reads the snapshot via
+ * `get_modifier_tap_status` (SOU-116, same pattern as `SystemAudioStatus`).
+ */
+export type ModifierTapStatus = { installed: boolean }
 export type Navigate = AppView
 export type OllamaPullProgress = { model: string; status: string; downloaded_bytes: number; total_bytes: number | null; done: boolean; error: string | null }
 export type PasteMethod = "clipboard" | "type" | 

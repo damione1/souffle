@@ -58,6 +58,7 @@ export type {
   InputRouteReason,
   PipelineError,
   TransportType,
+  ModifierTapStatus,
   SystemAudioStatus,
   TranscriptionHealth,
   TranscriptionCapabilities,

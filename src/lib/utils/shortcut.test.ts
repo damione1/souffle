@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "./shortcut";
+import {
+  isNativePttShortcut,
+  keyEventToShortcut,
+  modifierToShortcut,
+  shortcutMissingModifier,
+  shouldShowNativeTapBanner,
+} from "./shortcut";
 
 function key(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent("keydown", init);
@@ -53,5 +59,29 @@ describe("shortcutMissingModifier", () => {
   it("accepts F-keys and modified keys", () => {
     expect(shortcutMissingModifier(key({ key: "F8", code: "F8" }))).toBe(false);
     expect(shortcutMissingModifier(key({ key: "a", code: "KeyA", metaKey: true }))).toBe(false);
+  });
+});
+
+describe("shouldShowNativeTapBanner (SOU-116)", () => {
+  it("shows only when a native PTT shortcut is bound and the tap is missing", () => {
+    expect(shouldShowNativeTapBanner("Fn", { installed: false })).toBe(true);
+    expect(shouldShowNativeTapBanner("F5", { installed: false })).toBe(true);
+  });
+
+  it("hides when no native shortcut is bound (AC6)", () => {
+    expect(shouldShowNativeTapBanner("", { installed: false })).toBe(false);
+    expect(shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false })).toBe(
+      false,
+    );
+  });
+
+  it("hides while status is unknown or the tap is installed", () => {
+    expect(shouldShowNativeTapBanner("Fn", null)).toBe(false);
+    expect(shouldShowNativeTapBanner("Fn", { installed: true })).toBe(false);
+  });
+
+  it("mirrors the backend native PTT set", () => {
+    expect(isNativePttShortcut("MetaRight")).toBe(true);
+    expect(isNativePttShortcut("F4")).toBe(false);
   });
 });

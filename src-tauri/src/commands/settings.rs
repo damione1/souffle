@@ -164,6 +164,15 @@ pub fn get_shortcuts(state: State<'_, AppState>) -> Result<ShortcutSettings, Str
     ShortcutSettings::load(&state.db)
 }
 
+/// Last native PTT `CGEventTap` install status, for a webview that reloaded
+/// after the `ModifierTapStatus` event already fired (SOU-116). `None` before
+/// the first install attempt (including the startup delay).
+#[tauri::command]
+#[specta::specta]
+pub fn get_modifier_tap_status() -> Option<crate::app_events::ModifierTapStatus> {
+    crate::modifier_shortcut::modifier_tap_status()
+}
+
 /// Open the macOS System Settings to the Apple Intelligence & Siri pane.
 #[tauri::command]
 #[specta::specta]

@@ -110,6 +110,9 @@ pub fn accessibility_granted() -> bool {
 
 #[cfg(target_os = "macos")]
 fn open_accessibility_settings() {
+    // Prompt first so macOS inserts Soufflé into the Accessibility list
+    // (same pattern as `CGRequestListenEventAccess` before Input Monitoring).
+    let _ = accessibility_trusted_with_prompt(true);
     let _ = std::process::Command::new("open")
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         .spawn();

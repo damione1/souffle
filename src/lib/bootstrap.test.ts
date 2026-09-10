@@ -9,6 +9,7 @@ const {
   pillRelease,
   getDownloadProgress,
   getSystemAudioStatus,
+  getModifierTapStatus,
 } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
@@ -18,11 +19,13 @@ const {
   pillRelease: vi.fn<() => Promise<void>>(async () => undefined),
   getDownloadProgress: vi.fn<() => Promise<DownloadProgress | null>>(async () => null),
   getSystemAudioStatus: vi.fn<() => Promise<SystemAudioStatus | null>>(async () => null),
+  getModifierTapStatus: vi.fn<() => Promise<ModifierTapStatus | null>>(async () => null),
 }));
 
 vi.mock("./api/settings", () => ({
   getSettings,
   getSystemAudioStatus,
+  getModifierTapStatus,
   saveSettings,
   selectAudioDevice: vi.fn(),
 }));
@@ -48,7 +51,7 @@ import { LOCAL_BUILD, bootstrapAppState } from "./bootstrap";
 import { getAppState } from "./stores/app.svelte";
 import { mockRuntimeStatus, mockSettings } from "./test-helpers/fixtures";
 import { SETUP_STORAGE_KEY } from "./features/onboarding/setup";
-import type { AppStateMachine, DownloadProgress, SystemAudioStatus } from "./types";
+import type { AppStateMachine, DownloadProgress, ModifierTapStatus, SystemAudioStatus } from "./types";
 
 describe("bootstrapAppState what's new", () => {
   const app = getAppState();
@@ -136,6 +139,7 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
     app.settings = { ...mockSettings };
     app.machineState = { state: "idle" };
     app.systemAudioStatus = null;
+    app.modifierTapStatus = null;
     app.downloadFile = "";
     app.downloadCompletedFiles = 0;
     app.downloadTotalFiles = 0;
@@ -223,9 +227,30 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
     expect(app.systemAudioStatus).toBeNull();
   });
 
+  it("restores native PTT tap status after a webview reload (SOU-116 AC7)", async () => {
+    getMachineState.mockResolvedValueOnce({ state: "ready", data: { profile } });
+    getModifierTapStatus.mockResolvedValueOnce({ installed: false });
+
+    await bootstrapAppState(app);
+
+    expect(getModifierTapStatus).toHaveBeenCalledTimes(1);
+    expect(app.modifierTapStatus).toEqual({ installed: false });
+
+    // Remount / second bootstrap must query again — status must not live
+    // only in the previous webview's event listener.
+    getMachineState.mockResolvedValueOnce({ state: "ready", data: { profile } });
+    getModifierTapStatus.mockResolvedValueOnce({ installed: true });
+    app.modifierTapStatus = null;
+
+    await bootstrapAppState(app);
+
+    expect(app.modifierTapStatus).toEqual({ installed: true });
+  });
+
   it("keeps booting when a resync read fails", async () => {
     getMachineState.mockResolvedValueOnce(meeting);
     getSystemAudioStatus.mockRejectedValueOnce(new Error("backend busy"));
+    getModifierTapStatus.mockRejectedValueOnce(new Error("backend busy"));
 
     await expect(bootstrapAppState(app)).resolves.toEqual({ whatsNew: null });
     expect(runStartupModelFlow).toHaveBeenCalledTimes(1);

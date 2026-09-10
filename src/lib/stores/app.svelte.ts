@@ -3,6 +3,7 @@ import type {
   PermissionStatus,
   AppSettings,
   AppStateMachine,
+  ModifierTapStatus,
   PipelineError,
   SnippetEntry,
   SystemAudioStatus,
@@ -57,6 +58,9 @@ let recordingStartedAtMs = $state<number | null>(null);
 
 // System-audio capture status for the current meeting session
 let systemAudioStatus = $state<SystemAudioStatus | null>(null);
+
+// Native single-key PTT CGEventTap install status (SOU-116)
+let modifierTapStatus = $state<ModifierTapStatus | null>(null);
 
 // Calendar reminder awaiting the user's decision (drives the home banner)
 let upcomingMeeting = $state<UpcomingMeeting | null>(null);
@@ -283,6 +287,8 @@ export function getAppState() {
 
     get systemAudioStatus() { return systemAudioStatus; },
     set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },
+    get modifierTapStatus() { return modifierTapStatus; },
+    set modifierTapStatus(s: ModifierTapStatus | null) { modifierTapStatus = s; },
     get upcomingMeeting() { return upcomingMeeting; },
     set upcomingMeeting(u: UpcomingMeeting | null) { upcomingMeeting = u; },
 
