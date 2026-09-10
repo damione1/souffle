@@ -44,8 +44,9 @@ app-icon.png
 .claude/*
 !.claude/skills/
 .cursor/
-AGENTS.md
-CLAUDE.md
+
+# CodeQL CLI local databases / SARIF (scripts/codeql-local.sh)
+.codeql/
 
 # Marketing site build output
 site/_site/
