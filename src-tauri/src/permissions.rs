@@ -23,6 +23,20 @@ use crate::db::Database;
 /// list (empty, or a differently-signed Soufflé already ticked).
 const TCC_INSERT_SETTLE: Duration = Duration::from_millis(400);
 
+/// `kIOHIDRequestTypeListenEvent` / `kIOHIDRequestTypePostEvent`.
+const HID_LISTEN_EVENT: u32 = 1;
+const HID_POST_EVENT: u32 = 0;
+
+/// `IOHIDCheckAccess` result. Accessibility (PostEvent) includes listen
+/// rights, so `Granted` on ListenEvent is not the same as a row in
+/// Input Monitoring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HidAccess {
+    Granted,
+    Denied,
+    Unknown,
+}
+
 /// Last observed system-audio tap permission. There is no read-only TCC
 /// API for Core Audio taps, so a successful probe is remembered and the
 /// snapshot returns it without mounting a tap (SOU-120).
@@ -96,11 +110,11 @@ pub fn snapshot(db: &Database) -> PermissionStatus {
         // EventKit has a real read-only status API, so the snapshot is truthful
         // here (no probe needed).
         calendar: crate::calendar::authorization_state(),
-        input_monitoring: if input_monitoring_granted() {
-            PermState::Granted
-        } else {
-            PermState::Unknown
-        },
+        input_monitoring: input_monitoring_snapshot_state(
+            iohid_listen_access(),
+            accessibility_granted(),
+            iohid_post_access(),
+        ),
     }
 }
 
@@ -138,6 +152,29 @@ pub fn remember_system_audio(db: &Database, state: PermState) {
 
 fn system_audio_supported() -> bool {
     crate::platform::system_audio_capture_supported()
+}
+
+/// Input Monitoring snapshot. `CGPreflightListenEventAccess` and
+/// `IOHIDCheckAccess(ListenEvent)` return Granted when Accessibility is
+/// already trusted, even if System Settings has no Soufflé row (DTS,
+/// May 2026: Accessibility grants post *and* listen). That was the
+/// false "Granted" pill.
+fn input_monitoring_snapshot_state(
+    listen: HidAccess,
+    accessibility_trusted: bool,
+    post: HidAccess,
+) -> PermState {
+    match listen {
+        HidAccess::Denied => PermState::Denied,
+        HidAccess::Unknown => PermState::Unknown,
+        HidAccess::Granted => {
+            if accessibility_trusted || post == HidAccess::Granted {
+                PermState::Unknown
+            } else {
+                PermState::Granted
+            }
+        }
+    }
 }
 
 /// TCC prompts (`AXIsProcessTrustedWithOptions`, `CGRequestListenEventAccess`,
@@ -205,6 +242,21 @@ fn current_app_bundle_path() -> Option<PathBuf> {
 pub fn register_with_launch_services() {
     #[cfg(target_os = "macos")]
     register_current_bundle_with_launch_services();
+}
+
+/// Insert this process into the Input Monitoring and Accessibility lists
+/// before the UI can poll AX. `IOHIDRequestAccess` must run first:
+/// `AXIsProcessTrustedWithOptions` beforehand makes the HID request a
+/// no-op and the Input Monitoring pane opens empty (FB7381305).
+pub fn seed_tcc_clients() {
+    #[cfg(target_os = "macos")]
+    on_main(|| {
+        register_current_bundle_with_launch_services();
+        if iohid_check_access(HID_LISTEN_EVENT) == HidAccess::Unknown {
+            request_listen_event_access_now();
+        }
+        let _ = accessibility_trusted_with_prompt_now(false);
+    });
 }
 
 #[cfg(target_os = "macos")]
@@ -580,11 +632,11 @@ pub fn request(kind: PermissionKind) -> PermState {
         PermissionKind::Calendar => crate::calendar::request_access(),
         PermissionKind::InputMonitoring => {
             open_input_monitoring_settings();
-            if input_monitoring_granted() {
-                PermState::Granted
-            } else {
-                PermState::Denied
-            }
+            input_monitoring_snapshot_state(
+                iohid_listen_access(),
+                accessibility_granted(),
+                iohid_post_access(),
+            )
         }
     }
 }
@@ -664,6 +716,43 @@ mod tests {
         assert!(
             plist.contains("keyboard and mouse events"),
             "usage string should describe Input Monitoring, not a different permission"
+        );
+    }
+
+    #[test]
+    fn input_monitoring_is_not_granted_when_accessibility_covers_listen() {
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, true, HidAccess::Granted),
+            PermState::Unknown,
+            "Accessibility includes listen; that is not an Input Monitoring row"
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, true, HidAccess::Unknown),
+            PermState::Unknown
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Granted),
+            PermState::Unknown
+        );
+    }
+
+    #[test]
+    fn input_monitoring_granted_only_when_listen_is_not_inherited_from_ax() {
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Unknown),
+            PermState::Granted
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Denied),
+            PermState::Granted
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Unknown, false, HidAccess::Unknown),
+            PermState::Unknown
+        );
+        assert_eq!(
+            input_monitoring_snapshot_state(HidAccess::Denied, false, HidAccess::Unknown),
+            PermState::Denied
         );
     }
 
@@ -862,19 +951,29 @@ mod tests {
 }
 
 #[cfg(target_os = "macos")]
-fn input_monitoring_granted() -> bool {
-    #[link(name = "CoreGraphics", kind = "framework")]
+fn iohid_check_access(request_type: u32) -> HidAccess {
+    #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
-        fn CGPreflightListenEventAccess() -> bool;
-        #[allow(dead_code)]
-        fn CGRequestListenEventAccess() -> bool;
+        fn IOHIDCheckAccess(request_type: u32) -> u32;
     }
-    unsafe { CGPreflightListenEventAccess() }
+    match unsafe { IOHIDCheckAccess(request_type) } {
+        0 => HidAccess::Granted,
+        1 => HidAccess::Denied,
+        _ => HidAccess::Unknown,
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn input_monitoring_granted() -> bool {
-    true
+fn iohid_check_access(_request_type: u32) -> HidAccess {
+    HidAccess::Granted
+}
+
+fn iohid_listen_access() -> HidAccess {
+    iohid_check_access(HID_LISTEN_EVENT)
+}
+
+fn iohid_post_access() -> HidAccess {
+    iohid_check_access(HID_POST_EVENT)
 }
 
 #[cfg(target_os = "macos")]
@@ -888,28 +987,16 @@ fn request_listen_event_access_now() {
         fn IOHIDRequestAccess(request_type: u32) -> bool;
     }
     register_current_bundle_with_launch_services();
-    // kIOHIDRequestTypeListenEvent. DTS: this is the API that inserts the
+    // DTS (May 2026): IOHIDRequestAccess is the API that inserts the
     // Input Monitoring row. CGRequestListenEventAccess is the older
-    // CoreGraphics equivalent. A listen-only tap is the actual use of the
-    // privilege; creating one (even if it fails) is what some macOS
-    // versions need before the row appears. Dropped immediately, never
-    // attached to a runloop.
-    const LISTEN_EVENT: u32 = 1;
+    // CoreGraphics equivalent. Do not create a listen-only tap here:
+    // with Accessibility already granted the tap succeeds and
+    // CGPreflightListenEventAccess then reports Granted with no row
+    // in the Input Monitoring list.
     unsafe {
-        let _ = IOHIDRequestAccess(LISTEN_EVENT);
+        let _ = IOHIDRequestAccess(HID_LISTEN_EVENT);
         let _ = CGRequestListenEventAccess();
     }
-    use core_graphics::event::{
-        CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
-        CallbackResult,
-    };
-    let _ = CGEventTap::new(
-        CGEventTapLocation::Session,
-        CGEventTapPlacement::HeadInsertEventTap,
-        CGEventTapOptions::ListenOnly,
-        vec![CGEventType::KeyDown],
-        |_proxy, _ty, _event| CallbackResult::Keep,
-    );
 }
 
 #[cfg(target_os = "macos")]

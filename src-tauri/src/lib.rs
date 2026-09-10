@@ -295,10 +295,10 @@ pub fn run() {
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);
-            // In-place rebuilds leave Launch Services pointing at the previous
-            // binary. TCC then shows that Soufflé as granted while this process
-            // is not. Re-register before any permission prompt (SOU-122).
-            crate::permissions::register_with_launch_services();
+            // ListenEvent must be requested before any AXIsProcessTrusted*
+            // call: otherwise IOHIDRequestAccess never inserts the Input
+            // Monitoring row (FB7381305 / SOU-122).
+            crate::permissions::seed_tcc_clients();
 
             // Store the AppHandle so state transitions can emit events
             let state = app.state::<AppState>();
