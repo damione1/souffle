@@ -204,6 +204,21 @@ fn resolve_input_monitoring(db: &Database) -> PermState {
     state
 }
 
+/// Accessibility already includes listen rights, so `IOHIDRequestAccess`
+/// is a no-op and the Input Monitoring list stays empty. Reset ListenEvent
+/// first so this click can insert a row for *this* binary.
+fn prepare_listen_event_insert(
+    accessibility_trusted: bool,
+    listen: HidAccess,
+    reset_listen: impl FnOnce(),
+    request: impl FnOnce(),
+) {
+    if accessibility_trusted || listen == HidAccess::Granted {
+        reset_listen();
+    }
+    request();
+}
+
 /// Combine the live HID check with a remembered grant and the "Quit and
 /// Reopen" restart macOS issues after toggling Input Monitoring.
 fn input_monitoring_effective_state(
@@ -937,6 +952,35 @@ mod tests {
     }
 
     #[test]
+    fn listen_event_insert_resets_when_accessibility_already_covers_listen() {
+        use std::cell::Cell;
+        let reset = Cell::new(false);
+        let requested = Cell::new(false);
+        prepare_listen_event_insert(
+            true,
+            HidAccess::Granted,
+            || reset.set(true),
+            || requested.set(true),
+        );
+        assert!(
+            reset.get(),
+            "must clear ListenEvent or IOHIDRequestAccess is a no-op"
+        );
+        assert!(requested.get());
+    }
+
+    #[test]
+    fn listen_event_insert_does_not_reset_on_a_fresh_unknown() {
+        use std::cell::Cell;
+        let reset = Cell::new(false);
+        prepare_listen_event_insert(false, HidAccess::Unknown, || reset.set(true), || {});
+        assert!(
+            !reset.get(),
+            "first insert must not tccutil reset a service that has no row"
+        );
+    }
+
+    #[test]
     fn input_monitoring_remembered_grant_survives_later_launches() {
         assert_eq!(
             input_monitoring_effective_state(
@@ -1198,7 +1242,17 @@ fn request_listen_event_access_now() {
 fn open_input_monitoring_settings() {
     prompt_then_open_settings(
         || {
-            on_main(request_listen_event_access_now);
+            on_main(|| {
+                let id = crate::constants::running_app_identifier();
+                prepare_listen_event_insert(
+                    accessibility_granted(),
+                    iohid_check_access(HID_LISTEN_EVENT),
+                    || {
+                        let _ = tccutil_reset_service("ListenEvent", &id);
+                    },
+                    request_listen_event_access_now,
+                );
+            });
         },
         wait_for_tcc_insert,
         || open_privacy_pane("Privacy_ListenEvent"),
