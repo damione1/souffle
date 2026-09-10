@@ -48,6 +48,7 @@
   let accessibilityAttempts = $state(0);
   let leftAfterAttempt = $state(false);
   let returnedStillDenied = $state(false);
+  let leftWindow = $state(false);
   const showStaleHint = $derived(returnedStillDenied || accessibilityAttempts >= 2);
 
   /** Every write to `status` goes through here so the parent (which cannot
@@ -206,10 +207,21 @@
     // Denied that `request_permission` returns) does not count as a return.
     const onBlur = () => {
       if (accessibilityAttempts > 0) leftAfterAttempt = true;
+      leftWindow = true;
     };
     const onFocus = () => {
       if (leftAfterAttempt && status.accessibility === "denied") {
         returnedStillDenied = true;
+      }
+      // Re-probe system audio only after the user left the app (typically
+      // System Settings) so a revoke is reflected without mounting a tap
+      // on every window open (SOU-120 AC4 vs AC5).
+      if (
+        leftWindow
+        && (status.system_audio === "granted" || status.system_audio === "denied")
+      ) {
+        leftWindow = false;
+        void grant("system_audio");
       }
     };
     window.addEventListener("blur", onBlur);

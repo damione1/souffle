@@ -369,3 +369,80 @@ describe("PermissionsStep permission poll", () => {
     expect(permissionsApi.getPermissionStatus).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("PermissionsStep system audio remembered grant (SOU-120)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  function statusWithAudio(systemAudio: PermState): PermissionStatus {
+    return {
+      microphone: "granted",
+      system_audio: systemAudio,
+      accessibility: "granted",
+      calendar: "unknown",
+      input_monitoring: "granted",
+    };
+  }
+
+  it("shows Granted on open when the backend remembers a grant", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
+    render(PermissionsStep);
+
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
+    });
+    expect(within(rowFor("System audio")).queryByRole("button", { name: "Grant" })).toBeNull();
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("keeps Allow when the backend has never probed", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("unknown"));
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    expect(within(rowFor("System audio")).getByRole("button", { name: "Grant" })).toBeTruthy();
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("shows Unsupported without an Allow button", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("unsupported"));
+    render(PermissionsStep);
+
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByText("Not supported")).toBeTruthy();
+    });
+    expect(within(rowFor("System audio")).queryByRole("button")).toBeNull();
+  });
+
+  it("re-probes system audio after the window loses and regains focus", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
+    });
+
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => {
+      expect(permissionsApi.requestPermission).toHaveBeenCalledWith("system_audio");
+    });
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByRole("button", { name: "Grant" })).toBeTruthy();
+    });
+  });
+
+  it("does not re-probe on focus if the window never lost it", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
+    render(PermissionsStep);
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
+    });
+
+    window.dispatchEvent(new Event("focus"));
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+  });
+});
