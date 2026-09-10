@@ -1244,6 +1244,32 @@ mod tests {
     }
 
     #[test]
+    fn shortcut_settings_reject_duplicate_native_bindings() {
+        let shortcuts = ShortcutSettings {
+            toggle: "Fn".into(),
+            push_to_talk: "Fn".into(),
+        };
+
+        assert_eq!(
+            shortcuts.normalize().unwrap_err(),
+            "Dictation shortcuts must be different"
+        );
+    }
+
+    #[test]
+    fn native_toggle_shortcut_persists_across_load() {
+        let (db, _dir) = test_db();
+        let s = ShortcutSettings {
+            toggle: "Fn".into(),
+            push_to_talk: "MetaRight".into(),
+        };
+        s.save(&db).unwrap();
+        let loaded = ShortcutSettings::load(&db).unwrap();
+        assert_eq!(loaded.toggle, "Fn");
+        assert_eq!(loaded.push_to_talk, "MetaRight");
+    }
+
+    #[test]
     fn missing_settings_use_defaults() {
         let (db, _dir) = test_db();
         let settings = AppSettings::load(&db).expect("load defaults");

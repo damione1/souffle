@@ -6,7 +6,7 @@ use tauri_specta::Event;
 use tracing::info;
 
 use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutToggle};
-use crate::modifier_shortcut::is_native_ptt_shortcut;
+use crate::modifier_shortcut::{ShortcutRegistrationTarget, shortcut_registration_target};
 use crate::settings::{AppSettings, ShortcutSettings};
 use crate::state::AppState;
 
@@ -82,7 +82,29 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
     gs.unregister_all()
         .map_err(|e| format!("Unregister: {e}"))?;
 
-    if !shortcuts.toggle.is_empty() {
+    let toggle_target = shortcut_registration_target(&shortcuts.toggle);
+    let ptt_target = shortcut_registration_target(&shortcuts.push_to_talk);
+
+    if let Some(state) = app.try_state::<AppState>() {
+        {
+            let mut lock = state.modifier_toggle_shortcut.write().unwrap();
+            *lock = match toggle_target {
+                ShortcutRegistrationTarget::Native => Some(shortcuts.toggle.clone()),
+                _ => None,
+            };
+        }
+        {
+            let mut lock = state.modifier_ptt_shortcut.write().unwrap();
+            *lock = match ptt_target {
+                ShortcutRegistrationTarget::Native => Some(shortcuts.push_to_talk.clone()),
+                _ => None,
+            };
+        }
+        state.toggle_armed.store(false, Ordering::SeqCst);
+        state.ptt_start_armed.store(false, Ordering::SeqCst);
+    }
+
+    if toggle_target == ShortcutRegistrationTarget::Plugin {
         gs.on_shortcut(shortcuts.toggle.as_str(), move |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 let _ = ShortcutToggle.emit(app);
@@ -90,20 +112,14 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
         })
         .map_err(|e| format!("Register toggle shortcut '{}': {e}", shortcuts.toggle))?;
         info!(shortcut = shortcuts.toggle, "Toggle shortcut registered");
+    } else if toggle_target == ShortcutRegistrationTarget::Native {
+        info!(
+            shortcut = shortcuts.toggle,
+            "Toggle shortcut registered via native tap"
+        );
     }
 
-    let is_native = is_native_ptt_shortcut(&shortcuts.push_to_talk);
-
-    if let Some(state) = app.try_state::<AppState>() {
-        let mut lock = state.modifier_ptt_shortcut.write().unwrap();
-        *lock = if is_native {
-            Some(shortcuts.push_to_talk.clone())
-        } else {
-            None
-        };
-    }
-
-    if !shortcuts.push_to_talk.is_empty() && !is_native {
+    if ptt_target == ShortcutRegistrationTarget::Plugin {
         gs.on_shortcut(
             shortcuts.push_to_talk.as_str(),
             move |app, _shortcut, event| match event.state {
@@ -131,6 +147,11 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
         info!(
             shortcut = shortcuts.push_to_talk,
             "Push-to-talk shortcut registered"
+        );
+    } else if ptt_target == ShortcutRegistrationTarget::Native {
+        info!(
+            shortcut = shortcuts.push_to_talk,
+            "Push-to-talk shortcut registered via native tap"
         );
     }
 
