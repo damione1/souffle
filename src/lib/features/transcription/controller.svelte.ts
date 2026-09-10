@@ -184,20 +184,31 @@ function createTranscriptionControllerInstance() {
   let statusAction = $state<(() => void) | undefined>();
   let catalog = $state<TranscriptionCatalog | null>(null);
 
-  let tooShortBannerTimer: ReturnType<typeof setTimeout> | null = null;
+  let bannerTimer: ReturnType<typeof setTimeout> | null = null;
+  const AUTO_HIDE_MS = 5000;
+
+  function clearBannerTimer() {
+    if (bannerTimer) {
+      clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+  }
 
   function setBanner(message: string, action?: { label: string; run: () => void }) {
-    if (tooShortBannerTimer) {
-      clearTimeout(tooShortBannerTimer);
-      tooShortBannerTimer = null;
-    }
+    clearBannerTimer();
     statusMessage = message;
     statusActionLabel = action?.label;
     statusAction = action?.run;
+    if (message && !action) {
+      bannerTimer = setTimeout(clearBanner, AUTO_HIDE_MS);
+    }
   }
 
   function clearBanner() {
-    setBanner("");
+    clearBannerTimer();
+    statusMessage = "";
+    statusActionLabel = undefined;
+    statusAction = undefined;
   }
 
   function modelRequiredBanner(message: string) {
@@ -396,10 +407,7 @@ function createTranscriptionControllerInstance() {
           console.warn("Fast stop failed:", e);
         }
         setBanner(tr("home.dictation_too_short"));
-        tooShortBannerTimer = setTimeout(() => {
-          tooShortBannerTimer = null;
-          clearBanner();
-        }, 2000);
+
         clearSessionContext();
         isStopping = false;
         return;
@@ -626,6 +634,7 @@ function createTranscriptionControllerInstance() {
     get downloadedBytes() { return app.downloadedBytes; },
     get downloadTotalBytes() { return app.downloadTotalBytes; },
     get activeProfileLabel() { return activeProfileLabel; },
+    clearBanner,
     mount,
     refreshCatalog,
     refreshRuntimeStatus,
@@ -663,5 +672,6 @@ export function createTranscriptionController() {
 
 /** Reset the singleton for testing. */
 export function resetTranscriptionControllerForTest() {
+  instance?.clearBanner();
   instance = null;
 }

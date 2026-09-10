@@ -115,6 +115,7 @@
         message={transcription.statusMessage}
         actionLabel={transcription.statusActionLabel}
         onAction={transcription.statusAction}
+        onDismiss={transcription.clearBanner}
         variant="warning"
       />
     {/if}
@@ -123,6 +124,7 @@
         message={meeting.statusMessage}
         actionLabel={meeting.statusActionLabel}
         onAction={meeting.statusAction}
+        onDismiss={meeting.clearBanner}
         variant="warning"
       />
     {/if}
