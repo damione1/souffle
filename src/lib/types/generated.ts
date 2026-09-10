@@ -92,10 +92,13 @@ async loadModel(selection: TranscriptionProfileSelection) : Promise<Result<null,
  * 
  * `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
  * blocking wait runs off-thread and the window never freezes.
+ * 
+ * `cancel_on_escape` arms the transient Escape binding for toggle dictation
+ * (SOU-117). Push-to-talk passes false: releasing the PTT key is its cancel.
  */
-async startTranscription(channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
+async startTranscription(channel: TAURI_CHANNEL<TranscriptionSegment>, cancelOnEscape: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_transcription", { channel }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_transcription", { channel, cancelOnEscape }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1080,6 +1083,7 @@ async openReleasePage(url: string) : Promise<Result<null, string>> {
 export const events = __makeEvents__<{
 archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
+dictationCancelRequested: DictationCancelRequested,
 dictationLiveText: DictationLiveText,
 dictationStopRequested: DictationStopRequested,
 inputDevicesChanged: InputDevicesChanged,
@@ -1106,6 +1110,7 @@ updateAvailable: UpdateAvailable
 }>({
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
+dictationCancelRequested: "dictation-cancel-requested",
 dictationLiveText: "dictation-live-text",
 dictationStopRequested: "dictation-stop-requested",
 inputDevicesChanged: "input-devices-changed",
@@ -1359,6 +1364,11 @@ export type CalendarMeetingNudgeKind =
  */
 export type DataStats = { db_size_bytes: number; meeting_count: number; dictation_count: number; recordings_size_bytes: number }
 export type DiagnosticsBundle = { app_version: string; data_dir: string; log_dir: string; log_file: string | null; db_path: string; models_dir: string; machine_state: string; log_level: string; debug_transcription: boolean }
+/**
+ * Emitted when Escape is pressed during a cancelable (toggle) dictation.
+ * Discards the take: no polish, no history row, no paste (SOU-117).
+ */
+export type DictationCancelRequested = null
 /**
  * A dictation history entry
  */

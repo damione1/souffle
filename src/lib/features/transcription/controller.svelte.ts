@@ -332,7 +332,7 @@ function createTranscriptionControllerInstance() {
         // Push-to-talk only starts from a fully idle machine: a meeting (or
         // an already-running dictation) must not be interrupted.
         if (app.recordingMode === "idle" && !isStartingRecording && !isStopping) {
-          void toggleRecording(true);
+          void toggleRecording(true, { ptt: true });
         }
       }),
       events.shortcutPttStop.listen(() => {
@@ -380,8 +380,9 @@ function createTranscriptionControllerInstance() {
    * runs Polish on the assembled text before pasting or storing.
    *
    * @param {boolean} fromShortcut - Whether the toggle was triggered via a global keyboard shortcut.
+   * @param opts.ptt - Push-to-talk start. Escape does not cancel PTT (SOU-117).
    */
-  async function toggleRecording(fromShortcut = false) {
+  async function toggleRecording(fromShortcut = false, opts?: { ptt?: boolean }) {
     if (isStartingRecording || isStopping) return;
 
     if (!isDictating && app.recordingMode !== "idle") {
@@ -548,7 +549,7 @@ function createTranscriptionControllerInstance() {
         }
         tentative = "";
         transcript += segmentGap(transcript, segment.text) + segment.text;
-      });
+      }, !opts?.ptt);
     } catch (e) {
       setBanner({ type: "transient", message: errorMessage(e) });
       clearSessionContext();
@@ -567,8 +568,45 @@ function createTranscriptionControllerInstance() {
     }
   }
 
+  /** Discard the in-progress toggle dictation: stop capture, skip persist,
+   * polish, and paste. Same shape as the too-short abort above (SOU-117). */
+  async function cancelRecording() {
+    if (isStopping) return;
+    // `isStartingRecording` covers the window after StartDictation (Escape
+    // is already armed) but before the frontend has applied StateChanged.
+    if (!isDictating && !isStartingRecording) return;
+
+    isStopping = true;
+    sessionGeneration += 1;
+    pttStopQueued = false;
+    // Drop the take before awaiting stop so a drain-time abort cannot
+    // persist or polish the discarded text (SOU-117).
+    transcript = "";
+    tentative = "";
+    focusedApp = null;
+    sessionAutoPaste = false;
+    try {
+      await stopStreamingTranscription();
+    } catch (e) {
+      console.warn("Dictation cancel stop failed:", e);
+    }
+    setBanner({ type: "transient", message: tr("home.dictation_discarded") });
+    clearSessionContext();
+    isStartingRecording = false;
+    isStopping = false;
+  }
+
   /** The backend aborted the recording session (machine went to Error). */
   function handleRecordingAborted() {
+    if (isStopping) {
+      // Cancel or an in-flight stop already owns the session. Don't persist
+      // and don't wipe `transcript`: the stop path captured it, cancel
+      // already discarded it.
+      sessionGeneration += 1;
+      isStartingRecording = false;
+      pttStopQueued = false;
+      return;
+    }
     const sessionFocusedApp = focusedApp;
     const rawText = transcript.trim();
     sessionGeneration += 1; // cut off in-flight segments from the dead session
@@ -619,6 +657,7 @@ function createTranscriptionControllerInstance() {
     refreshCatalog,
     refreshRuntimeStatus,
     toggleRecording,
+    cancelRecording,
     handleRecordingAborted,
   };
 }
@@ -636,6 +675,15 @@ export function notifyDictationAborted() {
 export function notifyDictationStopRequested() {
   if (instance && instance.app.recordingMode === "dictation" && !instance.isStopping) {
     void instance.toggleRecording(true);
+  }
+}
+
+/** Escape during a cancelable dictation. No-op when not dictating, so this
+ * cannot start a session or take down a meeting (SOU-117). */
+export function notifyDictationCancelRequested() {
+  if (!instance || instance.isStopping) return;
+  if (instance.app.recordingMode === "dictation" || instance.isStartingRecording) {
+    void instance.cancelRecording();
   }
 }
 

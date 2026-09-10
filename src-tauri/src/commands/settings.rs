@@ -81,6 +81,7 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
 
     gs.unregister_all()
         .map_err(|e| format!("Unregister: {e}"))?;
+    crate::dictation_cancel::mark_unregistered();
 
     let toggle_target = shortcut_registration_target(&shortcuts.toggle);
     let ptt_target = shortcut_registration_target(&shortcuts.push_to_talk);
@@ -155,6 +156,12 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
             shortcut = shortcuts.push_to_talk,
             "Push-to-talk shortcut registered via native tap"
         );
+    }
+
+    if let Some(state) = app.try_state::<AppState>()
+        && let Ok(machine) = state.current_machine_state()
+    {
+        crate::dictation_cancel::sync(app, &machine);
     }
 
     Ok(())

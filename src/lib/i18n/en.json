@@ -499,6 +499,7 @@
   },
   "home": {
     "dictation_too_short": "Hold a little longer",
+    "dictation_discarded": "Dictation discarded",
     "dictate": "Dictate",
     "dictate_hint": "Set a shortcut",
     "meeting": "Meeting",

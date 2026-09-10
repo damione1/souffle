@@ -48,10 +48,11 @@ export async function deleteModel(selection: TranscriptionProfileSelection): Pro
 
 export async function startStreamingTranscription(
   onSegment: (segment: TranscriptionSegment) => void,
+  cancelOnEscape = true,
 ): Promise<void> {
   const channel = new Channel<TranscriptionSegment>();
   channel.onmessage = onSegment;
-  await unwrap(commands.startTranscription(channel));
+  await unwrap(commands.startTranscription(channel, cancelOnEscape));
 }
 
 export async function stopStreamingTranscription(): Promise<void> {

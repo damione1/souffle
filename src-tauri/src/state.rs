@@ -266,6 +266,7 @@ impl AppState {
             let _ = StateChanged(new_state.clone()).emit(&handle);
             crate::pill::sync(&handle, &new_state);
             crate::tray::sync(&handle, &new_state);
+            crate::dictation_cancel::sync(&handle, &new_state);
         }
 
         Ok(new_state)

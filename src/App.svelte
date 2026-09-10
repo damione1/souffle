@@ -27,6 +27,7 @@
   import {
     createTranscriptionController,
     notifyDictationAborted,
+    notifyDictationCancelRequested,
     notifyDictationStopRequested,
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState, deriveRecordingMode } from "./lib/stores/app.svelte";
@@ -53,6 +54,7 @@
   let unlistenModifierTap: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
   let unlistenDictationStop: (() => void) | null = null;
+  let unlistenDictationCancel: (() => void) | null = null;
   let unlistenMeetingFinalized: (() => void) | null = null;
   let unlistenUpcomingMeeting: (() => void) | null = null;
   let unlistenMeetingIdle: (() => void) | null = null;
@@ -252,6 +254,12 @@
       unlistenDictationStop = fn;
     });
 
+    events.dictationCancelRequested.listen(() => {
+      notifyDictationCancelRequested();
+    }).then((fn) => {
+      unlistenDictationCancel = fn;
+    });
+
     events.meetingFinalized.listen((event) => {
       notifyMeetingFinalized(event.payload.id);
     }).then((fn) => {
@@ -304,6 +312,7 @@
       unlistenModifierTap?.();
       unlistenMeetingStop?.();
       unlistenDictationStop?.();
+      unlistenDictationCancel?.();
       unlistenMeetingFinalized?.();
       unlistenUpcomingMeeting?.();
       unlistenMeetingIdle?.();
