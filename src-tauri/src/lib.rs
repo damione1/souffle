@@ -295,6 +295,10 @@ pub fn run() {
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);
+            // In-place rebuilds leave Launch Services pointing at the previous
+            // binary. TCC then shows that Soufflé as granted while this process
+            // is not. Re-register before any permission prompt (SOU-122).
+            crate::permissions::register_with_launch_services();
 
             // Store the AppHandle so state transitions can emit events
             let state = app.state::<AppState>();

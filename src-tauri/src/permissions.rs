@@ -9,11 +9,19 @@
 //! (`AXIsProcessTrusted`), and is granted only via System Settings, so its
 //! "request" just opens the relevant pane.
 
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::constants::APP_IDENTIFIER;
 use crate::db::Database;
+
+/// Pause between the TCC insert call and `open` of System Settings. The
+/// insert is asynchronous; opening the pane in the same turn shows a stale
+/// list (empty, or a differently-signed Soufflé already ticked).
+const TCC_INSERT_SETTLE: Duration = Duration::from_millis(400);
 
 /// Last observed system-audio tap permission. There is no read-only TCC
 /// API for Core Audio taps, so a successful probe is remembered and the
@@ -138,6 +146,11 @@ fn system_audio_supported() -> bool {
 /// hop. Reads (`AXIsProcessTrusted`, `CGPreflightListenEventAccess`) stay on
 /// the caller: `cargo test` has no main runloop, and a `dispatch_sync` there
 /// hangs (SOU-122 AC3).
+///
+/// Main-thread is necessary but not sufficient after an in-place rebuild:
+/// Launch Services must point at *this* binary, Input Monitoring needs
+/// `NSInputMonitoringUsageDescription`, and System Settings must not open
+/// before TCC has committed the new row.
 #[cfg(target_os = "macos")]
 fn on_main<R: Send>(f: impl FnOnce() -> R + Send) -> R {
     on_main_with(is_main_thread(), f)
@@ -163,6 +176,85 @@ fn is_main_thread() -> bool {
     unsafe { pthread_main_np() != 0 }
 }
 
+/// Walk `.../Name.app/Contents/MacOS/<exe>` up to the `.app` bundle.
+/// A bare debug binary (`target/debug/souffle`) has no bundle to register.
+fn app_bundle_path_from_exe(exe: &Path) -> Option<&Path> {
+    let macos_dir = exe.parent()?;
+    if macos_dir.file_name()?.to_str() != Some("MacOS") {
+        return None;
+    }
+    let contents = macos_dir.parent()?;
+    if contents.file_name()?.to_str() != Some("Contents") {
+        return None;
+    }
+    let app = contents.parent()?;
+    if app.extension()?.to_str() != Some("app") {
+        return None;
+    }
+    Some(app)
+}
+
+fn current_app_bundle_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    app_bundle_path_from_exe(&exe).map(Path::to_path_buf)
+}
+
+/// Re-register this `.app` with Launch Services so TCC / System Settings
+/// resolve the current binary after an in-place rebuild. No-op outside a
+/// bundle, and no-op off macOS. Safe to call more than once.
+pub fn register_with_launch_services() {
+    #[cfg(target_os = "macos")]
+    register_current_bundle_with_launch_services();
+}
+
+#[cfg(target_os = "macos")]
+fn register_current_bundle_with_launch_services() {
+    use core_foundation::base::TCFType;
+    use core_foundation::url::CFURL;
+
+    let Some(path) = current_app_bundle_path() else {
+        return;
+    };
+    // Apple's recipe for an overwritten bundle: bump mtime, then
+    // LSRegisterURL(..., true), so the next TCC lookup is this binary.
+    let _ = std::fs::File::open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    let Some(url) = CFURL::from_path(&path, true) else {
+        tracing::warn!(path = %path.display(), "CFURL for app bundle failed");
+        return;
+    };
+    #[link(name = "CoreServices", kind = "framework")]
+    unsafe extern "C" {
+        fn LSRegisterURL(in_url: core_foundation::url::CFURLRef, in_update: u8) -> i32;
+    }
+    let status = unsafe { LSRegisterURL(url.as_concrete_TypeRef(), 1) };
+    if status != 0 {
+        tracing::warn!(status, path = %path.display(), "LSRegisterURL failed");
+    }
+}
+
+fn wait_for_tcc_insert() {
+    if cfg!(test) {
+        return;
+    }
+    std::thread::sleep(TCC_INSERT_SETTLE);
+}
+
+fn open_privacy_pane(pane: &str) {
+    let _ = std::process::Command::new("open")
+        .arg(format!(
+            "x-apple.systempreferences:com.apple.preference.security?{pane}"
+        ))
+        .spawn();
+}
+
+/// Prompt (and any Launch Services registration) first, let TCC commit the
+/// row, then open the pane. Opening in the same turn shows a stale list.
+fn prompt_then_open_settings(prompt: impl FnOnce(), wait: impl FnOnce(), open: impl FnOnce()) {
+    prompt();
+    wait();
+    open();
+}
+
 // --- Accessibility (synthesized Cmd+V paste) ---
 
 #[cfg(target_os = "macos")]
@@ -181,15 +273,15 @@ pub fn accessibility_granted() -> bool {
 
 #[cfg(target_os = "macos")]
 fn open_accessibility_settings() {
-    // Prompt on the main thread so macOS inserts *this* binary into the
-    // Accessibility list (SOU-122). Off-thread, the pane opens empty or
-    // shows a differently-signed Soufflé already ticked.
-    on_main(|| {
-        let _ = accessibility_trusted_with_prompt(true);
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-            .spawn();
-    });
+    prompt_then_open_settings(
+        || {
+            on_main(|| {
+                let _ = accessibility_trusted_with_prompt_now(true);
+            });
+        },
+        wait_for_tcc_insert,
+        || open_privacy_pane("Privacy_Accessibility"),
+    );
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -209,6 +301,8 @@ fn accessibility_trusted_with_prompt(prompt: bool) -> bool {
 fn accessibility_trusted_with_prompt_now(prompt: bool) -> bool {
     use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString};
     use std::ffi::c_void;
+
+    register_current_bundle_with_launch_services();
 
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
@@ -521,6 +615,58 @@ mod tests {
         assert!(ran.load(std::sync::atomic::Ordering::SeqCst));
     }
 
+    #[test]
+    fn tcc_prompt_runs_before_the_settings_pane_opens() {
+        use std::cell::RefCell;
+        let order = RefCell::new(Vec::new());
+        prompt_then_open_settings(
+            || order.borrow_mut().push("prompt"),
+            || order.borrow_mut().push("wait"),
+            || order.borrow_mut().push("open"),
+        );
+        assert_eq!(
+            *order.borrow(),
+            ["prompt", "wait", "open"],
+            "System Settings must not open in the same turn as the TCC insert"
+        );
+    }
+
+    #[test]
+    fn app_bundle_path_walks_contents_macos() {
+        let exe = Path::new("/tmp/Soufflé.app/Contents/MacOS/souffle");
+        assert_eq!(
+            app_bundle_path_from_exe(exe),
+            Some(Path::new("/tmp/Soufflé.app"))
+        );
+    }
+
+    #[test]
+    fn app_bundle_path_rejects_a_bare_debug_binary() {
+        assert_eq!(
+            app_bundle_path_from_exe(Path::new("/tmp/target/debug/souffle")),
+            None
+        );
+        assert_eq!(
+            app_bundle_path_from_exe(Path::new("/tmp/Soufflé.app/Contents/MacOS")),
+            None,
+            "the MacOS directory itself is not the executable"
+        );
+    }
+
+    #[test]
+    fn info_plist_declares_input_monitoring_usage() {
+        let plist = std::fs::read_to_string(format!("{}/Info.plist", env!("CARGO_MANIFEST_DIR")))
+            .expect("src-tauri/Info.plist");
+        assert!(
+            plist.contains("<key>NSInputMonitoringUsageDescription</key>"),
+            "IOHIDRequestAccess does not insert the Input Monitoring row without this key"
+        );
+        assert!(
+            plist.contains("keyboard and mouse events"),
+            "usage string should describe Input Monitoring, not a different permission"
+        );
+    }
+
     /// `NoDevice` must serialize to its own value, distinct from `Denied`:
     /// the two need different instructions in the UI (plug in a mic vs.
     /// open System Settings), so they can't collapse to the same state.
@@ -732,29 +878,49 @@ fn input_monitoring_granted() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn open_input_monitoring_settings() {
+fn request_listen_event_access_now() {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
         fn CGRequestListenEventAccess() -> bool;
     }
     #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
-        fn IOHIDRequestAccess(request_type: u32) -> u8;
+        fn IOHIDRequestAccess(request_type: u32) -> bool;
     }
-    // kIOHIDRequestTypeListenEvent. The HID request is what recent macOS
-    // versions actually use to insert a row; CGRequestListenEventAccess is
-    // the older CoreGraphics equivalent. Both must run on the main thread
-    // or the Input Monitoring list opens without Soufflé (SOU-122 AC2).
+    register_current_bundle_with_launch_services();
+    // kIOHIDRequestTypeListenEvent. DTS: this is the API that inserts the
+    // Input Monitoring row. CGRequestListenEventAccess is the older
+    // CoreGraphics equivalent. A listen-only tap is the actual use of the
+    // privilege; creating one (even if it fails) is what some macOS
+    // versions need before the row appears. Dropped immediately, never
+    // attached to a runloop.
     const LISTEN_EVENT: u32 = 1;
-    on_main(|| {
-        unsafe {
-            let _ = IOHIDRequestAccess(LISTEN_EVENT);
-            let _ = CGRequestListenEventAccess();
-        }
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-            .spawn();
-    });
+    unsafe {
+        let _ = IOHIDRequestAccess(LISTEN_EVENT);
+        let _ = CGRequestListenEventAccess();
+    }
+    use core_graphics::event::{
+        CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
+        CallbackResult,
+    };
+    let _ = CGEventTap::new(
+        CGEventTapLocation::Session,
+        CGEventTapPlacement::HeadInsertEventTap,
+        CGEventTapOptions::ListenOnly,
+        vec![CGEventType::KeyDown],
+        |_proxy, _ty, _event| CallbackResult::Keep,
+    );
+}
+
+#[cfg(target_os = "macos")]
+fn open_input_monitoring_settings() {
+    prompt_then_open_settings(
+        || {
+            on_main(request_listen_event_access_now);
+        },
+        wait_for_tcc_insert,
+        || open_privacy_pane("Privacy_ListenEvent"),
+    );
 }
 
 #[cfg(not(target_os = "macos"))]
