@@ -35,14 +35,33 @@
   ];
 
   const controller = createSettingsController();
-  // Deep-link is one-shot: the anchor is read here and cleared immediately, so
-  // the next ordinary open still lands on Transcription with nothing highlighted.
-  const initialAnchor = controller.app.settingsInitialAnchor;
-  controller.app.settingsInitialAnchor = null;
-
+  // Read for the first paint so a deep link never flashes the Transcription tab.
+  // The effect below is what consumes it, and it also serves a link fired while
+  // Settings is already open (an alert rendered inside Settings itself).
   let activeTab = $state<SettingsTab>(
-    initialAnchor ? tabForAnchor(initialAnchor) : "transcription",
+    controller.app.settingsInitialAnchor
+      ? tabForAnchor(controller.app.settingsInitialAnchor)
+      : "transcription",
   );
+
+  let clearHighlight: (() => void) | null = null;
+
+  $effect(() => {
+    const target = controller.app.settingsInitialAnchor;
+    if (!target) return;
+
+    // One-shot: consumed here, so the next ordinary open lands on Transcription
+    // with nothing highlighted.
+    controller.app.settingsInitialAnchor = null;
+    activeTab = tabForAnchor(target);
+
+    void tick().then(() => {
+      clearHighlight?.();
+      clearHighlight = focusAnchor(target);
+    });
+  });
+
+  $effect(() => () => clearHighlight?.());
 
   let selectedTranscriptionLabel = $derived(
     formatSelectedTranscriptionLabel(
@@ -62,16 +81,6 @@
     void controller.mount();
 
     let cancelled = false;
-    let clearHighlight: (() => void) | null = null;
-
-    if (initialAnchor) {
-      // The tab panel is rendered by the same pass that runs onMount; wait for
-      // the DOM to settle before looking the anchored row up.
-      void tick().then(() => {
-        if (!cancelled) clearHighlight = focusAnchor(initialAnchor);
-      });
-    }
-
     const unlisteners: Array<() => void> = [];
 
     const register = (promise: Promise<() => void>) => {
@@ -98,7 +107,6 @@
 
     return () => {
       cancelled = true;
-      clearHighlight?.();
       for (const unlisten of unlisteners) {
         unlisten();
       }

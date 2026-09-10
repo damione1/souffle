@@ -131,9 +131,15 @@
    * and friends, no prompt), so it is cheap enough to run on every focus: it is
    * what lets a banner clear when the user grants a permission from System
    * Settings without ever reopening the permissions panel (SOU-089 AC6). */
+  let permissionSyncGeneration = 0;
   async function syncPermissions() {
+    const generation = ++permissionSyncGeneration;
     try {
-      app.appPermissions = await getPermissionStatus();
+      const status = await getPermissionStatus();
+      // Focus can fire twice in quick succession, and the permissions panel
+      // polls into the same field: drop a snapshot a newer one has overtaken,
+      // or a stale "denied" would resurrect a banner that correctly cleared.
+      if (generation === permissionSyncGeneration) app.appPermissions = status;
     } catch {
       // Best-effort: a failed snapshot just leaves the last known state.
     }
