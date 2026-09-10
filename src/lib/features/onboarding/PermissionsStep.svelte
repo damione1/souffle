@@ -175,9 +175,12 @@
       pollInFlight = true;
       void getPermissionStatus()
         .then((s) => {
-          // snapshot() intentionally returns "unknown" for un-probed capabilities
-          // like system_audio so we don't trigger unwarranted prompts. We only
-          // overwrite our state when we get a real answer.
+          // A probe in flight is newer than this snapshot. Dropping the
+          // result is what keeps a just-observed revoke from flipping back
+          // to the remembered Granted (SOU-120 AC4).
+          if (Object.values(busy).some(Boolean)) return;
+          // Snapshot never prompts. Unknown means "not remembered yet";
+          // keep the local value rather than wiping a grant in progress.
           const next = { ...status };
           if (s.accessibility !== "unknown") next.accessibility = s.accessibility;
           if (s.microphone !== "unknown") next.microphone = s.microphone;
@@ -213,12 +216,14 @@
       if (leftAfterAttempt && status.accessibility === "denied") {
         returnedStillDenied = true;
       }
-      // Re-probe system audio only after the user left the app (typically
-      // System Settings) so a revoke is reflected without mounting a tap
-      // on every window open (SOU-120 AC4 vs AC5).
+      // Re-probe a remembered grant after the user left the app (typically
+      // System Settings) so a revoke is reflected. Opening the window does
+      // not probe (AC5). Denied already has Grant; Unknown must not prompt
+      // (AC3). Skip while a probe is in flight so two taps cannot overlap.
       if (
         leftWindow
-        && (status.system_audio === "granted" || status.system_audio === "denied")
+        && status.system_audio === "granted"
+        && !busy.system_audio
       ) {
         leftWindow = false;
         void grant("system_audio");
