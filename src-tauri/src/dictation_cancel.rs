@@ -66,7 +66,19 @@ fn arm(app: &AppHandle) {
         return;
     }
     match gs.on_shortcut(ESCAPE, |app, _shortcut, event| {
-        if event.state == ShortcutState::Pressed {
+        if event.state != ShortcutState::Pressed {
+            return;
+        }
+        // If unregister failed, this callback can outlive the session.
+        // Re-check the machine so Escape cannot cancel a later PTT take
+        // or fire while idle (SOU-117 AC6 / AC7).
+        let Some(state) = app.try_state::<AppState>() else {
+            return;
+        };
+        let Ok(machine) = state.current_machine_state() else {
+            return;
+        };
+        if should_arm(WANTED.load(Ordering::SeqCst), &machine) {
             let _ = DictationCancelRequested.emit(app);
         }
     }) {
