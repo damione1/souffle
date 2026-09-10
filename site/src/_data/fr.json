@@ -53,7 +53,8 @@
       "body": "Avec le modèle par défaut, le texte s'affiche pendant que vous parlez encore, ponctué et avec les majuscules. Un passage local peut en polir la formulation avant que vous l'utilisiez, et ce même modèle gère le français et l'anglais sans que vous ayez à basculer.",
       "bullets": [
         "Le texte s'affiche pendant que vous parlez, pas à la fin",
-        "Un appui pour lancer et arrêter, ou maintenu tant que vous parlez",
+        "Un appui pour lancer et arrêter, ou maintenu tant que vous parlez — y compris Fn ou un modificateur seul",
+        "Dites une phrase déclencheur pour coller un extrait vocal au lieu d'une dictée libre",
         "Corrigez un nom mal entendu une fois : il reste corrigé ensuite",
         "Une IA locale peut s'occuper de polir la formulation, avec des instructions que vous pouvez changer",
         "Français et anglais sur le même modèle, sans bascule"
@@ -593,13 +594,17 @@
                 "Insère le texte dans l'app que vous utilisiez, et relit vos corrections quand « apprendre de mes corrections » est actif."
               ],
               [
+                "Surveillance de l'entrée",
+                "Permet d'assigner le push-to-talk à une seule touche (Fn, un modificateur seul, ou F5–F12) via un tap d'événements natif, les autres touches passant. Optionnel tant que vous n'avez pas choisi un tel raccourci."
+              ],
+              [
                 "Calendrier",
                 "Lit les événements du jour pour les lister et proposer de démarrer un enregistrement. Optionnel, et inactif tant que vous ne l'activez pas."
               ]
             ]
           },
           {
-            "p": "Refuser une permission ne désactive que la fonction concernée. Sans Audio système, une réunion enregistre quand même votre micro et la transcription est marquée <em>Micro seul</em>. Sans Accessibilité, le texte dicté est copié dans le presse-papiers au lieu d'être inséré à votre place."
+            "p": "Refuser une permission ne désactive que la fonction concernée. Sans Audio système, une réunion enregistre quand même votre micro et la transcription est marquée <em>Micro seul</em>. Sans Accessibilité, le texte dicté est copié dans le presse-papiers au lieu d'être inséré à votre place. Sans Surveillance de l'entrée, les raccourcis classiques avec modificateur fonctionnent encore ; seul le push-to-talk à une touche ne s'installera pas."
           }
         ]
       },
@@ -608,10 +613,10 @@
         "h": "Premier lancement",
         "blocks": [
           {
-            "p": "Un assistant couvre quatre choses : les permissions dont Soufflé a besoin, le micro à utiliser, le modèle de transcription à télécharger, et le raccourci de dictée. Le raccourci par défaut est <kbd>⌘⇧Espace</kbd>."
+            "p": "Un assistant couvre les permissions dont Soufflé a besoin, le micro à utiliser, le modèle de transcription à télécharger, le raccourci de dictée, et un entretien dictionnaire optionnel (prénoms, jargon, ton du polish) que vous pouvez passer. Le raccourci par défaut est <kbd>⌘⇧Espace</kbd>."
           },
           {
-            "p": "La dernière étape propose aussi le collage automatique, actif par défaut : quand vous arrêtez de dicter, le texte part directement dans l'app où vous étiez. Désactivez-le et le texte atterrit dans le presse-papiers. Tout cela se change plus tard dans les Paramètres."
+            "p": "L'étape du raccourci propose aussi le collage automatique, actif par défaut : quand vous arrêtez de dicter, le texte part directement dans l'app où vous étiez. Désactivez-le et le texte atterrit dans le presse-papiers. Une installation neuve termine avec Lancer à la connexion activé ; changez-le plus tard dans Paramètres → Système. Tout cela se change plus tard dans les Paramètres."
           }
         ]
       },
@@ -629,6 +634,9 @@
             "p": "Deux passages optionnels tournent à la sortie. Le <strong>polish de la dictée</strong> fait passer la transcription brute dans un LLM local, avec un modèle de prompt que vous pouvez modifier (nettoyage, courriel professionnel, liste à puces, retrait des hésitations) ; il demande Apple Intelligence ou Ollama. L'<strong>apprentissage des corrections</strong>, actif par défaut, surveille le champ juste après l'insertion : corrigez un nom mal entendu une fois à la main, et Soufflé garde cette orthographe pour la suite, dans le dictionnaire personnalisé sous Paramètres → Transcription."
           },
           {
+            "p": "Les <strong>extraits vocaux</strong> vivent sous Paramètres → Transcription : dites une phrase déclencheur en début de dictée et Soufflé colle l'expansion à la place, sans tenir compte de la casse ni des accents, et sans polish IA sur cette prise. Le menu de la barre des menus propose aussi <em>Copier la dernière transcription</em> quand vous en avez besoin."
+          },
+          {
             "p": "Des sons de départ et d'arrêt, optionnels, confirment que le raccourci a été capté."
           }
         ]
@@ -638,7 +646,7 @@
         "h": "Raccourcis",
         "blocks": [
           {
-            "p": "Les deux raccourcis de dictée se règlent dans Paramètres → Interface. Chacun doit contenir une touche de modification, et les deux ne peuvent pas partager la même combinaison."
+            "p": "Les deux raccourcis de dictée se règlent dans Paramètres → Interface. La bascule utilise une combinaison classique avec modificateur (<kbd>⌘⇧Espace</kbd> par défaut). Le push-to-talk peut faire de même, ou une seule touche — Fn, un modificateur seul, ou F5–F12 — qui demande la permission Surveillance de l'entrée pour que le tap natif s'installe. Les deux ne peuvent pas partager la même combinaison."
           },
           {
             "table": [
@@ -648,7 +656,7 @@
               ],
               [
                 "Maintenir pour parler",
-                "Maintenez pour enregistrer, relâchez pour arrêter. Non défini par défaut ; à assigner si vous préférez ce geste."
+                "Maintenir pour enregistrer, relâcher pour arrêter. Non assigné par défaut ; liez une combinaison classique ou une seule touche (Fn, modificateur seul, F5–F12) si vous préférez maintenir."
               ]
             ]
           }
@@ -663,6 +671,9 @@
           },
           {
             "p": "À l'arrêt, la pastille passe en <em>Reformulation…</em> le temps du passage de polish local, puis disparaît au moment où le texte atterrit dans le champ que vous utilisiez déjà. Sa fenêtre est exclue de la capture d'écran : elle n'apparaît pas dans la réunion où vous êtes."
+          },
+          {
+            "p": "Vous pouvez masquer la pastille dans Paramètres → Interface ; faites-la glisser quand elle est visible pour la déplacer. La position est mémorisée d'un écran à l'autre."
           }
         ]
       },
@@ -698,7 +709,7 @@
             "code": "brew install ollama\nollama pull qwen2.5:7b"
           },
           {
-            "p": "Ensuite, dans Paramètres → Réunions → Résumés, laissez le serveur sur <code>http://localhost:11434</code> et choisissez le modèle. N'importe quel modèle de conversation généraliste fait l'affaire ; <code>qwen2.5:7b</code> est celui que Soufflé recommande. C'est le même fournisseur qui sert au polish de la dictée."
+            "p": "Ensuite, dans Paramètres → IA, laissez le serveur sur <code>http://localhost:11434</code> et choisissez le modèle. N'importe quel modèle de conversation généraliste fait l'affaire ; <code>qwen2.5:7b</code> est celui que Soufflé recommande. C'est le même fournisseur qui sert au polish de la dictée."
           },
           {
             "p": "Rien de ce qui touche à un résumé ne sort de la machine. Avec Ollama, la seule requête part vers votre propre instance."
@@ -736,7 +747,7 @@
             "p": "Les deux Kyutai sont les modèles en flux continu : le texte apparaît pendant que vous parlez encore. Whisper et Parakeet transcrivent tout l'enregistrement une fois que vous avez arrêté, ce qui convient à une réunion qu'on lit après coup mais change la sensation en dictée."
           },
           {
-            "p": "Un modèle chargé est déchargé après une heure d'inactivité pour rendre la RAM, puis rechargé au prochain enregistrement. Ce délai se change, ou se désactive, dans Paramètres → Audio."
+            "p": "Un modèle chargé est déchargé après une heure d'inactivité pour rendre la RAM, puis rechargé au prochain enregistrement. Ce délai se change, ou se désactive, dans Paramètres → Transcription."
           }
         ]
       },
@@ -745,7 +756,7 @@
         "h": "Les paramètres",
         "blocks": [
           {
-            "p": "Cinq onglets. Les réglages qui méritent d'être connus :"
+            "p": "Six onglets. Les réglages qui méritent d'être connus :"
           },
           {
             "table": [
@@ -762,12 +773,20 @@
                 "Signaux sonores de départ et d'arrêt, avec un volume."
               ],
               [
-                "Polish de la dictée<br><span class=\"docs-tab\">Transcription</span>",
+                "Masquer la pastille<br><span class=\"docs-tab\">Interface</span>",
+                "Cache le HUD flottant pendant la dictée ou une réunion. Faites-le glisser quand il est visible pour le déplacer ; la position est mémorisée."
+              ],
+              [
+                "Polish de la dictée<br><span class=\"docs-tab\">IA</span>",
                 "Le passage LLM local et ses modèles de prompt, modifiables. Demande Apple Intelligence ou Ollama."
               ],
               [
                 "Dictionnaire personnalisé<br><span class=\"docs-tab\">Transcription</span>",
-                "Noms propres et termes techniques à orthographier correctement, saisis à la main ou appris de vos corrections."
+                "Noms propres et termes techniques à orthographier correctement, saisis à la main, appris de vos corrections, ou amorcés par l'entretien optionnel du premier lancement."
+              ],
+              [
+                "Extraits vocaux<br><span class=\"docs-tab\">Transcription</span>",
+                "Phrases déclencheurs qui se développent en un bloc de texte préparé en début de dictée. Une correspondance saute le polish."
               ],
               [
                 "Priorité des micros<br><span class=\"docs-tab\">Audio</span>",
@@ -778,7 +797,7 @@
                 "Arrêt après 5, 10, 15 ou 30 minutes sans parole, avec un garde-fou de durée maximale derrière."
               ],
               [
-                "Déchargement du modèle<br><span class=\"docs-tab\">Audio</span>",
+                "Déchargement du modèle<br><span class=\"docs-tab\">Transcription</span>",
                 "Libère la RAM du modèle après 5, 15 ou 60 minutes d'inactivité, ou jamais."
               ],
               [
@@ -786,8 +805,12 @@
                 "Inactif tant que vous ne l'activez pas. Liste les événements du jour et propose de démarrer quand l'un commence."
               ],
               [
-                "Résumés<br><span class=\"docs-tab\">Réunions</span>",
+                "Résumés<br><span class=\"docs-tab\">IA</span>",
                 "Fournisseur, serveur et modèle Ollama, et les modèles de résumé."
+              ],
+              [
+                "Lancer à la connexion<br><span class=\"docs-tab\">Système</span>",
+                "Ouvre Soufflé automatiquement au démarrage du Mac. Actif par défaut après l'assistant d'une installation neuve."
               ],
               [
                 "Audio des réunions<br><span class=\"docs-tab\">Système</span>",
@@ -949,6 +972,10 @@
               [
                 "Les autres participants n'apparaissent pas dans la transcription",
                 "La capture de l'audio système demande macOS 14.4 ou plus récent et la permission Audio système. Quand elle n'est pas disponible, la transcription est marquée <em>Micro seul</em> et n'enregistre que votre micro."
+              ],
+              [
+                "Un raccourci push-to-talk à une touche ne fait rien",
+                "Fn, les modificateurs seuls et F5–F12 demandent la Surveillance de l'entrée pour le tap natif. Paramètres → Système → Permissions y renvoie."
               ],
               [
                 "Le texte dicté n'est pas inséré",
