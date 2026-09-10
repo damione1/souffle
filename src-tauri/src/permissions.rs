@@ -41,6 +41,16 @@ enum HidAccess {
 /// snapshot returns it without mounting a tap (SOU-120).
 const SYSTEM_AUDIO_PERMISSION_KEY: &str = "system_audio_permission";
 
+/// Remembered Input Monitoring grant. `IOHIDCheckAccess(ListenEvent)` is
+/// true whenever Accessibility is trusted, so a live check cannot tell a
+/// real Input Monitoring row from AX covering listen. After the user
+/// toggles the row, macOS quits and relaunches the app: a pid change
+/// since we opened the pane is that signal.
+const INPUT_MONITORING_PERMISSION_KEY: &str = "input_monitoring_permission";
+const INPUT_MONITORING_PROMPT_PID_KEY: &str = "input_monitoring_prompt_pid";
+const INPUT_MONITORING_PROMPT_UNIX_KEY: &str = "input_monitoring_prompt_unix";
+const INPUT_MONITORING_RESTART_WINDOW_SECS: u64 = 15 * 60;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PermState {
@@ -109,11 +119,7 @@ pub fn snapshot(db: &Database) -> PermissionStatus {
         // EventKit has a real read-only status API, so the snapshot is truthful
         // here (no probe needed).
         calendar: crate::calendar::authorization_state(),
-        input_monitoring: input_monitoring_snapshot_state(
-            iohid_listen_access(),
-            accessibility_granted(),
-            iohid_post_access(),
-        ),
+        input_monitoring: resolve_input_monitoring(db),
     }
 }
 
@@ -174,6 +180,119 @@ fn input_monitoring_snapshot_state(
             }
         }
     }
+}
+
+fn resolve_input_monitoring(db: &Database) -> PermState {
+    let listen = iohid_listen_access();
+    let live =
+        input_monitoring_snapshot_state(listen, accessibility_granted(), iohid_post_access());
+    let remembered = load_remembered_input_monitoring(db);
+    let prompt = load_input_monitoring_prompt(db);
+    let now_unix = unix_now();
+    let state = input_monitoring_effective_state(
+        live,
+        listen,
+        remembered,
+        prompt,
+        std::process::id(),
+        now_unix,
+    );
+    if state == PermState::Granted && remembered != Some(PermState::Granted) {
+        remember_input_monitoring(db, PermState::Granted);
+        clear_input_monitoring_prompt(db);
+    }
+    state
+}
+
+/// Combine the live HID check with a remembered grant and the "Quit and
+/// Reopen" restart macOS issues after toggling Input Monitoring.
+fn input_monitoring_effective_state(
+    live: PermState,
+    listen: HidAccess,
+    remembered: Option<PermState>,
+    prompt: Option<(u32, u64)>,
+    now_pid: u32,
+    now_unix: u64,
+) -> PermState {
+    if live == PermState::Granted || live == PermState::Denied {
+        return live;
+    }
+    if remembered == Some(PermState::Granted) {
+        return PermState::Granted;
+    }
+    if listen == HidAccess::Granted
+        && let Some((pid, unix)) = prompt
+        && pid != now_pid
+        && now_unix.saturating_sub(unix) <= INPUT_MONITORING_RESTART_WINDOW_SECS
+    {
+        return PermState::Granted;
+    }
+    PermState::Unknown
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn load_remembered_input_monitoring(db: &Database) -> Option<PermState> {
+    let raw = db
+        .get_setting(INPUT_MONITORING_PERMISSION_KEY)
+        .ok()
+        .flatten()?;
+    match serde_json::from_str::<PermState>(&raw) {
+        Ok(PermState::Granted) => Some(PermState::Granted),
+        _ => None,
+    }
+}
+
+fn remember_input_monitoring(db: &Database, state: PermState) {
+    if state != PermState::Granted {
+        return;
+    }
+    if let Ok(raw) = serde_json::to_string(&state)
+        && let Err(e) = db.set_setting(INPUT_MONITORING_PERMISSION_KEY, &raw)
+    {
+        tracing::warn!(error = %e, "Failed to persist input monitoring permission");
+    }
+}
+
+fn load_input_monitoring_prompt(db: &Database) -> Option<(u32, u64)> {
+    let pid = db
+        .get_setting(INPUT_MONITORING_PROMPT_PID_KEY)
+        .ok()
+        .flatten()?
+        .parse()
+        .ok()?;
+    let unix = db
+        .get_setting(INPUT_MONITORING_PROMPT_UNIX_KEY)
+        .ok()
+        .flatten()?
+        .parse()
+        .ok()?;
+    Some((pid, unix))
+}
+
+fn clear_input_monitoring_prompt(db: &Database) {
+    let _ = db.set_setting(INPUT_MONITORING_PROMPT_PID_KEY, "");
+    let _ = db.set_setting(INPUT_MONITORING_PROMPT_UNIX_KEY, "");
+}
+
+/// Call when the user opens the Input Monitoring pane. After macOS quits
+/// and relaunches, `resolve_input_monitoring` treats a pid change as a grant.
+pub fn note_input_monitoring_prompt(db: &Database) {
+    let _ = db.set_setting(
+        INPUT_MONITORING_PROMPT_PID_KEY,
+        &std::process::id().to_string(),
+    );
+    let _ = db.set_setting(INPUT_MONITORING_PROMPT_UNIX_KEY, &unix_now().to_string());
+}
+
+pub fn clear_input_monitoring_memory(db: &Database) {
+    let _ = db.set_setting(INPUT_MONITORING_PERMISSION_KEY, "");
+    clear_input_monitoring_prompt(db);
 }
 
 /// TCC prompts (`AXIsProcessTrustedWithOptions`, `CGRequestListenEventAccess`,
@@ -765,6 +884,70 @@ mod tests {
         assert_eq!(
             input_monitoring_snapshot_state(HidAccess::Denied, false, HidAccess::Unknown),
             PermState::Denied
+        );
+    }
+
+    #[test]
+    fn input_monitoring_stays_open_settings_in_the_same_process_after_opening_the_pane() {
+        let live = PermState::Unknown;
+        assert_eq!(
+            input_monitoring_effective_state(
+                live,
+                HidAccess::Granted,
+                None,
+                Some((42, 1_000)),
+                42,
+                1_010,
+            ),
+            PermState::Unknown,
+            "AX covering listen plus opening the pane is not a grant"
+        );
+    }
+
+    #[test]
+    fn input_monitoring_is_granted_after_the_tcc_quit_and_reopen() {
+        let live = PermState::Unknown;
+        assert_eq!(
+            input_monitoring_effective_state(
+                live,
+                HidAccess::Granted,
+                None,
+                Some((42, 1_000)),
+                99,
+                1_030,
+            ),
+            PermState::Granted,
+        );
+    }
+
+    #[test]
+    fn input_monitoring_restart_signal_expires() {
+        let live = PermState::Unknown;
+        assert_eq!(
+            input_monitoring_effective_state(
+                live,
+                HidAccess::Granted,
+                None,
+                Some((42, 1_000)),
+                99,
+                1_000 + INPUT_MONITORING_RESTART_WINDOW_SECS + 1,
+            ),
+            PermState::Unknown,
+        );
+    }
+
+    #[test]
+    fn input_monitoring_remembered_grant_survives_later_launches() {
+        assert_eq!(
+            input_monitoring_effective_state(
+                PermState::Unknown,
+                HidAccess::Granted,
+                Some(PermState::Granted),
+                None,
+                7,
+                9_000,
+            ),
+            PermState::Granted,
         );
     }
 
