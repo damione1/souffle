@@ -54,6 +54,7 @@ const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
 const DICTATION_POLISH_ENABLED_KEY: &str = "dictation_polish_enabled";
 const DICTATION_POLISH_TEMPLATE_ID_KEY: &str = "dictation_polish_template_id";
 const DICTATION_POLISH_TEMPLATES_KEY: &str = "dictation_polish_templates";
+const DICTIONARY_INTERVIEW_DONE_KEY: &str = "dictionary_interview_done";
 const DEFAULT_SUMMARY_TEMPLATE_ID_KEY: &str = "default_summary_template_id";
 const SUMMARY_TEMPLATES_KEY: &str = "summary_templates";
 const LOG_LEVEL_KEY: &str = "log_level";
@@ -212,6 +213,8 @@ pub struct AppSettings {
     /// Does not force Kyutai/moshi decode language.
     pub meeting_transcription_language: MeetingTranscriptionLanguage,
     /// Optional LLM post-processing applied to dictation before paste/history.
+    pub dictionary_interview_done: bool,
+    /// Optional LLM post-processing applied to dictation before paste/history.
     pub dictation_polish_enabled: bool,
     /// Active polish template id (clean, email, bullets, no_fillers).
     pub dictation_polish_template_id: String,
@@ -279,6 +282,7 @@ impl Default for AppSettings {
             autostart_enabled: false,
             meeting_audio_retention: MeetingAudioRetention::default(),
             meeting_transcription_language: MeetingTranscriptionLanguage::default(),
+            dictionary_interview_done: false,
             dictation_polish_enabled: true,
             dictation_polish_template_id: crate::summary::TEMPLATE_CLEAN.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -462,6 +466,11 @@ impl AppSettings {
             db, MEETING_TRANSCRIPTION_LANGUAGE_KEY
         )? {
             settings.meeting_transcription_language = meeting_transcription_language;
+        }
+        if let Some(dictionary_interview_done) =
+            read_json_setting::<bool>(db, DICTIONARY_INTERVIEW_DONE_KEY)?
+        {
+            settings.dictionary_interview_done = dictionary_interview_done;
         }
         if let Some(dictation_polish_enabled) =
             read_json_setting::<bool>(db, DICTATION_POLISH_ENABLED_KEY)?
@@ -894,6 +903,11 @@ impl AppSettings {
         )?;
         write_json_setting(
             db,
+            DICTIONARY_INTERVIEW_DONE_KEY,
+            &normalized.dictionary_interview_done,
+        )?;
+        write_json_setting(
+            db,
             DICTATION_POLISH_ENABLED_KEY,
             &normalized.dictation_polish_enabled,
         )?;
@@ -1099,6 +1113,7 @@ mod tests {
             autostart_enabled: true,
             meeting_audio_retention: MeetingAudioRetention::Keep30d,
             meeting_transcription_language: super::MeetingTranscriptionLanguage::Fr,
+            dictionary_interview_done: false,
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -1465,6 +1480,7 @@ mod tests {
     fn dictation_polish_settings_round_trip() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
+            dictionary_interview_done: true,
             dictation_polish_enabled: true,
             dictation_polish_template_id: "bullets".into(),
             dictation_polish_templates: vec![super::DictationPolishTemplate {
@@ -1478,6 +1494,7 @@ mod tests {
         settings.save(&db).expect("save settings");
         let loaded = AppSettings::load(&db).expect("load settings");
 
+        assert!(loaded.dictionary_interview_done);
         assert!(loaded.dictation_polish_enabled);
         assert_eq!(loaded.dictation_polish_template_id, "bullets");
         assert_eq!(loaded.dictation_polish_templates.len(), 4);
