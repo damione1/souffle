@@ -1181,4 +1181,89 @@ describe("MeetingController", () => {
       expect(mockResumeMeetingRecording).toHaveBeenCalledOnce();
     });
   });
+
+  describe("banner lifetime (SOU-099)", () => {
+    async function mountedController() {
+      mockGetSummaryProvidersStatus.mockResolvedValue(makeSummaryProvidersStatus());
+      mockGetTranscriptionCatalog.mockResolvedValue(makeCatalog());
+      const ctrl = createMeetingController();
+      await ctrl.mount();
+      return ctrl;
+    }
+
+    it("auto-hides a banner without an action after 5s", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const ctrl = await mountedController();
+        ctrl.handleRecordingAborted();
+        expect(ctrl.statusMessage).toMatch(/interrupted/i);
+        expect(ctrl.statusActionLabel).toBeUndefined();
+
+        await vi.advanceTimersByTimeAsync(4999);
+        expect(ctrl.statusMessage).toMatch(/interrupted/i);
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(ctrl.statusMessage).toBe("");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not auto-hide a banner that carries an action", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        mockApp.transcriptionRuntimePhase = "download_required";
+        const ctrl = await mountedController();
+        await ctrl.startRecording();
+
+        expect(ctrl.statusMessage).toContain("Load the model");
+        expect(ctrl.statusActionLabel).toBe("Open model");
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(ctrl.statusMessage).toContain("Load the model");
+        expect(ctrl.statusActionLabel).toBe("Open model");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("clearBanner dismisses immediately and cancels the auto-hide timer", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const ctrl = await mountedController();
+        ctrl.handleRecordingAborted();
+        expect(ctrl.statusMessage).toMatch(/interrupted/i);
+
+        ctrl.clearBanner();
+        expect(ctrl.statusMessage).toBe("");
+        expect(ctrl.statusActionLabel).toBeUndefined();
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(ctrl.statusMessage).toBe("");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a later banner cancels the previous auto-hide timer", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const ctrl = await mountedController();
+        ctrl.handleRecordingAborted();
+        expect(ctrl.statusMessage).toMatch(/interrupted/i);
+
+        await vi.advanceTimersByTimeAsync(2000);
+        ctrl.handleRecordingAborted();
+        expect(ctrl.statusMessage).toMatch(/interrupted/i);
+
+        await vi.advanceTimersByTimeAsync(4000);
+        expect(ctrl.statusMessage).toMatch(/interrupted/i);
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(ctrl.statusMessage).toBe("");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

@@ -986,5 +986,6 @@ export function createMeetingController() {
  * Clear the controller singleton so tests can start fresh.
  */
 export function resetMeetingControllerForTest() {
+  instance?.clearBanner();
   instance = null;
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X } from "lucide-svelte";
+  import { X } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   let {
     message,
@@ -26,15 +26,20 @@
   }`}
 >
   <p class="text-sm">{message}</p>
-  
+
   <div class="flex items-center gap-2">
     {#if actionLabel && onAction}
-      <button class="btn btn-primary btn-sm shrink-0" onclick={onAction}>
+      <button type="button" class="btn btn-primary btn-sm shrink-0" onclick={onAction}>
         {actionLabel}
       </button>
     {/if}
     {#if onDismiss}
-      <button class="flex h-6 w-6 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-4 hover:text-text-primary" onclick={onDismiss} aria-label={$t("mic_toast.dismiss")}>
+      <button
+        type="button"
+        class="btn btn-icon shrink-0"
+        onclick={onDismiss}
+        aria-label={$t("mic_toast.dismiss")}
+      >
         <X size={14} aria-hidden="true" />
       </button>
     {/if}

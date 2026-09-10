@@ -672,5 +672,6 @@ export function createTranscriptionController() {
 
 /** Reset the singleton for testing. */
 export function resetTranscriptionControllerForTest() {
+  instance?.clearBanner();
   instance = null;
 }

@@ -46,4 +46,27 @@ describe('StatusBanner', () => {
     render(StatusBanner, { props: { message: 'Just a message', actionLabel: 'Repair' } });
     expect(screen.queryByRole('button')).toBeNull();
   });
+
+  it('renders an accessible dismiss button when onDismiss is provided', async () => {
+    const onDismiss = vi.fn();
+    render(StatusBanner, { props: { message: 'Copied', onDismiss } });
+
+    const button = screen.getByRole('button', { name: 'Dismiss' });
+    await fireEvent.click(button);
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('keeps dismiss next to an action button', () => {
+    render(StatusBanner, {
+      props: {
+        message: 'Model required',
+        actionLabel: 'Open model',
+        onAction: vi.fn(),
+        onDismiss: vi.fn(),
+      },
+    });
+
+    expect(screen.getByRole('button', { name: 'Open model' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
+  });
 });

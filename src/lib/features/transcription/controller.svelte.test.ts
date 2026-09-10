@@ -1461,6 +1461,54 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
   });
 
+  it("does not auto-hide a banner that carries an action", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "get_model_status") {
+          return Promise.resolve({ ...fakeStatus, phase: "download_required" });
+        }
+        return defaultInvoke(cmd);
+      });
+
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+      await ctrl.toggleRecording();
+
+      expect(ctrl.statusActionLabel).toBe("Open model");
+      const message = ctrl.statusMessage;
+      expect(message).toContain("Download and load");
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ctrl.statusMessage).toBe(message);
+      expect(ctrl.statusActionLabel).toBe("Open model");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clearBanner dismisses immediately and cancels the auto-hide timer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      expect(ctrl.statusMessage).toBe("Hold a little longer");
+
+      ctrl.clearBanner();
+      expect(ctrl.statusMessage).toBe("");
+      expect(ctrl.statusActionLabel).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ctrl.statusMessage).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("auto-hides the banner after 5s without wiping a later banner", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
