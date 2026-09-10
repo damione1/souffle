@@ -132,6 +132,37 @@ fn system_audio_supported() -> bool {
     crate::platform::system_audio_capture_supported()
 }
 
+/// TCC prompts (`AXIsProcessTrustedWithOptions`, `CGRequestListenEventAccess`,
+/// `IOHIDRequestAccess`) only insert this process into System Settings when
+/// they run on the main thread. `request_permission` is `spawn_blocking`, so
+/// hop. Reads (`AXIsProcessTrusted`, `CGPreflightListenEventAccess`) stay on
+/// the caller: `cargo test` has no main runloop, and a `dispatch_sync` there
+/// hangs (SOU-122 AC3).
+#[cfg(target_os = "macos")]
+fn on_main<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+    on_main_with(is_main_thread(), f)
+}
+
+#[cfg(target_os = "macos")]
+fn on_main_with<R: Send>(already_main: bool, f: impl FnOnce() -> R + Send) -> R {
+    if already_main {
+        return f();
+    }
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    dispatch2::DispatchQueue::main().exec_sync(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv().expect("main queue dropped a TCC hop")
+}
+
+#[cfg(target_os = "macos")]
+fn is_main_thread() -> bool {
+    unsafe extern "C" {
+        fn pthread_main_np() -> i32;
+    }
+    unsafe { pthread_main_np() != 0 }
+}
+
 // --- Accessibility (synthesized Cmd+V paste) ---
 
 #[cfg(target_os = "macos")]
@@ -150,12 +181,15 @@ pub fn accessibility_granted() -> bool {
 
 #[cfg(target_os = "macos")]
 fn open_accessibility_settings() {
-    // Prompt first so macOS inserts Soufflé into the Accessibility list
-    // (same pattern as `CGRequestListenEventAccess` before Input Monitoring).
-    let _ = accessibility_trusted_with_prompt(true);
-    let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        .spawn();
+    // Prompt on the main thread so macOS inserts *this* binary into the
+    // Accessibility list (SOU-122). Off-thread, the pane opens empty or
+    // shows a differently-signed Soufflé already ticked.
+    on_main(|| {
+        let _ = accessibility_trusted_with_prompt(true);
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
+    });
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -168,6 +202,11 @@ fn open_accessibility_settings() {}
 /// `tccutil reset` has cleared out a stale one.
 #[cfg(target_os = "macos")]
 fn accessibility_trusted_with_prompt(prompt: bool) -> bool {
+    on_main(move || accessibility_trusted_with_prompt_now(prompt))
+}
+
+#[cfg(target_os = "macos")]
+fn accessibility_trusted_with_prompt_now(prompt: bool) -> bool {
     use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString};
     use std::ffi::c_void;
 
@@ -470,6 +509,18 @@ mod tests {
         assert_eq!(json, "\"denied\"");
     }
 
+    #[test]
+    fn on_main_runs_inline_when_already_on_the_main_thread() {
+        // cargo test worker threads have no dispatch runloop. Hopping
+        // (`already_main: false`) would hang; the production path uses
+        // `pthread_main_np` so a test must only exercise the inline arm.
+        let ran = std::sync::atomic::AtomicBool::new(false);
+        on_main_with(true, || {
+            ran.store(true, std::sync::atomic::Ordering::SeqCst)
+        });
+        assert!(ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
     /// `NoDevice` must serialize to its own value, distinct from `Denied`:
     /// the two need different instructions in the UI (plug in a mic vs.
     /// open System Settings), so they can't collapse to the same state.
@@ -684,15 +735,26 @@ fn input_monitoring_granted() -> bool {
 fn open_input_monitoring_settings() {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
-        #[allow(dead_code)]
         fn CGRequestListenEventAccess() -> bool;
     }
-    unsafe {
-        let _ = CGRequestListenEventAccess();
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOHIDRequestAccess(request_type: u32) -> u8;
     }
-    let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-        .spawn();
+    // kIOHIDRequestTypeListenEvent. The HID request is what recent macOS
+    // versions actually use to insert a row; CGRequestListenEventAccess is
+    // the older CoreGraphics equivalent. Both must run on the main thread
+    // or the Input Monitoring list opens without Soufflé (SOU-122 AC2).
+    const LISTEN_EVENT: u32 = 1;
+    on_main(|| {
+        unsafe {
+            let _ = IOHIDRequestAccess(LISTEN_EVENT);
+            let _ = CGRequestListenEventAccess();
+        }
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+            .spawn();
+    });
 }
 
 #[cfg(not(target_os = "macos"))]
