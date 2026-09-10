@@ -2,6 +2,7 @@ pub mod app_events;
 pub mod apple_intelligence;
 pub mod archive;
 pub mod audio;
+pub mod autostart;
 pub mod ax_text;
 pub mod calendar;
 pub mod cli;
@@ -84,6 +85,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_transcription_catalog,
             commands::get_model_status,
             commands::download_model,
+            commands::get_download_progress,
+            commands::get_system_audio_status,
             commands::delete_model,
             commands::load_model,
             commands::start_transcription,
@@ -147,6 +150,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::update_dictionary_entry,
             commands::delete_dictionary_entry,
             commands::clear_dictionary,
+            commands::list_snippets,
+            commands::add_snippet,
+            commands::update_snippet,
+            commands::delete_snippet,
             commands::learn_from_edit,
             commands::get_permission_status,
             commands::request_permission,

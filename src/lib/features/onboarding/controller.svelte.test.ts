@@ -243,6 +243,23 @@ describe("createOnboardingController", () => {
     );
   });
 
+  // SOU-036: a fresh install leaves the wizard with the login item on; the
+  // recovery-mode test below is what keeps existing installs untouched.
+  it("enables autostart when a fresh install finishes the wizard", async () => {
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    app.settings = { ...mockSettings, autostart_enabled: false };
+    const ctrl = createOnboardingController();
+    await ctrl.mount();
+    expect(ctrl.recoveryOnly).toBe(false);
+
+    await ctrl.finish();
+
+    expect(settingsApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ autostart_enabled: true }),
+    );
+    expect(app.settings.autostart_enabled).toBe(true);
+  });
+
   it("never overwrites the stored setting when finishing in recovery mode", async () => {
     // setupDone => the wizard resumes in recovery mode (e.g. re-download a
     // deleted model), and must not touch auto_paste even if Accessibility

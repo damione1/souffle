@@ -40,6 +40,22 @@ async downloadModel(selection: TranscriptionProfileSelection, channel: TAURI_CHA
 }
 },
 /**
+ * Snapshot of the in-flight model download, for a webview that reloaded
+ * while the machine was `Downloading` and lost its progress Channel.
+ * `None` until the first download of the process starts.
+ */
+async getDownloadProgress() : Promise<DownloadProgress | null> {
+    return await TAURI_INVOKE("get_download_progress");
+},
+/**
+ * Last system-audio leg status of the current meeting, for a webview that
+ * reloaded after the `SystemAudioStatus` event already fired (SOU-073).
+ * `None` outside a meeting session or before the tap was first attempted.
+ */
+async getSystemAudioStatus() : Promise<SystemAudioStatus | null> {
+    return await TAURI_INVOKE("get_system_audio_status");
+},
+/**
  * Delete a downloaded model from disk.
  */
 async deleteModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {
@@ -778,6 +794,50 @@ async clearDictionary() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Lists all voice snippets from the database.
+ */
+async listSnippets() : Promise<Result<SnippetEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_snippets") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Adds a new voice snippet (spoken trigger → pasted expansion).
+ */
+async addSnippet(trigger: string, expansion: string) : Promise<Result<SnippetEntry, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_snippet", { trigger, expansion }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Updates an existing voice snippet's trigger and expansion.
+ */
+async updateSnippet(id: number, trigger: string, expansion: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_snippet", { id, trigger, expansion }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Deletes a specific voice snippet by ID.
+ */
+async deleteSnippet(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_snippet", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Persist word-level misspelling→term pairs from a post-paste edit.
  */
 async learnFromEdit(original: string, corrected: string) : Promise<Result<number, string>> {
@@ -1164,6 +1224,12 @@ meeting_autostop_minutes: number;
  * speech activity.
  */
 meeting_max_duration_minutes: number; 
+/**
+ * Launch Soufflé at login (SMAppService login item, SOU-036). The stored
+ * value is a fallback only: `get_settings` overwrites it with the state
+ * the system reports, and an absent key means "never asked", not "on".
+ */
+autostart_enabled: boolean; 
 /**
  * Opt-in recording of meeting audio to compressed files on disk, and
  * for how long they're kept. Off by default.
@@ -1575,6 +1641,7 @@ export type ShortcutSettings = { toggle: string; push_to_talk: string;
  */
 rewrite: string }
 export type ShortcutToggle = null
+export type SnippetEntry = { id: number; trigger: string; expansion: string; created_at: string }
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.

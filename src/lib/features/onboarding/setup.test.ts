@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   SETUP_STORAGE_KEY,
   PERMISSIONS_STORAGE_KEY,
+  decideAutostartOnFinish,
   decideShowSetupWizard,
   markPermissionsDone,
   markSetupComplete,
@@ -61,13 +62,13 @@ describe("decideShowSetupWizard", () => {
       decideShowSetupWizard("download_required", {
         permissionsDone: false,
         setupDone: false,
-      }),
+      }, "idle"),
     ).toBe(true);
   });
 
   it("keeps showing after the model is ready until the wizard is finished", () => {
     expect(
-      decideShowSetupWizard("ready", { permissionsDone: false, setupDone: false }),
+      decideShowSetupWizard("ready", { permissionsDone: false, setupDone: false }, "ready"),
     ).toBe(true);
   });
 
@@ -76,13 +77,13 @@ describe("decideShowSetupWizard", () => {
       decideShowSetupWizard("download_required", {
         permissionsDone: true,
         setupDone: false,
-      }),
+      }, "idle"),
     ).toBe(true);
   });
 
   it("hides for migrated existing users", () => {
     expect(
-      decideShowSetupWizard("ready", { permissionsDone: true, setupDone: true }),
+      decideShowSetupWizard("ready", { permissionsDone: true, setupDone: true }, "ready"),
     ).toBe(false);
   });
 
@@ -91,7 +92,26 @@ describe("decideShowSetupWizard", () => {
       decideShowSetupWizard("download_required", {
         permissionsDone: true,
         setupDone: true,
-      }),
+      }, "idle"),
+    ).toBe(true);
+  });
+
+  it("stays closed on a webview reload while the backend is still downloading (SOU-073)", () => {
+    // Files on disk are incomplete, so the phase reads "download_required",
+    // but the machine is mid-download: reopening would stack the wizard over
+    // a download that is about to finish.
+    expect(
+      decideShowSetupWizard("download_required", {
+        permissionsDone: true,
+        setupDone: true,
+      }, "downloading"),
+    ).toBe(false);
+    // A first run is different: the wizard is what is running the download.
+    expect(
+      decideShowSetupWizard("download_required", {
+        permissionsDone: true,
+        setupDone: false,
+      }, "downloading"),
     ).toBe(true);
   });
 });
@@ -116,5 +136,21 @@ describe("wizardSteps", () => {
 
   it("is model-only when setup was already completed", () => {
     expect(wizardSteps({ permissionsDone: true, setupDone: true })).toEqual(["model"]);
+  });
+});
+
+describe("decideAutostartOnFinish", () => {
+  it("turns the login item on when a fresh install finishes the wizard", () => {
+    expect(decideAutostartOnFinish(false, false)).toBe(true);
+  });
+
+  it("leaves an existing install off after a recovery run", () => {
+    // Absent key on an existing install reads as false; recovery must not
+    // promote that to "on" without the user touching the toggle.
+    expect(decideAutostartOnFinish(true, false)).toBe(false);
+  });
+
+  it("keeps an existing install on after a recovery run", () => {
+    expect(decideAutostartOnFinish(true, true)).toBe(true);
   });
 });

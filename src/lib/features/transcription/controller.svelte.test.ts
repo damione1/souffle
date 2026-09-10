@@ -137,6 +137,8 @@ describe("transcription controller", () => {
         return Promise.resolve(null);
       case "delete_dictation_entry":
         return Promise.resolve(null);
+      case "list_snippets":
+        return Promise.resolve([]);
       case "clear_dictation_history":
         return Promise.resolve(null);
       case "paste_text":
@@ -194,6 +196,7 @@ describe("transcription controller", () => {
     app.settingsOpen = false;
     app.settingsInitialAnchor = null;
     app.permissionsPanelOpen = false;
+    app.snippets = [];
 
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -1651,5 +1654,119 @@ describe("transcription controller", () => {
 
     expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
     expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+  });
+
+  const signatureSnippet = {
+    id: 1,
+    trigger: "signature mail",
+    expansion: "Cordialement, Damien",
+    created_at: "",
+  };
+
+  it("applies a snippet matching the start of dictation and skips polish", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "list_snippets") return Promise.resolve([signatureSnippet]);
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "Signature mail, et à bientôt.",
+      is_final: true,
+    });
+    await ctrl.toggleRecording();
+
+    // The raw row written before finalization is replaced by the expansion (AC5).
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("update_dictation_entry", expect.objectContaining({
+        text: "Cordialement, Damien, et à bientôt.",
+      }));
+    });
+    // A matched snippet never reaches the LLM (AC3).
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+  });
+
+  it("does not expand snippets in rewrite mode", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "list_snippets") {
+        return Promise.resolve([{ id: 1, trigger: "corrige", expansion: "EXPANSION", created_at: "" }]);
+      }
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "read_selected_text") return Promise.resolve("old selection");
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    eventListeners["shortcut-rewrite"]?.({ payload: null });
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.anything());
+    });
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "Corrige la faute de frappe.",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+    eventListeners["shortcut-rewrite"]?.({ payload: null });
+
+    // The spoken text is a rewrite instruction, not a trigger: it goes to polish untouched.
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
+        text: "Corrige la faute de frappe.",
+        rewriteOf: "old selection",
+      }));
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.objectContaining({
+      text: expect.stringContaining("EXPANSION"),
+    }));
+  });
+
+  it("finalization makes no snippet IPC call when no trigger matches", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+    const listSnippetCalls = () =>
+      mockInvoke.mock.calls.filter(([cmd]) => cmd === "list_snippets").length;
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    // The list is loaded once at mount (AC4: no extra IPC per dictation).
+    expect(listSnippetCalls()).toBe(1);
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+    });
+    await ctrl.toggleRecording();
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+    });
+    expect(listSnippetCalls()).toBe(1);
   });
 });

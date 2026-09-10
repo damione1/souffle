@@ -14,7 +14,12 @@ use crate::state::AppState;
 #[tauri::command]
 #[specta::specta]
 pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
-    AppSettings::load(&state.db)
+    let mut settings = AppSettings::load(&state.db)?;
+    #[cfg(target_os = "macos")]
+    {
+        settings.autostart_enabled = crate::autostart::is_enabled();
+    }
+    Ok(settings)
 }
 
 /// Save the typed application settings.
@@ -27,6 +32,14 @@ pub fn save_settings(
 ) -> Result<(), String> {
     let mut settings = settings.sanitize_for_save()?;
     let stored = AppSettings::load(&state.db)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        if settings.autostart_enabled != crate::autostart::is_enabled() {
+            crate::autostart::set_enabled(settings.autostart_enabled)?;
+        }
+    }
+
     let recording = state
         .current_machine_state()
         .map(|machine| machine.is_recording())

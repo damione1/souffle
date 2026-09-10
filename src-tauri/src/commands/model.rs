@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use tauri::Manager;
 use tauri::State;
 use tauri::ipc::Channel;
@@ -93,6 +95,31 @@ pub fn recover_state(state: State<'_, AppState>) -> Result<AppStateMachine, Stri
     state.apply_transition(StateAction::Recover)
 }
 
+/// Last progress report of the current download thread. The Channel a
+/// download streams to dies with the webview that opened it, so a reload
+/// mid-download would otherwise show a gauge stuck at zero (SOU-073).
+/// Reset when a download starts, so an earlier download's `Complete` can
+/// never be read as the new one's.
+static LAST_DOWNLOAD_PROGRESS: Mutex<Option<models::DownloadProgress>> = Mutex::new(None);
+
+fn record_download_progress(progress: Option<&models::DownloadProgress>) {
+    if let Ok(mut guard) = LAST_DOWNLOAD_PROGRESS.lock() {
+        *guard = progress.cloned();
+    }
+}
+
+/// Snapshot of the in-flight model download, for a webview that reloaded
+/// while the machine was `Downloading` and lost its progress Channel.
+/// `None` until the first download of the process starts.
+#[tauri::command]
+#[specta::specta]
+pub fn get_download_progress() -> Option<models::DownloadProgress> {
+    LAST_DOWNLOAD_PROGRESS
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
 /// Download the selected transcription model.
 /// Progress is streamed back via the Channel API.
 #[tauri::command]
@@ -154,6 +181,7 @@ pub fn download_model(
     state.apply_transition(StateAction::StartDownload {
         profile: profile.clone(),
     })?;
+    record_download_progress(None);
 
     // Clone what we need for the thread
     let channel_clone = channel.clone();
@@ -164,6 +192,7 @@ pub fn download_model(
         .name("model-download".into())
         .spawn(move || {
             let result = models::download_model(&profile, |progress| {
+                record_download_progress(Some(&progress));
                 let _ = channel_clone.send(progress);
             });
 
@@ -178,25 +207,29 @@ pub fn download_model(
             match result {
                 Ok(()) => {
                     apply(StateAction::DownloadComplete);
-                    let _ = channel_clone.send(models::DownloadProgress {
+                    let progress = models::DownloadProgress {
                         file: "all".into(),
                         downloaded_bytes: 0,
                         total_bytes: None,
                         completed_files: 1,
                         total_files: 1,
                         status: models::DownloadStatus::Complete,
-                    });
+                    };
+                    record_download_progress(Some(&progress));
+                    let _ = channel_clone.send(progress);
                 }
                 Err(e) => {
                     apply(StateAction::Fail { message: e.clone() });
-                    let _ = channel_clone.send(models::DownloadProgress {
+                    let progress = models::DownloadProgress {
                         file: "error".into(),
                         downloaded_bytes: 0,
                         total_bytes: None,
                         completed_files: 0,
                         total_files: 1,
                         status: models::DownloadStatus::Error(e),
-                    });
+                    };
+                    record_download_progress(Some(&progress));
+                    let _ = channel_clone.send(progress);
                 }
             }
         })

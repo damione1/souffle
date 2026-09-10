@@ -21,6 +21,11 @@ import {
   updateDictionaryEntry as apiUpdateDictionaryEntry,
   deleteDictionaryEntry as apiDeleteDictionaryEntry,
 } from "../../api/dictionary";
+import {
+  addSnippet as apiAddSnippet,
+  updateSnippet as apiUpdateSnippet,
+  deleteSnippet as apiDeleteSnippet,
+} from "../../api/snippets";
 import { listCalendars } from "../../api/calendar";
 import { requestPermission } from "../../api/permissions";
 import { setLocale, tr } from "../../i18n";
@@ -60,6 +65,7 @@ import {
   startTranscriptionModelDownload,
   startTranscriptionModelLoad,
 } from "../transcription/runtime";
+import { refreshSnippets } from "../transcription/snippets";
 
 export function createSettingsController() {
   const app = getAppState();
@@ -115,6 +121,7 @@ export function createSettingsController() {
       refreshSummaryProviders(),
       loadCatalog(),
       loadDictionary(),
+      refreshSnippets(),
       loadCalendars(),
     ]);
     await refreshRuntimeStatus();
@@ -564,6 +571,20 @@ export function createSettingsController() {
     });
   }
 
+  /** SOU-036: the backend registers/unregisters the login item before it
+   * writes the setting, so a rejected save means SMAppService refused.
+   * `persistSettings` never throws — it reports the failure as `false`,
+   * restores `app.settings`, and puts the reason in `statusMessage` — so the
+   * only thing left to undo here is the checkbox itself. */
+  async function onAutostartChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const checked = target.checked;
+    const persisted = await persistSettings((settings) => {
+      settings.autostart_enabled = checked;
+    });
+    if (!persisted) target.checked = !checked;
+  }
+
   function onAutoUpdateCheckChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -901,6 +922,25 @@ export function createSettingsController() {
     );
   }
 
+  // Snippets live in the app store so dictation finalization reads the same
+  // list this sheet edits, without an IPC call of its own (SOU-035 AC4).
+  async function handleAddSnippet(trigger: string, expansion: string) {
+    const entry = await apiAddSnippet(trigger, expansion);
+    app.snippets = [...app.snippets, entry].sort((a, b) => a.trigger.localeCompare(b.trigger));
+  }
+
+  async function handleDeleteSnippet(id: number) {
+    await apiDeleteSnippet(id);
+    app.snippets = app.snippets.filter((e) => e.id !== id);
+  }
+
+  async function handleUpdateSnippet(id: number, trigger: string, expansion: string) {
+    await apiUpdateSnippet(id, trigger, expansion);
+    app.snippets = app.snippets
+      .map((entry) => (entry.id === id ? { ...entry, trigger, expansion } : entry))
+      .sort((a, b) => a.trigger.localeCompare(b.trigger));
+  }
+
   function formatShortcut(shortcut: string): string {
     return formatShortcutLabel(shortcut) || "Not set";
   }
@@ -1050,6 +1090,7 @@ export function createSettingsController() {
     onLocaleChange,
     onAutoPasteChange,
     onLearnFromEditChange,
+    onAutostartChange,
     onAutoUpdateCheckChange,
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,
@@ -1083,6 +1124,10 @@ export function createSettingsController() {
     handleAddDictionaryEntry,
     handleDeleteDictionaryEntry,
     handleUpdateDictionaryEntry,
+    get snippetEntries() { return app.snippets; },
+    handleAddSnippet,
+    handleDeleteSnippet,
+    handleUpdateSnippet,
     startRecording,
     handleKeyDown,
     handleKeyUp,

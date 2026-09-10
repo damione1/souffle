@@ -36,6 +36,7 @@ export type {
   SummaryProviderChoice,
   SummaryProvidersStatus,
   SummaryTemplate,
+  SnippetEntry,
   PermState,
   PermissionKind,
   PermissionStatus,

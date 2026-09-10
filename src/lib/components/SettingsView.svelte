@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
+  import AutostartSettingsSection from "../features/settings/components/AutostartSettingsSection.svelte";
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
   import CalendarSettingsSection from "../features/settings/components/CalendarSettingsSection.svelte";
   import DataSettingsSection from "../features/settings/components/DataSettingsSection.svelte";
   import DictionarySettingsSection from "../features/settings/components/DictionarySettingsSection.svelte";
+  import SnippetsSettingsSection from "../features/settings/components/SnippetsSettingsSection.svelte";
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
@@ -159,6 +161,13 @@
         onDelete={controller.handleDeleteDictionaryEntry}
         onUpdate={controller.handleUpdateDictionaryEntry}
       />
+
+      <SnippetsSettingsSection
+        entries={controller.snippetEntries}
+        onAdd={controller.handleAddSnippet}
+        onDelete={controller.handleDeleteSnippet}
+        onUpdate={controller.handleUpdateSnippet}
+      />
     {:else if activeTab === "ai"}
       <IntelligenceSettingsSection
         ollamaUrl={controller.app.settings.ollama_url}
@@ -290,6 +299,11 @@
         onAutostartEnabledChange={controller.onCalendarAutostartEnabledChange}
       />
     {:else}
+      <AutostartSettingsSection
+        autostartEnabled={controller.app.settings.autostart_enabled}
+        onAutostartChange={controller.onAutostartChange}
+      />
+
       <PermissionsSettingsSection />
 
       <DiagnosticsSettingsSection

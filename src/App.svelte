@@ -34,6 +34,7 @@
   import { applyTheme, errorMessage } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
   import { decideShowSetupWizard, readSetupFlags } from "./lib/features/onboarding/setup";
+  import { loadAfterOrphanedDownload } from "./lib/features/transcription/runtime";
   import type { TranscriptionCatalog } from "./lib/types";
 
   const app = getAppState();
@@ -141,7 +142,7 @@
         }
       } catch {
         // First run, no settings yet — still offer the setup wizard.
-        if (decideShowSetupWizard("download_required", readSetupFlags())) {
+        if (decideShowSetupWizard("download_required", readSetupFlags(), app.machineState.state)) {
           app.showOnboarding = true;
         }
       }
@@ -177,6 +178,7 @@
     });
 
     events.stateChanged.listen((event) => {
+      const previous = app.machineState;
       // Detect a backend-initiated session abort (recording → error) so the
       // recorder controllers can reset their local state.
       const aborted = event.payload.state === "error" ? wasRecording(app.machineState) : null;
@@ -186,6 +188,9 @@
       // Lets a wake-resume that's waiting on a still-draining sleep-triggered
       // stop fire the moment the machine reports `ready`.
       notifyStateChanged(event.payload);
+      // A download that finished into a Channel the previous webview took
+      // with it still needs its model loaded (SOU-073).
+      loadAfterOrphanedDownload(app, previous, event.payload);
     }).then((fn) => {
       unlistenState = fn;
     });

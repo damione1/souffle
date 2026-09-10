@@ -3,6 +3,7 @@ import type {
   AppSettings,
   AppStateMachine,
   PipelineError,
+  SnippetEntry,
   SystemAudioStatus,
   TranscriptionHealth,
   TranscriptionProfile,
@@ -21,6 +22,11 @@ let settingsInitialAnchor = $state<SettingsAnchor | null>(null);
 // Permissions repair panel, mounted once in App so banners can open it
 // without going through Settings → System → Review (SOU-089).
 let permissionsPanelOpen = $state(false);
+
+// Voice snippets (SOU-035). Loaded once at startup and written through by
+// the settings sheet, so finalizing a dictation matches against this list
+// without an IPC round-trip.
+let snippets = $state<SnippetEntry[]>([]);
 
 // Current meeting ID (when viewing a specific meeting)
 let currentMeetingId = $state<string | null>(null);
@@ -104,6 +110,7 @@ let settings = $state<AppSettings>({
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
+  autostart_enabled: false,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
   dictation_polish_enabled: true,
@@ -225,6 +232,9 @@ export function getAppState() {
 
     get permissionsPanelOpen() { return permissionsPanelOpen; },
     set permissionsPanelOpen(v: boolean) { permissionsPanelOpen = v; },
+
+    get snippets() { return snippets; },
+    set snippets(list: SnippetEntry[]) { snippets = list; },
 
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },
