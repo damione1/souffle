@@ -12,7 +12,7 @@ import {
   updateDictationEntry,
 } from "../../api/transcription";
 import { learnFromEdit } from "../../api/dictionary";
-import { frontmostAppName, readFocusedText, readSelectedText } from "../../api/focus";
+import { frontmostAppName, readFocusedText } from "../../api/focus";
 import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
@@ -31,8 +31,6 @@ const POLISH_TIMEOUT_MS = 25_000;
 /** Exact `ACCESSIBILITY_STALE_ERROR` from clipboard.rs — copy succeeded, ⌘V is the recovery.
  * A parenthetical suffix means the copy itself failed; that is not "Copied". */
 const ACCESSIBILITY_PASTE_COPIED = "Accessibility permission missing.";
-
-type SessionMode = "insert" | "rewrite";
 
 function tokenizeWords(text: string): string[] {
   return text
@@ -90,7 +88,6 @@ function countCorrectionPairs(original: string, corrected: string): number {
 async function finalizeDictationText(
   rawText: string,
   focusedApp: string | null,
-  rewriteOf: string | null,
 ): Promise<{ text: string; warning?: string }> {
   const trimmed = rawText.trim();
   if (!trimmed) {
@@ -100,13 +97,10 @@ async function finalizeDictationText(
   const app = getAppState();
 
   // Voice snippet (SOU-035): a registered trigger at the start of the raw
-  // transcript pastes its expansion as-is and skips the polish. Rewrite mode
-  // dictates an instruction over a selection, not a trigger, so it is exempt.
-  if (!rewriteOf) {
-    const expanded = applySnippet(trimmed, app.snippets);
-    if (expanded !== null) {
-      return { text: expanded };
-    }
+  // transcript pastes its expansion as-is and skips the polish.
+  const expanded = applySnippet(trimmed, app.snippets);
+  if (expanded !== null) {
+    return { text: expanded };
   }
 
   if (!app.settings.dictation_polish_enabled) {
@@ -118,7 +112,7 @@ async function finalizeDictationText(
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       // Settle polish so a late reject after timeout cannot become unhandled.
-      const polish = polishDictation(trimmed, focusedApp, rewriteOf).then(
+      const polish = polishDictation(trimmed, focusedApp).then(
         (result) => ({ kind: "ok" as const, result }),
         (error: unknown) => ({ kind: "error" as const, error }),
       );
@@ -218,10 +212,8 @@ function createTranscriptionControllerInstance() {
   // Incremented for every session start (and on abort) so segment-channel
   // callbacks from a previous session can never write into a new one.
   let sessionGeneration = 0;
-  let sessionMode: SessionMode = "insert";
   let sessionAutoPaste = false;
   let focusedApp: string | null = null;
-  let rewriteOf: string | null = null;
   let learnFromEditTimer: ReturnType<typeof setTimeout> | null = null;
   let ceilingTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionStartTime = 0;
@@ -257,8 +249,6 @@ function createTranscriptionControllerInstance() {
    */
   function clearSessionContext() {
     focusedApp = null;
-    rewriteOf = null;
-    sessionMode = "insert";
     sessionAutoPaste = false;
     if (ceilingTimer) {
       clearTimeout(ceilingTimer);
@@ -275,15 +265,6 @@ function createTranscriptionControllerInstance() {
       focusedApp = await frontmostAppName();
     } catch {
       focusedApp = null;
-    }
-    if (sessionMode === "rewrite") {
-      try {
-        rewriteOf = await readSelectedText();
-      } catch {
-        rewriteOf = null;
-      }
-    } else {
-      rewriteOf = null;
     }
   }
 
@@ -325,14 +306,6 @@ function createTranscriptionControllerInstance() {
         // not a way to stop someone else's recording.
         if (app.recordingMode === "meeting") return;
         if (!isStartingRecording && !isStopping) {
-          if (!isDictating) sessionMode = "insert";
-          void toggleRecording(true);
-        }
-      }),
-      events.shortcutRewrite.listen(() => {
-        if (app.recordingMode === "meeting") return;
-        if (!isStartingRecording && !isStopping) {
-          if (!isDictating) sessionMode = "rewrite";
           void toggleRecording(true);
         }
       }),
@@ -340,7 +313,6 @@ function createTranscriptionControllerInstance() {
         // Push-to-talk only starts from a fully idle machine: a meeting (or
         // an already-running dictation) must not be interrupted.
         if (app.recordingMode === "idle" && !isStartingRecording && !isStopping) {
-          sessionMode = "insert";
           void toggleRecording(true);
         }
       }),
@@ -420,7 +392,6 @@ function createTranscriptionControllerInstance() {
       // polish or paste never leaves a zombie pill.
       const holdForPolish = app.settings.dictation_polish_enabled;
       const sessionFocusedApp = focusedApp;
-      const sessionRewriteOf = rewriteOf;
       const sessionShouldAutoPaste = sessionAutoPaste;
       if (holdForPolish) {
         try {
@@ -440,7 +411,6 @@ function createTranscriptionControllerInstance() {
         const finalized = await finalizeDictationText(
           rawText,
           sessionFocusedApp,
-          sessionRewriteOf,
         );
         if (finalized.warning) {
           setBanner(finalized.warning);
@@ -538,7 +508,6 @@ function createTranscriptionControllerInstance() {
 
       cancelLearnFromEditPoll();
       sessionAutoPaste = fromShortcut;
-      if (!fromShortcut) sessionMode = "insert";
       transcript = "";
       tentative = "";
       clearBanner();
@@ -584,7 +553,6 @@ function createTranscriptionControllerInstance() {
   /** The backend aborted the recording session (machine went to Error). */
   function handleRecordingAborted() {
     const sessionFocusedApp = focusedApp;
-    const sessionRewriteOf = rewriteOf;
     const rawText = transcript.trim();
     sessionGeneration += 1; // cut off in-flight segments from the dead session
     isStartingRecording = false;
@@ -603,7 +571,6 @@ function createTranscriptionControllerInstance() {
         const { text, warning } = await finalizeDictationText(
           rawText,
           sessionFocusedApp,
-          sessionRewriteOf,
         );
         if (warning) setBanner(warning);
         if (savedId && text && text !== rawText) {

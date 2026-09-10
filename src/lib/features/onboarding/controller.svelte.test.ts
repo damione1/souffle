@@ -144,7 +144,6 @@ describe("createOnboardingController", () => {
       expect(settingsApi.saveShortcuts).toHaveBeenCalledWith({
         toggle: "CommandOrControl+Shift+Space",
         push_to_talk: mockShortcuts.push_to_talk,
-        rewrite: mockShortcuts.rewrite,
       });
     });
     expect(ctrl.recordingShortcut).toBe(false);

@@ -110,7 +110,6 @@ const fakeDevices: AudioInputDevice[] = [
 const fakeShortcuts: ShortcutSettings = {
   toggle: "CommandOrControl+Shift+Space",
   push_to_talk: "",
-  rewrite: "",
 };
 
 const fakeCatalog: TranscriptionCatalog = {
@@ -567,38 +566,6 @@ describe("settings controller", () => {
     await vi.waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("save_shortcuts", {
         shortcuts: expect.objectContaining({ toggle: "CommandOrControl+Shift+K" }),
-      });
-    });
-  });
-
-  it("shortcut recording flow covers rewrite field", async () => {
-    const ctrl = createSettingsController();
-    await ctrl.mount();
-    expect(ctrl.rewriteShortcut).toBe("");
-
-    ctrl.startRecording("rewrite");
-    expect(ctrl.recordingField).toBe("rewrite");
-
-    const event = new KeyboardEvent("keydown", {
-      key: "r",
-      code: "KeyR",
-      metaKey: true,
-      shiftKey: true,
-    });
-    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
-    Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
-
-    ctrl.handleKeyDown(event);
-
-    expect(ctrl.rewriteShortcut).toBe("CommandOrControl+Shift+R");
-    expect(ctrl.recordingField).toBeNull();
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("save_shortcuts", {
-        shortcuts: expect.objectContaining({
-          rewrite: "CommandOrControl+Shift+R",
-          toggle: "CommandOrControl+Shift+Space",
-          push_to_talk: "",
-        }),
       });
     });
   });

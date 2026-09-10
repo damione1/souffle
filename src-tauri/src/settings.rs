@@ -61,7 +61,6 @@ const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
 const DICTATION_CEILING_SECONDS_KEY: &str = "dictation_ceiling_seconds";
-const SHORTCUT_REWRITE_KEY: &str = "shortcut_rewrite";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
 
@@ -964,8 +963,6 @@ fn dedupe_known_devices(known: &mut Vec<crate::audio::KnownDevice>) {
 pub struct ShortcutSettings {
     pub toggle: String,
     pub push_to_talk: String,
-    /// Toggle-style shortcut that rewrites the current selection.
-    pub rewrite: String,
 }
 
 impl Default for ShortcutSettings {
@@ -973,7 +970,6 @@ impl Default for ShortcutSettings {
         Self {
             toggle: crate::DEFAULT_TOGGLE_SHORTCUT.to_string(),
             push_to_talk: String::new(),
-            rewrite: String::new(),
         }
     }
 }
@@ -988,9 +984,6 @@ impl ShortcutSettings {
         if let Some(push_to_talk) = read_json_setting::<String>(db, SHORTCUT_PUSH_TO_TALK_KEY)? {
             shortcuts.push_to_talk = push_to_talk;
         }
-        if let Some(rewrite) = read_json_setting::<String>(db, SHORTCUT_REWRITE_KEY)? {
-            shortcuts.rewrite = rewrite;
-        }
 
         Ok(shortcuts.sanitized())
     }
@@ -999,13 +992,9 @@ impl ShortcutSettings {
         let normalized = Self {
             toggle: self.toggle.trim().to_string(),
             push_to_talk: self.push_to_talk.trim().to_string(),
-            rewrite: self.rewrite.trim().to_string(),
         };
 
-        if conflicting_pair(&normalized.toggle, &normalized.push_to_talk)
-            || conflicting_pair(&normalized.toggle, &normalized.rewrite)
-            || conflicting_pair(&normalized.push_to_talk, &normalized.rewrite)
-        {
+        if conflicting_pair(&normalized.toggle, &normalized.push_to_talk) {
             return Err("Dictation shortcuts must be different".into());
         }
 
@@ -1016,16 +1005,10 @@ impl ShortcutSettings {
         let mut normalized = Self {
             toggle: self.toggle.trim().to_string(),
             push_to_talk: self.push_to_talk.trim().to_string(),
-            rewrite: self.rewrite.trim().to_string(),
         };
 
         if conflicting_pair(&normalized.toggle, &normalized.push_to_talk) {
             normalized.push_to_talk.clear();
-        }
-        if conflicting_pair(&normalized.toggle, &normalized.rewrite)
-            || conflicting_pair(&normalized.push_to_talk, &normalized.rewrite)
-        {
-            normalized.rewrite.clear();
         }
 
         normalized
@@ -1035,7 +1018,6 @@ impl ShortcutSettings {
         let normalized = self.normalize()?;
         write_json_setting(db, SHORTCUT_TOGGLE_KEY, &normalized.toggle)?;
         write_json_setting(db, SHORTCUT_PUSH_TO_TALK_KEY, &normalized.push_to_talk)?;
-        write_json_setting(db, SHORTCUT_REWRITE_KEY, &normalized.rewrite)?;
         Ok(())
     }
 }
@@ -1237,24 +1219,10 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_rewrite_duplicate_is_cleared_on_load() {
-        let (db, _dir) = test_db();
-        db.set_setting("shortcut_toggle", "\"F6\"")
-            .expect("save toggle");
-        db.set_setting("shortcut_rewrite", "\"F6\"")
-            .expect("save rewrite");
-
-        let shortcuts = ShortcutSettings::load(&db).expect("load shortcuts");
-        assert_eq!(shortcuts.toggle, "F6");
-        assert_eq!(shortcuts.rewrite, "");
-    }
-
-    #[test]
     fn shortcut_settings_reject_duplicate_bindings() {
         let shortcuts = ShortcutSettings {
             toggle: "CommandOrControl+Shift+Space".into(),
             push_to_talk: "CommandOrControl+Shift+Space".into(),
-            rewrite: String::new(),
         };
 
         assert!(shortcuts.normalize().is_err());
@@ -1477,7 +1445,6 @@ mod tests {
         let s = ShortcutSettings {
             toggle: String::new(),
             push_to_talk: String::new(),
-            rewrite: String::new(),
         };
         assert!(s.normalize().is_ok());
     }
@@ -1488,7 +1455,6 @@ mod tests {
         let s = ShortcutSettings {
             toggle: "CommandOrControl+Shift+Space".to_string(),
             push_to_talk: "CommandOrControl+Shift+S".to_string(),
-            rewrite: "CommandOrControl+Shift+R".to_string(),
         };
         s.save(&db).unwrap();
         let loaded = ShortcutSettings::load(&db).unwrap();

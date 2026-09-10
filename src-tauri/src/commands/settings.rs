@@ -5,7 +5,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_specta::Event;
 use tracing::info;
 
-use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutRewrite, ShortcutToggle};
+use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutToggle};
 use crate::modifier_shortcut::is_native_ptt_shortcut;
 use crate::settings::{AppSettings, ShortcutSettings};
 use crate::state::AppState;
@@ -90,16 +90,6 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
         })
         .map_err(|e| format!("Register toggle shortcut '{}': {e}", shortcuts.toggle))?;
         info!(shortcut = shortcuts.toggle, "Toggle shortcut registered");
-    }
-
-    if !shortcuts.rewrite.is_empty() {
-        gs.on_shortcut(shortcuts.rewrite.as_str(), move |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                let _ = ShortcutRewrite.emit(app);
-            }
-        })
-        .map_err(|e| format!("Register rewrite shortcut '{}': {e}", shortcuts.rewrite))?;
-        info!(shortcut = shortcuts.rewrite, "Rewrite shortcut registered");
     }
 
     let is_native = is_native_ptt_shortcut(&shortcuts.push_to_talk);

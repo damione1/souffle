@@ -951,48 +951,7 @@ describe("transcription controller", () => {
     expect(ctrl.modelOperationState).toBe("idle");
   });
 
-  it("rewrite shortcut captures selection and polishes with extra args", async () => {
-    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
-    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
-        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
-        return Promise.resolve(null);
-      }
-      if (cmd === "frontmost_app_name") return Promise.resolve("Safari");
-      if (cmd === "read_selected_text") return Promise.resolve("old selection");
-      return defaultInvoke(cmd, args);
-    });
-
-    const ctrl = createTranscriptionController();
-    await ctrl.mount();
-    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
-
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.anything());
-    });
-    expect(mockInvoke).toHaveBeenCalledWith("frontmost_app_name");
-    expect(mockInvoke).toHaveBeenCalledWith("read_selected_text");
-
-    simulateRecordingStarted(ctrl.app);
-    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
-      text: "hello world",
-      is_final: true,
-      start_ms: 0,
-      end_ms: 1000,
-    });
-
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
-        text: "hello world",
-        focusedApp: "Safari",
-        rewriteOf: "old selection",
-      }));
-    });
-  });
-
-  it("insert start polishes with focusedApp and null rewriteOf", async () => {
+  it("insert start polishes with focusedApp", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "start_transcription") {
@@ -1023,7 +982,6 @@ describe("transcription controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
       text: "hello world",
       focusedApp: "Mail",
-      rewriteOf: null,
     }));
   });
 
@@ -1768,49 +1726,6 @@ describe("transcription controller", () => {
     });
     // A matched snippet never reaches the LLM (AC3).
     expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
-  });
-
-  it("does not expand snippets in rewrite mode", async () => {
-    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
-    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "list_snippets") {
-        return Promise.resolve([{ id: 1, trigger: "corrige", expansion: "EXPANSION", created_at: "" }]);
-      }
-      if (cmd === "start_transcription") {
-        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
-        return Promise.resolve(null);
-      }
-      if (cmd === "read_selected_text") return Promise.resolve("old selection");
-      return defaultInvoke(cmd, args);
-    });
-
-    const ctrl = createTranscriptionController();
-    await ctrl.mount();
-    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
-
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.anything());
-    });
-    simulateRecordingStarted(ctrl.app);
-    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
-      text: "Corrige la faute de frappe.",
-      is_final: true,
-      start_ms: 0,
-      end_ms: 1000,
-    });
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-
-    // The spoken text is a rewrite instruction, not a trigger: it goes to polish untouched.
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
-        text: "Corrige la faute de frappe.",
-        rewriteOf: "old selection",
-      }));
-    });
-    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.objectContaining({
-      text: expect.stringContaining("EXPANSION"),
-    }));
   });
 
   it("finalization makes no snippet IPC call when no trigger matches", async () => {
