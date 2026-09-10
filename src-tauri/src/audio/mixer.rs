@@ -878,10 +878,9 @@ mod aec_bench {
     // writeup). These asserts are regression floors against the measured
     // baseline, not aspirational targets — tighten them if cancellation
     // quality is improved later.
-    const DOUBLE_TALK_ERLE_FLOOR_DB: f32 = -14.0;
+    const DOUBLE_TALK_ERLE_FLOOR_DB: f32 = 0.0;
 
     #[test]
-    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_baseline() {
         let (erle_db, converge_frame) = run_echo_bench(None, 1.0, 50);
         println!(
@@ -898,7 +897,6 @@ mod aec_bench {
     }
 
     #[test]
-    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_with_delay_hint() {
         let (erle_db, converge_frame) = run_echo_bench(Some(50), 1.0, 50);
         println!(
@@ -919,7 +917,6 @@ mod aec_bench {
     /// whether a poor double-talk result comes from echo cancellation itself
     /// or from the double-talk/voice interaction. Measured baseline: +3.6dB.
     #[test]
-    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_no_voice_diagnostic() {
         let (erle_db, converge_frame) = run_echo_bench(Some(50), 0.0, 50);
         println!(
