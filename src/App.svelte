@@ -30,6 +30,7 @@
     notifyDictationStopRequested,
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState, deriveRecordingMode } from "./lib/stores/app.svelte";
+  import { getPermissionStatus } from "./lib/api/permissions";
   import { openSettings } from "./lib/features/settings/open";
   import { applyTheme, errorMessage } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
@@ -126,11 +127,21 @@
     }
   }
 
+  
+  async function syncPermissions() {
+    try {
+      app.appPermissions = await getPermissionStatus();
+    } catch {
+      // Best-effort
+    }
+  }
+
   onMount(() => {
     let cleanupTranscription = () => {};
     (async () => {
       try {
         const result = await bootstrapAppState(app);
+        await syncPermissions();
         whatsNew = result.whatsNew;
         if (result.whatsNew) {
           const targetVersion = result.whatsNew.version;
@@ -264,6 +275,7 @@
       if (document.visibilityState === "visible") notifySystemWokeUp();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", syncPermissions);
 
     return () => {
       cleanupTranscription();
@@ -281,6 +293,7 @@
       unlistenSystemWokeUp?.();
       unlistenInputRoute?.();
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", syncPermissions);
     };
   });
   function dismissWhatsNew() {

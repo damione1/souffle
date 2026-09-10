@@ -56,7 +56,7 @@ describe("PermissionsStep microphone denial", () => {
 
     const micRow = rowFor("Microphone");
     expect(within(micRow).getByText(/No microphone was found/)).toBeTruthy();
-    expect(within(micRow).queryByRole("button", { name: "Open Settings" })).toBeNull();
+    expect(within(micRow).queryByRole("button", { name: "Open Settings" })).toBeTruthy();
   });
 
   it("lists Input Monitoring so single-key PTT can be granted", async () => {

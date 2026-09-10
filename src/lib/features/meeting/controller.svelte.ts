@@ -64,9 +64,7 @@ function modelsForSummaryProvider(
 function createMeetingControllerInstance() {
   const app = getAppState();
 
-  let statusMessage = $state("");
-  let statusActionLabel = $state<string | undefined>();
-  let statusAction = $state<(() => void) | undefined>();
+  let statusReason = $state<import("../../types").StatusReason | null>(null);
   let ollamaAvailable = $state(false);
   let appleIntelligenceAvailable = $state(false);
   let summaryModels = $state<SummaryModelDescriptor[]>([]);
@@ -169,7 +167,16 @@ function createMeetingControllerInstance() {
         || app.transcriptionRuntimePhase === "load_required");
   }
 
+  let effectRoot: (() => void) | null = null;
   async function mount() {
+    effectRoot = $effect.root(() => {
+      $effect(() => {
+        if (!statusReason) return;
+        if (statusReason.type === "accessibility_denied" && app.appPermissions?.accessibility === "granted") clearBanner();
+        if (statusReason.type === "mic_denied" && app.appPermissions?.microphone === "granted") clearBanner();
+        if (statusReason.type === "no_model" && app.transcriptionRuntimePhase === "ready") clearBanner();
+      });
+    });
     await Promise.all([refreshSummaryProviders(), loadTranscriptionCatalog()]);
   }
 
@@ -177,7 +184,7 @@ function createMeetingControllerInstance() {
     try {
       transcriptionCatalog = await getTranscriptionCatalog();
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -221,7 +228,7 @@ function createMeetingControllerInstance() {
       // block loading the meeting itself, the player bar just stays hidden.
       audioSessions = await getMeetingAudio(id).catch(() => []);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     } finally {
       isLoadingMeeting = false;
     }
@@ -264,7 +271,7 @@ function createMeetingControllerInstance() {
       await saveMeetingNotes(id, notesDraft.trim() || null);
       notesSaveState = "saved";
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
       notesSaveState = "idle";
     }
   }
@@ -290,18 +297,16 @@ function createMeetingControllerInstance() {
     }
   }
 
-  function setBanner(message: string, action?: { label: string; run: () => void }) {
-    statusMessage = message;
-    statusActionLabel = action?.label;
-    statusAction = action?.run;
+  function setBanner(reason: import("../../types").StatusReason | null) {
+    statusReason = reason;
   }
 
   function clearBanner() {
-    setBanner("");
+    setBanner(null);
   }
 
   function modelRequiredBanner(message: string) {
-    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ anchor: "transcription.model" }) });
+    setBanner({ type: "no_model", message, actionLabel: tr("home.open_model"), onAction: () => openSettings({ anchor: "transcription.model" }) });
   }
 
   /** Shared by start and resume so overlapping clicks cannot both pass idle
@@ -328,9 +333,9 @@ function createMeetingControllerInstance() {
       if (app.transcriptionRuntimePhase !== "ready") {
         // Model may have been unloaded by the idle timeout; reload through the
         // normal load flow before recording rather than failing on start.
-        const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { setBanner(message); });
+        const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { setBanner({ type: "transient", message }); });
         if (!ready) {
-          modelRequiredBanner(statusMessage || tr("home.model_required_meeting"));
+          modelRequiredBanner(statusReason?.message || tr("home.model_required_meeting"));
           return;
         }
       }
@@ -380,7 +385,7 @@ function createMeetingControllerInstance() {
         participants: calendar?.participants ?? [],
       };
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
       resetLiveBuffers();
     } finally {
       endLaunch();
@@ -397,9 +402,9 @@ function createMeetingControllerInstance() {
     if (wakeResumeFallbackMeetingId === meeting.id) wakeResumeFallbackMeetingId = null;
 
     try {
-      const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { setBanner(message); });
+      const ready = await ensureModelLoaded(app, transcriptionCatalog, (message) => { setBanner({ type: "transient", message }); });
       if (!ready) {
-        modelRequiredBanner(statusMessage || tr("home.model_required_meeting"));
+        modelRequiredBanner(statusReason?.message || tr("home.model_required_meeting"));
         return;
       }
       resetLiveBuffers();
@@ -415,7 +420,7 @@ function createMeetingControllerInstance() {
         clearIdleState();
       });
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
       resetLiveBuffers();
     } finally {
       endLaunch();
@@ -446,7 +451,7 @@ function createMeetingControllerInstance() {
         // Header may not be queryable yet in a rare race; finalize reloads it.
       }
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     } finally {
       stopRequested = false;
     }
@@ -470,9 +475,7 @@ function createMeetingControllerInstance() {
     audioSessions = [];
     app.currentMeetingId = null;
     clearIdleState();
-    setBanner(
-      "Recording was interrupted — the meeting recorded so far was saved to history.",
-    );
+    setBanner({ type: "transient", message: "Recording was interrupted — the meeting recorded so far was saved to history." });
   }
 
   /** The backend detected the meeting has probably ended (silence or the
@@ -482,7 +485,7 @@ function createMeetingControllerInstance() {
 
     if (payload.reason === "max_duration") {
       if (stoppingNow()) return;
-      setBanner("Maximum meeting duration reached. Stopping the recording.");
+      setBanner({ type: "transient", message: "Maximum meeting duration reached. Stopping the recording." });
       void stopRecording();
       return;
     }
@@ -527,7 +530,7 @@ function createMeetingControllerInstance() {
         }
       }
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
       throw e;
     }
   }
@@ -569,7 +572,7 @@ function createMeetingControllerInstance() {
       for (let i = 0; i < indices.length; i++) {
         liveMeetingSegments[indices[i]].text = previousSegmentTexts[i];
       }
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -601,7 +604,7 @@ function createMeetingControllerInstance() {
         try {
           meetingId = await peekSleepPausedMeeting();
         } catch (e) {
-          setBanner(errorMessage(e));
+          setBanner({ type: "transient", message: errorMessage(e) });
           return;
         }
         if (!meetingId) return;
@@ -658,8 +661,8 @@ function createMeetingControllerInstance() {
     // resumeRecording reports its own failure via statusMessage and leaves
     // the meeting loaded (canResumeRecording) so the user can retry by hand.
     await resumeRecording();
-    if (!statusMessage) {
-      setBanner("Recording resumed after sleep.");
+    if (!statusReason?.message) {
+      setBanner({ type: "transient", message: "Recording resumed after sleep." });
     }
   }
 
@@ -671,7 +674,7 @@ function createMeetingControllerInstance() {
     wakeResumeFallbackMeetingId = meetingId;
     await loadMeeting(meetingId);
     if (!meeting || meeting.id !== meetingId) return; // load failed; loadMeeting already reported it
-    setBanner("Sleep interrupted this meeting. Resume recording to continue.");
+    setBanner({ type: "transient", message: "Sleep interrupted this meeting. Resume recording to continue." });
   }
 
   /** Leave the detail view: clear the open meeting and return to the list. */
@@ -708,7 +711,7 @@ function createMeetingControllerInstance() {
       await applyMeetingRename(id, trimmed);
       meeting = { ...meeting, title: trimmed };
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -740,7 +743,7 @@ function createMeetingControllerInstance() {
       meeting = loadedMeeting;
       syncSelectedModel(meeting.summary_model);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     } finally {
       isSummarizing = false;
       summaryStage = null;
@@ -771,7 +774,7 @@ function createMeetingControllerInstance() {
       isEditingTranscript = false;
       editedTranscriptDraft = "";
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -788,7 +791,7 @@ function createMeetingControllerInstance() {
       await saveEditedTranscript(meeting.id, null);
       meeting = await getMeeting(meeting.id);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -798,7 +801,7 @@ function createMeetingControllerInstance() {
       await removeMeeting(meeting.id);
       closeMeeting();
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -814,7 +817,7 @@ function createMeetingControllerInstance() {
     try {
       await saveMeetingExport(meeting.id, format);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     } finally {
       isExporting = false;
     }
@@ -832,17 +835,16 @@ function createMeetingControllerInstance() {
     try {
       await saveMeetingAudioExport(meeting.id);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     } finally {
       isExporting = false;
     }
   }
-
   return {
     get app() { return app; },
-    get statusMessage() { return statusMessage; },
-    get statusActionLabel() { return statusActionLabel; },
-    get statusAction() { return statusAction; },
+    get statusMessage() { return statusReason?.message ?? ""; },
+    get statusActionLabel() { return statusReason?.actionLabel; },
+    get statusAction() { return statusReason?.onAction; },
     get ollamaAvailable() { return ollamaAvailable; },
     get appleIntelligenceAvailable() { return appleIntelligenceAvailable; },
     get summaryAvailable() { return summaryModels.length > 0; },

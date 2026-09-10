@@ -1,5 +1,6 @@
 import type { SettingsAnchor } from "../features/settings/anchors";
 import type {
+  PermissionStatus,
   AppSettings,
   AppStateMachine,
   PipelineError,
@@ -14,6 +15,7 @@ import type { TranscriptionModelOperationState } from "../features/transcription
 
 // Settings sheet visibility (the app is otherwise a single home surface)
 let settingsOpen = $state(false);
+let appPermissions = $state<PermissionStatus | null>(null);
 
 // Tab to land on the next time settings opens (e.g. a "set up calendar" CTA
 // deep-linking into the meetings tab). Consumed once by SettingsView.
@@ -224,6 +226,9 @@ function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOp
 
 export function getAppState() {
   return {
+    get appPermissions() { return appPermissions; },
+    set appPermissions(v: PermissionStatus | null) { appPermissions = v; },
+
     get settingsOpen() { return settingsOpen; },
     set settingsOpen(v: boolean) { settingsOpen = v; },
 

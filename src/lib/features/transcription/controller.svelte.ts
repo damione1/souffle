@@ -179,29 +179,25 @@ function createTranscriptionControllerInstance() {
   let isStopping = $state(false);
   let transcript = $state("");
   let tentative = $state("");
-  let statusMessage = $state("");
-  let statusActionLabel = $state<string | undefined>();
-  let statusAction = $state<(() => void) | undefined>();
+  let statusReason = $state<import("../../types").StatusReason | null>(null);
   let catalog = $state<TranscriptionCatalog | null>(null);
 
   let tooShortBannerTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function setBanner(message: string, action?: { label: string; run: () => void }) {
+  function setBanner(reason: import("../../types").StatusReason | null) {
     if (tooShortBannerTimer) {
       clearTimeout(tooShortBannerTimer);
       tooShortBannerTimer = null;
     }
-    statusMessage = message;
-    statusActionLabel = action?.label;
-    statusAction = action?.run;
+    statusReason = reason;
   }
 
   function clearBanner() {
-    setBanner("");
+    setBanner(null);
   }
 
   function modelRequiredBanner(message: string) {
-    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ anchor: "transcription.model" }) });
+    setBanner({ type: "no_model", message, actionLabel: tr("home.open_model"), onAction: () => openSettings({ anchor: "transcription.model" }) });
   }
 
   // Incremented for every session start (and on abort) so segment-channel
@@ -303,7 +299,16 @@ function createTranscriptionControllerInstance() {
     }, LEARN_FROM_EDIT_DELAY_MS);
   }
 
+  let effectRoot: (() => void) | null = null;
   async function mount() {
+    effectRoot = $effect.root(() => {
+      $effect(() => {
+        if (!statusReason) return;
+        if (statusReason.type === "accessibility_denied" && app.appPermissions?.accessibility === "granted") clearBanner();
+        if (statusReason.type === "mic_denied" && app.appPermissions?.microphone === "granted") clearBanner();
+        if (statusReason.type === "no_model" && app.transcriptionRuntimePhase === "ready") clearBanner();
+      });
+    });
     await refreshCatalog();
     await refreshRuntimeStatus();
     await refreshSnippets();
@@ -344,6 +349,7 @@ function createTranscriptionControllerInstance() {
 
     return () => {
       unlisten.forEach((fn) => fn());
+      effectRoot?.();
     };
   }
 
@@ -357,7 +363,7 @@ function createTranscriptionControllerInstance() {
         transcription_backend_id: catalog.selected_backend_id,
       };
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -365,7 +371,7 @@ function createTranscriptionControllerInstance() {
     try {
       await refreshTranscriptionRuntimeStatus(app, catalog);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -395,7 +401,7 @@ function createTranscriptionControllerInstance() {
         } catch (e) {
           console.warn("Fast stop failed:", e);
         }
-        setBanner(tr("home.dictation_too_short"));
+        setBanner({ type: "transient", message: tr("home.dictation_too_short") });
         tooShortBannerTimer = setTimeout(() => {
           tooShortBannerTimer = null;
           clearBanner();
@@ -435,7 +441,7 @@ function createTranscriptionControllerInstance() {
           sessionRewriteOf,
         );
         if (finalized.warning) {
-          setBanner(finalized.warning);
+          setBanner({ type: "transient", message: finalized.warning });
         }
 
         if (savedId && finalized.text && finalized.text !== rawText) {
@@ -466,12 +472,9 @@ function createTranscriptionControllerInstance() {
                 }
               }
               if (message === ACCESSIBILITY_PASTE_COPIED) {
-                setBanner(tr("home.paste_copied"), {
-                  label: tr("permissions.repair"),
-                  run: openPermissionsRepair,
-                });
+                setBanner({ type: "accessibility_denied", message: tr("home.paste_copied"), actionLabel: tr("permissions.repair"), onAction: openPermissionsRepair });
               } else {
-                setBanner(tr("home.paste_failed", { error: message }));
+                setBanner({ type: "transient", message: tr("home.paste_failed", { error: message }) });
               }
               // A shortcut dictation runs from another app, so the status
               // banner above is likely not on screen: also notify outside
@@ -492,7 +495,7 @@ function createTranscriptionControllerInstance() {
           }
         }
       } catch (e) {
-        setBanner(errorMessage(e));
+        setBanner({ type: "transient", message: errorMessage(e) });
       } finally {
         clearSessionContext();
         if (holdForPolish) {
@@ -521,9 +524,9 @@ function createTranscriptionControllerInstance() {
         // Model was unloaded (e.g. the idle timeout freed it); reload through
         // the normal load flow before recording instead of leaving the user
         // stuck with a disabled button.
-        const ready = await ensureModelLoaded(app, catalog, (message) => { setBanner(message); });
+        const ready = await ensureModelLoaded(app, catalog, (message) => { setBanner({ type: "transient", message }); });
         if (!ready) {
-          modelRequiredBanner(statusMessage || tr("home.model_required_dictation"));
+          modelRequiredBanner(statusReason?.message || tr("home.model_required_dictation"));
           return;
         }
       }
@@ -556,7 +559,7 @@ function createTranscriptionControllerInstance() {
         transcript += segmentGap(transcript, segment.text) + segment.text;
       });
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
       clearSessionContext();
     } finally {
       isStartingRecording = false;
@@ -587,36 +590,31 @@ function createTranscriptionControllerInstance() {
     if (rawText) {
       void (async () => {
         const savedId = await saveToHistory(rawText);
-        setBanner(
-          savedId
-            ? tr("home.recording_interrupted_saved")
-            : tr("home.recording_interrupted"),
-        );
+        setBanner({ type: "transient", message: savedId ? tr("home.recording_interrupted_saved") : tr("home.recording_interrupted") });
         const { text, warning } = await finalizeDictationText(
           rawText,
           sessionFocusedApp,
           sessionRewriteOf,
         );
-        if (warning) setBanner(warning);
+        if (warning) setBanner({ type: "transient", message: warning });
         if (savedId && text && text !== rawText) {
           await updateHistory(savedId, text);
         }
       })();
     } else {
-      setBanner(tr("home.recording_interrupted"));
+      setBanner({ type: "transient", message: tr("home.recording_interrupted") });
     }
     clearSessionContext();
   }
-
   return {
     get app() { return app; },
     get isStartingRecording() { return isStartingRecording; },
     get isStopping() { return isStopping; },
     get transcript() { return transcript; },
     get tentative() { return tentative; },
-    get statusMessage() { return statusMessage; },
-    get statusActionLabel() { return statusActionLabel; },
-    get statusAction() { return statusAction; },
+    get statusMessage() { return statusReason?.message ?? ""; },
+    get statusActionLabel() { return statusReason?.actionLabel; },
+    get statusAction() { return statusReason?.onAction; },
     get catalog() { return catalog; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },
     get modelOperationState() { return app.transcriptionModelOperationState; },
