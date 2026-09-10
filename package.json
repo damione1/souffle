@@ -13,6 +13,8 @@
     "check:generated-types": "npm run generate:types && git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts",
     "tauri": "./scripts/tauri.sh",
     "dev:fresh": "./scripts/dev-fresh.sh",
+    "nightly": "./scripts/run-nightly.sh",
+    "nightly:dmg": "./scripts/run-nightly.sh --dmg",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
