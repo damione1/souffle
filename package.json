@@ -14,6 +14,7 @@
     "tauri": "./scripts/tauri.sh",
     "dev:fresh": "./scripts/dev-fresh.sh",
     "nightly": "./scripts/run-nightly.sh",
+    "nightly:fresh": "./scripts/run-nightly.sh --fresh",
     "nightly:dmg": "./scripts/run-nightly.sh --dmg",
     "test": "vitest run",
     "test:e2e": "playwright test"

@@ -1240,20 +1240,20 @@ fn request_listen_event_access_now() {
 
 #[cfg(target_os = "macos")]
 fn open_input_monitoring_settings() {
-    prompt_then_open_settings(
+    // tccutil must not run on the main thread. A Default CGEventTap
+    // (Accessibility) sits on that runloop; blocking it stalls WindowServer
+    // and freezes the whole session with a cold CPU.
+    prepare_listen_event_insert(
+        accessibility_granted(),
+        iohid_check_access(HID_LISTEN_EVENT),
         || {
-            on_main(|| {
-                let id = crate::constants::running_app_identifier();
-                prepare_listen_event_insert(
-                    accessibility_granted(),
-                    iohid_check_access(HID_LISTEN_EVENT),
-                    || {
-                        let _ = tccutil_reset_service("ListenEvent", &id);
-                    },
-                    request_listen_event_access_now,
-                );
-            });
+            let id = crate::constants::running_app_identifier();
+            let _ = tccutil_reset_service("ListenEvent", &id);
         },
+        || {},
+    );
+    prompt_then_open_settings(
+        || on_main(request_listen_event_access_now),
         wait_for_tcc_insert,
         || open_privacy_pane("Privacy_ListenEvent"),
     );
