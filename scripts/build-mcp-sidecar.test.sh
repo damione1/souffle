@@ -9,8 +9,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 script="./scripts/build-mcp-sidecar.sh"
 
-if grep -q 'src-tauri/target/release/souffle-mcp' "${script}"; then
-  echo "fail: ${script} still hardcodes src-tauri/target/release/souffle-mcp" >&2
+if grep -qE 'src-tauri/target/(release|debug)/souffle-mcp' "${script}"; then
+  echo "fail: ${script} still hardcodes src-tauri/target/{release,debug}/souffle-mcp" >&2
   exit 1
 fi
 

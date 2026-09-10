@@ -8,17 +8,34 @@ on:
   pull_request:
   merge_group:
 
-# A new push to a PR makes the in-flight run obsolete; don't pay for it.
+# A new push makes the in-flight run obsolete. Also cancel on develop:
+# two merges in a row otherwise serialize on the single macOS runner.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
-  generated-contracts:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - uses: actions/setup-node@v6.1.0
+        with:
+          node-version: 24
+          check-latest: true
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+
+  rust:
     runs-on: macos-latest
-    # The job normally finishes in ~13 min. Without a cap, a hung step runs to
-    # GitHub's 6 h default, and macOS minutes bill at 10x: one stuck run costs
-    # more than a month of green ones.
+    # Warm cache: ~5 min. Without a cap, a hung step runs to GitHub's 6 h
+    # default, and macOS minutes bill at 10x.
     timeout-minutes: 30
 
     steps:
@@ -37,19 +54,11 @@ jobs:
           workspaces: src-tauri -> target
           save-if: ${{ github.ref == 'refs/heads/develop' }}
 
-      - uses: actions/setup-node@v6.1.0
-        with:
-          node-version: 24
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
       # Cheap: cargo metadata honors CARGO_TARGET_DIR (no release build).
       - run: ./scripts/build-mcp-sidecar.test.sh
-      # Tauri's build script validates `externalBin` entries during `cargo test`,
-      # so the MCP sidecar must exist before type export (same as release builds).
-      - run: ./scripts/build-mcp-sidecar.sh
-      - run: npm run check:generated-types
+      # Tauri's build script validates `externalBin` during clippy/`cargo test`.
+      # Debug matches those profiles; --release (LTO) is packaging only.
+      - run: ./scripts/build-mcp-sidecar.sh --debug
       # Two PRs can each be green and still break develop together: one turned
       # a &str into a String while the other added a caller. Only the merged
       # tree catches that, so run the suites here as well as locally.
@@ -59,7 +68,9 @@ jobs:
       # wins the `Once` in `ensure_ort_initialized` can stall inside
       # `ort::init_from`, and every other thread then blocks on that `Once`
       # with no timeout. Fail the step instead of holding the runner.
+      # `export_typescript_bindings` is part of this suite; the next step
+      # checks it didn't drift the committed files (same as
+      # `npm run check:generated-types`).
       - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
         timeout-minutes: 15
-      - run: npm test
-      - run: npm run check
+      - run: git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts
