@@ -39,7 +39,7 @@ System-audio capture separates **Me** from **Them** in the live transcript, with
 
 - **Live transcript** with editable notes and participants beside it.
 - **Optional audio**, kept as compact Opus files for 7 days, 30 days or until you delete them, replayable with click-to-seek from any line.
-- **Corrections that stick**: fix a misheard name by hand once and Soufflé keeps that spelling, in a custom dictionary you can also edit yourself.
+- **Corrections that stick**: fix a misheard name by hand once and Soufflé keeps that spelling, in a custom dictionary you can also edit yourself — seeded by an optional interview on first run.
 - **A summary when you want one**, written on-device by Apple Intelligence on macOS 26 or newer, or by a local [Ollama](https://ollama.com/), with the decisions, the action items and their owners, and the questions nobody answered pulled out alongside it.
 
 ## Dictation, straight into the app you are already in
@@ -50,10 +50,11 @@ Soufflé is not a window you type into. Press the shortcut and a small pill appe
   <img src="docs/demo/overlay.gif" width="820" alt="The pill floating over a chat app: shortcut, dictation, reformulation, and the tidied text landing in the composer">
 </p>
 
-- **Press once to start and stop**, or bind a push-to-talk key and hold it instead.
+- **Press once to start and stop**, or bind a push-to-talk key and hold it instead — including Fn, a lone modifier, or F5–F12.
+- **Voice snippets**: say a trigger phrase at the start of a dictation to paste a prepared block instead; that take skips the polish pass.
 - **Insertion that fits the app**: the clipboard and ⌘V, simulated typing for terminals and secure fields that reject a synthetic paste, or a direct write through Accessibility.
 - **Polish before it lands** (optional): a local LLM pass tidies the phrasing, with editable prompt templates — clean up, professional email, bullet points, remove fillers.
-- **Optional start/stop sounds**, so you know the shortcut landed.
+- **Optional start/stop sounds**, so you know the shortcut landed. The menu bar can also copy the last transcription.
 
 ## Text arrives while you are still talking
 
@@ -76,6 +77,7 @@ Meetings and dictations land on one timeline, with today's calendar above it and
 - 🔒 **Nothing is uploaded.** Transcription, summaries and audio all stay on your Mac, in one local database you can export or delete whenever you like.
 - ✈️ **Works offline.** Once the speech model is on disk, transcription keeps working with the Wi-Fi off.
 - 🙅 **No account, ever.** No sign-up, no subscription, no API key to paste in. Every outbound connection the app makes is listed [below](#what-touches-the-network).
+- 🚀 **Launch at login** (optional): open Soufflé automatically when you start your Mac. On by default after a fresh setup wizard.
 
 ## Own your data
 
@@ -121,6 +123,7 @@ Soufflé asks for these as you use the features that need them, never up front:
 | Microphone | Records your voice to transcribe it | Everything |
 | System Audio Recording | Captures what the other participants say, without a virtual audio device | Meetings (macOS 14.4+) |
 | Accessibility | Pastes into the app you were using, and reads back your corrections when "learn from edits" is on | Auto-paste, dictation polish |
+| Input Monitoring | Installs the native event tap for single-key push-to-talk (Fn, lone modifier, F5–F12) | Single-key PTT (optional) |
 | Calendar | Reads today's events to list them and offer to start recording | Calendar integration (optional) |
 
 Settings > System > Permissions shows the current state of each and links straight to the matching System Settings pane.
