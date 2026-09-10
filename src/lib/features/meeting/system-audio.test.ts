@@ -68,17 +68,13 @@ describe("pastSystemAudioNotice", () => {
     expect(notice?.detail).toBe("device vanished");
   });
 
-  it("warns about a tap that ran all meeting and carried only silence", () => {
-    // The frame count alone would call this healthy: the tap runs on the
-    // device clock and delivers silence at full rate.
-    const notice = pastSystemAudioNotice(verdict({ samples: 48_000 * 600, signal_samples: 0 }));
-    expect(notice?.key).toBe("meeting_header.system_audio_reason_silent");
-  });
-
-  it("tells a silent tap from one that delivered nothing", () => {
-    expect(pastSystemAudioNotice(verdict())?.key).toBe(
-      "meeting_header.system_audio_reason_no_samples",
-    );
+  it("does not warn about a tap that ran, even when it carried only silence", () => {
+    // AC6: both lanes were captured. AC8 persists Silent/NoSamples on the
+    // meeting for later analysis; it is not a "mic only" banner.
+    expect(
+      pastSystemAudioNotice(verdict({ samples: 48_000 * 600, signal_samples: 0 })),
+    ).toBeNull();
+    expect(pastSystemAudioNotice(verdict())).toBeNull();
   });
 });
 
@@ -99,13 +95,8 @@ describe("provisionalSystemAudio", () => {
     );
   });
 
-  it("stands in for a silent leg too", () => {
-    expect(provisionalSystemAudio(status({ samples: 48_000, signal_samples: 0 }))?.reason_code).toBe(
-      "silent",
-    );
-  });
-
-  it("has nothing to stand in for when the leg was healthy", () => {
+  it("does not stand in for a tap that ran, silent or not", () => {
+    expect(provisionalSystemAudio(status({ samples: 48_000, signal_samples: 0 }))).toBeNull();
     expect(provisionalSystemAudio(status({ samples: 48_000, signal_samples: 48_000 }))).toBeNull();
     expect(provisionalSystemAudio(null)).toBeNull();
   });

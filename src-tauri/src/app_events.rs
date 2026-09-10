@@ -114,8 +114,9 @@ pub enum SystemAudioReason {
     StartFailed,
     /// The tap probe run before the session started failed (SOU-082).
     ProbeFailed,
-    /// The tap could not be created, which is what a refused "system audio
-    /// recording" permission looks like from here.
+    /// Reserved for a verified TCC denial. CreateProcessTap failing is not
+    /// that: a wedged coreaudiod returns the same error while permission is
+    /// still granted. Do not assign this from an error-string prefix.
     PermissionDenied,
     /// `capture_system_audio` is off in the settings, so no tap was tried.
     Disabled,

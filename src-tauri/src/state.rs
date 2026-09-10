@@ -311,10 +311,12 @@ impl AppState {
     /// the PipelineError event (the pipeline layer owns that event; this is
     /// the app-level cleanup that follows it).
     pub fn abort_active_session(&self, message: String) {
-        // Before the stop: the capture thread clears the system-audio
-        // snapshot as it tears the session down (SOU-119).
+        // Read the verdict before discarding it. After AudioGone the capture
+        // thread is already gone, so Stop is a no-op and would otherwise
+        // leave this snapshot for the next meeting (SOU-119).
         let system_audio = crate::audio::capture::session_system_audio();
         let _ = self.audio_cmd_sender.send(AudioCommand::Stop);
+        crate::audio::capture::discard_system_audio_status();
 
         // Salvage an in-progress meeting: stop_meeting_recording can no
         // longer run once the machine is in Error, so the accumulated

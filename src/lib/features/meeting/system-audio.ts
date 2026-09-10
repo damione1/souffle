@@ -26,15 +26,6 @@ function notice(code: SystemAudioReason | null, detail: string | null): SystemAu
 }
 
 /**
- * The reason a leg that ran carried nothing. The tap sits on the device
- * clock, so frames keep arriving whether or not anything plays: no frame at
- * all and nothing but silence are different failures (SOU-119 AC8).
- */
-function mutedReason(samples: number): SystemAudioReason {
-  return samples === 0 ? "no_samples" : "silent";
-}
-
-/**
  * What to say about the system-audio leg of the meeting being recorded now,
  * or null while there is nothing to warn about.
  *
@@ -49,33 +40,34 @@ export function liveSystemAudioNotice(status: SystemAudioStatus | null): SystemA
 }
 
 /**
- * What to say about a meeting reopened after the fact. Null when the leg
- * carried sound, and null for meetings recorded before this was tracked:
- * unknown is not the same as degraded.
+ * What to say about a meeting reopened after the fact. Null when the tap
+ * ran (both lanes were captured: AC6), and null for meetings recorded
+ * before this was tracked. A live-but-silent tap is persisted (AC8) and is
+ * not a "mic only" warning: both lanes were captured, they just carried
+ * no far-end sound.
  */
 export function pastSystemAudioNotice(
   audio: MeetingSystemAudio | null,
 ): SystemAudioNotice | null {
-  if (!audio) return null;
-  if (audio.active && audio.signal_samples > 0) return null;
-  return notice(audio.reason_code ?? (audio.active ? mutedReason(audio.samples) : null), audio.reason);
+  if (!audio || audio.active) return null;
+  return notice(audio.reason_code, audio.reason);
 }
 
 /**
  * A stand-in verdict for the meeting row loaded straight after a stop: it is
  * the header written during the recording, whose verdict only lands with the
  * authoritative save a moment later. Without this the notice would blink out
- * between the stop and `meetingFinalized`. Mirrors what the backend persists.
+ * between the stop and `meetingFinalized`. Mirrors the warning path, not the
+ * persisted Silent/NoSamples diagnostic.
  */
 export function provisionalSystemAudio(
   status: SystemAudioStatus | null,
 ): MeetingSystemAudio | null {
-  if (!status) return null;
-  if (status.active && status.signal_samples > 0) return null;
+  if (!status || status.active) return null;
   return {
     active: status.active,
     reason: status.reason,
-    reason_code: status.reason_code ?? (status.active ? mutedReason(status.samples) : null),
+    reason_code: status.reason_code,
     samples: status.samples,
     signal_samples: status.signal_samples,
   };

@@ -1356,11 +1356,7 @@ mod tests {
 
         let outcome = report_probe_outcome::<()>(
             None,
-            Err(
-                "AudioHardwareCreateProcessTap failed (560227702): system audio recording \
-                 permission is most likely denied"
-                    .into(),
-            ),
+            Err("AudioHardwareCreateProcessTap failed (560227702)".into()),
         );
 
         assert!(outcome.is_none());
@@ -1368,8 +1364,8 @@ mod tests {
         assert!(!stored.active);
         assert_eq!(
             stored.reason_code,
-            Some(SystemAudioReason::PermissionDenied),
-            "AC5: the real cause, not a generic probe failure"
+            Some(SystemAudioReason::ProbeFailed),
+            "CreateProcessTap is not a verified permission denial"
         );
         assert!(stored.reason.is_some(), "the raw detail is kept too");
     }

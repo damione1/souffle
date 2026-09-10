@@ -1774,8 +1774,9 @@ export type SystemAudioReason =
  */
 "probe_failed" | 
 /**
- * The tap could not be created, which is what a refused "system audio
- * recording" permission looks like from here.
+ * Reserved for a verified TCC denial. CreateProcessTap failing is not
+ * that: a wedged coreaudiod returns the same error while permission is
+ * still granted. Do not assign this from an error-string prefix.
  */
 "permission_denied" | 
 /**

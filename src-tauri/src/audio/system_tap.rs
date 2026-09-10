@@ -74,24 +74,26 @@ type IoBlock = RcBlock<
     ),
 >;
 
-/// Prefix of the error returned when the TCC-gated tap creation call fails.
-/// [`failure_reason`] keys the user-facing reason off it, so the two must be
-/// edited together (SOU-119).
+/// Prefix of the error returned when tap creation fails. The OS status is
+/// appended; do not guess a permission denial from it (a wedged coreaudiod
+/// produces the same failure while TCC is still granted).
 const TAP_CREATE_FAILED: &str = "AudioHardwareCreateProcessTap failed";
-/// Same, for the OS version gate.
+/// Prefix of the error returned by the OS-version gate. [`failure_reason`]
+/// keys `Unsupported` off it because that string is only produced after
+/// `system_audio_capture_supported` actually ran.
 const TAP_UNSUPPORTED: &str = "System audio capture requires macOS 14.4";
 
-/// Which reason a `spawn_tap` failure should be reported as. Tap creation is
-/// the call that triggers (and is refused by) the "system audio recording"
-/// TCC prompt, so nothing else in this file can fail that way: reporting it
-/// as a permission problem is what tells the user what to actually do, and
-/// AC5 of SOU-119 asks for exactly that instead of a generic message with
-/// the real one hidden in a tooltip.
+/// Which reason a `spawn_tap` failure should be reported as.
+///
+/// `AudioHardwareCreateProcessTap` failing is not a verified permission
+/// denial: a wedged `coreaudiod` returns the same error while TCC is still
+/// granted. This repo has shipped that class of bug before (a permission
+/// announced without being checked). The OS-version gate is different: we
+/// actually ran `system_audio_capture_supported` before producing that
+/// string, so `Unsupported` is a real check.
 pub fn failure_reason(error: &str) -> crate::app_events::SystemAudioReason {
     use crate::app_events::SystemAudioReason;
-    if error.starts_with(TAP_CREATE_FAILED) {
-        SystemAudioReason::PermissionDenied
-    } else if error.starts_with(TAP_UNSUPPORTED) {
+    if error.starts_with(TAP_UNSUPPORTED) {
         SystemAudioReason::Unsupported
     } else {
         SystemAudioReason::ProbeFailed
@@ -205,10 +207,7 @@ impl SystemTap {
         let mut tap_id: AudioObjectID = 0;
         let status = unsafe { AudioHardwareCreateProcessTap(Some(&description), &mut tap_id) };
         if status != 0 {
-            return Err(format!(
-                "{TAP_CREATE_FAILED} ({status}): system audio recording \
-                 permission is most likely denied"
-            ));
+            return Err(format!("{TAP_CREATE_FAILED} ({status})"));
         }
 
         match Self::build_aggregate(&description, tap_id, producer) {
@@ -502,17 +501,13 @@ mod tests {
 
     use super::*;
 
-    /// The messages are spelled out here on purpose: the classifier reads a
-    /// prefix, so a reworded error must fail this test rather than silently
-    /// downgrade a refused permission to a generic failure (SOU-119).
+    /// CreateProcessTap failing is not a verified TCC denial: a wedged
+    /// coreaudiod produces the same string. Do not accuse a permission.
     #[test]
-    fn a_refused_permission_is_reported_as_a_permission_problem() {
+    fn a_create_tap_failure_is_a_probe_failure_not_a_permission() {
         assert_eq!(
-            failure_reason(
-                "AudioHardwareCreateProcessTap failed (560227702): system audio recording \
-                 permission is most likely denied"
-            ),
-            crate::app_events::SystemAudioReason::PermissionDenied
+            failure_reason("AudioHardwareCreateProcessTap failed (560227702)"),
+            crate::app_events::SystemAudioReason::ProbeFailed
         );
     }
 

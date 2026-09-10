@@ -511,12 +511,7 @@ impl Database {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 _ => Err(format!("Query system audio: {e}")),
             })?;
-        match raw.as_deref() {
-            Some(raw) => serde_json::from_str(raw)
-                .map(Some)
-                .map_err(|e| format!("Deserialize system audio: {e}")),
-            None => Ok(None),
-        }
+        Ok(parse_system_audio(raw.as_deref()))
     }
 
     pub fn save_meeting_notes(&self, id: &str, notes: Option<&str>) -> Result<(), String> {
@@ -783,13 +778,25 @@ impl MeetingRow {
     }
 
     /// NULL (pre-v16 rows, and meetings saved by a path that had nothing to
-    /// report) means the system-audio leg was not tracked.
+    /// report) means the system-audio leg was not tracked. An unreadable
+    /// value is treated the same way: a Homebrew rollback that does not know
+    /// a newer `reason_code` must not make the meeting unopenable.
     fn system_audio(&self) -> Result<Option<MeetingSystemAudio>, String> {
-        match self.system_audio.as_deref() {
-            Some(raw) => serde_json::from_str(raw)
-                .map(Some)
-                .map_err(|e| format!("Deserialize system audio: {e}")),
-            None => Ok(None),
+        Ok(parse_system_audio(self.system_audio.as_deref()))
+    }
+}
+
+/// The system-audio verdict persists as JSON; nothing to report stores NULL.
+/// Unknown or corrupt JSON is dropped rather than failing the load: a
+/// rollback that does not know a newer `reason_code` must still open the
+/// meeting (SOU-119).
+fn parse_system_audio(raw: Option<&str>) -> Option<MeetingSystemAudio> {
+    let raw = raw?;
+    match serde_json::from_str(raw) {
+        Ok(audio) => Some(audio),
+        Err(error) => {
+            tracing::warn!(%error, "Ignoring unreadable system-audio verdict");
+            None
         }
     }
 }
@@ -831,8 +838,11 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, String> {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::params;
+
     use crate::app_events::{MeetingSystemAudio, SystemAudioReason};
     use crate::engine::TranscriptionProfile;
+    use crate::lock_ext::MutexExt;
     use crate::test_helpers::fixtures::{sample_meeting, test_db};
 
     fn degraded(reason_code: SystemAudioReason, samples: u64) -> MeetingSystemAudio {
@@ -905,6 +915,31 @@ mod tests {
                 .is_none(),
             "a missing meeting is not an error here"
         );
+    }
+
+    /// A Homebrew rollback that does not know a newer `reason_code` must
+    /// still open the meeting. The verdict is dropped, not the row.
+    #[test]
+    fn an_unreadable_verdict_does_not_hide_the_meeting() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("m-future")).unwrap();
+
+        {
+            let conn = db.conn.acquire().unwrap();
+            conn.execute(
+                "UPDATE meetings SET system_audio = ?1 WHERE id = 'm-future'",
+                params![
+                    r#"{"active":false,"reason":null,"reason_code":"from_the_future","samples":0,"signal_samples":0}"#
+                ],
+            )
+            .unwrap();
+        }
+
+        let loaded = db
+            .load_meeting("m-future")
+            .expect("an unknown reason_code must not hide the meeting");
+        assert!(loaded.system_audio.is_none());
+        assert!(db.meeting_system_audio("m-future").unwrap().is_none());
     }
 
     /// SOU-119: the verdict a resume must merge against is read back by id.
@@ -1030,6 +1065,26 @@ mod tests {
         let resumed = db.load_meeting("m1").unwrap();
         assert_eq!(resumed.participants, meeting.participants);
         assert_eq!(resumed.calendar_event_id.as_deref(), Some("evt-42"));
+    }
+
+    /// Resume reuses upsert_meeting_header; the system-audio verdict of the
+    /// previous session must still be there to merge against.
+    #[test]
+    fn upsert_meeting_header_leaves_the_system_audio_verdict() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("m-header");
+        meeting.system_audio = Some(degraded(SystemAudioReason::ProbeFailed, 0));
+        db.save_meeting(&meeting).unwrap();
+
+        let mut header = db.load_meeting("m-header").unwrap();
+        header.ended_at = None;
+        db.upsert_meeting_header(&header).unwrap();
+
+        let resumed = db.load_meeting("m-header").unwrap();
+        assert_eq!(
+            resumed.system_audio.and_then(|a| a.reason_code),
+            Some(SystemAudioReason::ProbeFailed)
+        );
     }
 
     #[test]

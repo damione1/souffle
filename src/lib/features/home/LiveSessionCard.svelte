@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AlarmClockOff, ClipboardCheck, Square } from "@lucide/svelte";
+  import { AlarmClockOff, ClipboardCheck, MicOff, Square } from "@lucide/svelte";
   import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
   import Waveform from "../../components/Waveform.svelte";
@@ -16,6 +16,7 @@
     scrollTopAfterLeadingUnmount,
     windowedParagraphs,
   } from "./live-paragraph-window";
+  import { liveSystemAudioNotice } from "../meeting/system-audio";
 
   let {
     mode,
@@ -76,6 +77,9 @@
   );
 
   const systemAudioActive = $derived(Boolean(meeting.app.systemAudioStatus?.active));
+  const liveNotice = $derived(
+    mode === "meeting" ? liveSystemAudioNotice(meeting.app.systemAudioStatus) : null,
+  );
 
   const idleSilenceMinutes = $derived(
     meeting.idleSignal ? Math.max(1, Math.round(meeting.idleSignal.idle_seconds / 60)) : 0,
@@ -245,6 +249,18 @@
       {/if}
     </div>
   {:else}
+    {#if liveNotice}
+      <div
+        class="flex items-start gap-3 rounded-default bg-warning/10 px-4 py-3 outline-1 outline-warning/30"
+        title={liveNotice.detail ?? ""}
+      >
+        <MicOff size={16} class="mt-px shrink-0 text-warning" aria-hidden="true" />
+        <p class="m-0 min-w-0 flex-1 text-sm text-text-secondary">
+          <span class="font-semibold">{$t("meeting_header.system_audio_unavailable")}</span>
+          {$t(liveNotice.key)}
+        </p>
+      </div>
+    {/if}
     {#if mode === "meeting" && meeting.idleSignal}
       <div class="flex items-center gap-3 rounded-default bg-warning/10 px-4 py-3 outline-1 outline-warning/30">
         <AlarmClockOff size={16} class="shrink-0 text-warning" aria-hidden="true" />

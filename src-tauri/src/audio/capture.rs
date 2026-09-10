@@ -40,16 +40,13 @@ static SYSTEM_AUDIO_SESSION: AtomicU64 = AtomicU64::new(0);
 /// are refreshed on the way out, since the stored status only holds them as
 /// of the last emit.
 pub fn system_audio_status() -> Option<crate::app_events::SystemAudioStatus> {
-    SYSTEM_AUDIO_STATUS
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
-        .map(|mut status| {
-            let (samples, signal_samples) = system_audio_counts();
-            status.samples = samples;
-            status.signal_samples = signal_samples;
-            status
-        })
+    let Ok(guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return None;
+    };
+    let mut status = (*guard).clone()?;
+    status.samples = SYSTEM_AUDIO_SAMPLES.load(Ordering::Relaxed);
+    status.signal_samples = SYSTEM_AUDIO_SIGNAL.load(Ordering::Relaxed);
+    Some(status)
 }
 
 /// `(frames delivered, frames carrying signal)` so far in this session.
@@ -60,18 +57,30 @@ pub fn system_audio_counts() -> (u64, u64) {
     )
 }
 
-/// Start a new session's tallies. Called once where the session is set up,
-/// and never on a mic rebuild or a tap retry, which stay inside their
-/// session and keep counting.
+/// Start a new session's tallies and drop any leftover snapshot. Called once
+/// where the session is set up, never on a mic rebuild or a tap retry.
+/// Clearing here is what stops an aborted meeting's reason from showing on
+/// the next one: `Stop` is a no-op once the capture thread has already
+/// exited (AudioGone).
 pub fn begin_system_audio_session(session_id: u64) {
+    let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return;
+    };
     SYSTEM_AUDIO_SESSION.store(session_id, Ordering::Relaxed);
     SYSTEM_AUDIO_SAMPLES.store(0, Ordering::Relaxed);
     SYSTEM_AUDIO_SIGNAL.store(0, Ordering::Relaxed);
+    *guard = None;
 }
 
 /// Publish the running totals of `session_id`. A tick belonging to an older
 /// session is ignored rather than allowed to overwrite the current one.
+/// Takes the snapshot lock so a concurrent `begin` cannot zero the session
+/// id between the check and the store (both run on the capture tick / command
+/// threads, never in the IOProc).
 fn publish_system_audio_counts(session_id: u64, samples: u64, signal: u64) {
+    let Ok(_guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return;
+    };
     if SYSTEM_AUDIO_SESSION.load(Ordering::Relaxed) != session_id {
         return;
     }
@@ -112,6 +121,24 @@ fn store_system_audio_status(status: Option<crate::app_events::SystemAudioStatus
     }
 }
 
+/// Drop the snapshot only if it still belongs to `session_id`. A stop that
+/// times out can run after the next session has already published its own
+/// status; clearing unconditionally would hide that meeting's reason.
+fn clear_system_audio_status_if_current_session(session_id: u64) {
+    let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return;
+    };
+    if SYSTEM_AUDIO_SESSION.load(Ordering::Relaxed) == session_id {
+        *guard = None;
+    }
+}
+
+/// Drop the snapshot after it has been persisted (abort salvage). The
+/// capture thread may already be gone, so `Stop` will never clear it.
+pub fn discard_system_audio_status() {
+    store_system_audio_status(None);
+}
+
 /// Tell the frontend whether the system-audio leg of a meeting is live, and
 /// remember it for a webview that reloads afterwards. Every path that gives
 /// up on system audio goes through here, including the ones that decide it
@@ -123,15 +150,20 @@ pub fn emit_system_audio_status(
     reason: Option<String>,
 ) {
     use tauri_specta::Event;
-    let (samples, signal_samples) = system_audio_counts();
-    let status = crate::app_events::SystemAudioStatus {
-        active,
-        reason,
-        reason_code,
-        samples,
-        signal_samples,
+    let status = {
+        let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() else {
+            return;
+        };
+        let status = crate::app_events::SystemAudioStatus {
+            active,
+            reason,
+            reason_code,
+            samples: SYSTEM_AUDIO_SAMPLES.load(Ordering::Relaxed),
+            signal_samples: SYSTEM_AUDIO_SIGNAL.load(Ordering::Relaxed),
+        };
+        *guard = Some(status.clone());
+        status
     };
-    store_system_audio_status(Some(status.clone()));
     if let Some(app) = app {
         let _ = status.emit(app);
     }
@@ -300,9 +332,10 @@ fn should_reuse_meeting(
 }
 
 /// Why the system-audio leg is gone after a tap (re)start failed inside a
-/// running session. A refused permission or an unsupported OS explains more
-/// than "the tap went away", so those keep their own reason; anything else
-/// is reported as a lost tap (SOU-119).
+/// running session. An unsupported OS (a real version check) explains more
+/// than "the tap went away"; everything else, including CreateProcessTap,
+/// is a lost tap. `PermissionDenied` stays in the match so a future
+/// verified TCC check still surfaces instead of being flattened.
 #[cfg(target_os = "macos")]
 fn mid_session_tap_reason(error: &str) -> crate::app_events::SystemAudioReason {
     use crate::app_events::SystemAudioReason;
@@ -825,11 +858,50 @@ mod system_audio_status_tests {
             SystemAudioReason::TapLost
         );
         assert_eq!(
-            mid_session_tap_reason(
-                "AudioHardwareCreateProcessTap failed (560227702): system audio recording \
-                 permission is most likely denied"
-            ),
-            SystemAudioReason::PermissionDenied
+            mid_session_tap_reason("AudioHardwareCreateProcessTap failed (560227702)"),
+            SystemAudioReason::TapLost,
+            "CreateProcessTap is not a verified permission denial"
+        );
+        assert_eq!(
+            mid_session_tap_reason("System audio capture requires macOS 14.4 or later"),
+            SystemAudioReason::Unsupported
+        );
+    }
+
+    /// A timed-out stop of session 7 must not wipe session 8's snapshot.
+    #[test]
+    fn stop_does_not_clear_a_newer_session_snapshot() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        begin_system_audio_session(7);
+        emit_system_audio_status(None, false, Some(SystemAudioReason::Disabled), None);
+        begin_system_audio_session(8);
+        emit_system_audio_status(None, true, None, None);
+
+        clear_system_audio_status_if_current_session(7);
+        let stored = system_audio_status().expect("session 8 snapshot must survive");
+        assert!(stored.active, "the late stop of 7 must not clear 8");
+
+        clear_system_audio_status_if_current_session(8);
+        assert!(system_audio_status().is_none());
+    }
+
+    /// An abort that never reaches `stop()` (AudioGone) must not leave its
+    /// reason for the next meeting to inherit.
+    #[test]
+    fn begin_drops_the_previous_session_snapshot() {
+        let _guard = LOCK.lock().unwrap();
+        reset();
+
+        begin_system_audio_session(7);
+        emit_system_audio_status(None, false, Some(SystemAudioReason::Disabled), None);
+        assert!(system_audio_status().is_some());
+
+        begin_system_audio_session(8);
+        assert!(
+            system_audio_status().is_none(),
+            "session 8 must start with no snapshot until it emits its own"
         );
     }
 }
@@ -1917,6 +1989,12 @@ impl AudioCapture {
                 false
             }
             Err(e) => {
+                // start() may have dropped the tap before failing (no owned
+                // handle and the retry window was open). The Start command
+                // path reports that; this rebuild path used not to, so a
+                // mid-meeting mic reopen that took the tap with it left the
+                // snapshot saying the leg was still up.
+                self.report_start_failure(params.capture_system_audio, &e);
                 let (n, counted_at) = count_rebuild_failure(
                     self.mic_rebuild_failures,
                     self.last_counted_failure,
@@ -2326,7 +2404,7 @@ impl AudioCapture {
         // and a Bluetooth headset can leave HFP/mono for A2DP stereo.
         let had_stream = self.release_capture_stream();
 
-        store_system_audio_status(None);
+        clear_system_audio_status_if_current_session(session_id);
         if let Some(mut meeting) = self.meeting.take() {
             // Tear down the tap first so its ring stops filling; then one
             // final flush drains both rings and all resampler tails.
