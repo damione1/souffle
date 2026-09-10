@@ -15,6 +15,7 @@ import { learnFromEdit } from "../../api/dictionary";
 import { frontmostAppName, readFocusedText } from "../../api/focus";
 import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
+import type { StatusReason } from "../../types/status";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage, segmentGap } from "../../utils";
 import { tr } from "../../i18n";
@@ -173,9 +174,7 @@ function createTranscriptionControllerInstance() {
   let isStopping = $state(false);
   let transcript = $state("");
   let tentative = $state("");
-  let statusMessage = $state("");
-  let statusActionLabel = $state<string | undefined>();
-  let statusAction = $state<(() => void) | undefined>();
+  let statusReason = $state<StatusReason | null>(null);
   let catalog = $state<TranscriptionCatalog | null>(null);
 
   let bannerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -188,25 +187,23 @@ function createTranscriptionControllerInstance() {
     }
   }
 
-  function setBanner(message: string, action?: { label: string; run: () => void }) {
+  function setBanner(reason: StatusReason | null) {
     clearBannerTimer();
-    statusMessage = message;
-    statusActionLabel = action?.label;
-    statusAction = action?.run;
-    if (message && !action) {
+    statusReason = reason;
+    // SOU-099: a banner that only reports a past event fades out on its own;
+    // one carrying a button waits for the user to act on it.
+    if (reason && !reason.onAction) {
       bannerTimer = setTimeout(clearBanner, AUTO_HIDE_MS);
     }
   }
 
   function clearBanner() {
     clearBannerTimer();
-    statusMessage = "";
-    statusActionLabel = undefined;
-    statusAction = undefined;
+    statusReason = null;
   }
 
   function modelRequiredBanner(message: string) {
-    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ tab: "transcription" }) });
+    setBanner({ type: "no_model", message, actionLabel: tr("home.open_model"), onAction: () => openSettings({ anchor: "transcription.model" }) });
   }
 
   // Incremented for every session start (and on abort) so segment-channel
@@ -295,7 +292,29 @@ function createTranscriptionControllerInstance() {
     }, LEARN_FROM_EDIT_DELAY_MS);
   }
 
+  // Auto-dismiss: a banner whose cause is gone (permission granted from System
+  // Settings, model finished loading) clears itself, without waiting for the
+  // next session (SOU-089 AC6).
+  let disposeAutoDismiss: (() => void) | null = null;
+  function startAutoDismiss() {
+    if (disposeAutoDismiss) return;
+    disposeAutoDismiss = $effect.root(() => {
+      $effect(() => {
+        // Read once: clearBanner() nulls statusReason, so a second test against
+        // it in the same pass would dereference null.
+        const reason = statusReason;
+        if (!reason) return;
+
+        const resolved =
+          (reason.type === "accessibility_denied" && app.appPermissions?.accessibility === "granted")
+          || (reason.type === "no_model" && app.transcriptionRuntimePhase === "ready");
+        if (resolved) clearBanner();
+      });
+    });
+  }
+
   async function mount() {
+    startAutoDismiss();
     await refreshCatalog();
     await refreshRuntimeStatus();
     await refreshSnippets();
@@ -327,6 +346,8 @@ function createTranscriptionControllerInstance() {
 
     return () => {
       unlisten.forEach((fn) => fn());
+      disposeAutoDismiss?.();
+      disposeAutoDismiss = null;
     };
   }
 
@@ -340,7 +361,7 @@ function createTranscriptionControllerInstance() {
         transcription_backend_id: catalog.selected_backend_id,
       };
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -348,7 +369,7 @@ function createTranscriptionControllerInstance() {
     try {
       await refreshTranscriptionRuntimeStatus(app, catalog);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -378,8 +399,7 @@ function createTranscriptionControllerInstance() {
         } catch (e) {
           console.warn("Fast stop failed:", e);
         }
-        setBanner(tr("home.dictation_too_short"));
-
+        setBanner({ type: "transient", message: tr("home.dictation_too_short") });
         clearSessionContext();
         isStopping = false;
         return;
@@ -413,7 +433,7 @@ function createTranscriptionControllerInstance() {
           sessionFocusedApp,
         );
         if (finalized.warning) {
-          setBanner(finalized.warning);
+          setBanner({ type: "transient", message: finalized.warning });
         }
 
         if (savedId && finalized.text && finalized.text !== rawText) {
@@ -444,12 +464,9 @@ function createTranscriptionControllerInstance() {
                 }
               }
               if (message === ACCESSIBILITY_PASTE_COPIED) {
-                setBanner(tr("home.paste_copied"), {
-                  label: tr("permissions.repair"),
-                  run: openPermissionsRepair,
-                });
+                setBanner({ type: "accessibility_denied", message: tr("home.paste_copied"), actionLabel: tr("permissions.repair"), onAction: openPermissionsRepair });
               } else {
-                setBanner(tr("home.paste_failed", { error: message }));
+                setBanner({ type: "transient", message: tr("home.paste_failed", { error: message }) });
               }
               // A shortcut dictation runs from another app, so the status
               // banner above is likely not on screen: also notify outside
@@ -470,7 +487,7 @@ function createTranscriptionControllerInstance() {
           }
         }
       } catch (e) {
-        setBanner(errorMessage(e));
+        setBanner({ type: "transient", message: errorMessage(e) });
       } finally {
         clearSessionContext();
         if (holdForPolish) {
@@ -499,9 +516,9 @@ function createTranscriptionControllerInstance() {
         // Model was unloaded (e.g. the idle timeout freed it); reload through
         // the normal load flow before recording instead of leaving the user
         // stuck with a disabled button.
-        const ready = await ensureModelLoaded(app, catalog, (message) => { setBanner(message); });
+        const ready = await ensureModelLoaded(app, catalog, (message) => { setBanner({ type: "transient", message }); });
         if (!ready) {
-          modelRequiredBanner(statusMessage || tr("home.model_required_dictation"));
+          modelRequiredBanner(statusReason?.message || tr("home.model_required_dictation"));
           return;
         }
       }
@@ -533,7 +550,7 @@ function createTranscriptionControllerInstance() {
         transcript += segmentGap(transcript, segment.text) + segment.text;
       });
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
       clearSessionContext();
     } finally {
       isStartingRecording = false;
@@ -563,22 +580,18 @@ function createTranscriptionControllerInstance() {
     if (rawText) {
       void (async () => {
         const savedId = await saveToHistory(rawText);
-        setBanner(
-          savedId
-            ? tr("home.recording_interrupted_saved")
-            : tr("home.recording_interrupted"),
-        );
+        setBanner({ type: "transient", message: savedId ? tr("home.recording_interrupted_saved") : tr("home.recording_interrupted") });
         const { text, warning } = await finalizeDictationText(
           rawText,
           sessionFocusedApp,
         );
-        if (warning) setBanner(warning);
+        if (warning) setBanner({ type: "transient", message: warning });
         if (savedId && text && text !== rawText) {
           await updateHistory(savedId, text);
         }
       })();
     } else {
-      setBanner(tr("home.recording_interrupted"));
+      setBanner({ type: "transient", message: tr("home.recording_interrupted") });
     }
     clearSessionContext();
   }
@@ -589,9 +602,9 @@ function createTranscriptionControllerInstance() {
     get isStopping() { return isStopping; },
     get transcript() { return transcript; },
     get tentative() { return tentative; },
-    get statusMessage() { return statusMessage; },
-    get statusActionLabel() { return statusActionLabel; },
-    get statusAction() { return statusAction; },
+    get statusMessage() { return statusReason?.message ?? ""; },
+    get statusActionLabel() { return statusReason?.actionLabel; },
+    get statusAction() { return statusReason?.onAction; },
     get catalog() { return catalog; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },
     get modelOperationState() { return app.transcriptionModelOperationState; },

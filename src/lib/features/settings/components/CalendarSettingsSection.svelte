@@ -3,6 +3,7 @@
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { CalendarInfo, PermState } from "../../../types";
+  import { commands } from "../../../api/generated";
 
   let {
     enabled,
@@ -44,6 +45,7 @@
   <h3>{$t("settings_calendar.title")}</h3>
   <div class="settings-rows">
   <SettingsField
+    anchor="meetings.calendar"
     label={$t("settings_calendar.enable_label")}
     description={$t("settings_calendar.enable_desc")}
   >
@@ -53,7 +55,11 @@
   </SettingsField>
 
   {#if permission === "denied"}
-    <StatusBanner message={$t("settings_calendar.permission_denied")} />
+    <StatusBanner
+      message={$t("settings_calendar.permission_denied")}
+      actionLabel={$t("permissions.open_system_settings")}
+      onAction={() => commands.openCalendarSettings()}
+    />
   {/if}
 
   {#if enabled && permission === "granted"}

@@ -671,6 +671,12 @@ async saveSettings(settings: AppSettings) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Open the macOS System Settings to the Apple Intelligence & Siri pane.
+ */
+async openAppleIntelligenceSettings() : Promise<void> {
+    await TAURI_INVOKE("open_apple_intelligence_settings");
+},
+/**
  * Update shortcut bindings at runtime.
  */
 async saveShortcuts(shortcuts: ShortcutSettings) : Promise<Result<null, string>> {
@@ -891,6 +897,12 @@ async listCalendars() : Promise<Result<CalendarInfo[], string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Open the macOS System Settings to the Calendars privacy pane.
+ */
+async openCalendarSettings() : Promise<void> {
+    await TAURI_INVOKE("open_calendar_settings");
 },
 /**
  * Today's timed events for the home view. Missing permission is a state the

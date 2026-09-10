@@ -52,4 +52,34 @@ describe("i18n locales", () => {
       .map(([key, files]) => `${key} (${[...files].join(", ")})`);
     expect(missing).toEqual([]);
   });
+
+  /** SOU-089 AC7: an alert names a button, never a route. A written itinerary
+   * goes stale in silence (SOU-056 shipped a path to a tab that no longer
+   * existed); this fails the moment one is reintroduced. */
+  it("has no written settings path in either locale", () => {
+    // Both exceptions are legitimate arrows: a unit range and a device change.
+    const allowed = new Set([
+      "settings_audio.sample_rate_high_warning",
+      "mic_toast.switched_detail",
+    ]);
+
+    const values = (obj: Record<string, unknown>, prefix = ""): [string, string][] =>
+      Object.entries(obj).flatMap(([key, value]) =>
+        value !== null && typeof value === "object"
+          ? values(value as Record<string, unknown>, `${prefix}${key}.`)
+          : ([[`${prefix}${key}`, String(value)]] as [string, string][]),
+      );
+
+    const offenders: string[] = [];
+    for (const [locale, dict] of [["en", en], ["fr", fr]] as const) {
+      for (const [key, value] of values(dict as Record<string, unknown>)) {
+        if (allowed.has(key)) continue;
+        if (/Settings >|Réglages >|→/.test(value)) {
+          offenders.push(`[${locale}] ${key}: ${value}`);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
 });

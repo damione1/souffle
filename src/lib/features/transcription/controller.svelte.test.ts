@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { flushSync } from "svelte";
 
 // --- Mocks for Tauri runtime ---
 
@@ -194,7 +195,8 @@ describe("transcription controller", () => {
     app.selectedDevice = "";
     app.settings = { ...mockSettings };
     app.settingsOpen = false;
-    app.settingsInitialTab = null;
+    app.settingsInitialAnchor = null;
+    app.appPermissions = null;
     app.permissionsPanelOpen = false;
     app.snippets = [];
 
@@ -309,6 +311,56 @@ describe("transcription controller", () => {
     expect(ctrl.statusAction).toBeTypeOf("function");
     ctrl.statusAction?.();
     expect(ctrl.app.permissionsPanelOpen).toBe(true);
+  });
+
+  /** SOU-089 AC6: the banner is stored as a reason, so granting the permission
+   * from System Settings clears it — no new dictation session required. */
+  it("clears the accessibility banner once the permission is granted", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "paste_text") {
+        return Promise.reject("Accessibility permission missing.");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = {
+      ...ctrl.app.settings,
+      auto_paste: true,
+      dictation_polish_enabled: false,
+    };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+    await ctrl.toggleRecording(true);
+
+    expect(ctrl.statusActionLabel).toBe("Repair permission");
+
+    // What the app-level snapshot does when the user grants it in System Settings.
+    ctrl.app.appPermissions = {
+      microphone: "granted",
+      system_audio: "unknown",
+      accessibility: "granted",
+      calendar: "unknown",
+      input_monitoring: "unknown",
+    };
+    flushSync();
+
+    expect(ctrl.statusMessage).toBe("");
+    expect(ctrl.statusActionLabel).toBeUndefined();
   });
 
   it("notifies outside the window when a shortcut paste fails and history fails", async () => {
@@ -776,7 +828,7 @@ describe("transcription controller", () => {
     expect(ctrl.statusActionLabel).toBe("Open model");
     ctrl.statusAction?.();
     expect(ctrl.app.settingsOpen).toBe(true);
-    expect(ctrl.app.settingsInitialTab).toBe("transcription");
+    expect(ctrl.app.settingsInitialAnchor).toBe("transcription.model");
   });
 
   it("toggleRecording guards double start", async () => {

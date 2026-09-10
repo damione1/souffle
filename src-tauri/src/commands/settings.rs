@@ -163,3 +163,12 @@ pub fn save_shortcuts(
 pub fn get_shortcuts(state: State<'_, AppState>) -> Result<ShortcutSettings, String> {
     ShortcutSettings::load(&state.db)
 }
+
+/// Open the macOS System Settings to the Apple Intelligence & Siri pane.
+#[tauri::command]
+#[specta::specta]
+pub fn open_apple_intelligence_settings() {
+    let _ = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.Siri-Settings.extension")
+        .spawn();
+}

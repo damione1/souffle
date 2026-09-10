@@ -78,3 +78,4 @@ export type {
  * (system audio). Backend wire format (see `engine::Speaker` in Rust);
  * specta emits it as a plain `string`. Compare with `===`. */
 export type Speaker = string;
+export type { StatusReason } from './status';

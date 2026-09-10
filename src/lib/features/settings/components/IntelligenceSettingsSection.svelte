@@ -5,6 +5,7 @@
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { SummaryModelDescriptor, SummaryProviderChoice } from "../../../types";
   import { ollamaModelPickerState } from "../ollama-model-picker";
+  import { commands } from "../../../api/generated";
 
   let {
     ollamaUrl,
@@ -106,6 +107,7 @@
   <h3>{$t("settings_intelligence.title")}</h3>
   <div class="settings-rows">
   <SettingsField
+    anchor="ai.provider"
     label={$t("settings_intelligence.provider")}
     description={$t("settings_intelligence.provider_desc")}
     htmlFor="summary-provider"
@@ -149,6 +151,8 @@
       message={appleIntelligenceHintKey === "settings_intelligence.ai_reason_unknown"
         ? $t(appleIntelligenceHintKey, { values: { code: appleIntelligenceUnavailableReason } })
         : $t(appleIntelligenceHintKey)}
+      actionLabel={appleIntelligenceUnavailableReason === "apple_intelligence_not_enabled" ? $t("permissions.open_system_settings") : undefined}
+      onAction={appleIntelligenceUnavailableReason === "apple_intelligence_not_enabled" ? () => commands.openAppleIntelligenceSettings() : undefined}
     />
   {/if}
 
@@ -177,6 +181,7 @@
 
   {#if modelPicker.visible}
     <SettingsField
+      anchor="ai.ollama_model"
       label={$t("settings_intelligence.summary_model")}
       description={modelPicker.showFallbackHint
         ? $t("settings_intelligence.summary_model_fallback_desc")

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Mic, Users } from "@lucide/svelte";
   import { t } from "svelte-i18n";
+  import { openSettings } from "../settings/open";
 
   let {
     dictationShortcut,
@@ -17,8 +18,8 @@
 
 <div class="grid grid-cols-2 gap-3">
   <button
-    onclick={onDictate}
-    disabled={!modelReady}
+    onclick={dictationShortcut ? onDictate : () => openSettings({ anchor: "interface.shortcuts" })}
+    disabled={!modelReady && !!dictationShortcut}
     class="surface-card flex cursor-pointer items-center gap-[15px] !p-5 text-left transition-[outline-color,transform,background-color] duration-150 hover:outline-accent/40 active:scale-[0.99] disabled:cursor-default disabled:opacity-50"
   >
     <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent/13 text-accent">

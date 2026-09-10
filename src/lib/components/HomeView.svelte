@@ -190,7 +190,7 @@
         onStartEvent={(event) => void calendar.startFromEvent(event)}
         calendarEnabled={calendar.enabled}
         calendarPermission={calendar.permission}
-        onSetupCalendar={() => openSettings({ tab: "meetings" })}
+        onSetupCalendar={() => openSettings({ anchor: "meetings.calendar" })}
       />
     {:else}
       <!-- During a live session, the session card is the only focus. -->

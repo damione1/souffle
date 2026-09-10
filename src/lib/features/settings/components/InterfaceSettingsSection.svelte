@@ -147,6 +147,7 @@
   {/if}
 
   <SettingsField
+    anchor="interface.shortcuts"
     label={$t("settings_interface.toggle_recording")}
     description={$t("settings_interface.toggle_recording_desc")}
   >

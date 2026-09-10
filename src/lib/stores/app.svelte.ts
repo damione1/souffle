@@ -1,4 +1,6 @@
+import type { SettingsAnchor } from "../features/settings/anchors";
 import type {
+  PermissionStatus,
   AppSettings,
   AppStateMachine,
   PipelineError,
@@ -13,10 +15,11 @@ import type { TranscriptionModelOperationState } from "../features/transcription
 
 // Settings sheet visibility (the app is otherwise a single home surface)
 let settingsOpen = $state(false);
+let appPermissions = $state<PermissionStatus | null>(null);
 
 // Tab to land on the next time settings opens (e.g. a "set up calendar" CTA
 // deep-linking into the meetings tab). Consumed once by SettingsView.
-let settingsInitialTab = $state<string | null>(null);
+let settingsInitialAnchor = $state<SettingsAnchor | null>(null);
 
 // Permissions repair panel, mounted once in App so banners can open it
 // without going through Settings → System → Review (SOU-089).
@@ -224,11 +227,14 @@ function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOp
 
 export function getAppState() {
   return {
+    get appPermissions() { return appPermissions; },
+    set appPermissions(v: PermissionStatus | null) { appPermissions = v; },
+
     get settingsOpen() { return settingsOpen; },
     set settingsOpen(v: boolean) { settingsOpen = v; },
 
-    get settingsInitialTab() { return settingsInitialTab; },
-    set settingsInitialTab(v: string | null) { settingsInitialTab = v; },
+    get settingsInitialAnchor() { return settingsInitialAnchor; },
+    set settingsInitialAnchor(v: SettingsAnchor | null) { settingsInitialAnchor = v; },
 
     get permissionsPanelOpen() { return permissionsPanelOpen; },
     set permissionsPanelOpen(v: boolean) { permissionsPanelOpen = v; },

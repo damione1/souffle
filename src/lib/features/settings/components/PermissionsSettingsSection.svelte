@@ -9,6 +9,7 @@
   <h3>{$t("permissions.settings_title")}</h3>
   <div class="settings-rows">
     <SettingsField
+      anchor="system.permissions"
       label={$t("permissions.settings_title")}
       description={$t("permissions.settings_desc")}
     >

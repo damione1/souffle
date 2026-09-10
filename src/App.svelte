@@ -30,6 +30,7 @@
     notifyDictationStopRequested,
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState, deriveRecordingMode } from "./lib/stores/app.svelte";
+  import { getPermissionStatus } from "./lib/api/permissions";
   import { openSettings } from "./lib/features/settings/open";
   import { applyTheme, errorMessage } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
@@ -126,11 +127,30 @@
     }
   }
 
+  /** Refresh the app-wide permission snapshot. Read-only (`AXIsProcessTrusted`
+   * and friends, no prompt), so it is cheap enough to run on every focus: it is
+   * what lets a banner clear when the user grants a permission from System
+   * Settings without ever reopening the permissions panel (SOU-089 AC6). */
+  let permissionSyncGeneration = 0;
+  async function syncPermissions() {
+    const generation = ++permissionSyncGeneration;
+    try {
+      const status = await getPermissionStatus();
+      // Focus can fire twice in quick succession, and the permissions panel
+      // polls into the same field: drop a snapshot a newer one has overtaken,
+      // or a stale "denied" would resurrect a banner that correctly cleared.
+      if (generation === permissionSyncGeneration) app.appPermissions = status;
+    } catch {
+      // Best-effort: a failed snapshot just leaves the last known state.
+    }
+  }
+
   onMount(() => {
     let cleanupTranscription = () => {};
     (async () => {
       try {
         const result = await bootstrapAppState(app);
+        await syncPermissions();
         whatsNew = result.whatsNew;
         if (result.whatsNew) {
           const targetVersion = result.whatsNew.version;
@@ -264,6 +284,7 @@
       if (document.visibilityState === "visible") notifySystemWokeUp();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", syncPermissions);
 
     return () => {
       cleanupTranscription();
@@ -281,6 +302,7 @@
       unlistenSystemWokeUp?.();
       unlistenInputRoute?.();
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", syncPermissions);
     };
   });
   function dismissWhatsNew() {
@@ -457,7 +479,7 @@
         detail={routeToastCopy.detail}
         hint={routeToastCopy.hint}
         actionLabel={routeToastCopy.hasAction ? $t("permissions.open_settings") : undefined}
-        onAction={routeToastCopy.hasAction ? () => openSettings({ tab: "audio" }) : undefined}
+        onAction={routeToastCopy.hasAction ? () => openSettings({ anchor: "audio.mic" }) : undefined}
         onDismiss={() => micToast.dismiss()}
       />
     </div>

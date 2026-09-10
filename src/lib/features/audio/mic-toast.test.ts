@@ -47,7 +47,7 @@ describe("micToastCopy", () => {
 
   it("uses lost_none when the previous name is missing", () => {
     const copy = micToastCopy(notice({ reason: "lost" }), translate);
-    expect(copy.detail).toBe("Connect a microphone in Settings");
+    expect(copy.detail).toBe("Connect a microphone");
   });
 });
 
