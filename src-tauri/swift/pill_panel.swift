@@ -11,14 +11,15 @@ import QuartzCore
 
 private let kCompactWidth: CGFloat = 280
 private let kCompactHeight: CGFloat = 64
-private let kMeetingWidth: CGFloat = 96
+private let kMeetingWidth: CGFloat = 108
 private let kMeetingHeight: CGFloat = 44
 private let kExpandedWidth: CGFloat = 440
 private let kMaxHeight: CGFloat = 200
 private let kTopMargin: CGFloat = 40
 private let kCornerRadiusFull: CGFloat = 28
 private let kCornerRadiusMeet: CGFloat = 22
-private let kWaveformBars: Int = 24
+private let kDictationWaveformBars: Int = 24
+private let kMeetingWaveformBars: Int = 3
 private let kMaxLiveLines: Int = 5
 private let kLiveFontSize: CGFloat = 13
 
@@ -67,7 +68,8 @@ private func stretchableRoundedMask(radius: CGFloat) -> NSImage {
 /// Drawn NSView bars (not CALayer): same geometry as the Svelte pill waveform.
 /// A 30 fps tick applies the per-bar sine variation; RMS arrives from Rust.
 private final class WaveformView: NSView {
-    private var bars: [CGFloat] = Array(repeating: 0.12, count: kWaveformBars)
+    private var barCount: Int = kDictationWaveformBars
+    private var bars: [CGFloat] = Array(repeating: 0.12, count: kDictationWaveformBars)
     private var rms: CGFloat = 0
     private var tick: Timer?
 
@@ -85,6 +87,14 @@ private final class WaveformView: NSView {
         }
     }
 
+    func setBarCount(_ count: Int) {
+        let n = max(1, count)
+        guard n != barCount else { return }
+        barCount = n
+        bars = Array(repeating: 0.12, count: n)
+        needsDisplay = true
+    }
+
     func setActive(_ active: Bool) {
         if active {
             if reduceMotionEnabled() {
@@ -96,7 +106,7 @@ private final class WaveformView: NSView {
         } else {
             stopTick()
             rms = 0
-            bars = Array(repeating: 0.12, count: kWaveformBars)
+            bars = Array(repeating: 0.12, count: barCount)
             needsDisplay = true
         }
     }
@@ -117,7 +127,7 @@ private final class WaveformView: NSView {
 
     private func applyRmsToBars() {
         let target = max(0.08, min(1, rms))
-        for i in 0..<kWaveformBars {
+        for i in 0..<barCount {
             bars[i] = target
         }
         needsDisplay = true
@@ -130,7 +140,7 @@ private final class WaveformView: NSView {
             return
         }
         let t = CACurrentMediaTime()
-        for i in 0..<kWaveformBars {
+        for i in 0..<barCount {
             let variation = sin(t * 5 + Double(i) * 0.5) * 0.15
             let spread = sin(Double(i) * 0.3 + t * 3.3) * 0.1
             let target = max(0.08, min(1, Double(rms) + variation + spread))
@@ -147,7 +157,7 @@ private final class WaveformView: NSView {
 
         // Compact dictation only has ~99 pt between title and Stop; 24×3pt
         // bars with 2 pt gaps need 118. Scale to bounds so they never overlap.
-        let n = CGFloat(kWaveformBars)
+        let n = CGFloat(barCount)
         let scale = min(1, w / (n * 3 + (n - 1) * 2))
         let barWidth = 3 * scale
         let barGap = 2 * scale
@@ -155,7 +165,7 @@ private final class WaveformView: NSView {
         let offsetX = (w - occupied) / 2
 
         ctx.setFillColor(kAccent.cgColor)
-        for i in 0..<kWaveformBars {
+        for i in 0..<barCount {
             let barH = max(2, bars[i] * (h - 4))
             let x = offsetX + CGFloat(i) * (barWidth + barGap)
             let y = (h - barH) / 2
@@ -313,7 +323,8 @@ private final class PillContentView: NSView {
         modeLabel.stringValue = title
         modeLabel.isHidden = compact
 
-        let showWave = (mode == .dictation)
+        let showWave = (mode == .dictation || mode == .meeting)
+        waveform.setBarCount(mode == .meeting ? kMeetingWaveformBars : kDictationWaveformBars)
         waveform.isHidden = !showWave
         waveform.setActive(showWave)
         spinner.isHidden = (mode != .polishing)
@@ -423,9 +434,20 @@ private final class PillContentView: NSView {
 
         if compact {
             modeLabel.frame = .zero
-            waveform.frame = .zero
             spinner.frame = .zero
             liveLabel.frame = .zero
+            // Between the recording dot and Stop: 6 pt inset each side so
+            // three 3 pt bars never sit on a neighbour (SOU-118 AC3).
+            let waveGap: CGFloat = 6
+            let waveX = hPad + dotSize + waveGap
+            let waveW = max(0, btnX - waveGap - waveX)
+            let waveH: CGFloat = 16
+            waveform.frame = CGRect(
+                x: waveX,
+                y: headerY + (rowH - waveH) / 2,
+                width: waveW,
+                height: waveH
+            )
         } else {
             let labelX = hPad + dotSize + 8
             let labelW: CGFloat = 96
