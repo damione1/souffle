@@ -183,6 +183,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "approx"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1154,15 +1163,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpufeatures"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1513,7 +1513,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.117",
- "unicode-xid",
 ]
 
 [[package]]
@@ -1923,6 +1922,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "fdaf-aec"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71894e687a65938dde60f3a943eedd11d22f484a1184612799d1251536fac28a"
+dependencies = [
+ "nalgebra",
+ "num-complex",
+ "rustfft",
 ]
 
 [[package]]
@@ -3859,6 +3869,33 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nalgebra"
+version = "0.32.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5c17de023a86f59ed79891b2e5d5a94c705dbe904a5b5c9c952ea6221b03e4"
+dependencies = [
+ "approx",
+ "matrixmultiply",
+ "nalgebra-macros",
+ "num-complex",
+ "num-rational",
+ "num-traits",
+ "simba",
+ "typenum",
+]
+
+[[package]]
+name = "nalgebra-macros"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "254a5372af8fc138e36684761d3c0cdb758a4410e938babcff1c860ce14ddbfc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -5923,6 +5960,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "safe_arch"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "safetensors"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6337,7 +6383,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.2.17",
+ "cpufeatures",
  "digest",
 ]
 
@@ -6364,6 +6410,19 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
  "libc",
+]
+
+[[package]]
+name = "simba"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "061507c94fc6ab4ba1c9a0305018408e312e17c041eb63bef8aa726fa33aceae"
+dependencies = [
+ "approx",
+ "num-complex",
+ "num-traits",
+ "paste",
+ "wide",
 ]
 
 [[package]]
@@ -6446,72 +6505,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sonora"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-dependencies = [
- "sonora-aec3",
- "sonora-agc2",
- "sonora-common-audio",
- "sonora-ns",
- "sonora-simd",
- "tracing",
-]
-
-[[package]]
-name = "sonora-aec3"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-dependencies = [
- "sonora-common-audio",
- "sonora-fft",
- "sonora-simd",
-]
-
-[[package]]
-name = "sonora-agc2"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-dependencies = [
- "bytemuck",
- "derive_more 2.1.1",
- "sonora-common-audio",
- "sonora-fft",
- "sonora-simd",
- "tracing",
-]
-
-[[package]]
-name = "sonora-common-audio"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-dependencies = [
- "derive_more 2.1.1",
- "sonora-simd",
-]
-
-[[package]]
-name = "sonora-fft"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-
-[[package]]
-name = "sonora-ns"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-dependencies = [
- "sonora-fft",
-]
-
-[[package]]
-name = "sonora-simd"
-version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/sonora?rev=70c673606e1db8442a8ba20659b2bc7355555274#70c673606e1db8442a8ba20659b2bc7355555274"
-dependencies = [
- "cpufeatures 0.3.0",
-]
-
-[[package]]
 name = "souffle"
 version = "0.0.0"
 dependencies = [
@@ -6530,6 +6523,7 @@ dependencies = [
  "dirs-next",
  "dispatch2",
  "enigo",
+ "fdaf-aec",
  "futures-util",
  "hf-hub",
  "hound",
@@ -6560,7 +6554,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sonora",
  "souffle",
  "souffle-mcp",
  "specta",
@@ -8509,6 +8502,16 @@ dependencies = [
  "cmake",
  "fs_extra",
  "semver",
+]
+
+[[package]]
+name = "wide"
+version = "0.7.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]
