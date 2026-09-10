@@ -23,6 +23,14 @@ pub const FRAME_SAMPLES: usize = 480;
 /// are discarded. Bounds clock drift between the two devices; transcription
 /// tolerates the resulting sub-frame discontinuity.
 const MAX_TAP_LEAD_SAMPLES: usize = MIX_RATE as usize / 4;
+/// RMS floor above which a block of tap samples counts as carrying far-end
+/// signal (SOU-119). The tap runs on the aggregate device clock, so it hands
+/// over ~48000 frames a second whether or not anything is playing: counting
+/// frames says the tap is alive, never that the other participants were
+/// heard. ~-66 dBFS: two dozen dB below the AEC gate below (so no real
+/// playback, however quiet, is missed) and well above the noise floor of a
+/// digitally silent mix, which is exact zeros in practice.
+const TAP_SIGNAL_RMS_FLOOR: f32 = 0.0005;
 /// RMS floor on the tap leg below which AEC must not run (SOU-063).
 /// Speakers-on / nothing-playing is the common damage case: the canceller
 /// has a silent reference and suppresses the mic instead. ~-42 dBFS —
@@ -48,6 +56,14 @@ pub struct MeetingMixer {
     aec: Option<Aec>,
     /// Tap samples discarded to bound drift; logged at session end.
     tap_discarded: u64,
+    /// Tap samples pulled out of the ring since this mixer was built,
+    /// silence included. Zero means the tap's queue never fired at all,
+    /// which is not the same as a tap delivering silence (SOU-119).
+    tap_ingested: u64,
+    /// Of those, the ones in a block whose RMS cleared
+    /// [`TAP_SIGNAL_RMS_FLOOR`]. This is the measure that says the far end
+    /// was actually heard.
+    tap_signal: u64,
     /// Recent far-end level. Gates *applying* AEC output, not whether
     /// the instance lives (SOU-063). A pause must not `set_aec(None)`.
     tap_rms_ema: f32,
@@ -82,6 +98,8 @@ impl MeetingMixer {
             scratch: vec![0.0; 4096],
             aec: None,
             tap_discarded: 0,
+            tap_ingested: 0,
+            tap_signal: 0,
             tap_rms_ema: 0.0,
             aec_apply_mix: 0.0,
         }
@@ -100,8 +118,15 @@ impl MeetingMixer {
             return;
         }
         let mean_sq = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
-        self.tap_rms_ema =
-            TAP_RMS_ATTACK * mean_sq.sqrt() + (1.0 - TAP_RMS_ATTACK) * self.tap_rms_ema;
+        let rms = mean_sq.sqrt();
+        // Per block, not smoothed: the EMA below is a control signal for the
+        // AEC, while this is a plain tally of how much of the session carried
+        // far-end signal. Blocks are one tick of ring content (~20ms), short
+        // enough that speech never averages down under the floor.
+        if rms >= TAP_SIGNAL_RMS_FLOOR {
+            self.tap_signal += samples.len() as u64;
+        }
+        self.tap_rms_ema = TAP_RMS_ATTACK * rms + (1.0 - TAP_RMS_ATTACK) * self.tap_rms_ema;
     }
 
     /// Enable/disable echo cancellation (e.g. when the output route changes
@@ -284,6 +309,16 @@ impl MeetingMixer {
         self.tap_discarded
     }
 
+    /// Tap samples this mixer has taken in, at the tap's own rate.
+    pub fn tap_ingested(&self) -> u64 {
+        self.tap_ingested
+    }
+
+    /// Tap samples that carried far-end signal, at the mix rate.
+    pub fn tap_signal(&self) -> u64 {
+        self.tap_signal
+    }
+
     fn ingest(&mut self, bound_tap_lead: bool) {
         loop {
             let n = self.mic.pop_slice(&mut self.scratch);
@@ -299,6 +334,7 @@ impl MeetingMixer {
             if n == 0 {
                 break;
             }
+            self.tap_ingested += n as u64;
             let resampled = self.tap_to_mix.process(&self.scratch[..n]);
             self.note_tap_samples(&resampled);
             tap_added += resampled.len();
@@ -421,6 +457,68 @@ mod tests {
         // Steady-state samples carry both sources (0.1 + 0.2).
         let mid = out[out.len() / 2];
         assert!((mid - 0.3).abs() < 0.05, "expected ~0.3, got {mid}");
+    }
+
+    /// SOU-119 AC8: the case the ticket exists for. A tap that is up and
+    /// carrying digital silence still delivers the full frame rate, so the
+    /// frame count alone would call that session healthy.
+    #[test]
+    fn a_tap_delivering_silence_counts_frames_but_no_signal() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        for _ in 0..50 {
+            mic.push_slice(&vec![0.1f32; 960]);
+            tap.push_slice(&vec![0.0f32; 960]);
+            mixer.tick();
+        }
+
+        assert!(
+            mixer.tap_ingested() >= 48_000,
+            "the tap did deliver frames: {}",
+            mixer.tap_ingested()
+        );
+        assert_eq!(
+            mixer.tap_signal(),
+            0,
+            "none of those frames carried far-end signal"
+        );
+    }
+
+    #[test]
+    fn a_tap_carrying_playback_counts_signal() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        for _ in 0..50 {
+            mic.push_slice(&vec![0.1f32; 960]);
+            tap.push_slice(&vec![0.05f32; 960]);
+            mixer.tick();
+        }
+
+        assert!(
+            mixer.tap_signal() >= 48_000,
+            "quiet but real playback must count as signal: {}",
+            mixer.tap_signal()
+        );
+    }
+
+    /// The floor has to sit below anything a user would call audible, not
+    /// just below line level.
+    #[test]
+    fn very_quiet_playback_still_counts_as_signal() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        // ~-60 dBFS, far below the AEC gate and barely audible.
+        for _ in 0..50 {
+            mic.push_slice(&vec![0.1f32; 960]);
+            tap.push_slice(&vec![0.001f32; 960]);
+            mixer.tick();
+        }
+
+        assert!(mixer.tap_signal() > 0, "quiet playback is still playback");
+        assert!(
+            !mixer.tap_has_energy(),
+            "and it stays below the AEC apply floor, which is a different question"
+        );
     }
 
     #[test]

@@ -74,6 +74,30 @@ type IoBlock = RcBlock<
     ),
 >;
 
+/// Prefix of the error returned when the TCC-gated tap creation call fails.
+/// [`failure_reason`] keys the user-facing reason off it, so the two must be
+/// edited together (SOU-119).
+const TAP_CREATE_FAILED: &str = "AudioHardwareCreateProcessTap failed";
+/// Same, for the OS version gate.
+const TAP_UNSUPPORTED: &str = "System audio capture requires macOS 14.4";
+
+/// Which reason a `spawn_tap` failure should be reported as. Tap creation is
+/// the call that triggers (and is refused by) the "system audio recording"
+/// TCC prompt, so nothing else in this file can fail that way: reporting it
+/// as a permission problem is what tells the user what to actually do, and
+/// AC5 of SOU-119 asks for exactly that instead of a generic message with
+/// the real one hidden in a tooltip.
+pub fn failure_reason(error: &str) -> crate::app_events::SystemAudioReason {
+    use crate::app_events::SystemAudioReason;
+    if error.starts_with(TAP_CREATE_FAILED) {
+        SystemAudioReason::PermissionDenied
+    } else if error.starts_with(TAP_UNSUPPORTED) {
+        SystemAudioReason::Unsupported
+    } else {
+        SystemAudioReason::ProbeFailed
+    }
+}
+
 /// Handle to a tap running on its own thread. Dropping it asks that thread
 /// to tear the tap down without ever blocking the caller.
 pub struct TapHandle {
@@ -160,7 +184,7 @@ impl SystemTap {
     /// Create a mono global tap and start delivering samples to `producer`.
     pub fn start(producer: HeapProd<f32>) -> Result<Self, String> {
         if !crate::platform::system_audio_capture_supported() {
-            return Err("System audio capture requires macOS 14.4 or later".into());
+            return Err(format!("{TAP_UNSUPPORTED} or later"));
         }
 
         // Mono mixdown of every process, excluding none.
@@ -182,8 +206,8 @@ impl SystemTap {
         let status = unsafe { AudioHardwareCreateProcessTap(Some(&description), &mut tap_id) };
         if status != 0 {
             return Err(format!(
-                "AudioHardwareCreateProcessTap failed ({status}) — system audio \
-                 recording permission may be denied"
+                "{TAP_CREATE_FAILED} ({status}): system audio recording \
+                 permission is most likely denied"
             ));
         }
 
@@ -477,6 +501,40 @@ mod tests {
     use ringbuf::traits::{Observer, Split};
 
     use super::*;
+
+    /// The messages are spelled out here on purpose: the classifier reads a
+    /// prefix, so a reworded error must fail this test rather than silently
+    /// downgrade a refused permission to a generic failure (SOU-119).
+    #[test]
+    fn a_refused_permission_is_reported_as_a_permission_problem() {
+        assert_eq!(
+            failure_reason(
+                "AudioHardwareCreateProcessTap failed (560227702): system audio recording \
+                 permission is most likely denied"
+            ),
+            crate::app_events::SystemAudioReason::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn an_old_os_is_reported_as_unsupported() {
+        assert_eq!(
+            failure_reason("System audio capture requires macOS 14.4 or later"),
+            crate::app_events::SystemAudioReason::Unsupported
+        );
+    }
+
+    #[test]
+    fn anything_else_stays_a_probe_failure() {
+        assert_eq!(
+            failure_reason("AudioDeviceStart failed (-66748)"),
+            crate::app_events::SystemAudioReason::ProbeFailed
+        );
+        assert_eq!(
+            failure_reason("System tap startup timed out (CoreAudio unresponsive)"),
+            crate::app_events::SystemAudioReason::ProbeFailed
+        );
+    }
 
     #[test]
     fn a_clean_teardown_reports_no_failure() {

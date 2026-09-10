@@ -152,6 +152,7 @@ export const mockMeeting: MeetingTranscript = {
   notes: null,
   calendar_event_id: null,
   participants: [],
+  system_audio: null,
 };
 
 export const mockMeetingList: MeetingListItem[] = [

@@ -208,6 +208,9 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
     getSystemAudioStatus.mockResolvedValueOnce({
       active: false,
       reason: "Screen Recording permission denied",
+      reason_code: "permission_denied",
+      samples: 0,
+      signal_samples: 0,
     });
 
     await bootstrapAppState(app);
@@ -215,6 +218,9 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
     expect(app.systemAudioStatus).toEqual({
       active: false,
       reason: "Screen Recording permission denied",
+      reason_code: "permission_denied",
+      samples: 0,
+      signal_samples: 0,
     });
   });
 
