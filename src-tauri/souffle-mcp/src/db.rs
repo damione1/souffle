@@ -51,8 +51,32 @@ pub fn resolve_db_path() -> PathBuf {
     }
     dirs_next::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(APP_IDENTIFIER)
+        .join(running_app_identifier())
         .join("souffle.db")
+}
+
+fn running_app_identifier() -> String {
+    bundle_identifier_from_info_plist().unwrap_or_else(|| APP_IDENTIFIER.to_string())
+}
+
+/// Sidecar lives at `Foo.app/Contents/MacOS/souffle-mcp`. Nightly builds
+/// use `com.souffle.desktop.nightly`; fall back to the shipped id.
+fn bundle_identifier_from_info_plist() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let macos = exe.parent()?;
+    if macos.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+    let plist = std::fs::read_to_string(macos.parent()?.join("Info.plist")).ok()?;
+    bundle_id_from_info_plist_xml(&plist)
+}
+
+fn bundle_id_from_info_plist_xml(plist: &str) -> Option<String> {
+    let key = "<key>CFBundleIdentifier</key>";
+    let after = plist.split_once(key)?.1.trim_start();
+    let after = after.strip_prefix("<string>")?;
+    let id = after.split_once("</string>")?.0.trim();
+    id.starts_with("com.souffle.").then(|| id.to_string())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -701,6 +725,26 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use tempfile::TempDir;
+
+    #[test]
+    fn reads_nightly_bundle_id_from_info_plist() {
+        let xml = r#"
+            <key>CFBundleName</key>
+            <string>Soufflé Nightly</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.souffle.desktop.nightly</string>
+        "#;
+        assert_eq!(
+            bundle_id_from_info_plist_xml(xml).as_deref(),
+            Some("com.souffle.desktop.nightly")
+        );
+    }
+
+    #[test]
+    fn ignores_a_plist_that_is_not_ours() {
+        let xml = "<key>CFBundleIdentifier</key><string>com.apple.Safari</string>";
+        assert_eq!(bundle_id_from_info_plist_xml(xml), None);
+    }
 
     /// Minimal fixture mirroring the app's current schema (meetings v10 +
     /// segments + dictation_entries + text_search FTS5). Kept intentionally

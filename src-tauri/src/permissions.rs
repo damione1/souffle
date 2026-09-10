@@ -15,7 +15,6 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::constants::APP_IDENTIFIER;
 use crate::db::Database;
 
 /// Pause between the TCC insert call and `open` of System Settings. The
@@ -388,10 +387,11 @@ fn accessibility_trusted_with_prompt(_prompt: bool) -> bool {
 /// the fresh prompt yet); treating that as `Denied` made the UI claim every
 /// repair had failed, including the ones that worked (SOU-054).
 pub fn repair_accessibility() -> Result<RepairAccessibilityResult, String> {
-    tccutil_reset_service("Accessibility", APP_IDENTIFIER)?;
+    let bundle_id = crate::constants::running_app_identifier();
+    tccutil_reset_service("Accessibility", &bundle_id)?;
     // Input Monitoring has the same stale-identity problem. A missing row
     // is not a failure: tccutil still succeeds for a known bundle id.
-    if let Err(e) = tccutil_reset_service("ListenEvent", APP_IDENTIFIER) {
+    if let Err(e) = tccutil_reset_service("ListenEvent", &bundle_id) {
         tracing::warn!(error = %e, "tccutil reset ListenEvent skipped");
     }
     // HID first: AXIsProcessTrustedWithOptions beforehand makes
@@ -656,6 +656,7 @@ pub fn request(kind: PermissionKind) -> PermState {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::constants::APP_IDENTIFIER;
     use std::cell::Cell;
 
     /// The onboarding UI matches on this exact string (`s === "denied"`), so

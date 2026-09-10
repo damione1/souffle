@@ -19,8 +19,12 @@ pub const MIMI_FRAME_SIZE: usize = 1920;
 /// Mimi codec frame rate (24000 / 1920)
 pub const MIMI_FRAMES_PER_SECOND: f64 = 12.5;
 
-/// Application bundle identifier
+/// Application bundle identifier of the shipped app.
 pub const APP_IDENTIFIER: &str = "com.souffle.desktop";
+
+/// Debug / `tauri dev` builds (`tauri.nightly.conf.json`). Separate TCC
+/// identity so a local build can sit next to the installed app.
+pub const NIGHTLY_APP_IDENTIFIER: &str = "com.souffle.desktop.nightly";
 
 /// Former bundle identifier; the data directory is renamed from this to
 /// [`APP_IDENTIFIER`] at startup so existing meetings/settings/models survive
@@ -28,17 +32,40 @@ pub const APP_IDENTIFIER: &str = "com.souffle.desktop";
 /// extension.)
 pub const LEGACY_APP_IDENTIFIER: &str = "com.souffle.app";
 
+/// Bundle id of *this* process. Nightly builds are `com.souffle.desktop.nightly`;
+/// cargo test and a bare binary fall back to [`APP_IDENTIFIER`].
+pub fn running_app_identifier() -> String {
+    #[cfg(target_os = "macos")]
+    if let Some(id) = macos_bundle_identifier()
+        && id.starts_with("com.souffle.")
+    {
+        return id;
+    }
+    APP_IDENTIFIER.to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_bundle_identifier() -> Option<String> {
+    use objc2_foundation::NSBundle;
+    let id = NSBundle::mainBundle().bundleIdentifier()?;
+    Some(id.to_string())
+}
+
 /// Get the application data directory (e.g. ~/Library/Application Support/com.souffle.desktop)
 pub fn app_data_dir() -> std::path::PathBuf {
     dirs_next::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(APP_IDENTIFIER)
+        .join(running_app_identifier())
 }
 
 /// Rename the legacy data directory to the current one if it exists and the new
 /// one doesn't. Runs before anything opens the database or log files. Best
 /// effort: on failure the app simply starts fresh at the new path.
+/// Nightly must not steal the production folder.
 pub fn migrate_legacy_data_dir() {
+    if running_app_identifier() != APP_IDENTIFIER {
+        return;
+    }
     let Some(base) = dirs_next::data_dir() else {
         return;
     };
@@ -231,3 +258,19 @@ Rules:
 
 ## Summary
 - ...";
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn nightly_id_is_not_the_shipped_id() {
+        assert_ne!(NIGHTLY_APP_IDENTIFIER, APP_IDENTIFIER);
+        assert_eq!(NIGHTLY_APP_IDENTIFIER, "com.souffle.desktop.nightly");
+    }
+
+    #[test]
+    fn cargo_test_falls_back_to_the_shipped_identifier() {
+        assert_eq!(running_app_identifier(), APP_IDENTIFIER);
+    }
+}
