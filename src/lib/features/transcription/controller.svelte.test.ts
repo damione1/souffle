@@ -1461,7 +1461,7 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
   });
 
-  it("auto-hides the too-short banner after 2s without wiping a later banner", async () => {
+  it("auto-hides the banner after 5s without wiping a later banner", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const ctrl = createTranscriptionController();
@@ -1472,8 +1472,34 @@ describe("transcription controller", () => {
       await ctrl.toggleRecording(true);
       expect(ctrl.statusMessage).toBe("Hold a little longer");
 
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(5000);
       expect(ctrl.statusMessage).toBe("");
+
+      // Test AC4: A later banner cancels the previous timer
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      expect(ctrl.statusMessage).toBe("Hold a little longer");
+      
+      await vi.advanceTimersByTimeAsync(2000);
+      
+      // Simulate another banner before timeout
+      ctrl.app.transcriptionRuntimePhase = "download_required";
+      await vi.advanceTimersByTimeAsync(0); // wait for reactivity
+      // In reality, download_required might trigger modelRequiredBanner via notifyDictationAborted,
+      // but let us just call setBanner directly if we could. Since we cannot access setBanner,
+      // we can trigger another short PTT.
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      
+      // We wait 4000ms. If the first timer was not cancelled, it would fire (2000+4000 > 5000)
+      // and clear the banner.
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(ctrl.statusMessage).toBe("Hold a little longer"); // second banner is still here
+      
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(ctrl.statusMessage).toBe(""); // finally clears
     } finally {
       vi.useRealTimers();
     }
@@ -1489,7 +1515,7 @@ describe("transcription controller", () => {
       await ctrl.toggleRecording();
       simulateRecordingStarted(ctrl.app);
 
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(5000);
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
       });

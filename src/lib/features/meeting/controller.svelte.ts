@@ -290,14 +290,31 @@ function createMeetingControllerInstance() {
     }
   }
 
+  let bannerTimer: ReturnType<typeof setTimeout> | null = null;
+  const AUTO_HIDE_MS = 5000;
+
+  function clearBannerTimer() {
+    if (bannerTimer) {
+      clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+  }
+
   function setBanner(message: string, action?: { label: string; run: () => void }) {
+    clearBannerTimer();
     statusMessage = message;
     statusActionLabel = action?.label;
     statusAction = action?.run;
+    if (message && !action) {
+      bannerTimer = setTimeout(clearBanner, AUTO_HIDE_MS);
+    }
   }
 
   function clearBanner() {
-    setBanner("");
+    clearBannerTimer();
+    statusMessage = "";
+    statusActionLabel = undefined;
+    statusAction = undefined;
   }
 
   function modelRequiredBanner(message: string) {
@@ -878,6 +895,7 @@ function createMeetingControllerInstance() {
     get idleDismissed() { return idleDismissed; },
     onNotesChange,
     flushNotes,
+    clearBanner,
     mount,
     onMeetingSelectionChange,
     refreshSummaryProviders,
