@@ -59,13 +59,16 @@ describe("PermissionsStep microphone denial", () => {
     expect(within(micRow).queryByRole("button", { name: "Open Settings" })).toBeTruthy();
   });
 
-  it("lists Input Monitoring so single-key PTT can be granted", async () => {
+  it("names Accessibility, not Input Monitoring, for single-key capture (SOU-116 AC1)", async () => {
     permissionsApi.getPermissionStatus.mockResolvedValue(statusWith("granted"));
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
-    expect(screen.getByText("Input Monitoring")).toBeTruthy();
-    expect(screen.getByText(/single-key shortcut/)).toBeTruthy();
+    expect(within(rowFor("Accessibility")).getByText(/single-key shortcut/)).toBeTruthy();
+    expect(within(rowFor("Input Monitoring")).queryByText(/single-key/)).toBeNull();
+    expect(
+      within(rowFor("Input Monitoring")).getByText(/without modifying them/),
+    ).toBeTruthy();
   });
 
   it("does not show the denied hint for an unrelated state", async () => {

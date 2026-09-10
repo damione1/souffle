@@ -247,6 +247,25 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
     expect(app.modifierTapStatus).toEqual({ installed: true });
   });
 
+  it("does not let a stale tap snapshot overwrite a live install event (SOU-116)", async () => {
+    let resolveStatus: (value: ModifierTapStatus | null) => void = () => {};
+    getMachineState.mockResolvedValueOnce({ state: "ready", data: { profile } });
+    getModifierTapStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        }),
+    );
+
+    const boot = bootstrapAppState(app);
+    await vi.waitFor(() => expect(getModifierTapStatus).toHaveBeenCalledTimes(1));
+    app.modifierTapStatus = { installed: true };
+    resolveStatus({ installed: false });
+    await boot;
+
+    expect(app.modifierTapStatus).toEqual({ installed: true });
+  });
+
   it("keeps booting when a resync read fails", async () => {
     getMachineState.mockResolvedValueOnce(meeting);
     getSystemAudioStatus.mockRejectedValueOnce(new Error("backend busy"));

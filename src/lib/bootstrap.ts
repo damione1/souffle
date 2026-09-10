@@ -126,9 +126,15 @@ async function resyncAfterReload(app: ReturnType<typeof getAppState>): Promise<v
 
   // Native PTT tap status is edge-triggered; restore after webview reload
   // so the settings banner can reappear without waiting for the next retry
-  // (SOU-116 / AC7).
+  // (SOU-116 / AC7). A live event that arrived while this read was in
+  // flight is newer: the retry loop stops on success, so overwriting
+  // `{ installed: true }` with a stale `{ installed: false }` would stick
+  // the Accessibility banner until the next reload.
   try {
-    app.modifierTapStatus = await getModifierTapStatus();
+    const snapshot = await getModifierTapStatus();
+    if (app.modifierTapStatus === null) {
+      app.modifierTapStatus = snapshot;
+    }
   } catch {
     // Banner stays hidden until the next install attempt emits.
   }
