@@ -1003,48 +1003,7 @@ describe("transcription controller", () => {
     expect(ctrl.modelOperationState).toBe("idle");
   });
 
-  it("rewrite shortcut captures selection and polishes with extra args", async () => {
-    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
-    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
-        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
-        return Promise.resolve(null);
-      }
-      if (cmd === "frontmost_app_name") return Promise.resolve("Safari");
-      if (cmd === "read_selected_text") return Promise.resolve("old selection");
-      return defaultInvoke(cmd, args);
-    });
-
-    const ctrl = createTranscriptionController();
-    await ctrl.mount();
-    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
-
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.anything());
-    });
-    expect(mockInvoke).toHaveBeenCalledWith("frontmost_app_name");
-    expect(mockInvoke).toHaveBeenCalledWith("read_selected_text");
-
-    simulateRecordingStarted(ctrl.app);
-    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
-      text: "hello world",
-      is_final: true,
-      start_ms: 0,
-      end_ms: 1000,
-    });
-
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
-        text: "hello world",
-        focusedApp: "Safari",
-        rewriteOf: "old selection",
-      }));
-    });
-  });
-
-  it("insert start polishes with focusedApp and null rewriteOf", async () => {
+  it("insert start polishes with focusedApp", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "start_transcription") {
@@ -1075,7 +1034,6 @@ describe("transcription controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
       text: "hello world",
       focusedApp: "Mail",
-      rewriteOf: null,
     }));
   });
 
@@ -1513,7 +1471,33 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
   });
 
-  it("auto-hides the too-short banner after 2s without wiping a later banner", async () => {
+  it("does not auto-hide a banner that carries an action", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "get_model_status") {
+          return Promise.resolve({ ...fakeStatus, phase: "download_required" });
+        }
+        return defaultInvoke(cmd);
+      });
+
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+      await ctrl.toggleRecording();
+
+      expect(ctrl.statusActionLabel).toBe("Open model");
+      const message = ctrl.statusMessage;
+      expect(message).toContain("Download and load");
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ctrl.statusMessage).toBe(message);
+      expect(ctrl.statusActionLabel).toBe("Open model");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clearBanner dismisses immediately and cancels the auto-hide timer", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const ctrl = createTranscriptionController();
@@ -1524,8 +1508,56 @@ describe("transcription controller", () => {
       await ctrl.toggleRecording(true);
       expect(ctrl.statusMessage).toBe("Hold a little longer");
 
-      await vi.advanceTimersByTimeAsync(2000);
+      ctrl.clearBanner();
       expect(ctrl.statusMessage).toBe("");
+      expect(ctrl.statusActionLabel).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ctrl.statusMessage).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("auto-hides the banner after 5s without wiping a later banner", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      expect(ctrl.statusMessage).toBe("Hold a little longer");
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ctrl.statusMessage).toBe("");
+
+      // Test AC4: A later banner cancels the previous timer
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      expect(ctrl.statusMessage).toBe("Hold a little longer");
+      
+      await vi.advanceTimersByTimeAsync(2000);
+      
+      // Simulate another banner before timeout
+      ctrl.app.transcriptionRuntimePhase = "download_required";
+      await vi.advanceTimersByTimeAsync(0); // wait for reactivity
+      // In reality, download_required might trigger modelRequiredBanner via notifyDictationAborted,
+      // but let us just call setBanner directly if we could. Since we cannot access setBanner,
+      // we can trigger another short PTT.
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      
+      // We wait 4000ms. If the first timer was not cancelled, it would fire (2000+4000 > 5000)
+      // and clear the banner.
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(ctrl.statusMessage).toBe("Hold a little longer"); // second banner is still here
+      
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(ctrl.statusMessage).toBe(""); // finally clears
     } finally {
       vi.useRealTimers();
     }
@@ -1541,7 +1573,7 @@ describe("transcription controller", () => {
       await ctrl.toggleRecording();
       simulateRecordingStarted(ctrl.app);
 
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(5000);
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
       });
@@ -1746,49 +1778,6 @@ describe("transcription controller", () => {
     });
     // A matched snippet never reaches the LLM (AC3).
     expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
-  });
-
-  it("does not expand snippets in rewrite mode", async () => {
-    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
-    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "list_snippets") {
-        return Promise.resolve([{ id: 1, trigger: "corrige", expansion: "EXPANSION", created_at: "" }]);
-      }
-      if (cmd === "start_transcription") {
-        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
-        return Promise.resolve(null);
-      }
-      if (cmd === "read_selected_text") return Promise.resolve("old selection");
-      return defaultInvoke(cmd, args);
-    });
-
-    const ctrl = createTranscriptionController();
-    await ctrl.mount();
-    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
-
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.anything());
-    });
-    simulateRecordingStarted(ctrl.app);
-    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
-      text: "Corrige la faute de frappe.",
-      is_final: true,
-      start_ms: 0,
-      end_ms: 1000,
-    });
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-
-    // The spoken text is a rewrite instruction, not a trigger: it goes to polish untouched.
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
-        text: "Corrige la faute de frappe.",
-        rewriteOf: "old selection",
-      }));
-    });
-    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.objectContaining({
-      text: expect.stringContaining("EXPANSION"),
-    }));
   });
 
   it("finalization makes no snippet IPC call when no trigger matches", async () => {

@@ -277,7 +277,6 @@
         pasteMethod={controller.app.settings.paste_method}
         toggleShortcut={controller.toggleShortcut}
         pttShortcut={controller.pttShortcut}
-        rewriteShortcut={controller.rewriteShortcut}
         recordingField={controller.recordingField}
         shortcutError={controller.shortcutError}
         onThemeChange={controller.onThemeChange}

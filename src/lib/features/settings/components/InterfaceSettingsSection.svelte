@@ -21,7 +21,6 @@
     pasteMethod,
     toggleShortcut,
     pttShortcut,
-    rewriteShortcut,
     recordingField,
     shortcutError,
     onThemeChange,
@@ -42,16 +41,15 @@
     pasteMethod: PasteMethod;
     toggleShortcut: string;
     pttShortcut: string;
-    rewriteShortcut: string;
-    recordingField: "toggle" | "ptt" | "rewrite" | null;
+    recordingField: "toggle" | "ptt" | null;
     shortcutError: string;
     onThemeChange: (theme: Theme) => void;
     onLocaleChange: (locale: string) => void;
     onAutoPasteChange: (event: Event) => void;
     onPasteDelayChange: (event: Event) => void;
     onPasteMethodChange: (event: Event) => void;
-    onStartRecording: (field: "toggle" | "ptt" | "rewrite") => void;
-    onClearShortcut: (field: "toggle" | "ptt" | "rewrite") => void | Promise<void>;
+    onStartRecording: (field: "toggle" | "ptt") => void;
+    onClearShortcut: (field: "toggle" | "ptt") => void | Promise<void>;
     formatShortcut: (shortcut: string) => string;
     pillHidden: boolean;
     onPillHiddenChange: (event: Event) => void;
@@ -184,26 +182,6 @@
         </button>
         {#if pttShortcut}
           <button onclick={() => onClearShortcut("ptt")} class="btn btn-ghost text-sm">{$t("settings_interface.clear")}</button>
-        {/if}
-      </div>
-    {/snippet}
-  </SettingsField>
-
-  <SettingsField
-    label={$t("settings_interface.rewrite")}
-    description={$t("settings_interface.rewrite_desc")}
-  >
-    {#snippet control()}
-      <div class="flex gap-2 items-center">
-        <button
-          onclick={() => onStartRecording("rewrite")}
-          class="shortcut-button"
-          class:is-recording={recordingField === "rewrite"}
-        >
-          {recordingField === "rewrite" ? $t("settings_interface.press_keys") : formatShortcut(rewriteShortcut)}
-        </button>
-        {#if rewriteShortcut}
-          <button onclick={() => onClearShortcut("rewrite")} class="btn btn-ghost text-sm">{$t("settings_interface.clear")}</button>
         {/if}
       </div>
     {/snippet}

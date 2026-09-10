@@ -71,7 +71,7 @@ describe("createOnboardingController", () => {
     const ctrl = createOnboardingController();
     await ctrl.mount();
 
-    expect(ctrl.steps).toEqual(["permissions", "microphone", "model", "shortcut"]);
+    expect(ctrl.steps).toEqual(["permissions", "microphone", "model", "shortcut", "interview"]);
     expect(ctrl.step).toBe("permissions");
 
     await ctrl.goNext();
@@ -86,7 +86,7 @@ describe("createOnboardingController", () => {
     localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
     const ctrl = createOnboardingController();
     await ctrl.mount();
-    expect(ctrl.steps).toEqual(["microphone", "model", "shortcut"]);
+    expect(ctrl.steps).toEqual(["microphone", "model", "shortcut", "interview"]);
     expect(ctrl.step).toBe("microphone");
   });
 
@@ -144,7 +144,6 @@ describe("createOnboardingController", () => {
       expect(settingsApi.saveShortcuts).toHaveBeenCalledWith({
         toggle: "CommandOrControl+Shift+Space",
         push_to_talk: mockShortcuts.push_to_talk,
-        rewrite: mockShortcuts.rewrite,
       });
     });
     expect(ctrl.recordingShortcut).toBe(false);

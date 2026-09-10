@@ -606,9 +606,9 @@ async clearDictationHistory() : Promise<Result<null, string>> {
 /**
  * Optional LLM polish pass for dictation text before paste/history.
  */
-async polishDictation(text: string, focusedApp: string | null, rewriteOf: string | null) : Promise<Result<DictationPolishResult, string>> {
+async polishDictation(text: string, focusedApp: string | null) : Promise<Result<DictationPolishResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("polish_dictation", { text, focusedApp, rewriteOf }) };
+    return { status: "ok", data: await TAURI_INVOKE("polish_dictation", { text, focusedApp }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1086,7 +1086,6 @@ pillHoldChanged: PillHoldChanged,
 pipelineError: PipelineError,
 shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
-shortcutRewrite: ShortcutRewrite,
 shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
@@ -1112,7 +1111,6 @@ pillHoldChanged: "pill-hold-changed",
 pipelineError: "pipeline-error",
 shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
-shortcutRewrite: "shortcut-rewrite",
 shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
 systemAudioStatus: "system-audio-status",
@@ -1240,6 +1238,10 @@ meeting_audio_retention: MeetingAudioRetention;
  * Does not force Kyutai/moshi decode language.
  */
 meeting_transcription_language: MeetingTranscriptionLanguage; 
+/**
+ * Optional LLM post-processing applied to dictation before paste/history.
+ */
+dictionary_interview_done: boolean; 
 /**
  * Optional LLM post-processing applied to dictation before paste/history.
  */
@@ -1631,15 +1633,7 @@ export type RepairAccessibilityResult = { reset_performed: boolean; prompt_shown
 export type SearchResult = { source_type: string; source_id: string; snippet: string; rank: number }
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
-/**
- * Toggle-style rewrite: capture the current selection, dictate, paste over it.
- */
-export type ShortcutRewrite = null
-export type ShortcutSettings = { toggle: string; push_to_talk: string; 
-/**
- * Toggle-style shortcut that rewrites the current selection.
- */
-rewrite: string }
+export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
 export type SnippetEntry = { id: number; trigger: string; expansion: string; created_at: string }
 export type StateChanged = AppStateMachine

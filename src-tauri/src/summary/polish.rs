@@ -329,7 +329,6 @@ pub fn build_polish_user_prompt(
     transcript: &str,
     dictionary: &[DictionaryEntry],
     focused_app: Option<&str>,
-    rewrite_of: Option<&str>,
 ) -> String {
     // Context first, transcript last, nothing after. Putting "Target app:"
     // after the transcript made Apple Intelligence echo it (or keep writing).
@@ -352,12 +351,6 @@ pub fn build_polish_user_prompt(
         prompt.push_str(
             "\nMatch that app's usual tone and formatting conventions. Do not mention the app name in the output.",
         );
-    }
-    if let Some(selection) = rewrite_of.filter(|selection| !selection.trim().is_empty()) {
-        prompt.push_str("\n\n");
-        prompt.push_str("Rewrite this selected text (replace it; keep meaning unless the dictation changes it):\n---\n");
-        prompt.push_str(selection);
-        prompt.push_str("\n---\nThe dictation transcript below is the user's spoken rewrite instructions. Output only the rewritten selection.");
     }
     prompt.push_str("\n\nDictation transcript:\n---\n");
     prompt.push_str(transcript.trim());
@@ -386,9 +379,6 @@ const PROMPT_LEAK_MARKERS: &[&str] = &[
     "Do not mention the app name",
     "Dictation transcript:",
     "Preferred spellings / vocabulary:",
-    "Rewrite this selected text",
-    "The dictation transcript below is the user's spoken rewrite instructions",
-    "The dictation transcript is the user's spoken rewrite instructions",
     "Reply with the cleaned dictation only",
     "Instructions:",
 ];
@@ -479,12 +469,6 @@ fn format_dictionary_vocabulary(entries: &[DictionaryEntry]) -> Option<String> {
     ))
 }
 
-fn polish_output_basis<'a>(stripped: &'a str, rewrite_of: Option<&'a str>) -> &'a str {
-    rewrite_of
-        .filter(|selection| !selection.trim().is_empty())
-        .unwrap_or(stripped)
-}
-
 fn polish_system_prompt(provider: SummaryProviderKind) -> &'static str {
     match provider {
         SummaryProviderKind::Ollama => super::ollama::DICTATION_POLISH_SYSTEM_PROMPT,
@@ -500,7 +484,6 @@ pub async fn polish_dictation_text(
     available_models: &[super::SummaryModelDescriptor],
     dictionary: &[DictionaryEntry],
     focused_app: Option<&str>,
-    rewrite_of: Option<&str>,
 ) -> DictationPolishResult {
     let stripped = strip_invisible_chars(raw_text);
 
@@ -553,13 +536,7 @@ pub async fn polish_dictation_text(
         }
     };
 
-    let prompt = build_polish_user_prompt(
-        &template_prompt,
-        &stripped,
-        dictionary,
-        focused_app,
-        rewrite_of,
-    );
+    let prompt = build_polish_user_prompt(&template_prompt, &stripped, dictionary, focused_app);
     let no_op = |_: SummarizeProgress| {};
     let raw = match generate_with_provider(
         provider,
@@ -568,9 +545,7 @@ pub async fn polish_dictation_text(
         polish_system_prompt(provider),
         prompt,
         0.1,
-        super::ollama::polish_budget(super::estimate_tokens(polish_output_basis(
-            &stripped, rewrite_of,
-        ))),
+        super::ollama::polish_budget(super::estimate_tokens(&stripped)),
         &no_op,
         false,
     )
@@ -591,8 +566,7 @@ pub async fn polish_dictation_text(
         Ok(text) => {
             let text = super::formatters::apply_post_polish_formatters(&text);
             let text = strip_prompt_leakage(&text, &stripped);
-            let basis = polish_output_basis(&stripped, rewrite_of);
-            let text = clamp_polish_expansion(template.id.as_str(), basis, &text);
+            let text = clamp_polish_expansion(template.id.as_str(), &stripped, &text);
             if text.trim().is_empty() {
                 DictationPolishResult {
                     text: stripped.trim().to_string(),
@@ -622,8 +596,7 @@ mod tests {
         TEMPLATE_NO_FILLERS, build_polish_user_prompt, clamp_polish_expansion,
         default_polish_templates, early_polish_dictation_result, effective_template_prompt,
         is_blank_for_polish, is_own_app_name, merge_polish_templates, parse_polish_response,
-        polish_output_basis, strip_invisible_chars, strip_prompt_leakage,
-        superseded_default_prompts,
+        strip_invisible_chars, strip_prompt_leakage, superseded_default_prompts,
     };
     use crate::filter::DictionaryEntry;
     use crate::settings::{AppSettings, DictationPolishTemplate};
@@ -806,12 +779,11 @@ mod tests {
 
     #[test]
     fn build_polish_user_prompt_includes_template_and_transcript() {
-        let prompt = build_polish_user_prompt("Make bullets", "hello world", &[], None, None);
+        let prompt = build_polish_user_prompt("Make bullets", "hello world", &[], None);
         assert!(prompt.contains("Make bullets"));
         assert!(prompt.contains("hello world"));
         assert!(!prompt.contains("Preferred spellings"));
         assert!(!prompt.contains("Target app:"));
-        assert!(!prompt.contains("Rewrite this selected text"));
     }
 
     #[test]
@@ -824,7 +796,6 @@ mod tests {
                 dict_entry("Kubernetes", None),
             ],
             None,
-            None,
         );
         assert!(prompt.contains("Preferred spellings / vocabulary:"));
         assert!(prompt.contains("- V6 (also heard as: vésix, vee six)"));
@@ -835,18 +806,17 @@ mod tests {
     #[test]
     fn build_polish_user_prompt_skips_empty_dictionary_section() {
         let prompt =
-            build_polish_user_prompt("Clean this", "hello", &[dict_entry("  ", None)], None, None);
+            build_polish_user_prompt("Clean this", "hello", &[dict_entry("  ", None)], None);
         assert!(!prompt.contains("Preferred spellings"));
     }
 
     #[test]
     fn build_polish_user_prompt_includes_focused_app() {
-        let prompt = build_polish_user_prompt("Clean this", "hello", &[], Some("Mail"), None);
+        let prompt = build_polish_user_prompt("Clean this", "hello", &[], Some("Mail"));
         assert!(prompt.contains("Target app: Mail"));
         assert!(prompt.contains(
             "Match that app's usual tone and formatting conventions. Do not mention the app name in the output."
         ));
-        assert!(!prompt.contains("Rewrite this selected text"));
         let target_at = prompt.find("Target app: Mail").unwrap();
         let transcript_at = prompt.find("Dictation transcript:").unwrap();
         assert!(
@@ -858,7 +828,7 @@ mod tests {
     #[test]
     fn build_polish_user_prompt_omits_souffle_as_target_app() {
         for name in ["Soufflé", "Souffle", "soufflé", " souffle "] {
-            let prompt = build_polish_user_prompt("Clean this", "hello", &[], Some(name), None);
+            let prompt = build_polish_user_prompt("Clean this", "hello", &[], Some(name));
             assert!(
                 !prompt.contains("Target app:"),
                 "own app {name:?} must not be injected as polish context"
@@ -903,38 +873,9 @@ mod tests {
     }
 
     #[test]
-    fn build_polish_user_prompt_includes_rewrite_of() {
-        let prompt = build_polish_user_prompt(
-            "Clean this",
-            "make it shorter",
-            &[],
-            None,
-            Some("The original paragraph."),
-        );
-        assert!(prompt.contains(
-            "Rewrite this selected text (replace it; keep meaning unless the dictation changes it):"
-        ));
-        assert!(prompt.contains("---\nThe original paragraph.\n---"));
-        assert!(prompt.contains(
-            "The dictation transcript below is the user's spoken rewrite instructions. Output only the rewritten selection."
-        ));
+    fn build_polish_user_prompt_omits_blank_app_context() {
+        let prompt = build_polish_user_prompt("Clean this", "hello", &[], Some("  "));
         assert!(!prompt.contains("Target app:"));
-    }
-
-    #[test]
-    fn polish_output_basis_uses_the_selection_when_rewriting() {
-        let instruction = "make it shorter";
-        let selection = "A long selected passage that must survive the rewrite.";
-        assert_eq!(polish_output_basis(instruction, Some(selection)), selection);
-        assert_eq!(polish_output_basis(instruction, None), instruction);
-        assert_eq!(polish_output_basis(instruction, Some("  \n")), instruction);
-    }
-
-    #[test]
-    fn build_polish_user_prompt_omits_blank_app_and_rewrite_context() {
-        let prompt = build_polish_user_prompt("Clean this", "hello", &[], Some("  "), Some("\n"));
-        assert!(!prompt.contains("Target app:"));
-        assert!(!prompt.contains("Rewrite this selected text"));
     }
 
     #[test]

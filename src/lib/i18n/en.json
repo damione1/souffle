@@ -141,8 +141,6 @@
     "paste_method_clipboard": "Clipboard (⌘V)",
     "paste_method_type": "Simulated typing",
     "paste_method_ax": "Focused field",
-    "rewrite": "Rewrite selection",
-    "rewrite_desc": "Press to dictate a rewrite of the selected text. Pastes over the selection instead of inserting.",
     "paste_delay": "Paste delay (ms)",
     "paste_delay_desc": "Wait time before pasting. Increase if the text lands in the wrong app.",
     "toggle_recording": "Toggle recording",
@@ -429,7 +427,17 @@
     "continue": "Continue",
     "back": "Back",
     "finish": "Get started",
-    "step_progress": "Step {current} of {total}"
+    "step_progress": "Step {current} of {total}",
+    "interview_title": "Dictionary",
+    "interview_subtitle": "5 optional questions to help Souffle recognize your usual words.",
+    "interview_skip": "Skip",
+    "interview_next": "Next",
+    "interview_q_name": "What is your first name?",
+    "interview_q_job": "What is your job?",
+    "interview_q_people": "What are the first names of your colleagues or relatives?",
+    "interview_q_jargon": "What jargon do you frequently use?",
+    "interview_q_tone": "What tone or style should Souffle use when polishing your dictation (e.g. casual, formal, concise)?",
+    "interview_ton_polish_warning": "Dictation polish is disabled. This style will be saved but ignored until it is re-enabled."
   },
   "status_chip": {
     "ready": "Ready",

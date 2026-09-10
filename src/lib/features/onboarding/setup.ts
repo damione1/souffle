@@ -3,7 +3,7 @@ import type { AppStateMachine, TranscriptionRuntimePhase } from "../../types";
 export const PERMISSIONS_STORAGE_KEY = "permissionsOnboarded";
 export const SETUP_STORAGE_KEY = "setupOnboarded";
 
-export type SetupStep = "permissions" | "microphone" | "model" | "shortcut";
+export type SetupStep = "permissions" | "microphone" | "model" | "shortcut" | "interview";
 
 export type SetupFlags = {
   permissionsDone: boolean;
@@ -77,12 +77,11 @@ export function decideAutostartOnFinish(recoveryOnly: boolean, current: boolean)
   return recoveryOnly ? current : true;
 }
 
-/** First-run walks permissions (if needed) → mic → model → shortcut.
- * Re-download after a deleted model is model-only. */
-export function wizardSteps(flags: SetupFlags): SetupStep[] {
+export function wizardSteps(flags: SetupFlags, dictionaryInterviewDone: boolean): SetupStep[] {
   if (flags.setupDone) return ["model"];
   const steps: SetupStep[] = [];
   if (!flags.permissionsDone) steps.push("permissions");
   steps.push("microphone", "model", "shortcut");
+  if (!dictionaryInterviewDone) steps.push("interview");
   return steps;
 }

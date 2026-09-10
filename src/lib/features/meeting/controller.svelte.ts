@@ -311,12 +311,29 @@ function createMeetingControllerInstance() {
     }
   }
 
+  let bannerTimer: ReturnType<typeof setTimeout> | null = null;
+  const AUTO_HIDE_MS = 5000;
+
+  function clearBannerTimer() {
+    if (bannerTimer) {
+      clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+  }
+
   function setBanner(reason: StatusReason | null) {
+    clearBannerTimer();
     statusReason = reason;
+    // SOU-099: a banner that only reports a past event fades out on its own;
+    // one carrying a button waits for the user to act on it.
+    if (reason && !reason.onAction) {
+      bannerTimer = setTimeout(clearBanner, AUTO_HIDE_MS);
+    }
   }
 
   function clearBanner() {
-    setBanner(null);
+    clearBannerTimer();
+    statusReason = null;
   }
 
   function modelRequiredBanner(message: string) {
@@ -895,6 +912,7 @@ function createMeetingControllerInstance() {
     get idleDismissed() { return idleDismissed; },
     onNotesChange,
     flushNotes,
+    clearBanner,
     mount,
     onMeetingSelectionChange,
     refreshSummaryProviders,
@@ -985,5 +1003,6 @@ export function createMeetingController() {
  * Clear the controller singleton so tests can start fresh.
  */
 export function resetMeetingControllerForTest() {
+  instance?.clearBanner();
   instance = null;
 }

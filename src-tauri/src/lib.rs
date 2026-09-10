@@ -177,7 +177,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             app_events::Navigate,
             app_events::ShortcutToggle,
-            app_events::ShortcutRewrite,
             app_events::ShortcutPttStart,
             app_events::ShortcutPttStop,
             app_events::StateChanged,

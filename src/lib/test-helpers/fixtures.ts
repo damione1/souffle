@@ -214,6 +214,7 @@ export const mockSettings: AppSettings = {
   autostart_enabled: false,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
+  dictionary_interview_done: false,
   dictation_polish_enabled: true,
   dictation_polish_template_id: "clean",
   dictation_polish_templates: [
@@ -237,7 +238,6 @@ export const mockSettings: AppSettings = {
 export const mockShortcuts: ShortcutSettings = {
   toggle: "CommandOrControl+Shift+S",
   push_to_talk: "CommandOrControl+Shift+Space",
-  rewrite: "",
 };
 
 // ---------------------------------------------------------------------------

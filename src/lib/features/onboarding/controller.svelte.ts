@@ -39,7 +39,7 @@ export function createOnboardingController() {
   let statusMessage = $state("");
   let isStarting = $state(false);
 
-  let steps = $state<SetupStep[]>(wizardSteps(readSetupFlags()));
+  let steps = $state<SetupStep[]>(wizardSteps(readSetupFlags(), app.settings?.dictionary_interview_done ?? false));
   let stepIndex = $state(0);
   let recoveryOnly = $state(readSetupFlags().setupDone);
 
@@ -48,7 +48,6 @@ export function createOnboardingController() {
 
   let toggleShortcut = $state("CommandOrControl+Shift+Space");
   let pushToTalk = $state("");
-  let rewrite = $state("");
   let recordingShortcut = $state(false);
   let shortcutError = $state("");
   // Mirrors the backend default (settings.rs) until the real Accessibility
@@ -70,6 +69,7 @@ export function createOnboardingController() {
       case "permissions":
       case "microphone":
       case "shortcut":
+      case "interview":
         return true;
       case "model":
         return modelReady && !busy;
@@ -86,7 +86,7 @@ export function createOnboardingController() {
   async function mount() {
     const flags = readSetupFlags();
     recoveryOnly = flags.setupDone;
-    steps = wizardSteps(flags);
+    steps = wizardSteps(flags, app.settings.dictionary_interview_done);
     stepIndex = 0;
     selectedDevice = app.selectedDevice;
 
@@ -119,7 +119,6 @@ export function createOnboardingController() {
       const shortcuts = await getShortcuts();
       toggleShortcut = shortcuts.toggle || "CommandOrControl+Shift+Space";
       pushToTalk = shortcuts.push_to_talk;
-      rewrite = shortcuts.rewrite;
     } catch {
       // Keep the built-in default.
     }
@@ -204,7 +203,6 @@ export function createOnboardingController() {
       await saveShortcuts({
         toggle: value,
         push_to_talk: pushToTalk,
-        rewrite,
       });
     } catch (e) {
       shortcutError = errorMessage(e);

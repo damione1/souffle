@@ -1,14 +1,18 @@
 <script lang="ts">
+  import { X } from "@lucide/svelte";
+  import { t } from "svelte-i18n";
   let {
     message,
     variant = "info",
     actionLabel,
-    onAction
+    onAction,
+    onDismiss
   }: {
     message: string;
     variant?: "warning" | "danger" | "info";
     actionLabel?: string;
     onAction?: () => void;
+    onDismiss?: () => void;
   } = $props();
 </script>
 
@@ -22,9 +26,22 @@
   }`}
 >
   <p class="text-sm">{message}</p>
-  {#if actionLabel && onAction}
-    <button class="btn btn-primary btn-sm shrink-0" onclick={onAction}>
-      {actionLabel}
-    </button>
-  {/if}
+
+  <div class="flex items-center gap-2">
+    {#if actionLabel && onAction}
+      <button type="button" class="btn btn-primary btn-sm shrink-0" onclick={onAction}>
+        {actionLabel}
+      </button>
+    {/if}
+    {#if onDismiss}
+      <button
+        type="button"
+        class="btn btn-icon shrink-0"
+        onclick={onDismiss}
+        aria-label={$t("mic_toast.dismiss")}
+      >
+        <X size={14} aria-hidden="true" />
+      </button>
+    {/if}
+  </div>
 </div>
