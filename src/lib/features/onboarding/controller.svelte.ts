@@ -39,7 +39,7 @@ export function createOnboardingController() {
   let statusMessage = $state("");
   let isStarting = $state(false);
 
-  let steps = $state<SetupStep[]>(wizardSteps(readSetupFlags()));
+  let steps = $state<SetupStep[]>(wizardSteps(readSetupFlags(), app.settings?.dictionary_interview_done ?? false));
   let stepIndex = $state(0);
   let recoveryOnly = $state(readSetupFlags().setupDone);
 
@@ -70,6 +70,7 @@ export function createOnboardingController() {
       case "permissions":
       case "microphone":
       case "shortcut":
+      case "interview":
         return true;
       case "model":
         return modelReady && !busy;
@@ -86,7 +87,7 @@ export function createOnboardingController() {
   async function mount() {
     const flags = readSetupFlags();
     recoveryOnly = flags.setupDone;
-    steps = wizardSteps(flags);
+    steps = wizardSteps(flags, app.settings.dictionary_interview_done);
     stepIndex = 0;
     selectedDevice = app.selectedDevice;
 

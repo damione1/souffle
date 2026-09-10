@@ -118,24 +118,34 @@ describe("decideShowSetupWizard", () => {
 
 describe("wizardSteps", () => {
   it("starts at permissions for a new user", () => {
-    expect(wizardSteps({ permissionsDone: false, setupDone: false })).toEqual([
+    expect(wizardSteps({ permissionsDone: false, setupDone: false }, false)).toEqual([
       "permissions",
       "microphone",
       "model",
       "shortcut",
+      "interview",
     ]);
   });
 
   it("resumes at microphone after permissions were granted", () => {
-    expect(wizardSteps({ permissionsDone: true, setupDone: false })).toEqual([
+    expect(wizardSteps({ permissionsDone: true, setupDone: false }, false)).toEqual([
       "microphone",
       "model",
       "shortcut",
+      "interview",
     ]);
   });
 
   it("is model-only when setup was already completed", () => {
-    expect(wizardSteps({ permissionsDone: true, setupDone: true })).toEqual(["model"]);
+    expect(wizardSteps({ permissionsDone: true, setupDone: true }, false)).toEqual(["model"]);
+  });
+
+  it("skips interview if already done", () => {
+    expect(wizardSteps({ permissionsDone: true, setupDone: false }, true)).toEqual([
+      "microphone",
+      "model",
+      "shortcut",
+    ]);
   });
 });
 

@@ -2,6 +2,7 @@
   import { Download, Keyboard, Lock, Mic, RefreshCw } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { locale, t } from "svelte-i18n";
+  import DictionaryInterview from "./DictionaryInterview.svelte";
   import ProgressBar from "../../components/ui/ProgressBar.svelte";
   import Spinner from "../../components/ui/Spinner.svelte";
   import StatusBanner from "../../components/ui/StatusBanner.svelte";
@@ -17,6 +18,7 @@
     microphone: "onboarding.mic_title",
     model: "onboarding.model_title",
     shortcut: "onboarding.shortcut_title",
+    interview: "onboarding.interview_title",
   } as const;
 
   const subtitles = {
@@ -24,6 +26,7 @@
     microphone: "onboarding.mic_subtitle",
     model: "onboarding.model_hint",
     shortcut: "onboarding.shortcut_subtitle",
+    interview: "onboarding.interview_subtitle",
   } as const;
 
   const continueLabel = $derived(
@@ -166,7 +169,7 @@
           </select>
         </div>
       {/if}
-    {:else}
+    {:else if controller.step === "shortcut"}
       <div class="flex flex-col gap-4 text-left">
         <div class="flex items-center gap-3">
           <Keyboard size={16} class="shrink-0 text-text-muted" aria-hidden="true" />
@@ -220,10 +223,13 @@
           </div>
         {/if}
       </div>
+    {:else if controller.step === "interview"}
+      <DictionaryInterview onComplete={() => void controller.goNext()} />
     {/if}
 
-    <div class="flex items-center gap-3">
-      {#if controller.stepIndex > 0}
+    {#if controller.step !== "interview"}
+      <div class="flex items-center gap-3">
+        {#if controller.stepIndex > 0}
         <button
           type="button"
           class="btn btn-ghost"
@@ -250,6 +256,7 @@
         {/if}
         {continueLabel}
       </button>
-    </div>
+      </div>
+    {/if}
   </div>
 </div>

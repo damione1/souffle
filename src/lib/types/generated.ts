@@ -1231,6 +1231,10 @@ meeting_transcription_language: MeetingTranscriptionLanguage;
 /**
  * Optional LLM post-processing applied to dictation before paste/history.
  */
+dictionary_interview_done: boolean; 
+/**
+ * Optional LLM post-processing applied to dictation before paste/history.
+ */
 dictation_polish_enabled: boolean; 
 /**
  * Active polish template id (clean, email, bullets, no_fillers).

@@ -83,6 +83,7 @@ const defaultSettings: AppSettings = {
   autostart_enabled: false,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
+  dictionary_interview_done: false,
   dictation_polish_enabled: true,
   dictation_polish_template_id: "clean",
   dictation_polish_templates: [
