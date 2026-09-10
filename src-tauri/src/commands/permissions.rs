@@ -1,22 +1,37 @@
+use std::sync::Arc;
+
+use tauri::State;
+
 use crate::permissions::{
     self, PermState, PermissionKind, PermissionStatus, RepairAccessibilityResult,
 };
+use crate::state::AppState;
 
 /// Cheap, non-prompting snapshot for the onboarding's initial render.
 #[tauri::command]
 #[specta::specta]
-pub fn get_permission_status() -> Result<PermissionStatus, String> {
-    Ok(permissions::snapshot())
+pub fn get_permission_status(state: State<'_, AppState>) -> Result<PermissionStatus, String> {
+    Ok(permissions::snapshot(&state.db))
 }
 
 /// Trigger the native prompt (or open System Settings) for one permission.
 /// The probe opens a device, so it runs off the command thread.
 #[tauri::command]
 #[specta::specta]
-pub async fn request_permission(kind: PermissionKind) -> Result<PermState, String> {
-    tauri::async_runtime::spawn_blocking(move || permissions::request(kind))
-        .await
-        .map_err(|e| format!("Permission probe failed: {e}"))
+pub async fn request_permission(
+    state: State<'_, AppState>,
+    kind: PermissionKind,
+) -> Result<PermState, String> {
+    let db = Arc::clone(&state.db);
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = permissions::request(kind);
+        if kind == PermissionKind::SystemAudio {
+            permissions::remember_system_audio(&db, result);
+        }
+        result
+    })
+    .await
+    .map_err(|e| format!("Permission probe failed: {e}"))
 }
 
 /// Clear a stale Accessibility TCC entry and re-prompt. Updating the app by

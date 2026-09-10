@@ -13,6 +13,12 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::constants::APP_IDENTIFIER;
+use crate::db::Database;
+
+/// Last observed system-audio tap permission. There is no read-only TCC
+/// API for Core Audio taps, so a successful probe is remembered and the
+/// snapshot returns it without mounting a tap (SOU-120).
+const SYSTEM_AUDIO_PERMISSION_KEY: &str = "system_audio_permission";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -61,17 +67,19 @@ pub struct RepairAccessibilityResult {
     pub prompt_shown: bool,
 }
 
-/// Cheap, non-prompting snapshot for the initial onboarding render. Microphone
-/// and system audio are left `Unknown` (probing them would prompt); the user
-/// triggers those explicitly via `request_permission`.
-pub fn snapshot() -> PermissionStatus {
+/// Cheap, non-prompting snapshot for the initial onboarding render.
+///
+/// System audio has no read-only TCC API. Probing mounts a Core Audio tap
+/// and would prompt on a first launch, so the snapshot never probes: it
+/// returns a remembered `Granted`/`Denied` after a user-initiated probe,
+/// and `Unknown` until then (SOU-120).
+pub fn snapshot(db: &Database) -> PermissionStatus {
     PermissionStatus {
         microphone: microphone_authorization_status(),
-        system_audio: if system_audio_supported() {
-            PermState::Unknown
-        } else {
-            PermState::Unsupported
-        },
+        system_audio: system_audio_snapshot_state(
+            system_audio_supported(),
+            load_remembered_system_audio(db),
+        ),
         accessibility: if accessibility_granted() {
             PermState::Granted
         } else {
@@ -85,6 +93,38 @@ pub fn snapshot() -> PermissionStatus {
         } else {
             PermState::Unknown
         },
+    }
+}
+
+/// Snapshot value for system audio given platform support and a remembered
+/// probe result. Never mounts a tap.
+pub fn system_audio_snapshot_state(supported: bool, remembered: Option<PermState>) -> PermState {
+    if !supported {
+        return PermState::Unsupported;
+    }
+    match remembered {
+        Some(PermState::Granted) => PermState::Granted,
+        Some(PermState::Denied) => PermState::Denied,
+        _ => PermState::Unknown,
+    }
+}
+
+pub fn load_remembered_system_audio(db: &Database) -> Option<PermState> {
+    let raw = db.get_setting(SYSTEM_AUDIO_PERMISSION_KEY).ok().flatten()?;
+    match serde_json::from_str::<PermState>(&raw) {
+        Ok(state @ (PermState::Granted | PermState::Denied)) => Some(state),
+        _ => None,
+    }
+}
+
+pub fn remember_system_audio(db: &Database, state: PermState) {
+    if !matches!(state, PermState::Granted | PermState::Denied) {
+        return;
+    }
+    if let Ok(raw) = serde_json::to_string(&state)
+        && let Err(e) = db.set_setting(SYSTEM_AUDIO_PERMISSION_KEY, &raw)
+    {
+        tracing::warn!(error = %e, "Failed to persist system audio permission");
     }
 }
 
@@ -554,6 +594,70 @@ mod tests {
         );
         assert_eq!(seen.as_deref(), Some(APP_IDENTIFIER));
         assert_eq!(APP_IDENTIFIER, "com.souffle.desktop");
+    }
+
+    #[test]
+    fn system_audio_snapshot_is_unknown_until_a_probe_succeeds() {
+        assert_eq!(system_audio_snapshot_state(true, None), PermState::Unknown);
+        assert_eq!(
+            system_audio_snapshot_state(true, Some(PermState::Unknown)),
+            PermState::Unknown
+        );
+    }
+
+    #[test]
+    fn system_audio_snapshot_returns_remembered_granted_without_probing() {
+        assert_eq!(
+            system_audio_snapshot_state(true, Some(PermState::Granted)),
+            PermState::Granted
+        );
+    }
+
+    #[test]
+    fn system_audio_snapshot_returns_remembered_denied() {
+        assert_eq!(
+            system_audio_snapshot_state(true, Some(PermState::Denied)),
+            PermState::Denied
+        );
+    }
+
+    #[test]
+    fn system_audio_snapshot_stays_unsupported_even_if_something_was_remembered() {
+        assert_eq!(
+            system_audio_snapshot_state(false, Some(PermState::Granted)),
+            PermState::Unsupported
+        );
+        assert_eq!(
+            system_audio_snapshot_state(false, None),
+            PermState::Unsupported
+        );
+    }
+
+    #[test]
+    fn system_audio_permission_round_trips_through_the_db() {
+        let (db, _dir) = crate::test_helpers::fixtures::test_db();
+        assert_eq!(load_remembered_system_audio(&db), None);
+
+        remember_system_audio(&db, PermState::Granted);
+        assert_eq!(load_remembered_system_audio(&db), Some(PermState::Granted));
+        assert_eq!(
+            snapshot(&db).system_audio,
+            if system_audio_supported() {
+                PermState::Granted
+            } else {
+                PermState::Unsupported
+            }
+        );
+
+        remember_system_audio(&db, PermState::Denied);
+        assert_eq!(load_remembered_system_audio(&db), Some(PermState::Denied));
+
+        remember_system_audio(&db, PermState::Unknown);
+        assert_eq!(
+            load_remembered_system_audio(&db),
+            Some(PermState::Denied),
+            "Unknown must not clobber a remembered answer"
+        );
     }
 }
 
