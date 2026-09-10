@@ -68,11 +68,21 @@ describe("shouldShowNativeTapBanner (SOU-116)", () => {
     expect(shouldShowNativeTapBanner("F5", { installed: false })).toBe(true);
   });
 
+  it("shows when Toggle is native and the tap is missing (SOU-115)", () => {
+    expect(shouldShowNativeTapBanner("", { installed: false }, "Fn")).toBe(true);
+    expect(shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false }, "F8")).toBe(
+      true,
+    );
+  });
+
   it("hides when no native shortcut is bound (AC6)", () => {
     expect(shouldShowNativeTapBanner("", { installed: false })).toBe(false);
     expect(shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false })).toBe(
       false,
     );
+    expect(
+      shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false }, "Alt+Space"),
+    ).toBe(false);
   });
 
   it("hides while status is unknown or the tap is installed", () => {

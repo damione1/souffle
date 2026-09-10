@@ -58,13 +58,17 @@ export function isNativePttShortcut(shortcut: string): boolean {
   return NATIVE_PTT_SHORTCUTS.has(shortcut);
 }
 
-/** Settings banner for a bound native PTT key when the tap is known missing.
- * `null` status = not yet attempted (startup delay); do not flash (SOU-116). */
+/** Settings banner when a native Toggle or PTT key is bound and the tap is
+ * known missing. `null` status = not yet attempted (startup delay); do not
+ * flash (SOU-116). Toggle is included once SOU-115 can bind native keys. */
 export function shouldShowNativeTapBanner(
   pttShortcut: string,
   tapStatus: { installed: boolean } | null,
+  toggleShortcut = "",
 ): boolean {
-  return isNativePttShortcut(pttShortcut) && tapStatus?.installed === false;
+  const nativeBound =
+    isNativePttShortcut(pttShortcut) || isNativePttShortcut(toggleShortcut);
+  return nativeBound && tapStatus?.installed === false;
 }
 
 function mapKey(code: string, key: string): string | null {

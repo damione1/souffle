@@ -13,7 +13,7 @@ use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 use tracing::{error, info};
 
-use crate::app_events::{ModifierTapStatus, ShortcutPttStart, ShortcutPttStop};
+use crate::app_events::{ModifierTapStatus, ShortcutPttStart, ShortcutPttStop, ShortcutToggle};
 use crate::state::AppState;
 
 /// Last `ModifierTapStatus` emitted. The event is edge-triggered (install
@@ -34,9 +34,20 @@ fn store_and_emit_modifier_tap_status(app: &AppHandle, installed: bool) {
     let _ = status.emit(app);
 }
 
-/// Single-key PTT bindings that the plugin cannot register. Combos stay on
-/// `tauri-plugin-global-shortcut` (SOU-032).
-pub(crate) fn is_native_ptt_shortcut(shortcut: &str) -> bool {
+/// Where a dictation shortcut is registered (SOU-032 / SOU-115).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShortcutRegistrationTarget {
+    /// Empty binding — nothing to register.
+    None,
+    /// Single native key handled by the CGEventTap.
+    Native,
+    /// Classic combo handled by `tauri-plugin-global-shortcut`.
+    Plugin,
+}
+
+/// Single-key bindings that the plugin cannot register. Combos stay on
+/// `tauri-plugin-global-shortcut` (SOU-032). Shared by Toggle and PTT (SOU-115).
+pub(crate) fn is_native_shortcut(shortcut: &str) -> bool {
     matches!(
         shortcut,
         "Fn" | "MetaLeft"
@@ -56,6 +67,17 @@ pub(crate) fn is_native_ptt_shortcut(shortcut: &str) -> bool {
             | "F11"
             | "F12"
     )
+}
+
+/// Route a stored accelerator to the native tap or the global-shortcut plugin.
+pub(crate) fn shortcut_registration_target(shortcut: &str) -> ShortcutRegistrationTarget {
+    if shortcut.is_empty() {
+        ShortcutRegistrationTarget::None
+    } else if is_native_shortcut(shortcut) {
+        ShortcutRegistrationTarget::Native
+    } else {
+        ShortcutRegistrationTarget::Plugin
+    }
 }
 
 pub fn start_modifier_tap(app: AppHandle) {
@@ -119,20 +141,27 @@ fn install_and_run(app: AppHandle) -> bool {
                 Some(s) => s.inner(),
                 None => return CallbackResult::Keep,
             };
-            let current_shortcut = {
-                let lock = state.modifier_ptt_shortcut.read().unwrap();
+            let toggle_shortcut = {
+                let lock = state.modifier_toggle_shortcut.read().unwrap();
                 lock.clone()
             };
-
-            let Some(shortcut) = current_shortcut else {
-                return CallbackResult::Keep;
+            let ptt_shortcut = {
+                let lock = state.modifier_ptt_shortcut.read().unwrap();
+                lock.clone()
             };
 
             let keycode = event
                 .get_integer_value_field(core_graphics::event::EventField::KEYBOARD_EVENT_KEYCODE);
             let flags = event.get_flags();
 
-            if !shortcut_matches_keycode(&shortcut, keycode) {
+            let matches_toggle = toggle_shortcut
+                .as_deref()
+                .is_some_and(|s| shortcut_matches_keycode(s, keycode));
+            let matches_ptt = ptt_shortcut
+                .as_deref()
+                .is_some_and(|s| shortcut_matches_keycode(s, keycode));
+
+            if !matches_toggle && !matches_ptt {
                 return CallbackResult::Keep;
             }
 
@@ -147,18 +176,36 @@ fn install_and_run(app: AppHandle) -> bool {
                 };
 
                 if is_pressed {
-                    emit_ptt_start(state, &app);
-                } else if state.ptt_start_armed.swap(false, Ordering::SeqCst) {
-                    let _ = ShortcutPttStop.emit(&app);
+                    if matches_toggle {
+                        emit_toggle(state, &app);
+                    }
+                    if matches_ptt {
+                        emit_ptt_start(state, &app);
+                    }
+                } else {
+                    if matches_toggle {
+                        state.toggle_armed.store(false, Ordering::SeqCst);
+                    }
+                    if matches_ptt && state.ptt_start_armed.swap(false, Ordering::SeqCst) {
+                        let _ = ShortcutPttStop.emit(&app);
+                    }
                 }
                 return CallbackResult::Drop;
             }
 
             if matches!(event_type, CGEventType::KeyDown) {
-                emit_ptt_start(state, &app);
+                if matches_toggle {
+                    emit_toggle(state, &app);
+                }
+                if matches_ptt {
+                    emit_ptt_start(state, &app);
+                }
                 return CallbackResult::Drop;
             } else if matches!(event_type, CGEventType::KeyUp) {
-                if state.ptt_start_armed.swap(false, Ordering::SeqCst) {
+                if matches_toggle {
+                    state.toggle_armed.store(false, Ordering::SeqCst);
+                }
+                if matches_ptt && state.ptt_start_armed.swap(false, Ordering::SeqCst) {
                     let _ = ShortcutPttStop.emit(&app);
                 }
                 return CallbackResult::Drop;
@@ -192,6 +239,13 @@ fn install_and_run(app: AppHandle) -> bool {
     }
 }
 
+fn emit_toggle(state: &AppState, app: &AppHandle) {
+    // Key-repeat (and extra FlagsChanged) must not re-fire Toggle.
+    if !state.toggle_armed.swap(true, Ordering::SeqCst) {
+        let _ = ShortcutToggle.emit(app);
+    }
+}
+
 fn emit_ptt_start(state: &AppState, app: &AppHandle) {
     if state.ptt_is_paused() {
         state.ptt_start_armed.store(false, Ordering::SeqCst);
@@ -203,7 +257,7 @@ fn emit_ptt_start(state: &AppState, app: &AppHandle) {
     }
 }
 
-/// macOS virtual keycodes for modifier-only PTT and F5–F12 (SOU-032).
+/// macOS virtual keycodes for modifier-only PTT/Toggle and F5–F12 (SOU-032).
 fn shortcut_matches_keycode(shortcut: &str, keycode: i64) -> bool {
     matches!(
         (shortcut, keycode),
@@ -229,7 +283,10 @@ fn shortcut_matches_keycode(shortcut: &str, keycode: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_native_ptt_shortcut, shortcut_matches_keycode};
+    use super::{
+        ShortcutRegistrationTarget, is_native_shortcut, shortcut_matches_keycode,
+        shortcut_registration_target,
+    };
 
     #[test]
     fn modifier_and_fn_keycodes() {
@@ -252,10 +309,34 @@ mod tests {
             ("F12", 111),
         ] {
             assert!(shortcut_matches_keycode(name, code), "{name}");
-            assert!(is_native_ptt_shortcut(name), "{name}");
+            assert!(is_native_shortcut(name), "{name}");
         }
         assert!(!shortcut_matches_keycode("F5", 122));
-        assert!(!is_native_ptt_shortcut("F4"));
-        assert!(!is_native_ptt_shortcut("CommandOrControl+Shift+Space"));
+        assert!(!is_native_shortcut("F4"));
+        assert!(!is_native_shortcut("CommandOrControl+Shift+Space"));
+    }
+
+    #[test]
+    fn native_toggle_routes_to_tap_not_plugin() {
+        assert_eq!(
+            shortcut_registration_target("Fn"),
+            ShortcutRegistrationTarget::Native
+        );
+        assert_eq!(
+            shortcut_registration_target("MetaRight"),
+            ShortcutRegistrationTarget::Native
+        );
+        assert_eq!(
+            shortcut_registration_target("F8"),
+            ShortcutRegistrationTarget::Native
+        );
+        assert_eq!(
+            shortcut_registration_target("CommandOrControl+Shift+Space"),
+            ShortcutRegistrationTarget::Plugin
+        );
+        assert_eq!(
+            shortcut_registration_target(""),
+            ShortcutRegistrationTarget::None
+        );
     }
 }
