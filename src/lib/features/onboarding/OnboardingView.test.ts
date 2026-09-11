@@ -93,3 +93,73 @@ describe("OnboardingView shortcut step (SOU-053)", () => {
     expect(screen.queryByTestId("auto-paste-accessibility-warning")).toBeNull();
   });
 });
+
+// SOU-131: the dictionary interview used to add a fifth step after the
+// shortcut. The rendered progress and the final button label must follow the
+// four real steps, not a count the view carries separately.
+describe("OnboardingView step count (SOU-131)", () => {
+  const app = getAppState();
+
+  beforeEach(() => {
+    localStorage.clear();
+    app.showOnboarding = true;
+    app.machineState = { state: "idle" };
+    app.transcriptionRuntimePhase = "ready";
+    app.selectedDevice = "";
+
+    transcriptionApi.getTranscriptionCatalog.mockResolvedValue(mockCatalog);
+    settingsApi.getShortcuts.mockResolvedValue({ ...mockShortcuts });
+    settingsApi.saveShortcuts.mockResolvedValue(undefined);
+    settingsApi.saveSettings.mockResolvedValue(undefined);
+    settingsApi.listAudioDevices.mockResolvedValue(fakeDevices);
+    settingsApi.selectAudioDevice.mockResolvedValue(undefined);
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      microphone: "granted",
+      system_audio: "granted",
+      accessibility: "granted",
+      calendar: "unknown",
+    });
+  });
+
+  afterEach(cleanup);
+
+  it("walks four steps and ends on the shortcut with the finish label", async () => {
+    render(OnboardingView);
+
+    await waitFor(() => screen.getByText("Grant permissions"));
+    const progress = screen.getByRole("progressbar");
+    expect(progress.getAttribute("aria-valuemax")).toBe("4");
+    expect(progress.children).toHaveLength(4);
+    expect(progress.getAttribute("aria-valuenow")).toBe("1");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => screen.getByText("Choose your microphone"));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => screen.getByText("Download the transcription model"));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => screen.getByText("Quick dictation shortcut"));
+
+    // Last step: the progress is full and the primary button offers to finish.
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("4");
+    expect(screen.getByRole("button", { name: "Get started" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
+
+  it("closes the wizard from the shortcut step", async () => {
+    render(OnboardingView);
+
+    await waitFor(() => screen.getByText("Grant permissions"));
+    await fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => screen.getByText("Choose your microphone"));
+    await fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => screen.getByText("Download the transcription model"));
+    await fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => screen.getByText("Quick dictation shortcut"));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Get started" }));
+
+    await waitFor(() => expect(app.showOnboarding).toBe(false));
+  });
+});

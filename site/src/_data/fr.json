@@ -609,7 +609,7 @@
         "h": "Premier lancement",
         "blocks": [
           {
-            "p": "Un assistant couvre les permissions dont Soufflé a besoin, le micro à utiliser, le modèle de transcription à télécharger, le raccourci de dictée, et un entretien dictionnaire optionnel (prénoms, jargon, ton du polish) que vous pouvez passer. Le raccourci par défaut est <kbd>⌘⇧Espace</kbd>."
+            "p": "Un assistant couvre les permissions dont Soufflé a besoin, le micro à utiliser, le modèle de transcription à télécharger, et le raccourci de dictée. Le raccourci par défaut est <kbd>⌘⇧Espace</kbd>."
           },
           {
             "p": "L'étape du raccourci propose aussi le collage automatique, actif par défaut : quand vous arrêtez de dicter, le texte part directement dans l'app où vous étiez. Désactivez-le et le texte atterrit dans le presse-papiers. Une installation neuve termine avec Lancer à la connexion activé ; changez-le plus tard dans Paramètres → Système. Tout cela se change plus tard dans les Paramètres."
@@ -778,7 +778,7 @@
               ],
               [
                 "Dictionnaire personnalisé<br><span class=\"docs-tab\">Transcription</span>",
-                "Noms propres et termes techniques à orthographier correctement, saisis à la main, appris de vos corrections, ou amorcés par l'entretien optionnel du premier lancement."
+                "Noms propres et termes techniques à orthographier correctement, saisis à la main ou appris de vos corrections."
               ],
               [
                 "Extraits vocaux<br><span class=\"docs-tab\">Transcription</span>",
