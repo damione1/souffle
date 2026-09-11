@@ -33,6 +33,15 @@ const TCC_INSERT_SETTLE: Duration = Duration::from_millis(400);
 /// snapshot returns it without mounting a tap (SOU-120).
 const SYSTEM_AUDIO_PERMISSION_KEY: &str = "system_audio_permission";
 
+/// Last observed microphone permission. `AVCaptureDevice`'s
+/// `authorizationStatus` is answered from a per-process cache that is filled
+/// on the first call and never refreshed: a process that asks before the
+/// user answers the prompt keeps being told `NotDetermined` for the rest of
+/// its life, even though TCC has recorded the grant. A probe that saw real
+/// audio is remembered here so the snapshot can still be truthful after the
+/// permissions window is closed and reopened.
+const MICROPHONE_PERMISSION_KEY: &str = "microphone_permission";
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PermState {
@@ -86,7 +95,10 @@ pub struct RepairAccessibilityResult {
 /// and `Unknown` until then (SOU-120).
 pub fn snapshot(db: &Database) -> PermissionStatus {
     PermissionStatus {
-        microphone: microphone_authorization_status(),
+        microphone: microphone_snapshot_state(
+            microphone_authorization_status(),
+            load_remembered_microphone(db),
+        ),
         system_audio: system_audio_snapshot_state(
             system_audio_supported(),
             load_remembered_system_audio(db),
@@ -112,6 +124,40 @@ pub fn system_audio_snapshot_state(supported: bool, remembered: Option<PermState
         Some(PermState::Granted) => PermState::Granted,
         Some(PermState::Denied) => PermState::Denied,
         _ => PermState::Unknown,
+    }
+}
+
+/// Snapshot value for the microphone. The live status wins whenever the OS
+/// has decided; a remembered grant covers the one case it cannot answer,
+/// a cached `NotDetermined` taken before the user said yes.
+pub fn microphone_snapshot_state(live: PermState, remembered: Option<PermState>) -> PermState {
+    match live {
+        PermState::Unknown => remembered.unwrap_or(PermState::Unknown),
+        decided => decided,
+    }
+}
+
+pub fn load_remembered_microphone(db: &Database) -> Option<PermState> {
+    let raw = db.get_setting(MICROPHONE_PERMISSION_KEY).ok().flatten()?;
+    match serde_json::from_str::<PermState>(&raw) {
+        Ok(PermState::Granted) => Some(PermState::Granted),
+        _ => None,
+    }
+}
+
+/// Only a grant is worth remembering. The probe reports `Denied` both for a
+/// real refusal and for a microphone CoreAudio failed to start, while a real
+/// refusal is already reported truthfully by `AVCaptureDevice` on the next
+/// launch, so persisting a denial could only turn a transient audio failure
+/// into a sticky one.
+pub fn remember_microphone(db: &Database, state: PermState) {
+    if state != PermState::Granted {
+        return;
+    }
+    if let Ok(raw) = serde_json::to_string(&state)
+        && let Err(e) = db.set_setting(MICROPHONE_PERMISSION_KEY, &raw)
+    {
+        tracing::warn!(error = %e, "Failed to persist microphone permission");
     }
 }
 
@@ -790,6 +836,52 @@ mod tests {
         );
         assert_eq!(seen.as_deref(), Some(APP_IDENTIFIER));
         assert_eq!(APP_IDENTIFIER, "com.souffle.desktop");
+    }
+
+    #[test]
+    fn microphone_snapshot_prefers_the_live_status_when_the_os_has_decided() {
+        assert_eq!(
+            microphone_snapshot_state(PermState::Denied, Some(PermState::Granted)),
+            PermState::Denied,
+            "a revoke observed on a fresh process must beat the remembered grant"
+        );
+        assert_eq!(
+            microphone_snapshot_state(PermState::Granted, None),
+            PermState::Granted
+        );
+    }
+
+    #[test]
+    fn microphone_snapshot_falls_back_to_a_remembered_grant() {
+        // The reported failure: the process read NotDetermined two seconds
+        // before the user granted the permission and kept returning it from
+        // the AVFoundation cache, so the row showed "Grant" forever.
+        assert_eq!(
+            microphone_snapshot_state(PermState::Unknown, Some(PermState::Granted)),
+            PermState::Granted
+        );
+        assert_eq!(
+            microphone_snapshot_state(PermState::Unknown, None),
+            PermState::Unknown
+        );
+    }
+
+    #[test]
+    fn microphone_grant_round_trips_through_the_db() {
+        let (db, _dir) = crate::test_helpers::fixtures::test_db();
+        assert_eq!(load_remembered_microphone(&db), None);
+
+        remember_microphone(&db, PermState::Granted);
+        assert_eq!(load_remembered_microphone(&db), Some(PermState::Granted));
+
+        for transient in [PermState::Denied, PermState::NoDevice, PermState::Unknown] {
+            remember_microphone(&db, transient);
+            assert_eq!(
+                load_remembered_microphone(&db),
+                Some(PermState::Granted),
+                "{transient:?} must not clobber a remembered grant"
+            );
+        }
     }
 
     #[test]
