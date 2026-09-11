@@ -28,11 +28,6 @@ use crate::db::Database;
 /// list (empty, or a differently-signed Soufflé already ticked).
 const TCC_INSERT_SETTLE: Duration = Duration::from_millis(400);
 
-/// Last observed system-audio tap permission. There is no read-only TCC
-/// API for Core Audio taps, so a successful probe is remembered and the
-/// snapshot returns it without mounting a tap (SOU-120).
-const SYSTEM_AUDIO_PERMISSION_KEY: &str = "system_audio_permission";
-
 /// Last observed microphone permission. `AVCaptureDevice`'s
 /// `authorizationStatus` is answered from a per-process cache that is filled
 /// on the first call and never refreshed: a process that asks before the
@@ -87,22 +82,15 @@ pub struct RepairAccessibilityResult {
     pub prompt_shown: bool,
 }
 
-/// Cheap, non-prompting snapshot for the initial onboarding render.
-///
-/// System audio has no read-only TCC API. Probing mounts a Core Audio tap
-/// and would prompt on a first launch, so the snapshot never probes: it
-/// returns a remembered `Granted`/`Denied` after a user-initiated probe,
-/// and `Unknown` until then (SOU-120).
+/// Cheap, non-prompting snapshot for the initial onboarding render. No
+/// entry in it opens a device: every capability answers from a status API.
 pub fn snapshot(db: &Database) -> PermissionStatus {
     PermissionStatus {
         microphone: microphone_snapshot_state(
             microphone_authorization_status(),
             load_remembered_microphone(db),
         ),
-        system_audio: system_audio_snapshot_state(
-            system_audio_supported(),
-            load_remembered_system_audio(db),
-        ),
+        system_audio: system_audio_status(),
         accessibility: if accessibility_granted() {
             PermState::Granted
         } else {
@@ -114,17 +102,28 @@ pub fn snapshot(db: &Database) -> PermissionStatus {
     }
 }
 
-/// Snapshot value for system audio given platform support and a remembered
-/// probe result. Never mounts a tap.
-pub fn system_audio_snapshot_state(supported: bool, remembered: Option<PermState>) -> PermState {
+/// Live system-audio status, read without creating any audio object.
+pub fn system_audio_status() -> PermState {
+    system_audio_state_with(
+        system_audio_supported(),
+        audio_capture_preflight,
+        probe_system_audio,
+    )
+}
+
+/// `probe` only runs when the TCC SPI is unavailable (feature off, or the
+/// symbol gone from a future macOS). It answers by mounting a tap, which is
+/// what the read used to do and what the SPI exists to avoid, but it is an
+/// answer rather than a panic.
+pub fn system_audio_state_with(
+    supported: bool,
+    preflight: impl FnOnce() -> Option<PermState>,
+    probe: impl FnOnce() -> PermState,
+) -> PermState {
     if !supported {
         return PermState::Unsupported;
     }
-    match remembered {
-        Some(PermState::Granted) => PermState::Granted,
-        Some(PermState::Denied) => PermState::Denied,
-        _ => PermState::Unknown,
-    }
+    preflight().unwrap_or_else(probe)
 }
 
 /// Snapshot value for the microphone. The live status wins whenever the OS
@@ -158,25 +157,6 @@ pub fn remember_microphone(db: &Database, state: PermState) {
         && let Err(e) = db.set_setting(MICROPHONE_PERMISSION_KEY, &raw)
     {
         tracing::warn!(error = %e, "Failed to persist microphone permission");
-    }
-}
-
-pub fn load_remembered_system_audio(db: &Database) -> Option<PermState> {
-    let raw = db.get_setting(SYSTEM_AUDIO_PERMISSION_KEY).ok().flatten()?;
-    match serde_json::from_str::<PermState>(&raw) {
-        Ok(state @ (PermState::Granted | PermState::Denied)) => Some(state),
-        _ => None,
-    }
-}
-
-pub fn remember_system_audio(db: &Database, state: PermState) {
-    if !matches!(state, PermState::Granted | PermState::Denied) {
-        return;
-    }
-    if let Ok(raw) = serde_json::to_string(&state)
-        && let Err(e) = db.set_setting(SYSTEM_AUDIO_PERMISSION_KEY, &raw)
-    {
-        tracing::warn!(error = %e, "Failed to persist system audio permission");
     }
 }
 
@@ -590,8 +570,78 @@ pub fn probe_microphone() -> PermState {
     }
 }
 
-// --- System audio (probe via a short-lived Core Audio tap) ---
+// --- System audio (kTCCServiceAudioCapture) ---
 
+/// `TCCAccessPreflight(service, NULL)`, from the private TCC framework.
+/// CoreAudio ships no permission query for process taps, so this SPI is the
+/// only way to read the status without mounting one. Unlike the public
+/// preflight APIs it is an XPC round trip to tccd on every call, so it never
+/// answers from a per-process cache.
+#[cfg(all(target_os = "macos", feature = "private-tcc"))]
+fn tcc_preflight(service: &str) -> Option<PermState> {
+    use objc2_core_foundation::{CFRetained, CFString};
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    type TccAccessPreflight = unsafe extern "C" fn(*const c_void, *const c_void) -> i32;
+
+    static SYMBOL: OnceLock<Option<TccAccessPreflight>> = OnceLock::new();
+    let preflight = (*SYMBOL.get_or_init(|| unsafe {
+        let handle = libc::dlopen(
+            c"/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC".as_ptr(),
+            libc::RTLD_LAZY,
+        );
+        if handle.is_null() {
+            tracing::warn!("TCC.framework not loadable; falling back to the tap probe");
+            return None;
+        }
+        let symbol = libc::dlsym(handle, c"TCCAccessPreflight".as_ptr());
+        if symbol.is_null() {
+            tracing::warn!("TCCAccessPreflight missing; falling back to the tap probe");
+            return None;
+        }
+        Some(std::mem::transmute::<*mut c_void, TccAccessPreflight>(
+            symbol,
+        ))
+    }))?;
+
+    let service = CFString::from_str(service);
+    let raw = unsafe {
+        preflight(
+            CFRetained::as_ptr(&service).as_ptr().cast(),
+            std::ptr::null(),
+        )
+    };
+    tcc_preflight_state(raw)
+}
+
+#[cfg(not(all(target_os = "macos", feature = "private-tcc")))]
+fn tcc_preflight(_service: &str) -> Option<PermState> {
+    None
+}
+
+fn audio_capture_preflight() -> Option<PermState> {
+    tcc_preflight("kTCCServiceAudioCapture")
+}
+
+/// AudioCap, Hyprnote and screenpipe all read the same three values out of
+/// this SPI. Anything else means the contract moved, and an unknown number
+/// must not be read as a verdict.
+fn tcc_preflight_state(raw: i32) -> Option<PermState> {
+    match raw {
+        0 => Some(PermState::Granted),
+        1 => Some(PermState::Denied),
+        2 => Some(PermState::Unknown),
+        other => {
+            tracing::warn!(value = other, "Unexpected TCCAccessPreflight value");
+            None
+        }
+    }
+}
+
+/// Mounts a tap for two seconds. This is the request path (the tap is what
+/// raises the native prompt) and the read fallback when the TCC SPI is
+/// unavailable. Never call it to render a status while the SPI answers.
 #[cfg(target_os = "macos")]
 pub fn probe_system_audio() -> PermState {
     use ringbuf::HeapRb;
@@ -890,66 +940,61 @@ mod tests {
     }
 
     #[test]
-    fn system_audio_snapshot_is_unknown_until_a_probe_succeeds() {
-        assert_eq!(system_audio_snapshot_state(true, None), PermState::Unknown);
-        assert_eq!(
-            system_audio_snapshot_state(true, Some(PermState::Unknown)),
-            PermState::Unknown
-        );
+    fn system_audio_reads_the_tcc_preflight_without_mounting_a_tap() {
+        for (raw, expected) in [
+            (PermState::Granted, PermState::Granted),
+            (PermState::Denied, PermState::Denied),
+            (PermState::Unknown, PermState::Unknown),
+        ] {
+            let state = system_audio_state_with(
+                true,
+                || Some(raw),
+                || panic!("a status read must not mount a tap when the SPI answered"),
+            );
+            assert_eq!(state, expected);
+        }
     }
 
+    /// AC8: a missing `TCCAccessPreflight` degrades to the tap probe. The
+    /// arm is unreachable on a machine that has the symbol, so it is the
+    /// injected `None` that keeps it honest.
     #[test]
-    fn system_audio_snapshot_returns_remembered_granted_without_probing() {
-        assert_eq!(
-            system_audio_snapshot_state(true, Some(PermState::Granted)),
-            PermState::Granted
-        );
-    }
-
-    #[test]
-    fn system_audio_snapshot_returns_remembered_denied() {
-        assert_eq!(
-            system_audio_snapshot_state(true, Some(PermState::Denied)),
-            PermState::Denied
-        );
-    }
-
-    #[test]
-    fn system_audio_snapshot_stays_unsupported_even_if_something_was_remembered() {
-        assert_eq!(
-            system_audio_snapshot_state(false, Some(PermState::Granted)),
-            PermState::Unsupported
-        );
-        assert_eq!(
-            system_audio_snapshot_state(false, None),
-            PermState::Unsupported
-        );
-    }
-
-    #[test]
-    fn system_audio_permission_round_trips_through_the_db() {
-        let (db, _dir) = crate::test_helpers::fixtures::test_db();
-        assert_eq!(load_remembered_system_audio(&db), None);
-
-        remember_system_audio(&db, PermState::Granted);
-        assert_eq!(load_remembered_system_audio(&db), Some(PermState::Granted));
-        assert_eq!(
-            snapshot(&db).system_audio,
-            if system_audio_supported() {
+    fn system_audio_falls_back_to_the_probe_when_the_spi_is_missing() {
+        let probed = Cell::new(false);
+        let state = system_audio_state_with(
+            true,
+            || None,
+            || {
+                probed.set(true);
                 PermState::Granted
-            } else {
-                PermState::Unsupported
-            }
+            },
         );
+        assert_eq!(state, PermState::Granted);
+        assert!(probed.get(), "a null dlsym must fall back, not panic");
+    }
 
-        remember_system_audio(&db, PermState::Denied);
-        assert_eq!(load_remembered_system_audio(&db), Some(PermState::Denied));
-
-        remember_system_audio(&db, PermState::Unknown);
+    #[test]
+    fn system_audio_stays_unsupported_before_macos_14_4() {
         assert_eq!(
-            load_remembered_system_audio(&db),
-            Some(PermState::Denied),
-            "Unknown must not clobber a remembered answer"
+            system_audio_state_with(
+                false,
+                || panic!("an unsupported OS must not be asked"),
+                || panic!("an unsupported OS must not be probed"),
+            ),
+            PermState::Unsupported
+        );
+    }
+
+    /// 0/1/2 is the mapping AudioCap, Hyprnote and screenpipe agree on.
+    #[test]
+    fn tcc_preflight_values_map_to_states() {
+        assert_eq!(tcc_preflight_state(0), Some(PermState::Granted));
+        assert_eq!(tcc_preflight_state(1), Some(PermState::Denied));
+        assert_eq!(tcc_preflight_state(2), Some(PermState::Unknown));
+        assert_eq!(
+            tcc_preflight_state(-1),
+            None,
+            "an unknown value must fall back, not be read as a verdict"
         );
     }
 }

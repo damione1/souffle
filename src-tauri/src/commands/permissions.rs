@@ -25,14 +25,8 @@ pub async fn request_permission(
     let db = Arc::clone(&state.db);
     tauri::async_runtime::spawn_blocking(move || {
         let result = permissions::request(kind);
-        match kind {
-            PermissionKind::SystemAudio => permissions::remember_system_audio(&db, result),
-            // `AVCaptureDevice` caches its authorization status for the life
-            // of the process, so a grant the user makes after the first read
-            // is invisible to every later snapshot. The probe's verdict is
-            // the only fresh answer this process will ever get.
-            PermissionKind::Microphone => permissions::remember_microphone(&db, result),
-            _ => {}
+        if kind == PermissionKind::Microphone {
+            permissions::remember_microphone(&db, result);
         }
         result
     })
