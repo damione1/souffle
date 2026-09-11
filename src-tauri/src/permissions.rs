@@ -1,13 +1,14 @@
 //! macOS permission detection + prompting for the startup onboarding.
 //!
-//! The microphone has a real read-only status API (`AVCaptureDevice`'s
-//! `authorizationStatus`), so `request` checks it first and only falls back
-//! to probing (briefly opening the device, which also triggers the TCC
-//! prompt) when the OS hasn't decided yet. There is no equivalent for Core
-//! Audio taps, so system audio is still probe-only. Accessibility (needed
-//! for the synthesized Cmd+V paste and for the native single-key shortcut
-//! tap) has its own cheap check (`AXIsProcessTrusted`), and is granted only
-//! via System Settings, so its "request" just opens the relevant pane.
+//! Reading a status never opens a device. The microphone answers from
+//! `AVCaptureDevice`'s `authorizationStatus` and is asked for through
+//! `requestAccessForMediaType:completionHandler:`, whose completion block is
+//! the only in-process signal that carries a fresh answer. System audio is
+//! read through TCC's `TCCAccessPreflight` SPI and asked for by mounting the
+//! tap. Accessibility (needed for the synthesized Cmd+V paste and for the
+//! native single-key shortcut tap) has its own cheap check
+//! (`AXIsProcessTrusted`), and is granted only via System Settings, so its
+//! "request" just opens the relevant pane.
 //!
 //! Input Monitoring is deliberately absent. An active `CGEventTap` is
 //! authorized by Accessibility, which subsumes the listen right, so the
@@ -16,26 +17,26 @@
 //! record, so asking could not even create the row it promised.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-
-use crate::db::Database;
 
 /// Pause between the TCC insert call and `open` of System Settings. The
 /// insert is asynchronous; opening the pane in the same turn shows a stale
 /// list (empty, or a differently-signed Soufflé already ticked).
 const TCC_INSERT_SETTLE: Duration = Duration::from_millis(400);
 
-/// Last observed microphone permission. `AVCaptureDevice`'s
-/// `authorizationStatus` is answered from a per-process cache that is filled
-/// on the first call and never refreshed: a process that asks before the
-/// user answers the prompt keeps being told `NotDetermined` for the rest of
-/// its life, even though TCC has recorded the grant. A probe that saw real
-/// audio is remembered here so the snapshot can still be truthful after the
-/// permissions window is closed and reopened.
-const MICROPHONE_PERMISSION_KEY: &str = "microphone_permission";
+/// A microphone grant reported by the `requestAccess` completion block.
+///
+/// `AVCaptureDevice`'s `authorizationStatus` is answered from a per-process
+/// cache filled on the first call. AVFoundation's own request path refreshes
+/// it, so this flag should never be needed; it exists because the panel must
+/// not be able to stick on "Grant" if it ever is. In this process only: a
+/// grant is not a fact the app owns, and a persisted copy could only go on
+/// claiming a permission the user has since revoked.
+static MICROPHONE_GRANT_OBSERVED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -84,11 +85,11 @@ pub struct RepairAccessibilityResult {
 
 /// Cheap, non-prompting snapshot for the initial onboarding render. No
 /// entry in it opens a device: every capability answers from a status API.
-pub fn snapshot(db: &Database) -> PermissionStatus {
+pub fn snapshot() -> PermissionStatus {
     PermissionStatus {
         microphone: microphone_snapshot_state(
             microphone_authorization_status(),
-            load_remembered_microphone(db),
+            MICROPHONE_GRANT_OBSERVED.load(Ordering::Relaxed),
         ),
         system_audio: system_audio_status(),
         accessibility: if accessibility_granted() {
@@ -127,36 +128,12 @@ pub fn system_audio_state_with(
 }
 
 /// Snapshot value for the microphone. The live status wins whenever the OS
-/// has decided; a remembered grant covers the one case it cannot answer,
-/// a cached `NotDetermined` taken before the user said yes.
-pub fn microphone_snapshot_state(live: PermState, remembered: Option<PermState>) -> PermState {
+/// has decided; a grant seen by this process covers the one case it cannot
+/// answer, a cached `NotDetermined` taken before the user said yes.
+pub fn microphone_snapshot_state(live: PermState, observed_grant: bool) -> PermState {
     match live {
-        PermState::Unknown => remembered.unwrap_or(PermState::Unknown),
-        decided => decided,
-    }
-}
-
-pub fn load_remembered_microphone(db: &Database) -> Option<PermState> {
-    let raw = db.get_setting(MICROPHONE_PERMISSION_KEY).ok().flatten()?;
-    match serde_json::from_str::<PermState>(&raw) {
-        Ok(PermState::Granted) => Some(PermState::Granted),
-        _ => None,
-    }
-}
-
-/// Only a grant is worth remembering. The probe reports `Denied` both for a
-/// real refusal and for a microphone CoreAudio failed to start, while a real
-/// refusal is already reported truthfully by `AVCaptureDevice` on the next
-/// launch, so persisting a denial could only turn a transient audio failure
-/// into a sticky one.
-pub fn remember_microphone(db: &Database, state: PermState) {
-    if state != PermState::Granted {
-        return;
-    }
-    if let Ok(raw) = serde_json::to_string(&state)
-        && let Err(e) = db.set_setting(MICROPHONE_PERMISSION_KEY, &raw)
-    {
-        tracing::warn!(error = %e, "Failed to persist microphone permission");
+        PermState::Unknown if observed_grant => PermState::Granted,
+        state => state,
     }
 }
 
@@ -444,25 +421,37 @@ fn open_microphone_settings() {
 #[cfg(not(target_os = "macos"))]
 fn open_microphone_settings() {}
 
+/// `Denied` also covers `Restricted` (parental controls, MDM): macOS never
+/// re-prompts once it has an answer, so the only move left is the pane.
 fn request_microphone_with(
     status: impl FnOnce() -> PermState,
     open_settings: impl FnOnce(),
-    probe: impl FnOnce() -> PermState,
+    request_access: impl FnOnce() -> bool,
     has_device: impl FnOnce() -> bool,
 ) -> PermState {
     match status() {
-        PermState::Granted => {
-            if has_device() {
-                PermState::Granted
-            } else {
-                PermState::NoDevice
-            }
-        }
+        PermState::Granted => granted_or_no_device(has_device),
         PermState::Denied => {
             open_settings();
             PermState::Denied
         }
-        _ => probe(),
+        _ => {
+            if request_access() {
+                granted_or_no_device(has_device)
+            } else {
+                PermState::Denied
+            }
+        }
+    }
+}
+
+/// TCC access and a usable input device are different problems with
+/// different fixes, so a grant with nothing plugged in is not `Granted`.
+fn granted_or_no_device(has_device: impl FnOnce() -> bool) -> PermState {
+    if has_device() {
+        PermState::Granted
+    } else {
+        PermState::NoDevice
     }
 }
 
@@ -475,99 +464,54 @@ fn request_microphone() -> PermState {
     request_microphone_with(
         microphone_authorization_status,
         open_microphone_settings,
-        probe_microphone,
+        || {
+            let granted = request_microphone_access();
+            if granted {
+                MICROPHONE_GRANT_OBSERVED.store(true, Ordering::Relaxed);
+            }
+            granted
+        },
         has_microphone_device,
     )
 }
 
-fn no_op_stream_error(_e: cpal::StreamError) {}
+/// The native prompt, and the only in-process event that reports its answer.
+///
+/// Going through the CoreAudio HAL instead (opening an input stream) raises
+/// the same dialog but leaves AVFoundation's cached status untouched, so the
+/// process keeps reading `NotDetermined` for the rest of its life.
+#[cfg(target_os = "macos")]
+fn request_microphone_access() -> bool {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
 
-/// Briefly open the default input device and wait for real audio callbacks.
-/// This is what actually triggers the TCC prompt the first time; afterwards
-/// `request_microphone` skips straight to this only when the OS reports
-/// `NotDetermined`.
-pub fn probe_microphone() -> PermState {
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Duration;
-
-    let host = cpal::default_host();
-    let Some(device) = host.default_input_device() else {
-        return PermState::NoDevice;
-    };
-    let Ok(config) = device.default_input_config() else {
-        return PermState::NoDevice;
-    };
-
-    let got = Arc::new(AtomicBool::new(false));
-    let sample_format = config.sample_format();
-    let stream_config: cpal::StreamConfig = config.into();
-
-    let stream = match sample_format {
-        cpal::SampleFormat::F32 => {
-            let got = Arc::clone(&got);
-            device.build_input_stream(
-                &stream_config,
-                move |_d: &[f32], _: &_| got.store(true, Ordering::Relaxed),
-                no_op_stream_error,
-                None,
-            )
-        }
-        cpal::SampleFormat::I16 => {
-            let got = Arc::clone(&got);
-            device.build_input_stream(
-                &stream_config,
-                move |_d: &[i16], _: &_| got.store(true, Ordering::Relaxed),
-                no_op_stream_error,
-                None,
-            )
-        }
-        cpal::SampleFormat::U16 => {
-            let got = Arc::clone(&got);
-            device.build_input_stream(
-                &stream_config,
-                move |_d: &[u16], _: &_| got.store(true, Ordering::Relaxed),
-                no_op_stream_error,
-                None,
-            )
-        }
-        _ => return PermState::Denied,
-    };
-
-    let stream = match stream {
-        Ok(s) => s,
-        Err(cpal::BuildStreamError::DeviceNotAvailable) => return PermState::NoDevice,
-        Err(_) => return PermState::Denied,
-    };
-    if let Err(e) = stream.play() {
-        match e {
-            cpal::PlayStreamError::DeviceNotAvailable => return PermState::NoDevice,
-            _ => return PermState::Denied,
-        }
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    // A TCC request has to be raised from the main thread (SOU-122), and
+    // `request` runs on a blocking pool thread. Only the call hops: it
+    // returns as soon as the dialog is up, and the completion block fires
+    // later on an arbitrary queue.
+    let asked = on_main(move || unsafe {
+        let Some(media_type) = AVMediaTypeAudio else {
+            return false;
+        };
+        let block = RcBlock::new(move |granted: Bool| {
+            let _ = tx.send(granted.as_bool());
+        });
+        AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &block);
+        true
+    });
+    if !asked {
+        return false;
     }
+    // Generous: the user may leave the dialog on screen. The timeout only
+    // bounds a callback that never comes.
+    matches!(rx.recv_timeout(Duration::from_secs(300)), Ok(true))
+}
 
-    // Wait up to 15s for a callback. On first launch the macOS TCC dialog is
-    // still on screen when this probe starts, so the window must outlast the
-    // time it takes the user to read it and click Allow/Deny. When permission
-    // was already granted the early exit as soon as data arrives keeps this fast.
-    for _ in 0..150 {
-        if got.load(Ordering::Relaxed) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    // Pause then drop so the probe's AudioUnit is actually disposed. cpal
-    // 0.15 leaked StreamInner on macOS, which would leave a Bluetooth
-    // headset in HFP/mono after the onboarding mic check.
-    let _ = stream.pause();
-    drop(stream);
-
-    if got.load(Ordering::Relaxed) {
-        PermState::Granted
-    } else {
-        PermState::Denied
-    }
+#[cfg(not(target_os = "macos"))]
+fn request_microphone_access() -> bool {
+    false
 }
 
 // --- System audio (kTCCServiceAudioCapture) ---
@@ -775,59 +719,78 @@ mod tests {
         assert_eq!(no_device, "\"no_device\"");
     }
 
-    /// A settled `Denied` must open Settings and must NOT re-run the probe:
-    /// macOS never re-prompts after a deny, so probing again would just
-    /// burn 15s to land on the same answer.
+    /// AC4: a settled `Denied` (or `Restricted`) opens Settings and must NOT
+    /// ask again. macOS never re-prompts after an answer, so a request would
+    /// return the same verdict without showing anything.
     #[test]
-    fn denied_opens_settings_without_probing() {
+    fn denied_opens_settings_without_asking() {
         let opened = Cell::new(false);
-        let probed = Cell::new(false);
+        let asked = Cell::new(false);
 
         let result = request_microphone_with(
             || PermState::Denied,
             || opened.set(true),
             || {
-                probed.set(true);
-                PermState::Granted
+                asked.set(true);
+                true
             },
             || true,
         );
 
         assert_eq!(result, PermState::Denied);
         assert!(opened.get(), "Denied must open System Settings");
-        assert!(!probed.get(), "Denied must not run the probe");
+        assert!(!asked.get(), "Denied must not request access");
     }
 
-    /// `NotDetermined` (modeled as `Unknown` here) still probes: that's what
-    /// shows the TCC dialog the first time.
+    /// AC3: `NotDetermined` (modeled as `Unknown` here) goes through
+    /// `requestAccess`, and the completion block's answer is the verdict.
     #[test]
-    fn not_determined_probes_without_opening_settings() {
+    fn not_determined_requests_access_without_opening_settings() {
         let opened = Cell::new(false);
-        let probed = Cell::new(false);
+        let asked = Cell::new(false);
 
         let result = request_microphone_with(
             || PermState::Unknown,
             || opened.set(true),
             || {
-                probed.set(true);
-                PermState::Granted
+                asked.set(true);
+                true
             },
             || true,
         );
 
         assert_eq!(result, PermState::Granted);
         assert!(!opened.get(), "NotDetermined must not open Settings");
-        assert!(probed.get(), "NotDetermined must run the probe");
+        assert!(asked.get(), "NotDetermined must request access");
+    }
+
+    #[test]
+    fn a_refused_request_is_denied() {
+        let result = request_microphone_with(
+            || PermState::Unknown,
+            || panic!("the request answers, so Settings must stay shut"),
+            || false,
+            || true,
+        );
+        assert_eq!(result, PermState::Denied);
+    }
+
+    /// A grant with nothing plugged in is not a permission problem, and the
+    /// UI says something else about it.
+    #[test]
+    fn a_grant_without_an_input_device_is_no_device() {
+        let result = request_microphone_with(|| PermState::Unknown, || {}, || true, || false);
+        assert_eq!(result, PermState::NoDevice);
     }
 
     /// Already-authorized short-circuits to `Granted` without touching
-    /// Settings or the probe.
+    /// Settings or raising a prompt.
     #[test]
     fn granted_short_circuits() {
         let result = request_microphone_with(
             || PermState::Granted,
             || panic!("Granted must not open Settings"),
-            || panic!("Granted must not probe"),
+            || panic!("Granted must not request access"),
             || true,
         );
         assert_eq!(result, PermState::Granted);
@@ -896,47 +859,52 @@ mod tests {
     #[test]
     fn microphone_snapshot_prefers_the_live_status_when_the_os_has_decided() {
         assert_eq!(
-            microphone_snapshot_state(PermState::Denied, Some(PermState::Granted)),
+            microphone_snapshot_state(PermState::Denied, true),
             PermState::Denied,
-            "a revoke observed on a fresh process must beat the remembered grant"
+            "a revoke read on this process must beat a grant seen earlier"
         );
         assert_eq!(
-            microphone_snapshot_state(PermState::Granted, None),
+            microphone_snapshot_state(PermState::Granted, false),
             PermState::Granted
         );
     }
 
+    /// AC5: the reported failure was a process that read NotDetermined two
+    /// seconds before the user granted the permission and kept returning it
+    /// from the AVFoundation cache, so the row showed "Grant" forever. A
+    /// grant the request callback reported wins over that stale read.
     #[test]
-    fn microphone_snapshot_falls_back_to_a_remembered_grant() {
-        // The reported failure: the process read NotDetermined two seconds
-        // before the user granted the permission and kept returning it from
-        // the AVFoundation cache, so the row showed "Grant" forever.
+    fn microphone_snapshot_uses_a_grant_this_process_observed() {
         assert_eq!(
-            microphone_snapshot_state(PermState::Unknown, Some(PermState::Granted)),
+            microphone_snapshot_state(PermState::Unknown, true),
             PermState::Granted
         );
         assert_eq!(
-            microphone_snapshot_state(PermState::Unknown, None),
+            microphone_snapshot_state(PermState::Unknown, false),
             PermState::Unknown
         );
     }
 
+    /// AC6: the two permission rows are gone from the code, and a database
+    /// still carrying them opens and reads back like any other.
     #[test]
-    fn microphone_grant_round_trips_through_the_db() {
-        let (db, _dir) = crate::test_helpers::fixtures::test_db();
-        assert_eq!(load_remembered_microphone(&db), None);
+    fn a_database_carrying_the_removed_permission_rows_still_loads() {
+        let (db, dir) = crate::test_helpers::fixtures::test_db();
+        db.set_setting("microphone_permission", "\"granted\"")
+            .unwrap();
+        db.set_setting("system_audio_permission", "\"denied\"")
+            .unwrap();
+        drop(db);
 
-        remember_microphone(&db, PermState::Granted);
-        assert_eq!(load_remembered_microphone(&db), Some(PermState::Granted));
-
-        for transient in [PermState::Denied, PermState::NoDevice, PermState::Unknown] {
-            remember_microphone(&db, transient);
-            assert_eq!(
-                load_remembered_microphone(&db),
-                Some(PermState::Granted),
-                "{transient:?} must not clobber a remembered grant"
-            );
-        }
+        let db = crate::db::Database::open(&dir.path().join("test.db"))
+            .expect("a database holding the old permission rows must still open");
+        let settings = db.get_all_settings().expect("settings must read back");
+        assert!(
+            settings
+                .iter()
+                .any(|(key, _)| key == "microphone_permission"),
+            "the rows are left in place, just unread"
+        );
     }
 
     #[test]

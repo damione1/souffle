@@ -872,7 +872,8 @@ async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
 },
 /**
  * Trigger the native prompt (or open System Settings) for one permission.
- * The probe opens a device, so it runs off the command thread.
+ * Blocks until the user answers the dialog, so it runs off the command
+ * thread.
  */
 async requestPermission(kind: PermissionKind) : Promise<Result<PermState, string>> {
     try {
