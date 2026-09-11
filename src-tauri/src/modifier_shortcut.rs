@@ -1,5 +1,5 @@
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -89,8 +89,16 @@ pub(crate) fn shortcut_registration_target(shortcut: &str) -> ShortcutRegistrati
 }
 
 /// Mach port of the installed tap, for enable/disable from any thread.
-/// Zero until the tap is installed; the runloop thread never lets it go.
+/// Zero until the tap is installed, and back to zero before the tap is
+/// dropped.
 static TAP_PORT: AtomicUsize = AtomicUsize::new(0);
+
+/// Serializes `CGEventTapEnable` against the teardown that invalidates the
+/// port. `CFRunLoop::run_current` returns when the runloop has no sources
+/// left, and dropping the `CGEventTap` invalidates its `CFMachPort`; without
+/// this lock a concurrent `sync_modifier_tap` could load the port before the
+/// clear and call `CGEventTapEnable` on freed memory.
+static TAP_PORT_LOCK: Mutex<()> = Mutex::new(());
 
 /// Whether a configured shortcut currently needs the tap.
 static TAP_WANTED: AtomicBool = AtomicBool::new(false);
@@ -108,6 +116,32 @@ const TAP_STARTUP_GRACE: Duration = Duration::from_millis(500);
 /// for the grant. A read, never a request: it cannot raise a prompt.
 const TAP_PERMISSION_POLL: Duration = Duration::from_secs(2);
 
+/// Wakes the waiting thread when `TAP_WANTED` changes. Without it the thread
+/// keeps ticking every two seconds for the life of the process even after the
+/// user moves both shortcuts to combos and nothing needs the tap.
+static TAP_WANTED_CHANGED: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+
+/// Block until the tap is wanted again. Returns immediately when it already
+/// is; a spurious wake just re-reads `TAP_WANTED`, which is the condition.
+fn wait_until_tap_wanted() {
+    let (lock, cv) = &TAP_WANTED_CHANGED;
+    let mut changed = lock.lock().unwrap_or_else(|e| e.into_inner());
+    while !TAP_WANTED.load(Ordering::SeqCst) {
+        *changed = false;
+        changed = cv
+            .wait(changed)
+            .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    }
+}
+
+fn signal_tap_wanted_changed() {
+    let (lock, cv) = &TAP_WANTED_CHANGED;
+    if let Ok(mut changed) = lock.lock() {
+        *changed = true;
+    }
+    cv.notify_all();
+}
+
 /// Install the native tap, or take it out of the event path, to match the
 /// shortcuts the user actually configured. Creating a `CGEventTap` is a TCC
 /// request: done with no shortcut needing it, macOS raises an Accessibility
@@ -117,6 +151,7 @@ const TAP_PERMISSION_POLL: Duration = Duration::from_secs(2);
 /// a restart.
 pub fn sync_modifier_tap(app: &AppHandle, needed: bool) {
     TAP_WANTED.store(needed, Ordering::SeqCst);
+    signal_tap_wanted_changed();
     set_tap_enabled(needed);
     if !needed || TAP_THREAD_SPAWNED.swap(true, Ordering::SeqCst) {
         return;
@@ -136,19 +171,21 @@ fn run_modifier_tap(app: AppHandle) {
     thread::sleep(TAP_STARTUP_GRACE);
     let mut warned = false;
     loop {
-        if TAP_WANTED.load(Ordering::SeqCst) {
-            // `AXIsProcessTrusted` is a snapshot read, `CGEventTap::new` is a
-            // TCC request. Reading first is what keeps the wait from raising a
-            // prompt every couple of seconds; the banner carries the news
-            // instead (SOU-116).
-            if crate::permissions::accessibility_granted() && install_and_run(app.clone()) {
-                return;
-            }
-            store_and_emit_modifier_tap_status(&app, false);
-            if !warned {
-                error!("Native shortcut tap not installed. Is Accessibility granted?");
-                warned = true;
-            }
+        // Nothing wants the tap: sleep on the condvar instead of ticking
+        // forever. `sync_modifier_tap` wakes this up when a single-key
+        // shortcut comes back.
+        wait_until_tap_wanted();
+        // `AXIsProcessTrusted` is a snapshot read, `CGEventTap::new` is a
+        // TCC request. Reading first is what keeps the wait from raising a
+        // prompt every couple of seconds; the banner carries the news
+        // instead (SOU-116).
+        if crate::permissions::accessibility_granted() && install_and_run(app.clone()) {
+            return;
+        }
+        store_and_emit_modifier_tap_status(&app, false);
+        if !warned {
+            error!("Native shortcut tap not installed. Is Accessibility granted?");
+            warned = true;
         }
         thread::sleep(TAP_PERMISSION_POLL);
     }
@@ -156,6 +193,7 @@ fn run_modifier_tap(app: AppHandle) {
 
 #[cfg(target_os = "macos")]
 fn set_tap_enabled(enabled: bool) {
+    let _guard = TAP_PORT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let ptr = TAP_PORT.load(Ordering::SeqCst);
     if ptr == 0 {
         return;
@@ -200,11 +238,20 @@ fn install_and_run(app: AppHandle) -> bool {
                 None => return CallbackResult::Keep,
             };
             let toggle_shortcut = {
-                let lock = state.modifier_toggle_shortcut.read().unwrap();
+                // A poisoned lock must not panic here: this runs inside the
+                // C callback of an active HID tap, in front of every
+                // keystroke on the machine.
+                let lock = state
+                    .modifier_toggle_shortcut
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner());
                 lock.clone()
             };
             let ptt_shortcut = {
-                let lock = state.modifier_ptt_shortcut.read().unwrap();
+                let lock = state
+                    .modifier_ptt_shortcut
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner());
                 lock.clone()
             };
 
@@ -282,7 +329,7 @@ fn install_and_run(app: AppHandle) -> bool {
                 Ordering::SeqCst,
             );
             let Ok(loop_source) = tap.mach_port().create_runloop_source(0) else {
-                TAP_PORT.store(0, Ordering::SeqCst);
+                clear_tap_port();
                 store_and_emit_modifier_tap_status(&app_for_status, false);
                 return false;
             };
@@ -293,10 +340,21 @@ fn install_and_run(app: AppHandle) -> bool {
             // A shortcut saved while the tap was being installed decides here.
             set_tap_enabled(TAP_WANTED.load(Ordering::SeqCst));
             core_foundation::runloop::CFRunLoop::run_current();
+            // The runloop gave up (no sources left). Retire the port before
+            // `tap` drops and invalidates it, so no enable can reach it.
+            clear_tap_port();
+            drop(tap);
             false
         }
         Err(_) => false,
     }
+}
+
+/// Zero `TAP_PORT` under the lock `set_tap_enabled` takes, so a concurrent
+/// enable either ran before the clear (on a still-valid port) or sees zero.
+fn clear_tap_port() {
+    let _guard = TAP_PORT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    TAP_PORT.store(0, Ordering::SeqCst);
 }
 
 fn emit_toggle(state: &AppState, app: &AppHandle) {
