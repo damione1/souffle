@@ -2772,6 +2772,17 @@ impl AudioCapture {
         // nothing to rebuild.
         self.poll_pending_mic_open();
 
+        // Still inside CoreAudio from a timed-out open: rebuilding would
+        // only hit `Busy` and climb the mic-loss ladder to a false
+        // "Microphone lost" while system audio keeps working. Wait.
+        if self
+            .mic_open_pending
+            .as_ref()
+            .is_some_and(PendingOpen::is_running)
+        {
+            return false;
+        }
+
         let failed = self
             .stream_failed
             .swap(false, std::sync::atomic::Ordering::Relaxed);

@@ -61,7 +61,7 @@ struct TapShared {
     /// Counts samples dropped because the ring buffer was full.
     dropped: AtomicU64,
     /// Counts IO callback invocations — observable for health checks.
-    callbacks: AtomicU64,
+    callbacks: Arc<AtomicU64>,
 }
 
 type IoBlock = RcBlock<
@@ -106,6 +106,17 @@ pub struct TapHandle {
     /// Closing this channel (on drop) unparks the tap thread.
     _stop_tx: std::sync::mpsc::Sender<()>,
     pub sample_rate: u32,
+    /// IO callbacks observed by the tap thread. Shared so a permission probe
+    /// can tell "mounted but silent / denied" (0) from a live tap (>0)
+    /// without reaching into the non-`Send` `SystemTap`.
+    callbacks: Arc<AtomicU64>,
+}
+
+impl TapHandle {
+    /// Number of IO callback invocations so far on this tap.
+    pub fn callback_count(&self) -> u64 {
+        self.callbacks.load(Ordering::Relaxed)
+    }
 }
 
 /// Start a system tap on a dedicated thread, waiting up to `timeout` for it
@@ -135,7 +146,9 @@ pub fn spawn_tap(
             }
             match SystemTap::start(producer) {
                 Ok(tap) => {
-                    if event_tx.send(Ok(tap.sample_rate() as u32)).is_err() {
+                    let sample_rate = tap.sample_rate() as u32;
+                    let callbacks = tap.share_callbacks();
+                    if event_tx.send(Ok((sample_rate, callbacks))).is_err() {
                         // Caller timed out and gave up; tear down immediately.
                         return;
                     }
@@ -152,9 +165,10 @@ pub fn spawn_tap(
         .map_err(|e| format!("Failed to spawn tap thread: {e}"))?;
 
     match event_rx.recv_timeout(timeout) {
-        Ok(Ok(sample_rate)) => Ok(TapHandle {
+        Ok(Ok((sample_rate, callbacks))) => Ok(TapHandle {
             _stop_tx: stop_tx,
             sample_rate,
+            callbacks,
         }),
         Ok(Err(e)) => Err(e),
         Err(_) => Err(
@@ -244,7 +258,7 @@ impl SystemTap {
         let shared = Arc::new(TapShared {
             producer: Mutex::new(producer),
             dropped: AtomicU64::new(0),
-            callbacks: AtomicU64::new(0),
+            callbacks: Arc::new(AtomicU64::new(0)),
         });
         let block_shared = Arc::clone(&shared);
         let block: IoBlock = RcBlock::new(
@@ -308,6 +322,10 @@ impl SystemTap {
     /// denied).
     pub fn callback_count(&self) -> u64 {
         self.shared.callbacks.load(Ordering::Relaxed)
+    }
+
+    fn share_callbacks(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.shared.callbacks)
     }
 }
 
