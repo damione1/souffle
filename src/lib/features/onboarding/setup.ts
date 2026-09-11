@@ -3,7 +3,7 @@ import type { AppStateMachine, TranscriptionRuntimePhase } from "../../types";
 export const PERMISSIONS_STORAGE_KEY = "permissionsOnboarded";
 export const SETUP_STORAGE_KEY = "setupOnboarded";
 
-export type SetupStep = "permissions" | "microphone" | "model" | "shortcut" | "interview";
+export type SetupStep = "permissions" | "microphone" | "model" | "shortcut";
 
 export type SetupFlags = {
   permissionsDone: boolean;
@@ -77,11 +77,10 @@ export function decideAutostartOnFinish(recoveryOnly: boolean, current: boolean)
   return recoveryOnly ? current : true;
 }
 
-export function wizardSteps(flags: SetupFlags, dictionaryInterviewDone: boolean): SetupStep[] {
+export function wizardSteps(flags: SetupFlags): SetupStep[] {
   if (flags.setupDone) return ["model"];
   const steps: SetupStep[] = [];
   if (!flags.permissionsDone) steps.push("permissions");
   steps.push("microphone", "model", "shortcut");
-  if (!dictionaryInterviewDone) steps.push("interview");
   return steps;
 }

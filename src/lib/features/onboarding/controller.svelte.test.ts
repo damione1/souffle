@@ -70,7 +70,7 @@ describe("createOnboardingController", () => {
     const ctrl = createOnboardingController();
     await ctrl.mount();
 
-    expect(ctrl.steps).toEqual(["permissions", "microphone", "model", "shortcut", "interview"]);
+    expect(ctrl.steps).toEqual(["permissions", "microphone", "model", "shortcut"]);
     expect(ctrl.step).toBe("permissions");
 
     await ctrl.goNext();
@@ -85,7 +85,7 @@ describe("createOnboardingController", () => {
     localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
     const ctrl = createOnboardingController();
     await ctrl.mount();
-    expect(ctrl.steps).toEqual(["microphone", "model", "shortcut", "interview"]);
+    expect(ctrl.steps).toEqual(["microphone", "model", "shortcut"]);
     expect(ctrl.step).toBe("microphone");
   });
 
@@ -146,6 +146,25 @@ describe("createOnboardingController", () => {
       });
     });
     expect(ctrl.recordingShortcut).toBe(false);
+  });
+
+  // SOU-131: the dictionary interview used to sit after the shortcut, so the
+  // shortcut step was never the one that closed the wizard.
+  it("closes the wizard when the shortcut step continues", async () => {
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    app.transcriptionRuntimePhase = "ready";
+    const ctrl = createOnboardingController();
+    await ctrl.mount();
+
+    await ctrl.goNext();
+    await ctrl.goNext();
+    expect(ctrl.step).toBe("shortcut");
+    expect(ctrl.stepIndex).toBe(ctrl.steps.length - 1);
+
+    await ctrl.goNext();
+
+    expect(localStorage.getItem(SETUP_STORAGE_KEY)).toBe("1");
+    expect(app.showOnboarding).toBe(false);
   });
 
   it("finishes marking setup complete, auto-paste following Accessibility", async () => {

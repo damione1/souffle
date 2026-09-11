@@ -609,7 +609,7 @@
         "h": "First run",
         "blocks": [
           {
-            "p": "A setup wizard covers the permissions Soufflé needs, which microphone to use, the speech model to download, the dictation shortcut, and an optional dictionary interview (names, jargon, polish tone) you can skip. The default shortcut is <kbd>⌘⇧Space</kbd>."
+            "p": "A setup wizard covers the permissions Soufflé needs, which microphone to use, the speech model to download, and the dictation shortcut. The default shortcut is <kbd>⌘⇧Space</kbd>."
           },
           {
             "p": "The shortcut step also offers auto-paste, on by default: when you stop dictating, the text goes straight into the app you were in. Turn it off and the text is put on the clipboard instead. A fresh install finishes with Launch at login on; change that later in Settings → System. Everything here can be changed later in Settings."
@@ -778,7 +778,7 @@
               ],
               [
                 "Custom dictionary<br><span class=\"docs-tab\">Transcription</span>",
-                "Proper nouns and technical terms to spell correctly, filled in by hand, learned from your corrections, or seeded by the optional first-run interview."
+                "Proper nouns and technical terms to spell correctly, filled in by hand or learned from your corrections."
               ],
               [
                 "Voice snippets<br><span class=\"docs-tab\">Transcription</span>",
