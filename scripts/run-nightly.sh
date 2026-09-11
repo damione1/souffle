@@ -36,10 +36,18 @@ if [[ "$fresh" -eq 1 ]]; then
   echo "Wiping Nightly data and TCC rows ($nightly_id)"
   rm -rf "${HOME}/Library/Application Support/${nightly_id}"
   rm -rf "${HOME}/Library/WebKit/${nightly_id}"
-  for svc in Accessibility ListenEvent Microphone ScreenCapture; do
+  for svc in Accessibility AudioCapture Calendar Microphone ScreenCapture; do
     tccutil reset "$svc" "$nightly_id" >/dev/null 2>&1 || true
   done
 fi
+
+# TCC keys its records on the designated requirement, not on the bundle id. An
+# unsigned bundle's DR is its cdhash, so every rebuild is a new subject and all
+# permissions have to be granted again. Signing with a stable Developer ID gives
+# a DR of the form `identifier ... and certificate leaf[subject.OU] = X6H966RSDB`,
+# which survives a rebuild. No notarization needed: a locally built bundle
+# carries no quarantine flag, so Gatekeeper never asks.
+export APPLE_SIGNING_IDENTITY="Developer ID Application: Damien Goehrig (X6H966RSDB)"
 
 npm run tauri -- build --debug --bundles app
 
