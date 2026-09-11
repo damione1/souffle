@@ -1,0 +1,88 @@
+name: CodeRabbit gate
+
+# CodeRabbit has no notion of "wait for CI": left on auto-review it reviews the
+# push, the fix for the failing suite, and the fix for its own remarks, three
+# times over. So auto-review is off in .coderabbit.yaml and gated on a label
+# that only this workflow grants, once every other check on the head commit has
+# come back green.
+
+on:
+  pull_request:
+    types: [synchronize, reopened]
+  workflow_run:
+    workflows: [Contracts, E2E]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  pull-requests: write
+
+concurrency:
+  # Contracts and E2E finish within seconds of each other; serialize so the
+  # later one reads a complete picture instead of racing on the label.
+  group: coderabbit-gate-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  LABEL: ci-green
+
+jobs:
+  coderabbit-park:
+    # A new push invalidates the previous verdict. Drop the label so an
+    # incremental review does not start ahead of the suites.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Withdraw the gate for the new head commit
+        run: |
+          gh api -X DELETE \
+            "repos/$GH_REPO/issues/${{ github.event.pull_request.number }}/labels/$LABEL" \
+            --silent 2>/dev/null || echo "label was not set"
+
+  coderabbit-gate:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Grant the gate when every other check is green
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          pr=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" \
+                 --jq '[.[] | select(.state == "open")] | first | .number // empty')
+          if [ -z "$pr" ]; then
+            echo "No open PR for $HEAD_SHA"
+            exit 0
+          fi
+
+          # Only this repo's Actions checks decide. CodeRabbit's own check runs
+          # are excluded, otherwise the gate waits on what it is gating, and so
+          # are this workflow's jobs, which are running right now by definition.
+          not_green=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[]
+                   | select(.app.slug == "github-actions")
+                   | select(.name | startswith("coderabbit-") | not)
+                   | select((.status == "completed"
+                             and (.conclusion == "success"
+                                  or .conclusion == "skipped"
+                                  or .conclusion == "neutral")) | not)
+                   | .name] | unique | join(", ")')
+
+          if [ -n "$not_green" ]; then
+            echo "Still pending or failed: $not_green"
+            gh api -X DELETE "repos/$GH_REPO/issues/$pr/labels/$LABEL" \
+              --silent 2>/dev/null || true
+            exit 0
+          fi
+
+          gh label create "$LABEL" --color 0e8a16 \
+            --description "CI green: CodeRabbit may review" 2>/dev/null || true
+          gh pr edit "$pr" --add-label "$LABEL"
+          echo "PR #$pr is green, CodeRabbit released"
