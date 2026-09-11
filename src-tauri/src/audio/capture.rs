@@ -344,7 +344,9 @@ impl std::fmt::Display for MicOpenError {
 /// of it.
 struct PendingOpen<T> {
     thread: JoinHandle<()>,
-    rx: std::sync::mpsc::Receiver<Result<T, String>>,
+    /// Gone once the open has been abandoned: the worker's `send` then fails
+    /// and it releases the value itself.
+    rx: Option<std::sync::mpsc::Receiver<Result<T, String>>>,
     abandoned: Arc<AtomicBool>,
     started: Instant,
 }
@@ -354,17 +356,30 @@ impl<T> PendingOpen<T> {
         !self.thread.is_finished()
     }
 
-    /// Tell the worker nobody is waiting any more. It checks this before
-    /// starting the device, and releases anything it has already built.
-    fn abandon(&self) {
+    /// Tell the worker nobody is waiting any more, and stop listening.
+    ///
+    /// Returns a value the worker had already delivered before the flag was
+    /// set: dropping the receiver on it would drop it without the release
+    /// its `discard` performs, so the caller has to do that itself. An
+    /// abandoned open is still worth keeping around — `is_running` is what
+    /// stops a second open being spawned on a device that has not answered
+    /// the first.
+    fn abandon(&mut self) -> Option<T> {
         self.abandoned.store(true, Ordering::Relaxed);
+        self.rx
+            .take()
+            .and_then(|rx| rx.try_recv().ok())
+            .and_then(Result::ok)
     }
 
     /// The stream, if the open has answered since the last look. `Err` is
     /// the open's own failure; `Ok(None)` means it is still inside
-    /// CoreAudio.
+    /// CoreAudio, or nobody is listening any more.
     fn try_take(&self) -> Result<Option<T>, String> {
-        match self.rx.try_recv() {
+        let Some(rx) = self.rx.as_ref() else {
+            return Ok(None);
+        };
+        match rx.try_recv() {
             Ok(Ok(value)) => Ok(Some(value)),
             Ok(Err(error)) => Err(error),
             Err(std::sync::mpsc::TryRecvError::Empty) => Ok(None),
@@ -382,19 +397,84 @@ impl<T> PendingOpen<T> {
 /// ring back with. Held while the open is still out, dropped with it.
 struct MicAdoption {
     session_id: u64,
+    /// UID of the device this open targeted. A session that has moved to
+    /// another input since must not be handed this one: `mic_device_uid`
+    /// and friends would then describe one device while the live stream
+    /// runs on another, and the health check would watch the wrong object.
+    device_uid: Option<String>,
     mic_cons: ringbuf::HeapCons<f32>,
     sample_rate: u32,
     channels: u16,
     mic_gain: f32,
 }
 
+/// Whether a late microphone stream is still the right one to install.
+#[derive(Debug, PartialEq, Eq)]
+enum AdoptionVerdict {
+    Install,
+    Release(&'static str),
+}
+
+/// Everything the decision depends on, so it can be made without a device.
+struct AdoptionContext<'a> {
+    adoption_session: u64,
+    active_session: Option<u64>,
+    meeting_session: Option<u64>,
+    adoption_device: Option<&'a str>,
+    current_device: Option<&'a str>,
+    has_stream: bool,
+}
+
+/// A stream that took a minute to arrive can easily belong to a world that
+/// no longer exists. Every reason it might is checked here.
+fn adoption_verdict(ctx: AdoptionContext<'_>) -> AdoptionVerdict {
+    let Some(active_session) = ctx.active_session else {
+        return AdoptionVerdict::Release("the session has ended");
+    };
+    if active_session != ctx.adoption_session {
+        return AdoptionVerdict::Release("it belongs to a session that has ended");
+    }
+    // The session may have been pointed at another input while this open was
+    // out — the user picking one, or a route change resolving elsewhere.
+    // Installing it then would leave `mic_device_name/uid/object_id`
+    // describing one device and the live stream running on another: the
+    // health check would watch the wrong HAL object, and no rebuild would
+    // ever correct it.
+    if ctx.current_device != ctx.adoption_device {
+        return AdoptionVerdict::Release("the session has moved to another input device");
+    }
+    match ctx.meeting_session {
+        None => return AdoptionVerdict::Release("the meeting is gone"),
+        Some(meeting_session) if meeting_session != ctx.adoption_session => {
+            return AdoptionVerdict::Release("the meeting moved on to another session");
+        }
+        Some(_) => {}
+    }
+    if ctx.has_stream {
+        return AdoptionVerdict::Release("the session already rebuilt its microphone");
+    }
+    AdoptionVerdict::Install
+}
+
+/// Release a microphone stream nobody is going to install, the way
+/// `release_capture_stream` does: pause, then drop, or a Bluetooth headset
+/// stays in HFP/mono.
+fn release_late_mic_stream(stream: Stream, why: &str) {
+    debug!("Late microphone stream released: {why}");
+    if let Err(e) = stream.pause() {
+        debug!("Pause of a released late mic stream: {e}");
+    }
+}
+
 /// Run `open` on a throwaway thread and wait at most `timeout` for it.
 ///
-/// Whatever `open` returns once nobody is waiting is handed to `discard`,
+/// A value `open` returns once nobody is waiting is handed to `discard`,
 /// which releases it the way `release_capture_stream` does — pause, then
-/// drop — so a Bluetooth headset leaves HFP instead of staying in mono.
-/// Moving the stream between threads is fine: cpal's CoreAudio `Stream` is
-/// `Send` (cpal 0.17).
+/// drop — so a Bluetooth headset leaves HFP instead of staying in mono. The
+/// one case `discard` cannot cover is a value already delivered when the
+/// caller gives up; `PendingOpen::abandon` hands that one back for the
+/// caller to release. Moving the stream between threads is fine: cpal's
+/// CoreAudio `Stream` is `Send` (cpal 0.16 added it).
 ///
 /// On timeout the worker is handed back rather than cut loose, so the
 /// caller can either abandon it or wait for its stream on its own clock.
@@ -471,7 +551,7 @@ where
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => (
             Some(PendingOpen {
                 thread,
-                rx,
+                rx: Some(rx),
                 abandoned,
                 started,
             }),
@@ -698,6 +778,88 @@ mod mic_open_tests {
                 );
             }
         }
+    }
+
+    fn adoption_of(session: u64) -> AdoptionContext<'static> {
+        AdoptionContext {
+            adoption_session: session,
+            active_session: Some(session),
+            meeting_session: Some(session),
+            adoption_device: Some("BuiltInMicrophoneDevice"),
+            current_device: Some("BuiltInMicrophoneDevice"),
+            has_stream: false,
+        }
+    }
+
+    #[test]
+    fn a_late_stream_for_the_running_meeting_is_installed() {
+        assert_eq!(adoption_verdict(adoption_of(9)), AdoptionVerdict::Install);
+    }
+
+    /// Everything a minute-late stream can outlive. Each of these installed
+    /// would be worse than no microphone: a stream nobody drains, or one the
+    /// health check is not watching.
+    #[test]
+    fn a_late_stream_is_released_when_the_world_moved_on() {
+        for (what, ctx) in [
+            (
+                "session ended",
+                AdoptionContext {
+                    active_session: None,
+                    ..adoption_of(9)
+                },
+            ),
+            (
+                "another session",
+                AdoptionContext {
+                    active_session: Some(10),
+                    ..adoption_of(9)
+                },
+            ),
+            (
+                "meeting gone",
+                AdoptionContext {
+                    meeting_session: None,
+                    ..adoption_of(9)
+                },
+            ),
+            (
+                "meeting moved on",
+                AdoptionContext {
+                    meeting_session: Some(10),
+                    ..adoption_of(9)
+                },
+            ),
+            (
+                "microphone already rebuilt",
+                AdoptionContext {
+                    has_stream: true,
+                    ..adoption_of(9)
+                },
+            ),
+        ] {
+            assert!(
+                matches!(adoption_verdict(ctx), AdoptionVerdict::Release(_)),
+                "a late stream must not be installed after {what}"
+            );
+        }
+    }
+
+    /// The wedged built-in answers a minute after the user plugged in a
+    /// headset. Installing it would leave the session recording the device
+    /// the user moved away from, with the health check watching the other
+    /// one — and no rebuild would ever notice.
+    #[test]
+    fn a_late_stream_from_a_device_the_session_left_is_released() {
+        let ctx = AdoptionContext {
+            adoption_device: Some("BuiltInMicrophoneDevice"),
+            current_device: Some("com.shure.mv7"),
+            ..adoption_of(9)
+        };
+        assert_eq!(
+            adoption_verdict(ctx),
+            AdoptionVerdict::Release("the session has moved to another input device")
+        );
     }
 
     /// The park belongs to the device that stalled. CoreAudio emits a
@@ -1959,7 +2121,8 @@ impl AudioCapture {
             }
             // Finished, and whatever it produced was collected (or released)
             // by `poll_pending_mic_open`. Nothing left to keep.
-            self.drop_pending_mic_open();
+            self.mic_open_pending = None;
+            self.mic_open_adoption = None;
         }
         if mic_open_is_parked(self.mic_open_timed_out.as_ref(), device_name) {
             return Err(MicOpenError::Parked);
@@ -2012,6 +2175,21 @@ impl AudioCapture {
             // to nobody now.
             self.mic_open_timed_out = None;
             self.abandon_pending_mic_open();
+        }
+        // Refused here rather than in `open_mic_stream`: everything between
+        // this point and the open touches the device that is not answering
+        // — two `list_input_devices_impl`, `find_device`, and a
+        // `preferred_config` that instantiates and disposes an AUHAL twice —
+        // and the meeting path reopens the capture gate before it, which a
+        // stream still out on the previous open must not slip through. None
+        // of it can change the answer while that open is still running.
+        self.reap_pending_mic_open();
+        if self
+            .mic_open_pending
+            .as_ref()
+            .is_some_and(PendingOpen::is_running)
+        {
+            return Err(MicOpenError::Busy.to_string());
         }
         // Ensure any previous callback stops emitting immediately. The
         // recorder is NOT torn down here; see `sync_recorder`, so a
@@ -2413,14 +2591,16 @@ impl AudioCapture {
                 self.active_session_id.store(0, Ordering::Release);
                 let (dead_prod, dead_cons) = HeapRb::<f32>::new(1).split();
                 drop(dead_prod);
-                if matches!(e, MicOpenError::TimedOut(_)) && self.mic_open_pending.is_some() {
+                if matches!(e, MicOpenError::TimedOut(_)) {
                     // This attempt's open is still inside CoreAudio. Keep its
                     // ring: `poll_pending_mic_open` hands it to the mixer if
                     // the device ever answers, and only then is the gate
-                    // reopened. A `Busy` error belongs to an earlier attempt,
-                    // whose ring is already held, so it must not clobber it.
+                    // reopened. Only a timeout gets here with an open of its
+                    // own; `Busy` belongs to an earlier attempt whose ring is
+                    // already held, and must not clobber it.
                     self.mic_open_adoption = Some(MicAdoption {
                         session_id,
+                        device_uid: self.mic_device_uid.clone(),
                         mic_cons,
                         sample_rate,
                         channels,
@@ -2950,26 +3130,36 @@ impl AudioCapture {
         self.teardown_session_state();
     }
 
-    /// Ends a dictation session whose microphone could not be rebuilt after
-    /// repeated attempts and has no other audio source to fall back on.
-    /// Records the reason for the engine actor's `AudioGone` handler before
-    /// tearing down — see `teardown_session_state` for why exiting this
-    /// thread is what lets the actor salvage and fail the session, exactly
-    /// like a panic abort.
-    /// Give up on an open that is still out, and forget it. The worker
-    /// releases whatever it built, on its own thread.
+    /// Stop waiting on an open that is still out. The worker is *not*
+    /// forgotten: `is_running` on it is what refuses a second open on a
+    /// device that has not answered the first, and that guard has to
+    /// outlive the session that gave up — a stop and a restart on the same
+    /// wedged device would otherwise each spend a fresh bound and leave a
+    /// fresh AUHAL behind.
     fn abandon_pending_mic_open(&mut self) {
-        if let Some(pending) = &self.mic_open_pending {
-            pending.abandon();
+        let delivered = self
+            .mic_open_pending
+            .as_mut()
+            .and_then(PendingOpen::abandon);
+        if let Some(stream) = delivered {
+            // It answered between the last look and now, so the worker will
+            // not release it.
+            release_late_mic_stream(stream, "the session stopped waiting for it");
         }
-        self.drop_pending_mic_open();
+        self.mic_open_adoption = None;
+        self.reap_pending_mic_open();
     }
 
-    /// Forget the pending open without telling the worker anything. Only
-    /// correct once the worker has finished, or right after `abandon`.
-    fn drop_pending_mic_open(&mut self) {
-        self.mic_open_pending = None;
-        self.mic_open_adoption = None;
+    /// Drop a worker that has come back. Keeping a finished one only hides
+    /// the next open behind a guard that no longer guards anything.
+    fn reap_pending_mic_open(&mut self) {
+        if self
+            .mic_open_pending
+            .as_ref()
+            .is_some_and(|pending| !pending.is_running())
+        {
+            self.mic_open_pending = None;
+        }
     }
 
     /// Put a late microphone stream to work, if one has arrived.
@@ -2990,17 +3180,21 @@ impl AudioCapture {
             return;
         };
         let elapsed_ms = pending.elapsed().as_millis() as u64;
+        // Asked first, and on purpose: a worker that sends and exits between
+        // the look and this question would otherwise be read as a dead end
+        // while its stream sits unread in the channel.
+        let was_running = pending.is_running();
         match pending.try_take() {
             Ok(None) => {
-                // Still inside CoreAudio. A thread that ended without
-                // sending anything is a dead end, not a wait.
-                if !pending.is_running() {
-                    self.drop_pending_mic_open();
+                if !was_running {
+                    self.mic_open_pending = None;
+                    self.mic_open_adoption = None;
                 }
             }
             Ok(Some(stream)) => {
                 let adopted = self.adopt_mic_stream(stream, elapsed_ms);
-                self.drop_pending_mic_open();
+                self.mic_open_pending = None;
+                self.mic_open_adoption = None;
                 if adopted {
                     self.mic_open_timed_out = None;
                     self.clear_mic_loss_ladder();
@@ -3008,7 +3202,8 @@ impl AudioCapture {
             }
             Err(error) => {
                 warn!(elapsed_ms, error, "Late microphone open failed");
-                self.drop_pending_mic_open();
+                self.mic_open_pending = None;
+                self.mic_open_adoption = None;
             }
         }
     }
@@ -3018,37 +3213,26 @@ impl AudioCapture {
     /// session that has since ended, or to one that already has a
     /// microphone, is released instead.
     fn adopt_mic_stream(&mut self, stream: Stream, elapsed_ms: u64) -> bool {
-        let release = |stream: Stream, why: &str| {
-            debug!("Late microphone stream released: {why}");
-            if let Err(e) = stream.pause() {
-                debug!("Pause of a released late mic stream: {e}");
-            }
-        };
-
         let Some(adoption) = self.mic_open_adoption.take() else {
-            release(stream, "nothing was waiting for it");
+            release_late_mic_stream(stream, "nothing was waiting for it");
             return false;
         };
-        let Some(params) = self.active_params.as_ref() else {
-            release(stream, "the session has ended");
-            return false;
-        };
-        if params.session_id != adoption.session_id {
-            release(stream, "it belongs to a session that has ended");
+        let verdict = adoption_verdict(AdoptionContext {
+            adoption_session: adoption.session_id,
+            active_session: self.active_params.as_ref().map(|p| p.session_id),
+            meeting_session: self.meeting.as_ref().map(|m| m.session_id),
+            adoption_device: adoption.device_uid.as_deref(),
+            current_device: self.mic_device_uid.as_deref(),
+            has_stream: self.stream.is_some(),
+        });
+        if let AdoptionVerdict::Release(why) = verdict {
+            release_late_mic_stream(stream, why);
             return false;
         }
         let Some(meeting) = self.meeting.as_mut() else {
-            release(stream, "the meeting is gone");
+            release_late_mic_stream(stream, "the meeting is gone");
             return false;
         };
-        if meeting.session_id != adoption.session_id {
-            release(stream, "the meeting moved on to another session");
-            return false;
-        }
-        if self.stream.is_some() {
-            release(stream, "the session already rebuilt its microphone");
-            return false;
-        }
 
         meeting.mixer.replace_mic(
             adoption.mic_cons,
@@ -3091,6 +3275,12 @@ impl AudioCapture {
         self.teardown_session_state();
     }
 
+    /// Ends a dictation session whose microphone could not be rebuilt after
+    /// repeated attempts and has no other audio source to fall back on.
+    /// Records the reason for the engine actor's `AudioGone` handler before
+    /// tearing down — see `teardown_session_state` for why exiting this
+    /// thread is what lets the actor salvage and fail the session, exactly
+    /// like a panic abort.
     fn abort_after_mic_loss(&mut self) {
         if let Ok(mut reason) = self.audio_gone_reason.lock() {
             *reason = Some(

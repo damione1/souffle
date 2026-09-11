@@ -17,9 +17,9 @@ pub enum DictationFeedbackKind {
     Stop,
 }
 
-/// Cues currently on a playback thread. Playback is short (a few hundred
-/// milliseconds), so more than a couple at once means threads are piling up
-/// rather than overlapping.
+/// Cues currently on a playback thread. Each cue is 120 ms of audio plus the
+/// time it takes to open the output, so several at once means threads are
+/// piling up rather than overlapping.
 static FEEDBACK_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 
 /// How many playback threads may exist at once. `play()` and
@@ -27,9 +27,16 @@ static FEEDBACK_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 /// their own — the same property that let a wedged input device stall a
 /// meeting for 72 s (SOU-125) — and this thread is never joined, so a wedged
 /// output device would otherwise leave one stuck thread behind per dictation
-/// toggle for the life of the app. Two, so the stop cue is never dropped
-/// because the start cue is still playing.
-const MAX_FEEDBACK_THREADS: usize = 2;
+/// toggle for the life of the app.
+///
+/// Four rather than two: a cue outlives its 120 ms by however long the
+/// device takes to open, which on a Bluetooth sink waking from idle is not
+/// negligible, and push-to-talk can fire start and stop inside that window.
+/// The cap exists to bound a wedge, not to serialise normal use. Once it is
+/// reached every further cue is skipped until a thread returns, which on a
+/// genuinely wedged output is the honest outcome — a device that cannot
+/// start cannot play a sound either.
+const MAX_FEEDBACK_THREADS: usize = 4;
 
 /// Take one of `max` slots, or report that none is free. Never blocks, and
 /// never overshoots under concurrent callers.
@@ -42,11 +49,11 @@ fn try_reserve_slot(in_flight: &AtomicUsize, max: usize) -> bool {
 }
 
 /// Releases its slot however the playback thread ends, panic included.
-struct FeedbackSlot;
+struct FeedbackSlot(&'static AtomicUsize);
 
 impl Drop for FeedbackSlot {
     fn drop(&mut self) {
-        FEEDBACK_IN_FLIGHT.fetch_sub(1, Ordering::AcqRel);
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -74,7 +81,7 @@ pub fn play_dictation_feedback(settings: &AppSettings, kind: DictationFeedbackKi
     let spawned = thread::Builder::new()
         .name("feedback-sound".into())
         .spawn(move || {
-            let _slot = FeedbackSlot;
+            let _slot = FeedbackSlot(&FEEDBACK_IN_FLIGHT);
             if let Err(e) = play_wav_blocking(&path, volume) {
                 warn!("Feedback sound playback failed: {e}");
             }
@@ -207,19 +214,35 @@ mod tests {
     /// dictation toggle from piling up for the life of the app.
     #[test]
     fn playback_slots_are_capped_and_returned() {
-        let in_flight = AtomicUsize::new(0);
-        assert!(try_reserve_slot(&in_flight, 2));
-        assert!(try_reserve_slot(&in_flight, 2));
+        static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+        assert!(try_reserve_slot(&IN_FLIGHT, 2));
+        assert!(try_reserve_slot(&IN_FLIGHT, 2));
         assert!(
-            !try_reserve_slot(&in_flight, 2),
+            !try_reserve_slot(&IN_FLIGHT, 2),
             "a third cue must be skipped, not stacked on a device that is not answering"
         );
 
-        in_flight.fetch_sub(1, Ordering::AcqRel);
+        drop(FeedbackSlot(&IN_FLIGHT));
         assert!(
-            try_reserve_slot(&in_flight, 2),
+            try_reserve_slot(&IN_FLIGHT, 2),
             "a finished playback must free its slot"
         );
+    }
+
+    /// The slot is released however the playback thread ends: a panic inside
+    /// cpal would otherwise burn one permanently, and four of them would
+    /// silence the cues for the life of the app.
+    #[test]
+    fn a_panicking_playback_still_frees_its_slot() {
+        static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+        assert!(try_reserve_slot(&IN_FLIGHT, 1));
+        let panicked = std::panic::catch_unwind(|| {
+            let _slot = FeedbackSlot(&IN_FLIGHT);
+            panic!("cpal gave up mid-playback");
+        });
+        assert!(panicked.is_err());
+        assert_eq!(IN_FLIGHT.load(Ordering::Acquire), 0);
+        assert!(try_reserve_slot(&IN_FLIGHT, 1));
     }
 
     #[test]
