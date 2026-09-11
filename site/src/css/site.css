@@ -146,32 +146,50 @@ html { scrollbar-color: var(--ink) var(--amber); }
 .band:first-of-type { border-top: 0; }
 .sheet { max-width: var(--measure); margin: 0 auto; padding: 0 var(--gut); }
 
-/* The dot screen: the only way this page makes a tone between two inks. */
-.screened {
-  background-image: radial-gradient(circle at center, var(--ink) 0 1.1px, transparent 1.1px);
-  background-size: 7px 7px;
-  opacity: 0.5;
+/* The dot screen: the only way this page makes a tone between two inks.
+   Printed where the sheet turns over, and behind the two speaker names, so
+   the mid-tones on this page are screened rather than blended. */
+.screen-band {
+  height: clamp(26px, 3vw, 44px);
+  background-image: radial-gradient(circle at center, var(--ink) 0 1.6px, transparent 1.6px);
+  background-size: 9px 9px;
 }
 
 /* ─── Type scale ───
    One face, eight steps. Leading tightens as the size grows, the way a
    poster sets billing; width condenses on the same curve. */
 .t-xl {
-  font-size: clamp(44px, 9.7vw, 146px);
   line-height: 0.85;
   letter-spacing: -0.035em;
   font-variation-settings: "wdth" 68;
   font-weight: 800;
   text-transform: uppercase;
 }
-.t-l {
-  font-size: clamp(34px, 6.2vw, 86px);
+/* A bill sets its billing flush to the sheet: each line is measured and
+   sized to fill the measure, so the block squares off instead of ragging
+   wherever a clamp happened to stop. The clamp below is what shows before
+   the measuring runs, and what stands if it never does. */
+/* The lines shrink to their own text so the typesetter can read a natural
+   width off them; a block-level line would just report the column. */
+[data-fit] { display: flex; flex-direction: column; align-items: flex-start; }
+[data-fit] .hl {
+  display: inline-block; white-space: nowrap;
+  font-size: clamp(40px, 8.4vw, 132px);
+}
+.t-l, .bill-1, .bill-2, .bill-3, .bill-4 {
   line-height: 0.9;
   letter-spacing: -0.03em;
   font-variation-settings: "wdth" 72;
   font-weight: 800;
   text-transform: uppercase;
 }
+/* The acts are not peers. Rank descends down the sheet the way billing
+   descends down a bill, and size is the only thing carrying it. */
+.t-l   { font-size: clamp(34px, 6.2vw, 86px); }
+.bill-1 { font-size: clamp(38px, 7.4vw, 102px); }
+.bill-2 { font-size: clamp(34px, 6.2vw, 86px); }
+.bill-3 { font-size: clamp(30px, 5.2vw, 72px); }
+.bill-4 { font-size: clamp(27px, 4.4vw, 60px); }
 .t-m {
   font-size: clamp(26px, 3.4vw, 46px);
   line-height: 0.98;
@@ -214,8 +232,8 @@ html { scrollbar-color: var(--ink) var(--amber); }
 .run-langs { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .run-langs a { padding: 4px 8px; }
 .run-langs a[aria-current="true"] { background: var(--ink); color: var(--amber); }
-.run-dl { flex-shrink: 0; padding: 5px 11px; border: 1px solid var(--ink); }
-.run-dl:hover { background: var(--ink); color: var(--amber); }
+.run-word { flex-shrink: 0; padding: 4px 0; border-bottom: 2px solid var(--ink); }
+.run-word:hover { color: var(--ox); border-color: var(--ox); }
 .run-toggle { display: none; padding: 5px 10px; border: 1px solid var(--ink); flex-shrink: 0; }
 
 /* ─── Type-set actions ───
@@ -239,6 +257,25 @@ html { scrollbar-color: var(--ink) var(--amber); }
   transition: background-color 120ms linear, color 120ms linear;
 }
 .act-secondary:hover { background: var(--ink); color: var(--ground); }
+
+/* The primary action is type on the sheet, not a pill and not a block:
+   a billing line with a heavy rule under it. */
+.act-ruled {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 20px; width: 100%; padding-bottom: 9px;
+  border-bottom: 3px solid var(--ink);
+  font-size: clamp(21px, 2.3vw, 32px); font-weight: 800;
+  letter-spacing: -0.02em; text-transform: uppercase;
+  font-variation-settings: "wdth" 74;
+  transition: color 140ms linear, border-color 140ms linear, padding-left 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.act-ruled svg { flex-shrink: 0; align-self: center; }
+.act-ruled:hover { color: var(--ox); border-color: var(--ox); padding-left: 8px; }
+.act-ruled.is-quiet {
+  border-bottom-width: 1px;
+  font-size: clamp(16px, 1.5vw, 21px);
+  font-variation-settings: "wdth" 82;
+}
 
 .copyline {
   display: flex; align-items: center; gap: 14px; width: 100%;
@@ -284,8 +321,22 @@ html { scrollbar-color: var(--ink) var(--amber); }
   border-top: 1px solid var(--rule);
 }
 .act-cols p em { font-style: normal; font-weight: 700; }
-.act-cols p em.me { color: var(--ink); box-shadow: inset 0 -0.32em 0 rgba(23, 16, 10, 0.16); }
-.act-cols p em.them { color: var(--ox); box-shadow: inset 0 -0.32em 0 rgba(107, 39, 16, 0.16); }
+/* Two speakers, two inks, registered exactly — and the tone under each is a
+   screen of its own ink, not a wash of it. */
+.act-cols p em.me, .act-cols p em.them {
+  padding: 0 0.14em;
+  background-repeat: repeat;
+  background-size: 5px 5px;
+  background-position: 0 0.16em;
+}
+.act-cols p em.me {
+  color: var(--ink);
+  background-image: radial-gradient(circle at center, var(--ink) 0 1.05px, transparent 1.05px);
+}
+.act-cols p em.them {
+  color: var(--ox);
+  background-image: radial-gradient(circle at center, var(--ox) 0 1.05px, transparent 1.05px);
+}
 
 /* The facts list: rule-separated, no bullet glyphs, no check icons. */
 .facts li { padding: 9px 0; border-top: 1px solid var(--rule-faint); }
@@ -308,7 +359,8 @@ html { scrollbar-color: var(--ink) var(--amber); }
 }
 .bill-row.is-billed .dim { color: rgba(251, 243, 226, 0.72); }
 .bill-row.is-billed .spec { border-color: rgba(251, 243, 226, 0.4); }
-.bill-name { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.bill-name { margin: 0; }
+.bill-name .bill-tag { margin-left: 12px; white-space: nowrap; }
 .specs { display: flex; flex-wrap: wrap; gap: 6px; }
 .spec {
   padding: 3px 8px; border: 1px solid var(--rule);
@@ -354,10 +406,13 @@ html { scrollbar-color: var(--ink) var(--amber); }
 .tail b { font-weight: 700; }
 
 /* ─── Close ─── */
-.close { padding-block: clamp(64px, 8vw, 128px) clamp(56px, 7vw, 104px); text-align: center; }
-.close h2 { text-wrap: balance; }
-.close-do { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: clamp(24px, 3vw, 36px); flex-wrap: wrap; }
-.close-copy { max-width: 460px; margin: 18px auto 0; }
+.close { padding-block: clamp(64px, 8vw, 128px) clamp(56px, 7vw, 104px); }
+.close-under {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 430px);
+  gap: clamp(30px, 4vw, 56px); align-items: start;
+  margin-top: clamp(20px, 2.4vw, 30px);
+}
+.close-do { display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
 
 /* ─── Foot strip ─── */
 .foot {
@@ -378,7 +433,16 @@ html { scrollbar-color: var(--ink) var(--amber); }
   transition: font-size 420ms cubic-bezier(0.16, 1, 0.3, 1),
               font-variation-settings 420ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-[data-act-head].is-playing { font-size: clamp(38px, 7vw, 100px); font-variation-settings: "wdth" 66; }
+/* Top billing is relative to the act's own rank, and the acts either side
+   give way for it, so the change reads as billing rather than a nudge. */
+.bill-1.is-playing { font-size: clamp(44px, 8.8vw, 122px); font-variation-settings: "wdth" 66; }
+.bill-2.is-playing { font-size: clamp(39px, 7.4vw, 103px); font-variation-settings: "wdth" 66; }
+.bill-3.is-playing { font-size: clamp(35px, 6.2vw, 87px); font-variation-settings: "wdth" 66; }
+.bill-4.is-playing { font-size: clamp(31px, 5.3vw, 73px); font-variation-settings: "wdth" 66; }
+.bill-1.is-demoted { font-size: clamp(35px, 6.8vw, 92px); font-variation-settings: "wdth" 76; }
+.bill-2.is-demoted { font-size: clamp(31px, 5.7vw, 78px); font-variation-settings: "wdth" 76; }
+.bill-3.is-demoted { font-size: clamp(28px, 4.8vw, 65px); font-variation-settings: "wdth" 76; }
+.bill-4.is-demoted { font-size: clamp(25px, 4.1vw, 55px); font-variation-settings: "wdth" 76; }
 
 /* An act already behind the reader is struck through in the bill, the way a
    set that has played is struck off. */
@@ -390,7 +454,12 @@ html { scrollbar-color: var(--ink) var(--amber); }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  [data-act-head], [data-act-head].is-playing { transition: none; font-size: clamp(34px, 6.2vw, 86px); font-variation-settings: "wdth" 72; }
+  /* Rank survives as the inversion and the struck rule; only the step goes. */
+  [data-act-head] { transition: none; }
+  .bill-1.is-playing, .bill-1.is-demoted { font-size: clamp(38px, 7.4vw, 102px); font-variation-settings: "wdth" 72; }
+  .bill-2.is-playing, .bill-2.is-demoted { font-size: clamp(34px, 6.2vw, 86px); font-variation-settings: "wdth" 72; }
+  .bill-3.is-playing, .bill-3.is-demoted { font-size: clamp(30px, 5.2vw, 72px); font-variation-settings: "wdth" 72; }
+  .bill-4.is-playing, .bill-4.is-demoted { font-size: clamp(27px, 4.4vw, 60px); font-variation-settings: "wdth" 72; }
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
 }
 
@@ -429,7 +498,7 @@ html { scrollbar-color: var(--ink) var(--amber); }
 /* ─── Narrow ─── */
 @media (max-width: 1080px) {
   :root { --gut: 22px; }
-  .hero-under { grid-template-columns: minmax(0, 1fr); gap: 26px; align-items: start; }
+  .hero-under, .close-under { grid-template-columns: minmax(0, 1fr); gap: 26px; align-items: start; }
   .act-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .points { grid-template-columns: minmax(0, 1fr); }
   .points > div { padding: 18px 0 4px; border-left: 0; border-top: 1px solid var(--rule-faint); }
@@ -456,5 +525,4 @@ html { scrollbar-color: var(--ink) var(--amber); }
   .kv div > :last-child { text-align: left; }
   .docs-row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
   .act-primary, .act-secondary { width: 100%; justify-content: center; }
-  .close-do { flex-direction: column; align-items: stretch; }
 }

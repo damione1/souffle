@@ -30,12 +30,14 @@ layout: layouts/base.njk
 {# ── THE TOP OF THE SHEET ── #}
 <section class="band">
   <div class="sheet hero">
-    <h1 class="t-xl">{{ t.hero.title | safe }}</h1>
+    <h1 class="t-xl" data-fit>
+      {%- for line in t.hero.titleLines %}<span class="hl">{{ line }}</span>{% endfor %}
+    </h1>
 
     <div class="hero-under">
       <p class="t-s measure">{{ t.hero.sub }}</p>
       <div class="hero-do">
-        <a class="act-primary" href="{{ site.latest }}">{{ icon("download", 19) }}{{ t.hero.cta }}</a>
+        <a class="act-ruled" href="{{ site.latest }}">{{ t.hero.cta }}{{ icon("arrow", 22) }}</a>
         {{ copyline(site.brew, t.nav.copy) }}
         <p class="t-3xs dim" style="padding-top:10px;border-top:1px solid var(--rule)">{{ t.hero.note }} · {{ t.hero.badge }}</p>
       </div>
@@ -57,7 +59,7 @@ layout: layouts/base.njk
     {%- for f in t.features %}
     <article class="act" id="act-{{ f.id }}" data-act-watch="features">
       <div class="act-head">
-        <h2 class="t-l" data-act-head>{{ f.title }}</h2>
+        <h2 class="bill-{{ loop.index }}" data-act-head>{{ f.title }}</h2>
       </div>
       <div class="act-cols">
         <p class="t-s">{{ f.body | safe }}</p>
@@ -74,18 +76,16 @@ layout: layouts/base.njk
 </section>
 
 {# ── THE REVERSE OF THE SHEET: the dense factual half ── #}
+<div class="screen-band" aria-hidden="true"></div>
 <section id="models" class="band invert">
   <div class="sheet act">
-    <h2 class="t-l" data-act-head data-act-watch="models">{{ t.models.title }}</h2>
+    <h2 class="bill-3" data-act-head data-act-watch="models">{{ t.models.title }}</h2>
     <p class="t-s measure" style="margin-top:20px">{{ t.models.sub }}</p>
 
     <div class="bill-list" style="margin-top:clamp(22px,2.6vw,34px)">
       {%- for m in t.models.cards %}
       <div class="bill-row{% if m.featured %} is-billed{% endif %}">
-        <div class="bill-name">
-          <h3 class="t-m">{{ m.name }}</h3>
-          {%- if m.tag %}<span class="t-3xs dim">{{ m.tag }}</span>{% endif %}
-        </div>
+        <p class="bill-name"><span class="t-m">{{ m.name }}</span>{% if m.tag %}<span class="t-3xs dim bill-tag">{{ m.tag }}</span>{% endif %}</p>
         <p class="t-xs">{{ m.desc }}</p>
         <div class="specs">
           {%- for c in m.chips %}<span class="spec">{{ c }}</span>{% endfor %}
@@ -98,7 +98,7 @@ layout: layouts/base.njk
 
 <section id="privacy" class="band invert">
   <div class="sheet act">
-    <h2 class="t-l" data-act-head data-act-watch="privacy">{{ t.privacy.title }}</h2>
+    <h2 class="bill-3" data-act-head data-act-watch="privacy">{{ t.privacy.title }}</h2>
     <p class="t-s measure" style="margin-top:20px">{{ t.privacy.sub }}</p>
     <div class="points">
       {%- for p in t.privacy.points %}
@@ -114,7 +114,7 @@ layout: layouts/base.njk
 
 <section class="band invert">
   <div class="sheet act">
-    <h2 class="t-l" data-act-head data-act-watch="privacy">{{ t.owndata.title }}</h2>
+    <h2 class="bill-4" data-act-head data-act-watch="privacy">{{ t.owndata.title }}</h2>
     <p class="t-s measure" style="margin-top:20px">{{ t.owndata.sub }}</p>
     <div class="points">
       {%- for p in t.owndata.points %}
@@ -157,12 +157,14 @@ layout: layouts/base.njk
 {# ── THE CLOSE ── #}
 <section id="download" class="band">
   <div class="sheet close">
-    <h2 class="t-xl">{{ t.cta.title }}</h2>
-    <p class="t-s close-copy">{{ t.cta.sub | safe }}</p>
-    <div class="close-do">
-      <a class="act-primary" href="{{ site.latest }}">{{ icon("download", 19) }}{{ t.cta.primary }}</a>
-      <a class="act-secondary" href="{{ site.repo }}">{{ icon("github", 19) }}{{ t.cta.secondary }}</a>
+    <h2 class="t-xl" data-fit><span class="hl">{{ t.cta.title }}</span></h2>
+    <div class="close-under">
+      <p class="t-s measure">{{ t.cta.sub | safe }}</p>
+      <div class="close-do">
+        <a class="act-ruled" href="{{ site.latest }}">{{ t.cta.primary }}{{ icon("arrow", 22) }}</a>
+        <a class="act-ruled is-quiet" href="{{ site.repo }}">{{ t.cta.secondary }}{{ icon("arrow", 22) }}</a>
+        {{ copyline(site.brew, t.nav.copy) }}
+      </div>
     </div>
-    <div class="close-copy">{{ copyline(site.brew, t.nav.copy) }}</div>
   </div>
 </section>

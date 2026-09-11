@@ -23,6 +23,53 @@
   });
 })();
 
+/* Flush-set billing.
+   A bill sets its headline to the sheet: each line is measured at a
+   reference size and scaled so it fills the measure exactly. Lines were
+   rebroken per locale to comparable lengths, so the block squares off
+   without any one line towering over its neighbours. CSS carries a clamp
+   for the moment before this runs and for the case where it never does. */
+(function () {
+  "use strict";
+  var blocks = Array.prototype.slice.call(document.querySelectorAll("[data-fit]"));
+  if (!blocks.length) return;
+
+  var REF = 100;
+  /* High enough that the measure is what stops a line, not the cap. */
+  var MAX = 220;
+  var MIN = 30;
+
+  var fit = function () {
+    blocks.forEach(function (block) {
+      var width = block.clientWidth;
+      if (!width) return;
+      Array.prototype.forEach.call(block.querySelectorAll(".hl"), function (line) {
+        line.style.fontSize = REF + "px";
+        var natural = line.scrollWidth;
+        if (!natural) return;
+        /* scrollWidth rounds to whole pixels, and negative tracking makes
+           the real line a shade wider than the rounded figure; the margin
+           keeps a flush line from spilling past the measure. */
+        var size = Math.min(MAX, Math.max(MIN, (width * 0.995 / natural) * REF));
+        line.style.fontSize = size.toFixed(2) + "px";
+      });
+    });
+  };
+
+  var queued = false;
+  var onResize = function () {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; fit(); });
+  };
+
+  fit();
+  window.addEventListener("resize", onResize);
+  /* The face swaps in after first paint; a measurement taken against the
+     fallback would set every line to the wrong width. */
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+})();
+
 /* The billing size-step: the page's one authored moment.
    Nothing here fades in or slides up — every element is visible from the
    start and this only changes rank. The act you are reading takes top
@@ -71,7 +118,10 @@
 
     acts.forEach(function (el, i) {
       var head = el.matches("[data-act-head]") ? el : el.querySelector("[data-act-head]");
-      if (head) head.classList.toggle("is-playing", el === playing);
+      if (head) {
+        head.classList.toggle("is-playing", el === playing);
+        head.classList.toggle("is-demoted", playing !== null && el !== playing);
+      }
       el.classList.toggle("is-played", playingAt >= 0 && i < playingAt);
     });
 

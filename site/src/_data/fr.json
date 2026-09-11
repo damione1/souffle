@@ -21,7 +21,10 @@
   },
   "hero": {
     "badge": "macOS 13+ · APPLE SILICON",
-    "title": "Votre voix<br>ne quitte jamais<br>votre Mac.",
+    "titleLines": [
+      "Votre voix ne quitte",
+      "jamais votre Mac."
+    ],
     "sub": "Soufflé dicte dans n'importe quelle app, transcrit vos réunions en distinguant votre voix de celle des autres, et rédige le résumé. Le tout en local, sur votre Mac. Aucun serveur, aucun compte, aucune clé d'API.",
     "cta": "Télécharger pour macOS",
     "note": "Gratuit et open source",

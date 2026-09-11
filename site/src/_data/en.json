@@ -21,7 +21,10 @@
   },
   "hero": {
     "badge": "macOS 13+ · APPLE SILICON",
-    "title": "Your voice never<br>leaves<br>your Mac.",
+    "titleLines": [
+      "Your voice never",
+      "leaves your Mac."
+    ],
     "sub": "Soufflé dictates into any app, transcribes meetings that tell your voice from everyone else's, and writes the summary, all of it on-device. No cloud, no account, no API key.",
     "cta": "Download for macOS",
     "note": "Free and open source",

@@ -25,7 +25,7 @@
     <a href="{{ "/docs/" if isDocs else "/" }}" aria-current="{{ "true" if loc.code == "en" }}">EN</a>
     <a href="{{ "/fr/docs/" if isDocs else "/fr/" }}" aria-current="{{ "true" if loc.code == "fr" }}">FR</a>
   </div>
-  <a class="run-dl" href="{{ "#download" if not isDocs else site.latest }}">{{ t.nav.download }}</a>
+  <a class="run-word" href="{{ "#download" if not isDocs else site.latest }}">{{ t.nav.download }}</a>
   <button class="run-toggle t-3xs" type="button" aria-controls="run-acts" aria-expanded="false" aria-label="{{ t.nav.menu }}">
     <span class="run-toggle-open">{{ icon("menu", 15) }}</span>
     <span class="run-toggle-close" hidden>{{ icon("close", 15) }}</span>
