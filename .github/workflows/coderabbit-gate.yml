@@ -21,6 +21,9 @@ permissions:
   actions: read
   checks: read
   pull-requests: write
+  # Labels live on the Issues API even when they are attached to a pull request:
+  # pull-requests: write alone cannot create the label if it is ever deleted.
+  issues: write
 
 concurrency:
   # Contracts and E2E finish within seconds of each other; serialize so the
@@ -41,22 +44,43 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Pinned to the default branch on purpose: this job holds a token that can
+      # write labels, so it must never source a helper as edited by the PR.
+      - uses: actions/checkout@v6.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: scripts/ci
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Withdraw the gate for the new head commit
+        env:
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          gh api -X DELETE \
-            "repos/$GH_REPO/issues/${{ github.event.pull_request.number }}/labels/$LABEL" \
-            --silent 2>/dev/null || echo "label was not set"
+          set -euo pipefail
+          . ./scripts/ci/coderabbit-gate-lib.sh
+          drop_label "$PR"
 
   coderabbit-gate:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Pinned to the default branch on purpose: this job holds a token that can
+      # write labels, so it must never source a helper as edited by the PR.
+      - uses: actions/checkout@v6.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: scripts/ci
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Grant the gate when every other check is green
         env:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
+          . ./scripts/ci/coderabbit-gate-lib.sh
 
           pr=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" \
                  --jq '[.[] | select(.state == "open")] | first | .number // empty')
@@ -80,11 +104,12 @@ jobs:
 
           if [ -n "$not_green" ]; then
             echo "Still pending or failed: $not_green"
-            gh api -X DELETE "repos/$GH_REPO/issues/$pr/labels/$LABEL" \
-              --silent 2>/dev/null || true
+            drop_label "$pr"
             exit 0
           fi
 
+          # Recreate the label if someone deleted it. A failure here needs no
+          # handling: --add-label below fails loudly on a label that is missing.
           gh label create "$LABEL" --color 0e8a16 \
             --description "CI green: CodeRabbit may review" 2>/dev/null || true
           gh pr edit "$pr" --add-label "$LABEL"
