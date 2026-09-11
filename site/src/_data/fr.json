@@ -16,11 +16,15 @@
     "home": "Accueil",
     "releases": "Versions",
     "download": "Télécharger",
-    "menu": "Menu"
+    "menu": "Menu",
+    "copy": "Copier"
   },
   "hero": {
     "badge": "macOS 13+ · APPLE SILICON",
-    "title": "Votre voix ne quitte<br>jamais votre Mac.",
+    "titleLines": [
+      "Votre voix ne quitte",
+      "jamais votre Mac."
+    ],
     "sub": "Soufflé dicte dans n'importe quelle app, transcrit vos réunions en distinguant votre voix de celle des autres, et rédige le résumé. Le tout en local, sur votre Mac. Aucun serveur, aucun compte, aucune clé d'API.",
     "cta": "Télécharger pour macOS",
     "note": "Gratuit et open source",
@@ -77,7 +81,6 @@
     }
   ],
   "overlay": {
-    "eyebrow": "Partout où vous tapez",
     "title": "La même dictée, dans toutes vos apps.",
     "body": "Pas besoin de garder une fenêtre ouverte : restez dans votre application habituelle, appuyez sur le raccourci, une petite pastille apparaît par-dessus ce que vous faites, et le texte arrive directement dans le champ où était votre curseur. Messagerie, courriel, éditeur, terminal : la pastille s'en fiche, et elle n'apparaît jamais dans un enregistrement d'écran.",
     "bullets": [
@@ -94,7 +97,6 @@
     "caption": "Appuyez sur le raccourci n'importe où, parlez : le texte propre atterrit là où votre curseur était déjà."
   },
   "models": {
-    "eyebrow": "Modèles de reconnaissance",
     "title": "Choisissez le compromis qui vous va.",
     "sub": "Les quatre tournent en local, téléchargés à la première utilisation. Les deux Kyutai affichent le texte au fil de la parole ; les deux autres transcrivent une fois que vous avez fini.",
     "cards": [
@@ -144,7 +146,6 @@
     ]
   },
   "owndata": {
-    "eyebrow": "Vos données",
     "title": "Tout reste à vous, et vous pouvez tout emporter.",
     "sub": "Pas de format propriétaire, pas de frais d'export, rien qui vous retienne.",
     "points": [
@@ -359,20 +360,20 @@
         {
           "name": "Angela Moss",
           "initials": "A",
-          "colour": "#c2557a",
+          "colour": "#6f6480",
           "presence": "online"
         },
         {
           "name": "Tyrell Wellick",
           "initials": "T",
-          "colour": "#4d7ea8",
+          "colour": "#4d6a88",
           "presence": "away",
           "unread": "1"
         },
         {
           "name": "Shama Biswas",
           "initials": "S",
-          "colour": "#6a7f4a",
+          "colour": "#5a7a72",
           "presence": "online"
         }
       ],
@@ -382,21 +383,21 @@
       "me": {
         "name": "Elliot Alderson",
         "initials": "E",
-        "colour": "#5b5bd6",
+        "colour": "#5b6b8c",
         "at": "10:04"
       },
       "messages": [
         {
           "from": "Angela Moss",
           "initials": "A",
-          "colour": "#c2557a",
+          "colour": "#6f6480",
           "at": "09:58",
           "text": "Le client demande quand on peut annoncer la divulgation. Je leur dis quoi ?"
         },
         {
           "from": "Tyrell Wellick",
           "initials": "T",
-          "colour": "#4d7ea8",
+          "colour": "#4d6a88",
           "at": "10:02",
           "text": "Ça dépend de la rotation des clés, non ? J'aimerais éviter d'annoncer une date qu'on repousse ensuite."
         }
@@ -414,7 +415,6 @@
     "meetingElapsed": "12:40"
   },
   "docs": {
-    "eyebrow": "Documentation",
     "title": "Tout ce que fait Soufflé, et ce qu'il lui faut.",
     "intro": "Ce que Soufflé fait, ce qu'il lui faut, et où il range les choses. Rien ici ne demande de compte, de clé d'API, ni de connexion réseau au-delà du premier téléchargement de modèle.",
     "groups": [
@@ -1055,7 +1055,6 @@
     ]
   },
   "privacy": {
-    "eyebrow": "Confidentialité",
     "title": "Privé pour de vrai, pas juste en théorie.",
     "sub": "La transcription, les résumés et l'audio restent sur votre Mac. Il n'y a même pas de serveur en face.",
     "points": [

@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-11T00:00:00Z",
+  "title": "Design System: Soufflé",
+  "extensions": {
+    "colorMeta": {
+      "amber": {
+        "role": "primary",
+        "displayName": "Handbill Amber",
+        "canonical": "oklch(75.5% 0.144 77)",
+        "tonalRamp": ["oklch(15% 0.144 77)", "oklch(26% 0.144 77)", "oklch(37% 0.144 77)", "oklch(48% 0.144 77)", "oklch(60% 0.144 77)", "oklch(71% 0.144 77)", "oklch(83% 0.144 77)", "oklch(95% 0.144 77)"]
+      },
+      "oxblood": {
+        "role": "secondary",
+        "displayName": "Oxblood",
+        "canonical": "oklch(37% 0.103 38.2)",
+        "tonalRamp": ["oklch(15% 0.103 38.2)", "oklch(26% 0.103 38.2)", "oklch(37% 0.103 38.2)", "oklch(48% 0.103 38.2)", "oklch(60% 0.103 38.2)", "oklch(71% 0.103 38.2)", "oklch(83% 0.103 38.2)", "oklch(95% 0.103 38.2)"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper Cream",
+        "canonical": "oklch(93.9% 0.032 87.3)",
+        "tonalRamp": ["oklch(15% 0.032 87.3)", "oklch(26% 0.032 87.3)", "oklch(37% 0.032 87.3)", "oklch(48% 0.032 87.3)", "oklch(60% 0.032 87.3)", "oklch(71% 0.032 87.3)", "oklch(83% 0.032 87.3)", "oklch(95% 0.032 87.3)"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Press Ink",
+        "canonical": "oklch(18% 0.017 62.1)",
+        "tonalRamp": ["oklch(15% 0.017 62.1)", "oklch(26% 0.017 62.1)", "oklch(37% 0.017 62.1)", "oklch(48% 0.017 62.1)", "oklch(60% 0.017 62.1)", "oklch(71% 0.017 62.1)", "oklch(83% 0.017 62.1)", "oklch(95% 0.017 62.1)"]
+      },
+      "ink-quiet-on-paper": {
+        "role": "neutral",
+        "displayName": "Quiet Ink (on paper)",
+        "canonical": "oklch(41.2% 0.045 66)",
+        "tonalRamp": ["oklch(15% 0.045 66)", "oklch(26% 0.045 66)", "oklch(37% 0.045 66)", "oklch(48% 0.045 66)", "oklch(60% 0.045 66)", "oklch(71% 0.045 66)", "oklch(83% 0.045 66)", "oklch(95% 0.045 66)"]
+      },
+      "ink-quiet-on-amber": {
+        "role": "neutral",
+        "displayName": "Quiet Ink (on amber)",
+        "canonical": "oklch(34.4% 0.053 71.1)",
+        "tonalRamp": ["oklch(15% 0.053 71.1)", "oklch(26% 0.053 71.1)", "oklch(37% 0.053 71.1)", "oklch(48% 0.053 71.1)", "oklch(60% 0.053 71.1)", "oklch(71% 0.053 71.1)", "oklch(83% 0.053 71.1)", "oklch(95% 0.053 71.1)"]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule",
+        "canonical": "rgba(23, 16, 10, 0.24)",
+        "tonalRamp": ["rgba(23, 16, 10, 0.06)", "rgba(23, 16, 10, 0.11)", "rgba(23, 16, 10, 0.14)", "rgba(23, 16, 10, 0.18)", "rgba(23, 16, 10, 0.24)", "rgba(23, 16, 10, 0.26)", "rgba(23, 16, 10, 0.4)", "rgba(23, 16, 10, 1)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The hero and closing headlines only. Flush-set to the measure by measurement in site.js, uppercase, condensed to wdth 68. Two authored lines per locale." },
+      "billing-1": { "displayName": "Billing 1", "purpose": "The top-billed act heading. The tier itself is the rank." },
+      "billing-2": { "displayName": "Billing 2", "purpose": "The second act heading. Also the docs page title, which is the same sheet at a smaller billing." },
+      "billing-3": { "displayName": "Billing 3", "purpose": "The third act heading and the two dense factual headings (models, privacy). The plateau is deliberate: those three are peers." },
+      "billing-4": { "displayName": "Billing 4", "purpose": "The last heading down the sheet (your data)." },
+      "title": { "displayName": "Title", "purpose": "Sub-headings inside an act: a second movement, the three-point runs, requirements blocks, model names, docs section headings." },
+      "lead": { "displayName": "Lead", "purpose": "The one-line sub under each headline and the prose column of each act. Capped at 62ch." },
+      "body": { "displayName": "Body", "purpose": "Facts lists and point paragraphs." },
+      "caption": { "displayName": "Caption", "purpose": "Plate captions, command lines, secondary notes." },
+      "label": { "displayName": "Label", "purpose": "The masthead run, the footer, plate identifiers, overlay steps, docs sidebar group headings. Always uppercase; the smallest voice on the sheet." },
+      "mono": { "displayName": "Mono", "purpose": "Only where there is a real command, file size, spec value or timecode. Never atmosphere." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "contact", "value": "140ms linear", "purpose": "Hover on an action: the fill or the type and rule go oxblood. Colour only; nothing moves." },
+      { "name": "rank-colour", "value": "160ms linear", "purpose": "The inversion of the act in play in the bill, and the overlay step at 200ms linear." },
+      { "name": "rank-step", "value": "300ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "The billing size-step: font-size and font-variation-settings on a name in the bill. The page's only authored motion, and it changes rank, never visibility. Disabled under prefers-reduced-motion, where rank survives as the inversion and the struck rule." }
+    ],
+    "breakpoints": [
+      { "name": "narrow", "value": "1080px" },
+      { "name": "hand", "value": "780px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Solid Action",
+      "kind": "button",
+      "refersTo": "act-solid",
+      "description": "The primary action: the one block of solid ink on the sheet, type knocked out in the band's ground. Used for the download at the hero and at the close.",
+      "html": "<a class=\"ds-act-solid\" href=\"#\">Download for macOS<svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3v13\"/><path d=\"M7 12l5 5 5-5\"/><path d=\"M4 21h16\"/></svg></a>",
+      "css": ".ds-act-solid { display: flex; align-items: center; justify-content: space-between; gap: 20px; width: 100%; padding: 20px 26px; background: var(--ink, #17100a); color: var(--amber, #e2a22f); font-family: Archivo, system-ui, sans-serif; font-size: clamp(21px, 2.3vw, 32px); font-weight: 800; letter-spacing: -0.02em; text-transform: uppercase; font-variation-settings: 'wdth' 74; text-decoration: none; border: 0; border-radius: 0; transition: background-color 140ms linear; } .ds-act-solid svg { flex-shrink: 0; } .ds-act-solid:hover { background: var(--ox, #6b2710); } .ds-act-solid:focus-visible { outline: 2px solid var(--ink, #17100a); outline-offset: 3px; }"
+    },
+    {
+      "name": "Ruled Action (quiet)",
+      "kind": "button",
+      "refersTo": "act-ruled-quiet",
+      "description": "The secondary action: type on the sheet with a hairline under it, at the reading size rather than a display size, so the solid block keeps the primary rank.",
+      "html": "<a class=\"ds-act-ruled\" href=\"#\">Read the source<svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3v13\"/><path d=\"M7 12l5 5 5-5\"/><path d=\"M4 21h16\"/></svg></a>",
+      "css": ".ds-act-ruled { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; width: 100%; padding-bottom: 9px; border-bottom: 1px solid var(--ink, #17100a); color: var(--ink, #17100a); font-family: Archivo, system-ui, sans-serif; font-size: clamp(16px, 1.5vw, 21px); font-weight: 800; letter-spacing: -0.02em; text-transform: uppercase; font-variation-settings: 'wdth' 82; text-decoration: none; border-radius: 0; transition: color 140ms linear, border-color 140ms linear; } .ds-act-ruled svg { flex-shrink: 0; align-self: center; } .ds-act-ruled:hover { color: var(--ox, #6b2710); border-color: var(--ox, #6b2710); } .ds-act-ruled:focus-visible { outline: 2px solid var(--ink, #17100a); outline-offset: 3px; }"
+    },
+    {
+      "name": "Command Line",
+      "kind": "input",
+      "refersTo": "copyline",
+      "description": "The install command, printed as a line of the sheet with a copy affordance at the right margin. Copied state turns the label oxblood for 1400ms; no toast, no tooltip.",
+      "html": "<button class=\"ds-copyline\" type=\"button\"><code>brew install --cask souffle</code><span class=\"ds-copyline-do\">Copy</span></button>",
+      "css": ".ds-copyline { display: flex; align-items: center; gap: 14px; width: 100%; padding: 11px 0; border: 0; border-top: 1px solid var(--rule, rgba(23,16,10,0.24)); border-radius: 0; background: none; color: var(--ink, #17100a); font-family: Archivo, system-ui, sans-serif; cursor: pointer; text-align: left; } .ds-copyline code { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-copyline-do { margin-left: auto; flex-shrink: 0; font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; font-variation-settings: 'wdth' 92; } .ds-copyline:hover .ds-copyline-do, .ds-copyline.is-copied .ds-copyline-do { color: var(--ox, #6b2710); } .ds-copyline:focus-visible { outline: 2px solid var(--ink, #17100a); outline-offset: 3px; }"
+    },
+    {
+      "name": "The Bill",
+      "kind": "nav",
+      "refersTo": "run-act",
+      "description": "The running order across the masthead and the page's signature interaction. The act in play inverts and steps up; the others give way a step; the ones behind the reader are struck off. Each name is pinned to the width of its largest state so the row never shifts.",
+      "html": "<nav class=\"ds-run-acts\"><a class=\"ds-run-act is-played\" href=\"#\">Features</a><a class=\"ds-run-act is-playing\" href=\"#\">Models</a><a class=\"ds-run-act is-demoted\" href=\"#\">Privacy</a><a class=\"ds-run-act is-demoted\" href=\"#\">Docs</a></nav>",
+      "css": ".ds-run-acts { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-family: Archivo, system-ui, sans-serif; } .ds-run-act { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 4px 9px; border-radius: 0; color: var(--ink, #17100a); text-decoration: none; font-size: 11.5px; font-weight: 600; line-height: 1.25; letter-spacing: 0.1em; text-transform: uppercase; font-variation-settings: 'wdth' 92; transition: background-color 160ms linear, color 160ms linear, font-size 300ms cubic-bezier(0.16, 1, 0.3, 1), font-variation-settings 300ms cubic-bezier(0.16, 1, 0.3, 1); } .ds-run-act.is-playing { background: var(--ink, #17100a); color: var(--amber, #e2a22f); font-size: 15px; font-variation-settings: 'wdth' 78; letter-spacing: 0.06em; } .ds-run-act.is-demoted { font-size: 10.5px; font-variation-settings: 'wdth' 100; color: var(--fg-2, #5c4630); } .ds-run-act.is-played::after { content: ''; position: absolute; left: 6px; right: 6px; top: 52%; border-top: 1px solid currentColor; opacity: 0.55; } .ds-run-act:focus-visible { outline: 2px solid var(--ink, #17100a); outline-offset: 3px; } @media (prefers-reduced-motion: reduce) { .ds-run-act { transition: none; } .ds-run-act.is-playing, .ds-run-act.is-demoted { font-size: 11.5px; font-variation-settings: 'wdth' 92; letter-spacing: 0.1em; } .ds-run-act.is-demoted { color: inherit; } }"
+    },
+    {
+      "name": "Billing Row",
+      "kind": "card",
+      "refersTo": "bill-row",
+      "description": "A model as a line of the bill. The default model is billed: the row inverts to ink and bleeds 18px past the measure so the fill reads as a printed bar, not a highlighted cell.",
+      "html": "<div class=\"ds-bill-list\"><div class=\"ds-bill-row is-billed\"><p class=\"ds-bill-name\"><span class=\"ds-bill-title\">Parakeet</span><span class=\"ds-bill-tag\">Default</span></p><p class=\"ds-bill-desc\">Fast, accurate, and the one installed on first run.</p><div class=\"ds-specs\"><span class=\"ds-spec\">620 MB</span><span class=\"ds-spec\">25 languages</span></div></div><div class=\"ds-bill-row\"><p class=\"ds-bill-name\"><span class=\"ds-bill-title\">Whisper</span></p><p class=\"ds-bill-desc\">Slower, broader language coverage.</p><div class=\"ds-specs\"><span class=\"ds-spec\">1.5 GB</span><span class=\"ds-spec\">99 languages</span></div></div></div>",
+      "css": ".ds-bill-list { border-top: 1px solid var(--rule, rgba(23,16,10,0.24)); font-family: Archivo, system-ui, sans-serif; color: var(--ink, #17100a); } .ds-bill-row { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 7fr) minmax(0, 5fr); gap: clamp(16px, 2.4vw, 40px); align-items: baseline; padding: clamp(16px, 1.8vw, 24px) 0; border-bottom: 1px solid var(--rule, rgba(23,16,10,0.24)); border-radius: 0; } .ds-bill-row.is-billed { background: var(--ink, #17100a); color: var(--paper, #f4ead3); margin-inline: -18px; padding-inline: 18px; } .ds-bill-name { margin: 0; } .ds-bill-title { font-size: clamp(26px, 3.4vw, 46px); line-height: 0.98; letter-spacing: -0.025em; font-weight: 800; text-transform: uppercase; font-variation-settings: 'wdth' 78; } .ds-bill-tag { margin-left: 12px; white-space: nowrap; font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; font-variation-settings: 'wdth' 92; opacity: 0.72; } .ds-bill-desc { margin: 0; font-size: 16px; line-height: 1.55; } .ds-specs { display: flex; flex-wrap: wrap; gap: 6px; } .ds-spec { padding: 3px 8px; border: 1px solid var(--rule, rgba(23,16,10,0.24)); border-radius: 0; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; font-size: 11.5px; line-height: 1.3; } .ds-bill-row.is-billed .ds-spec { border-color: rgba(244, 234, 211, 0.4); } @media (max-width: 1080px) { .ds-bill-row { grid-template-columns: minmax(0, 1fr); gap: 10px; } }"
+    },
+    {
+      "name": "Spec Chip",
+      "kind": "chip",
+      "refersTo": "spec-chip",
+      "description": "A factual label: size, speed, language count. Mono inside a hairline rectangle. Not a tag, not a button, no selected state.",
+      "html": "<span class=\"ds-spec-chip\">620 MB</span>",
+      "css": ".ds-spec-chip { display: inline-block; padding: 3px 8px; border: 1px solid var(--rule, rgba(23,16,10,0.24)); border-radius: 0; background: none; color: var(--ink, #17100a); font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; font-size: 11.5px; line-height: 1.3; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Ruled Key/Value Block",
+      "kind": "custom",
+      "refersTo": "kv",
+      "description": "Requirements and permissions: a hairline above the block, a faint hairline under each row, key in quiet ink on the left, value right-aligned. Stacks to two lines below 780px.",
+      "html": "<div class=\"ds-kv\"><div><span class=\"ds-kv-k\">macOS</span><span>13.0 or later</span></div><div><span class=\"ds-kv-k\">Chip</span><span>Apple Silicon (M1 or later)</span></div><div><span class=\"ds-kv-k\">Disk</span><span>620 MB for the default model</span></div></div>",
+      "css": ".ds-kv { border-top: 1px solid var(--rule, rgba(23,16,10,0.24)); font-family: Archivo, system-ui, sans-serif; font-size: 16px; line-height: 1.55; color: var(--ink, #17100a); } .ds-kv div { display: flex; justify-content: space-between; gap: 24px; padding: 11px 0; border-bottom: 1px solid var(--rule-faint, rgba(23,16,10,0.11)); } .ds-kv div > :last-child { text-align: right; } .ds-kv-k { color: var(--fg-2, #5c4630); } @media (max-width: 780px) { .ds-kv div { flex-direction: column; gap: 2px; } .ds-kv div > :last-child { text-align: left; } }"
+    },
+    {
+      "name": "Plate",
+      "kind": "card",
+      "refersTo": "plate",
+      "description": "A reproduction of the app mounted on the sheet: shadow and outline stripped, a 1px ink border in their place, the window's own 14px corner kept, width capped at 860px, height following content. The caption sits in the margin column beside the window, never under it.",
+      "html": "<figure class=\"ds-plate-grid\"><div class=\"ds-plate\"><div class=\"ds-plate-bar\"><span class=\"ds-plate-dot\"></span><span class=\"ds-plate-dot\"></span><span class=\"ds-plate-dot\"></span><span class=\"ds-plate-title\">Soufflé</span></div><div class=\"ds-plate-body\">The app, reproduced in live HTML and CSS.</div></div><figcaption class=\"ds-plate-note\"><span class=\"ds-plate-name\">Live meeting</span><span class=\"ds-plate-caption\">Two speakers, separated on device while the meeting is still running.</span></figcaption></figure>",
+      "css": ".ds-plate-grid { display: grid; grid-template-columns: minmax(0, 860px) minmax(0, 1fr); gap: clamp(22px, 2.8vw, 44px); align-items: start; margin: 0; font-family: Archivo, system-ui, sans-serif; } .ds-plate { border-radius: 14px; overflow: hidden; border: 1px solid var(--ink, #17100a); box-shadow: none; outline: none; background: #fdf6e8; } .ds-plate-bar { display: flex; align-items: center; gap: 8px; padding: 11px 14px; background: rgba(255, 250, 240, 0.72); border-bottom: 1px solid rgba(150, 115, 70, 0.12); } .ds-plate-dot { width: 11px; height: 11px; border-radius: 50%; background: #e5d1a3; } .ds-plate-title { margin-left: 8px; font-size: 11.5px; color: #ab9573; } .ds-plate-body { padding: 22px 26px 26px; font-size: 15px; line-height: 1.75; color: #4a3620; } .ds-plate-note { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--rule, rgba(23,16,10,0.24)); } .ds-plate-name { font-size: 11.5px; font-weight: 600; line-height: 1.25; letter-spacing: 0.1em; text-transform: uppercase; font-variation-settings: 'wdth' 92; color: var(--ink, #17100a); } .ds-plate-caption { font-size: 13.5px; line-height: 1.5; color: var(--fg-2, #5c4630); } @media (max-width: 1080px) { .ds-plate-grid { grid-template-columns: minmax(0, 1fr); } }"
+    },
+    {
+      "name": "Overlay Step",
+      "kind": "chip",
+      "refersTo": "stage-step",
+      "description": "Page furniture around the overlay plate: the steps of the scene, set in the sheet's vocabulary rather than the app's. Butted together with a -1px left margin so adjacent borders collapse into one shared hairline, like a printed table. Active is inverted.",
+      "html": "<div class=\"ds-stage-steps\"><span class=\"ds-stage-step\">Idle</span><span class=\"ds-stage-step is-active\">Dictating</span><span class=\"ds-stage-step\">Pasted</span></div>",
+      "css": ".ds-stage-steps { display: flex; flex-wrap: wrap; gap: 0; justify-content: flex-start; font-family: Archivo, system-ui, sans-serif; } .ds-stage-step { padding: 6px 13px; border: 1px solid var(--rule, rgba(23,16,10,0.24)); border-radius: 0; margin-left: -1px; outline: 0; font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-2, #5c4630); background: transparent; transition: background-color 200ms linear, color 200ms linear; } .ds-stage-step:first-child { margin-left: 0; } .ds-stage-step.is-active { background: var(--ink, #17100a); color: var(--paper, #f4ead3); border-color: var(--ink, #17100a); }"
+    },
+    {
+      "name": "Docs Navigation Link",
+      "kind": "nav",
+      "refersTo": "docs-nav-active",
+      "description": "The running order in the docs left margin. Grouped under a label-voice heading over a hairline; hover is oxblood; the section you are reading inverts with 8px of horizontal padding so the fill reads as a bar.",
+      "html": "<nav class=\"ds-docs-group\"><span class=\"ds-docs-group-h\">Getting started</span><a class=\"ds-docs-link\" href=\"#\">Install</a><a class=\"ds-docs-link is-active\" href=\"#\">First run</a><a class=\"ds-docs-link\" href=\"#\">Permissions</a></nav>",
+      "css": ".ds-docs-group { display: flex; flex-direction: column; font-family: Archivo, system-ui, sans-serif; color: var(--ink, #17100a); } .ds-docs-group-h { padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--rule, rgba(23,16,10,0.24)); color: var(--fg-2, #5c4630); font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; font-variation-settings: 'wdth' 92; } .ds-docs-link { padding: 5px 0; border-bottom: 1px solid var(--rule-faint, rgba(23,16,10,0.11)); border-radius: 0; color: inherit; text-decoration: none; font-size: 13.5px; line-height: 1.5; } .ds-docs-link:hover { color: var(--ox, #6b2710); } .ds-docs-link.is-active { background: var(--ink, #17100a); color: var(--paper, #f4ead3); padding-left: 8px; padding-right: 8px; } .ds-docs-link:focus-visible { outline: 2px solid var(--ink, #17100a); outline-offset: 3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Billing",
+    "overview": "The site is one sheet of paper. The sheet itself is paper cream, and the amber, the app's own accent taken to full sheet strength, prints only as two full-bleed bands: the opening (the masthead and the hero, one continuous band) and the close. Everything between them is printed on paper. An earlier build drenched the whole page in amber; nine thousand pixels of saturated ground read as mustard and wore the colour out, so the amber was pulled back to the two ends where it still signals. The paper runs a shade deeper than the app's own cream so the app screens still read as plates printed on it rather than as the sheet showing through.\n\nNothing on the page is a card, a panel, a tile or a container. Sections are bands of the same sheet divided by a hairline, and hierarchy is carried by size and line breaks alone, the way a concert bill ranks its acts: the headliner is simply the largest type on the poster, and no numeral, kicker or eyebrow is ever printed to explain the order. A mechanical dot screen, printed directly under the opening band, marks the point where the sheet turns from amber to paper.\n\nThe world is deliberately the opposite of what this software category ships. It refuses the centred hero over a radial glow, the alternating zig-zag feature rows, the trio of icon-tile cards and the gradient CTA box. In their place: a headline flush-set to the full measure by measurement rather than by a clamp, acts that descend in billing size down the page, a justified tail block packing the smallest facts at the foot, and a masthead across the very top that is the sheet's own first line rather than a floating bar. It scrolls away with the paper.\n\nThe only picture on the page is the software actually running. Every image is live HTML and CSS: five reproductions of the real macOS app, mounted as plates with a hard ink edge, each held to the width of the app's real window. That is the whole proof strategy, and it is why the sheet carries no photography, no illustration, no decorative shape and no social proof of any kind.",
+    "keyCharacteristics": [
+      "Four inks, closed set; every intermediate tone is a halftone screen, never a blend",
+      "Paper is the sheet; amber is reserved for the opening and closing bands",
+      "One variable grotesk at eight steps, condensing as it grows",
+      "Zero radius and zero shadow on the page's own chrome; rules are hairlines; state is inversion",
+      "Nothing enters, fades or slides; the one authored motion changes rank, not visibility"
+    ],
+    "rules": [
+      { "name": "The Four Inks Rule", "body": "Amber, ink, oxblood, paper. There is no fifth colour and no gradient anywhere in the page's own chrome. If a tone between two inks is needed, it is printed as a mechanical dot screen: a repeating radial-gradient dot on a 9px grid for the band that marks the turn of the sheet, and a 5px dot band along the baseline behind each speaker's name. A screen is a pattern of one ink; it is never a blend of two.", "section": "colors" },
+      { "name": "The Two Bands Rule", "body": "Amber is a band, not a page. It prints at the opening (masthead and hero, one unbroken run) and at the close, and nowhere else. A new full-bleed amber section in the middle of the sheet is a system violation: the colour earns its force by being spent twice.", "section": "colors" },
+      { "name": "The Inversion Rule", "body": "The active, current or featured state is one move: fill with ink, flip the type to the ground colour. This is the entire state vocabulary of the page. It is used for the primary action, the act in play in the bill, the default model row, the active overlay step, the active docs-sidebar link, the current language, and text selection. Nothing glows, tints, outlines or lifts to say \"selected\".", "section": "colors" },
+      { "name": "The Contact-Only Oxblood Rule", "body": "Oxblood is earned by touch or by identity (hover, the copied confirmation, the other speaker) and by nothing else. The moment oxblood becomes a resting fill or a decoration, the four-ink system reads as a three-plus-accent system and the poster becomes a website.", "section": "colors" },
+      { "name": "The Flush-Set Rule", "body": "The two display headlines are not sized by a clamp. A typesetter in site.js measures each line at a 100px reference, scales it so it fills the container's width exactly, then runs one correction pass (hinting at the final size moves the real width, and without the second pass the line overhangs the margin every rule below it stops at). The block squares off instead of ragging wherever a clamp happened to stop. The CSS clamp is the fallback that shows before the measurement runs and stands if it never does. It is not the design. The fit re-runs on resize and again on document.fonts.ready, because a width measured against the fallback face is the wrong width.", "section": "typography" },
+      { "name": "The Authored Break Rule", "body": "Headline lines are authored per locale in _data/*.json as hero.titleLines, rebroken to comparable lengths so that flush-setting cannot leave one line towering over its neighbour. French runs longer than English and gets its own breaks. A headline is never handed to the browser to wrap.", "section": "typography" },
+      { "name": "The One Face Rule", "body": "Archivo does every job. JetBrains Mono appears only where there is a real command, size or timecode. A third face on the page's own surfaces is a system violation.", "section": "typography" },
+      { "name": "The Rank-By-Size Rule", "body": "Acts are not peers, and size is the only thing carrying the difference. Each act heading takes a permanent billing tier (.bill-1 … .bill-4) that descends down the sheet, with a plateau where the later acts share a rank. Rank is never printed as a numeral, a kicker, an eyebrow, a step label or a coloured tag.", "section": "typography" },
+      { "name": "The Band Rule", "body": "A section is a band of the sheet, separated from its neighbour by one hairline. Nothing on this page is a card. If a block needs to be set apart, it is set apart by a rule, a column division or an inversion, not by a box with a background, a border radius and an inset.", "section": "layout" },
+      { "name": "The Sheet's Own First Line Rule", "body": "The masthead is not a floating bar. It has no fixed position, no backdrop blur, no shadow and no compact scrolled state; it is the top line of the sheet, it belongs to the opening band, and it scrolls away with the paper.", "section": "layout" },
+      { "name": "The Turn Rule", "body": "The sheet turns once, and the screened band is printed at the exact place it turns: immediately under the opening amber band, before the first act. The screen is not decoration and it is not a divider that can be reused between arbitrary sections.", "section": "layout" },
+      { "name": "The Flat-Sheet Rule", "body": "No box-shadow on any element the page owns. If a surface needs to be distinguished, use a hairline, an inversion, or a screened band. Shadows belong to the app being pictured, not to the sheet it is printed on.", "section": "elevation" },
+      { "name": "The Plate Rule", "body": "A screen of the app mounts as a plate: the mock's own drop shadow and outline are forced off, and a 1px ink border takes their place. The corner radius stays at the app's own 14px, because a macOS window really is rounded and squaring it would misreport the product. A poster does not float a window; it prints a plate.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do build every new surface out of bands divided by hairlines, inside the 1360px measure with the 40px/22px gutter.",
+      "Do print on paper by default. Amber is spent on the opening and the close; a new section in the middle of the sheet is a paper section.",
+      "Do carry rank with billing size and authored line breaks. If a new section needs to outrank its neighbour, give it a higher .bill- tier.",
+      "Do use inversion (ink fill, ground-coloured type) as the only way to say active, current, featured or selected.",
+      "Do hold any new plate to 860px in the plate grid, and let its height follow its content.",
+      "Do reserve the width of an element's largest state whenever state changes its type size, so no row reflows.",
+      "Do reach for a mechanical dot screen when a mid-tone is genuinely needed, at the established scales (1.6px on 9px, 1.15px on 5px).",
+      "Do re-declare --fg-2, --rule and --rule-faint for any new ground, the way .drenched does, instead of letting one value carry across both grounds.",
+      "Do re-run any measurement-based layout on document.fonts.ready; a width measured against the fallback face is the wrong width.",
+      "Do keep every text role at or above the 5.26:1 floor this build measured against its own ground.",
+      "Do set commands, file sizes, spec values and timecodes in JetBrains Mono, and nothing else."
+    ],
+    "donts": [
+      "Don't introduce a fifth colour, a gradient, a tint or an opacity-blended tone on the page's own chrome. The one gradient on the page lives inside the pinned brand logo.",
+      "Don't drench a middle section in amber, or use amber as a fill on a button, chip, badge or panel.",
+      "Don't add a border radius to anything the page itself draws, and don't add a shadow, a blur, a glass surface or a translucent layer anywhere. There is no elevation in this system.",
+      "Don't build a card, a panel, a tile, a bordered box around body text or a trio of icon tiles. A filled panel never sits behind body text.",
+      "Don't make a button a pill or a filled rounded block. The primary action is a square block of ink; every other action is type over a rule.",
+      "Don't float the masthead, shrink it on scroll, or give it a backdrop blur.",
+      "Don't animate anything into existence. No @keyframes, no animation, no transform, no entrance, no scroll reveal, no parallax. Content is fully visible at all times, and the only authored motion changes rank.",
+      "Don't print rank as a numeral, a kicker, an eyebrow, a step label or a coloured tag.",
+      "Don't fill an area with oxblood at rest or put it behind text; it is a contact and identity ink for type, rules and the one hover fill.",
+      "Don't add photography, illustration, decorative shapes, or any social proof: logos, counts, testimonials, stars. The app mocks are the only demonstration this site makes.",
+      "Don't let a headline wrap on its own. Author the breaks per locale.",
+      "Don't fold the mock palette or the mock faces into the page's system."
+    ]
+  }
+}
