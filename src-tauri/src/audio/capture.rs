@@ -220,26 +220,6 @@ const MIC_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 /// never fires cpal's error callback) and the mic leg must be rebuilt.
 const MIC_STALE_AFTER: Duration = Duration::from_secs(2);
 
-/// How long opening the microphone stream may take before it is worth a line
-/// in the log. `build_input_stream` + `play()` normally cost tens of
-/// milliseconds, but CoreAudio can fail to start the IO thread for a device
-/// and retry with a 14 s timeout each time, blocking this thread inside
-/// `play()`. Nothing else on the session says so: the UI keeps claiming to
-/// record, no callback ever arrives, and the stop this thread cannot service
-/// ends as "End-of-stream marker never arrived".
-const MIC_OPEN_SLOW_AFTER: Duration = Duration::from_secs(3);
-
-fn log_slow_mic_open(started: Instant, device_name: &str) {
-    let elapsed = started.elapsed();
-    if elapsed >= MIC_OPEN_SLOW_AFTER {
-        warn!(
-            device = device_name,
-            elapsed_ms = elapsed.as_millis() as u64,
-            "Microphone stream took a long time to open; CoreAudio is slow or failing to start it"
-        );
-    }
-}
-
 /// Ceiling on how often AudioLevel is pushed to the frontend. The meeting
 /// tick is faster than this; the dictation tick matches this interval, so both
 /// modes stream levels at ~15Hz.
@@ -257,6 +237,24 @@ const DICTATION_ABORT_AFTER_FAILURES: u32 = 5;
 /// on the next mic rebuild, but not more often than this, so a flapping
 /// mic does not stall the mixer every `MIC_CHECK_INTERVAL`.
 const TAP_RETRY_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Ceiling on opening the microphone: `build_input_stream` plus `play()`.
+/// Both are synchronous CoreAudio calls with no deadline of their own, and
+/// one session was measured blocking 72s inside `play()` while coreaudiod
+/// failed to start the device's IO thread. A user starting a meeting waits
+/// on this call, so the wait has to end even though the cause of the stall
+/// is not understood. Well above a healthy open (tens of ms) and above a
+/// Bluetooth route switch, far below the minute-scale stall observed.
+const MIC_OPEN_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// A device that just blew through `MIC_OPEN_TIMEOUT` fails the same way on
+/// the next attempt, and every attempt freezes the capture thread (hence
+/// the meeting mixer) for the whole bound. Park it for this long before
+/// spending another bound on it, the way `TAP_RETRY_INTERVAL` parks a tap:
+/// retrying on the `MIC_CHECK_INTERVAL` cadence would cost the system-audio
+/// leg more than the missing microphone does. An explicit route event
+/// clears the park, so picking another device is never delayed by it.
+const MIC_OPEN_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Decision for one mic-loss episode in `check_mic_health`, given how many
 /// rebuilds have failed in a row, whether the session has another audio
@@ -292,6 +290,167 @@ fn decide_mic_loss(
         MicLossAction::Abort
     } else {
         MicLossAction::KeepRetrying
+    }
+}
+
+/// Why opening the microphone did not yield a stream.
+enum MicOpenError {
+    /// cpal itself refused: bad config, device gone mid-open.
+    Failed(String),
+    /// The open ran past `MIC_OPEN_TIMEOUT`. A device failure, never a
+    /// permission denial: a TCC refusal delivers silent buffers or fails
+    /// the build outright, it does not stall inside CoreAudio.
+    TimedOut(Duration),
+    /// Not attempted: the last open on this device hit the bound less than
+    /// `MIC_OPEN_RETRY_INTERVAL` ago.
+    Parked,
+}
+
+impl std::fmt::Display for MicOpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(error) => write!(f, "{error}"),
+            Self::TimedOut(elapsed) => write!(
+                f,
+                "Microphone device did not open within {:.1}s (CoreAudio never returned)",
+                elapsed.as_secs_f32()
+            ),
+            Self::Parked => write!(
+                f,
+                "Microphone device is not responding; not reopened yet after the last timeout"
+            ),
+        }
+    }
+}
+
+/// Run `open` on a throwaway thread and wait at most `timeout` for it.
+///
+/// `open` owns everything it builds. Once the wait has expired the value
+/// can no longer be handed over, so that thread `discard`s it instead: a
+/// cpal stream has to be paused and dropped by the thread holding it (cpal
+/// 0.15 leaked `StreamInner` when it was released elsewhere). A thread
+/// still inside a CoreAudio call is never killed and never joined, and its
+/// handle is dropped here, so the process can exit while it is stuck.
+fn open_with_timeout<T, F, D>(timeout: Duration, open: F, discard: D) -> Result<T, MicOpenError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    D: FnOnce(T) + Send + 'static,
+{
+    let started = Instant::now();
+    let (tx, rx) = std::sync::mpsc::channel::<Result<T, String>>();
+    std::thread::Builder::new()
+        .name("mic-open".into())
+        .spawn(move || match open() {
+            Ok(value) => {
+                if let Err(std::sync::mpsc::SendError(Ok(abandoned))) = tx.send(Ok(value)) {
+                    discard(abandoned);
+                }
+            }
+            Err(error) => {
+                let _ = tx.send(Err(error));
+            }
+        })
+        .map_err(|e| MicOpenError::Failed(format!("Failed to spawn mic open thread: {e}")))?;
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(MicOpenError::Failed(error)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(MicOpenError::TimedOut(started.elapsed()))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(MicOpenError::Failed("Mic open thread died".into()))
+        }
+    }
+}
+
+fn log_mic_open_timeout(device_name: &str, elapsed: Duration) {
+    warn!(
+        device = device_name,
+        elapsed_ms = elapsed.as_millis() as u64,
+        "Microphone stream did not open within the bound; giving up on the device for now"
+    );
+}
+
+#[cfg(test)]
+mod mic_open_tests {
+    use super::*;
+
+    /// Stands in for the cpal stream: the wrapper is what is under test,
+    /// not CoreAudio.
+    const OPENED: u32 = 7;
+
+    #[test]
+    fn a_stalled_open_gives_the_caller_back_a_timeout() {
+        let (discarded_tx, discarded_rx) = std::sync::mpsc::channel();
+        let waited = Instant::now();
+        let opened = open_with_timeout(
+            Duration::from_millis(50),
+            || {
+                std::thread::sleep(Duration::from_millis(400));
+                Ok(OPENED)
+            },
+            move |value| {
+                let _ = discarded_tx.send(value);
+            },
+        );
+
+        let Err(MicOpenError::TimedOut(elapsed)) = opened else {
+            panic!("an open past the bound must report a timeout");
+        };
+        assert!(
+            elapsed >= Duration::from_millis(50),
+            "the reported elapsed time must cover the bound, got {elapsed:?}"
+        );
+        assert!(
+            waited.elapsed() < Duration::from_millis(400),
+            "the caller waited for the stalled open instead of giving up"
+        );
+
+        // Released by the thread that built it, never by this one.
+        assert_eq!(
+            discarded_rx.recv_timeout(Duration::from_secs(5)),
+            Ok(OPENED),
+            "the abandoned value must be discarded on its own thread"
+        );
+    }
+
+    #[test]
+    fn an_open_that_answers_in_time_returns_its_stream() {
+        let opened = open_with_timeout(
+            Duration::from_secs(5),
+            || Ok(OPENED),
+            |_| panic!("a delivered value must not be discarded"),
+        );
+        assert!(matches!(opened, Ok(OPENED)));
+    }
+
+    #[test]
+    fn a_refused_open_is_a_failure_rather_than_a_timeout() {
+        let opened = open_with_timeout(
+            Duration::from_secs(5),
+            || Err::<u32, String>("Failed to build input stream: device gone".into()),
+            |_| {},
+        );
+        let Err(MicOpenError::Failed(error)) = opened else {
+            panic!("cpal's own error must be reported as a failure");
+        };
+        assert_eq!(error, "Failed to build input stream: device gone");
+    }
+
+    /// A stalled device is not a denied microphone: the text a timeout
+    /// carries into the log and the session error must not read as one.
+    #[test]
+    fn a_timeout_never_reads_as_a_permission_denial() {
+        let message = MicOpenError::TimedOut(Duration::from_secs(8)).to_string();
+        let lowered = message.to_lowercase();
+        for permission_word in ["permission", "denied", "access", "authoriz", "privacy"] {
+            assert!(
+                !lowered.contains(permission_word),
+                "a timeout must not be worded as a permission problem: {message}"
+            );
+        }
     }
 }
 
@@ -1207,6 +1366,10 @@ pub struct AudioCapture {
     /// check from tearing the stream down every interval; explicit route
     /// events (`refresh_input_route`) clear it so a real change retries.
     route_attempt_uid: Option<String>,
+    /// When the last microphone open ran past `MIC_OPEN_TIMEOUT`. Parks the
+    /// next open for `MIC_OPEN_RETRY_INTERVAL`; cleared on a successful
+    /// open, on an explicit route event, and at session start.
+    mic_open_timed_out_at: Option<Instant>,
     /// Set by the cpal error callback when the stream dies (e.g. its device
     /// disappeared); the next mic health check rebuilds the capture leg.
     stream_failed: Arc<std::sync::atomic::AtomicBool>,
@@ -1275,6 +1438,7 @@ impl AudioCapture {
                     mic_device_object_id: None,
                     last_mic_callback_ms: Arc::new(AtomicU64::new(0)),
                     route_attempt_uid: None,
+                    mic_open_timed_out_at: None,
                     stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     last_mic_check: Instant::now(),
                     level_throttle: AudioLevelThrottle::new(),
@@ -1475,6 +1639,42 @@ impl AudioCapture {
             .ok_or_else(|| "No input device available".to_string())
     }
 
+    /// Build and start the microphone stream under `MIC_OPEN_TIMEOUT`.
+    ///
+    /// A device that just ran past the bound is not reopened for
+    /// `MIC_OPEN_RETRY_INTERVAL`: another attempt would cost this thread
+    /// (and the meeting mixer it drives) the whole bound again.
+    fn open_mic_stream<F>(&mut self, device_name: &str, build: F) -> Result<Stream, MicOpenError>
+    where
+        F: FnOnce() -> Result<Stream, String> + Send + 'static,
+    {
+        if self
+            .mic_open_timed_out_at
+            .is_some_and(|at| at.elapsed() < MIC_OPEN_RETRY_INTERVAL)
+        {
+            return Err(MicOpenError::Parked);
+        }
+
+        let opened = open_with_timeout(MIC_OPEN_TIMEOUT, build, |stream| {
+            // Owned end to end by the thread that built it: cpal 0.15 leaked
+            // `StreamInner` when a stream was released anywhere else, and the
+            // Bluetooth route only returns to A2DP once it is dropped.
+            if let Err(e) = stream.pause() {
+                debug!("Pause of an abandoned mic stream: {e}");
+            }
+        });
+
+        match &opened {
+            Ok(_) => self.mic_open_timed_out_at = None,
+            Err(MicOpenError::TimedOut(elapsed)) => {
+                log_mic_open_timeout(device_name, *elapsed);
+                self.mic_open_timed_out_at = Some(Instant::now());
+            }
+            Err(MicOpenError::Failed(_) | MicOpenError::Parked) => {}
+        }
+        opened
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn start(
         &mut self,
@@ -1493,6 +1693,9 @@ impl AudioCapture {
             .is_none_or(|p| p.session_id != session_id);
         if is_new_session {
             self.clear_mic_loss_ladder();
+            // A new session is a fresh user intent: give a device parked by
+            // a previous session's timeout one more chance.
+            self.mic_open_timed_out_at = None;
         }
         // Ensure any previous callback stops emitting immediately. The
         // recorder is NOT torn down here; see `sync_recorder`, so a
@@ -1617,78 +1820,86 @@ impl AudioCapture {
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         LOGGED.store(false, std::sync::atomic::Ordering::Relaxed);
 
-        let opened_at = Instant::now();
-        let stream = device
-            .build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if active_session_id.load(Ordering::Acquire) != session_id {
-                        return;
-                    }
-                    last_mic_callback_ms.store(unix_now_ms(), Ordering::Relaxed);
+        // Stored before the open, not between the build and `play()`: a
+        // stream that has not been played delivers no callback, so the gate
+        // is just as closed, and both calls now run on another thread.
+        self.active_session_id.store(session_id, Ordering::Release);
 
-                    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let resampled = match resampler.lock() {
-                        Ok(mut r) => r.process(data),
-                        Err(_) => return,
-                    };
-                    if !resampled.is_empty() {
-                        // Compute RMS for waveform visualization
-                        let sum_sq: f32 = resampled.iter().map(|s| s * s).sum();
-                        let rms = (sum_sq / resampled.len() as f32).sqrt();
-                        // Clamp to 0.0-1.0 (typical speech RMS is 0.01-0.15)
-                        let normalized = (rms * 8.0).min(1.0);
-                        rms_ref.store(normalized.to_bits(), Ordering::Relaxed);
+        let build = move || {
+            let stream = device
+                .build_input_stream(
+                    &config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if active_session_id.load(Ordering::Acquire) != session_id {
+                            return;
+                        }
+                        last_mic_callback_ms.store(unix_now_ms(), Ordering::Relaxed);
 
-                        // Log first chunk to confirm audio is flowing
-                        if crate::debug::transcription_debug_enabled()
-                            && !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed)
-                        {
-                            let max_amp = resampled.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-                            debug!(
-                                "First audio chunk: {} samples, max_amp={max_amp:.4}",
-                                resampled.len(),
-                            );
-                        }
-                        if let Some(feed) = &recorder_feed {
-                            feed.push(&resampled);
-                        }
-                        if sender
-                            .try_send(AudioMessage::Chunk(AudioChunk {
-                                session_id,
-                                samples: resampled,
-                                captured_at: Instant::now(),
-                                speaker: None,                            }))
-                            .is_err()
-                        {
-                            let dropped = dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                            if dropped == 1 || dropped.is_multiple_of(100) {
-                                warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
+                        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let resampled = match resampler.lock() {
+                            Ok(mut r) => r.process(data),
+                            Err(_) => return,
+                        };
+                        if !resampled.is_empty() {
+                            // Compute RMS for waveform visualization
+                            let sum_sq: f32 = resampled.iter().map(|s| s * s).sum();
+                            let rms = (sum_sq / resampled.len() as f32).sqrt();
+                            // Clamp to 0.0-1.0 (typical speech RMS is 0.01-0.15)
+                            let normalized = (rms * 8.0).min(1.0);
+                            rms_ref.store(normalized.to_bits(), Ordering::Relaxed);
+
+                            // Log first chunk to confirm audio is flowing
+                            if crate::debug::transcription_debug_enabled()
+                                && !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed)
+                            {
+                                let max_amp = resampled.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+                                debug!(
+                                    "First audio chunk: {} samples, max_amp={max_amp:.4}",
+                                    resampled.len(),
+                                );
+                            }
+                            if let Some(feed) = &recorder_feed {
+                                feed.push(&resampled);
+                            }
+                            if sender
+                                .try_send(AudioMessage::Chunk(AudioChunk {
+                                    session_id,
+                                    samples: resampled,
+                                    captured_at: Instant::now(),
+                                    speaker: None,                            }))
+                                .is_err()
+                            {
+                                let dropped = dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                                if dropped == 1 || dropped.is_multiple_of(100) {
+                                    warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
+                                }
                             }
                         }
-                    }
-                    }));
-                    if caught.is_err() {
-                        stream_failed_cb.store(true, Ordering::Relaxed);
-                    }
-                },
-                err_fn,
-                None,
-            )
-            .map_err(|e| {
-                // A CoreAudio open that failed slowly is the case worth a
-                // line: the elapsed time is the only evidence of a wedged
-                // device, and `?` would throw it away.
-                log_slow_mic_open(opened_at, &device_name);
-                format!("Failed to build input stream: {e}")
-            })?;
+                        }));
+                        if caught.is_err() {
+                            stream_failed_cb.store(true, Ordering::Relaxed);
+                        }
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| format!("Failed to build input stream: {e}"))?;
+            stream
+                .play()
+                .map_err(|e| format!("Failed to start stream: {e}"))?;
+            Ok(stream)
+        };
 
-        self.active_session_id.store(session_id, Ordering::Release);
-        stream.play().map_err(|e| {
-            log_slow_mic_open(opened_at, &device_name);
-            format!("Failed to start stream: {e}")
-        })?;
-        log_slow_mic_open(opened_at, &device_name);
+        let stream = match self.open_mic_stream(&device_name, build) {
+            Ok(stream) => stream,
+            Err(e) => {
+                // No stream to gate, and the abandoned open may still start
+                // one minutes from now: close the gate so nothing it
+                // captures reaches this session.
+                self.active_session_id.store(0, Ordering::Release);
+                return Err(e.to_string());
+            }
+        };
         self.stream = Some(stream);
 
         info!("Audio capture started on '{device_name}'");
@@ -1809,41 +2020,6 @@ impl AudioCapture {
             error!("Audio stream error: {err}");
             stream_failed.store(true, std::sync::atomic::Ordering::Relaxed);
         };
-        let opened_at = Instant::now();
-        let stream = device
-            .build_input_stream(
-                config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if active_session_id.load(Ordering::Acquire) != session_id {
-                        return;
-                    }
-                    last_mic_callback_ms.store(unix_now_ms(), Ordering::Relaxed);
-                    // Ring full means the mixer is wedged; losing mic samples
-                    // here is the only safe option in a realtime callback.
-                    let _ = mic_prod.push_slice(data);
-                },
-                err_fn,
-                None,
-            )
-            .map_err(|e| {
-                log_slow_mic_open(
-                    opened_at,
-                    self.mic_device_name.as_deref().unwrap_or("unknown"),
-                );
-                format!("Failed to build input stream: {e}")
-            })?;
-        stream.play().map_err(|e| {
-            log_slow_mic_open(
-                opened_at,
-                self.mic_device_name.as_deref().unwrap_or("unknown"),
-            );
-            format!("Failed to start stream: {e}")
-        })?;
-        log_slow_mic_open(
-            opened_at,
-            self.mic_device_name.as_deref().unwrap_or("unknown"),
-        );
-
         // Accept mic samples into the ring buffer from here on, even though
         // `spawn_tap` below can block this thread for up to its 5s timeout
         // when coreaudiod is slow or wedged. The mic callback gates on this
@@ -1852,8 +2028,65 @@ impl AudioCapture {
         // seconds of the meeting's start, despite the mixer/meeting_tick not
         // running yet to drain them. The ring buffer (~2s capacity) still
         // bounds how much of a slow tap's wait it can retain, but that beats
-        // discarding all of it outright.
+        // discarding all of it outright. Nothing is captured before `play()`
+        // either way, so the store is equally safe ahead of the open.
         self.active_session_id.store(session_id, Ordering::Release);
+
+        let device = device.clone();
+        let config = config.clone();
+        let build = move || {
+            let stream = device
+                .build_input_stream(
+                    &config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if active_session_id.load(Ordering::Acquire) != session_id {
+                            return;
+                        }
+                        last_mic_callback_ms.store(unix_now_ms(), Ordering::Relaxed);
+                        // Ring full means the mixer is wedged; losing mic samples
+                        // here is the only safe option in a realtime callback.
+                        let _ = mic_prod.push_slice(data);
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| format!("Failed to build input stream: {e}"))?;
+            stream
+                .play()
+                .map_err(|e| format!("Failed to start stream: {e}"))?;
+            Ok(stream)
+        };
+
+        let device_name = self
+            .mic_device_name
+            .clone()
+            .unwrap_or_else(|| "unknown".into());
+        let (mic_cons, mic_unavailable) = match self.open_mic_stream(&device_name, build) {
+            Ok(stream) => {
+                self.stream = Some(stream);
+                (mic_cons, None)
+            }
+            // cpal refused outright: nothing was left running, and the
+            // caller retries. Only a device that stops answering is worth
+            // degrading the meeting for.
+            Err(e @ MicOpenError::Failed(_)) => {
+                self.active_session_id.store(0, Ordering::Release);
+                return Err(e.to_string());
+            }
+            Err(e) => {
+                // The meeting goes on with the system-audio leg alone rather
+                // than waiting on a device that does not answer. Close the
+                // gate, and hand the mixer a ring nobody writes to: the
+                // abandoned open still owns the producer of `mic_cons` and
+                // could push frames minutes out of place, which is exactly
+                // what shifts the diarized lanes apart.
+                self.active_session_id.store(0, Ordering::Release);
+                let (dead_prod, dead_cons) = HeapRb::<f32>::new(1).split();
+                drop(dead_prod);
+                drop(mic_cons);
+                (dead_cons, Some(e.to_string()))
+            }
+        };
 
         if let Some(meeting) = self.meeting.as_mut() {
             meeting
@@ -1861,7 +2094,9 @@ impl AudioCapture {
                 .replace_mic(mic_cons, sample_rate, channels, mic_gain);
             meeting.session_id = session_id;
             meeting.diarize = diarize;
-            self.stream = Some(stream);
+            if let Some(error) = mic_unavailable {
+                return Err(error);
+            }
             info!("Meeting microphone rebuilt; system-audio tap kept");
             return Ok(());
         }
@@ -1928,7 +2163,6 @@ impl AudioCapture {
         #[cfg(not(target_os = "macos"))]
         let aec_active = false;
 
-        self.stream = Some(stream);
         self.meeting = Some(MeetingState {
             session_id,
             mixer,
@@ -1939,6 +2173,10 @@ impl AudioCapture {
             ticks: 0,
             last_tap_attempt: Instant::now(),
         });
+
+        if let Some(error) = mic_unavailable {
+            return Err(error);
+        }
 
         info!("Meeting audio capture started (mic + system audio)");
         Ok(())
@@ -2089,6 +2327,7 @@ impl AudioCapture {
     /// send EndOfStream (`active_params` was already cleared).
     fn refresh_input_route(&mut self) -> bool {
         self.route_attempt_uid = None;
+        self.mic_open_timed_out_at = None;
         if self.active_params.is_some() {
             self.last_mic_check = Instant::now();
             if self.check_mic_health() {
@@ -2330,6 +2569,7 @@ impl AudioCapture {
         self.mic_device_uid = None;
         self.mic_device_object_id = None;
         self.route_attempt_uid = None;
+        self.mic_open_timed_out_at = None;
         self.last_mic_callback_ms.store(0, Ordering::Relaxed);
         self.release_capture_stream();
         self.resampler.take();
@@ -2439,6 +2679,7 @@ impl AudioCapture {
         self.mic_device_uid = None;
         self.mic_device_object_id = None;
         self.route_attempt_uid = None;
+        self.mic_open_timed_out_at = None;
         self.last_mic_callback_ms.store(0, Ordering::Relaxed);
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
