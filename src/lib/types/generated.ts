@@ -860,7 +860,14 @@ async learnFromEdit(original: string, corrected: string) : Promise<Result<number
 }
 },
 /**
- * Cheap, non-prompting snapshot for the onboarding's initial render.
+ * Cheap, non-prompting snapshot for the onboarding's initial render, and
+ * the source of the panel's 600 ms poll.
+ * 
+ * Off the command thread even though every read is a status API: three of
+ * them (`AXIsProcessTrusted`, `TCCAccessPreflight`, EventKit) are XPC round
+ * trips to `tccd`, and a synchronous command runs on the main thread, where
+ * a stalled `tccd` would freeze the window. Nothing here needs the main
+ * thread — only *requests* do (SOU-122).
  */
 async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
     try {

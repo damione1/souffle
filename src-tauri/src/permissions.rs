@@ -38,6 +38,14 @@ const TCC_INSERT_SETTLE: Duration = Duration::from_millis(400);
 /// claiming a permission the user has since revoked.
 static MICROPHONE_GRANT_OBSERVED: AtomicBool = AtomicBool::new(false);
 
+/// A system-audio grant reported by the tap this process mounted.
+///
+/// Same contract as `MICROPHONE_GRANT_OBSERVED`, for the one case the read
+/// path cannot answer: `TCCAccessPreflight` gone from a future macOS. Without
+/// it the row would stick on "Grant" for a permission the user has already
+/// given, which is the defect SOU-120 opened. In this process only.
+static SYSTEM_AUDIO_GRANT_OBSERVED: AtomicBool = AtomicBool::new(false);
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PermState {
@@ -107,23 +115,28 @@ pub fn system_audio_status() -> PermState {
     system_audio_state_with(
         system_audio_supported(),
         audio_capture_preflight,
-        probe_system_audio,
+        SYSTEM_AUDIO_GRANT_OBSERVED.load(Ordering::Relaxed),
     )
 }
 
-/// `probe` only runs when the TCC SPI is unavailable (feature off, or the
-/// symbol gone from a future macOS). It answers by mounting a tap, which is
-/// what the read used to do and what the SPI exists to avoid, but it is an
-/// answer rather than a panic.
+/// A read never mounts a tap, not even when the SPI is missing. Mounting one
+/// would block the caller for two seconds and, on a fresh install, raise the
+/// AudioCapture prompt nobody asked for — on every 600 ms poll of the panel.
+/// With no SPI the honest answer is "not determined", narrowed by the one
+/// grant this process may have seen itself.
 pub fn system_audio_state_with(
     supported: bool,
     preflight: impl FnOnce() -> Option<PermState>,
-    probe: impl FnOnce() -> PermState,
+    observed_grant: bool,
 ) -> PermState {
     if !supported {
         return PermState::Unsupported;
     }
-    preflight().unwrap_or_else(probe)
+    match preflight() {
+        Some(PermState::Unknown) | None if observed_grant => PermState::Granted,
+        Some(state) => state,
+        None => PermState::Unknown,
+    }
 }
 
 /// Snapshot value for the microphone. The live status wins whenever the OS
@@ -422,10 +435,14 @@ fn open_microphone_settings() {}
 
 /// `Denied` also covers `Restricted` (parental controls, MDM): macOS never
 /// re-prompts once it has an answer, so the only move left is the pane.
+///
+/// `request_access` returns `None` when the completion block never reported:
+/// a dialog left open on screen is not a refusal, so that becomes `Unknown`
+/// and the panel's poll settles it once the user answers.
 fn request_microphone_with(
     status: impl FnOnce() -> PermState,
     open_settings: impl FnOnce(),
-    request_access: impl FnOnce() -> bool,
+    request_access: impl FnOnce() -> Option<bool>,
     has_device: impl FnOnce() -> bool,
 ) -> PermState {
     match status() {
@@ -434,13 +451,11 @@ fn request_microphone_with(
             open_settings();
             PermState::Denied
         }
-        _ => {
-            if request_access() {
-                granted_or_no_device(has_device)
-            } else {
-                PermState::Denied
-            }
-        }
+        _ => match request_access() {
+            Some(true) => granted_or_no_device(has_device),
+            Some(false) => PermState::Denied,
+            None => PermState::Unknown,
+        },
     }
 }
 
@@ -464,23 +479,25 @@ fn request_microphone() -> PermState {
         microphone_authorization_status,
         open_microphone_settings,
         || {
-            let granted = request_microphone_access();
-            if granted {
+            let answer = request_microphone_access();
+            if answer == Some(true) {
                 MICROPHONE_GRANT_OBSERVED.store(true, Ordering::Relaxed);
             }
-            granted
+            answer
         },
         has_microphone_device,
     )
 }
 
 /// The native prompt, and the only in-process event that reports its answer.
+/// `None` means no answer came back: the prompt could not be raised, or the
+/// user walked away from an open dialog.
 ///
 /// Going through the CoreAudio HAL instead (opening an input stream) raises
 /// the same dialog but leaves AVFoundation's cached status untouched, so the
 /// process keeps reading `NotDetermined` for the rest of its life.
 #[cfg(target_os = "macos")]
-fn request_microphone_access() -> bool {
+fn request_microphone_access() -> Option<bool> {
     use block2::RcBlock;
     use objc2::runtime::Bool;
     use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
@@ -501,16 +518,16 @@ fn request_microphone_access() -> bool {
         true
     });
     if !asked {
-        return false;
+        return None;
     }
-    // Generous: the user may leave the dialog on screen. The timeout only
-    // bounds a callback that never comes.
-    matches!(rx.recv_timeout(Duration::from_secs(300)), Ok(true))
+    // Generous: the user may leave the dialog on screen. A timeout is not a
+    // refusal, so it answers `None` and the panel's poll settles the row.
+    rx.recv_timeout(Duration::from_secs(300)).ok()
 }
 
 #[cfg(not(target_os = "macos"))]
-fn request_microphone_access() -> bool {
-    false
+fn request_microphone_access() -> Option<bool> {
+    None
 }
 
 // --- System audio (kTCCServiceAudioCapture) ---
@@ -570,6 +587,10 @@ fn audio_capture_preflight() -> Option<PermState> {
 /// AudioCap, Hyprnote and screenpipe all read the same three values out of
 /// this SPI. Anything else means the contract moved, and an unknown number
 /// must not be read as a verdict.
+///
+/// It does not validate the service name: an unknown service answers 1
+/// (denied), not an out-of-range value. The only signal that the SPI itself
+/// is gone is a null `dlsym`, which `tcc_preflight` handles.
 #[cfg(any(test, all(target_os = "macos", feature = "private-tcc")))]
 fn tcc_preflight_state(raw: i32) -> Option<PermState> {
     match raw {
@@ -583,9 +604,10 @@ fn tcc_preflight_state(raw: i32) -> Option<PermState> {
     }
 }
 
-/// Mounts a tap for two seconds. This is the request path (the tap is what
-/// raises the native prompt) and the read fallback when the TCC SPI is
-/// unavailable. Never call it to render a status while the SPI answers.
+/// Mounts a tap for two seconds. This is the *request* path and nothing else:
+/// the tap is what raises the native prompt. It must never run to render a
+/// status, with or without the SPI — that is what created and tore down a
+/// `Souffle Tap` aggregate on every poll (SOU-124 AC7).
 #[cfg(target_os = "macos")]
 pub fn probe_system_audio() -> PermState {
     use ringbuf::HeapRb;
@@ -607,12 +629,37 @@ pub fn probe_system_audio() -> PermState {
     PermState::Unsupported
 }
 
+/// Raise the AudioCapture prompt by mounting the tap, then let TCC say what
+/// the user answered.
+///
+/// The tap succeeding is not a grant: `AudioHardwareCreateProcessTap` and
+/// `AudioDeviceStart` return `noErr` on a refusal and deliver silence, which
+/// is why the row used to flash "Granted" right after a "Don't Allow".
+fn request_system_audio() -> PermState {
+    request_system_audio_with(probe_system_audio, audio_capture_preflight)
+}
+
+fn request_system_audio_with(
+    probe: impl FnOnce() -> PermState,
+    preflight: impl FnOnce() -> Option<PermState>,
+) -> PermState {
+    let probed = probe();
+    if probed == PermState::Unsupported {
+        return probed;
+    }
+    let state = preflight().unwrap_or(probed);
+    if state == PermState::Granted {
+        SYSTEM_AUDIO_GRANT_OBSERVED.store(true, Ordering::Relaxed);
+    }
+    state
+}
+
 /// Trigger the native prompt (or open Settings) for one permission and return
 /// the resulting state.
 pub fn request(kind: PermissionKind) -> PermState {
     match kind {
         PermissionKind::Microphone => request_microphone(),
-        PermissionKind::SystemAudio => probe_system_audio(),
+        PermissionKind::SystemAudio => request_system_audio(),
         PermissionKind::Accessibility => {
             open_accessibility_settings();
             if accessibility_granted() {
@@ -732,7 +779,7 @@ mod tests {
             || opened.set(true),
             || {
                 asked.set(true);
-                true
+                Some(true)
             },
             || true,
         );
@@ -754,7 +801,7 @@ mod tests {
             || opened.set(true),
             || {
                 asked.set(true);
-                true
+                Some(true)
             },
             || true,
         );
@@ -769,17 +816,31 @@ mod tests {
         let result = request_microphone_with(
             || PermState::Unknown,
             || panic!("the request answers, so Settings must stay shut"),
-            || false,
+            || Some(false),
             || true,
         );
         assert_eq!(result, PermState::Denied);
+    }
+
+    /// A dialog the user walked away from is not a refusal. Reporting Denied
+    /// would paint the row red and offer System Settings for a permission
+    /// that is still merely unanswered.
+    #[test]
+    fn a_request_that_never_answers_is_unknown_not_denied() {
+        let result = request_microphone_with(
+            || PermState::Unknown,
+            || panic!("an unanswered prompt must not open Settings"),
+            || None,
+            || true,
+        );
+        assert_eq!(result, PermState::Unknown);
     }
 
     /// A grant with nothing plugged in is not a permission problem, and the
     /// UI says something else about it.
     #[test]
     fn a_grant_without_an_input_device_is_no_device() {
-        let result = request_microphone_with(|| PermState::Unknown, || {}, || true, || false);
+        let result = request_microphone_with(|| PermState::Unknown, || {}, || Some(true), || false);
         assert_eq!(result, PermState::NoDevice);
     }
 
@@ -907,6 +968,7 @@ mod tests {
         );
     }
 
+    /// AC7: the SPI answers on its own, and its verdict is the row.
     #[test]
     fn system_audio_reads_the_tcc_preflight_without_mounting_a_tap() {
         for (raw, expected) in [
@@ -914,31 +976,71 @@ mod tests {
             (PermState::Denied, PermState::Denied),
             (PermState::Unknown, PermState::Unknown),
         ] {
-            let state = system_audio_state_with(
-                true,
-                || Some(raw),
-                || panic!("a status read must not mount a tap when the SPI answered"),
-            );
-            assert_eq!(state, expected);
+            assert_eq!(system_audio_state_with(true, || Some(raw), false), expected);
         }
     }
 
-    /// AC8: a missing `TCCAccessPreflight` degrades to the tap probe. The
-    /// arm is unreachable on a machine that has the symbol, so it is the
-    /// injected `None` that keeps it honest.
+    /// AC8: a missing `TCCAccessPreflight` reads as "not determined". It must
+    /// not fall back to the tap: a read that mounts a tap blocks the poll for
+    /// two seconds and raises the prompt the user never asked for.
     #[test]
-    fn system_audio_falls_back_to_the_probe_when_the_spi_is_missing() {
-        let probed = Cell::new(false);
-        let state = system_audio_state_with(
-            true,
-            || None,
-            || {
-                probed.set(true);
-                PermState::Granted
-            },
+    fn system_audio_without_the_spi_reads_unknown_and_never_probes() {
+        assert_eq!(
+            system_audio_state_with(true, || None, false),
+            PermState::Unknown,
+            "a null dlsym must degrade to Unknown, not panic and not probe"
         );
-        assert_eq!(state, PermState::Granted);
-        assert!(probed.get(), "a null dlsym must fall back, not panic");
+    }
+
+    /// The one case the read cannot answer on its own: no SPI, but this
+    /// process mounted the tap itself and saw the grant. Without this the row
+    /// would stick on "Grant" forever (SOU-120).
+    #[test]
+    fn system_audio_uses_a_grant_this_process_observed() {
+        assert_eq!(
+            system_audio_state_with(true, || None, true),
+            PermState::Granted
+        );
+        assert_eq!(
+            system_audio_state_with(true, || Some(PermState::Unknown), true),
+            PermState::Granted
+        );
+        assert_eq!(
+            system_audio_state_with(true, || Some(PermState::Denied), true),
+            PermState::Denied,
+            "a revoke read from TCC must beat a grant seen earlier"
+        );
+    }
+
+    /// CoreAudio returns noErr and silence when the user refuses, so a tap
+    /// that mounted is not a grant. TCC has the answer.
+    #[test]
+    fn a_refused_system_audio_prompt_is_denied_even_though_the_tap_mounted() {
+        assert_eq!(
+            request_system_audio_with(|| PermState::Granted, || Some(PermState::Denied)),
+            PermState::Denied
+        );
+        assert_eq!(
+            request_system_audio_with(|| PermState::Granted, || Some(PermState::Granted)),
+            PermState::Granted
+        );
+    }
+
+    /// With no SPI the probe is all there is, and an unsupported OS is not
+    /// asked at all.
+    #[test]
+    fn system_audio_request_falls_back_to_the_probe_and_skips_unsupported() {
+        assert_eq!(
+            request_system_audio_with(|| PermState::Granted, || None),
+            PermState::Granted
+        );
+        assert_eq!(
+            request_system_audio_with(
+                || PermState::Unsupported,
+                || panic!("an unsupported OS must not be preflighted"),
+            ),
+            PermState::Unsupported
+        );
     }
 
     #[test]
@@ -947,7 +1049,7 @@ mod tests {
             system_audio_state_with(
                 false,
                 || panic!("an unsupported OS must not be asked"),
-                || panic!("an unsupported OS must not be probed"),
+                true
             ),
             PermState::Unsupported
         );
