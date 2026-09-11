@@ -355,33 +355,33 @@ fn start_pipeline_blocking(
         ),
     );
 
-    // SOU-082: Try to acquire the system audio tap *before* starting the session
-    // so we can downgrade to single-stream (diarize = false) if the tap fails.
+    // SOU-082: learn whether a tap will come up *before* committing the
+    // engine to dual-lane diarization. The probe must not stay alive across
+    // the microphone open: a live process-tap aggregate held while cpal
+    // builds/plays the AUHAL input stream is what wedged the built-in mic
+    // for a full `MIC_OPEN_TIMEOUT` in meeting repros (system audio fine,
+    // dictation-without-tap fine). Drop the probe; `start_meeting` opens
+    // the mic first, then spawns the real tap.
     #[cfg(target_os = "macos")]
-    let (tap_handle, tap_cons) = if capture_system_audio {
+    let tap_alive = if capture_system_audio {
         use ringbuf::traits::Split;
-        let (tap_prod, tap_cons) =
+        let (tap_prod, _tap_cons) =
             ringbuf::HeapRb::<f32>::new(crate::audio::mixer::MIX_RATE as usize * 2).split();
         let probe =
             crate::audio::system_tap::spawn_tap(tap_prod, std::time::Duration::from_secs(5));
         match report_probe_outcome(app.as_ref(), probe) {
-            Some(tap) => (Some(tap), Some(tap_cons)),
-            None => (None, None),
+            Some(tap) => {
+                drop(tap);
+                true
+            }
+            None => false,
         }
     } else {
-        (None, None)
+        true
     };
+    #[cfg(not(target_os = "macos"))]
+    let tap_alive = true;
 
-    let tap_alive = {
-        #[cfg(target_os = "macos")]
-        {
-            !capture_system_audio || tap_handle.is_some()
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            true
-        }
-    };
     let (actual_capture_system_audio, diarize) = capture_and_diarize_after_probe(
         capture_system_audio,
         tap_alive,
@@ -438,10 +438,12 @@ fn start_pipeline_blocking(
             capture_system_audio: actual_capture_system_audio,
             diarize,
             record_path,
+            // No pre-spawned tap: start_meeting opens the mic first, then
+            // the tap (see the disposable probe above).
             #[cfg(target_os = "macos")]
-            tap: tap_handle,
+            tap: None,
             #[cfg(target_os = "macos")]
-            tap_cons,
+            tap_cons: None,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
