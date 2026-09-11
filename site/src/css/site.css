@@ -275,19 +275,14 @@ html { scrollbar-color: var(--ink) var(--paper); }
 .act-ruled {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 20px; width: 100%; padding-bottom: 9px;
-  border-bottom: 3px solid var(--ink);
-  font-size: clamp(21px, 2.3vw, 32px); font-weight: 800;
+  border-bottom: 1px solid var(--ink);
+  font-size: clamp(16px, 1.5vw, 21px); font-weight: 800;
   letter-spacing: -0.02em; text-transform: uppercase;
-  font-variation-settings: "wdth" 74;
+  font-variation-settings: "wdth" 82;
   transition: color 140ms linear, border-color 140ms linear;
 }
 .act-ruled svg { flex-shrink: 0; align-self: center; }
 .act-ruled:hover { color: var(--ox); border-color: var(--ox); }
-.act-ruled.is-quiet {
-  border-bottom-width: 1px;
-  font-size: clamp(16px, 1.5vw, 21px);
-  font-variation-settings: "wdth" 82;
-}
 
 .copyline {
   display: flex; align-items: center; gap: 14px; width: 100%;
@@ -316,13 +311,13 @@ html { scrollbar-color: var(--ink) var(--paper); }
 .hero-plate { padding-block: clamp(22px, 2.8vw, 36px) clamp(30px, 4vw, 56px); }
 
 /* --plate is the app's own default window width; every plate on the sheet
-   is held to it so the windows keep the proportions they really have.
+   is held to it, so the windows keep the proportions they really have.
 
    Holding them to the app's full 780px height as well was literal but worse
    to look at: a short screen became an empty room, up to 325px of bare
    canvas under the outcomes panel. The width cap is what stops them reading
    as stretched screenshots; the height follows the content. */
-:root { --plate: 880px; }
+:root { --plate: 860px; }
 .hero-plate, .act-plate {
   display: grid;
   grid-template-columns: minmax(0, var(--plate)) minmax(0, 1fr);
@@ -390,8 +385,8 @@ html { scrollbar-color: var(--ink) var(--paper); }
   background: var(--ink); color: var(--paper);
   margin-inline: -18px; padding-inline: 18px;
 }
-.bill-row.is-billed .dim { color: rgba(251, 243, 226, 0.72); }
-.bill-row.is-billed .spec { border-color: rgba(251, 243, 226, 0.4); }
+.bill-row.is-billed .dim { color: color-mix(in srgb, var(--paper) 72%, transparent); }
+.bill-row.is-billed .spec { border-color: color-mix(in srgb, var(--paper) 40%, transparent); }
 .bill-name { margin: 0; }
 .bill-name .bill-tag { margin-left: 12px; white-space: nowrap; }
 .specs { display: flex; flex-wrap: wrap; gap: 6px; }

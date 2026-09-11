@@ -41,7 +41,7 @@ on-device**. No account, no API key, no network call after the first model
 download. Specifically:
 
 - Speaker separation comes from native system-audio capture, with **no virtual
-  audio device to install** — the usual price of admission for this category.
+  audio device to install**, the usual price of admission for this category.
 - Summaries run through Apple Intelligence or a local Ollama, never a hosted API.
 - Open source (GPL-3.0-or-later), so the privacy claim is auditable rather than
   promised.
@@ -75,7 +75,7 @@ Binding, confirmed by the user:
 
 - The name **Soufflé** and the existing soufflé logo (`site/src/souffle-logo.svg`).
 - The **warm amber** chromatic family. It comes from the app itself, and the
-  animated mocks on the page render the app's real light palette — a site that
+  animated mocks on the page render the app's real light palette, so a site that
   drifted off amber would stop matching the product it shows.
 
 Explicitly **not** binding: typography, layout, composition, motion, section
@@ -87,13 +87,13 @@ needs, and it does not sell. The existing copy is confirmed good and is reused.
 ## Evidence on Hand
 
 - **Real and usable:** the animated mocks in `site/src/_includes/mocks/`. They are
-  not screenshots — they are HTML/CSS rebuilt from the app's own components,
+  not screenshots. They are HTML/CSS rebuilt from the app's own components,
   running the app's own behaviour (the waveform loop is ported from
   `Waveform.svelte`). They are the product demonstration and the strongest asset
   on the page. The user asked explicitly to keep them.
 - **Real and usable:** verifiable technical facts already on the page (model
   sizes, OS requirements, permissions, licence, signed/notarised releases).
-- **Does not exist — must never be fabricated:** testimonials, user quotes,
+- **Does not exist, must never be fabricated:** testimonials, user quotes,
   customer logos, download counts, star counts, star ratings, benchmark numbers,
   latency figures, accuracy percentages, "trusted by" claims, press mentions,
   awards. The user confirmed there is no social proof of any kind. The product
@@ -114,9 +114,9 @@ needs, and it does not sell. The existing copy is confirmed good and is reused.
 
 ## Accessibility & Inclusion
 
-- Keyboard reachable, visible focus, WCAG AA contrast on the dark ground.
+- Keyboard reachable, visible focus, WCAG AA contrast on every ground the page uses.
 - `prefers-reduced-motion: reduce` must render every animated mock in its
-  finished state rather than animating — an existing, working behaviour that the
+  finished state rather than animating. This is existing, working behaviour that the
   redesign must preserve.
 - Bilingual EN/FR with `hreflang`; French copy runs longer than English, so
   layouts cannot depend on English line lengths.
