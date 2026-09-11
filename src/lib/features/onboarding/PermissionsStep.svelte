@@ -47,7 +47,6 @@
   let accessibilityAttempts = $state(0);
   let leftAfterAttempt = $state(false);
   let returnedStillDenied = $state(false);
-  let leftWindow = $state(false);
   const showStaleHint = $derived(returnedStillDenied || accessibilityAttempts >= 2);
 
   /** Every write to `status` goes through here so the parent (which cannot
@@ -199,24 +198,15 @@
     // Denied that `request_permission` returns) does not count as a return.
     const onBlur = () => {
       if (accessibilityAttempts > 0) leftAfterAttempt = true;
-      leftWindow = true;
     };
     const onFocus = () => {
       if (leftAfterAttempt && status.accessibility === "denied") {
         returnedStillDenied = true;
       }
-      // Re-probe a remembered grant after the user left the app (typically
-      // System Settings) so a revoke is reflected. Opening the window does
-      // not probe (AC5). Denied already has Grant; Unknown must not prompt
-      // (AC3). Skip while a probe is in flight so two taps cannot overlap.
-      if (
-        leftWindow
-        && status.system_audio === "granted"
-        && !busy.system_audio
-      ) {
-        leftWindow = false;
-        void grant("system_audio");
-      }
+      // Nothing else happens here. Returning from System Settings used to
+      // re-probe system audio to catch a revoke, which mounted a real Core
+      // Audio tap every time (SOU-124 AC7). The 600 ms poll now reads the
+      // live TCC status, so a revoke shows up on its own.
     };
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);
