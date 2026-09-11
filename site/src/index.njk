@@ -59,7 +59,7 @@ layout: layouts/base.njk
     {%- for f in t.features %}
     <article class="act" id="act-{{ f.id }}" data-act-watch="features">
       <div class="act-head">
-        <h2 class="bill-{{ loop.index }}" data-act-head>{{ f.title }}</h2>
+        <h2 class="bill-{{ loop.index }}">{{ f.title }}</h2>
       </div>
       <div class="act-cols">
         <p class="t-s">{{ f.body | safe }}</p>
@@ -79,7 +79,7 @@ layout: layouts/base.njk
 <div class="screen-band" aria-hidden="true"></div>
 <section id="models" class="band invert">
   <div class="sheet act">
-    <h2 class="bill-3" data-act-head data-act-watch="models">{{ t.models.title }}</h2>
+    <h2 class="bill-3" data-act-watch="models">{{ t.models.title }}</h2>
     <p class="t-s measure" style="margin-top:20px">{{ t.models.sub }}</p>
 
     <div class="bill-list" style="margin-top:clamp(22px,2.6vw,34px)">
@@ -98,7 +98,7 @@ layout: layouts/base.njk
 
 <section id="privacy" class="band invert">
   <div class="sheet act">
-    <h2 class="bill-3" data-act-head data-act-watch="privacy">{{ t.privacy.title }}</h2>
+    <h2 class="bill-3" data-act-watch="privacy">{{ t.privacy.title }}</h2>
     <p class="t-s measure" style="margin-top:20px">{{ t.privacy.sub }}</p>
     <div class="points">
       {%- for p in t.privacy.points %}
@@ -114,7 +114,7 @@ layout: layouts/base.njk
 
 <section class="band invert">
   <div class="sheet act">
-    <h2 class="bill-4" data-act-head data-act-watch="privacy">{{ t.owndata.title }}</h2>
+    <h2 class="bill-4" data-act-watch="privacy">{{ t.owndata.title }}</h2>
     <p class="t-s measure" style="margin-top:20px">{{ t.owndata.sub }}</p>
     <div class="points">
       {%- for p in t.owndata.points %}

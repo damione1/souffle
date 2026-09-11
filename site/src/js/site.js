@@ -103,6 +103,29 @@
     if (g && groupOrder.indexOf(g) < 0) groupOrder.push(g);
   });
 
+  /* Reserve each name's widest state.
+     The step changes the size of a name in the bill, which would otherwise
+     shove its neighbours sideways every time rank changed. Each name is
+     measured at its largest state once and pinned to that width, so the row
+     holds still while the type inside it steps. */
+  var reserve = function () {
+    Object.keys(runLinks).forEach(function (key) {
+      var a = runLinks[key];
+      a.style.minWidth = "";
+      var had = a.className;
+      /* The size is transitioned, so a width read straight after adding the
+         class returns the size it is animating away from. */
+      a.style.transition = "none";
+      a.classList.remove("is-playing", "is-demoted");
+      a.classList.add("is-playing");
+      var widest = a.getBoundingClientRect().width;
+      a.className = had;
+      a.style.minWidth = Math.ceil(widest) + 1 + "px";
+      void a.offsetWidth;
+      a.style.transition = "";
+    });
+  };
+
   /* Rank is read off one line across the viewport rather than off an
      intersection band: the act in play is simply the last one whose top has
      passed that line. A band leaves gaps between acts where nothing
@@ -124,11 +147,6 @@
     var playingAt = playing ? acts.indexOf(playing) : -1;
 
     acts.forEach(function (el, i) {
-      var head = el.matches("[data-act-head]") ? el : el.querySelector("[data-act-head]");
-      if (head) {
-        head.classList.toggle("is-playing", el === playing);
-        head.classList.toggle("is-demoted", playing !== null && el !== playing);
-      }
       el.classList.toggle("is-played", playingAt >= 0 && i < playingAt);
     });
 
@@ -138,6 +156,7 @@
       var a = runLinks[key];
       if (!a) return;
       a.classList.toggle("is-playing", key === group);
+      a.classList.toggle("is-demoted", groupAt >= 0 && key !== group);
       a.classList.toggle("is-played", groupAt >= 0 && i < groupAt);
     });
   };
@@ -149,9 +168,18 @@
     requestAnimationFrame(function () { queued = false; paint(); });
   };
 
+  var onResize = function () {
+    reserve();
+    last = undefined;
+    paint();
+  };
+
   window.addEventListener("scroll", onScroll, { passive: true });
-  window.addEventListener("resize", onScroll);
+  window.addEventListener("resize", onResize);
+  reserve();
   paint();
+  /* The face swaps in after first paint and changes every measured width. */
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(onResize);
 })();
 
 /* Docs sidebar: highlight the section you are reading. */
