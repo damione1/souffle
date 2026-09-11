@@ -34,11 +34,10 @@
     this.accent = "#e9ae55";
     this.resize();
     this.refreshAccent();
-    // The pill's own wave (unlike the header one) sits in a box that
-    // animates its width open as text streams in (.pill-overlay's `width`
-    // transition). resize() at construction time or at start() catches
-    // whatever width the box has *then*, so the backing store stays sized
-    // for the collapsed pill and gets visibly stretched once it widens.
+    // The pill's own wave (unlike the header one) sits in a box that changes
+    // width when the panel opens. resize() at construction time or at start()
+    // catches whatever width the box has *then*, so the backing store stays
+    // sized for the collapsed pill and gets visibly stretched once it widens.
     // Re-measuring on every box-size change keeps it sharp throughout.
     var self = this;
     if (window.ResizeObserver) {
