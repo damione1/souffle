@@ -1,18 +1,13 @@
-{% from "icons.njk" import icon %}
 {% from "mocks/mocks.njk" import overlay %}
 {#
-  An act of the bill like any other, so it keeps the page's fixed running
-  order rather than interrupting it with a different shape.
+  The second movement of the dictation act: the same dictation, outside the
+  app. It is not its own act — one subject, one place on the bill.
 #}
-<article class="act" id="overlay" data-act-watch="features">
-  <div class="act-head">
-    <h2 class="bill-2">{{ t.overlay.title }}</h2>
-  </div>
-  <div class="act-cols">
-    <p class="t-s">{{ t.overlay.body }}</p>
-    <ul class="facts t-xs">
-      {%- for b in t.overlay.bullets %}<li>{{ b }}</li>{% endfor %}
-    </ul>
-  </div>
-  <figure class="act-plate">{{ overlay(t) }}</figure>
-</article>
+<h3 class="t-m act-movement" id="overlay">{{ t.overlay.title }}</h3>
+<div class="act-cols">
+  <p class="t-s">{{ t.overlay.body }}</p>
+  <ul class="facts t-xs">
+    {%- for b in t.overlay.bullets %}<li>{{ b }}</li>{% endfor %}
+  </ul>
+</div>
+<figure class="act-plate">{{ overlay(t) }}</figure>

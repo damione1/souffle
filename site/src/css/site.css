@@ -18,13 +18,13 @@
   --amber: #e2a22f;
   --ink: #17100a;
   --ox: #6b2710;
-  --paper: #fbf3e2;
+  --paper: #f4ead3;
 
-  --ground: var(--amber);
+  --ground: var(--paper);
   --fg: var(--ink);
-  --fg-2: #4a3418;
-  --rule: rgba(23, 16, 10, 0.26);
-  --rule-faint: rgba(23, 16, 10, 0.14);
+  --fg-2: #5c4630;
+  --rule: rgba(23, 16, 10, 0.24);
+  --rule-faint: rgba(23, 16, 10, 0.11);
 
   --font: "Archivo", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
@@ -33,13 +33,14 @@
   --gut: 40px;
 }
 
-/* The reverse of the sheet: the dense factual half, printed on paper. */
-.invert {
-  --ground: var(--paper);
-  --fg: var(--ink);
-  --fg-2: #5c4630;
-  --rule: rgba(23, 16, 10, 0.24);
-  --rule-faint: rgba(23, 16, 10, 0.11);
+/* The two drenched bands: the opening and the close, printed in full amber.
+   Nine thousand pixels of saturated ground wore the amber out; held to the
+   two ends it signals again. */
+.drenched {
+  --ground: var(--amber);
+  --fg-2: #4a3418;
+  --rule: rgba(23, 16, 10, 0.26);
+  --rule-faint: rgba(23, 16, 10, 0.14);
 }
 
 /* ─── Mock palette: the app's own `.light` cream, untouched ───
@@ -124,7 +125,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
-  background: var(--amber);
+  background: var(--paper);
   color: var(--ink);
   font-family: var(--font);
   font-size: 16px;
@@ -142,10 +143,10 @@ a { color: inherit; text-decoration: none; }
 button { font: inherit; border: 0; background: none; color: inherit; }
 
 /* Browser surfaces belong to the sheet too. */
-::selection { background: var(--ink); color: var(--amber); }
-.invert ::selection { background: var(--ink); color: var(--paper); }
+::selection { background: var(--ink); color: var(--paper); }
+.drenched ::selection { background: var(--ink); color: var(--amber); }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
-html { scrollbar-color: var(--ink) var(--amber); }
+html { scrollbar-color: var(--ink) var(--paper); }
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 :where(.num) { font-variant-numeric: tabular-nums; }
 
@@ -224,11 +225,16 @@ html { scrollbar-color: var(--ink) var(--amber); }
 /* ─── Marginalia: the run across the top of the sheet ───
    Not a floating bar. It is the sheet's own top line, and it scrolls away
    with the paper. */
+/* The ground bleeds the full width; the run itself is centred on the measure
+   the way every band is, so the wordmark starts where the headline does. */
+.margin-band {
+  background: var(--ground); color: var(--fg);
+  border-bottom: 1px solid var(--rule);
+}
 .margin-run {
   display: flex; align-items: center; gap: 26px;
   max-width: var(--measure); margin: 0 auto;
   padding: 14px var(--gut);
-  border-bottom: 1px solid var(--rule);
 }
 .wordmark { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
 .wordmark span {
@@ -252,6 +258,18 @@ html { scrollbar-color: var(--ink) var(--amber); }
 
 /* The primary action is type on the sheet, not a pill and not a block:
    a billing line with a heavy rule under it. */
+.act-solid {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; width: 100%; padding: 20px 26px;
+  background: var(--ink); color: var(--ground);
+  font-size: clamp(21px, 2.3vw, 32px); font-weight: 800;
+  letter-spacing: -0.02em; text-transform: uppercase;
+  font-variation-settings: "wdth" 74;
+  transition: background-color 140ms linear;
+}
+.act-solid:hover { background: var(--ox); color: var(--ground); }
+.act-solid svg { flex-shrink: 0; }
+
 .act-ruled {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 20px; width: 100%; padding-bottom: 9px;
@@ -297,16 +315,12 @@ html { scrollbar-color: var(--ink) var(--amber); }
 
 /* --plate is the app's own default window width; every plate on the sheet
    is held to it so the windows keep the proportions they really have.
-   --plate-h is that width at the app's 860x780 ratio: a real window does not
-   shrink to fit its content, so a short screen keeps the window's height and
-   shows the canvas below it, which is what the app actually looks like. */
-:root { --plate: 880px; --plate-h: 798px; }
 
-/* Only where the plate is actually at its capped width. min-height can only
-   grow the box, so no content can be clipped by it. */
-@media (min-width: 1081px) {
-  .win { min-height: var(--plate-h); }
-}
+   Holding them to the app's full 780px height as well was literal but worse
+   to look at: a short screen became an empty room, up to 325px of bare
+   canvas under the outcomes panel. The width cap is what stops them reading
+   as stretched screenshots; the height follows the content. */
+:root { --plate: 880px; }
 .hero-plate, .act-plate {
   display: grid;
   grid-template-columns: minmax(0, var(--plate)) minmax(0, 1fr);
@@ -349,6 +363,9 @@ html { scrollbar-color: var(--ink) var(--amber); }
   color: var(--ox);
   background-image: radial-gradient(circle at center, var(--ox) 0 1.15px, transparent 1.15px);
 }
+
+/* A second movement inside one act: the same subject, a step down the bill. */
+.act-movement { margin-top: clamp(44px, 5.5vw, 84px); }
 
 /* The facts list: rule-separated, no bullet glyphs, no check icons. */
 .facts li { padding: 9px 0; border-top: 1px solid var(--rule-faint); }
