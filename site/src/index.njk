@@ -4,98 +4,90 @@ permalink: "{{ loc.dir }}index.html"
 layout: layouts/base.njk
 ---
 {% from "icons.njk" import icon %}
-{% from "mocks/mocks.njk" import meeting, dictation, home, outcomes %}
+{% from "mocks/mocks.njk" import meeting, dictation, home, outcomes, overlay %}
+{% set docs = "/docs/" if loc.code == "en" else "/fr/docs/" %}
 
 {#
-  Both of the reassurance blocks read the same way: a heading, three
-  plain-language points, and one link to the page that carries the
-  detail. The specifics (hostnames, export formats, the MCP server, the
-  command line) live in the docs instead of on the landing page.
+  One sheet. Hierarchy is size and line breaks; there are no cards, no
+  panels and no containers on this page. The only images it contains are
+  the app mocks, printed onto the sheet as plates.
 #}
-{% macro plainBlock(b, href) %}
-<div class="plain-head">
-  <span class="eyebrow">{{ b.eyebrow }}</span>
-  <h2 class="h2">{{ b.title }}</h2>
-  <p class="lead">{{ b.sub }}</p>
-</div>
-<div class="plain-grid">
-  {%- for p in b.points %}
-  <div class="plain-point">
-    <span class="plain-icon">{{ icon(p.icon, 20, 1.8) }}</span>
-    <h3>{{ p.h }}</h3>
-    <p>{{ p.d }}</p>
-  </div>
-  {%- endfor %}
-</div>
-<a class="plain-more" href="{{ href }}">{{ b.more }}{{ icon("arrow", 15) }}</a>
+
+{% macro plate(name, t) %}
+  {%- if name == "home" %}{{ home(t) }}
+  {%- elif name == "dictation" %}{{ dictation(t) }}
+  {%- elif name == "outcomes" %}{{ outcomes(t) }}
+  {%- else %}{{ meeting(t) }}{% endif %}
 {% endmacro %}
 
-{# ── HERO ── #}
-<section class="hero">
-  <div class="hero-glow" aria-hidden="true"></div>
-  <div class="hero-inner">
-    <p class="hero-badge reveal"><span class="ready-dot"></span>{{ t.hero.badge }}</p>
-    <h1 class="reveal">{{ t.hero.title | safe }}</h1>
-    <p class="hero-sub reveal">{{ t.hero.sub }}</p>
-    <div class="reveal" style="display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap;justify-content:center">
-      <a class="btn btn-primary" href="{{ site.latest }}">{{ icon("download", 18) }}{{ t.hero.cta }}</a>
-      <button class="copy" data-copy="{{ site.brew }}" type="button">
-        <code>{{ site.brew }}</code><span class="copy-icon">{{ icon("copy", 14) }}</span>
-      </button>
+{% macro copyline(cmd, label) %}
+<button class="copyline t-2xs" data-copy="{{ cmd }}" type="button">
+  <code>{{ cmd }}</code>
+  <span class="copyline-do t-3xs">{{ label }}</span>
+</button>
+{% endmacro %}
+
+{# ── THE TOP OF THE SHEET ── #}
+<section class="band drenched">
+  <div class="sheet hero">
+    <h1 class="t-xl" data-fit>
+      {%- for line in t.hero.titleLines %}<span class="hl">{{ line }}</span>{% endfor %}
+    </h1>
+
+    <div class="hero-under">
+      <p class="t-s measure">{{ t.hero.sub }}</p>
+      <div class="hero-do">
+        <a class="act-solid" href="{{ site.latest }}">{{ t.hero.cta }}{{ icon("arrow", 22) }}</a>
+        {{ copyline(site.brew, t.nav.copy) }}
+        <p class="t-3xs dim" style="padding-top:10px;border-top:1px solid var(--rule)">{{ t.hero.note }} · {{ t.hero.badge }}</p>
+      </div>
     </div>
-    <p class="reveal" style="font-size:13.5px;color:var(--t4)">{{ t.hero.note }}</p>
-  </div>
-  <div class="reveal" style="margin:66px auto 0;max-width:940px">
-    {{ meeting(t) }}
-    <p class="mock-caption" style="color:var(--t5)">{{ t.hero.caption }}</p>
+
+    <figure class="hero-plate">
+      {{ meeting(t) }}
+      <figcaption class="plate-note">
+        <span class="t-3xs">{{ t.mock.liveMeeting }}</span>
+        <span class="t-2xs dim">{{ t.hero.caption }}</span>
+      </figcaption>
+    </figure>
   </div>
 </section>
 
-{# ── FEATURES ── #}
-<section id="features" class="section">
-  <div class="wrap" style="display:flex;flex-direction:column;gap:104px">
+{# ── THE ACTS ── #}
+<div class="screen-band" aria-hidden="true"></div>
+<section id="features" class="band">
+  <div class="sheet">
     {%- for f in t.features %}
-    <div class="feature reveal{% if f.flip %} is-flipped{% endif %}">
-      {%- if f.flip %}<div style="min-width:0">
-        {%- if f.mock == "home" %}{{ home(t) }}{% elif f.mock == "dictation" %}{{ dictation(t) }}{% else %}{{ outcomes(t) }}{% endif %}
-      </div>{% endif %}
-      <div class="feature-text">
-        <span class="pill pill-{{ f.tone }}" style="align-self:flex-start">{{ icon(f.icon, 13) }}{{ f.badge }}</span>
-        <h2>{{ f.title }}</h2>
-        <p class="lead">{{ f.body | safe }}</p>
-        <div class="checks">
-          {%- for b in f.bullets %}
-          <div class="check">{{ icon("check", 17, 2.2) }}<span>{{ b }}</span></div>
-          {%- endfor %}
-        </div>
+    <article class="act" id="act-{{ f.id }}" data-act-watch="features">
+      <div class="act-head">
+        <h2 class="bill-{{ loop.index }}">{{ f.title }}</h2>
       </div>
-      {%- if not f.flip %}<div style="min-width:0">
-        {%- if f.mock == "home" %}{{ home(t) }}{% elif f.mock == "dictation" %}{{ dictation(t) }}{% else %}{{ outcomes(t) }}{% endif %}
-      </div>{% endif %}
-    </div>
-    {%- if f.overlayAfter %}{% include "partials/overlay-section.njk" %}{% endif %}
+      <div class="act-cols">
+        <p class="t-s">{{ f.body | safe }}</p>
+        <ul class="facts t-xs">
+          {%- for b in f.bullets %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+      </div>
+      <figure class="act-plate">{{ plate(f.mock, t) }}</figure>
+      {%- if f.overlayAfter %}{% include "partials/overlay-section.njk" %}{% endif %}
+    </article>
     {%- endfor %}
   </div>
 </section>
 
-{# ── MODELS ── #}
-<section id="models" class="section">
-  <div class="wrap">
-    <div class="reveal" style="text-align:center;margin-bottom:40px">
-      <span class="eyebrow">{{ t.models.eyebrow }}</span>
-      <h2 class="h2">{{ t.models.title }}</h2>
-      <p class="lead" style="max-width:560px;margin:16px auto 0;color:var(--t4)">{{ t.models.sub }}</p>
-    </div>
-    <div class="reveal" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px">
+{# ── THE DENSE FACTUAL HALF ── #}
+<section id="models" class="band">
+  <div class="sheet act">
+    <h2 class="bill-3" data-act-watch="models">{{ t.models.title }}</h2>
+    <p class="t-s measure" style="margin-top:20px">{{ t.models.sub }}</p>
+
+    <div class="bill-list" style="margin-top:clamp(22px,2.6vw,34px)">
       {%- for m in t.models.cards %}
-      <div class="card" style="padding:24px 26px{% if m.featured %};outline-color:color-mix(in srgb, var(--accent) 22%, transparent){% endif %}">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px">
-          <h3 style="font-size:20px;font-weight:600;color:var(--t1)">{{ m.name }}</h3>
-          {%- if m.tag %}<span class="pill {{ 'pill-accent' if m.featured }}" style="font-size:11.5px{% if not m.featured %};background:var(--surface-2);color:var(--t3);outline:1px solid var(--ghost){% endif %}">{{ m.tag }}</span>{% endif %}
-        </div>
-        <p style="font-size:15px;line-height:1.6;color:var(--t3);margin-bottom:16px">{{ m.desc }}</p>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          {%- for c in m.chips %}<span class="mono" style="padding:4px 10px;border-radius:9999px;background:var(--surface-2);font-size:12px;color:var(--t3)">{{ c }}</span>{% endfor %}
+      <div class="bill-row{% if m.featured %} is-billed{% endif %}">
+        <p class="bill-name"><span class="t-m">{{ m.name }}</span>{% if m.tag %}<span class="t-3xs dim bill-tag">{{ m.tag }}</span>{% endif %}</p>
+        <p class="t-xs">{{ m.desc }}</p>
+        <div class="specs">
+          {%- for c in m.chips %}<span class="spec">{{ c }}</span>{% endfor %}
         </div>
       </div>
       {%- endfor %}
@@ -103,66 +95,75 @@ layout: layouts/base.njk
   </div>
 </section>
 
-{# ── PRIVACY ── #}
-{% set docs = "/docs/" if loc.code == "en" else "/fr/docs/" %}
-<section id="privacy" class="section">
-  <div class="wrap reveal">
-    {{ plainBlock(t.privacy, docs + "#privacy") }}
-  </div>
-</section>
-
-{# ── YOUR DATA ── #}
-<section class="section">
-  <div class="wrap reveal">
-    {{ plainBlock(t.owndata, docs + "#export") }}
-  </div>
-</section>
-
-{# ── REQUIREMENTS + PERMISSIONS ── #}
-<section class="section">
-  <div class="wrap">
-    <div class="reveal req-perm-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px">
-      <div class="card" style="padding:28px 30px">
-        <h3 style="font-size:22px;font-weight:600;color:var(--t1);margin-bottom:20px">{{ t.requirements.title }}</h3>
-        {%- for r in t.requirements.rows %}
-        <div style="display:flex;justify-content:space-between;gap:20px;padding:13px 0{% if not loop.last %};border-bottom:1px solid var(--divider){% endif %}">
-          <span style="font-size:15px;color:var(--t3)">{{ r.k }}</span>
-          <span style="font-size:15px;color:var(--t2);text-align:right">{{ r.v | safe }}</span>
-        </div>
-        {%- endfor %}
+<section id="privacy" class="band">
+  <div class="sheet act">
+    <h2 class="bill-3" data-act-watch="privacy">{{ t.privacy.title }}</h2>
+    <p class="t-s measure" style="margin-top:20px">{{ t.privacy.sub }}</p>
+    <div class="points">
+      {%- for p in t.privacy.points %}
+      <div>
+        <h3 class="t-m">{{ p.h }}</h3>
+        <p class="t-xs dim">{{ p.d }}</p>
       </div>
-      <div class="card" style="padding:28px 30px">
-        <h3 style="font-size:22px;font-weight:600;color:var(--t1);margin-bottom:8px">{{ t.requirements.permTitle }}</h3>
-        <p style="font-size:14.5px;line-height:1.6;color:var(--t4);margin-bottom:14px">{{ t.requirements.permSub }}</p>
-        {%- for p in t.requirements.perms %}
-        <div style="display:flex;justify-content:space-between;gap:20px;padding:12px 0{% if not loop.last %};border-bottom:1px solid var(--divider){% endif %}">
-          <span style="font-size:15px;color:var(--t3)">{{ p.k }}</span>
-          <span style="font-size:15px;color:var(--t2);text-align:right">{{ p.v }}</span>
+      {%- endfor %}
+    </div>
+    <a class="more-link t-2xs" href="{{ docs }}#privacy">{{ t.privacy.more }}{{ icon("arrow", 14) }}</a>
+  </div>
+</section>
+
+<section class="band">
+  <div class="sheet act">
+    <h2 class="bill-4" data-act-watch="privacy">{{ t.owndata.title }}</h2>
+    <p class="t-s measure" style="margin-top:20px">{{ t.owndata.sub }}</p>
+    <div class="points">
+      {%- for p in t.owndata.points %}
+      <div>
+        <h3 class="t-m">{{ p.h }}</h3>
+        <p class="t-xs dim">{{ p.d }}</p>
+      </div>
+      {%- endfor %}
+    </div>
+    <a class="more-link t-2xs" href="{{ docs }}#export">{{ t.owndata.more }}{{ icon("arrow", 14) }}</a>
+  </div>
+</section>
+
+{# ── THE TAIL: the smallest facts, packed at the foot of the sheet ── #}
+<section class="band">
+  <div class="sheet act">
+    <div class="act-cols" style="border-top:0;margin-top:0;padding-top:0">
+      <div>
+        <h3 class="t-m">{{ t.requirements.title }}</h3>
+        <div class="kv t-xs" style="margin-top:16px">
+          {%- for r in t.requirements.rows %}
+          <div><span class="dim">{{ r.k }}</span><span>{{ r.v | safe }}</span></div>
+          {%- endfor %}
         </div>
-        {%- endfor %}
+      </div>
+      <div>
+        <h3 class="t-m">{{ t.requirements.permTitle }}</h3>
+        <p class="t-2xs dim" style="margin-top:10px">{{ t.requirements.permSub }}</p>
+        <div class="kv t-xs" style="margin-top:14px">
+          {%- for p in t.requirements.perms %}
+          <div><span class="dim">{{ p.k }}</span><span>{{ p.v }}</span></div>
+          {%- endfor %}
+        </div>
       </div>
     </div>
-    <div class="reveal" style="display:flex;align-items:flex-start;gap:13px;margin-top:18px;padding:20px 26px;border-radius:14px;background:color-mix(in srgb, var(--warning) 6%, transparent);outline:1px solid color-mix(in srgb, var(--warning) 18%, transparent);color:var(--warning)">
-      {{ icon("warning", 19, 1.9) }}
-      <p style="font-size:15px;line-height:1.62;color:var(--t2)"><strong style="font-weight:600;color:var(--t1)">{{ t.requirements.statusTitle }}</strong> {{ t.requirements.status }}</p>
-    </div>
+    <p class="tail t-2xs"><b>{{ t.requirements.statusTitle }}</b> {{ t.requirements.status }}</p>
   </div>
 </section>
 
-{# ── DOWNLOAD ── #}
-<section id="download" class="section">
-  <div class="wrap reveal" style="position:relative;padding:76px 60px;background:var(--surface-1);border-radius:24px;outline:1px solid color-mix(in srgb, var(--accent) 18%, transparent);text-align:center;overflow:hidden">
-    <div aria-hidden="true" style="position:absolute;top:-220px;left:50%;transform:translateX(-50%);width:800px;height:440px;background:radial-gradient(ellipse at center, rgba(233,174,85,0.18), rgba(233,174,85,0) 70%);pointer-events:none"></div>
-    <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:22px">
-      <h2 style="max-width:760px;font-size:46px;font-weight:600;line-height:1.1;color:var(--t1)">{{ t.cta.title }}</h2>
-      <p style="max-width:580px;font-size:17px;line-height:1.62;color:var(--t3)">{{ t.cta.sub | safe }}</p>
-      <div style="display:flex;align-items:center;gap:14px;margin-top:8px;flex-wrap:wrap;justify-content:center">
-        <a class="btn btn-primary" href="{{ site.latest }}">{{ icon("download", 18) }}{{ t.cta.primary }}</a>
-        <a class="btn btn-secondary" href="{{ site.repo }}">{{ icon("github", 18) }}{{ t.cta.secondary }}</a>
+{# ── THE CLOSE ── #}
+<section id="download" class="band drenched">
+  <div class="sheet close">
+    <h2 class="t-xl" data-fit><span class="hl">{{ t.cta.title }}</span></h2>
+    <div class="close-under">
+      <p class="t-s measure">{{ t.cta.sub | safe }}</p>
+      <div class="close-do">
+        <a class="act-solid" href="{{ site.latest }}">{{ t.cta.primary }}{{ icon("arrow", 22) }}</a>
+        <a class="act-ruled" href="{{ site.repo }}">{{ t.cta.secondary }}{{ icon("arrow", 22) }}</a>
+        {{ copyline(site.brew, t.nav.copy) }}
       </div>
-      <button class="copy" data-copy="{{ site.brew }}" type="button" style="margin-top:6px">
-        <code>{{ site.brew }}</code><span class="copy-icon">{{ icon("copy", 14) }}</span>
-      </button>
     </div>
   </div>
 </section>
