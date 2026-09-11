@@ -77,4 +77,17 @@ describe("LiveSessionCard system-audio notice (SOU-119 AC5)", () => {
     expect(screen.queryByText(/System audio capture is turned off/)).toBeNull();
     expect(screen.getByText("System audio active")).toBeTruthy();
   });
+
+  it("does not call a meeting mic only before the leg has reported", () => {
+    render(LiveSessionCard, {
+      props: {
+        mode: "meeting",
+        transcription: stubTranscription() as never,
+        meeting: stubMeeting(null) as never,
+      },
+    });
+
+    expect(screen.queryByText("Mic only")).toBeNull();
+    expect(screen.getByText("Checking system audio")).toBeTruthy();
+  });
 });

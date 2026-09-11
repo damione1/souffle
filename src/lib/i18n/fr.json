@@ -528,6 +528,7 @@
     "autopaste_hint": "Collé automatiquement dans votre dernière app à l’arrêt",
     "live_transcript": "Transcription en direct",
     "system_audio_active": "Audio système actif",
+    "system_audio_pending": "Vérification de l’audio système",
     "idle_silence_banner": "Aucune parole détectée depuis {minutes} min. L'enregistrement va bientôt s'arrêter.",
     "idle_stop_now": "Arrêter maintenant",
     "idle_keep_recording": "Continuer l'enregistrement",

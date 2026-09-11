@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MeetingSystemAudio, SystemAudioStatus } from "../../types";
 import {
   liveSystemAudioNotice,
+  liveSystemAudioState,
   pastSystemAudioNotice,
   provisionalSystemAudio,
 } from "./system-audio";
@@ -13,6 +14,19 @@ function status(over: Partial<SystemAudioStatus> = {}): SystemAudioStatus {
 function verdict(over: Partial<MeetingSystemAudio> = {}): MeetingSystemAudio {
   return { active: true, reason: null, reason_code: null, samples: 0, signal_samples: 0, ...over };
 }
+
+describe("liveSystemAudioState", () => {
+  it("is pending until the capture thread reports on the leg", () => {
+    expect(liveSystemAudioState(null)).toBe("pending");
+  });
+
+  it("separates a reported failure from a leg that has not reported yet", () => {
+    expect(liveSystemAudioState(status({ active: false, reason_code: "disabled" }))).toBe(
+      "unavailable",
+    );
+    expect(liveSystemAudioState(status())).toBe("active");
+  });
+});
 
 describe("liveSystemAudioNotice", () => {
   it("says nothing while the system-audio leg is up", () => {

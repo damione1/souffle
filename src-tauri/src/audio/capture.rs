@@ -220,6 +220,26 @@ const MIC_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 /// never fires cpal's error callback) and the mic leg must be rebuilt.
 const MIC_STALE_AFTER: Duration = Duration::from_secs(2);
 
+/// How long opening the microphone stream may take before it is worth a line
+/// in the log. `build_input_stream` + `play()` normally cost tens of
+/// milliseconds, but CoreAudio can fail to start the IO thread for a device
+/// and retry with a 14 s timeout each time, blocking this thread inside
+/// `play()`. Nothing else on the session says so: the UI keeps claiming to
+/// record, no callback ever arrives, and the stop this thread cannot service
+/// ends as "End-of-stream marker never arrived".
+const MIC_OPEN_SLOW_AFTER: Duration = Duration::from_secs(3);
+
+fn log_slow_mic_open(started: Instant, device_name: &str) {
+    let elapsed = started.elapsed();
+    if elapsed >= MIC_OPEN_SLOW_AFTER {
+        warn!(
+            device = device_name,
+            elapsed_ms = elapsed.as_millis() as u64,
+            "Microphone stream took a long time to open; CoreAudio is slow or failing to start it"
+        );
+    }
+}
+
 /// Ceiling on how often AudioLevel is pushed to the frontend. The meeting
 /// tick is faster than this; the dictation tick matches this interval, so both
 /// modes stream levels at ~15Hz.
@@ -1597,6 +1617,7 @@ impl AudioCapture {
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         LOGGED.store(false, std::sync::atomic::Ordering::Relaxed);
 
+        let opened_at = Instant::now();
         let stream = device
             .build_input_stream(
                 &config,
@@ -1660,6 +1681,7 @@ impl AudioCapture {
         stream
             .play()
             .map_err(|e| format!("Failed to start stream: {e}"))?;
+        log_slow_mic_open(opened_at, &device_name);
         self.stream = Some(stream);
 
         info!("Audio capture started on '{device_name}'");
@@ -1780,6 +1802,7 @@ impl AudioCapture {
             error!("Audio stream error: {err}");
             stream_failed.store(true, std::sync::atomic::Ordering::Relaxed);
         };
+        let opened_at = Instant::now();
         let stream = device
             .build_input_stream(
                 config,
@@ -1799,6 +1822,10 @@ impl AudioCapture {
         stream
             .play()
             .map_err(|e| format!("Failed to start stream: {e}"))?;
+        log_slow_mic_open(
+            opened_at,
+            self.mic_device_name.as_deref().unwrap_or("unknown"),
+        );
 
         // Accept mic samples into the ring buffer from here on, even though
         // `spawn_tap` below can block this thread for up to its 5s timeout
