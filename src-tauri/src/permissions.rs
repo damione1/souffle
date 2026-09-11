@@ -206,17 +206,31 @@ fn resolve_input_monitoring(db: &Database) -> PermState {
 
 /// Accessibility already includes listen rights, so `IOHIDRequestAccess`
 /// is a no-op and the Input Monitoring list stays empty. Reset ListenEvent
-/// first so this click can insert a row for *this* binary.
+/// first so this click can insert a row for *this* binary. The same no-op
+/// applies once this process has called `AXIsProcessTrustedWithOptions`,
+/// whatever the answer was (FB7381305), which is why the Accessibility
+/// click is tracked too.
 fn prepare_listen_event_insert(
     accessibility_trusted: bool,
+    accessibility_prompted_here: bool,
     listen: HidAccess,
     reset_listen: impl FnOnce(),
     request: impl FnOnce(),
 ) {
-    if accessibility_trusted || listen == HidAccess::Granted {
+    if accessibility_trusted || accessibility_prompted_here || listen == HidAccess::Granted {
         reset_listen();
     }
     request();
+}
+
+/// Set once this process has run `AXIsProcessTrustedWithOptions`. Nothing
+/// runs it before a user action now, so the Input Monitoring insert has to
+/// know whether it is second in line.
+static ACCESSIBILITY_PROMPTED_HERE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn accessibility_prompted_here() -> bool {
+    ACCESSIBILITY_PROMPTED_HERE.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Combine the live HID check with a remembered grant and the "Quit and
@@ -377,21 +391,6 @@ pub fn register_with_launch_services() {
     register_current_bundle_with_launch_services();
 }
 
-/// Insert this process into the Input Monitoring and Accessibility lists
-/// before the UI can poll AX. `IOHIDRequestAccess` must run first:
-/// `AXIsProcessTrustedWithOptions` beforehand makes the HID request a
-/// no-op and the Input Monitoring pane opens empty (FB7381305).
-pub fn seed_tcc_clients() {
-    #[cfg(target_os = "macos")]
-    on_main(|| {
-        register_current_bundle_with_launch_services();
-        if iohid_check_access(HID_LISTEN_EVENT) == HidAccess::Unknown {
-            request_listen_event_access_now();
-        }
-        let _ = accessibility_trusted_with_prompt_now(false);
-    });
-}
-
 #[cfg(target_os = "macos")]
 fn register_current_bundle_with_launch_services() {
     use core_foundation::base::TCFType;
@@ -488,6 +487,7 @@ fn accessibility_trusted_with_prompt_now(prompt: bool) -> bool {
     use std::ffi::c_void;
 
     register_current_bundle_with_launch_services();
+    ACCESSIBILITY_PROMPTED_HERE.store(true, std::sync::atomic::Ordering::SeqCst);
 
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
@@ -958,6 +958,7 @@ mod tests {
         let requested = Cell::new(false);
         prepare_listen_event_insert(
             true,
+            false,
             HidAccess::Granted,
             || reset.set(true),
             || requested.set(true),
@@ -973,11 +974,34 @@ mod tests {
     fn listen_event_insert_does_not_reset_on_a_fresh_unknown() {
         use std::cell::Cell;
         let reset = Cell::new(false);
-        prepare_listen_event_insert(false, HidAccess::Unknown, || reset.set(true), || {});
+        prepare_listen_event_insert(false, false, HidAccess::Unknown, || reset.set(true), || {});
         assert!(
             !reset.get(),
             "first insert must not tccutil reset a service that has no row"
         );
+    }
+
+    /// Nothing seeds TCC at startup any more, so the Accessibility click can
+    /// come first. `AXIsProcessTrustedWithOptions` then makes a later
+    /// `IOHIDRequestAccess` a no-op unless ListenEvent is cleared first
+    /// (FB7381305), and the Input Monitoring pane would open with no row.
+    #[test]
+    fn listen_event_insert_resets_after_an_accessibility_prompt_in_this_process() {
+        use std::cell::Cell;
+        let reset = Cell::new(false);
+        let requested = Cell::new(false);
+        prepare_listen_event_insert(
+            false,
+            true,
+            HidAccess::Unknown,
+            || reset.set(true),
+            || requested.set(true),
+        );
+        assert!(
+            reset.get(),
+            "an AX prompt in this process must not cost the Input Monitoring row"
+        );
+        assert!(requested.get());
     }
 
     #[test]
@@ -1245,6 +1269,7 @@ fn open_input_monitoring_settings() {
     // and freezes the whole session with a cold CPU.
     prepare_listen_event_insert(
         accessibility_granted(),
+        accessibility_prompted_here(),
         iohid_check_access(HID_LISTEN_EVENT),
         || {
             let id = crate::constants::running_app_identifier();

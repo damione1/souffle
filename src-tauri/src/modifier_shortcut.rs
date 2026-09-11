@@ -1,6 +1,5 @@
-use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -28,10 +27,19 @@ pub fn modifier_tap_status() -> Option<ModifierTapStatus> {
 
 fn store_and_emit_modifier_tap_status(app: &AppHandle, installed: bool) {
     let status = ModifierTapStatus { installed };
-    if let Ok(mut guard) = MODIFIER_TAP_STATUS.lock() {
-        *guard = Some(status);
+    let changed = match MODIFIER_TAP_STATUS.lock() {
+        Ok(mut guard) => {
+            let changed = guard.map(|s| s.installed) != Some(installed);
+            *guard = Some(status);
+            changed
+        }
+        Err(_) => true,
+    };
+    // The waiting thread re-reads the permission every couple of seconds.
+    // The banner only needs the transitions, not the polling.
+    if changed {
+        let _ = status.emit(app);
     }
-    let _ = status.emit(app);
 }
 
 /// Where a dictation shortcut is registered (SOU-032 / SOU-115).
@@ -80,32 +88,91 @@ pub(crate) fn shortcut_registration_target(shortcut: &str) -> ShortcutRegistrati
     }
 }
 
-pub fn start_modifier_tap(app: AppHandle) {
-    thread::spawn(move || {
-        // Wait a little before starting to ensure AppState is registered.
-        // Status is not emitted during this window so the settings banner
-        // cannot flash on every launch (SOU-116 risk zone).
-        thread::sleep(Duration::from_millis(500));
-        let mut warned = false;
-        loop {
-            if install_and_run(app.clone()) {
+/// Mach port of the installed tap, for enable/disable from any thread.
+/// Zero until the tap is installed; the runloop thread never lets it go.
+static TAP_PORT: AtomicUsize = AtomicUsize::new(0);
+
+/// Whether a configured shortcut currently needs the tap.
+static TAP_WANTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the runloop thread has been spawned. It cannot be unspawned, so
+/// an unwanted tap is disabled rather than torn down.
+static TAP_THREAD_SPAWNED: AtomicBool = AtomicBool::new(false);
+
+/// Give the Tauri setup hook time to finish managing `AppState` before the
+/// callback reads it. Status is not emitted during this window so the
+/// settings banner cannot flash on every launch (SOU-116 risk zone).
+const TAP_STARTUP_GRACE: Duration = Duration::from_millis(500);
+
+/// How often the thread re-reads the Accessibility snapshot while it waits
+/// for the grant. A read, never a request: it cannot raise a prompt.
+const TAP_PERMISSION_POLL: Duration = Duration::from_secs(2);
+
+/// Install the native tap, or take it out of the event path, to match the
+/// shortcuts the user actually configured. Creating a `CGEventTap` is a TCC
+/// request: done with no shortcut needing it, macOS raises an Accessibility
+/// prompt nobody asked for, and an active HID tap sits in front of every
+/// keystroke on the machine. Called from `register_shortcuts`, so a combo
+/// saved in Settings takes the tap out and a single key puts it back without
+/// a restart.
+pub fn sync_modifier_tap(app: &AppHandle, needed: bool) {
+    TAP_WANTED.store(needed, Ordering::SeqCst);
+    set_tap_enabled(needed);
+    if !needed || TAP_THREAD_SPAWNED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    thread::spawn(move || run_modifier_tap(app));
+}
+
+/// True when either configured shortcut is a single native key.
+pub(crate) fn tap_is_needed(toggle: &str, push_to_talk: &str) -> bool {
+    [toggle, push_to_talk]
+        .iter()
+        .any(|s| shortcut_registration_target(s) == ShortcutRegistrationTarget::Native)
+}
+
+fn run_modifier_tap(app: AppHandle) {
+    thread::sleep(TAP_STARTUP_GRACE);
+    let mut warned = false;
+    loop {
+        if TAP_WANTED.load(Ordering::SeqCst) {
+            // `AXIsProcessTrusted` is a snapshot read, `CGEventTap::new` is a
+            // TCC request. Reading first is what keeps the wait from raising a
+            // prompt every couple of seconds; the banner carries the news
+            // instead (SOU-116).
+            if crate::permissions::accessibility_granted() && install_and_run(app.clone()) {
                 return;
             }
             store_and_emit_modifier_tap_status(&app, false);
             if !warned {
-                error!(
-                    "Failed to install modifier CGEventTap. Is Accessibility granted? Retrying."
-                );
+                error!("Native shortcut tap not installed. Is Accessibility granted?");
                 warned = true;
             }
-            thread::sleep(Duration::from_secs(2));
         }
-    });
+        thread::sleep(TAP_PERMISSION_POLL);
+    }
 }
 
+#[cfg(target_os = "macos")]
+fn set_tap_enabled(enabled: bool) {
+    let ptr = TAP_PORT.load(Ordering::SeqCst);
+    if ptr == 0 {
+        return;
+    }
+    unsafe {
+        // CGEventTapEnable takes a CFMachPortRef.
+        unsafe extern "C" {
+            fn CGEventTapEnable(tap: *const std::ffi::c_void, enable: bool);
+        }
+        CGEventTapEnable(ptr as *const _, enabled);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_tap_enabled(_enabled: bool) {}
+
 fn install_and_run(app: AppHandle) -> bool {
-    let tap_port_ptr = Arc::new(AtomicUsize::new(0));
-    let tap_port_clone = tap_port_ptr.clone();
     // Callback takes ownership of `app`; keep a handle for status emits after
     // install succeeds or the runloop source fails to attach.
     let app_for_status = app.clone();
@@ -124,16 +191,7 @@ fn install_and_run(app: AppHandle) -> bool {
                 event_type,
                 CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput
             ) {
-                let ptr = tap_port_clone.load(Ordering::Relaxed);
-                if ptr != 0 {
-                    unsafe {
-                        // CGEventTapEnable takes a CFMachPortRef.
-                        unsafe extern "C" {
-                            fn CGEventTapEnable(tap: *const std::ffi::c_void, enable: bool);
-                        }
-                        CGEventTapEnable(ptr as *const _, true);
-                    }
-                }
+                set_tap_enabled(TAP_WANTED.load(Ordering::SeqCst));
                 return CallbackResult::Keep;
             }
 
@@ -219,11 +277,12 @@ fn install_and_run(app: AppHandle) -> bool {
         Ok(tap) => {
             info!("Modifier CGEventTap installed");
             store_and_emit_modifier_tap_status(&app_for_status, true);
-            tap_port_ptr.store(
+            TAP_PORT.store(
                 tap.mach_port().as_concrete_TypeRef() as usize,
-                Ordering::Relaxed,
+                Ordering::SeqCst,
             );
             let Ok(loop_source) = tap.mach_port().create_runloop_source(0) else {
+                TAP_PORT.store(0, Ordering::SeqCst);
                 store_and_emit_modifier_tap_status(&app_for_status, false);
                 return false;
             };
@@ -231,7 +290,8 @@ fn install_and_run(app: AppHandle) -> bool {
             current_loop.add_source(&loop_source, unsafe {
                 core_foundation::runloop::kCFRunLoopCommonModes
             });
-            tap.enable();
+            // A shortcut saved while the tap was being installed decides here.
+            set_tap_enabled(TAP_WANTED.load(Ordering::SeqCst));
             core_foundation::runloop::CFRunLoop::run_current();
             false
         }
@@ -285,7 +345,7 @@ fn shortcut_matches_keycode(shortcut: &str, keycode: i64) -> bool {
 mod tests {
     use super::{
         ShortcutRegistrationTarget, is_native_shortcut, shortcut_matches_keycode,
-        shortcut_registration_target,
+        shortcut_registration_target, tap_is_needed,
     };
 
     #[test]
@@ -338,5 +398,23 @@ mod tests {
             shortcut_registration_target(""),
             ShortcutRegistrationTarget::None
         );
+    }
+
+    /// The tap is an Accessibility request and sits in front of every
+    /// keystroke on the machine. Default install: a combo and an empty PTT,
+    /// so no tap and no permission prompt at startup.
+    #[test]
+    fn tap_is_only_needed_for_a_single_key_binding() {
+        assert!(!tap_is_needed(
+            "CommandOrControl+Shift+Space",
+            "CommandOrControl+Shift+D"
+        ));
+        assert!(!tap_is_needed("", ""));
+        assert!(tap_is_needed("Fn", "CommandOrControl+Shift+D"));
+        assert!(tap_is_needed(
+            "CommandOrControl+Shift+Space",
+            "ControlRight"
+        ));
+        assert!(tap_is_needed("F8", "Fn"));
     }
 }

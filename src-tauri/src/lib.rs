@@ -295,10 +295,11 @@ pub fn run() {
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);
-            // ListenEvent must be requested before any AXIsProcessTrusted*
-            // call: otherwise IOHIDRequestAccess never inserts the Input
-            // Monitoring row (FB7381305 / SOU-122).
-            crate::permissions::seed_tcc_clients();
+            // Launch Services must resolve this binary before TCC looks it up,
+            // or System Settings shows the row of a previous build. Registering
+            // is not a TCC request: nothing at startup may prompt, a permission
+            // is only ever asked for on a user action.
+            crate::permissions::register_with_launch_services();
 
             // Store the AppHandle so state transitions can emit events
             let state = app.state::<AppState>();
@@ -324,10 +325,11 @@ pub fn run() {
                 }
             };
 
+            // `register_shortcuts` also installs the native tap, and only for
+            // a shortcut that needs it.
             if let Err(e) = commands::register_shortcuts(app.handle(), &shortcuts) {
                 tracing::warn!("Failed to register shortcuts on startup: {e}");
             }
-            crate::modifier_shortcut::start_modifier_tap(app.handle().clone());
 
             match settings::AppSettings::load(&state.db) {
                 Ok(app_settings) => {
