@@ -76,9 +76,11 @@
 
 /* The mocks reproduce the app and are not edited to suit the page. What
    changes is how the sheet mounts them: a poster does not float a window,
-   it prints a plate. Hard edge, no radius, no glow. */
+   it prints a plate. The corners stay rounded because a macOS window really
+   is rounded; the ink border is what holds the plate onto the sheet, and the
+   drop shadow that would make it float is gone. */
 .win {
-  border-radius: 0 !important;
+  border-radius: 14px;
   box-shadow: none !important;
   outline: none !important;
   border: 1px solid var(--ink);
@@ -366,6 +368,8 @@ html { scrollbar-color: var(--ink) var(--paper); }
 
 /* A second movement inside one act: the same subject, a step down the bill. */
 .act-movement { margin-top: clamp(44px, 5.5vw, 84px); }
+/* The overlay stage is already a plate-and-margin grid of its own. */
+.plate-wrap { margin-top: clamp(30px, 4vw, 56px); }
 
 /* The facts list: rule-separated, no bullet glyphs, no check icons. */
 .facts li { padding: 9px 0; border-top: 1px solid var(--rule-faint); }

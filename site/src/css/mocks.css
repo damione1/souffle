@@ -208,29 +208,31 @@
 .overlay-stage { position: relative; }
 
 /* ── "E Corp Chat": the fictional chat client the pill floats over ──
-   Its own cold corporate palette on purpose. On the app's warm cream the
-   mock read as another Soufflé screen, which defeats the point of the
-   section: the overlay works on top of somebody else's software. */
+   Deliberately cool, because the point of the section is that the overlay
+   works on top of somebody else's software: given Soufflé's warm cream it
+   would read as another Soufflé screen. Cool slate rather than the crimson
+   it used to carry, so it stays clearly foreign without shouting across the
+   sheet at the amber. */
 .chat {
-  --c-side: #1a1c1f;
+  --c-side: #22262f;
   --c-side-dim: rgba(255, 255, 255, 0.55);
   --c-side-strong: #ffffff;
-  --c-side-hover: rgba(255, 255, 255, 0.06);
-  --c-side-active: rgba(196, 30, 58, 0.18);
-  --c-bg: #ffffff;
-  --c-border: #e3e4e6;
-  --c-text: #1a1c1f;
-  --c-dim: #6b6f76;
-  --c-accent: #c41e3a;
-  --c-input: #f2f3f4;
-  --c-badge: #c41e3a;
+  --c-side-hover: rgba(255, 255, 255, 0.07);
+  --c-side-active: rgba(122, 137, 168, 0.26);
+  --c-bg: #fdfdfe;
+  --c-border: #e4e6ec;
+  --c-text: #1e222b;
+  --c-dim: #6a7081;
+  --c-accent: #5b6b8c;
+  --c-input: #f1f2f6;
+  --c-badge: #7a89a8;
   display: grid; grid-template-columns: 184px minmax(0, 1fr);
   min-height: 396px; background: var(--c-bg);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
-.chat-win { outline-color: #d8dbe6; }
-.chat-bar { background: #eef0f5; border-bottom-color: var(--c-border, #e6e8ef); }
-.chat-bar .win-title { color: #6b7288; font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+.chat-win { outline-color: #dcdfe7; }
+.chat-bar { background: #eceef3; border-bottom-color: var(--c-border, #e4e6ec); }
+.chat-bar .win-title { color: #6a7081; font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
 
 .chat-side { background: var(--c-side); padding: 0 8px 14px; display: flex; flex-direction: column; gap: 16px; }
 .chat-ws {
@@ -276,8 +278,8 @@
   width: 8px; height: 8px; border-radius: 50%;
   border: 2px solid var(--c-side);
 }
-.chat-presence.is-online { background: #3fb27f; }
-.chat-presence.is-away { background: #d9a13a; }
+.chat-presence.is-online { background: #5c9c85; }
+.chat-presence.is-away { background: #97a0b2; }
 
 .chat-main { display: flex; flex-direction: column; min-width: 0; background: var(--c-bg); }
 .chat-head {
@@ -304,13 +306,13 @@
 .chat-body { min-width: 0; }
 .chat-name { font-size: 13px; font-weight: 600; color: var(--c-text); }
 .chat-at { margin-left: 7px; font-size: 11px; color: var(--c-dim); }
-.chat-text { font-size: 13.5px; line-height: 1.55; color: #333a52; }
+.chat-text { font-size: 13.5px; line-height: 1.55; color: #343a47; }
 .chat-composer {
   margin: 0 18px 18px; padding: 10px 12px; border-radius: 10px;
   background: var(--c-input); border: 1px solid var(--c-border);
   display: flex; align-items: center; gap: 10px; min-height: 44px;
 }
-.chat-composer.is-focused { border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(91, 91, 214, 0.14); }
+.chat-composer.is-focused { border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(91, 107, 140, 0.16); }
 .chat-field {
   flex: 1; min-width: 0; display: flex; align-items: center;
   font-size: 13.5px; line-height: 1.45;

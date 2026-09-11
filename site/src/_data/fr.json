@@ -360,20 +360,20 @@
         {
           "name": "Angela Moss",
           "initials": "A",
-          "colour": "#c2557a",
+          "colour": "#6f6480",
           "presence": "online"
         },
         {
           "name": "Tyrell Wellick",
           "initials": "T",
-          "colour": "#4d7ea8",
+          "colour": "#4d6a88",
           "presence": "away",
           "unread": "1"
         },
         {
           "name": "Shama Biswas",
           "initials": "S",
-          "colour": "#6a7f4a",
+          "colour": "#5a7a72",
           "presence": "online"
         }
       ],
@@ -383,21 +383,21 @@
       "me": {
         "name": "Elliot Alderson",
         "initials": "E",
-        "colour": "#5b5bd6",
+        "colour": "#5b6b8c",
         "at": "10:04"
       },
       "messages": [
         {
           "from": "Angela Moss",
           "initials": "A",
-          "colour": "#c2557a",
+          "colour": "#6f6480",
           "at": "09:58",
           "text": "Le client demande quand on peut annoncer la divulgation. Je leur dis quoi ?"
         },
         {
           "from": "Tyrell Wellick",
           "initials": "T",
-          "colour": "#4d7ea8",
+          "colour": "#4d6a88",
           "at": "10:02",
           "text": "Ça dépend de la rotation des clés, non ? J'aimerais éviter d'annoncer une date qu'on repousse ensuite."
         }
