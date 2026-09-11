@@ -36,8 +36,10 @@ if [[ "$fresh" -eq 1 ]]; then
   echo "Wiping Nightly data and TCC rows ($nightly_id)"
   rm -rf "${HOME}/Library/Application Support/${nightly_id}"
   rm -rf "${HOME}/Library/WebKit/${nightly_id}"
+  # Failures are printed, not swallowed: a service name macOS no longer
+  # accepts is exactly what makes a --fresh run lie about its starting state.
   for svc in Accessibility AudioCapture Calendar Microphone ScreenCapture; do
-    tccutil reset "$svc" "$nightly_id" >/dev/null 2>&1 || true
+    tccutil reset "$svc" "$nightly_id" >/dev/null || echo "  tccutil reset $svc failed (see above)"
   done
 fi
 
@@ -51,7 +53,15 @@ fi
 # The first build after this fails with `errSecInternalComponent` unless the
 # keychain prompt for the signing key is answered with "Always Allow": the
 # private key's ACL does not list codesign. One click, once per machine.
-export APPLE_SIGNING_IDENTITY="Developer ID Application: Damien Goehrig (X6H966RSDB)"
+export APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: Damien Goehrig (X6H966RSDB)}"
+
+if ! security find-identity -v -p codesigning | grep -qF "$APPLE_SIGNING_IDENTITY"; then
+  echo "WARNING: no codesigning identity matching '$APPLE_SIGNING_IDENTITY' in the keychain."
+  echo "         Building unsigned: every rebuild will be a new TCC subject, so"
+  echo "         all permissions have to be granted again each time."
+  echo "         Set APPLE_SIGNING_IDENTITY to an identity you do have to fix this."
+  unset APPLE_SIGNING_IDENTITY
+fi
 
 npm run tauri -- build --debug --bundles app
 
