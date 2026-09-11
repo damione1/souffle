@@ -86,15 +86,25 @@
 /* The overlay mock ships its own progress chips and caption, driven by
    mocks.js. They are page furniture around the plate, so they are set in
    the sheet's vocabulary rather than the app's. */
-.overlay-stage { font-family: var(--font); }
+.overlay-stage {
+  font-family: var(--font);
+  display: grid;
+  grid-template-columns: minmax(0, var(--plate)) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: clamp(22px, 2.8vw, 44px);
+  align-items: start;
+}
+.overlay-stage > .win { grid-row: 1 / span 2; }
 .overlay-stage .mock-caption {
-  max-width: 68ch; margin: 16px 0 0; padding-top: 12px;
+  grid-column: 2; grid-row: 2;
+  max-width: none; margin: 0; padding-top: 10px;
   border-top: 1px solid var(--rule);
   font-size: 13.5px; line-height: 1.5; color: var(--fg-2); text-align: left;
 }
 .overlay-stage .stage-steps {
+  grid-column: 2; grid-row: 1;
   display: flex; flex-wrap: wrap; gap: 0;
-  justify-content: flex-start; margin-top: 18px;
+  justify-content: flex-start; margin-top: 0;
 }
 .overlay-stage .stage-step {
   padding: 6px 13px; border: 1px solid var(--rule); border-radius: 0;
@@ -284,9 +294,28 @@ html { scrollbar-color: var(--ink) var(--amber); }
 }
 .hero-do { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
 .hero-plate { padding-block: clamp(22px, 2.8vw, 36px) clamp(30px, 4vw, 56px); }
+
+/* --plate is the app's own default window width; every plate on the sheet
+   is held to it so the windows keep the proportions they really have.
+   --plate-h is that width at the app's 860x780 ratio: a real window does not
+   shrink to fit its content, so a short screen keeps the window's height and
+   shows the canvas below it, which is what the app actually looks like. */
+:root { --plate: 880px; --plate-h: 798px; }
+
+/* Only where the plate is actually at its capped width. min-height can only
+   grow the box, so no content can be clipped by it. */
+@media (min-width: 1081px) {
+  .win { min-height: var(--plate-h); }
+}
+.hero-plate, .act-plate {
+  display: grid;
+  grid-template-columns: minmax(0, var(--plate)) minmax(0, 1fr);
+  gap: clamp(22px, 2.8vw, 44px);
+  align-items: start;
+}
 .plate-note {
-  display: flex; gap: 18px; align-items: baseline;
-  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule);
+  display: flex; flex-direction: column; gap: 8px;
+  padding-top: 10px; border-top: 1px solid var(--rule);
 }
 
 /* ─── An act of the bill ───
@@ -483,6 +512,9 @@ html { scrollbar-color: var(--ink) var(--amber); }
 @media (max-width: 1080px) {
   :root { --gut: 22px; }
   .hero-under, .close-under { grid-template-columns: minmax(0, 1fr); gap: 26px; align-items: start; }
+  .hero-plate, .act-plate, .overlay-stage { grid-template-columns: minmax(0, 1fr); }
+  .overlay-stage > .win { grid-row: auto; }
+  .overlay-stage .mock-caption, .overlay-stage .stage-steps { grid-column: 1; grid-row: auto; }
   .act-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .points { grid-template-columns: minmax(0, 1fr); }
   .points > div { padding: 18px 0 4px; border-left: 0; border-top: 1px solid var(--rule-faint); }
