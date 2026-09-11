@@ -167,12 +167,11 @@
       pollInFlight = true;
       void getPermissionStatus()
         .then((s) => {
-          // A probe in flight is newer than this snapshot. Dropping the
-          // result is what keeps a just-observed revoke from flipping back
-          // to the remembered Granted (SOU-120 AC4).
+          // A request in flight is newer than this snapshot: drop the
+          // result rather than letting it overwrite a fresher answer.
           if (Object.values(busy).some(Boolean)) return;
-          // Snapshot never prompts. Unknown means "not remembered yet";
-          // keep the local value rather than wiping a grant in progress.
+          // Snapshot never prompts. Unknown means "not determined"; keep
+          // the local value rather than wiping a grant in progress.
           const next = { ...status };
           if (s.accessibility !== "unknown") next.accessibility = s.accessibility;
           if (s.microphone !== "unknown") next.microphone = s.microphone;
