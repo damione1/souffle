@@ -45,13 +45,20 @@
       if (!width) return;
       Array.prototype.forEach.call(block.querySelectorAll(".hl"), function (line) {
         line.style.fontSize = REF + "px";
-        var natural = line.scrollWidth;
+        var natural = line.getBoundingClientRect().width;
         if (!natural) return;
-        /* scrollWidth rounds to whole pixels, and negative tracking makes
-           the real line a shade wider than the rounded figure; the margin
-           keeps a flush line from spilling past the measure. */
-        var size = Math.min(MAX, Math.max(MIN, (width * 0.995 / natural) * REF));
-        line.style.fontSize = size.toFixed(2) + "px";
+        var size = Math.min(MAX, Math.max(MIN, (width / natural) * REF));
+        line.style.fontSize = size.toFixed(3) + "px";
+
+        /* One correction pass: the first estimate is taken against a
+           rendering at the reference size, and hinting at the final size
+           moves the real width a little. Without this the line overhangs
+           the margin every rule below it stops at. */
+        var actual = line.getBoundingClientRect().width;
+        if (actual > 0) {
+          size = Math.min(MAX, Math.max(MIN, size * (width / actual)));
+          line.style.fontSize = size.toFixed(3) + "px";
+        }
       });
     });
   };

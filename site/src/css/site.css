@@ -237,26 +237,8 @@ html { scrollbar-color: var(--ink) var(--amber); }
 .run-toggle { display: none; padding: 5px 10px; border: 1px solid var(--ink); flex-shrink: 0; }
 
 /* ─── Type-set actions ───
-   A button here is a rectangle or a ruled line of type. Never a pill,
-   never a fill with a radius. */
-.act-primary {
-  display: inline-flex; align-items: center; gap: 12px;
-  padding: 15px 26px; background: var(--ink); color: var(--ground);
-  font-size: clamp(17px, 1.8vw, 22px); font-weight: 800;
-  letter-spacing: -0.015em; text-transform: uppercase;
-  font-variation-settings: "wdth" 80;
-  transition: background-color 120ms linear, color 120ms linear;
-}
-.act-primary:hover { background: var(--ox); color: var(--ground); }
-.act-secondary {
-  display: inline-flex; align-items: center; gap: 12px;
-  padding: 15px 26px; border: 1px solid var(--ink);
-  font-size: clamp(17px, 1.8vw, 22px); font-weight: 800;
-  letter-spacing: -0.015em; text-transform: uppercase;
-  font-variation-settings: "wdth" 80;
-  transition: background-color 120ms linear, color 120ms linear;
-}
-.act-secondary:hover { background: var(--ink); color: var(--ground); }
+   An action here is a billing line with a rule under it. Never a pill,
+   never a filled block with a radius. */
 
 /* The primary action is type on the sheet, not a pill and not a block:
    a billing line with a heavy rule under it. */
@@ -267,10 +249,10 @@ html { scrollbar-color: var(--ink) var(--amber); }
   font-size: clamp(21px, 2.3vw, 32px); font-weight: 800;
   letter-spacing: -0.02em; text-transform: uppercase;
   font-variation-settings: "wdth" 74;
-  transition: color 140ms linear, border-color 140ms linear, padding-left 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: color 140ms linear, border-color 140ms linear;
 }
 .act-ruled svg { flex-shrink: 0; align-self: center; }
-.act-ruled:hover { color: var(--ox); border-color: var(--ox); padding-left: 8px; }
+.act-ruled:hover { color: var(--ox); border-color: var(--ox); }
 .act-ruled.is-quiet {
   border-bottom-width: 1px;
   font-size: clamp(16px, 1.5vw, 21px);
@@ -321,21 +303,22 @@ html { scrollbar-color: var(--ink) var(--amber); }
   border-top: 1px solid var(--rule);
 }
 .act-cols p em { font-style: normal; font-weight: 700; }
-/* Two speakers, two inks, registered exactly — and the tone under each is a
-   screen of its own ink, not a wash of it. */
+/* Two speakers, two inks, registered exactly. The mid-tone under each name
+   is a screen of that speaker's own ink, printed as a band along the
+   baseline rather than behind the glyph, so the word keeps its silhouette. */
 .act-cols p em.me, .act-cols p em.them {
-  padding: 0 0.14em;
-  background-repeat: repeat;
+  padding-bottom: 0.16em;
+  background-repeat: repeat-x;
+  background-position: 0 100%;
   background-size: 5px 5px;
-  background-position: 0 0.16em;
 }
 .act-cols p em.me {
   color: var(--ink);
-  background-image: radial-gradient(circle at center, var(--ink) 0 1.05px, transparent 1.05px);
+  background-image: radial-gradient(circle at center, var(--ink) 0 1.15px, transparent 1.15px);
 }
 .act-cols p em.them {
   color: var(--ox);
-  background-image: radial-gradient(circle at center, var(--ox) 0 1.05px, transparent 1.05px);
+  background-image: radial-gradient(circle at center, var(--ox) 0 1.15px, transparent 1.15px);
 }
 
 /* The facts list: rule-separated, no bullet glyphs, no check icons. */
@@ -520,9 +503,8 @@ html { scrollbar-color: var(--ink) var(--amber); }
   .margin-run.is-open .run-acts { flex-direction: column; align-items: stretch; }
   .margin-run.is-open .run-acts a { padding: 10px 0; border-bottom: 1px solid var(--rule-faint); }
   .run-toggle { display: inline-flex; }
-  .run-dl { margin-left: auto; }
+  .run-word { margin-left: auto; }
   .kv div { flex-direction: column; gap: 2px; }
   .kv div > :last-child { text-align: left; }
   .docs-row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
-  .act-primary, .act-secondary { width: 100%; justify-content: center; }
 }
