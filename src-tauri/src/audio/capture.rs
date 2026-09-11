@@ -738,6 +738,38 @@ mod mic_open_tests {
         );
     }
 
+    /// Forgetting a finished worker without draining drops a delivered stream
+    /// without its `pause()` — the race inside `check_mic_health` between
+    /// poll (still running, empty) and `start`/`reap` (finished, value waiting).
+    #[test]
+    fn a_finished_open_still_hands_over_what_it_delivered() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (pending, opened) = open_with_timeout(
+            Duration::from_millis(50),
+            move |_abandoned| {
+                let _ = release_rx.recv_timeout(Duration::from_secs(5));
+                Ok(OPENED)
+            },
+            |_| panic!("a kept open must not discard on its own thread"),
+        );
+        assert!(matches!(opened, Err(MicOpenError::TimedOut(_))));
+        let mut pending = pending.expect("a spawned worker must be handed back");
+        assert!(pending.is_running());
+        assert_eq!(pending.try_take(), Ok(None));
+
+        let _ = release_tx.send(());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pending.is_running() {
+            assert!(
+                Instant::now() < deadline,
+                "worker must finish once released"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // What `reap_pending_mic_open` must do instead of `pending = None`.
+        assert_eq!(pending.abandon(), Some(OPENED));
+    }
+
     #[test]
     fn an_open_that_answers_in_time_returns_its_stream() {
         let (_pending, opened) = open_with_timeout(
@@ -2115,14 +2147,25 @@ impl AudioCapture {
     where
         F: FnOnce(&AtomicBool) -> Result<Stream, String> + Send + 'static,
     {
-        if let Some(pending) = &self.mic_open_pending {
-            if pending.is_running() {
-                return Err(MicOpenError::Busy);
-            }
-            // Finished, and whatever it produced was collected (or released)
-            // by `poll_pending_mic_open`. Nothing left to keep.
+        if self
+            .mic_open_pending
+            .as_ref()
+            .is_some_and(PendingOpen::is_running)
+        {
+            return Err(MicOpenError::Busy);
+        }
+        if self.mic_open_pending.is_some() {
+            // Finished between the last poll and here: drain before forget,
+            // same reason as `reap_pending_mic_open`.
+            let delivered = self
+                .mic_open_pending
+                .as_mut()
+                .and_then(PendingOpen::abandon);
             self.mic_open_pending = None;
             self.mic_open_adoption = None;
+            if let Some(stream) = delivered {
+                release_late_mic_stream(stream, "a new open is starting");
+            }
         }
         if mic_open_is_parked(self.mic_open_timed_out.as_ref(), device_name) {
             return Err(MicOpenError::Parked);
@@ -3152,13 +3195,33 @@ impl AudioCapture {
 
     /// Drop a worker that has come back. Keeping a finished one only hides
     /// the next open behind a guard that no longer guards anything.
+    ///
+    /// Drains first: a stream delivered between the last `poll_pending_mic_open`
+    /// and here (the gap inside `check_mic_health` between poll and `start`)
+    /// would otherwise be dropped with the receiver and never `pause()`d —
+    /// the cpal 0.15 `StreamInner` leak, and a missed adoption.
     fn reap_pending_mic_open(&mut self) {
-        if self
+        let finished = self
             .mic_open_pending
             .as_ref()
-            .is_some_and(|pending| !pending.is_running())
-        {
-            self.mic_open_pending = None;
+            .is_some_and(|pending| !pending.is_running());
+        if !finished {
+            return;
+        }
+        let delivered = self
+            .mic_open_pending
+            .as_mut()
+            .and_then(PendingOpen::abandon);
+        self.mic_open_pending = None;
+        // Prefer install when the meeting is still waiting on this open;
+        // release when the world moved on (route change rebuild, etc.).
+        if let Some(stream) = delivered {
+            if self.adopt_mic_stream(stream, 0) {
+                self.mic_open_timed_out = None;
+                self.clear_mic_loss_ladder();
+            }
+        } else {
+            self.mic_open_adoption = None;
         }
     }
 
