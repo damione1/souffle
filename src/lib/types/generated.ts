@@ -1610,8 +1610,7 @@ export type PasteMethod = "clipboard" | "type" |
 "ax"
 export type PermState = "granted" | "denied" | 
 /**
- * Not yet probed — the user hasn't triggered this one (probing would
- * prompt, so we don't do it unsolicited at startup).
+ * TCC has no answer on record: the user has not been asked yet.
  */
 "unknown" | 
 /**

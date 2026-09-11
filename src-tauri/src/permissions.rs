@@ -43,8 +43,7 @@ static MICROPHONE_GRANT_OBSERVED: AtomicBool = AtomicBool::new(false);
 pub enum PermState {
     Granted,
     Denied,
-    /// Not yet probed — the user hasn't triggered this one (probing would
-    /// prompt, so we don't do it unsolicited at startup).
+    /// TCC has no answer on record: the user has not been asked yet.
     Unknown,
     /// The OS doesn't support this capability (e.g. taps need macOS 14.4+).
     Unsupported,
@@ -571,6 +570,7 @@ fn audio_capture_preflight() -> Option<PermState> {
 /// AudioCap, Hyprnote and screenpipe all read the same three values out of
 /// this SPI. Anything else means the contract moved, and an unknown number
 /// must not be read as a verdict.
+#[cfg(any(test, all(target_os = "macos", feature = "private-tcc")))]
 fn tcc_preflight_state(raw: i32) -> Option<PermState> {
     match raw {
         0 => Some(PermState::Granted),
