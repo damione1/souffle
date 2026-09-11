@@ -1,40 +1,32 @@
-use std::sync::Arc;
-
-use tauri::State;
-
 use crate::permissions::{
     self, PermState, PermissionKind, PermissionStatus, RepairAccessibilityResult,
 };
-use crate::state::AppState;
 
-/// Cheap, non-prompting snapshot for the onboarding's initial render.
+/// Cheap, non-prompting snapshot for the onboarding's initial render, and
+/// the source of the panel's 600 ms poll.
+///
+/// Off the command thread even though every read is a status API: three of
+/// them (`AXIsProcessTrusted`, `TCCAccessPreflight`, EventKit) are XPC round
+/// trips to `tccd`, and a synchronous command runs on the main thread, where
+/// a stalled `tccd` would freeze the window. Nothing here needs the main
+/// thread — only *requests* do (SOU-122).
 #[tauri::command]
 #[specta::specta]
-pub fn get_permission_status(state: State<'_, AppState>) -> Result<PermissionStatus, String> {
-    Ok(permissions::snapshot(&state.db))
+pub async fn get_permission_status() -> Result<PermissionStatus, String> {
+    tauri::async_runtime::spawn_blocking(permissions::snapshot)
+        .await
+        .map_err(|e| format!("Permission status read failed: {e}"))
 }
 
 /// Trigger the native prompt (or open System Settings) for one permission.
-/// The probe opens a device, so it runs off the command thread.
+/// Blocks until the user answers the dialog, so it runs off the command
+/// thread.
 #[tauri::command]
 #[specta::specta]
-pub async fn request_permission(
-    state: State<'_, AppState>,
-    kind: PermissionKind,
-) -> Result<PermState, String> {
-    let db = Arc::clone(&state.db);
-    tauri::async_runtime::spawn_blocking(move || {
-        if kind == PermissionKind::InputMonitoring {
-            permissions::note_input_monitoring_prompt(&db);
-        }
-        let result = permissions::request(kind);
-        if kind == PermissionKind::SystemAudio {
-            permissions::remember_system_audio(&db, result);
-        }
-        result
-    })
-    .await
-    .map_err(|e| format!("Permission probe failed: {e}"))
+pub async fn request_permission(kind: PermissionKind) -> Result<PermState, String> {
+    tauri::async_runtime::spawn_blocking(move || permissions::request(kind))
+        .await
+        .map_err(|e| format!("Permission request failed: {e}"))
 }
 
 /// Clear a stale Accessibility TCC entry and re-prompt. Updating the app by
@@ -44,15 +36,8 @@ pub async fn request_permission(
 /// the command thread since it shells out and may block on the prompt.
 #[tauri::command]
 #[specta::specta]
-pub async fn repair_accessibility_permission(
-    state: State<'_, AppState>,
-) -> Result<RepairAccessibilityResult, String> {
-    let db = Arc::clone(&state.db);
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = permissions::repair_accessibility();
-        permissions::clear_input_monitoring_memory(&db);
-        result
-    })
-    .await
-    .map_err(|e| format!("Accessibility repair failed: {e}"))?
+pub async fn repair_accessibility_permission() -> Result<RepairAccessibilityResult, String> {
+    tauri::async_runtime::spawn_blocking(permissions::repair_accessibility)
+        .await
+        .map_err(|e| format!("Accessibility repair failed: {e}"))?
 }

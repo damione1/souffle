@@ -107,6 +107,13 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
         state.toggle_armed.store(false, Ordering::SeqCst);
     }
 
+    // The tap only goes in the event path for a single-key binding, and a
+    // binding is always a user action: it never installs itself at startup.
+    crate::modifier_shortcut::sync_modifier_tap(
+        app,
+        crate::modifier_shortcut::tap_is_needed(&shortcuts.toggle, &shortcuts.push_to_talk),
+    );
+
     if toggle_target == ShortcutRegistrationTarget::Plugin {
         gs.on_shortcut(shortcuts.toggle.as_str(), move |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {

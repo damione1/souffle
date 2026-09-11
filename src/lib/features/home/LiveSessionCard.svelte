@@ -16,7 +16,7 @@
     scrollTopAfterLeadingUnmount,
     windowedParagraphs,
   } from "./live-paragraph-window";
-  import { liveSystemAudioNotice } from "../meeting/system-audio";
+  import { liveSystemAudioNotice, liveSystemAudioState } from "../meeting/system-audio";
 
   let {
     mode,
@@ -76,7 +76,7 @@
     mode === "dictation" ? transcription.isStopping : meeting.isStopping,
   );
 
-  const systemAudioActive = $derived(Boolean(meeting.app.systemAudioStatus?.active));
+  const systemAudioState = $derived(liveSystemAudioState(meeting.app.systemAudioStatus));
   const liveNotice = $derived(
     mode === "meeting" ? liveSystemAudioNotice(meeting.app.systemAudioStatus) : null,
   );
@@ -280,10 +280,16 @@
       <div class="flex items-center justify-between gap-3">
         <h3 class="text-sm font-semibold text-text-primary">{$t("home.live_transcript")}</h3>
         <span class="inline-flex items-center gap-1.5 text-[11.5px] text-text-muted">
-          <span class={`h-1.5 w-1.5 rounded-full ${systemAudioActive ? "bg-accent" : "bg-surface-4"}`}></span>
-          {systemAudioActive
-            ? $t("home.system_audio_active")
-            : $t("meeting_header.system_audio_unavailable")}
+          <span
+            class={`h-1.5 w-1.5 rounded-full ${systemAudioState === "active" ? "bg-accent" : "bg-surface-4"}`}
+          ></span>
+          {#if systemAudioState === "active"}
+            {$t("home.system_audio_active")}
+          {:else if systemAudioState === "pending"}
+            {$t("home.system_audio_pending")}
+          {:else}
+            {$t("meeting_header.system_audio_unavailable")}
+          {/if}
         </span>
       </div>
       <p class="m-0 text-[11.5px] text-text-muted">{$t("home.live_edit_hint")}</p>

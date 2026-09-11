@@ -39,6 +39,21 @@ export function liveSystemAudioNotice(status: SystemAudioStatus | null): SystemA
   return notice(status.reason_code, status.reason);
 }
 
+/** Where the system-audio leg of a running meeting stands. */
+export type LiveSystemAudioState = "active" | "unavailable" | "pending";
+
+/**
+ * Three states, not two. The status only arrives once the capture thread has
+ * the leg up or has given up on it, and a meeting whose microphone stream is
+ * still being opened has neither. Reading the gap as "Mic only" labelled a
+ * meeting whose tap was healthy and whose microphone was the leg that
+ * failed, with no reason next to it because there was no verdict to explain.
+ */
+export function liveSystemAudioState(status: SystemAudioStatus | null): LiveSystemAudioState {
+  if (!status) return "pending";
+  return status.active ? "active" : "unavailable";
+}
+
 /**
  * What to say about a meeting reopened after the fact. Null when the tap
  * ran (both lanes were captured: AC6), and null for meetings recorded

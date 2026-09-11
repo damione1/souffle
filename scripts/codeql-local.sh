@@ -23,11 +23,20 @@ codeql database create "$out/js" \
 codeql database create "$out/actions" \
   --language=actions --source-root=.
 
-codeql database analyze "$out/rust" rust-code-scanning.qls \
+# Suites are named by pack spec, not by bare name. The bare name only
+# resolves inside the CodeQL Action's bundle, which ships the query packs; the
+# Homebrew CLI carries none, so it downloads them into ~/.codeql/packages and
+# resolves them by spec.
+codeql pack download codeql/rust-queries codeql/javascript-queries codeql/actions-queries
+
+codeql database analyze "$out/rust" \
+  'codeql/rust-queries:codeql-suites/rust-code-scanning.qls' \
   --format=sarif-latest --output="$out/rust.sarif"
-codeql database analyze "$out/js" javascript-code-scanning.qls \
+codeql database analyze "$out/js" \
+  'codeql/javascript-queries:codeql-suites/javascript-code-scanning.qls' \
   --format=sarif-latest --output="$out/js.sarif"
-codeql database analyze "$out/actions" actions-code-scanning.qls \
+codeql database analyze "$out/actions" \
+  'codeql/actions-queries:codeql-suites/actions-code-scanning.qls' \
   --format=sarif-latest --output="$out/actions.sarif"
 
 echo "CodeQL local gate green. SARIF under $out/*.sarif"

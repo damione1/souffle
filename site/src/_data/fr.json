@@ -591,11 +591,7 @@
               ],
               [
                 "Accessibilité",
-                "Insère le texte dans l'app que vous utilisiez, et relit vos corrections quand « apprendre de mes corrections » est actif."
-              ],
-              [
-                "Surveillance de l'entrée",
-                "Permet d'assigner le push-to-talk à une seule touche (Fn, un modificateur seul, ou F5–F12) via un tap d'événements natif, les autres touches passant. Optionnel tant que vous n'avez pas choisi un tel raccourci."
+                "Insère le texte dans l'app que vous utilisiez, relit vos corrections quand « apprendre de mes corrections » est actif, et installe le tap d'événements natif qui permet d'assigner un raccourci de dictée à une seule touche (Fn, un modificateur seul, ou F5–F12)."
               ],
               [
                 "Calendrier",
@@ -604,7 +600,7 @@
             ]
           },
           {
-            "p": "Refuser une permission ne désactive que la fonction concernée. Sans Audio système, une réunion enregistre quand même votre micro et la transcription est marquée <em>Micro seul</em>. Sans Accessibilité, le texte dicté est copié dans le presse-papiers au lieu d'être inséré à votre place. Sans Surveillance de l'entrée, les raccourcis classiques avec modificateur fonctionnent encore ; seul le push-to-talk à une touche ne s'installera pas."
+            "p": "Refuser une permission ne désactive que la fonction concernée. Sans Audio système, une réunion enregistre quand même votre micro et la transcription est marquée <em>Micro seul</em>. Sans Accessibilité, le texte dicté est copié dans le presse-papiers au lieu d'être inséré à votre place et un raccourci à une seule touche ne peut pas installer son tap ; les raccourcis classiques avec modificateur fonctionnent encore."
           }
         ]
       },
@@ -646,7 +642,7 @@
         "h": "Raccourcis",
         "blocks": [
           {
-            "p": "Les deux raccourcis de dictée se règlent dans Paramètres → Interface. La bascule utilise une combinaison classique avec modificateur (<kbd>⌘⇧Espace</kbd> par défaut). Le push-to-talk peut faire de même, ou une seule touche — Fn, un modificateur seul, ou F5–F12 — qui demande la permission Surveillance de l'entrée pour que le tap natif s'installe. Les deux ne peuvent pas partager la même combinaison."
+            "p": "Les deux raccourcis de dictée se règlent dans Paramètres → Interface. La bascule utilise une combinaison classique avec modificateur (<kbd>⌘⇧Espace</kbd> par défaut). Le push-to-talk peut faire de même, ou une seule touche (Fn, un modificateur seul, ou F5–F12), qui demande la permission Accessibilité pour que le tap natif s'installe. Les deux ne peuvent pas partager la même combinaison."
           },
           {
             "table": [
@@ -975,7 +971,7 @@
               ],
               [
                 "Un raccourci push-to-talk à une touche ne fait rien",
-                "Fn, les modificateurs seuls et F5–F12 demandent la Surveillance de l'entrée pour le tap natif. Paramètres → Système → Permissions y renvoie."
+                "Fn, les modificateurs seuls et F5–F12 demandent la permission Accessibilité pour le tap natif. Paramètres → Système → Permissions y renvoie."
               ],
               [
                 "Le texte dicté n'est pas inséré",

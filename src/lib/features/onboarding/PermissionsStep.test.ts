@@ -19,7 +19,7 @@ function statusWith(microphone: PermState): PermissionStatus {
     microphone,
     system_audio: "unknown",
     accessibility: "granted",
-    calendar: "unknown", input_monitoring: "granted",
+    calendar: "unknown",
   };
 }
 
@@ -59,16 +59,16 @@ describe("PermissionsStep microphone denial", () => {
     expect(within(micRow).queryByRole("button", { name: "Open Settings" })).toBeTruthy();
   });
 
-  it("names Accessibility, not Input Monitoring, for single-key capture (SOU-116 AC1)", async () => {
+  // Accessibility is the permission the native tap actually needs, and the
+  // only one now listed for it. Input Monitoring gated nothing and its row
+  // could never be created from inside the app, so it is gone (SOU-116 AC1).
+  it("names Accessibility for single-key capture and lists no Input Monitoring row", async () => {
     permissionsApi.getPermissionStatus.mockResolvedValue(statusWith("granted"));
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
     expect(within(rowFor("Accessibility")).getByText(/single-key shortcut/)).toBeTruthy();
-    expect(within(rowFor("Input Monitoring")).queryByText(/single-key/)).toBeNull();
-    expect(
-      within(rowFor("Input Monitoring")).getByText(/without modifying them/),
-    ).toBeTruthy();
+    expect(screen.queryByText("Input Monitoring")).toBeNull();
   });
 
   it("does not show the denied hint for an unrelated state", async () => {
@@ -94,7 +94,7 @@ describe("PermissionsStep accessibility repair", () => {
       microphone: "granted",
       system_audio: "unknown",
       accessibility: "denied",
-      calendar: "unknown", input_monitoring: "granted",
+      calendar: "unknown",
     };
   }
 
@@ -159,7 +159,6 @@ describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
       system_audio: "unknown",
       accessibility: "denied",
       calendar: "unknown",
-      input_monitoring: "unknown",
     };
   }
 
@@ -387,7 +386,6 @@ describe("PermissionsStep system audio remembered grant (SOU-120)", () => {
       system_audio: systemAudio,
       accessibility: "granted",
       calendar: "unknown",
-      input_monitoring: "granted",
     };
   }
 
@@ -421,9 +419,12 @@ describe("PermissionsStep system audio remembered grant (SOU-120)", () => {
     expect(within(rowFor("System audio")).queryByRole("button")).toBeNull();
   });
 
-  it("re-probes system audio after the window loses and regains focus", async () => {
+  // SOU-124 AC7: returning from System Settings used to re-probe, which
+  // mounted a Core Audio tap on every round trip. The poll reads TCC live
+  // instead, so a revoke arrives without any device being opened.
+  it("never probes on a focus round trip, and picks a revoke up from the poll", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
-    permissionsApi.requestPermission.mockResolvedValue("denied");
     render(PermissionsStep);
     await waitFor(() => {
       expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
@@ -431,24 +432,15 @@ describe("PermissionsStep system audio remembered grant (SOU-120)", () => {
 
     window.dispatchEvent(new Event("blur"));
     window.dispatchEvent(new Event("focus"));
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
 
-    await waitFor(() => {
-      expect(permissionsApi.requestPermission).toHaveBeenCalledWith("system_audio");
-    });
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("denied"));
+    await vi.advanceTimersByTimeAsync(600);
     await waitFor(() => {
       expect(within(rowFor("System audio")).getByRole("button", { name: "Grant" })).toBeTruthy();
     });
-  });
-
-  it("does not re-probe on focus if the window never lost it", async () => {
-    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
-    render(PermissionsStep);
-    await waitFor(() => {
-      expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
-    });
-
-    window.dispatchEvent(new Event("focus"));
     expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("does not re-probe a remembered deny or an unprobed row (SOU-120 AC3)", async () => {
@@ -470,32 +462,6 @@ describe("PermissionsStep system audio remembered grant (SOU-120)", () => {
     window.dispatchEvent(new Event("blur"));
     window.dispatchEvent(new Event("focus"));
     expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
-  });
-
-  it("does not start a second probe while one is in flight", async () => {
-    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
-    let release: (() => void) | undefined;
-    permissionsApi.requestPermission.mockImplementationOnce(
-      () =>
-        new Promise<PermState>((resolve) => {
-          release = () => resolve("granted");
-        }),
-    );
-    render(PermissionsStep);
-    await waitFor(() => {
-      expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
-    });
-
-    window.dispatchEvent(new Event("blur"));
-    window.dispatchEvent(new Event("focus"));
-    await waitFor(() => {
-      expect(permissionsApi.requestPermission).toHaveBeenCalledTimes(1);
-    });
-
-    window.dispatchEvent(new Event("blur"));
-    window.dispatchEvent(new Event("focus"));
-    expect(permissionsApi.requestPermission).toHaveBeenCalledTimes(1);
-    release?.();
   });
 
   it("the 600 ms poll does not mount a tap on a remembered grant (SOU-120 AC5)", async () => {

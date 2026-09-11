@@ -860,7 +860,14 @@ async learnFromEdit(original: string, corrected: string) : Promise<Result<number
 }
 },
 /**
- * Cheap, non-prompting snapshot for the onboarding's initial render.
+ * Cheap, non-prompting snapshot for the onboarding's initial render, and
+ * the source of the panel's 600 ms poll.
+ * 
+ * Off the command thread even though every read is a status API: three of
+ * them (`AXIsProcessTrusted`, `TCCAccessPreflight`, EventKit) are XPC round
+ * trips to `tccd`, and a synchronous command runs on the main thread, where
+ * a stalled `tccd` would freeze the window. Nothing here needs the main
+ * thread — only *requests* do (SOU-122).
  */
 async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
     try {
@@ -872,7 +879,8 @@ async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
 },
 /**
  * Trigger the native prompt (or open System Settings) for one permission.
- * The probe opens a device, so it runs off the command thread.
+ * Blocks until the user answers the dialog, so it runs off the command
+ * thread.
  */
 async requestPermission(kind: PermissionKind) : Promise<Result<PermState, string>> {
     try {
@@ -1609,8 +1617,7 @@ export type PasteMethod = "clipboard" | "type" |
 "ax"
 export type PermState = "granted" | "denied" | 
 /**
- * Not yet probed — the user hasn't triggered this one (probing would
- * prompt, so we don't do it unsolicited at startup).
+ * TCC has no answer on record: the user has not been asked yet.
  */
 "unknown" | 
 /**
@@ -1627,8 +1634,8 @@ export type PermState = "granted" | "denied" |
 /**
  * Which capability to probe or prompt for via `request`.
  */
-export type PermissionKind = "microphone" | "system_audio" | "accessibility" | "calendar" | "input_monitoring"
-export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState; calendar: PermState; input_monitoring: PermState }
+export type PermissionKind = "microphone" | "system_audio" | "accessibility" | "calendar"
+export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState; calendar: PermState }
 /**
  * Frontend-driven hold on the pill window, toggled by the `pill_hold` /
  * `pill_release` commands. The pill runs in its own webview, separate from

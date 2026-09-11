@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Accessibility, Check, Mic, Volume2, Keyboard } from "@lucide/svelte";
+  import { Accessibility, Check, Mic, Volume2 } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import Spinner from "../../components/ui/Spinner.svelte";
@@ -23,7 +23,6 @@
     system_audio: "unknown",
     accessibility: "unknown",
     calendar: "unknown",
-    input_monitoring: "unknown",
   });
   let busy = $state<Record<string, boolean>>({});
   let error = $state("");
@@ -48,7 +47,6 @@
   let accessibilityAttempts = $state(0);
   let leftAfterAttempt = $state(false);
   let returnedStillDenied = $state(false);
-  let leftWindow = $state(false);
   const showStaleHint = $derived(returnedStillDenied || accessibilityAttempts >= 2);
 
   /** Every write to `status` goes through here so the parent (which cannot
@@ -97,13 +95,6 @@
       icon: Accessibility,
       label: $t("permissions.accessibility_label"),
       desc: $t("permissions.accessibility_desc"),
-      action: $t("permissions.open_settings"),
-    },
-    {
-      kind: "input_monitoring",
-      icon: Keyboard,
-      label: $t("permissions.input_monitoring_label"),
-      desc: $t("permissions.input_monitoring_desc"),
       action: $t("permissions.open_settings"),
     },
   ]);
@@ -175,25 +166,22 @@
       pollInFlight = true;
       void getPermissionStatus()
         .then((s) => {
-          // A probe in flight is newer than this snapshot. Dropping the
-          // result is what keeps a just-observed revoke from flipping back
-          // to the remembered Granted (SOU-120 AC4).
+          // A request in flight is newer than this snapshot: drop the
+          // result rather than letting it overwrite a fresher answer.
           if (Object.values(busy).some(Boolean)) return;
-          // Snapshot never prompts. Unknown means "not remembered yet";
-          // keep the local value rather than wiping a grant in progress.
+          // Snapshot never prompts. Unknown means "not determined"; keep
+          // the local value rather than wiping a grant in progress.
           const next = { ...status };
           if (s.accessibility !== "unknown") next.accessibility = s.accessibility;
           if (s.microphone !== "unknown") next.microphone = s.microphone;
           if (s.system_audio !== "unknown") next.system_audio = s.system_audio;
           if (s.calendar !== "unknown") next.calendar = s.calendar;
-          if (s.input_monitoring !== "unknown") next.input_monitoring = s.input_monitoring;
 
           if (
             next.accessibility !== status.accessibility ||
             next.microphone !== status.microphone ||
             next.system_audio !== status.system_audio ||
-            next.calendar !== status.calendar ||
-            next.input_monitoring !== status.input_monitoring
+            next.calendar !== status.calendar
           ) {
             setStatus(next);
           }
@@ -210,24 +198,15 @@
     // Denied that `request_permission` returns) does not count as a return.
     const onBlur = () => {
       if (accessibilityAttempts > 0) leftAfterAttempt = true;
-      leftWindow = true;
     };
     const onFocus = () => {
       if (leftAfterAttempt && status.accessibility === "denied") {
         returnedStillDenied = true;
       }
-      // Re-probe a remembered grant after the user left the app (typically
-      // System Settings) so a revoke is reflected. Opening the window does
-      // not probe (AC5). Denied already has Grant; Unknown must not prompt
-      // (AC3). Skip while a probe is in flight so two taps cannot overlap.
-      if (
-        leftWindow
-        && status.system_audio === "granted"
-        && !busy.system_audio
-      ) {
-        leftWindow = false;
-        void grant("system_audio");
-      }
+      // Nothing else happens here. Returning from System Settings used to
+      // re-probe system audio to catch a revoke, which mounted a real Core
+      // Audio tap every time (SOU-124 AC7). The 600 ms poll now reads the
+      // live TCC status, so a revoke shows up on its own.
     };
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);

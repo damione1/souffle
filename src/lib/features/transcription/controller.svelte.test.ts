@@ -355,7 +355,6 @@ describe("transcription controller", () => {
       system_audio: "unknown",
       accessibility: "granted",
       calendar: "unknown",
-      input_monitoring: "unknown",
     };
     flushSync();
 

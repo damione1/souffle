@@ -962,7 +962,23 @@ pub fn paste_text(
     delay_ms: u64,
     method: crate::settings::PasteMethod,
 ) -> Result<(), String> {
-    crate::clipboard::paste_text(&text, delay_ms, method)
+    // The insertion path left no trace at all, so afterwards a paste that
+    // was never requested, one that failed, and one the target app dropped
+    // all read the same: nothing in the log.
+    info!(
+        ?method,
+        chars = text.chars().count(),
+        delay_ms,
+        "Inserting dictation"
+    );
+    let started = std::time::Instant::now();
+    let result = crate::clipboard::paste_text(&text, delay_ms, method);
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    match &result {
+        Ok(()) => info!(elapsed_ms, "Dictation inserted"),
+        Err(e) => warn!(elapsed_ms, error = %e, "Dictation insert failed"),
+    }
+    result
 }
 
 /// Write text to the pasteboard without pasting. Cancels a pending clipboard

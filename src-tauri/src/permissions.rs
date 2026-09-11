@@ -1,63 +1,57 @@
 //! macOS permission detection + prompting for the startup onboarding.
 //!
-//! The microphone has a real read-only status API (`AVCaptureDevice`'s
-//! `authorizationStatus`), so `request` checks it first and only falls back
-//! to probing (briefly opening the device, which also triggers the TCC
-//! prompt) when the OS hasn't decided yet. There is no equivalent for Core
-//! Audio taps, so system audio is still probe-only. Accessibility (needed
-//! for the synthesized Cmd+V paste) has its own cheap check
+//! Reading a status never opens a device. The microphone answers from
+//! `AVCaptureDevice`'s `authorizationStatus` and is asked for through
+//! `requestAccessForMediaType:completionHandler:`, whose completion block is
+//! the only in-process signal that carries a fresh answer. System audio is
+//! read through TCC's `TCCAccessPreflight` SPI and asked for by mounting the
+//! tap. Accessibility (needed for the synthesized Cmd+V paste and for the
+//! native single-key shortcut tap) has its own cheap check
 //! (`AXIsProcessTrusted`), and is granted only via System Settings, so its
 //! "request" just opens the relevant pane.
+//!
+//! Input Monitoring is deliberately absent. An active `CGEventTap` is
+//! authorized by Accessibility, which subsumes the listen right, so the
+//! permission gated nothing; and once the app has an Accessibility TCC
+//! record, tccd answers a ListenEvent request by composing from that parent
+//! record, so asking could not even create the row it promised.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-
-use crate::db::Database;
 
 /// Pause between the TCC insert call and `open` of System Settings. The
 /// insert is asynchronous; opening the pane in the same turn shows a stale
 /// list (empty, or a differently-signed Soufflé already ticked).
 const TCC_INSERT_SETTLE: Duration = Duration::from_millis(400);
 
-/// `kIOHIDRequestTypeListenEvent` / `kIOHIDRequestTypePostEvent`.
-const HID_LISTEN_EVENT: u32 = 1;
-const HID_POST_EVENT: u32 = 0;
+/// A microphone grant reported by the `requestAccess` completion block.
+///
+/// `AVCaptureDevice`'s `authorizationStatus` is answered from a per-process
+/// cache filled on the first call. AVFoundation's own request path refreshes
+/// it, so this flag should never be needed; it exists because the panel must
+/// not be able to stick on "Grant" if it ever is. In this process only: a
+/// grant is not a fact the app owns, and a persisted copy could only go on
+/// claiming a permission the user has since revoked.
+static MICROPHONE_GRANT_OBSERVED: AtomicBool = AtomicBool::new(false);
 
-/// `IOHIDCheckAccess` result. Accessibility (PostEvent) includes listen
-/// rights, so `Granted` on ListenEvent is not the same as a row in
-/// Input Monitoring.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HidAccess {
-    Granted,
-    Denied,
-    Unknown,
-}
-
-/// Last observed system-audio tap permission. There is no read-only TCC
-/// API for Core Audio taps, so a successful probe is remembered and the
-/// snapshot returns it without mounting a tap (SOU-120).
-const SYSTEM_AUDIO_PERMISSION_KEY: &str = "system_audio_permission";
-
-/// Remembered Input Monitoring grant. `IOHIDCheckAccess(ListenEvent)` is
-/// true whenever Accessibility is trusted, so a live check cannot tell a
-/// real Input Monitoring row from AX covering listen. After the user
-/// toggles the row, macOS quits and relaunches the app: a pid change
-/// since we opened the pane is that signal.
-const INPUT_MONITORING_PERMISSION_KEY: &str = "input_monitoring_permission";
-const INPUT_MONITORING_PROMPT_PID_KEY: &str = "input_monitoring_prompt_pid";
-const INPUT_MONITORING_PROMPT_UNIX_KEY: &str = "input_monitoring_prompt_unix";
-const INPUT_MONITORING_RESTART_WINDOW_SECS: u64 = 15 * 60;
+/// A system-audio grant reported by the tap this process mounted.
+///
+/// Same contract as `MICROPHONE_GRANT_OBSERVED`, for the one case the read
+/// path cannot answer: `TCCAccessPreflight` gone from a future macOS. Without
+/// it the row would stick on "Grant" for a permission the user has already
+/// given, which is the defect SOU-120 opened. In this process only.
+static SYSTEM_AUDIO_GRANT_OBSERVED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PermState {
     Granted,
     Denied,
-    /// Not yet probed — the user hasn't triggered this one (probing would
-    /// prompt, so we don't do it unsolicited at startup).
+    /// TCC has no answer on record: the user has not been asked yet.
     Unknown,
     /// The OS doesn't support this capability (e.g. taps need macOS 14.4+).
     Unsupported,
@@ -74,7 +68,6 @@ pub struct PermissionStatus {
     pub system_audio: PermState,
     pub accessibility: PermState,
     pub calendar: PermState,
-    pub input_monitoring: PermState,
 }
 
 /// Which capability to probe or prompt for via `request`.
@@ -85,7 +78,6 @@ pub enum PermissionKind {
     SystemAudio,
     Accessibility,
     Calendar,
-    InputMonitoring,
 }
 
 /// Outcome of `repair_accessibility`. Distinct from `PermState` because a
@@ -98,19 +90,15 @@ pub struct RepairAccessibilityResult {
     pub prompt_shown: bool,
 }
 
-/// Cheap, non-prompting snapshot for the initial onboarding render.
-///
-/// System audio has no read-only TCC API. Probing mounts a Core Audio tap
-/// and would prompt on a first launch, so the snapshot never probes: it
-/// returns a remembered `Granted`/`Denied` after a user-initiated probe,
-/// and `Unknown` until then (SOU-120).
-pub fn snapshot(db: &Database) -> PermissionStatus {
+/// Cheap, non-prompting snapshot for the initial onboarding render. No
+/// entry in it opens a device: every capability answers from a status API.
+pub fn snapshot() -> PermissionStatus {
     PermissionStatus {
-        microphone: microphone_authorization_status(),
-        system_audio: system_audio_snapshot_state(
-            system_audio_supported(),
-            load_remembered_system_audio(db),
+        microphone: microphone_snapshot_state(
+            microphone_authorization_status(),
+            MICROPHONE_GRANT_OBSERVED.load(Ordering::Relaxed),
         ),
+        system_audio: system_audio_status(),
         accessibility: if accessibility_granted() {
             PermState::Granted
         } else {
@@ -119,39 +107,45 @@ pub fn snapshot(db: &Database) -> PermissionStatus {
         // EventKit has a real read-only status API, so the snapshot is truthful
         // here (no probe needed).
         calendar: crate::calendar::authorization_state(),
-        input_monitoring: resolve_input_monitoring(db),
     }
 }
 
-/// Snapshot value for system audio given platform support and a remembered
-/// probe result. Never mounts a tap.
-pub fn system_audio_snapshot_state(supported: bool, remembered: Option<PermState>) -> PermState {
+/// Live system-audio status, read without creating any audio object.
+pub fn system_audio_status() -> PermState {
+    system_audio_state_with(
+        system_audio_supported(),
+        audio_capture_preflight,
+        SYSTEM_AUDIO_GRANT_OBSERVED.load(Ordering::Relaxed),
+    )
+}
+
+/// A read never mounts a tap, not even when the SPI is missing. Mounting one
+/// would block the caller for two seconds and, on a fresh install, raise the
+/// AudioCapture prompt nobody asked for — on every 600 ms poll of the panel.
+/// With no SPI the honest answer is "not determined", narrowed by the one
+/// grant this process may have seen itself.
+pub fn system_audio_state_with(
+    supported: bool,
+    preflight: impl FnOnce() -> Option<PermState>,
+    observed_grant: bool,
+) -> PermState {
     if !supported {
         return PermState::Unsupported;
     }
-    match remembered {
-        Some(PermState::Granted) => PermState::Granted,
-        Some(PermState::Denied) => PermState::Denied,
-        _ => PermState::Unknown,
+    match preflight() {
+        Some(PermState::Unknown) | None if observed_grant => PermState::Granted,
+        Some(state) => state,
+        None => PermState::Unknown,
     }
 }
 
-pub fn load_remembered_system_audio(db: &Database) -> Option<PermState> {
-    let raw = db.get_setting(SYSTEM_AUDIO_PERMISSION_KEY).ok().flatten()?;
-    match serde_json::from_str::<PermState>(&raw) {
-        Ok(state @ (PermState::Granted | PermState::Denied)) => Some(state),
-        _ => None,
-    }
-}
-
-pub fn remember_system_audio(db: &Database, state: PermState) {
-    if !matches!(state, PermState::Granted | PermState::Denied) {
-        return;
-    }
-    if let Ok(raw) = serde_json::to_string(&state)
-        && let Err(e) = db.set_setting(SYSTEM_AUDIO_PERMISSION_KEY, &raw)
-    {
-        tracing::warn!(error = %e, "Failed to persist system audio permission");
+/// Snapshot value for the microphone. The live status wins whenever the OS
+/// has decided; a grant seen by this process covers the one case it cannot
+/// answer, a cached `NotDetermined` taken before the user said yes.
+pub fn microphone_snapshot_state(live: PermState, observed_grant: bool) -> PermState {
+    match live {
+        PermState::Unknown if observed_grant => PermState::Granted,
+        state => state,
     }
 }
 
@@ -159,168 +153,15 @@ fn system_audio_supported() -> bool {
     crate::platform::system_audio_capture_supported()
 }
 
-/// Input Monitoring snapshot. `CGPreflightListenEventAccess` and
-/// `IOHIDCheckAccess(ListenEvent)` return Granted when Accessibility is
-/// already trusted, even if System Settings has no Soufflé row (DTS,
-/// May 2026: Accessibility grants post *and* listen). That was the
-/// false "Granted" pill.
-fn input_monitoring_snapshot_state(
-    listen: HidAccess,
-    accessibility_trusted: bool,
-    post: HidAccess,
-) -> PermState {
-    match listen {
-        HidAccess::Denied => PermState::Denied,
-        HidAccess::Unknown => PermState::Unknown,
-        HidAccess::Granted => {
-            if accessibility_trusted || post == HidAccess::Granted {
-                PermState::Unknown
-            } else {
-                PermState::Granted
-            }
-        }
-    }
-}
-
-fn resolve_input_monitoring(db: &Database) -> PermState {
-    let listen = iohid_listen_access();
-    let live =
-        input_monitoring_snapshot_state(listen, accessibility_granted(), iohid_post_access());
-    let remembered = load_remembered_input_monitoring(db);
-    let prompt = load_input_monitoring_prompt(db);
-    let now_unix = unix_now();
-    let state = input_monitoring_effective_state(
-        live,
-        listen,
-        remembered,
-        prompt,
-        std::process::id(),
-        now_unix,
-    );
-    if state == PermState::Granted && remembered != Some(PermState::Granted) {
-        remember_input_monitoring(db, PermState::Granted);
-        clear_input_monitoring_prompt(db);
-    }
-    state
-}
-
-/// Accessibility already includes listen rights, so `IOHIDRequestAccess`
-/// is a no-op and the Input Monitoring list stays empty. Reset ListenEvent
-/// first so this click can insert a row for *this* binary.
-fn prepare_listen_event_insert(
-    accessibility_trusted: bool,
-    listen: HidAccess,
-    reset_listen: impl FnOnce(),
-    request: impl FnOnce(),
-) {
-    if accessibility_trusted || listen == HidAccess::Granted {
-        reset_listen();
-    }
-    request();
-}
-
-/// Combine the live HID check with a remembered grant and the "Quit and
-/// Reopen" restart macOS issues after toggling Input Monitoring.
-fn input_monitoring_effective_state(
-    live: PermState,
-    listen: HidAccess,
-    remembered: Option<PermState>,
-    prompt: Option<(u32, u64)>,
-    now_pid: u32,
-    now_unix: u64,
-) -> PermState {
-    if live == PermState::Granted || live == PermState::Denied {
-        return live;
-    }
-    if remembered == Some(PermState::Granted) {
-        return PermState::Granted;
-    }
-    if listen == HidAccess::Granted
-        && let Some((pid, unix)) = prompt
-        && pid != now_pid
-        && now_unix.saturating_sub(unix) <= INPUT_MONITORING_RESTART_WINDOW_SECS
-    {
-        return PermState::Granted;
-    }
-    PermState::Unknown
-}
-
-fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-fn load_remembered_input_monitoring(db: &Database) -> Option<PermState> {
-    let raw = db
-        .get_setting(INPUT_MONITORING_PERMISSION_KEY)
-        .ok()
-        .flatten()?;
-    match serde_json::from_str::<PermState>(&raw) {
-        Ok(PermState::Granted) => Some(PermState::Granted),
-        _ => None,
-    }
-}
-
-fn remember_input_monitoring(db: &Database, state: PermState) {
-    if state != PermState::Granted {
-        return;
-    }
-    if let Ok(raw) = serde_json::to_string(&state)
-        && let Err(e) = db.set_setting(INPUT_MONITORING_PERMISSION_KEY, &raw)
-    {
-        tracing::warn!(error = %e, "Failed to persist input monitoring permission");
-    }
-}
-
-fn load_input_monitoring_prompt(db: &Database) -> Option<(u32, u64)> {
-    let pid = db
-        .get_setting(INPUT_MONITORING_PROMPT_PID_KEY)
-        .ok()
-        .flatten()?
-        .parse()
-        .ok()?;
-    let unix = db
-        .get_setting(INPUT_MONITORING_PROMPT_UNIX_KEY)
-        .ok()
-        .flatten()?
-        .parse()
-        .ok()?;
-    Some((pid, unix))
-}
-
-fn clear_input_monitoring_prompt(db: &Database) {
-    let _ = db.set_setting(INPUT_MONITORING_PROMPT_PID_KEY, "");
-    let _ = db.set_setting(INPUT_MONITORING_PROMPT_UNIX_KEY, "");
-}
-
-/// Call when the user opens the Input Monitoring pane. After macOS quits
-/// and relaunches, `resolve_input_monitoring` treats a pid change as a grant.
-pub fn note_input_monitoring_prompt(db: &Database) {
-    let _ = db.set_setting(
-        INPUT_MONITORING_PROMPT_PID_KEY,
-        &std::process::id().to_string(),
-    );
-    let _ = db.set_setting(INPUT_MONITORING_PROMPT_UNIX_KEY, &unix_now().to_string());
-}
-
-pub fn clear_input_monitoring_memory(db: &Database) {
-    let _ = db.set_setting(INPUT_MONITORING_PERMISSION_KEY, "");
-    clear_input_monitoring_prompt(db);
-}
-
-/// TCC prompts (`AXIsProcessTrustedWithOptions`, `CGRequestListenEventAccess`,
-/// `IOHIDRequestAccess`) only insert this process into System Settings when
-/// they run on the main thread. `request_permission` is `spawn_blocking`, so
-/// hop. Reads (`AXIsProcessTrusted`, `CGPreflightListenEventAccess`) stay on
-/// the caller: `cargo test` has no main runloop, and a `dispatch_sync` there
+/// An `AXIsProcessTrustedWithOptions` prompt only registers this process
+/// with System Settings when it runs on the main thread. `request_permission`
+/// is `spawn_blocking`, so hop. Reads (`AXIsProcessTrusted`) stay on the
+/// caller: `cargo test` has no main runloop, and a `dispatch_sync` there
 /// hangs (SOU-122 AC3).
 ///
 /// Main-thread is necessary but not sufficient after an in-place rebuild:
-/// Launch Services must point at *this* binary, Input Monitoring needs
-/// `NSInputMonitoringUsageDescription`, and System Settings must not open
-/// before TCC has committed the new row.
+/// Launch Services must point at *this* binary, and System Settings must
+/// not open before TCC has committed the new row.
 #[cfg(target_os = "macos")]
 fn on_main<R: Send>(f: impl FnOnce() -> R + Send) -> R {
     on_main_with(is_main_thread(), f)
@@ -375,21 +216,6 @@ fn current_app_bundle_path() -> Option<PathBuf> {
 pub fn register_with_launch_services() {
     #[cfg(target_os = "macos")]
     register_current_bundle_with_launch_services();
-}
-
-/// Insert this process into the Input Monitoring and Accessibility lists
-/// before the UI can poll AX. `IOHIDRequestAccess` must run first:
-/// `AXIsProcessTrustedWithOptions` beforehand makes the HID request a
-/// no-op and the Input Monitoring pane opens empty (FB7381305).
-pub fn seed_tcc_clients() {
-    #[cfg(target_os = "macos")]
-    on_main(|| {
-        register_current_bundle_with_launch_services();
-        if iohid_check_access(HID_LISTEN_EVENT) == HidAccess::Unknown {
-            request_listen_event_access_now();
-        }
-        let _ = accessibility_trusted_with_prompt_now(false);
-    });
 }
 
 #[cfg(target_os = "macos")]
@@ -522,16 +348,12 @@ fn accessibility_trusted_with_prompt(_prompt: bool) -> bool {
 /// repair had failed, including the ones that worked (SOU-054).
 pub fn repair_accessibility() -> Result<RepairAccessibilityResult, String> {
     let bundle_id = crate::constants::running_app_identifier();
+    // The only trace this path leaves. Without it a repair that never runs
+    // and a repair that runs and changes nothing look identical from the
+    // outside, and both are reported as "the button does nothing".
+    tracing::info!(bundle_id, "Repairing the Accessibility permission");
     tccutil_reset_service("Accessibility", &bundle_id)?;
-    // Input Monitoring has the same stale-identity problem. A missing row
-    // is not a failure: tccutil still succeeds for a known bundle id.
-    if let Err(e) = tccutil_reset_service("ListenEvent", &bundle_id) {
-        tracing::warn!(error = %e, "tccutil reset ListenEvent skipped");
-    }
-    // HID first: AXIsProcessTrustedWithOptions beforehand makes
-    // IOHIDRequestAccess a no-op (FB7381305).
-    #[cfg(target_os = "macos")]
-    on_main(request_listen_event_access_now);
+    tracing::info!("Accessibility TCC entry reset; asking macOS to prompt");
     let _ = accessibility_trusted_with_prompt(true);
     Ok(RepairAccessibilityResult {
         reset_performed: true,
@@ -611,25 +433,39 @@ fn open_microphone_settings() {
 #[cfg(not(target_os = "macos"))]
 fn open_microphone_settings() {}
 
+/// `Denied` also covers `Restricted` (parental controls, MDM): macOS never
+/// re-prompts once it has an answer, so the only move left is the pane.
+///
+/// `request_access` returns `None` when the completion block never reported:
+/// a dialog left open on screen is not a refusal, so that becomes `Unknown`
+/// and the panel's poll settles it once the user answers.
 fn request_microphone_with(
     status: impl FnOnce() -> PermState,
     open_settings: impl FnOnce(),
-    probe: impl FnOnce() -> PermState,
+    request_access: impl FnOnce() -> Option<bool>,
     has_device: impl FnOnce() -> bool,
 ) -> PermState {
     match status() {
-        PermState::Granted => {
-            if has_device() {
-                PermState::Granted
-            } else {
-                PermState::NoDevice
-            }
-        }
+        PermState::Granted => granted_or_no_device(has_device),
         PermState::Denied => {
             open_settings();
             PermState::Denied
         }
-        _ => probe(),
+        _ => match request_access() {
+            Some(true) => granted_or_no_device(has_device),
+            Some(false) => PermState::Denied,
+            None => PermState::Unknown,
+        },
+    }
+}
+
+/// TCC access and a usable input device are different problems with
+/// different fixes, so a grant with nothing plugged in is not `Granted`.
+fn granted_or_no_device(has_device: impl FnOnce() -> bool) -> PermState {
+    if has_device() {
+        PermState::Granted
+    } else {
+        PermState::NoDevice
     }
 }
 
@@ -642,103 +478,136 @@ fn request_microphone() -> PermState {
     request_microphone_with(
         microphone_authorization_status,
         open_microphone_settings,
-        probe_microphone,
+        || {
+            let answer = request_microphone_access();
+            if answer == Some(true) {
+                MICROPHONE_GRANT_OBSERVED.store(true, Ordering::Relaxed);
+            }
+            answer
+        },
         has_microphone_device,
     )
 }
 
-fn no_op_stream_error(_e: cpal::StreamError) {}
+/// The native prompt, and the only in-process event that reports its answer.
+/// `None` means no answer came back: the prompt could not be raised, or the
+/// user walked away from an open dialog.
+///
+/// Going through the CoreAudio HAL instead (opening an input stream) raises
+/// the same dialog but leaves AVFoundation's cached status untouched, so the
+/// process keeps reading `NotDetermined` for the rest of its life.
+#[cfg(target_os = "macos")]
+fn request_microphone_access() -> Option<bool> {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
 
-/// Briefly open the default input device and wait for real audio callbacks.
-/// This is what actually triggers the TCC prompt the first time; afterwards
-/// `request_microphone` skips straight to this only when the OS reports
-/// `NotDetermined`.
-pub fn probe_microphone() -> PermState {
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Duration;
-
-    let host = cpal::default_host();
-    let Some(device) = host.default_input_device() else {
-        return PermState::NoDevice;
-    };
-    let Ok(config) = device.default_input_config() else {
-        return PermState::NoDevice;
-    };
-
-    let got = Arc::new(AtomicBool::new(false));
-    let sample_format = config.sample_format();
-    let stream_config: cpal::StreamConfig = config.into();
-
-    let stream = match sample_format {
-        cpal::SampleFormat::F32 => {
-            let got = Arc::clone(&got);
-            device.build_input_stream(
-                &stream_config,
-                move |_d: &[f32], _: &_| got.store(true, Ordering::Relaxed),
-                no_op_stream_error,
-                None,
-            )
-        }
-        cpal::SampleFormat::I16 => {
-            let got = Arc::clone(&got);
-            device.build_input_stream(
-                &stream_config,
-                move |_d: &[i16], _: &_| got.store(true, Ordering::Relaxed),
-                no_op_stream_error,
-                None,
-            )
-        }
-        cpal::SampleFormat::U16 => {
-            let got = Arc::clone(&got);
-            device.build_input_stream(
-                &stream_config,
-                move |_d: &[u16], _: &_| got.store(true, Ordering::Relaxed),
-                no_op_stream_error,
-                None,
-            )
-        }
-        _ => return PermState::Denied,
-    };
-
-    let stream = match stream {
-        Ok(s) => s,
-        Err(cpal::BuildStreamError::DeviceNotAvailable) => return PermState::NoDevice,
-        Err(_) => return PermState::Denied,
-    };
-    if let Err(e) = stream.play() {
-        match e {
-            cpal::PlayStreamError::DeviceNotAvailable => return PermState::NoDevice,
-            _ => return PermState::Denied,
-        }
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    // A TCC request has to be raised from the main thread (SOU-122), and
+    // `request` runs on a blocking pool thread. Only the call hops: it
+    // returns as soon as the dialog is up, and the completion block fires
+    // later on an arbitrary queue.
+    let asked = on_main(move || unsafe {
+        let Some(media_type) = AVMediaTypeAudio else {
+            return false;
+        };
+        let block = RcBlock::new(move |granted: Bool| {
+            let _ = tx.send(granted.as_bool());
+        });
+        AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &block);
+        true
+    });
+    if !asked {
+        return None;
     }
+    // Generous: the user may leave the dialog on screen. A timeout is not a
+    // refusal, so it answers `None` and the panel's poll settles the row.
+    rx.recv_timeout(Duration::from_secs(300)).ok()
+}
 
-    // Wait up to 15s for a callback. On first launch the macOS TCC dialog is
-    // still on screen when this probe starts, so the window must outlast the
-    // time it takes the user to read it and click Allow/Deny. When permission
-    // was already granted the early exit as soon as data arrives keeps this fast.
-    for _ in 0..150 {
-        if got.load(Ordering::Relaxed) {
-            break;
+#[cfg(not(target_os = "macos"))]
+fn request_microphone_access() -> Option<bool> {
+    None
+}
+
+// --- System audio (kTCCServiceAudioCapture) ---
+
+/// `TCCAccessPreflight(service, NULL)`, from the private TCC framework.
+/// CoreAudio ships no permission query for process taps, so this SPI is the
+/// only way to read the status without mounting one. Unlike the public
+/// preflight APIs it is an XPC round trip to tccd on every call, so it never
+/// answers from a per-process cache.
+#[cfg(all(target_os = "macos", feature = "private-tcc"))]
+fn tcc_preflight(service: &str) -> Option<PermState> {
+    use objc2_core_foundation::{CFRetained, CFString};
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    type TccAccessPreflight = unsafe extern "C" fn(*const c_void, *const c_void) -> i32;
+
+    static SYMBOL: OnceLock<Option<TccAccessPreflight>> = OnceLock::new();
+    let preflight = (*SYMBOL.get_or_init(|| unsafe {
+        let handle = libc::dlopen(
+            c"/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC".as_ptr(),
+            libc::RTLD_LAZY,
+        );
+        if handle.is_null() {
+            tracing::warn!("TCC.framework not loadable; falling back to the tap probe");
+            return None;
         }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    // Pause then drop so the probe's AudioUnit is actually disposed. cpal
-    // 0.15 leaked StreamInner on macOS, which would leave a Bluetooth
-    // headset in HFP/mono after the onboarding mic check.
-    let _ = stream.pause();
-    drop(stream);
+        let symbol = libc::dlsym(handle, c"TCCAccessPreflight".as_ptr());
+        if symbol.is_null() {
+            tracing::warn!("TCCAccessPreflight missing; falling back to the tap probe");
+            return None;
+        }
+        Some(std::mem::transmute::<*mut c_void, TccAccessPreflight>(
+            symbol,
+        ))
+    }))?;
 
-    if got.load(Ordering::Relaxed) {
-        PermState::Granted
-    } else {
-        PermState::Denied
+    let service = CFString::from_str(service);
+    let raw = unsafe {
+        preflight(
+            CFRetained::as_ptr(&service).as_ptr().cast(),
+            std::ptr::null(),
+        )
+    };
+    tcc_preflight_state(raw)
+}
+
+#[cfg(not(all(target_os = "macos", feature = "private-tcc")))]
+fn tcc_preflight(_service: &str) -> Option<PermState> {
+    None
+}
+
+fn audio_capture_preflight() -> Option<PermState> {
+    tcc_preflight("kTCCServiceAudioCapture")
+}
+
+/// AudioCap, Hyprnote and screenpipe all read the same three values out of
+/// this SPI. Anything else means the contract moved, and an unknown number
+/// must not be read as a verdict.
+///
+/// It does not validate the service name: an unknown service answers 1
+/// (denied), not an out-of-range value. The only signal that the SPI itself
+/// is gone is a null `dlsym`, which `tcc_preflight` handles.
+#[cfg(any(test, all(target_os = "macos", feature = "private-tcc")))]
+fn tcc_preflight_state(raw: i32) -> Option<PermState> {
+    match raw {
+        0 => Some(PermState::Granted),
+        1 => Some(PermState::Denied),
+        2 => Some(PermState::Unknown),
+        other => {
+            tracing::warn!(value = other, "Unexpected TCCAccessPreflight value");
+            None
+        }
     }
 }
 
-// --- System audio (probe via a short-lived Core Audio tap) ---
-
+/// Mounts a tap for two seconds. This is the *request* path and nothing else:
+/// the tap is what raises the native prompt. It must never run to render a
+/// status, with or without the SPI — that is what created and tore down a
+/// `Souffle Tap` aggregate on every poll (SOU-124 AC7).
 #[cfg(target_os = "macos")]
 pub fn probe_system_audio() -> PermState {
     use ringbuf::HeapRb;
@@ -760,12 +629,37 @@ pub fn probe_system_audio() -> PermState {
     PermState::Unsupported
 }
 
+/// Raise the AudioCapture prompt by mounting the tap, then let TCC say what
+/// the user answered.
+///
+/// The tap succeeding is not a grant: `AudioHardwareCreateProcessTap` and
+/// `AudioDeviceStart` return `noErr` on a refusal and deliver silence, which
+/// is why the row used to flash "Granted" right after a "Don't Allow".
+fn request_system_audio() -> PermState {
+    request_system_audio_with(probe_system_audio, audio_capture_preflight)
+}
+
+fn request_system_audio_with(
+    probe: impl FnOnce() -> PermState,
+    preflight: impl FnOnce() -> Option<PermState>,
+) -> PermState {
+    let probed = probe();
+    if probed == PermState::Unsupported {
+        return probed;
+    }
+    let state = preflight().unwrap_or(probed);
+    if state == PermState::Granted {
+        SYSTEM_AUDIO_GRANT_OBSERVED.store(true, Ordering::Relaxed);
+    }
+    state
+}
+
 /// Trigger the native prompt (or open Settings) for one permission and return
 /// the resulting state.
 pub fn request(kind: PermissionKind) -> PermState {
     match kind {
         PermissionKind::Microphone => request_microphone(),
-        PermissionKind::SystemAudio => probe_system_audio(),
+        PermissionKind::SystemAudio => request_system_audio(),
         PermissionKind::Accessibility => {
             open_accessibility_settings();
             if accessibility_granted() {
@@ -775,14 +669,6 @@ pub fn request(kind: PermissionKind) -> PermState {
             }
         }
         PermissionKind::Calendar => crate::calendar::request_access(),
-        PermissionKind::InputMonitoring => {
-            open_input_monitoring_settings();
-            input_monitoring_snapshot_state(
-                iohid_listen_access(),
-                accessibility_granted(),
-                iohid_post_access(),
-            )
-        }
     }
 }
 
@@ -851,147 +737,21 @@ mod tests {
         );
     }
 
+    /// The app never asks for Input Monitoring, but `CGEventTap::new` still
+    /// makes macOS raise a ListenEvent access request for this process (a
+    /// tap at the HID location asks for both listen and post rights). A TCC
+    /// request with no usage string is refused out of hand, so the key stays.
     #[test]
     fn info_plist_declares_input_monitoring_usage() {
         let plist = std::fs::read_to_string(format!("{}/Info.plist", env!("CARGO_MANIFEST_DIR")))
             .expect("src-tauri/Info.plist");
         assert!(
             plist.contains("<key>NSInputMonitoringUsageDescription</key>"),
-            "IOHIDRequestAccess does not insert the Input Monitoring row without this key"
+            "the native shortcut tap makes macOS ask for ListenEvent on our behalf"
         );
         assert!(
             plist.contains("keyboard and mouse events"),
-            "usage string should describe Input Monitoring, not a different permission"
-        );
-    }
-
-    #[test]
-    fn input_monitoring_is_not_granted_when_accessibility_covers_listen() {
-        assert_eq!(
-            input_monitoring_snapshot_state(HidAccess::Granted, true, HidAccess::Granted),
-            PermState::Unknown,
-            "Accessibility includes listen; that is not an Input Monitoring row"
-        );
-        assert_eq!(
-            input_monitoring_snapshot_state(HidAccess::Granted, true, HidAccess::Unknown),
-            PermState::Unknown
-        );
-        assert_eq!(
-            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Granted),
-            PermState::Unknown
-        );
-    }
-
-    #[test]
-    fn input_monitoring_granted_only_when_listen_is_not_inherited_from_ax() {
-        assert_eq!(
-            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Unknown),
-            PermState::Granted
-        );
-        assert_eq!(
-            input_monitoring_snapshot_state(HidAccess::Granted, false, HidAccess::Denied),
-            PermState::Granted
-        );
-        assert_eq!(
-            input_monitoring_snapshot_state(HidAccess::Unknown, false, HidAccess::Unknown),
-            PermState::Unknown
-        );
-        assert_eq!(
-            input_monitoring_snapshot_state(HidAccess::Denied, false, HidAccess::Unknown),
-            PermState::Denied
-        );
-    }
-
-    #[test]
-    fn input_monitoring_stays_open_settings_in_the_same_process_after_opening_the_pane() {
-        let live = PermState::Unknown;
-        assert_eq!(
-            input_monitoring_effective_state(
-                live,
-                HidAccess::Granted,
-                None,
-                Some((42, 1_000)),
-                42,
-                1_010,
-            ),
-            PermState::Unknown,
-            "AX covering listen plus opening the pane is not a grant"
-        );
-    }
-
-    #[test]
-    fn input_monitoring_is_granted_after_the_tcc_quit_and_reopen() {
-        let live = PermState::Unknown;
-        assert_eq!(
-            input_monitoring_effective_state(
-                live,
-                HidAccess::Granted,
-                None,
-                Some((42, 1_000)),
-                99,
-                1_030,
-            ),
-            PermState::Granted,
-        );
-    }
-
-    #[test]
-    fn input_monitoring_restart_signal_expires() {
-        let live = PermState::Unknown;
-        assert_eq!(
-            input_monitoring_effective_state(
-                live,
-                HidAccess::Granted,
-                None,
-                Some((42, 1_000)),
-                99,
-                1_000 + INPUT_MONITORING_RESTART_WINDOW_SECS + 1,
-            ),
-            PermState::Unknown,
-        );
-    }
-
-    #[test]
-    fn listen_event_insert_resets_when_accessibility_already_covers_listen() {
-        use std::cell::Cell;
-        let reset = Cell::new(false);
-        let requested = Cell::new(false);
-        prepare_listen_event_insert(
-            true,
-            HidAccess::Granted,
-            || reset.set(true),
-            || requested.set(true),
-        );
-        assert!(
-            reset.get(),
-            "must clear ListenEvent or IOHIDRequestAccess is a no-op"
-        );
-        assert!(requested.get());
-    }
-
-    #[test]
-    fn listen_event_insert_does_not_reset_on_a_fresh_unknown() {
-        use std::cell::Cell;
-        let reset = Cell::new(false);
-        prepare_listen_event_insert(false, HidAccess::Unknown, || reset.set(true), || {});
-        assert!(
-            !reset.get(),
-            "first insert must not tccutil reset a service that has no row"
-        );
-    }
-
-    #[test]
-    fn input_monitoring_remembered_grant_survives_later_launches() {
-        assert_eq!(
-            input_monitoring_effective_state(
-                PermState::Unknown,
-                HidAccess::Granted,
-                Some(PermState::Granted),
-                None,
-                7,
-                9_000,
-            ),
-            PermState::Granted,
+            "usage string should describe what the tap reads"
         );
     }
 
@@ -1006,59 +766,92 @@ mod tests {
         assert_eq!(no_device, "\"no_device\"");
     }
 
-    /// A settled `Denied` must open Settings and must NOT re-run the probe:
-    /// macOS never re-prompts after a deny, so probing again would just
-    /// burn 15s to land on the same answer.
+    /// AC4: a settled `Denied` (or `Restricted`) opens Settings and must NOT
+    /// ask again. macOS never re-prompts after an answer, so a request would
+    /// return the same verdict without showing anything.
     #[test]
-    fn denied_opens_settings_without_probing() {
+    fn denied_opens_settings_without_asking() {
         let opened = Cell::new(false);
-        let probed = Cell::new(false);
+        let asked = Cell::new(false);
 
         let result = request_microphone_with(
             || PermState::Denied,
             || opened.set(true),
             || {
-                probed.set(true);
-                PermState::Granted
+                asked.set(true);
+                Some(true)
             },
             || true,
         );
 
         assert_eq!(result, PermState::Denied);
         assert!(opened.get(), "Denied must open System Settings");
-        assert!(!probed.get(), "Denied must not run the probe");
+        assert!(!asked.get(), "Denied must not request access");
     }
 
-    /// `NotDetermined` (modeled as `Unknown` here) still probes: that's what
-    /// shows the TCC dialog the first time.
+    /// AC3: `NotDetermined` (modeled as `Unknown` here) goes through
+    /// `requestAccess`, and the completion block's answer is the verdict.
     #[test]
-    fn not_determined_probes_without_opening_settings() {
+    fn not_determined_requests_access_without_opening_settings() {
         let opened = Cell::new(false);
-        let probed = Cell::new(false);
+        let asked = Cell::new(false);
 
         let result = request_microphone_with(
             || PermState::Unknown,
             || opened.set(true),
             || {
-                probed.set(true);
-                PermState::Granted
+                asked.set(true);
+                Some(true)
             },
             || true,
         );
 
         assert_eq!(result, PermState::Granted);
         assert!(!opened.get(), "NotDetermined must not open Settings");
-        assert!(probed.get(), "NotDetermined must run the probe");
+        assert!(asked.get(), "NotDetermined must request access");
+    }
+
+    #[test]
+    fn a_refused_request_is_denied() {
+        let result = request_microphone_with(
+            || PermState::Unknown,
+            || panic!("the request answers, so Settings must stay shut"),
+            || Some(false),
+            || true,
+        );
+        assert_eq!(result, PermState::Denied);
+    }
+
+    /// A dialog the user walked away from is not a refusal. Reporting Denied
+    /// would paint the row red and offer System Settings for a permission
+    /// that is still merely unanswered.
+    #[test]
+    fn a_request_that_never_answers_is_unknown_not_denied() {
+        let result = request_microphone_with(
+            || PermState::Unknown,
+            || panic!("an unanswered prompt must not open Settings"),
+            || None,
+            || true,
+        );
+        assert_eq!(result, PermState::Unknown);
+    }
+
+    /// A grant with nothing plugged in is not a permission problem, and the
+    /// UI says something else about it.
+    #[test]
+    fn a_grant_without_an_input_device_is_no_device() {
+        let result = request_microphone_with(|| PermState::Unknown, || {}, || Some(true), || false);
+        assert_eq!(result, PermState::NoDevice);
     }
 
     /// Already-authorized short-circuits to `Granted` without touching
-    /// Settings or the probe.
+    /// Settings or raising a prompt.
     #[test]
     fn granted_short_circuits() {
         let result = request_microphone_with(
             || PermState::Granted,
             || panic!("Granted must not open Settings"),
-            || panic!("Granted must not probe"),
+            || panic!("Granted must not request access"),
             || true,
         );
         assert_eq!(result, PermState::Granted);
@@ -1125,139 +918,153 @@ mod tests {
     }
 
     #[test]
-    fn system_audio_snapshot_is_unknown_until_a_probe_succeeds() {
-        assert_eq!(system_audio_snapshot_state(true, None), PermState::Unknown);
+    fn microphone_snapshot_prefers_the_live_status_when_the_os_has_decided() {
         assert_eq!(
-            system_audio_snapshot_state(true, Some(PermState::Unknown)),
-            PermState::Unknown
+            microphone_snapshot_state(PermState::Denied, true),
+            PermState::Denied,
+            "a revoke read on this process must beat a grant seen earlier"
         );
-    }
-
-    #[test]
-    fn system_audio_snapshot_returns_remembered_granted_without_probing() {
         assert_eq!(
-            system_audio_snapshot_state(true, Some(PermState::Granted)),
+            microphone_snapshot_state(PermState::Granted, false),
             PermState::Granted
         );
     }
 
+    /// AC5: the reported failure was a process that read NotDetermined two
+    /// seconds before the user granted the permission and kept returning it
+    /// from the AVFoundation cache, so the row showed "Grant" forever. A
+    /// grant the request callback reported wins over that stale read.
     #[test]
-    fn system_audio_snapshot_returns_remembered_denied() {
+    fn microphone_snapshot_uses_a_grant_this_process_observed() {
         assert_eq!(
-            system_audio_snapshot_state(true, Some(PermState::Denied)),
+            microphone_snapshot_state(PermState::Unknown, true),
+            PermState::Granted
+        );
+        assert_eq!(
+            microphone_snapshot_state(PermState::Unknown, false),
+            PermState::Unknown
+        );
+    }
+
+    /// AC6: the two permission rows are gone from the code, and a database
+    /// still carrying them opens and reads back like any other.
+    #[test]
+    fn a_database_carrying_the_removed_permission_rows_still_loads() {
+        let (db, dir) = crate::test_helpers::fixtures::test_db();
+        db.set_setting("microphone_permission", "\"granted\"")
+            .unwrap();
+        db.set_setting("system_audio_permission", "\"denied\"")
+            .unwrap();
+        drop(db);
+
+        let db = crate::db::Database::open(&dir.path().join("test.db"))
+            .expect("a database holding the old permission rows must still open");
+        let settings = db.get_all_settings().expect("settings must read back");
+        assert!(
+            settings
+                .iter()
+                .any(|(key, _)| key == "microphone_permission"),
+            "the rows are left in place, just unread"
+        );
+    }
+
+    /// AC7: the SPI answers on its own, and its verdict is the row.
+    #[test]
+    fn system_audio_reads_the_tcc_preflight_without_mounting_a_tap() {
+        for (raw, expected) in [
+            (PermState::Granted, PermState::Granted),
+            (PermState::Denied, PermState::Denied),
+            (PermState::Unknown, PermState::Unknown),
+        ] {
+            assert_eq!(system_audio_state_with(true, || Some(raw), false), expected);
+        }
+    }
+
+    /// AC8: a missing `TCCAccessPreflight` reads as "not determined". It must
+    /// not fall back to the tap: a read that mounts a tap blocks the poll for
+    /// two seconds and raises the prompt the user never asked for.
+    #[test]
+    fn system_audio_without_the_spi_reads_unknown_and_never_probes() {
+        assert_eq!(
+            system_audio_state_with(true, || None, false),
+            PermState::Unknown,
+            "a null dlsym must degrade to Unknown, not panic and not probe"
+        );
+    }
+
+    /// The one case the read cannot answer on its own: no SPI, but this
+    /// process mounted the tap itself and saw the grant. Without this the row
+    /// would stick on "Grant" forever (SOU-120).
+    #[test]
+    fn system_audio_uses_a_grant_this_process_observed() {
+        assert_eq!(
+            system_audio_state_with(true, || None, true),
+            PermState::Granted
+        );
+        assert_eq!(
+            system_audio_state_with(true, || Some(PermState::Unknown), true),
+            PermState::Granted
+        );
+        assert_eq!(
+            system_audio_state_with(true, || Some(PermState::Denied), true),
+            PermState::Denied,
+            "a revoke read from TCC must beat a grant seen earlier"
+        );
+    }
+
+    /// CoreAudio returns noErr and silence when the user refuses, so a tap
+    /// that mounted is not a grant. TCC has the answer.
+    #[test]
+    fn a_refused_system_audio_prompt_is_denied_even_though_the_tap_mounted() {
+        assert_eq!(
+            request_system_audio_with(|| PermState::Granted, || Some(PermState::Denied)),
             PermState::Denied
         );
+        assert_eq!(
+            request_system_audio_with(|| PermState::Granted, || Some(PermState::Granted)),
+            PermState::Granted
+        );
+    }
+
+    /// With no SPI the probe is all there is, and an unsupported OS is not
+    /// asked at all.
+    #[test]
+    fn system_audio_request_falls_back_to_the_probe_and_skips_unsupported() {
+        assert_eq!(
+            request_system_audio_with(|| PermState::Granted, || None),
+            PermState::Granted
+        );
+        assert_eq!(
+            request_system_audio_with(
+                || PermState::Unsupported,
+                || panic!("an unsupported OS must not be preflighted"),
+            ),
+            PermState::Unsupported
+        );
     }
 
     #[test]
-    fn system_audio_snapshot_stays_unsupported_even_if_something_was_remembered() {
+    fn system_audio_stays_unsupported_before_macos_14_4() {
         assert_eq!(
-            system_audio_snapshot_state(false, Some(PermState::Granted)),
-            PermState::Unsupported
-        );
-        assert_eq!(
-            system_audio_snapshot_state(false, None),
+            system_audio_state_with(
+                false,
+                || panic!("an unsupported OS must not be asked"),
+                true
+            ),
             PermState::Unsupported
         );
     }
 
+    /// 0/1/2 is the mapping AudioCap, Hyprnote and screenpipe agree on.
     #[test]
-    fn system_audio_permission_round_trips_through_the_db() {
-        let (db, _dir) = crate::test_helpers::fixtures::test_db();
-        assert_eq!(load_remembered_system_audio(&db), None);
-
-        remember_system_audio(&db, PermState::Granted);
-        assert_eq!(load_remembered_system_audio(&db), Some(PermState::Granted));
+    fn tcc_preflight_values_map_to_states() {
+        assert_eq!(tcc_preflight_state(0), Some(PermState::Granted));
+        assert_eq!(tcc_preflight_state(1), Some(PermState::Denied));
+        assert_eq!(tcc_preflight_state(2), Some(PermState::Unknown));
         assert_eq!(
-            snapshot(&db).system_audio,
-            if system_audio_supported() {
-                PermState::Granted
-            } else {
-                PermState::Unsupported
-            }
-        );
-
-        remember_system_audio(&db, PermState::Denied);
-        assert_eq!(load_remembered_system_audio(&db), Some(PermState::Denied));
-
-        remember_system_audio(&db, PermState::Unknown);
-        assert_eq!(
-            load_remembered_system_audio(&db),
-            Some(PermState::Denied),
-            "Unknown must not clobber a remembered answer"
+            tcc_preflight_state(-1),
+            None,
+            "an unknown value must fall back, not be read as a verdict"
         );
     }
 }
-
-#[cfg(target_os = "macos")]
-fn iohid_check_access(request_type: u32) -> HidAccess {
-    #[link(name = "IOKit", kind = "framework")]
-    unsafe extern "C" {
-        fn IOHIDCheckAccess(request_type: u32) -> u32;
-    }
-    match unsafe { IOHIDCheckAccess(request_type) } {
-        0 => HidAccess::Granted,
-        1 => HidAccess::Denied,
-        _ => HidAccess::Unknown,
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn iohid_check_access(_request_type: u32) -> HidAccess {
-    HidAccess::Granted
-}
-
-fn iohid_listen_access() -> HidAccess {
-    iohid_check_access(HID_LISTEN_EVENT)
-}
-
-fn iohid_post_access() -> HidAccess {
-    iohid_check_access(HID_POST_EVENT)
-}
-
-#[cfg(target_os = "macos")]
-fn request_listen_event_access_now() {
-    #[link(name = "CoreGraphics", kind = "framework")]
-    unsafe extern "C" {
-        fn CGRequestListenEventAccess() -> bool;
-    }
-    #[link(name = "IOKit", kind = "framework")]
-    unsafe extern "C" {
-        fn IOHIDRequestAccess(request_type: u32) -> bool;
-    }
-    register_current_bundle_with_launch_services();
-    // DTS (May 2026): IOHIDRequestAccess is the API that inserts the
-    // Input Monitoring row. CGRequestListenEventAccess is the older
-    // CoreGraphics equivalent. Do not create a listen-only tap here:
-    // with Accessibility already granted the tap succeeds and
-    // CGPreflightListenEventAccess then reports Granted with no row
-    // in the Input Monitoring list.
-    unsafe {
-        let _ = IOHIDRequestAccess(HID_LISTEN_EVENT);
-        let _ = CGRequestListenEventAccess();
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn open_input_monitoring_settings() {
-    // tccutil must not run on the main thread. A Default CGEventTap
-    // (Accessibility) sits on that runloop; blocking it stalls WindowServer
-    // and freezes the whole session with a cold CPU.
-    prepare_listen_event_insert(
-        accessibility_granted(),
-        iohid_check_access(HID_LISTEN_EVENT),
-        || {
-            let id = crate::constants::running_app_identifier();
-            let _ = tccutil_reset_service("ListenEvent", &id);
-        },
-        || {},
-    );
-    prompt_then_open_settings(
-        || on_main(request_listen_event_access_now),
-        wait_for_tcc_insert,
-        || open_privacy_pane("Privacy_ListenEvent"),
-    );
-}
-
-#[cfg(not(target_os = "macos"))]
-fn open_input_monitoring_settings() {}

@@ -122,8 +122,7 @@ Soufflé asks for these as you use the features that need them, never up front:
 | --- | --- | --- |
 | Microphone | Records your voice to transcribe it | Everything |
 | System Audio Recording | Captures what the other participants say, without a virtual audio device | Meetings (macOS 14.4+) |
-| Accessibility | Pastes into the app you were using, and reads back your corrections when "learn from edits" is on | Auto-paste, dictation polish |
-| Input Monitoring | Installs the native event tap for single-key push-to-talk (Fn, lone modifier, F5–F12) | Single-key PTT (optional) |
+| Accessibility | Pastes into the app you were using, reads back your corrections when "learn from edits" is on, and installs the native event tap for single-key shortcuts (Fn, lone modifier, F5–F12) | Auto-paste, dictation polish, single-key shortcuts |
 | Calendar | Reads today's events to list them and offer to start recording | Calendar integration (optional) |
 
 Settings > System > Permissions shows the current state of each and links straight to the matching System Settings pane.

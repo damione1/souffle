@@ -64,9 +64,16 @@ pub fn paste_text(text: &str, delay_ms: u64, method: PasteMethod) -> Result<(), 
     match method {
         PasteMethod::Ax => {
             thread::sleep(Duration::from_millis(delay_ms));
-            if ax_set_applied(&crate::ax_text::set_selected_text(text)) {
+            let ax = crate::ax_text::set_selected_text(text);
+            if ax_set_applied(&ax) {
                 return Ok(());
             }
+            // Which of the two the target app actually saw is the first
+            // question to ask about a paste that did not land.
+            tracing::info!(
+                reason = ?ax,
+                "Accessibility insert did not apply; falling back to Cmd+V"
+            );
             paste_via_cmd_v(text, 0, &mut enigo)?;
         }
         PasteMethod::Clipboard => {
