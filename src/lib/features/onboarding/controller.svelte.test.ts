@@ -61,7 +61,6 @@ describe("createOnboardingController", () => {
       system_audio: "unknown",
       accessibility: "unknown",
       calendar: "unknown",
-      input_monitoring: "unknown",
     });
     permissionsApi.requestPermission.mockResolvedValue("granted");
     startDownload.mockResolvedValue(undefined);
@@ -156,7 +155,6 @@ describe("createOnboardingController", () => {
       system_audio: "granted",
       accessibility: "granted",
       calendar: "unknown",
-      input_monitoring: "granted",
     });
     const ctrl = createOnboardingController();
     await ctrl.mount();
@@ -181,7 +179,6 @@ describe("createOnboardingController", () => {
       system_audio: "granted",
       accessibility: "denied",
       calendar: "unknown",
-      input_monitoring: "unknown",
     });
     const ctrl = createOnboardingController();
     await ctrl.mount();
@@ -201,7 +198,6 @@ describe("createOnboardingController", () => {
       system_audio: "granted",
       accessibility: "granted",
       calendar: "unknown",
-      input_monitoring: "granted",
     });
     const ctrl = createOnboardingController();
     await ctrl.mount();
@@ -221,7 +217,6 @@ describe("createOnboardingController", () => {
       system_audio: "granted",
       accessibility: "denied",
       calendar: "unknown",
-      input_monitoring: "unknown",
     });
     const ctrl = createOnboardingController();
     await ctrl.mount();
@@ -232,7 +227,6 @@ describe("createOnboardingController", () => {
       system_audio: "granted",
       accessibility: "granted",
       calendar: "unknown",
-      input_monitoring: "granted",
     });
     expect(ctrl.autoPaste).toBe(true);
 
@@ -270,7 +264,6 @@ describe("createOnboardingController", () => {
       system_audio: "granted",
       accessibility: "granted",
       calendar: "unknown",
-      input_monitoring: "granted",
     });
     const ctrl = createOnboardingController();
     await ctrl.mount();

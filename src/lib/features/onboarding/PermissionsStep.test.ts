@@ -19,7 +19,7 @@ function statusWith(microphone: PermState): PermissionStatus {
     microphone,
     system_audio: "unknown",
     accessibility: "granted",
-    calendar: "unknown", input_monitoring: "granted",
+    calendar: "unknown",
   };
 }
 
@@ -59,16 +59,16 @@ describe("PermissionsStep microphone denial", () => {
     expect(within(micRow).queryByRole("button", { name: "Open Settings" })).toBeTruthy();
   });
 
-  it("names Accessibility, not Input Monitoring, for single-key capture (SOU-116 AC1)", async () => {
+  // Accessibility is the permission the native tap actually needs, and the
+  // only one now listed for it. Input Monitoring gated nothing and its row
+  // could never be created from inside the app, so it is gone (SOU-116 AC1).
+  it("names Accessibility for single-key capture and lists no Input Monitoring row", async () => {
     permissionsApi.getPermissionStatus.mockResolvedValue(statusWith("granted"));
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
     expect(within(rowFor("Accessibility")).getByText(/single-key shortcut/)).toBeTruthy();
-    expect(within(rowFor("Input Monitoring")).queryByText(/single-key/)).toBeNull();
-    expect(
-      within(rowFor("Input Monitoring")).getByText(/without modifying them/),
-    ).toBeTruthy();
+    expect(screen.queryByText("Input Monitoring")).toBeNull();
   });
 
   it("does not show the denied hint for an unrelated state", async () => {
@@ -94,7 +94,7 @@ describe("PermissionsStep accessibility repair", () => {
       microphone: "granted",
       system_audio: "unknown",
       accessibility: "denied",
-      calendar: "unknown", input_monitoring: "granted",
+      calendar: "unknown",
     };
   }
 
@@ -159,7 +159,6 @@ describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
       system_audio: "unknown",
       accessibility: "denied",
       calendar: "unknown",
-      input_monitoring: "unknown",
     };
   }
 
@@ -387,7 +386,6 @@ describe("PermissionsStep system audio remembered grant (SOU-120)", () => {
       system_audio: systemAudio,
       accessibility: "granted",
       calendar: "unknown",
-      input_monitoring: "granted",
     };
   }
 

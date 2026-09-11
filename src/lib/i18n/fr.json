@@ -554,8 +554,6 @@
     "system_desc": "Capturer les autres participants pendant les meetings. Actif uniquement en réunion.",
     "accessibility_label": "Accessibilité",
     "accessibility_desc": "Coller les transcriptions automatiquement avec ⌘V, et capturer le raccourci sur une seule touche (ex: fn, cmd). Soufflé ne lit pas votre écran.",
-    "input_monitoring_label": "Surveillance de l'entrée",
-    "input_monitoring_desc": "Observer les événements clavier et souris sans les modifier.",
     "grant": "Autoriser",
     "open_system_settings": "Ouvrir les Réglages Système",
     "open_settings": "Ouvrir Réglages",

@@ -591,11 +591,7 @@
               ],
               [
                 "Accessibility",
-                "Inserts the text into the app you were using, and reads back your corrections when “learn from edits” is on."
-              ],
-              [
-                "Input Monitoring",
-                "Lets push-to-talk bind to a single key (Fn, a lone modifier, or F5–F12) through a native event tap, while other keys pass through. Optional until you set such a shortcut."
+                "Inserts the text into the app you were using, reads back your corrections when “learn from edits” is on, and installs the native event tap that lets a dictation shortcut bind to a single key (Fn, a lone modifier, or F5–F12)."
               ],
               [
                 "Calendar",
@@ -604,7 +600,7 @@
             ]
           },
           {
-            "p": "Refusing one disables only the feature that needs it. Without System Audio a meeting still records your microphone and the transcript is labelled <em>Mic only</em>. Without Accessibility the dictated text is copied to the clipboard instead of being inserted for you. Without Input Monitoring, classic modifier shortcuts still work; only single-key push-to-talk will not install."
+            "p": "Refusing one disables only the feature that needs it. Without System Audio a meeting still records your microphone and the transcript is labelled <em>Mic only</em>. Without Accessibility the dictated text is copied to the clipboard instead of being inserted for you, and a single-key shortcut cannot install its event tap; classic modifier shortcuts still work."
           }
         ]
       },
@@ -646,7 +642,7 @@
         "h": "Shortcuts",
         "blocks": [
           {
-            "p": "Both dictation shortcuts are set in Settings → Interface. Toggle uses a classic combo with a modifier (default <kbd>⌘⇧Space</kbd>). Push-to-talk can use the same style, or a single key — Fn, a lone modifier, or F5–F12 — which needs the Input Monitoring permission so the native tap can install. The two bindings cannot share a combination."
+            "p": "Both dictation shortcuts are set in Settings → Interface. Toggle uses a classic combo with a modifier (default <kbd>⌘⇧Space</kbd>). Push-to-talk can use the same style, or a single key (Fn, a lone modifier, or F5–F12), which needs the Accessibility permission so the native tap can install. The two bindings cannot share a combination."
           },
           {
             "table": [
@@ -975,7 +971,7 @@
               ],
               [
                 "A single-key push-to-talk shortcut does nothing",
-                "Fn, lone modifiers and F5–F12 need Input Monitoring for the native tap. Settings → System → Permissions links there."
+                "Fn, lone modifiers and F5–F12 need the Accessibility permission for the native tap. Settings → System → Permissions links there."
               ],
               [
                 "The dictated text is not inserted",

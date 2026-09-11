@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Accessibility, Check, Mic, Volume2, Keyboard } from "@lucide/svelte";
+  import { Accessibility, Check, Mic, Volume2 } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import Spinner from "../../components/ui/Spinner.svelte";
@@ -23,7 +23,6 @@
     system_audio: "unknown",
     accessibility: "unknown",
     calendar: "unknown",
-    input_monitoring: "unknown",
   });
   let busy = $state<Record<string, boolean>>({});
   let error = $state("");
@@ -97,13 +96,6 @@
       icon: Accessibility,
       label: $t("permissions.accessibility_label"),
       desc: $t("permissions.accessibility_desc"),
-      action: $t("permissions.open_settings"),
-    },
-    {
-      kind: "input_monitoring",
-      icon: Keyboard,
-      label: $t("permissions.input_monitoring_label"),
-      desc: $t("permissions.input_monitoring_desc"),
       action: $t("permissions.open_settings"),
     },
   ]);
@@ -186,14 +178,12 @@
           if (s.microphone !== "unknown") next.microphone = s.microphone;
           if (s.system_audio !== "unknown") next.system_audio = s.system_audio;
           if (s.calendar !== "unknown") next.calendar = s.calendar;
-          if (s.input_monitoring !== "unknown") next.input_monitoring = s.input_monitoring;
 
           if (
             next.accessibility !== status.accessibility ||
             next.microphone !== status.microphone ||
             next.system_audio !== status.system_audio ||
-            next.calendar !== status.calendar ||
-            next.input_monitoring !== status.input_monitoring
+            next.calendar !== status.calendar
           ) {
             setStatus(next);
           }

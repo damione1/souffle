@@ -72,7 +72,6 @@ describe("OnboardingView shortcut step (SOU-053)", () => {
       system_audio: "granted",
       accessibility: "denied",
       calendar: "unknown",
-      input_monitoring: "unknown",
     });
 
     await goToShortcutStep();
@@ -87,7 +86,6 @@ describe("OnboardingView shortcut step (SOU-053)", () => {
       system_audio: "granted",
       accessibility: "granted",
       calendar: "unknown",
-      input_monitoring: "unknown",
     });
 
     await goToShortcutStep();

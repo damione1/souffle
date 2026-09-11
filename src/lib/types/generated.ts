@@ -1627,8 +1627,8 @@ export type PermState = "granted" | "denied" |
 /**
  * Which capability to probe or prompt for via `request`.
  */
-export type PermissionKind = "microphone" | "system_audio" | "accessibility" | "calendar" | "input_monitoring"
-export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState; calendar: PermState; input_monitoring: PermState }
+export type PermissionKind = "microphone" | "system_audio" | "accessibility" | "calendar"
+export type PermissionStatus = { microphone: PermState; system_audio: PermState; accessibility: PermState; calendar: PermState }
 /**
  * Frontend-driven hold on the pill window, toggled by the `pill_hold` /
  * `pill_release` commands. The pill runs in its own webview, separate from
