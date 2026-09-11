@@ -13,6 +13,15 @@ reviews:
   related_prs: true
   poem: false
 
+  auto_review:
+    # Off on purpose: .github/workflows/coderabbit-gate.yml adds `ci-green` once
+    # Contracts and E2E pass on the head commit, and removes it on every push.
+    # Reviewing a diff that the suites are about to invalidate spends credits
+    # twice for one answer.
+    enabled: false
+    labels:
+      - ci-green
+
   # Generated and vendored code is not reviewable material.
   path_filters:
     - "!src/lib/types/generated.ts"
