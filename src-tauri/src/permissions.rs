@@ -146,9 +146,7 @@ pub fn system_audio_state_with(
     }
     match preflight() {
         Some(PermState::Granted) => PermState::Granted,
-        Some(PermState::Denied | PermState::Unknown) | None if observed_grant => {
-            PermState::Granted
-        }
+        Some(PermState::Denied | PermState::Unknown) | None if observed_grant => PermState::Granted,
         Some(state) => state,
         None => PermState::Unknown,
     }
@@ -628,11 +626,8 @@ fn tcc_request(service: &str) -> Option<bool> {
     use std::ffi::c_void;
     use std::sync::OnceLock;
 
-    type TccAccessRequest = unsafe extern "C" fn(
-        *const c_void,
-        *const c_void,
-        *mut block2::DynBlock<dyn Fn(Bool)>,
-    );
+    type TccAccessRequest =
+        unsafe extern "C" fn(*const c_void, *const c_void, *mut block2::DynBlock<dyn Fn(Bool)>);
 
     static SYMBOL: OnceLock<Option<TccAccessRequest>> = OnceLock::new();
     let request = (*SYMBOL.get_or_init(|| unsafe {
