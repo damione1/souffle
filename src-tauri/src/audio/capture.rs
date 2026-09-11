@@ -1675,12 +1675,19 @@ impl AudioCapture {
                 err_fn,
                 None,
             )
-            .map_err(|e| format!("Failed to build input stream: {e}"))?;
+            .map_err(|e| {
+                // A CoreAudio open that failed slowly is the case worth a
+                // line: the elapsed time is the only evidence of a wedged
+                // device, and `?` would throw it away.
+                log_slow_mic_open(opened_at, &device_name);
+                format!("Failed to build input stream: {e}")
+            })?;
 
         self.active_session_id.store(session_id, Ordering::Release);
-        stream
-            .play()
-            .map_err(|e| format!("Failed to start stream: {e}"))?;
+        stream.play().map_err(|e| {
+            log_slow_mic_open(opened_at, &device_name);
+            format!("Failed to start stream: {e}")
+        })?;
         log_slow_mic_open(opened_at, &device_name);
         self.stream = Some(stream);
 
@@ -1818,10 +1825,20 @@ impl AudioCapture {
                 err_fn,
                 None,
             )
-            .map_err(|e| format!("Failed to build input stream: {e}"))?;
-        stream
-            .play()
-            .map_err(|e| format!("Failed to start stream: {e}"))?;
+            .map_err(|e| {
+                log_slow_mic_open(
+                    opened_at,
+                    self.mic_device_name.as_deref().unwrap_or("unknown"),
+                );
+                format!("Failed to build input stream: {e}")
+            })?;
+        stream.play().map_err(|e| {
+            log_slow_mic_open(
+                opened_at,
+                self.mic_device_name.as_deref().unwrap_or("unknown"),
+            );
+            format!("Failed to start stream: {e}")
+        })?;
         log_slow_mic_open(
             opened_at,
             self.mic_device_name.as_deref().unwrap_or("unknown"),
