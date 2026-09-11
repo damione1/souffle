@@ -379,7 +379,12 @@ fn accessibility_trusted_with_prompt(_prompt: bool) -> bool {
 /// repair had failed, including the ones that worked (SOU-054).
 pub fn repair_accessibility() -> Result<RepairAccessibilityResult, String> {
     let bundle_id = crate::constants::running_app_identifier();
+    // The only trace this path leaves. Without it a repair that never runs
+    // and a repair that runs and changes nothing look identical from the
+    // outside, and both are reported as "the button does nothing".
+    tracing::info!(bundle_id, "Repairing the Accessibility permission");
     tccutil_reset_service("Accessibility", &bundle_id)?;
+    tracing::info!("Accessibility TCC entry reset; asking macOS to prompt");
     let _ = accessibility_trusted_with_prompt(true);
     Ok(RepairAccessibilityResult {
         reset_performed: true,
