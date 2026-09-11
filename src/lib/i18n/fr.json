@@ -439,17 +439,7 @@
     "continue": "Continuer",
     "back": "Retour",
     "finish": "Commencer",
-    "step_progress": "Étape {current} sur {total}",
-    "interview_title": "Dictionnaire",
-    "interview_subtitle": "5 questions optionnelles pour aider Souffle à reconnaître vos mots habituels.",
-    "interview_skip": "Passer",
-    "interview_next": "Suivant",
-    "interview_q_name": "Quel est votre prénom ?",
-    "interview_q_job": "Quel est votre métier ?",
-    "interview_q_people": "Quels sont les prénoms de vos proches ou collègues ?",
-    "interview_q_jargon": "Quel est le jargon que vous utilisez souvent ?",
-    "interview_q_tone": "Quel ton ou style Souffle doit-il utiliser lors du nettoyage de la dictée (ex: tutoiement, formel, concis) ?",
-    "interview_ton_polish_warning": "Le nettoyage de dictée est désactivé. Ce style sera enregistré mais ignoré tant qu'il n'est pas activé."
+    "step_progress": "Étape {current} sur {total}"
   },
   "status_chip": {
     "ready": "Prêt",

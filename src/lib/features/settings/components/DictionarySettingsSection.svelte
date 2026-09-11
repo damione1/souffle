@@ -2,10 +2,7 @@
   import { Trash2, Plus } from "@lucide/svelte";
   import { t } from "svelte-i18n";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
-  import DictionaryInterview from "../../onboarding/DictionaryInterview.svelte";
   import type { DictionaryEntry } from "../../../types";
-
-  let showInterview = $state(false);
 
   let {
     entries,
@@ -81,22 +78,8 @@
 </script>
 
 <section class="settings-group">
-  <div class="flex items-center justify-between">
-    <h3>{$t("settings_dictionary.title")}</h3>
-    <button
-      class="btn btn-ghost btn-sm"
-      onclick={() => (showInterview = true)}
-    >
-      {$t("onboarding.interview_title")}
-    </button>
-  </div>
+  <h3>{$t("settings_dictionary.title")}</h3>
   <div class="settings-rows">
-  {#if showInterview}
-    <div class="p-4 border border-surface-3 rounded-xl bg-surface-1">
-      <h4 class="font-medium text-sm mb-2">{$t("onboarding.interview_title")}</h4>
-      <DictionaryInterview onComplete={() => { showInterview = false; }} />
-    </div>
-  {/if}
   <SettingsField
     label={$t("settings_dictionary.learn_from_edit")}
     description={$t("settings_dictionary.learn_from_edit_desc")}
