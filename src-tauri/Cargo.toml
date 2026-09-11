@@ -79,6 +79,9 @@ whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }
 
 # Phase 4: SQLite unified storage
 rusqlite = { version = "0.33", features = ["bundled-full"] }
+# Accent folding for snippet trigger uniqueness (SOU-035), mirrors the
+# NFD + strip-marks fold the frontend matcher applies.
+unicode-normalization = "0.1"
 
 # Pipeline quality filters + Parakeet (all share the bundled ONNX Runtime
 # dylib via ort load-dynamic — never link onnxruntime statically here, its
@@ -108,11 +111,11 @@ objc2-event-kit = "0.3"
 objc2-av-foundation = { version = "0.3", default-features = false, features = [
     "AVCaptureDevice",
     "AVMediaFormat",
+    "block2",
 ] }
 # Sleep/wake observers (NSWorkspace notifications)
 objc2-app-kit = "0.3"
 ringbuf = "0.5"
-sonora = "0.1"
 block2 = "0.6"
 dispatch2 = "0.3"
 
@@ -123,11 +126,17 @@ dispatch2 = "0.3"
 # container.
 opus = "0.3"
 ogg = "0.9"
+core-graphics = "0.25.0"
+core-foundation = "0.10.1"
+objc2-service-management = "0.3"
+fdaf-aec = "0.1.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility-sys = "0.2"
 
 [features]
+default = ["private-tcc"]
+
 # Exposes the mock transcription engine (normally `#[cfg(test)]`-only) so the
 # `tests/` integration binaries — which link the lib as a normal, non-`cfg(test)`
 # dependency — can use it too. Enabled automatically for `cargo test` via the
@@ -136,6 +145,13 @@ accessibility-sys = "0.2"
 # lib is built as a dependency, even via this self-reference.
 test-support = []
 
+# `TCCAccessPreflight` is an SPI: there is no public API to read the system
+# audio capture permission, and Apple can drop the symbol. On means the status
+# is read by XPC to tccd; off (or a `dlsym` miss at runtime) falls back to
+# mounting a short-lived tap, which answers the same question by doing the
+# thing.
+private-tcc = []
+
 [dev-dependencies]
 tempfile = "3"
 souffle-mcp = { path = "souffle-mcp" }
@@ -143,27 +159,6 @@ souffle = { path = ".", features = ["test-support"] }
 # MockRuntime + mock_builder for driving Tauri commands in integration tests
 # without a real webview.
 tauri = { version = "2", features = ["test"] }
-
-# sonora-aec3 0.1.0 (the only version published to crates.io) panics in
-# `AdaptiveFirFilter::set_size_partitions` when the filter shrinks immediately
-# (e.g. on an echo-path-change event after the filter grew past its initial
-# size): `zero_filter(old_size, new_size, ..)` slices `old_size..new_size`,
-# which is an invalid range once old_size > new_size. Fixed upstream in
-# dec6a074 ("prevent panic when shrinking adaptive FIR filter", #15) but not
-# yet released as a new crates.io version. Pinned to a specific commit
-# (rather than a branch) so the fix is reproducible via Cargo.lock; bump this
-# rev, or drop the patch entirely, once 0.1.1+ ships. Every sonora-* crate is
-# patched to the same rev (not just sonora-aec3) so the whole dependency
-# graph resolves to one source instead of building duplicate copies of the
-# shared DSP crates (sonora-common-audio, sonora-fft, sonora-simd).
-[patch.crates-io]
-sonora = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
-sonora-aec3 = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
-sonora-agc2 = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
-sonora-common-audio = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
-sonora-fft = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
-sonora-ns = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
-sonora-simd = { git = "https://github.com/dignifiedquire/sonora", rev = "70c673606e1db8442a8ba20659b2bc7355555274" }
 
 [profile.release]
 strip = true

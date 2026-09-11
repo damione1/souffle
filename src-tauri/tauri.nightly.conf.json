@@ -1,0 +1,9 @@
+{
+  "productName": "Soufflé Nightly",
+  "identifier": "com.souffle.desktop.nightly",
+  "bundle": {
+    "macOS": {
+      "entitlements": "./entitlements.nightly.plist"
+    }
+  }
+}

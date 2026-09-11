@@ -53,7 +53,8 @@
       "body": "With the default model the text streams in while you are still talking, punctuated and capitalised. A local pass can tidy the phrasing before you use it, and that same model handles French and English without you switching anything.",
       "bullets": [
         "Text appears as you speak, not once you stop",
-        "Press once to start and stop, or hold to talk",
+        "Press once to start and stop, or hold to talk — including Fn or a lone modifier",
+        "Say a trigger phrase to paste a voice snippet instead of free dictation",
         "Fix a misheard name by hand once, and it stays fixed",
         "A local LLM pass can polish the wording, with editable prompts",
         "French and English on the same model, no switching"
@@ -590,7 +591,7 @@
               ],
               [
                 "Accessibility",
-                "Inserts the text into the app you were using, and reads back your corrections when “learn from edits” is on."
+                "Inserts the text into the app you were using, reads back your corrections when “learn from edits” is on, and installs the native event tap that lets a dictation shortcut bind to a single key (Fn, a lone modifier, or F5–F12)."
               ],
               [
                 "Calendar",
@@ -599,7 +600,7 @@
             ]
           },
           {
-            "p": "Refusing one disables only the feature that needs it. Without System Audio a meeting still records your microphone and the transcript is labelled <em>Mic only</em>. Without Accessibility the dictated text is copied to the clipboard instead of being inserted for you."
+            "p": "Refusing one disables only the feature that needs it. Without System Audio a meeting still records your microphone and the transcript is labelled <em>Mic only</em>. Without Accessibility the dictated text is copied to the clipboard instead of being inserted for you, and a single-key shortcut cannot install its event tap; classic modifier shortcuts still work."
           }
         ]
       },
@@ -608,10 +609,10 @@
         "h": "First run",
         "blocks": [
           {
-            "p": "A setup wizard covers four things: the permissions Soufflé needs, which microphone to use, the speech model to download, and the dictation shortcut. The default shortcut is <kbd>⌘⇧Space</kbd>."
+            "p": "A setup wizard covers the permissions Soufflé needs, which microphone to use, the speech model to download, and the dictation shortcut. The default shortcut is <kbd>⌘⇧Space</kbd>."
           },
           {
-            "p": "The last step also offers auto-paste, on by default: when you stop dictating, the text goes straight into the app you were in. Turn it off and the text is put on the clipboard instead. Everything here can be changed later in Settings."
+            "p": "The shortcut step also offers auto-paste, on by default: when you stop dictating, the text goes straight into the app you were in. Turn it off and the text is put on the clipboard instead. A fresh install finishes with Launch at login on; change that later in Settings → System. Everything here can be changed later in Settings."
           }
         ]
       },
@@ -629,6 +630,9 @@
             "p": "Two optional passes run on the way out. <strong>Dictation polish</strong> sends the raw transcript through a local LLM with an editable prompt template (clean up, professional email, bullet points, remove fillers) and needs Apple Intelligence or Ollama. <strong>Learn from edits</strong>, on by default, watches the field just after insertion: correct a misheard name by hand once and Soufflé keeps that spelling for next time, in the custom dictionary under Settings → Transcription."
           },
           {
+            "p": "<strong>Voice snippets</strong> live under Settings → Transcription: say a trigger phrase at the start of a dictation and Soufflé pastes the expansion instead, case- and accent-insensitive, with no AI polish on that take. The menu bar also offers <em>Copy Last Transcription</em> when you need the previous take back."
+          },
+          {
             "p": "Optional start and stop sounds confirm the shortcut landed."
           }
         ]
@@ -638,7 +642,7 @@
         "h": "Shortcuts",
         "blocks": [
           {
-            "p": "Both dictation shortcuts are set in Settings → Interface. Each must include a modifier key, and the two cannot share a combination."
+            "p": "Both dictation shortcuts are set in Settings → Interface. Toggle uses a classic combo with a modifier (default <kbd>⌘⇧Space</kbd>). Push-to-talk can use the same style, or a single key (Fn, a lone modifier, or F5–F12), which needs the Accessibility permission so the native tap can install. The two bindings cannot share a combination."
           },
           {
             "table": [
@@ -648,7 +652,7 @@
               ],
               [
                 "Push-to-talk",
-                "Hold to record, release to stop. Not set by default; bind it if you prefer holding."
+                "Hold to record, release to stop. Not set by default; bind a classic combo or a single key (Fn, lone modifier, F5–F12) if you prefer holding."
               ]
             ]
           }
@@ -663,6 +667,9 @@
           },
           {
             "p": "When you stop, the pill switches to <em>Reformulating…</em> while the local polish pass runs, then disappears as the text lands in the field you were already using. The window is excluded from screen capture, so it does not turn up in the meeting you are in."
+          },
+          {
+            "p": "You can hide the overlay in Settings → Interface; drag it when visible to move it. Position is remembered across display changes."
           }
         ]
       },
@@ -698,7 +705,7 @@
             "code": "brew install ollama\nollama pull qwen2.5:7b"
           },
           {
-            "p": "Then, in Settings → Meetings → Summarization, leave the server at <code>http://localhost:11434</code> and pick the model. Any general-purpose chat model works; <code>qwen2.5:7b</code> is the one Soufflé recommends. The same provider is what dictation polish uses."
+            "p": "Then, in Settings → AI, leave the server at <code>http://localhost:11434</code> and pick the model. Any general-purpose chat model works; <code>qwen2.5:7b</code> is the one Soufflé recommends. The same provider is what dictation polish uses."
           },
           {
             "p": "Nothing about a summary is sent anywhere. With Ollama the only request is to your own instance."
@@ -736,7 +743,7 @@
             "p": "The two Kyutai models are the streaming ones: text appears while you are still talking. Whisper and Parakeet transcribe the whole recording once you stop, which is fine for a meeting you read afterwards but changes how dictation feels."
           },
           {
-            "p": "A loaded model is unloaded after an hour of inactivity to give the RAM back, and reloaded on the next recording. Change or disable that in Settings → Audio."
+            "p": "A loaded model is unloaded after an hour of inactivity to give the RAM back, and reloaded on the next recording. Change or disable that in Settings → Transcription."
           }
         ]
       },
@@ -745,7 +752,7 @@
         "h": "Settings reference",
         "blocks": [
           {
-            "p": "Five tabs. The settings worth knowing about:"
+            "p": "Six tabs. The settings worth knowing about:"
           },
           {
             "table": [
@@ -762,12 +769,20 @@
                 "Start and stop cues, with a volume."
               ],
               [
-                "Dictation polish<br><span class=\"docs-tab\">Transcription</span>",
+                "Hide recording overlay<br><span class=\"docs-tab\">Interface</span>",
+                "Hide the floating HUD while dictating or in a meeting. Drag it when visible to move it; the position is remembered."
+              ],
+              [
+                "Dictation polish<br><span class=\"docs-tab\">AI</span>",
                 "The local LLM pass and its prompt templates, which you can edit. Needs Apple Intelligence or Ollama."
               ],
               [
                 "Custom dictionary<br><span class=\"docs-tab\">Transcription</span>",
                 "Proper nouns and technical terms to spell correctly, filled in by hand or learned from your corrections."
+              ],
+              [
+                "Voice snippets<br><span class=\"docs-tab\">Transcription</span>",
+                "Trigger phrases that expand to a prepared block of text at the start of a dictation. Matching skips the polish pass."
               ],
               [
                 "Microphone priority<br><span class=\"docs-tab\">Audio</span>",
@@ -778,7 +793,7 @@
                 "Stop after 5, 10, 15 or 30 minutes without speech, with a hard failsafe behind it."
               ],
               [
-                "Model unload<br><span class=\"docs-tab\">Audio</span>",
+                "Model unload<br><span class=\"docs-tab\">Transcription</span>",
                 "Free the model's RAM after 5, 15 or 60 idle minutes, or never."
               ],
               [
@@ -786,8 +801,12 @@
                 "Off until you turn it on. Lists today's events and offers to start recording when one begins."
               ],
               [
-                "Summarization<br><span class=\"docs-tab\">Meetings</span>",
+                "Summarization<br><span class=\"docs-tab\">AI</span>",
                 "Provider, Ollama server and model, and the summary templates."
+              ],
+              [
+                "Launch at login<br><span class=\"docs-tab\">System</span>",
+                "Open Soufflé automatically when you start your Mac. On by default after a fresh setup wizard."
               ],
               [
                 "Meeting audio<br><span class=\"docs-tab\">System</span>",
@@ -949,6 +968,10 @@
               [
                 "The other participants are missing from the transcript",
                 "System-audio capture needs macOS 14.4 or later and the System Audio permission. When it is unavailable the transcript is labelled <em>Mic only</em> and records your microphone alone."
+              ],
+              [
+                "A single-key push-to-talk shortcut does nothing",
+                "Fn, lone modifiers and F5–F12 need the Accessibility permission for the native tap. Settings → System → Permissions links there."
               ],
               [
                 "The dictated text is not inserted",

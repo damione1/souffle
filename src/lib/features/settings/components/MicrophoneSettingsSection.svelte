@@ -72,7 +72,7 @@
 <section class="settings-group">
   <h3>{$t("settings_audio.microphone_title")}</h3>
   <div class="settings-rows">
-    <div class="flex items-center justify-between gap-4">
+    <div id="audio.mic" data-settings-anchor="audio.mic" class="flex items-center justify-between gap-4">
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <label for="input-device" class="setting-label">{$t("settings_audio.input_device")}</label>
         <span class="setting-desc">{$t("settings_audio.description")}</span>

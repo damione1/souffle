@@ -56,7 +56,19 @@ describe("PermissionsStep microphone denial", () => {
 
     const micRow = rowFor("Microphone");
     expect(within(micRow).getByText(/No microphone was found/)).toBeTruthy();
-    expect(within(micRow).queryByRole("button", { name: "Open Settings" })).toBeNull();
+    expect(within(micRow).queryByRole("button", { name: "Open Settings" })).toBeTruthy();
+  });
+
+  // Accessibility is the permission the native tap actually needs, and the
+  // only one now listed for it. Input Monitoring gated nothing and its row
+  // could never be created from inside the app, so it is gone (SOU-116 AC1).
+  it("names Accessibility for single-key capture and lists no Input Monitoring row", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWith("granted"));
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    expect(within(rowFor("Accessibility")).getByText(/single-key shortcut/)).toBeTruthy();
+    expect(screen.queryByText("Input Monitoring")).toBeNull();
   });
 
   it("does not show the denied hint for an unrelated state", async () => {
@@ -86,6 +98,22 @@ describe("PermissionsStep accessibility repair", () => {
     };
   }
 
+  function repairButton(): HTMLElement {
+    return screen.getByRole("button", { name: "Repair permissions" });
+  }
+
+  it("keeps Repair permissions visible under the list on first paint", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    expect(screen.getByText("Permissions issues?")).toBeTruthy();
+    expect(repairButton()).toBeTruthy();
+    expect(
+      within(rowFor("Accessibility")).queryByRole("button", { name: "Repair permissions" }),
+    ).toBeNull();
+  });
+
   it("announces success when tccutil reset succeeds", async () => {
     permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
     permissionsApi.repairAccessibilityPermission.mockResolvedValue({
@@ -95,11 +123,10 @@ describe("PermissionsStep accessibility repair", () => {
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
-    const axRow = rowFor("Accessibility");
-    await fireEvent.click(within(axRow).getByRole("button", { name: "Repair permission" }));
+    await fireEvent.click(repairButton());
 
     await waitFor(() => {
-      expect(within(axRow).getByText(/new prompt should appear/i)).toBeTruthy();
+      expect(screen.getByText(/new prompt should appear/i)).toBeTruthy();
     });
     expect(permissionsApi.repairAccessibilityPermission).toHaveBeenCalledOnce();
   });
@@ -110,14 +137,120 @@ describe("PermissionsStep accessibility repair", () => {
     render(PermissionsStep);
 
     await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
-    const axRow = rowFor("Accessibility");
-    await fireEvent.click(within(axRow).getByRole("button", { name: "Repair permission" }));
+    await fireEvent.click(repairButton());
 
     await waitFor(() => {
       expect(screen.getByText(/tccutil reset Accessibility failed/)).toBeTruthy();
     });
-    expect(within(axRow).queryByText(/new prompt should appear/i)).toBeNull();
-    expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
+    expect(screen.queryByText(/new prompt should appear/i)).toBeNull();
+    expect(screen.getByText("Permissions issues?")).toBeTruthy();
+  });
+});
+
+describe("PermissionsStep accessibility on a fresh install (SOU-055)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  function accessibilityDenied(): PermissionStatus {
+    return {
+      microphone: "granted",
+      system_audio: "unknown",
+      accessibility: "denied",
+      calendar: "unknown",
+    };
+  }
+
+  it("does not diagnose a stale TCC entry before the user has tried anything", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+
+    const axRow = rowFor("Accessibility");
+    expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
+    expect(within(axRow).queryByRole("button", { name: "Repair permissions" })).toBeNull();
+    expect(within(axRow).getByText(/tick Soufflé in the Accessibility list/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Repair permissions" })).toBeTruthy();
+  });
+
+  it("still does not diagnose it right after Open Settings, before the user comes back", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    // request_permission answers Denied synchronously while System Settings
+    // is still opening; that answer says nothing about the user's intent.
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+
+    await waitFor(() => expect(permissionsApi.requestPermission).toHaveBeenCalledWith("accessibility"));
+    expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
+    expect(within(axRow).queryByRole("button", { name: "Repair permissions" })).toBeNull();
+  });
+
+  it("diagnoses it once the user has left for Settings and come back still refused", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+    await fireEvent.blur(window);
+    await fireEvent.focus(window);
+
+    await waitFor(() => {
+      expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
+    });
+    expect(screen.getByRole("button", { name: "Repair permissions" })).toBeTruthy();
+  });
+
+  it("diagnoses it on a second attempt even without a blur/focus pair", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    const openSettings = () =>
+      fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+
+    await openSettings();
+    expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
+    await openSettings();
+
+    await waitFor(() => {
+      expect(within(axRow).getByText(/stale entry/i)).toBeTruthy();
+    });
+  });
+
+  it("drops the diagnosis again once the permission is granted", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(accessibilityDenied());
+    permissionsApi.requestPermission.mockResolvedValue("denied");
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    const axRow = rowFor("Accessibility");
+    await fireEvent.click(within(axRow).getByRole("button", { name: "Open Settings" }));
+    await fireEvent.blur(window);
+    await fireEvent.focus(window);
+    await waitFor(() => expect(within(axRow).getByText(/stale entry/i)).toBeTruthy());
+
+    // The 600 ms poll reports the grant.
+    permissionsApi.getPermissionStatus.mockResolvedValue({
+      ...accessibilityDenied(),
+      accessibility: "granted",
+    });
+    await waitFor(
+      () => {
+        expect(within(axRow).getByText("Granted")).toBeTruthy();
+      },
+      { timeout: 3000 },
+    );
+    expect(within(axRow).queryByText(/stale entry/i)).toBeNull();
   });
 });
 
@@ -237,5 +370,110 @@ describe("PermissionsStep permission poll", () => {
 
     await vi.advanceTimersByTimeAsync(600);
     expect(permissionsApi.getPermissionStatus).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("PermissionsStep system audio remembered grant (SOU-120)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  function statusWithAudio(systemAudio: PermState): PermissionStatus {
+    return {
+      microphone: "granted",
+      system_audio: systemAudio,
+      accessibility: "granted",
+      calendar: "unknown",
+    };
+  }
+
+  it("shows Granted on open when the backend remembers a grant", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
+    render(PermissionsStep);
+
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
+    });
+    expect(within(rowFor("System audio")).queryByRole("button", { name: "Grant" })).toBeNull();
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("keeps Allow when the backend has never probed", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("unknown"));
+    render(PermissionsStep);
+
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+    expect(within(rowFor("System audio")).getByRole("button", { name: "Grant" })).toBeTruthy();
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("shows Unsupported without an Allow button", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("unsupported"));
+    render(PermissionsStep);
+
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByText("Not supported")).toBeTruthy();
+    });
+    expect(within(rowFor("System audio")).queryByRole("button")).toBeNull();
+  });
+
+  // SOU-124 AC7: returning from System Settings used to re-probe, which
+  // mounted a Core Audio tap on every round trip. The poll reads TCC live
+  // instead, so a revoke arrives without any device being opened.
+  it("never probes on a focus round trip, and picks a revoke up from the poll", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
+    render(PermissionsStep);
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
+    });
+
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("focus"));
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("denied"));
+    await vi.advanceTimersByTimeAsync(600);
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByRole("button", { name: "Grant" })).toBeTruthy();
+    });
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("does not re-probe a remembered deny or an unprobed row (SOU-120 AC3)", async () => {
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("denied"));
+    render(PermissionsStep);
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByRole("button", { name: "Grant" })).toBeTruthy();
+    });
+
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("focus"));
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+
+    cleanup();
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("unknown"));
+    render(PermissionsStep);
+    await waitFor(() => expect(permissionsApi.getPermissionStatus).toHaveBeenCalled());
+
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("focus"));
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("the 600 ms poll does not mount a tap on a remembered grant (SOU-120 AC5)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    permissionsApi.getPermissionStatus.mockResolvedValue(statusWithAudio("granted"));
+    render(PermissionsStep);
+    await waitFor(() => {
+      expect(within(rowFor("System audio")).getByText("Granted")).toBeTruthy();
+    });
+
+    await vi.advanceTimersByTimeAsync(1800);
+    expect(permissionsApi.requestPermission).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { flushSync } from "svelte";
 
 // --- Mocks for Tauri runtime ---
 
@@ -24,7 +25,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(),
 }));
 
-import { createTranscriptionController, notifyDictationStopRequested, resetTranscriptionControllerForTest } from "./controller.svelte";
+import { createTranscriptionController, notifyDictationCancelRequested, notifyDictationStopRequested, resetTranscriptionControllerForTest } from "./controller.svelte";
 import {
   startTranscriptionModelDownload,
   startTranscriptionModelLoad,
@@ -137,6 +138,8 @@ describe("transcription controller", () => {
         return Promise.resolve(null);
       case "delete_dictation_entry":
         return Promise.resolve(null);
+      case "list_snippets":
+        return Promise.resolve([]);
       case "clear_dictation_history":
         return Promise.resolve(null);
       case "paste_text":
@@ -192,8 +195,10 @@ describe("transcription controller", () => {
     app.selectedDevice = "";
     app.settings = { ...mockSettings };
     app.settingsOpen = false;
-    app.settingsInitialTab = null;
+    app.settingsInitialAnchor = null;
+    app.appPermissions = null;
     app.permissionsPanelOpen = false;
+    app.snippets = [];
 
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -302,10 +307,59 @@ describe("transcription controller", () => {
       savedToHistory: true,
     });
     expect(ctrl.statusMessage).toBe("Copied — press ⌘V");
-    expect(ctrl.statusActionLabel).toBe("Repair permission");
+    expect(ctrl.statusActionLabel).toBe("Repair permissions");
     expect(ctrl.statusAction).toBeTypeOf("function");
     ctrl.statusAction?.();
     expect(ctrl.app.permissionsPanelOpen).toBe(true);
+  });
+
+  /** SOU-089 AC6: the banner is stored as a reason, so granting the permission
+   * from System Settings clears it — no new dictation session required. */
+  it("clears the accessibility banner once the permission is granted", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      if (cmd === "paste_text") {
+        return Promise.reject("Accessibility permission missing.");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = {
+      ...ctrl.app.settings,
+      auto_paste: true,
+      dictation_polish_enabled: false,
+    };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+      start_ms: 0,
+      end_ms: 1000,
+    });
+    await ctrl.toggleRecording(true);
+
+    expect(ctrl.statusActionLabel).toBe("Repair permissions");
+
+    // What the app-level snapshot does when the user grants it in System Settings.
+    ctrl.app.appPermissions = {
+      microphone: "granted",
+      system_audio: "unknown",
+      accessibility: "granted",
+      calendar: "unknown",
+    };
+    flushSync();
+
+    expect(ctrl.statusMessage).toBe("");
+    expect(ctrl.statusActionLabel).toBeUndefined();
   });
 
   it("notifies outside the window when a shortcut paste fails and history fails", async () => {
@@ -773,7 +827,7 @@ describe("transcription controller", () => {
     expect(ctrl.statusActionLabel).toBe("Open model");
     ctrl.statusAction?.();
     expect(ctrl.app.settingsOpen).toBe(true);
-    expect(ctrl.app.settingsInitialTab).toBe("transcription");
+    expect(ctrl.app.settingsInitialAnchor).toBe("transcription.model");
   });
 
   it("toggleRecording guards double start", async () => {
@@ -836,7 +890,7 @@ describe("transcription controller", () => {
 
     expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
-    expect(ctrl.statusActionLabel).toBe("Repair permission");
+    expect(ctrl.statusActionLabel).toBe("Repair permissions");
 
     ctrl.app.machineState = { state: "idle" };
     ctrl.app.transcriptionRuntimePhase = "download_required";
@@ -844,7 +898,7 @@ describe("transcription controller", () => {
 
     expect(ctrl.statusMessage).toContain("Download and load");
     expect(ctrl.statusActionLabel).toBe("Open model");
-    expect(ctrl.statusActionLabel).not.toBe("Repair permission");
+    expect(ctrl.statusActionLabel).not.toBe("Repair permissions");
   });
 
   it("does not double-start while ensureModelLoaded is still pending", async () => {
@@ -948,48 +1002,7 @@ describe("transcription controller", () => {
     expect(ctrl.modelOperationState).toBe("idle");
   });
 
-  it("rewrite shortcut captures selection and polishes with extra args", async () => {
-    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
-    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
-        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
-        return Promise.resolve(null);
-      }
-      if (cmd === "frontmost_app_name") return Promise.resolve("Safari");
-      if (cmd === "read_selected_text") return Promise.resolve("old selection");
-      return defaultInvoke(cmd, args);
-    });
-
-    const ctrl = createTranscriptionController();
-    await ctrl.mount();
-    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
-
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.anything());
-    });
-    expect(mockInvoke).toHaveBeenCalledWith("frontmost_app_name");
-    expect(mockInvoke).toHaveBeenCalledWith("read_selected_text");
-
-    simulateRecordingStarted(ctrl.app);
-    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
-      text: "hello world",
-      is_final: true,
-      start_ms: 0,
-      end_ms: 1000,
-    });
-
-    eventListeners["shortcut-rewrite"]?.({ payload: null });
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
-        text: "hello world",
-        focusedApp: "Safari",
-        rewriteOf: "old selection",
-      }));
-    });
-  });
-
-  it("insert start polishes with focusedApp and null rewriteOf", async () => {
+  it("insert start polishes with focusedApp", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "start_transcription") {
@@ -1020,7 +1033,6 @@ describe("transcription controller", () => {
     expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
       text: "hello world",
       focusedApp: "Mail",
-      rewriteOf: null,
     }));
   });
 
@@ -1458,6 +1470,98 @@ describe("transcription controller", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
   });
 
+  it("does not auto-hide a banner that carries an action", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "get_model_status") {
+          return Promise.resolve({ ...fakeStatus, phase: "download_required" });
+        }
+        return defaultInvoke(cmd);
+      });
+
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+      await ctrl.toggleRecording();
+
+      expect(ctrl.statusActionLabel).toBe("Open model");
+      const message = ctrl.statusMessage;
+      expect(message).toContain("Download and load");
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ctrl.statusMessage).toBe(message);
+      expect(ctrl.statusActionLabel).toBe("Open model");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clearBanner dismisses immediately and cancels the auto-hide timer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      expect(ctrl.statusMessage).toBe("Hold a little longer");
+
+      ctrl.clearBanner();
+      expect(ctrl.statusMessage).toBe("");
+      expect(ctrl.statusActionLabel).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ctrl.statusMessage).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("auto-hides the banner after 5s without wiping a later banner", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const ctrl = createTranscriptionController();
+      await ctrl.mount();
+
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      expect(ctrl.statusMessage).toBe("Hold a little longer");
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ctrl.statusMessage).toBe("");
+
+      // Test AC4: A later banner cancels the previous timer
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      expect(ctrl.statusMessage).toBe("Hold a little longer");
+      
+      await vi.advanceTimersByTimeAsync(2000);
+      
+      // Simulate another banner before timeout
+      ctrl.app.transcriptionRuntimePhase = "download_required";
+      await vi.advanceTimersByTimeAsync(0); // wait for reactivity
+      // In reality, download_required might trigger modelRequiredBanner via notifyDictationAborted,
+      // but let us just call setBanner directly if we could. Since we cannot access setBanner,
+      // we can trigger another short PTT.
+      await ctrl.toggleRecording(true);
+      simulateRecordingStarted(ctrl.app, 0);
+      await ctrl.toggleRecording(true);
+      
+      // We wait 4000ms. If the first timer was not cancelled, it would fire (2000+4000 > 5000)
+      // and clear the banner.
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(ctrl.statusMessage).toBe("Hold a little longer"); // second banner is still here
+      
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(ctrl.statusMessage).toBe(""); // finally clears
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("dictation ceiling stops a long session", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
@@ -1468,7 +1572,7 @@ describe("transcription controller", () => {
       await ctrl.toggleRecording();
       simulateRecordingStarted(ctrl.app);
 
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(5000);
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
       });
@@ -1543,6 +1647,172 @@ describe("transcription controller", () => {
 
     expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
     expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    expect(ctrl.app.machineState.state).toBe("recording_meeting");
+  });
+
+  it("toggle dictation asks the backend to arm Escape cancel (SOU-117)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "start_transcription",
+      expect.objectContaining({ cancelOnEscape: true }),
+    );
+  });
+
+  it("PTT dictation does not arm Escape cancel (SOU-117)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    eventListeners["shortcut-ptt-start"]?.({ payload: null });
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "start_transcription",
+        expect.objectContaining({ cancelOnEscape: false }),
+      );
+    });
+  });
+
+  it("notifyDictationCancelRequested stops without history, polish, or paste (SOU-117)", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, auto_paste: true, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording(true);
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "hello world", is_final: true });
+
+    notifyDictationCancelRequested();
+    await vi.waitFor(() => {
+      expect(ctrl.statusMessage).toBe("Dictation discarded");
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("pill_hold", expect.anything());
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(ctrl.transcript).toBe("");
+  });
+
+  it("a late segment after cancel cannot revive the take (SOU-117)", async () => {
+    const channel = captureTranscriptionChannel();
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "keep me", is_final: true });
+
+    notifyDictationCancelRequested();
+    await vi.waitFor(() => {
+      expect(ctrl.transcript).toBe("");
+    });
+
+    channel.emit({ text: "late word", is_final: true });
+    expect(ctrl.transcript).toBe("");
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+  });
+
+  it("abort during cancel does not persist or polish (SOU-117)", async () => {
+    let releaseStop: (() => void) | undefined;
+    const channel = captureTranscriptionChannel();
+    const innerInvoke = mockInvoke.getMockImplementation()!;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "stop_transcription") {
+        return new Promise<void>((r) => { releaseStop = r; });
+      }
+      return innerInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    channel.emit({ text: "do not save me", is_final: true });
+
+    notifyDictationCancelRequested();
+    await vi.waitFor(() => {
+      expect(releaseStop).toBeTypeOf("function");
+    });
+
+    ctrl.handleRecordingAborted();
+    releaseStop!();
+    await vi.waitFor(() => {
+      expect(ctrl.statusMessage).toBe("Dictation discarded");
+    });
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+  });
+
+  it("cancels while start_transcription is still in flight (SOU-117)", async () => {
+    let releaseStart: (() => void) | undefined;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        return new Promise<void>((r) => { releaseStart = r; });
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    const start = ctrl.toggleRecording();
+    await vi.waitFor(() => {
+      expect(releaseStart).toBeTypeOf("function");
+    });
+
+    notifyDictationCancelRequested();
+    releaseStart!();
+    await start;
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+  });
+
+  it("notifyDictationCancelRequested is a no-op while idle (SOU-117)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    notifyDictationCancelRequested();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+  });
+
+  it("notifyDictationCancelRequested is a no-op while a meeting is recording (SOU-117)", async () => {
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+
+    ctrl.app.machineState = {
+      state: "recording_meeting",
+      data: {
+        profile: {
+          engine_id: "kyutai",
+          engine_label: "Kyutai",
+          model_id: "stt-1b-en_fr",
+          model_label: "STT 1B",
+          backend_id: "candle",
+          backend_label: "Candle",
+        },
+        session_id: 1,
+        meeting_id: "meeting-1",
+      },
+    };
+
+    notifyDictationCancelRequested();
+
+    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
     expect(ctrl.app.machineState.state).toBe("recording_meeting");
   });
 
@@ -1633,5 +1903,76 @@ describe("transcription controller", () => {
 
     expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
     expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+  });
+
+  const signatureSnippet = {
+    id: 1,
+    trigger: "signature mail",
+    expansion: "Cordialement, Damien",
+    created_at: "",
+  };
+
+  it("applies a snippet matching the start of dictation and skips polish", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "list_snippets") return Promise.resolve([signatureSnippet]);
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "Signature mail, et à bientôt.",
+      is_final: true,
+    });
+    await ctrl.toggleRecording();
+
+    // The raw row written before finalization is replaced by the expansion (AC5).
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("update_dictation_entry", expect.objectContaining({
+        text: "Cordialement, Damien, et à bientôt.",
+      }));
+    });
+    // A matched snippet never reaches the LLM (AC3).
+    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+  });
+
+  it("finalization makes no snippet IPC call when no trigger matches", async () => {
+    let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "start_transcription") {
+        transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
+        return Promise.resolve(null);
+      }
+      return defaultInvoke(cmd, args);
+    });
+    const listSnippetCalls = () =>
+      mockInvoke.mock.calls.filter(([cmd]) => cmd === "list_snippets").length;
+
+    const ctrl = createTranscriptionController();
+    await ctrl.mount();
+    // The list is loaded once at mount (AC4: no extra IPC per dictation).
+    expect(listSnippetCalls()).toBe(1);
+
+    await ctrl.toggleRecording();
+    simulateRecordingStarted(ctrl.app);
+    (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
+      text: "hello world",
+      is_final: true,
+    });
+    await ctrl.toggleRecording();
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+    });
+    expect(listSnippetCalls()).toBe(1);
   });
 });

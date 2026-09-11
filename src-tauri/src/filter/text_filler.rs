@@ -6,7 +6,8 @@ use super::{TextFilter, TextFilterKind};
 
 /// Filler word pattern: English + French fillers, case-insensitive, word-boundary.
 static FILLER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(uh+|um+|euh+|hm+|hmm+|ah+|hein)\b").expect("filler regex must compile")
+    Regex::new(r"(?i)\b(uh+|um+|euh+|heu+|hm+|hmm+|hum+|ah+|hein)\b")
+        .expect("filler regex must compile")
 });
 
 pub struct FillerRemovalFilter;
@@ -23,9 +24,26 @@ impl TextFilter for FillerRemovalFilter {
     }
 
     fn apply(&self, text: &str) -> String {
-        let result = FILLER_PATTERN.replace_all(text, "");
-        // Collapse whitespace left behind by removed fillers
-        crate::engine::collapse_whitespace(&result)
+        let replaced = FILLER_PATTERN.replace_all(text, "");
+        if replaced == text {
+            return text.to_string();
+        }
+
+        let collapsed = crate::engine::collapse_whitespace(&replaced);
+        let mut result = collapsed;
+
+        static MULTI_COMMA: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(?:,\s*){2,}").unwrap());
+        result = MULTI_COMMA.replace_all(&result, ", ").into_owned();
+
+        static MULTI_DOT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:\.\s*){2,}").unwrap());
+        result = MULTI_DOT.replace_all(&result, ". ").into_owned();
+
+        static LEADING_PUNC: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"^\s*[,\.;]\s*").unwrap());
+        result = LEADING_PUNC.replace_all(&result, "").into_owned();
+
+        result.trim().to_string()
     }
 }
 
@@ -43,6 +61,8 @@ mod tests {
     fn removes_french_fillers() {
         let f = FillerRemovalFilter::new();
         assert_eq!(f.apply("euh je pense que hein"), "je pense que");
+        assert_eq!(f.apply("hum je crois"), "je crois");
+        assert_eq!(f.apply("heu oui"), "oui");
     }
 
     #[test]
@@ -55,6 +75,8 @@ mod tests {
     fn preserves_normal_text() {
         let f = FillerRemovalFilter::new();
         assert_eq!(f.apply("the umbrella is useful"), "the umbrella is useful");
+        // No fillers, so punctuation is untouched
+        assert_eq!(f.apply(","), ",");
     }
 
     #[test]
@@ -73,5 +95,16 @@ mod tests {
     fn only_fillers_returns_empty() {
         let f = FillerRemovalFilter::new();
         assert_eq!(f.apply("uh um hmm"), "");
+        assert_eq!(f.apply("euh,"), "");
+    }
+
+    #[test]
+    fn orphan_punctuation_cleanup() {
+        let f = FillerRemovalFilter::new();
+        assert_eq!(
+            f.apply("Euh, je pense que, euh, c'est bon."),
+            "je pense que, c'est bon."
+        );
+        assert_eq!(f.apply("So, um, I think"), "So, I think");
     }
 }

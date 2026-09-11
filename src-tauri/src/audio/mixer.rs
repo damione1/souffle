@@ -23,6 +23,14 @@ pub const FRAME_SAMPLES: usize = 480;
 /// are discarded. Bounds clock drift between the two devices; transcription
 /// tolerates the resulting sub-frame discontinuity.
 const MAX_TAP_LEAD_SAMPLES: usize = MIX_RATE as usize / 4;
+/// RMS floor above which a block of tap samples counts as carrying far-end
+/// signal (SOU-119). The tap runs on the aggregate device clock, so it hands
+/// over ~48000 frames a second whether or not anything is playing: counting
+/// frames says the tap is alive, never that the other participants were
+/// heard. ~-66 dBFS: two dozen dB below the AEC gate below (so no real
+/// playback, however quiet, is missed) and well above the noise floor of a
+/// digitally silent mix, which is exact zeros in practice.
+const TAP_SIGNAL_RMS_FLOOR: f32 = 0.0005;
 /// RMS floor on the tap leg below which AEC must not run (SOU-063).
 /// Speakers-on / nothing-playing is the common damage case: the canceller
 /// has a silent reference and suppresses the mic instead. ~-42 dBFS —
@@ -48,9 +56,21 @@ pub struct MeetingMixer {
     aec: Option<Aec>,
     /// Tap samples discarded to bound drift; logged at session end.
     tap_discarded: u64,
+    /// Tap samples pulled out of the ring since this mixer was built,
+    /// silence included. Zero means the tap's queue never fired at all,
+    /// which is not the same as a tap delivering silence (SOU-119).
+    tap_ingested: u64,
+    /// Of those, the ones in a block whose RMS cleared
+    /// [`TAP_SIGNAL_RMS_FLOOR`]. This is the measure that says the far end
+    /// was actually heard.
+    tap_signal: u64,
     /// Recent far-end level. Gates *applying* AEC output, not whether
     /// the instance lives (SOU-063). A pause must not `set_aec(None)`.
     tap_rms_ema: f32,
+    /// Blend toward cancelled (1.0) or raw mic (0.0). Ramps over one
+    /// frame when the apply decision flips so the boundary stays continuous
+    /// (SOU-063 AC3).
+    aec_apply_mix: f32,
 }
 
 impl MeetingMixer {
@@ -78,7 +98,10 @@ impl MeetingMixer {
             scratch: vec![0.0; 4096],
             aec: None,
             tap_discarded: 0,
+            tap_ingested: 0,
+            tap_signal: 0,
             tap_rms_ema: 0.0,
+            aec_apply_mix: 0.0,
         }
     }
 
@@ -95,15 +118,43 @@ impl MeetingMixer {
             return;
         }
         let mean_sq = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
-        self.tap_rms_ema =
-            TAP_RMS_ATTACK * mean_sq.sqrt() + (1.0 - TAP_RMS_ATTACK) * self.tap_rms_ema;
+        let rms = mean_sq.sqrt();
+        // Per block, not smoothed: the EMA below is a control signal for the
+        // AEC, while this is a plain tally of how much of the session carried
+        // far-end signal. Blocks are one tick of ring content (~20ms), short
+        // enough that speech never averages down under the floor.
+        if rms >= TAP_SIGNAL_RMS_FLOOR {
+            self.tap_signal += samples.len() as u64;
+        }
+        self.tap_rms_ema = TAP_RMS_ATTACK * rms + (1.0 - TAP_RMS_ATTACK) * self.tap_rms_ema;
     }
 
     /// Enable/disable echo cancellation (e.g. when the output route changes
     /// between speakers and headphones mid-session). Passing a fresh `Aec`
-    /// also resets convergence state.
+    /// also resets convergence state. Pending mic-timeline samples from the
+    /// outgoing instance are prepended to the fifos so a mute/route flip does
+    /// not drop speech still sitting in the FDAF delay line.
     pub fn set_aec(&mut self, aec: Option<Aec>) {
+        if let Some(old) = self.aec.as_mut() {
+            let pending = old.drain_pending();
+            if !pending.is_empty() {
+                let n = pending.len();
+                let mut mic = pending;
+                mic.append(&mut self.mic_fifo);
+                self.mic_fifo = mic;
+                // Keep legs aligned: pending is mic-only content, so the tap
+                // side gets matching silence at the front.
+                let mut tap = vec![0.0f32; n];
+                tap.append(&mut self.tap_fifo);
+                self.tap_fifo = tap;
+            }
+        }
         self.aec = aec;
+        // Fresh instance (or none) starts from raw; the crossfade handles
+        // the next apply transition.
+        if self.aec.is_none() {
+            self.aec_apply_mix = 0.0;
+        }
     }
 
     /// Swap the microphone ring after a mid-session rebuild. The tap ring,
@@ -258,6 +309,16 @@ impl MeetingMixer {
         self.tap_discarded
     }
 
+    /// Tap samples this mixer has taken in, at the tap's own rate.
+    pub fn tap_ingested(&self) -> u64 {
+        self.tap_ingested
+    }
+
+    /// Tap samples that carried far-end signal, at the mix rate.
+    pub fn tap_signal(&self) -> u64 {
+        self.tap_signal
+    }
+
     fn ingest(&mut self, bound_tap_lead: bool) {
         loop {
             let n = self.mic.pop_slice(&mut self.scratch);
@@ -273,6 +334,7 @@ impl MeetingMixer {
             if n == 0 {
                 break;
             }
+            self.tap_ingested += n as u64;
             let resampled = self.tap_to_mix.process(&self.scratch[..n]);
             self.note_tap_samples(&resampled);
             tap_added += resampled.len();
@@ -329,16 +391,28 @@ impl MeetingMixer {
         // Always feed the canceller while it exists so a far-end pause
         // does not dump convergence. Apply the output only when the tap
         // is actually playing — otherwise emit raw mic (SOU-063 lever 2).
-        let apply_aec = self.tap_has_energy();
+        // A one-frame linear crossfade covers apply↔bypass flips (AC3).
+        let target = if self.tap_has_energy() { 1.0f32 } else { 0.0 };
         if n == FRAME_SAMPLES
             && let Some(aec) = self.aec.as_mut()
         {
             aec.process_render(&tap);
-            if apply_aec {
-                aec.process_capture(&mut mic);
+            let raw = mic.clone();
+            let mut cancelled = mic;
+            aec.process_capture(&mut cancelled);
+
+            if (self.aec_apply_mix - target).abs() < f32::EPSILON {
+                mic = if target > 0.5 { cancelled } else { raw };
             } else {
-                let mut discarded = mic.clone();
-                aec.process_capture(&mut discarded);
+                let start = self.aec_apply_mix;
+                let delta = target - start;
+                mic = (0..n)
+                    .map(|i| {
+                        let t = start + delta * (i as f32 + 1.0) / n as f32;
+                        cancelled[i] * t + raw[i] * (1.0 - t)
+                    })
+                    .collect();
+                self.aec_apply_mix = target;
             }
         }
 
@@ -383,6 +457,68 @@ mod tests {
         // Steady-state samples carry both sources (0.1 + 0.2).
         let mid = out[out.len() / 2];
         assert!((mid - 0.3).abs() < 0.05, "expected ~0.3, got {mid}");
+    }
+
+    /// SOU-119 AC8: the case the ticket exists for. A tap that is up and
+    /// carrying digital silence still delivers the full frame rate, so the
+    /// frame count alone would call that session healthy.
+    #[test]
+    fn a_tap_delivering_silence_counts_frames_but_no_signal() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        for _ in 0..50 {
+            mic.push_slice(&vec![0.1f32; 960]);
+            tap.push_slice(&vec![0.0f32; 960]);
+            mixer.tick();
+        }
+
+        assert!(
+            mixer.tap_ingested() >= 48_000,
+            "the tap did deliver frames: {}",
+            mixer.tap_ingested()
+        );
+        assert_eq!(
+            mixer.tap_signal(),
+            0,
+            "none of those frames carried far-end signal"
+        );
+    }
+
+    #[test]
+    fn a_tap_carrying_playback_counts_signal() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        for _ in 0..50 {
+            mic.push_slice(&vec![0.1f32; 960]);
+            tap.push_slice(&vec![0.05f32; 960]);
+            mixer.tick();
+        }
+
+        assert!(
+            mixer.tap_signal() >= 48_000,
+            "quiet but real playback must count as signal: {}",
+            mixer.tap_signal()
+        );
+    }
+
+    /// The floor has to sit below anything a user would call audible, not
+    /// just below line level.
+    #[test]
+    fn very_quiet_playback_still_counts_as_signal() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 16_000);
+
+        // ~-60 dBFS, far below the AEC gate and barely audible.
+        for _ in 0..50 {
+            mic.push_slice(&vec![0.1f32; 960]);
+            tap.push_slice(&vec![0.001f32; 960]);
+            mixer.tick();
+        }
+
+        assert!(mixer.tap_signal() > 0, "quiet playback is still playback");
+        assert!(
+            !mixer.tap_has_energy(),
+            "and it stays below the AEC apply floor, which is a different question"
+        );
     }
 
     #[test]
@@ -445,6 +581,68 @@ mod tests {
         assert!(
             (mid - 0.5).abs() < 0.05,
             "below the energy floor the mic must pass through raw, got {mid}"
+        );
+    }
+
+    /// Replacing a live Aec must not drop samples still sitting in its delay
+    /// line — they are prepended onto the mic fifo (SOU-063 / route flips).
+    #[test]
+    fn set_aec_none_preserves_pending_mic_timeline() {
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, MIX_RATE);
+        mixer.set_aec(Some(Aec::new(MIX_RATE)));
+
+        // Drive enough frames for the FDAF block to produce leftover output.
+        let far = vec![0.2f32; FRAME_SAMPLES];
+        let near = vec![0.4f32; FRAME_SAMPLES];
+        for _ in 0..30 {
+            mic.push_slice(&near);
+            tap.push_slice(&far);
+            let _ = mixer.tick_split();
+        }
+
+        let fifo_before = mixer.mic_fifo.len();
+        mixer.set_aec(None);
+        assert!(
+            mixer.mic_fifo.len() > fifo_before,
+            "disengaging AEC must prepend pending delay-line samples \
+             (fifo before={fifo_before}, after={})",
+            mixer.mic_fifo.len()
+        );
+        assert!(mixer.aec.is_none());
+    }
+
+    /// Apply↔bypass flips crossfade over one frame: adjacent-sample jump at
+    /// the boundary stays well under a hard switch (SOU-063 AC3).
+    #[test]
+    fn aec_apply_toggle_crossfade_bounds_discontinuity() {
+        let (mut mic, _tap, mut mixer) = make_mixer(48_000, 48_000, MIX_RATE);
+        // Live Aec during its silence-fill window: cancelled ≈ 0 while raw
+        // mic is 0.8 — a hard switch would jump by ~0.8; the one-frame fade
+        // must keep the per-step jump under ~0.8/480.
+        mixer.set_aec(Some(Aec::new(MIX_RATE)));
+        mixer.aec_apply_mix = 1.0;
+        mixer.tap_rms_ema = 0.0; // target = 0 → crossfade 1→0 this frame
+
+        mic.push_slice(&vec![0.8f32; FRAME_SAMPLES]);
+        let (me, _) = mixer.tick_split();
+
+        assert!(
+            (mixer.aec_apply_mix - 0.0).abs() < f32::EPSILON,
+            "apply mix must finish the frame at the raw target"
+        );
+        let max_jump = me
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_jump < 0.01,
+            "crossfade frame adjacent jump too large: {max_jump} (hard switch would be ~0.8)"
+        );
+        // Endpoint should land on raw mic.
+        assert!(
+            (me[me.len() - 1] - 0.8).abs() < 0.05,
+            "fade must end on raw mic, got {}",
+            me[me.len() - 1]
         );
     }
 
@@ -867,21 +1065,13 @@ mod aec_bench {
         (erle_db, converge_frame)
     }
 
-    // Measured baselines (release build, this bench, 2026-07-18): double-talk
-    // (voice + echo together) comes out around -10dB, i.e. sonora's NLP stage
-    // leaves the output *further* from clean voice than the raw uncancelled
-    // echo would have been, both with and without the `stream_delay_ms` hint.
-    // Echo-only (no voice, see the diagnostic below) attenuates by a modest
-    // +3.6dB. That's weak for AEC3 and corroborates the production incident's
-    // report of echo passing through even before the crate panicked; it is
-    // not something this fix attempts to solve (see the investigation
-    // writeup). These asserts are regression floors against the measured
-    // baseline, not aspirational targets — tighten them if cancellation
-    // quality is improved later.
-    const DOUBLE_TALK_ERLE_FLOOR_DB: f32 = -14.0;
+    // Measured baselines (release build, SOU-063 fix, 2026-09-09): fdaf-aec
+    // (linear FDAF, no NLP suppression) achieves +19.7 dB ERLE in double-talk
+    // and +30.8 dB echo-only. This floor is the regression gate — if ERLE
+    // falls back negative someone re-introduced a non-linear suppressor.
+    const DOUBLE_TALK_ERLE_FLOOR_DB: f32 = 0.0;
 
     #[test]
-    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_baseline() {
         let (erle_db, converge_frame) = run_echo_bench(None, 1.0, 50);
         println!(
@@ -898,7 +1088,6 @@ mod aec_bench {
     }
 
     #[test]
-    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_with_delay_hint() {
         let (erle_db, converge_frame) = run_echo_bench(Some(50), 1.0, 50);
         println!(
@@ -919,7 +1108,6 @@ mod aec_bench {
     /// whether a poor double-talk result comes from echo cancellation itself
     /// or from the double-talk/voice interaction. Measured baseline: +3.6dB.
     #[test]
-    #[ignore = "multi-second synthetic bench, run explicitly with -- --ignored --nocapture"]
     fn wideband_echo_attenuation_no_voice_diagnostic() {
         let (erle_db, converge_frame) = run_echo_bench(Some(50), 0.0, 50);
         println!(

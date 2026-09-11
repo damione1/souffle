@@ -29,6 +29,7 @@ export type {
   MeetingListItem,
   MeetingParticipant,
   MeetingRecordingSession,
+  MeetingSystemAudio,
   MeetingTranscript,
   ModelArtifactDescriptor,
   OllamaPullProgress,
@@ -36,6 +37,7 @@ export type {
   SummaryProviderChoice,
   SummaryProvidersStatus,
   SummaryTemplate,
+  SnippetEntry,
   PermState,
   PermissionKind,
   PermissionStatus,
@@ -57,6 +59,8 @@ export type {
   InputRouteReason,
   PipelineError,
   TransportType,
+  ModifierTapStatus,
+  SystemAudioReason,
   SystemAudioStatus,
   TranscriptionHealth,
   TranscriptionCapabilities,
@@ -77,3 +81,4 @@ export type {
  * (system audio). Backend wire format (see `engine::Speaker` in Rust);
  * specta emits it as a plain `string`. Compare with `===`. */
 export type Speaker = string;
+export type { StatusReason } from './status';

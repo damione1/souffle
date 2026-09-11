@@ -39,6 +39,7 @@
       message={controller.statusMessage}
       actionLabel={controller.statusActionLabel}
       onAction={controller.statusAction}
+      onDismiss={controller.clearBanner}
       variant="warning"
     />
   {/if}

@@ -1,7 +1,11 @@
+import type { SettingsAnchor } from "../features/settings/anchors";
 import type {
+  PermissionStatus,
   AppSettings,
   AppStateMachine,
+  ModifierTapStatus,
   PipelineError,
+  SnippetEntry,
   SystemAudioStatus,
   TranscriptionHealth,
   TranscriptionProfile,
@@ -12,14 +16,20 @@ import type { TranscriptionModelOperationState } from "../features/transcription
 
 // Settings sheet visibility (the app is otherwise a single home surface)
 let settingsOpen = $state(false);
+let appPermissions = $state<PermissionStatus | null>(null);
 
 // Tab to land on the next time settings opens (e.g. a "set up calendar" CTA
 // deep-linking into the meetings tab). Consumed once by SettingsView.
-let settingsInitialTab = $state<string | null>(null);
+let settingsInitialAnchor = $state<SettingsAnchor | null>(null);
 
 // Permissions repair panel, mounted once in App so banners can open it
 // without going through Settings → System → Review (SOU-089).
 let permissionsPanelOpen = $state(false);
+
+// Voice snippets (SOU-035). Loaded once at startup and written through by
+// the settings sheet, so finalizing a dictation matches against this list
+// without an IPC round-trip.
+let snippets = $state<SnippetEntry[]>([]);
 
 // Current meeting ID (when viewing a specific meeting)
 let currentMeetingId = $state<string | null>(null);
@@ -49,6 +59,9 @@ let recordingStartedAtMs = $state<number | null>(null);
 // System-audio capture status for the current meeting session
 let systemAudioStatus = $state<SystemAudioStatus | null>(null);
 
+// Native single-key PTT CGEventTap install status (SOU-116)
+let modifierTapStatus = $state<ModifierTapStatus | null>(null);
+
 // Calendar reminder awaiting the user's decision (drives the home banner)
 let upcomingMeeting = $state<UpcomingMeeting | null>(null);
 
@@ -65,7 +78,9 @@ let downloadTotalFiles = $state(0);
 let downloadedBytes = $state(0);
 let downloadTotalBytes = $state<number | null>(null);
 
-// Settings with defaults
+// Settings with defaults matching AppSettings::default() in src-tauri/src/settings.rs.
+// getSettings() overwrites these on every successful bootstrap; these are only
+// active if the backend is unreachable on first launch (onboarding flow).
 let settings = $state<AppSettings>({
   theme: "dark",
   locale: "",
@@ -81,9 +96,10 @@ let settings = $state<AppSettings>({
   clamshell_audio_device: null,
   input_priority: { priorities: [], hidden: [], known: [] },
   allow_bluetooth_mic: false,
-  transcription_engine_id: "",
-  transcription_model_id: "",
-  transcription_backend_id: "",
+  // Matches KYUTAI_ENGINE_ID / KYUTAI_MODEL_ID / CANDLE_BACKEND_ID in engine/mod.rs
+  transcription_engine_id: "kyutai",
+  transcription_model_id: "stt-1b-en_fr",
+  transcription_backend_id: "candle",
   vad_enabled: true,
   filler_removal: true,
   stutter_collapse: false,
@@ -100,19 +116,26 @@ let settings = $state<AppSettings>({
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
+  autostart_enabled: false,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
   dictation_polish_enabled: true,
   dictation_polish_template_id: "clean",
+  // Fallback only, used when getSettings() has not yet succeeded. Prompts
+  // are empty on purpose: merge_polish_templates keeps a stored empty prompt
+  // (it is not in the superseded-builtin list), but effective_template_prompt
+  // falls back to the shipped defaults at polish time, so a bootstrap-failure
+  // path cannot persist the old stub one-liners as the live polish text.
   dictation_polish_templates: [
-    { id: "clean", label: "Clean up", prompt: "Clean without rewriting." },
-    { id: "email", label: "Professional email", prompt: "Rewrite as email." },
-    { id: "bullets", label: "Bullet points", prompt: "Use bullets." },
-    { id: "no_fillers", label: "Remove fillers", prompt: "Remove fillers." },
+    { id: "clean", label: "Clean up", prompt: "" },
+    { id: "email", label: "Professional email", prompt: "" },
+    { id: "bullets", label: "Bullet points", prompt: "" },
+    { id: "no_fillers", label: "Remove fillers", prompt: "" },
   ],
   auto_update_check_enabled: true,
   dictation_learn_from_edit: true,
   default_summary_template_id: "default",
+  // Stub prompts: same rationale as dictation_polish_templates above.
   summary_templates: [
     { id: "default", name: "Default", prompt: "" },
     { id: "detailed_minutes", name: "Detailed minutes", prompt: "" },
@@ -207,14 +230,20 @@ function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOp
 
 export function getAppState() {
   return {
+    get appPermissions() { return appPermissions; },
+    set appPermissions(v: PermissionStatus | null) { appPermissions = v; },
+
     get settingsOpen() { return settingsOpen; },
     set settingsOpen(v: boolean) { settingsOpen = v; },
 
-    get settingsInitialTab() { return settingsInitialTab; },
-    set settingsInitialTab(v: string | null) { settingsInitialTab = v; },
+    get settingsInitialAnchor() { return settingsInitialAnchor; },
+    set settingsInitialAnchor(v: SettingsAnchor | null) { settingsInitialAnchor = v; },
 
     get permissionsPanelOpen() { return permissionsPanelOpen; },
     set permissionsPanelOpen(v: boolean) { permissionsPanelOpen = v; },
+
+    get snippets() { return snippets; },
+    set snippets(list: SnippetEntry[]) { snippets = list; },
 
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },
@@ -257,6 +286,8 @@ export function getAppState() {
 
     get systemAudioStatus() { return systemAudioStatus; },
     set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },
+    get modifierTapStatus() { return modifierTapStatus; },
+    set modifierTapStatus(s: ModifierTapStatus | null) { modifierTapStatus = s; },
     get upcomingMeeting() { return upcomingMeeting; },
     set upcomingMeeting(u: UpcomingMeeting | null) { upcomingMeeting = u; },
 

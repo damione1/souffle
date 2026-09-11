@@ -85,7 +85,15 @@ describe('transcription API', () => {
 
     await startStreamingTranscription(onSegment);
 
-    expect(mockInvoke).toHaveBeenCalledWith('start_transcription', expect.objectContaining({ channel: expect.any(Object) }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith('start_transcription', expect.objectContaining({ channel: expect.any(Object), cancelOnEscape: true }), undefined);
+  });
+
+  it('startStreamingTranscription can skip the Escape cancel binding', async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    await startStreamingTranscription(vi.fn(), false);
+
+    expect(mockInvoke).toHaveBeenCalledWith('start_transcription', expect.objectContaining({ cancelOnEscape: false }), undefined);
   });
 
   it('stopStreamingTranscription calls correct command', async () => {

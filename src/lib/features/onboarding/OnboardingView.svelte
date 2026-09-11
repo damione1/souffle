@@ -166,7 +166,7 @@
           </select>
         </div>
       {/if}
-    {:else}
+    {:else if controller.step === "shortcut"}
       <div class="flex flex-col gap-4 text-left">
         <div class="flex items-center gap-3">
           <Keyboard size={16} class="shrink-0 text-text-muted" aria-hidden="true" />

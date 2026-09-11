@@ -40,6 +40,30 @@ async downloadModel(selection: TranscriptionProfileSelection, channel: TAURI_CHA
 }
 },
 /**
+ * Snapshot of the in-flight model download, for a webview that reloaded
+ * while the machine was `Downloading` and lost its progress Channel.
+ * `None` until the first download of the process starts.
+ */
+async getDownloadProgress() : Promise<DownloadProgress | null> {
+    return await TAURI_INVOKE("get_download_progress");
+},
+/**
+ * Last system-audio leg status of the current meeting, for a webview that
+ * reloaded after the `SystemAudioStatus` event already fired (SOU-073).
+ * `None` outside a meeting session or before the tap was first attempted.
+ */
+async getSystemAudioStatus() : Promise<SystemAudioStatus | null> {
+    return await TAURI_INVOKE("get_system_audio_status");
+},
+/**
+ * Last native PTT `CGEventTap` install status, for a webview that reloaded
+ * after the `ModifierTapStatus` event already fired (SOU-116). `None` before
+ * the first install attempt (including the startup delay).
+ */
+async getModifierTapStatus() : Promise<ModifierTapStatus | null> {
+    return await TAURI_INVOKE("get_modifier_tap_status");
+},
+/**
  * Delete a downloaded model from disk.
  */
 async deleteModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {
@@ -68,10 +92,13 @@ async loadModel(selection: TranscriptionProfileSelection) : Promise<Result<null,
  * 
  * `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
  * blocking wait runs off-thread and the window never freezes.
+ * 
+ * `cancel_on_escape` arms the transient Escape binding for toggle dictation
+ * (SOU-117). Push-to-talk passes false: releasing the PTT key is its cancel.
  */
-async startTranscription(channel: TAURI_CHANNEL<TranscriptionSegment>) : Promise<Result<null, string>> {
+async startTranscription(channel: TAURI_CHANNEL<TranscriptionSegment>, cancelOnEscape: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_transcription", { channel }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_transcription", { channel, cancelOnEscape }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -590,9 +617,9 @@ async clearDictationHistory() : Promise<Result<null, string>> {
 /**
  * Optional LLM polish pass for dictation text before paste/history.
  */
-async polishDictation(text: string, focusedApp: string | null, rewriteOf: string | null) : Promise<Result<DictationPolishResult, string>> {
+async polishDictation(text: string, focusedApp: string | null) : Promise<Result<DictationPolishResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("polish_dictation", { text, focusedApp, rewriteOf }) };
+    return { status: "ok", data: await TAURI_INVOKE("polish_dictation", { text, focusedApp }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -653,6 +680,12 @@ async saveSettings(settings: AppSettings) : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Open the macOS System Settings to the Apple Intelligence & Siri pane.
+ */
+async openAppleIntelligenceSettings() : Promise<void> {
+    await TAURI_INVOKE("open_apple_intelligence_settings");
 },
 /**
  * Update shortcut bindings at runtime.
@@ -772,6 +805,50 @@ async clearDictionary() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Lists all voice snippets from the database.
+ */
+async listSnippets() : Promise<Result<SnippetEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_snippets") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Adds a new voice snippet (spoken trigger → pasted expansion).
+ */
+async addSnippet(trigger: string, expansion: string) : Promise<Result<SnippetEntry, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_snippet", { trigger, expansion }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Updates an existing voice snippet's trigger and expansion.
+ */
+async updateSnippet(id: number, trigger: string, expansion: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_snippet", { id, trigger, expansion }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Deletes a specific voice snippet by ID.
+ */
+async deleteSnippet(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_snippet", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Persist word-level misspelling→term pairs from a post-paste edit.
  */
 async learnFromEdit(original: string, corrected: string) : Promise<Result<number, string>> {
@@ -783,7 +860,14 @@ async learnFromEdit(original: string, corrected: string) : Promise<Result<number
 }
 },
 /**
- * Cheap, non-prompting snapshot for the onboarding's initial render.
+ * Cheap, non-prompting snapshot for the onboarding's initial render, and
+ * the source of the panel's 600 ms poll.
+ * 
+ * Off the command thread even though every read is a status API: three of
+ * them (`AXIsProcessTrusted`, `TCCAccessPreflight`, EventKit) are XPC round
+ * trips to `tccd`, and a synchronous command runs on the main thread, where
+ * a stalled `tccd` would freeze the window. Nothing here needs the main
+ * thread — only *requests* do (SOU-122).
  */
 async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
     try {
@@ -795,7 +879,8 @@ async getPermissionStatus() : Promise<Result<PermissionStatus, string>> {
 },
 /**
  * Trigger the native prompt (or open System Settings) for one permission.
- * The probe opens a device, so it runs off the command thread.
+ * Blocks until the user answers the dialog, so it runs off the command
+ * thread.
  */
 async requestPermission(kind: PermissionKind) : Promise<Result<PermState, string>> {
     try {
@@ -831,6 +916,12 @@ async listCalendars() : Promise<Result<CalendarInfo[], string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Open the macOS System Settings to the Calendars privacy pane.
+ */
+async openCalendarSettings() : Promise<void> {
+    await TAURI_INVOKE("open_calendar_settings");
 },
 /**
  * Today's timed events for the home view. Missing permission is a state the
@@ -1000,6 +1091,7 @@ async openReleasePage(url: string) : Promise<Result<null, string>> {
 export const events = __makeEvents__<{
 archiveExportProgress: ArchiveExportProgress,
 audioLevel: AudioLevel,
+dictationCancelRequested: DictationCancelRequested,
 dictationLiveText: DictationLiveText,
 dictationStopRequested: DictationStopRequested,
 inputDevicesChanged: InputDevicesChanged,
@@ -1009,12 +1101,12 @@ inputRouteNotice: InputRouteNotice,
 meetingFinalized: MeetingFinalized,
 meetingIdle: MeetingIdle,
 meetingStopRequested: MeetingStopRequested,
+modifierTapStatus: ModifierTapStatus,
 navigate: Navigate,
 pillHoldChanged: PillHoldChanged,
 pipelineError: PipelineError,
 shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
-shortcutRewrite: ShortcutRewrite,
 shortcutToggle: ShortcutToggle,
 stateChanged: StateChanged,
 systemAudioStatus: SystemAudioStatus,
@@ -1026,6 +1118,7 @@ updateAvailable: UpdateAvailable
 }>({
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
+dictationCancelRequested: "dictation-cancel-requested",
 dictationLiveText: "dictation-live-text",
 dictationStopRequested: "dictation-stop-requested",
 inputDevicesChanged: "input-devices-changed",
@@ -1035,12 +1128,12 @@ inputRouteNotice: "input-route-notice",
 meetingFinalized: "meeting-finalized",
 meetingIdle: "meeting-idle",
 meetingStopRequested: "meeting-stop-requested",
+modifierTapStatus: "modifier-tap-status",
 navigate: "navigate",
 pillHoldChanged: "pill-hold-changed",
 pipelineError: "pipeline-error",
 shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
-shortcutRewrite: "shortcut-rewrite",
 shortcutToggle: "shortcut-toggle",
 stateChanged: "state-changed",
 systemAudioStatus: "system-audio-status",
@@ -1152,6 +1245,12 @@ meeting_autostop_minutes: number;
  * speech activity.
  */
 meeting_max_duration_minutes: number; 
+/**
+ * Launch Soufflé at login (SMAppService login item, SOU-036). The stored
+ * value is a fallback only: `get_settings` overwrites it with the state
+ * the system reports, and an absent key means "never asked", not "on".
+ */
+autostart_enabled: boolean; 
 /**
  * Opt-in recording of meeting audio to compressed files on disk, and
  * for how long they're kept. Off by default.
@@ -1269,6 +1368,11 @@ export type CalendarMeetingNudgeKind =
  */
 export type DataStats = { db_size_bytes: number; meeting_count: number; dictation_count: number; recordings_size_bytes: number }
 export type DiagnosticsBundle = { app_version: string; data_dir: string; log_dir: string; log_file: string | null; db_path: string; models_dir: string; machine_state: string; log_level: string; debug_transcription: boolean }
+/**
+ * Emitted when Escape is pressed during a cancelable (toggle) dictation.
+ * Discards the take: no polish, no history row, no paste (SOU-117).
+ */
+export type DictationCancelRequested = null
 /**
  * A dictation history entry
  */
@@ -1457,6 +1561,13 @@ export type MeetingRecordingSession = { id: string; started_at: string; ended_at
  */
 export type MeetingStopRequested = null
 /**
+ * What the system-audio leg did over a recording. Kept across resumes by
+ * [`worse_system_audio`], so this is the *worst* verdict any of the
+ * meeting's sessions reached, and `samples` / `signal_samples` are the ones
+ * measured during that session, not a total over the meeting (SOU-119).
+ */
+export type MeetingSystemAudio = { active: boolean; reason: string | null; reason_code: SystemAudioReason | null; samples: number; signal_samples: number }
+/**
  * Full meeting transcript stored as JSON
  */
 export type MeetingTranscript = { id: string; title: string; started_at: string; ended_at: string | null; duration_seconds: number; transcription_profile: TranscriptionProfile; recording_sessions: MeetingRecordingSession[]; segments: TranscriptionSegment[]; summary: string | null; summary_is_stale: boolean; summary_model: string | null; summary_generated_at: string | null; structured_summary: StructuredSummary | null; edited_transcript: string | null; 
@@ -1473,7 +1584,12 @@ calendar_event_id: string | null;
  * Attendees captured from the calendar event; shown in the UI and fed
  * into the summary prompt.
  */
-participants: MeetingParticipant[] }
+participants: MeetingParticipant[]; 
+/**
+ * What the system-audio leg did over the recording. `None` on meetings
+ * recorded before this was tracked (SOU-119).
+ */
+system_audio: MeetingSystemAudio | null }
 /**
  * How long recorded meeting audio is kept on disk before the startup sweep
  * deletes it. Opt-in: recording itself only happens when this is not `Off`.
@@ -1482,6 +1598,12 @@ participants: MeetingParticipant[] }
  */
 export type MeetingTranscriptionLanguage = "auto" | "en" | "fr"
 export type ModelArtifactDescriptor = { id: string; label: string; description: string; provider: string; repository: string; revision: string | null; file_format: string; download_size_bytes: number | null; required_files: string[] }
+/**
+ * Whether the native single-key PTT `CGEventTap` is installed. Edge-triggered
+ * on install success/failure; a webview that reloads reads the snapshot via
+ * `get_modifier_tap_status` (SOU-116, same pattern as `SystemAudioStatus`).
+ */
+export type ModifierTapStatus = { installed: boolean }
 export type Navigate = AppView
 export type OllamaPullProgress = { model: string; status: string; downloaded_bytes: number; total_bytes: number | null; done: boolean; error: string | null }
 export type PasteMethod = "clipboard" | "type" | 
@@ -1491,8 +1613,7 @@ export type PasteMethod = "clipboard" | "type" |
 "ax"
 export type PermState = "granted" | "denied" | 
 /**
- * Not yet probed — the user hasn't triggered this one (probing would
- * prompt, so we don't do it unsolicited at startup).
+ * TCC has no answer on record: the user has not been asked yet.
  */
 "unknown" | 
 /**
@@ -1553,16 +1674,9 @@ export type RepairAccessibilityResult = { reset_performed: boolean; prompt_shown
 export type SearchResult = { source_type: string; source_id: string; snippet: string; rank: number }
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
-/**
- * Toggle-style rewrite: capture the current selection, dictate, paste over it.
- */
-export type ShortcutRewrite = null
-export type ShortcutSettings = { toggle: string; push_to_talk: string; 
-/**
- * Toggle-style shortcut that rewrites the current selection.
- */
-rewrite: string }
+export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
+export type SnippetEntry = { id: number; trigger: string; expansion: string; created_at: string }
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.
@@ -1632,6 +1746,51 @@ apple_intelligence_unavailable_reason: string | null; models: SummaryModelDescri
  */
 export type SummaryTemplate = { id: string; name: string; prompt: string }
 /**
+ * Why the system-audio leg of a meeting is not carrying the other
+ * participants. Machine-readable so the UI can say it in the user's
+ * language instead of showing a raw CoreAudio error (SOU-119).
+ * 
+ * The order of the variants is the order of severity used by
+ * [`worse_system_audio`]: later means "less of a system-audio leg".
+ */
+export type SystemAudioReason = 
+/**
+ * The tap delivered audio all session, and every sample was silence.
+ */
+"silent" | 
+/**
+ * The tap ran without ever delivering a frame: its dispatch queue never
+ * fired, which is not the same as delivering silence.
+ */
+"no_samples" | 
+/**
+ * The tap was lost mid-session and could not be started again.
+ */
+"tap_lost" | 
+/**
+ * The capture session failed to start after the tap was acquired (e.g.
+ * the microphone went away), taking the tap down with it.
+ */
+"start_failed" | 
+/**
+ * The tap probe run before the session started failed (SOU-082).
+ */
+"probe_failed" | 
+/**
+ * Reserved for a verified TCC denial. CreateProcessTap failing is not
+ * that: a wedged coreaudiod returns the same error while permission is
+ * still granted. Do not assign this from an error-string prefix.
+ */
+"permission_denied" | 
+/**
+ * `capture_system_audio` is off in the settings, so no tap was tried.
+ */
+"disabled" | 
+/**
+ * The OS is too old for process taps (macOS < 14.4, or not macOS).
+ */
+"unsupported"
+/**
  * State of the system-audio capture leg of a meeting session, emitted when
  * the session starts and whenever the leg changes (e.g. tap rebuild after
  * an output device switch).
@@ -1640,7 +1799,22 @@ export type SystemAudioStatus = { active: boolean;
 /**
  * Present when inactive because of an error (e.g. permission denied).
  */
-reason: string | null }
+reason: string | null; 
+/**
+ * Why the leg is inactive, when that is known.
+ */
+reason_code: SystemAudioReason | null; 
+/**
+ * Frames the leg has delivered so far this session, silence included.
+ * Zero while `active` is true means the tap's queue never fired.
+ */
+samples: number; 
+/**
+ * Of those, how many carried far-end signal. A tap on the device clock
+ * delivers frames whether or not anything plays, so this, not `samples`,
+ * is what says the other participants were actually heard (SOU-119).
+ */
+signal_samples: number }
 /**
  * The system finished sleeping and woke back up (`NSWorkspaceDidWakeNotification`).
  * The frontend calls `peek_sleep_paused_meeting` on receiving this (and again

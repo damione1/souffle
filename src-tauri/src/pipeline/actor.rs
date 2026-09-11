@@ -773,6 +773,7 @@ impl EngineActor {
                 audio_filters,
                 drain_window_frames,
                 lookback_frames,
+                sample_rate,
             ))
         };
 
@@ -957,6 +958,10 @@ struct SingleMode {
     lookback: VecDeque<Vec<f32>>,
     /// Bound on `lookback`'s length. Oldest frame is evicted once full.
     lookback_frames: usize,
+    /// Cumulative audio time (seconds) evicted from the lookback ring.
+    /// Added to engine-reported timestamps so they stay aligned with the .ogg file.
+    eviction_offset_seconds: f64,
+    sample_rate: u32,
 }
 
 impl SingleMode {
@@ -964,6 +969,7 @@ impl SingleMode {
         audio_filters: AudioFilterChain,
         drain_window_frames: usize,
         lookback_frames: usize,
+        sample_rate: u32,
     ) -> Self {
         Self {
             buffer: Vec::new(),
@@ -977,6 +983,8 @@ impl SingleMode {
             tail_drained: false,
             lookback: VecDeque::new(),
             lookback_frames,
+            eviction_offset_seconds: 0.0,
+            sample_rate,
         }
     }
 
@@ -986,8 +994,17 @@ impl SingleMode {
             return;
         }
         if self.lookback.len() >= self.lookback_frames {
-            self.lookback.pop_front();
+            let evicted = self.lookback.pop_front().unwrap();
+            let duration = evicted.len() as f64 / self.sample_rate as f64;
+            self.eviction_offset_seconds += duration;
             self.vad_evicted += 1;
+
+            if self.vad_evicted == 1 {
+                tracing::warn!(
+                    "VAD eviction: first frame lost ({}s total so far). Transcript clock correction active.",
+                    self.eviction_offset_seconds
+                );
+            }
         }
         self.lookback.push_back(frame);
     }
@@ -1007,6 +1024,19 @@ impl SingleMode {
         }
         Ok(segments)
     }
+
+    fn apply_eviction_offset(
+        &self,
+        mut segments: Vec<TranscriptionSegment>,
+    ) -> Vec<TranscriptionSegment> {
+        if self.eviction_offset_seconds > 0.0 {
+            for seg in &mut segments {
+                seg.start_time += self.eviction_offset_seconds;
+                seg.end_time += self.eviction_offset_seconds;
+            }
+        }
+        segments
+    }
 }
 
 impl SessionMode for SingleMode {
@@ -1022,7 +1052,8 @@ impl SessionMode for SingleMode {
         &mut self,
         engine: &mut dyn TranscriptionEngine,
     ) -> Result<Vec<TranscriptionSegment>, String> {
-        catch_engine(|| self.drain_lookback(engine))
+        let segments = catch_engine(|| self.drain_lookback(engine))?;
+        Ok(self.apply_eviction_offset(segments))
     }
 
     fn step(
@@ -1067,7 +1098,7 @@ impl SessionMode for SingleMode {
                 );
             }
         }
-        Ok(Some(segments))
+        Ok(Some(self.apply_eviction_offset(segments)))
     }
 
     fn finish_frame(
@@ -1076,7 +1107,8 @@ impl SessionMode for SingleMode {
         chunk_size: usize,
     ) -> Result<Vec<TranscriptionSegment>, String> {
         let frame: Vec<f32> = self.buffer.drain(..chunk_size).collect();
-        catch_engine(|| engine.transcribe(&frame, None))
+        let segments = catch_engine(|| engine.transcribe(&frame, None))?;
+        Ok(self.apply_eviction_offset(segments))
     }
 
     fn finish_tail(
@@ -1086,9 +1118,9 @@ impl SessionMode for SingleMode {
         if self.buffer.is_empty() {
             return Ok(Vec::new());
         }
-        let result = catch_engine(|| engine.transcribe(&self.buffer, None));
+        let segments = catch_engine(|| engine.transcribe(&self.buffer, None))?;
         self.buffer.clear();
-        result
+        Ok(self.apply_eviction_offset(segments))
     }
 
     fn log_heartbeat(
@@ -1159,11 +1191,7 @@ impl DiarizedMode {
 
     /// Calculates the number of full `chunk_size` frames in the buffer.
     fn full_frames(buf: &[f32], chunk_size: usize) -> usize {
-        if chunk_size == 0 {
-            0
-        } else {
-            buf.len() / chunk_size
-        }
+        buf.len().checked_div(chunk_size).unwrap_or(0)
     }
 
     /// Takes one full `chunk_size` frame from the buffer if available.
@@ -2546,7 +2574,7 @@ mod tests {
         let drain_window = 3;
         // Lookback disabled: this test is about the window/gating mechanics,
         // covered separately by the `single_mode_lookback_*` tests below.
-        let mut mode = SingleMode::new(chain, drain_window, 0);
+        let mut mode = SingleMode::new(chain, drain_window, 0, 16000);
         let mut engine = MockEngine::new();
 
         // Speech: fed and counted as transcribed, not skipped.
@@ -2602,7 +2630,7 @@ mod tests {
         let drain_window = 5;
         // Lookback disabled: this test is about the tail_drained latch,
         // covered separately by the `single_mode_lookback_*` tests below.
-        let mut mode = SingleMode::new(chain, drain_window, 0);
+        let mut mode = SingleMode::new(chain, drain_window, 0, 16000);
         let mut engine = MockEngine::new().with_tail_drained_schedule([false, false, false, true]);
 
         // Speech: fed (consumes the first schedule slot, irrelevant while speaking).
@@ -2666,7 +2694,7 @@ mod tests {
             crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
         let drain_window_frames = 13;
         let lookback_frames = 4;
-        let mut mode = SingleMode::new(chain, drain_window_frames, lookback_frames);
+        let mut mode = SingleMode::new(chain, drain_window_frames, lookback_frames, 16000);
         // Reports drained after the 3rd silent frame, far short of the
         // 13-frame window.
         let mut engine = MockEngine::new().with_tail_drained_schedule([false, false, false, true]);
@@ -2745,7 +2773,7 @@ mod tests {
             crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
         // No drain window: a silent frame is gated (buffered in the lookback
         // ring) the instant speech stops, isolating the lookback behavior.
-        let mut mode = SingleMode::new(chain, 0, 4);
+        let mut mode = SingleMode::new(chain, 0, 4, 16000);
         let mut engine = MockEngine::new();
         engine
             .transcribe_responses
@@ -2799,7 +2827,7 @@ mod tests {
         let speech = Arc::new(AtomicBool::new(true));
         let chain =
             crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
-        let mut mode = SingleMode::new(chain, 0, 2);
+        let mut mode = SingleMode::new(chain, 0, 2, 16000);
         let mut engine = MockEngine::new();
 
         mode.ingest(make_frame());
@@ -2835,7 +2863,7 @@ mod tests {
         let speech = Arc::new(AtomicBool::new(true));
         let chain =
             crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
-        let mut mode = SingleMode::new(chain, 0, 4);
+        let mut mode = SingleMode::new(chain, 0, 4, 16000);
         let mut engine = MockEngine::new();
 
         mode.ingest(make_frame());
@@ -2878,7 +2906,7 @@ mod tests {
         let speech = Arc::new(AtomicBool::new(true));
         let chain =
             crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
-        let mut mode = SingleMode::new(chain, 0, 4);
+        let mut mode = SingleMode::new(chain, 0, 4, 16000);
         let mut engine = MockEngine::new();
         engine
             .transcribe_responses
@@ -2942,7 +2970,7 @@ mod tests {
         let speech = Arc::new(AtomicBool::new(false));
         let chain =
             crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
-        let mut mode = SingleMode::new(chain, 0, 4);
+        let mut mode = SingleMode::new(chain, 0, 4, 16000);
         let mut engine = MockEngine::new();
         engine
             .transcribe_responses
@@ -3098,5 +3126,99 @@ mod tests {
             0,
             "stall recovery must not call the plain reset_state, which rewinds the timeline"
         );
+    }
+
+    struct MockVadFilter {
+        call_count: usize,
+    }
+    impl crate::filter::AudioFilter for MockVadFilter {
+        fn kind(&self) -> crate::filter::AudioFilterKind {
+            crate::filter::AudioFilterKind::SileroVad
+        }
+        fn process(&mut self, _audio: &[f32]) -> bool {
+            self.call_count += 1;
+            self.call_count == 1
+        }
+        fn reset(&mut self) {
+            self.call_count = 0;
+        }
+    }
+
+    #[test]
+    fn single_mode_vad_aggregation_test_sou_067() {
+        let chunk_size = MIMI_FRAME_SIZE;
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(MockVadFilter { call_count: 0 })]);
+        let mut mode = SingleMode::new(chain, 0, 4, 16000);
+        let mut engine = MockEngine::new();
+        engine
+            .transcribe_responses
+            .push_back(Ok(vec![seg("speech")]));
+
+        mode.ingest(AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        });
+
+        let segments = mode.step(&mut engine, chunk_size).unwrap();
+        assert!(segments.is_some());
+        assert_eq!(segments.unwrap()[0].text, "speech");
+    }
+
+    #[test]
+    fn single_mode_eviction_offsets_emitted_segments() {
+        let chunk_size = 16000 * 5;
+        let sample_rate = 16000;
+
+        let speech = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let chain =
+            crate::filter::AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+
+        let mut mode = SingleMode::new(chain, 0, 1, sample_rate);
+        let mut engine = MockEngine::new();
+
+        let make_frame = || AudioChunk {
+            session_id: 1,
+            samples: vec![0.0f32; chunk_size],
+            captured_at: Instant::now(),
+            speaker: None,
+        };
+
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        assert_eq!(mode.vad_skipped, 1);
+        assert_eq!(mode.vad_evicted, 0);
+
+        mode.ingest(make_frame());
+        assert!(matches!(mode.step(&mut engine, chunk_size), Ok(None)));
+        assert_eq!(mode.vad_skipped, 2);
+        assert_eq!(mode.vad_evicted, 1);
+        assert_eq!(mode.eviction_offset_seconds, 5.0);
+
+        speech.store(true, Ordering::SeqCst);
+
+        let mut replayed = seg("replayed");
+        replayed.start_time = 1.0;
+        replayed.end_time = 2.0;
+        engine.transcribe_responses.push_back(Ok(vec![replayed]));
+
+        let mut live = seg("live");
+        live.start_time = 5.0;
+        live.end_time = 6.0;
+        engine.transcribe_responses.push_back(Ok(vec![live]));
+
+        mode.ingest(make_frame());
+        let segments = mode.step(&mut engine, chunk_size).unwrap().unwrap();
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].text, "replayed");
+        assert_eq!(segments[0].start_time, 6.0);
+        assert_eq!(segments[0].end_time, 7.0);
+
+        assert_eq!(segments[1].text, "live");
+        assert_eq!(segments[1].start_time, 10.0);
+        assert_eq!(segments[1].end_time, 11.0);
     }
 }

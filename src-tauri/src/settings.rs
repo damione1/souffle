@@ -47,6 +47,7 @@ pub const PILL_POSITION_KEY: &str = "pill_position";
 const MEETING_AUTOSTOP_ENABLED_KEY: &str = "meeting_autostop_enabled";
 const MEETING_AUTOSTOP_MINUTES_KEY: &str = "meeting_autostop_minutes";
 const MEETING_MAX_DURATION_MINUTES_KEY: &str = "meeting_max_duration_minutes";
+const AUTOSTART_ENABLED_KEY: &str = "autostart_enabled";
 const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
 const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
@@ -60,7 +61,6 @@ const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
 const DICTATION_CEILING_SECONDS_KEY: &str = "dictation_ceiling_seconds";
-const SHORTCUT_REWRITE_KEY: &str = "shortcut_rewrite";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
 
@@ -201,6 +201,10 @@ pub struct AppSettings {
     /// Hard failsafe: stop the meeting after this many minutes regardless of
     /// speech activity.
     pub meeting_max_duration_minutes: u32,
+    /// Launch Soufflé at login (SMAppService login item, SOU-036). The stored
+    /// value is a fallback only: `get_settings` overwrites it with the state
+    /// the system reports, and an absent key means "never asked", not "on".
+    pub autostart_enabled: bool,
     /// Opt-in recording of meeting audio to compressed files on disk, and
     /// for how long they're kept. Off by default.
     pub meeting_audio_retention: MeetingAudioRetention,
@@ -272,6 +276,7 @@ impl Default for AppSettings {
             meeting_autostop_enabled: true,
             meeting_autostop_minutes: 10,
             meeting_max_duration_minutes: 240,
+            autostart_enabled: false,
             meeting_audio_retention: MeetingAudioRetention::default(),
             meeting_transcription_language: MeetingTranscriptionLanguage::default(),
             dictation_polish_enabled: true,
@@ -442,6 +447,9 @@ impl AppSettings {
             read_json_setting::<u32>(db, MEETING_MAX_DURATION_MINUTES_KEY)?
         {
             settings.meeting_max_duration_minutes = meeting_max_duration_minutes;
+        }
+        if let Some(autostart_enabled) = read_json_setting::<bool>(db, AUTOSTART_ENABLED_KEY)? {
+            settings.autostart_enabled = autostart_enabled;
         }
         if let Some(meeting_audio_retention) =
             read_json_setting::<MeetingAudioRetention>(db, MEETING_AUDIO_RETENTION_KEY)?
@@ -873,6 +881,7 @@ impl AppSettings {
             MEETING_MAX_DURATION_MINUTES_KEY,
             &normalized.meeting_max_duration_minutes,
         )?;
+        write_json_setting(db, AUTOSTART_ENABLED_KEY, &normalized.autostart_enabled)?;
         write_json_setting(
             db,
             MEETING_AUDIO_RETENTION_KEY,
@@ -954,8 +963,6 @@ fn dedupe_known_devices(known: &mut Vec<crate::audio::KnownDevice>) {
 pub struct ShortcutSettings {
     pub toggle: String,
     pub push_to_talk: String,
-    /// Toggle-style shortcut that rewrites the current selection.
-    pub rewrite: String,
 }
 
 impl Default for ShortcutSettings {
@@ -963,7 +970,6 @@ impl Default for ShortcutSettings {
         Self {
             toggle: crate::DEFAULT_TOGGLE_SHORTCUT.to_string(),
             push_to_talk: String::new(),
-            rewrite: String::new(),
         }
     }
 }
@@ -978,9 +984,6 @@ impl ShortcutSettings {
         if let Some(push_to_talk) = read_json_setting::<String>(db, SHORTCUT_PUSH_TO_TALK_KEY)? {
             shortcuts.push_to_talk = push_to_talk;
         }
-        if let Some(rewrite) = read_json_setting::<String>(db, SHORTCUT_REWRITE_KEY)? {
-            shortcuts.rewrite = rewrite;
-        }
 
         Ok(shortcuts.sanitized())
     }
@@ -989,13 +992,9 @@ impl ShortcutSettings {
         let normalized = Self {
             toggle: self.toggle.trim().to_string(),
             push_to_talk: self.push_to_talk.trim().to_string(),
-            rewrite: self.rewrite.trim().to_string(),
         };
 
-        if conflicting_pair(&normalized.toggle, &normalized.push_to_talk)
-            || conflicting_pair(&normalized.toggle, &normalized.rewrite)
-            || conflicting_pair(&normalized.push_to_talk, &normalized.rewrite)
-        {
+        if conflicting_pair(&normalized.toggle, &normalized.push_to_talk) {
             return Err("Dictation shortcuts must be different".into());
         }
 
@@ -1006,16 +1005,10 @@ impl ShortcutSettings {
         let mut normalized = Self {
             toggle: self.toggle.trim().to_string(),
             push_to_talk: self.push_to_talk.trim().to_string(),
-            rewrite: self.rewrite.trim().to_string(),
         };
 
         if conflicting_pair(&normalized.toggle, &normalized.push_to_talk) {
             normalized.push_to_talk.clear();
-        }
-        if conflicting_pair(&normalized.toggle, &normalized.rewrite)
-            || conflicting_pair(&normalized.push_to_talk, &normalized.rewrite)
-        {
-            normalized.rewrite.clear();
         }
 
         normalized
@@ -1025,7 +1018,6 @@ impl ShortcutSettings {
         let normalized = self.normalize()?;
         write_json_setting(db, SHORTCUT_TOGGLE_KEY, &normalized.toggle)?;
         write_json_setting(db, SHORTCUT_PUSH_TO_TALK_KEY, &normalized.push_to_talk)?;
-        write_json_setting(db, SHORTCUT_REWRITE_KEY, &normalized.rewrite)?;
         Ok(())
     }
 }
@@ -1104,6 +1096,7 @@ mod tests {
             meeting_autostop_enabled: false,
             meeting_autostop_minutes: 15,
             meeting_max_duration_minutes: 120,
+            autostart_enabled: true,
             meeting_audio_retention: MeetingAudioRetention::Keep30d,
             meeting_transcription_language: super::MeetingTranscriptionLanguage::Fr,
             dictation_polish_enabled: true,
@@ -1156,6 +1149,45 @@ mod tests {
         assert_eq!(same_triple.transcription_model_id, "stt-1b-en_fr");
     }
 
+    // SOU-036: an install that never saw the setting has no key at all. That
+    // must load as "off" — the login item is only ever registered after a
+    // deliberate gesture (toggle or fresh-install wizard), never by default.
+    #[test]
+    fn autostart_absent_key_loads_as_disabled() {
+        let (db, _dir) = test_db();
+        assert_eq!(
+            db.get_setting("autostart_enabled").expect("get setting"),
+            None
+        );
+
+        let loaded = AppSettings::load(&db).expect("load settings");
+        assert!(!loaded.autostart_enabled);
+    }
+
+    #[test]
+    fn autostart_explicit_value_round_trips() {
+        let (db, _dir) = test_db();
+        let settings = AppSettings {
+            autostart_enabled: true,
+            ..AppSettings::default()
+        };
+        settings.save(&db).expect("save settings");
+        assert!(AppSettings::load(&db).expect("load").autostart_enabled);
+
+        // An explicit `false` is written too, so it stays distinguishable
+        // from the never-written key above.
+        let settings = AppSettings {
+            autostart_enabled: false,
+            ..AppSettings::default()
+        };
+        settings.save(&db).expect("save settings");
+        assert_eq!(
+            db.get_setting("autostart_enabled").expect("get setting"),
+            Some("false".into())
+        );
+        assert!(!AppSettings::load(&db).expect("load").autostart_enabled);
+    }
+
     #[test]
     fn blank_audio_device_is_removed_on_save() {
         let (db, _dir) = test_db();
@@ -1187,27 +1219,39 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_rewrite_duplicate_is_cleared_on_load() {
-        let (db, _dir) = test_db();
-        db.set_setting("shortcut_toggle", "\"F6\"")
-            .expect("save toggle");
-        db.set_setting("shortcut_rewrite", "\"F6\"")
-            .expect("save rewrite");
-
-        let shortcuts = ShortcutSettings::load(&db).expect("load shortcuts");
-        assert_eq!(shortcuts.toggle, "F6");
-        assert_eq!(shortcuts.rewrite, "");
-    }
-
-    #[test]
     fn shortcut_settings_reject_duplicate_bindings() {
         let shortcuts = ShortcutSettings {
             toggle: "CommandOrControl+Shift+Space".into(),
             push_to_talk: "CommandOrControl+Shift+Space".into(),
-            rewrite: String::new(),
         };
 
         assert!(shortcuts.normalize().is_err());
+    }
+
+    #[test]
+    fn shortcut_settings_reject_duplicate_native_bindings() {
+        let shortcuts = ShortcutSettings {
+            toggle: "Fn".into(),
+            push_to_talk: "Fn".into(),
+        };
+
+        assert_eq!(
+            shortcuts.normalize().unwrap_err(),
+            "Dictation shortcuts must be different"
+        );
+    }
+
+    #[test]
+    fn native_toggle_shortcut_persists_across_load() {
+        let (db, _dir) = test_db();
+        let s = ShortcutSettings {
+            toggle: "Fn".into(),
+            push_to_talk: "MetaRight".into(),
+        };
+        s.save(&db).unwrap();
+        let loaded = ShortcutSettings::load(&db).unwrap();
+        assert_eq!(loaded.toggle, "Fn");
+        assert_eq!(loaded.push_to_talk, "MetaRight");
     }
 
     #[test]
@@ -1427,7 +1471,6 @@ mod tests {
         let s = ShortcutSettings {
             toggle: String::new(),
             push_to_talk: String::new(),
-            rewrite: String::new(),
         };
         assert!(s.normalize().is_ok());
     }
@@ -1438,11 +1481,30 @@ mod tests {
         let s = ShortcutSettings {
             toggle: "CommandOrControl+Shift+Space".to_string(),
             push_to_talk: "CommandOrControl+Shift+S".to_string(),
-            rewrite: "CommandOrControl+Shift+R".to_string(),
         };
         s.save(&db).unwrap();
         let loaded = ShortcutSettings::load(&db).unwrap();
         assert_eq!(s, loaded);
+    }
+
+    // SOU-131: `dictionary_interview_done` was dropped with the onboarding
+    // interview, so every install that ran the old wizard still carries that
+    // row. Loading must ignore it instead of failing on it.
+    #[test]
+    fn load_ignores_a_setting_key_that_no_longer_exists() {
+        let (db, _dir) = test_db();
+        db.set_setting("dictionary_interview_done", "true")
+            .expect("seed the retired key");
+
+        let loaded = AppSettings::load(&db).expect("load settings");
+
+        assert_eq!(loaded, AppSettings::default());
+        // Saving does not resurrect the key, and leaves the stale row alone.
+        loaded.save(&db).expect("save settings");
+        assert_eq!(
+            db.get_setting("dictionary_interview_done").unwrap(),
+            Some("true".to_string()),
+        );
     }
 
     #[test]

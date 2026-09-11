@@ -77,6 +77,7 @@ fn build_meeting() -> MeetingTranscript {
             is_organizer: true,
             is_current_user: false,
         }],
+        system_audio: None,
     }
 }
 

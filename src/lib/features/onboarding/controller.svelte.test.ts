@@ -143,10 +143,28 @@ describe("createOnboardingController", () => {
       expect(settingsApi.saveShortcuts).toHaveBeenCalledWith({
         toggle: "CommandOrControl+Shift+Space",
         push_to_talk: mockShortcuts.push_to_talk,
-        rewrite: mockShortcuts.rewrite,
       });
     });
     expect(ctrl.recordingShortcut).toBe(false);
+  });
+
+  // SOU-131: the dictionary interview used to sit after the shortcut, so the
+  // shortcut step was never the one that closed the wizard.
+  it("closes the wizard when the shortcut step continues", async () => {
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    app.transcriptionRuntimePhase = "ready";
+    const ctrl = createOnboardingController();
+    await ctrl.mount();
+
+    await ctrl.goNext();
+    await ctrl.goNext();
+    expect(ctrl.step).toBe("shortcut");
+    expect(ctrl.stepIndex).toBe(ctrl.steps.length - 1);
+
+    await ctrl.goNext();
+
+    expect(localStorage.getItem(SETUP_STORAGE_KEY)).toBe("1");
+    expect(app.showOnboarding).toBe(false);
   });
 
   it("finishes marking setup complete, auto-paste following Accessibility", async () => {
@@ -235,6 +253,23 @@ describe("createOnboardingController", () => {
     expect(settingsApi.saveSettings).toHaveBeenCalledWith(
       expect.objectContaining({ auto_paste: true }),
     );
+  });
+
+  // SOU-036: a fresh install leaves the wizard with the login item on; the
+  // recovery-mode test below is what keeps existing installs untouched.
+  it("enables autostart when a fresh install finishes the wizard", async () => {
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, "1");
+    app.settings = { ...mockSettings, autostart_enabled: false };
+    const ctrl = createOnboardingController();
+    await ctrl.mount();
+    expect(ctrl.recoveryOnly).toBe(false);
+
+    await ctrl.finish();
+
+    expect(settingsApi.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ autostart_enabled: true }),
+    );
+    expect(app.settings.autostart_enabled).toBe(true);
   });
 
   it("never overwrites the stored setting when finishing in recovery mode", async () => {

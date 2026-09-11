@@ -1,5 +1,11 @@
 import { commands, unwrap } from "./generated";
-import type { AppSettings, AudioInputDevice, ShortcutSettings } from "../types";
+import type {
+  AppSettings,
+  AudioInputDevice,
+  ModifierTapStatus,
+  ShortcutSettings,
+  SystemAudioStatus,
+} from "../types";
 
 export async function getSettings(): Promise<AppSettings> {
   return unwrap(commands.getSettings());
@@ -35,6 +41,20 @@ export async function resetInputSampleRate(deviceUid: string): Promise<number> {
 
 export async function getSystemAudioSupport(): Promise<boolean> {
   return commands.getSystemAudioSupport();
+}
+
+/** Last system-audio leg status of the current meeting. The event only fires
+ * when the tap is (re)built, so a webview reloaded mid-meeting reads this
+ * snapshot instead (SOU-073). `null` outside a meeting session. */
+export async function getSystemAudioStatus(): Promise<SystemAudioStatus | null> {
+  return commands.getSystemAudioStatus();
+}
+
+/** Last native PTT CGEventTap install status. The event only fires on
+ * success/failure, so a reloaded webview reads this snapshot (SOU-116).
+ * `null` before the first install attempt. */
+export async function getModifierTapStatus(): Promise<ModifierTapStatus | null> {
+  return commands.getModifierTapStatus();
 }
 
 export async function isLaptop(): Promise<boolean> {

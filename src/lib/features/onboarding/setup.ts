@@ -1,4 +1,4 @@
-import type { TranscriptionRuntimePhase } from "../../types";
+import type { AppStateMachine, TranscriptionRuntimePhase } from "../../types";
 
 export const PERMISSIONS_STORAGE_KEY = "permissionsOnboarded";
 export const SETUP_STORAGE_KEY = "setupOnboarded";
@@ -55,14 +55,28 @@ export function shouldMigrateSetupComplete(
 export function decideShowSetupWizard(
   phase: TranscriptionRuntimePhase,
   flags: SetupFlags,
+  machineState: AppStateMachine["state"],
 ): boolean {
-  if (flags.setupDone) return phase === "download_required";
+  if (flags.setupDone) {
+    // Model-only recovery after the user deleted the files. Not while the
+    // backend is still downloading: a webview reload mid-download reports
+    // "download_required" too, and must not reopen the wizard over a
+    // download that is about to finish (SOU-073).
+    return phase === "download_required" && machineState !== "downloading";
+  }
   if (flags.permissionsDone && phase !== "download_required") return false;
   return true;
 }
 
-/** First-run walks permissions (if needed) → mic → model → shortcut.
- * Re-download after a deleted model is model-only. */
+/** SOU-036: what `autostart_enabled` should be once the wizard finishes.
+ * A fresh install leaves the wizard with the login item registered; a
+ * recovery run (model re-download on an already set-up install) keeps
+ * whatever is stored, because an absent key on an existing install must not
+ * turn into "on" without a gesture from the user. */
+export function decideAutostartOnFinish(recoveryOnly: boolean, current: boolean): boolean {
+  return recoveryOnly ? current : true;
+}
+
 export function wizardSteps(flags: SetupFlags): SetupStep[] {
   if (flags.setupDone) return ["model"];
   const steps: SetupStep[] = [];

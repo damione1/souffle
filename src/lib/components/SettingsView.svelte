@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { t } from "svelte-i18n";
+  import AutostartSettingsSection from "../features/settings/components/AutostartSettingsSection.svelte";
   import AboutSettingsSection from "../features/settings/components/AboutSettingsSection.svelte";
   import AudioSettingsSection from "../features/settings/components/AudioSettingsSection.svelte";
   import CalendarSettingsSection from "../features/settings/components/CalendarSettingsSection.svelte";
   import DataSettingsSection from "../features/settings/components/DataSettingsSection.svelte";
   import DictionarySettingsSection from "../features/settings/components/DictionarySettingsSection.svelte";
+  import SnippetsSettingsSection from "../features/settings/components/SnippetsSettingsSection.svelte";
   import DiagnosticsSettingsSection from "../features/settings/components/DiagnosticsSettingsSection.svelte";
   import IntelligenceSettingsSection from "../features/settings/components/IntelligenceSettingsSection.svelte";
   import InterfaceSettingsSection from "../features/settings/components/InterfaceSettingsSection.svelte";
@@ -17,6 +19,7 @@
   import SummaryTemplatesSettingsSection from "../features/settings/components/SummaryTemplatesSettingsSection.svelte";
   import { createSettingsController } from "../features/settings/controller.svelte";
   import { type SettingsTab } from "../features/settings/open";
+  import { focusAnchor, tabForAnchor } from "../features/settings/anchors";
   import { formatSelectedTranscriptionLabel } from "../features/transcription/catalog";
   import { events } from "../api/generated";
   import ConfirmAction from "./ui/ConfirmAction.svelte";
@@ -32,11 +35,33 @@
   ];
 
   const controller = createSettingsController();
+  // Read for the first paint so a deep link never flashes the Transcription tab.
+  // The effect below is what consumes it, and it also serves a link fired while
+  // Settings is already open (an alert rendered inside Settings itself).
   let activeTab = $state<SettingsTab>(
-    (controller.app.settingsInitialTab as SettingsTab | null) ?? "transcription",
+    controller.app.settingsInitialAnchor
+      ? tabForAnchor(controller.app.settingsInitialAnchor)
+      : "transcription",
   );
-  // Deep-link is one-shot: don't stick future normal opens to this tab.
-  controller.app.settingsInitialTab = null;
+
+  let clearHighlight: (() => void) | null = null;
+
+  $effect(() => {
+    const target = controller.app.settingsInitialAnchor;
+    if (!target) return;
+
+    // One-shot: consumed here, so the next ordinary open lands on Transcription
+    // with nothing highlighted.
+    controller.app.settingsInitialAnchor = null;
+    activeTab = tabForAnchor(target);
+
+    void tick().then(() => {
+      clearHighlight?.();
+      clearHighlight = focusAnchor(target);
+    });
+  });
+
+  $effect(() => () => clearHighlight?.());
 
   let selectedTranscriptionLabel = $derived(
     formatSelectedTranscriptionLabel(
@@ -90,6 +115,7 @@
 </script>
 
 <svelte:window
+  onkeyup={(event) => controller.handleKeyUp?.(event)}
   onkeydown={(event) => {
     controller.handleKeyDown(event);
     // Escape closes the settings screen unless it just cancelled a
@@ -155,6 +181,13 @@
         onAdd={controller.handleAddDictionaryEntry}
         onDelete={controller.handleDeleteDictionaryEntry}
         onUpdate={controller.handleUpdateDictionaryEntry}
+      />
+
+      <SnippetsSettingsSection
+        entries={controller.snippetEntries}
+        onAdd={controller.handleAddSnippet}
+        onDelete={controller.handleDeleteSnippet}
+        onUpdate={controller.handleUpdateSnippet}
       />
     {:else if activeTab === "ai"}
       <IntelligenceSettingsSection
@@ -252,9 +285,9 @@
         pasteMethod={controller.app.settings.paste_method}
         toggleShortcut={controller.toggleShortcut}
         pttShortcut={controller.pttShortcut}
-        rewriteShortcut={controller.rewriteShortcut}
         recordingField={controller.recordingField}
         shortcutError={controller.shortcutError}
+        modifierTapStatus={controller.app.modifierTapStatus}
         onThemeChange={controller.onThemeChange}
         onLocaleChange={controller.onLocaleChange}
         onAutoPasteChange={controller.onAutoPasteChange}
@@ -287,6 +320,11 @@
         onAutostartEnabledChange={controller.onCalendarAutostartEnabledChange}
       />
     {:else}
+      <AutostartSettingsSection
+        autostartEnabled={controller.app.settings.autostart_enabled}
+        onAutostartChange={controller.onAutostartChange}
+      />
+
       <PermissionsSettingsSection />
 
       <DiagnosticsSettingsSection

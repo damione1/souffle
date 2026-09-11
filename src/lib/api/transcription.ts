@@ -35,16 +35,24 @@ export async function loadModel(selection: TranscriptionProfileSelection): Promi
   await unwrap(commands.loadModel(selection));
 }
 
+/** Last progress report of the in-flight model download. The Channel that
+ * {@link downloadModel} streams to dies with the webview, so a reload
+ * mid-download reads this snapshot to restore the gauge (SOU-073). */
+export async function getDownloadProgress(): Promise<DownloadProgress | null> {
+  return commands.getDownloadProgress();
+}
+
 export async function deleteModel(selection: TranscriptionProfileSelection): Promise<void> {
   await unwrap(commands.deleteModel(selection));
 }
 
 export async function startStreamingTranscription(
   onSegment: (segment: TranscriptionSegment) => void,
+  cancelOnEscape = true,
 ): Promise<void> {
   const channel = new Channel<TranscriptionSegment>();
   channel.onmessage = onSegment;
-  await unwrap(commands.startTranscription(channel));
+  await unwrap(commands.startTranscription(channel, cancelOnEscape));
 }
 
 export async function stopStreamingTranscription(): Promise<void> {

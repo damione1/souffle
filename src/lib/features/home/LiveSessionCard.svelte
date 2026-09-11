@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AlarmClockOff, ClipboardCheck, Square } from "@lucide/svelte";
+  import { AlarmClockOff, ClipboardCheck, MicOff, Square } from "@lucide/svelte";
   import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
   import Waveform from "../../components/Waveform.svelte";
@@ -16,6 +16,7 @@
     scrollTopAfterLeadingUnmount,
     windowedParagraphs,
   } from "./live-paragraph-window";
+  import { liveSystemAudioNotice, liveSystemAudioState } from "../meeting/system-audio";
 
   let {
     mode,
@@ -47,16 +48,25 @@
       ? windowedParagraphs(meeting.liveTranscript.committed, meeting.liveTranscript.tail)
       : [],
   );
-  const liveTentative = $derived(
-    mode === "meeting" ? meeting.liveTranscript.tentative : transcription.tentative,
+  const liveTentativeDictation = $derived(
+    mode === "dictation" ? transcription.tentative : "",
+  );
+  const liveTentativeMeeting = $derived(
+    mode === "meeting" ? meeting.liveTranscript.tentative : [],
   );
 
+  const lastIndexBySpeaker = $derived.by(() => {
+    const map = new Map<string | null, number>();
+    liveParagraphs.forEach((p, i) => map.set(p.speaker ?? null, i));
+    return map;
+  });
 
   const hasLiveContent = $derived(
     mode === "dictation"
-      ? Boolean(liveText) || Boolean(liveTentative)
-      : liveParagraphs.length > 0 || Boolean(liveTentative),
+      ? Boolean(liveText) || Boolean(liveTentativeDictation)
+      : liveParagraphs.length > 0 || liveTentativeMeeting.length > 0,
   );
+
 
   const elapsed = $derived(
     formatDuration(elapsedSecondsSince(meeting.app.recordingStartedAtMs, nowMs)),
@@ -66,7 +76,10 @@
     mode === "dictation" ? transcription.isStopping : meeting.isStopping,
   );
 
-  const systemAudioActive = $derived(Boolean(meeting.app.systemAudioStatus?.active));
+  const systemAudioState = $derived(liveSystemAudioState(meeting.app.systemAudioStatus));
+  const liveNotice = $derived(
+    mode === "meeting" ? liveSystemAudioNotice(meeting.app.systemAudioStatus) : null,
+  );
 
   const idleSilenceMinutes = $derived(
     meeting.idleSignal ? Math.max(1, Math.round(meeting.idleSignal.idle_seconds / 60)) : 0,
@@ -85,8 +98,9 @@
     if (stopping || editSaving) return false;
     const isCommitted = meeting.liveTranscript.committed.some((item) => item.id === paragraph.id);
     if (!isCommitted) return false;
-    const isLast = index === liveParagraphs.length - 1;
-    return !(isLast && Boolean(liveTentative));
+    const isLastForSpeaker = lastIndexBySpeaker.get(paragraph.speaker ?? null) === index;
+    const hasTentative = isLastForSpeaker && liveTentativeMeeting.some(t => t.speaker === (paragraph.speaker ?? null));
+    return !hasTentative;
   }
 
   function startParagraphEdit(paragraph: LiveParagraph) {
@@ -159,7 +173,8 @@
   $effect(() => {
     void liveText;
     void liveParagraphs;
-    void liveTentative;
+    void liveTentativeDictation;
+    void liveTentativeMeeting;
     const el = transcriptEl;
     if (el && pendingRemovedHeight > 0) {
       el.scrollTop = scrollTopAfterLeadingUnmount(el.scrollTop, pendingRemovedHeight);
@@ -220,7 +235,7 @@
   {#if mode === "dictation"}
     <div class="flex min-h-[340px] flex-col rounded-[18px] bg-surface-1 p-[30px] px-8 outline-1 outline-ghost-border">
       <p class="m-0 text-[19px] font-normal leading-[1.85] text-text-secondary">
-        {liveText}{#if liveTentative}<span class="opacity-50">{segmentGap(liveText, liveTentative)}{liveTentative}</span>{/if}<span
+        {liveText}{#if liveTentativeDictation}<span class="opacity-50">{segmentGap(liveText, liveTentativeDictation)}{liveTentativeDictation}</span>{/if}<span
           class="ml-0.5 inline-block h-5 w-0.5 bg-accent align-[-3px]"
           style="animation: blink 1s step-end infinite;"
         ></span>
@@ -234,6 +249,18 @@
       {/if}
     </div>
   {:else}
+    {#if liveNotice}
+      <div
+        class="flex items-start gap-3 rounded-default bg-warning/10 px-4 py-3 outline-1 outline-warning/30"
+        title={liveNotice.detail ?? ""}
+      >
+        <MicOff size={16} class="mt-px shrink-0 text-warning" aria-hidden="true" />
+        <p class="m-0 min-w-0 flex-1 text-sm text-text-secondary">
+          <span class="font-semibold">{$t("meeting_header.system_audio_unavailable")}</span>
+          {$t(liveNotice.key)}
+        </p>
+      </div>
+    {/if}
     {#if mode === "meeting" && meeting.idleSignal}
       <div class="flex items-center gap-3 rounded-default bg-warning/10 px-4 py-3 outline-1 outline-warning/30">
         <AlarmClockOff size={16} class="shrink-0 text-warning" aria-hidden="true" />
@@ -253,10 +280,16 @@
       <div class="flex items-center justify-between gap-3">
         <h3 class="text-sm font-semibold text-text-primary">{$t("home.live_transcript")}</h3>
         <span class="inline-flex items-center gap-1.5 text-[11.5px] text-text-muted">
-          <span class={`h-1.5 w-1.5 rounded-full ${systemAudioActive ? "bg-accent" : "bg-surface-4"}`}></span>
-          {systemAudioActive
-            ? $t("home.system_audio_active")
-            : $t("meeting_header.system_audio_unavailable")}
+          <span
+            class={`h-1.5 w-1.5 rounded-full ${systemAudioState === "active" ? "bg-accent" : "bg-surface-4"}`}
+          ></span>
+          {#if systemAudioState === "active"}
+            {$t("home.system_audio_active")}
+          {:else if systemAudioState === "pending"}
+            {$t("home.system_audio_pending")}
+          {:else}
+            {$t("meeting_header.system_audio_unavailable")}
+          {/if}
         </span>
       </div>
       <p class="m-0 text-[11.5px] text-text-muted">{$t("home.live_edit_hint")}</p>
@@ -270,6 +303,8 @@
         {:else}
           {#each liveParagraphs as paragraph, i (paragraph.id)}
             {@const label = resolveSpeakerLabel(paragraph.speaker)}
+            {@const isLastForSpeaker = lastIndexBySpeaker.get(paragraph.speaker ?? null) === i}
+            {@const speakerTentative = isLastForSpeaker ? liveTentativeMeeting.find(t => t.speaker === (paragraph.speaker ?? null))?.text : null}
             <div class="flex flex-col gap-[3px]" style="animation: rise-in 240ms ease;">
               <div class="flex items-center gap-2">
                 {#if label}
@@ -320,16 +355,30 @@
                     onAddAlias={meeting.addDictionaryAlias}
                     class="m-0 inline text-[15px] leading-[1.75] text-text-secondary"
                   />
-                  {#if i === liveParagraphs.length - 1 && liveTentative}
-                    <span class="opacity-50">{segmentGap(paragraph.text, liveTentative)}{liveTentative}</span>
+                  {#if speakerTentative}
+                    <span class="opacity-50">{segmentGap(paragraph.text, speakerTentative)}{speakerTentative}</span>
                   {/if}
                 </p>
               {/if}
             </div>
           {/each}
-          {#if liveParagraphs.length === 0 && liveTentative}
-            <p class="m-0 text-[15px] leading-[1.75] text-text-secondary opacity-50">{liveTentative}</p>
-          {/if}
+          {#each liveTentativeMeeting as tentative (tentative.speaker)}
+            {#if !lastIndexBySpeaker.has(tentative.speaker)}
+              {@const label = resolveSpeakerLabel(tentative.speaker)}
+              <div class="flex flex-col gap-[3px]" style="animation: rise-in 240ms ease;">
+                <div class="flex items-center gap-2">
+                  {#if label}
+                    <span
+                      class="text-[11.5px] font-semibold"
+                      class:text-accent={label.kind === "me"}
+                      class:text-secondary={label.kind === "them"}
+                    >{label.kind === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
+                  {/if}
+                </div>
+                <p class="m-0 text-[15px] leading-[1.75] text-text-secondary opacity-50">{tentative.text}</p>
+              </div>
+            {/if}
+          {/each}
         {/if}
       </div>
     </div>

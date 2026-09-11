@@ -11,8 +11,12 @@
   } from "../../api/permissions";
   import type { PermissionStatus, PermState } from "../../types";
   import { errorMessage } from "../../utils";
+  import { openSettings } from "../settings/open";
+  import { getAppState } from "../../stores/app.svelte";
 
   let { onStatusChange }: { onStatusChange?: (status: PermissionStatus) => void } = $props();
+
+  const app = getAppState();
 
   let status = $state<PermissionStatus>({
     microphone: "unknown",
@@ -27,13 +31,39 @@
   let repairCooldown = $state(false);
   let repairCooldownTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /**
+   * The "stale TCC entry" diagnosis is only plausible once the user has tried
+   * to grant Accessibility and come back with it still refused. On a fresh
+   * install nothing was ever granted: there is no stale entry, no row to
+   * remove with the minus button, and the Repair it advertises resets an
+   * entry that does not exist, so it can only fail (SOU-055).
+   *
+   * Two independent triggers, because the click on Open Settings alone is not
+   * one: `request_permission` returns Denied synchronously while System
+   * Settings is still opening. A blur/focus pair is the honest signal ("you
+   * went there and came back without it"); the attempt count is the fallback
+   * for a webview that never sees one, so Repair stays reachable either way.
+   */
+  let accessibilityAttempts = $state(0);
+  let leftAfterAttempt = $state(false);
+  let returnedStillDenied = $state(false);
+  const showStaleHint = $derived(returnedStillDenied || accessibilityAttempts >= 2);
+
   /** Every write to `status` goes through here so the parent (which cannot
    * see this component's local state otherwise) learns the real permission
    * state, e.g. to gate the onboarding auto-paste default (SOU-053). */
   function setStatus(next: PermissionStatus) {
     status = next;
+    // Publish upward: this component already polls TCC every 600 ms, so the
+    // app-level snapshot rides on it rather than starting a second poll.
+    app.appPermissions = next;
     // Reset success banner if accessibility state changes back/forth
-    if (next.accessibility === "granted") repairSuccess = false;
+    if (next.accessibility === "granted") {
+      repairSuccess = false;
+      accessibilityAttempts = 0;
+      leftAfterAttempt = false;
+      returnedStillDenied = false;
+    }
     onStatusChange?.(next);
   }
 
@@ -87,6 +117,7 @@
   async function grant(kind: PermissionKind) {
     busy[kind] = true;
     error = "";
+    if (kind === "accessibility") accessibilityAttempts += 1;
     try {
       const next = await requestPermission(kind);
       setStatus({ ...status, [kind]: next });
@@ -135,9 +166,11 @@
       pollInFlight = true;
       void getPermissionStatus()
         .then((s) => {
-          // snapshot() intentionally returns "unknown" for un-probed capabilities
-          // like system_audio so we don't trigger unwarranted prompts. We only
-          // overwrite our state when we get a real answer.
+          // A request in flight is newer than this snapshot: drop the
+          // result rather than letting it overwrite a fresher answer.
+          if (Object.values(busy).some(Boolean)) return;
+          // Snapshot never prompts. Unknown means "not determined"; keep
+          // the local value rather than wiping a grant in progress.
           const next = { ...status };
           if (s.accessibility !== "unknown") next.accessibility = s.accessibility;
           if (s.microphone !== "unknown") next.microphone = s.microphone;
@@ -159,9 +192,30 @@
         });
     }, 600);
 
+    // "Went to System Settings and came back without it" is the only moment
+    // the stale-entry diagnosis is worth showing. Tracked as a pair so a
+    // window that regains focus without ever having lost it (the synchronous
+    // Denied that `request_permission` returns) does not count as a return.
+    const onBlur = () => {
+      if (accessibilityAttempts > 0) leftAfterAttempt = true;
+    };
+    const onFocus = () => {
+      if (leftAfterAttempt && status.accessibility === "denied") {
+        returnedStillDenied = true;
+      }
+      // Nothing else happens here. Returning from System Settings used to
+      // re-probe system audio to catch a revoke, which mounted a real Core
+      // Audio tap every time (SOU-124 AC7). The 600 ms poll now reads the
+      // live TCC status, so a revoke shows up on its own.
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+
     return () => {
       clearInterval(timer);
       clearTimeout(repairCooldownTimer);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
     };
   });
 </script>
@@ -201,29 +255,14 @@
       </div>
 
       {#if row.kind === "accessibility" && s === "denied"}
-        <div class="flex items-center justify-between gap-3 pl-8">
+        <div class="pl-8">
           <p class="text-xs text-text-muted">
-            {#if repairSuccess}
-              {$t("permissions.accessibility_repair_success")}
-            {:else}
+            {#if showStaleHint}
               {$t("permissions.accessibility_stale_hint")}
+            {:else}
+              {$t("permissions.accessibility_denied_hint")}
             {/if}
           </p>
-          <button
-            class="btn btn-ghost shrink-0 gap-1.5"
-            disabled={repairing || busy[row.kind] || repairCooldown}
-            onclick={repairAccessibility}
-          >
-            {#if repairing}
-              <Spinner />
-              {$t("permissions.checking")}
-            {:else if repairSuccess}
-              <Check size={14} />
-              {$t("permissions.repair")}
-            {:else}
-              {$t("permissions.repair")}
-            {/if}
-          </button>
         </div>
       {:else if row.kind === "microphone" && s === "denied"}
         <div class="flex items-center justify-between gap-3 pl-8">
@@ -244,10 +283,38 @@
       {:else if row.kind === "microphone" && s === "no_device"}
         <div class="flex items-center gap-3 pl-8">
           <p class="text-xs text-text-muted">{$t("permissions.mic_no_device_hint")}</p>
+          <button
+            class="btn btn-ghost shrink-0 gap-1.5"
+            onclick={() => openSettings({ anchor: "audio.mic" })}
+          >
+            {$t("permissions.open_settings")}
+          </button>
         </div>
       {/if}
     </div>
   {/each}
+
+  <div class="flex items-center justify-between gap-3 px-1 pt-1">
+    <p class="text-xs text-text-muted">
+      {#if repairSuccess}
+        {$t("permissions.accessibility_repair_success")}
+      {:else}
+        {$t("permissions.issues_prompt")}
+      {/if}
+    </p>
+    <button
+      class="btn btn-ghost shrink-0 gap-1.5"
+      disabled={repairing || repairCooldown}
+      onclick={repairAccessibility}
+    >
+      {#if repairing}
+        <Spinner />
+        {$t("permissions.checking")}
+      {:else}
+        {$t("permissions.repair")}
+      {/if}
+    </button>
+  </div>
 </div>
 
 {#if error}

@@ -68,7 +68,6 @@ pub async fn polish_dictation(
     state: State<'_, AppState>,
     text: String,
     focused_app: Option<String>,
-    rewrite_of: Option<String>,
 ) -> Result<DictationPolishResult, String> {
     let settings = AppSettings::load(&state.db)?;
     if let Some(result) = early_polish_dictation_result(&settings, &text) {
@@ -83,7 +82,6 @@ pub async fn polish_dictation(
         &providers.models,
         &dictionary,
         focused_app.as_deref(),
-        rewrite_of.as_deref(),
     )
     .await)
 }

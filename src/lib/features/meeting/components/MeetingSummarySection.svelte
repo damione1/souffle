@@ -5,6 +5,7 @@
   import Spinner from "../../../components/ui/Spinner.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import type { MeetingTranscript, SummarizeProgress, SummaryModelDescriptor, SummaryTemplate, TranscriptionSegment } from "../../../types";
+  import { openSettings } from "../../settings/open";
 
   const builtInTemplateNameKeys: Record<string, string> = {
     default: "summary_templates.template_default",
@@ -223,9 +224,12 @@
           </button>
         </div>
       {:else}
-        <div class="flex items-center gap-2 py-2">
-          <span class="status-dot"></span>
-          <span class="text-sm text-text-muted">{$t("meeting_summary.no_summary_provider")}</span>
+        <div class="py-2">
+          <StatusBanner
+            message={$t("meeting_summary.no_summary_provider")}
+            actionLabel={$t("permissions.open_settings")}
+            onAction={() => openSettings({ anchor: "ai.provider" })}
+          />
         </div>
       {/if}
     {/if}

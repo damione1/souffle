@@ -1,0 +1,146 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+language: en-US
+
+tone_instructions: >-
+  Be concise and technical. Name the failure scenario rather than restating the code.
+  Do not comment on formatting that rustfmt, prettier or clippy already enforce.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  assess_linked_issues: true
+  related_prs: true
+  poem: false
+
+  auto_review:
+    # Off on purpose: .github/workflows/coderabbit-gate.yml adds `ci-green` once
+    # Contracts and E2E pass on the head commit, and removes it on every push.
+    # Reviewing a diff that the suites are about to invalidate spends credits
+    # twice for one answer.
+    enabled: false
+    labels:
+      - ci-green
+
+  # Generated and vendored code is not reviewable material.
+  path_filters:
+    - "!src/lib/types/generated.ts"
+    - "!src/lib/api/generated.ts"
+    - "!src-tauri/gen/**"
+    - "!src-tauri/fixtures/**"
+    - "!src-tauri/target/**"
+    - "!dist/**"
+    - "!**/node_modules/**"
+
+  path_instructions:
+    - path: "src-tauri/src/engine/**"
+      instructions: |
+        Streaming ASR. The dominant defect class here is a segment timestamp that moves.
+        Flag any change to VAD gating, KV refresh, frame eviction or lane pairing that could
+        shift start_time or end_time, and say which segments would move.
+        In diarized mode both lanes are fed every frame on purpose: holding, dropping or
+        reordering frames in one lane desynchronises the other. Flag it.
+        Check that epoch origin survives a reset or a resume after sleep.
+        A flush that discards a short remainder loses the last word: flag remainder handling.
+
+    - path: "src-tauri/src/audio/**"
+      instructions: |
+        Capture, AEC, device hot-swap. Flag any path where audio accumulated during a device
+        rebuild can be discarded, in particular drift bounds applied after a route change.
+        AEC changes must stay gated on output mute and volume: suppressing the microphone
+        while the system output is silent is a known regression.
+
+    - path: "src-tauri/src/commands/**"
+      instructions: |
+        Tauri IPC boundary. Flag every new or modified `Result<_, String>`: the frontend cannot
+        discriminate a cause from a string, and a typed error already exists.
+        Flag session orchestration logic added here rather than in the layer below.
+        A changed #[tauri::command] signature requires `npm run generate:types`; if the
+        generated files are not in the diff, say so.
+
+    - path: "src-tauri/src/**"
+      instructions: |
+        Flag any window operation (show, hide, resize, move, focus, emit to a window) performed
+        while an AppState mutex or any other lock is held. This deadlocks the main thread and
+        has been reproduced from a process sample. Report the lock and the call site.
+        Flag a permission (TCC, Accessibility, microphone) reported as granted, repaired or
+        successful without a verification step actually confirming it.
+        Flag state written only in memory when a crash or restart must preserve it.
+
+    - path: "src/lib/features/**"
+      instructions: |
+        Flag state that lives only in the webview and is lost on reload or crash when the
+        backend is the owner of record. Flag an error path that is swallowed rather than
+        surfaced to the user. Flag a UI action that does not consult the state machine before
+        firing. When an alert asks the user to change a setting, it must offer the control,
+        not describe the path to it.
+
+    - path: "src/**/*.svelte"
+      instructions: |
+        Svelte 5 runes. Flag `setSize` or any resize called from JS on a window anchored to the
+        top of the screen: it moves the anchor. Flag derived state that reintroduces a
+        reactivity cycle. User-facing strings must exist in both locales.
+
+    - path: "src-tauri/src/db/**"
+      instructions: |
+        Flag a migration that computes a value from a table that may still be empty at that
+        point in the sequence. Flag any write path to the transcript that does not also update
+        the FTS index: search and the MCP server read from it and would silently disagree.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Release and signing. Flag any change that moves a dylib out of the frameworks directory
+        (notarisation rejects it) or that targets an architecture other than aarch64.
+
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: >-
+        Conventional commit prefix, then the user-visible effect. Under 72 characters.
+    description:
+      mode: warning
+    issue_assessment:
+      mode: off
+    custom_checks:
+      - name: Acceptance criteria are evidenced
+        mode: warning
+        instructions: >-
+          The description must contain an "Acceptance criteria" section listing numbered
+          criteria, each followed by the test, file or manual observation that satisfies it.
+          Fail if the section is missing, if any criterion has no named evidence, or if a
+          criterion is phrased so that it could not be shown to be false.
+      - name: Scope fence is declared
+        mode: warning
+        instructions: >-
+          The description must contain an "Out of scope" section naming what was deliberately
+          not changed. Then compare it against the diff and report any file touched that falls
+          outside the stated scope.
+      - name: Verification was actually run
+        mode: warning
+        instructions: >-
+          The description must contain a "Verification" section listing the exact commands run
+          and their results. Fail if commands are listed without results, or if the diff
+          changes Rust code and no cargo test invocation is reported.
+
+  tools:
+    clippy:
+      enabled: true
+    eslint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    actionlint:
+      enabled: true
+    markdownlint:
+      enabled: false
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CLAUDE.md"
+      - ".claude/**/*.md"
+  learnings:
+    scope: local
+  issues:
+    scope: local

@@ -21,6 +21,11 @@ import {
   updateDictionaryEntry as apiUpdateDictionaryEntry,
   deleteDictionaryEntry as apiDeleteDictionaryEntry,
 } from "../../api/dictionary";
+import {
+  addSnippet as apiAddSnippet,
+  updateSnippet as apiUpdateSnippet,
+  deleteSnippet as apiDeleteSnippet,
+} from "../../api/snippets";
 import { listCalendars } from "../../api/calendar";
 import { requestPermission } from "../../api/permissions";
 import { setLocale, tr } from "../../i18n";
@@ -39,7 +44,7 @@ import type {
   Theme,
   TranscriptionCatalog,
 } from "../../types";
-import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, shortcutMissingModifier } from "../../utils";
+import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "../../utils";
 import {
   buildMicrophoneList,
   keepConnectedDevices,
@@ -60,6 +65,7 @@ import {
   startTranscriptionModelDownload,
   startTranscriptionModelLoad,
 } from "../transcription/runtime";
+import { refreshSnippets } from "../transcription/snippets";
 
 export function createSettingsController() {
   const app = getAppState();
@@ -90,8 +96,7 @@ export function createSettingsController() {
 
   let toggleShortcut = $state("CommandOrControl+Shift+Space");
   let pttShortcut = $state("");
-  let rewriteShortcut = $state("");
-  let recordingField = $state<"toggle" | "ptt" | "rewrite" | null>(null);
+  let recordingField = $state<"toggle" | "ptt" | null>(null);
   let shortcutError = $state("");
 
   let dictionaryEntries = $state<DictionaryEntry[]>([]);
@@ -115,6 +120,7 @@ export function createSettingsController() {
       refreshSummaryProviders(),
       loadCatalog(),
       loadDictionary(),
+      refreshSnippets(),
       loadCalendars(),
     ]);
     await refreshRuntimeStatus();
@@ -159,7 +165,6 @@ export function createSettingsController() {
       const shortcuts = await getShortcuts();
       toggleShortcut = shortcuts.toggle;
       pttShortcut = shortcuts.push_to_talk;
-      rewriteShortcut = shortcuts.rewrite;
     } catch (e) {
       console.warn("Failed to load shortcuts:", e);
     }
@@ -564,6 +569,20 @@ export function createSettingsController() {
     });
   }
 
+  /** SOU-036: the backend registers/unregisters the login item before it
+   * writes the setting, so a rejected save means SMAppService refused.
+   * `persistSettings` never throws — it reports the failure as `false`,
+   * restores `app.settings`, and puts the reason in `statusMessage` — so the
+   * only thing left to undo here is the checkbox itself. */
+  async function onAutostartChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const checked = target.checked;
+    const persisted = await persistSettings((settings) => {
+      settings.autostart_enabled = checked;
+    });
+    if (!persisted) target.checked = !checked;
+  }
+
   function onAutoUpdateCheckChange(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     void persistSettings((settings) => {
@@ -901,20 +920,40 @@ export function createSettingsController() {
     );
   }
 
+  // Snippets live in the app store so dictation finalization reads the same
+  // list this sheet edits, without an IPC call of its own (SOU-035 AC4).
+  async function handleAddSnippet(trigger: string, expansion: string) {
+    const entry = await apiAddSnippet(trigger, expansion);
+    app.snippets = [...app.snippets, entry].sort((a, b) => a.trigger.localeCompare(b.trigger));
+  }
+
+  async function handleDeleteSnippet(id: number) {
+    await apiDeleteSnippet(id);
+    app.snippets = app.snippets.filter((e) => e.id !== id);
+  }
+
+  async function handleUpdateSnippet(id: number, trigger: string, expansion: string) {
+    await apiUpdateSnippet(id, trigger, expansion);
+    app.snippets = app.snippets
+      .map((entry) => (entry.id === id ? { ...entry, trigger, expansion } : entry))
+      .sort((a, b) => a.trigger.localeCompare(b.trigger));
+  }
+
   function formatShortcut(shortcut: string): string {
     return formatShortcutLabel(shortcut) || "Not set";
   }
 
-  function startRecording(field: "toggle" | "ptt" | "rewrite") {
+  function startRecording(field: "toggle" | "ptt") {
     recordingField = field;
     shortcutError = "";
   }
 
-  function applyShortcutValue(field: "toggle" | "ptt" | "rewrite", value: string) {
+  function applyShortcutValue(field: "toggle" | "ptt", value: string) {
     if (field === "toggle") toggleShortcut = value;
-    else if (field === "ptt") pttShortcut = value;
-    else rewriteShortcut = value;
+    else pttShortcut = value;
   }
+
+  let modifierDownEvent: KeyboardEvent | null = null;
 
   function handleKeyDown(event: KeyboardEvent) {
     if (!recordingField) return;
@@ -923,14 +962,24 @@ export function createSettingsController() {
 
     if (event.key === "Escape") {
       recordingField = null;
+      modifierDownEvent = null;
       return;
     }
 
     if (event.key === "Backspace" || event.key === "Delete") {
       applyShortcutValue(recordingField, "");
       recordingField = null;
+      modifierDownEvent = null;
       void saveShortcutSettings();
       return;
+    }
+
+    const modOnly = modifierToShortcut(event);
+    if (modOnly) {
+      modifierDownEvent = event;
+      return;
+    } else {
+      modifierDownEvent = null;
     }
 
     const shortcut = keyEventToShortcut(event);
@@ -946,20 +995,30 @@ export function createSettingsController() {
     void saveShortcutSettings();
   }
 
+  function handleKeyUp(event: KeyboardEvent) {
+    if (!recordingField) return;
+    const modOnly = modifierToShortcut(event);
+    if (modOnly && modifierDownEvent && modifierDownEvent.key === event.key) {
+      applyShortcutValue(recordingField, modOnly);
+      recordingField = null;
+      modifierDownEvent = null;
+      void saveShortcutSettings();
+    }
+  }
+
   async function saveShortcutSettings() {
     shortcutError = "";
     try {
       await persistShortcutSettings({
         toggle: toggleShortcut,
         push_to_talk: pttShortcut,
-        rewrite: rewriteShortcut,
       } satisfies ShortcutSettings);
     } catch (e) {
       shortcutError = errorMessage(e);
     }
   }
 
-  async function clearShortcut(field: "toggle" | "ptt" | "rewrite") {
+  async function clearShortcut(field: "toggle" | "ptt") {
     applyShortcutValue(field, "");
     await saveShortcutSettings();
   }
@@ -997,7 +1056,6 @@ export function createSettingsController() {
     get downloadTotalBytes() { return app.downloadTotalBytes; },
     get toggleShortcut() { return toggleShortcut; },
     get pttShortcut() { return pttShortcut; },
-    get rewriteShortcut() { return rewriteShortcut; },
     get recordingField() { return recordingField; },
     get shortcutError() { return shortcutError; },
     get dictionaryEntries() { return dictionaryEntries; },
@@ -1027,6 +1085,7 @@ export function createSettingsController() {
     onLocaleChange,
     onAutoPasteChange,
     onLearnFromEditChange,
+    onAutostartChange,
     onAutoUpdateCheckChange,
     onDictationPolishEnabledChange,
     onDictationPolishTemplateChange,
@@ -1060,8 +1119,13 @@ export function createSettingsController() {
     handleAddDictionaryEntry,
     handleDeleteDictionaryEntry,
     handleUpdateDictionaryEntry,
+    get snippetEntries() { return app.snippets; },
+    handleAddSnippet,
+    handleDeleteSnippet,
+    handleUpdateSnippet,
     startRecording,
     handleKeyDown,
+    handleKeyUp,
     clearShortcut,
     formatShortcut,
   };

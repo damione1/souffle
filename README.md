@@ -50,10 +50,11 @@ Soufflé is not a window you type into. Press the shortcut and a small pill appe
   <img src="docs/demo/overlay.gif" width="820" alt="The pill floating over a chat app: shortcut, dictation, reformulation, and the tidied text landing in the composer">
 </p>
 
-- **Press once to start and stop**, or bind a push-to-talk key and hold it instead.
+- **Press once to start and stop**, or bind a push-to-talk key and hold it instead — including Fn, a lone modifier, or F5–F12.
+- **Voice snippets**: say a trigger phrase at the start of a dictation to paste a prepared block instead; that take skips the polish pass.
 - **Insertion that fits the app**: the clipboard and ⌘V, simulated typing for terminals and secure fields that reject a synthetic paste, or a direct write through Accessibility.
 - **Polish before it lands** (optional): a local LLM pass tidies the phrasing, with editable prompt templates — clean up, professional email, bullet points, remove fillers.
-- **Optional start/stop sounds**, so you know the shortcut landed.
+- **Optional start/stop sounds**, so you know the shortcut landed. The menu bar can also copy the last transcription.
 
 ## Text arrives while you are still talking
 
@@ -76,6 +77,7 @@ Meetings and dictations land on one timeline, with today's calendar above it and
 - 🔒 **Nothing is uploaded.** Transcription, summaries and audio all stay on your Mac, in one local database you can export or delete whenever you like.
 - ✈️ **Works offline.** Once the speech model is on disk, transcription keeps working with the Wi-Fi off.
 - 🙅 **No account, ever.** No sign-up, no subscription, no API key to paste in. Every outbound connection the app makes is listed [below](#what-touches-the-network).
+- 🚀 **Launch at login** (optional): open Soufflé automatically when you start your Mac. On by default after a fresh setup wizard.
 
 ## Own your data
 
@@ -120,7 +122,7 @@ Soufflé asks for these as you use the features that need them, never up front:
 | --- | --- | --- |
 | Microphone | Records your voice to transcribe it | Everything |
 | System Audio Recording | Captures what the other participants say, without a virtual audio device | Meetings (macOS 14.4+) |
-| Accessibility | Pastes into the app you were using, and reads back your corrections when "learn from edits" is on | Auto-paste, dictation polish |
+| Accessibility | Pastes into the app you were using, reads back your corrections when "learn from edits" is on, and installs the native event tap for single-key shortcuts (Fn, lone modifier, F5–F12) | Auto-paste, dictation polish, single-key shortcuts |
 | Calendar | Reads today's events to list them and offer to start recording | Calendar integration (optional) |
 
 Settings > System > Permissions shows the current state of each and links straight to the matching System Settings pane.
@@ -158,6 +160,12 @@ Requires an Apple Silicon Mac, [Rust](https://rustup.rs/), [Node.js](https://nod
 ```bash
 npm install
 npm run tauri dev
+```
+
+Debug builds are **Soufflé Nightly** (`com.souffle.desktop.nightly`) so they sit next to the installed app with their own TCC rows. After a code change:
+
+```bash
+make nightly
 ```
 
 ## License

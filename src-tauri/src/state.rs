@@ -31,6 +31,12 @@ pub enum AudioCommand {
         /// setting is not off. `None` for dictation and for meetings
         /// recorded with retention off.
         record_path: Option<std::path::PathBuf>,
+        /// The pre-spawned system audio tap, if any (macOS only).
+        #[cfg(target_os = "macos")]
+        tap: Option<crate::audio::system_tap::TapHandle>,
+        /// The consumer side of the pre-spawned tap, if any (macOS only).
+        #[cfg(target_os = "macos")]
+        tap_cons: Option<ringbuf::HeapCons<f32>>,
     },
     Stop,
     SelectDevice(String),
@@ -133,6 +139,9 @@ impl MeetingAccumulator {
             notes: self.notes,
             calendar_event_id: self.calendar_event_id,
             participants: self.participants,
+            // Filled in by whoever stops the session: only they can read the
+            // capture snapshot before it is cleared (SOU-119).
+            system_audio: None,
         }
     }
 }
@@ -175,6 +184,12 @@ pub struct AppState {
     /// Release only emits `ShortcutPttStop` if this is still true, so a
     /// paused PTT press cannot stop a dictation started another way.
     pub ptt_start_armed: AtomicBool,
+    /// Set when `ShortcutToggle` was emitted for the current native key-down.
+    /// Cleared on release so key-repeat cannot flip dictation in a loop.
+    pub toggle_armed: AtomicBool,
+    pub modifier_ptt_shortcut: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    /// Native single-key Toggle binding (SOU-115), symmetric to PTT.
+    pub modifier_toggle_shortcut: std::sync::Arc<std::sync::RwLock<Option<String>>>,
 }
 
 impl AppState {
@@ -197,6 +212,9 @@ impl AppState {
             live_edit_lock: Mutex::new(()),
             ptt_paused_until: Mutex::new(None),
             ptt_start_armed: AtomicBool::new(false),
+            toggle_armed: AtomicBool::new(false),
+            modifier_ptt_shortcut: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            modifier_toggle_shortcut: std::sync::Arc::new(std::sync::RwLock::new(None)),
         }
     }
 
@@ -251,6 +269,7 @@ impl AppState {
             let _ = StateChanged(new_state.clone()).emit(&handle);
             crate::pill::sync(&handle, &new_state);
             crate::tray::sync(&handle, &new_state);
+            crate::dictation_cancel::sync(&handle, &new_state);
         }
 
         Ok(new_state)
@@ -292,7 +311,12 @@ impl AppState {
     /// the PipelineError event (the pipeline layer owns that event; this is
     /// the app-level cleanup that follows it).
     pub fn abort_active_session(&self, message: String) {
+        // Read the verdict before discarding it. After AudioGone the capture
+        // thread is already gone, so Stop is a no-op and would otherwise
+        // leave this snapshot for the next meeting (SOU-119).
+        let system_audio = crate::audio::capture::session_system_audio();
         let _ = self.audio_cmd_sender.send(AudioCommand::Stop);
+        crate::audio::capture::discard_system_audio_status();
 
         // Salvage an in-progress meeting: stop_meeting_recording can no
         // longer run once the machine is in Error, so the accumulated
@@ -303,7 +327,11 @@ impl AppState {
             .ok()
             .and_then(|mut guard| guard.take());
         if let Some(meeting) = accumulator {
-            let transcript = meeting.into_transcript(chrono::Utc::now());
+            let mut transcript = meeting.into_transcript(chrono::Utc::now());
+            transcript.system_audio = crate::app_events::worse_system_audio(
+                self.db.meeting_system_audio(&transcript.id).unwrap_or(None),
+                system_audio,
+            );
             match self.db.save_meeting(&transcript) {
                 Ok(()) => info!(
                     id = %transcript.id,

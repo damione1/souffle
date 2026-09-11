@@ -657,4 +657,16 @@ mod tests {
             "the Kubernetes cluster"
         );
     }
+
+    #[test]
+    fn kyutai_multi_word_alias_limitation() {
+        // Multi-word aliases do not fire when processed word-by-word (like Kyutai segments).
+        // This is a known limitation.
+        let f = DictionaryFilter::with_session_terms(
+            vec![entry_with_pronunciation("FluidVoice", "fluid boys")],
+            &[],
+        );
+        assert_eq!(f.apply("fluid"), "fluid");
+        assert_eq!(f.apply("boys"), "boys");
+    }
 }

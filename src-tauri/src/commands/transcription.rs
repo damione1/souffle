@@ -10,7 +10,7 @@ use tauri_specta::Event;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::app_events::{MeetingFinalized, SystemWokeUp};
+use crate::app_events::{MeetingFinalized, SystemAudioReason, SystemWokeUp};
 use crate::constants::STOP_REPLY_TIMEOUT_SECS;
 use crate::db::Database;
 use crate::engine::TranscriptionSegment;
@@ -53,6 +53,9 @@ fn meeting_header(acc: &MeetingAccumulator) -> MeetingTranscript {
         notes: acc.notes.clone(),
         calendar_event_id: acc.calendar_event_id.clone(),
         participants: acc.participants.clone(),
+        // The header is written at session start and never carries the
+        // verdict; the authoritative save at stop does (SOU-119).
+        system_audio: None,
     }
 }
 
@@ -172,6 +175,7 @@ async fn launch_meeting(
     let audio = state.audio_cmd_sender.clone();
     let db = Arc::clone(&state.db);
     let acc = Arc::clone(&state.meeting_accumulator);
+    let app = state.app_handle().ok();
     let res = tauri::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
             &actor,
@@ -182,6 +186,7 @@ async fn launch_meeting(
             session_terms,
             Some(recording_target),
             on_segment,
+            app,
         )
     })
     .await
@@ -242,6 +247,80 @@ struct RecordingTarget {
     session_index: usize,
 }
 
+/// What a starting session intends to do about system audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SystemAudioPlan {
+    /// Probe the tap and run the leg if it comes up.
+    Attempt,
+    /// No leg at all, for the given reason. Dictation carries no reason: it
+    /// has no system-audio leg to report on in the first place.
+    Skip(Option<SystemAudioReason>),
+}
+
+/// Apply the plan: a skipped leg is emitted *and* stored right here, before
+/// the capture thread is asked for anything, so the "we never even tried"
+/// case is as visible as a failure. Returns whether to attempt the tap.
+fn apply_system_audio_plan(app: Option<&AppHandle>, plan: SystemAudioPlan) -> bool {
+    if let SystemAudioPlan::Skip(Some(reason_code)) = plan {
+        crate::audio::capture::emit_system_audio_status(app, false, Some(reason_code), None);
+    }
+    plan == SystemAudioPlan::Attempt
+}
+
+/// Report the outcome of the system-audio probe, then hand back the tap.
+/// A failure goes through the shared helper, which stores the snapshot as
+/// well as emitting it: emitting alone left a reloaded webview with nothing
+/// (SOU-119). Generic over the tap so the reporting can be tested without
+/// CoreAudio.
+#[cfg(target_os = "macos")]
+fn report_probe_outcome<T>(app: Option<&AppHandle>, outcome: Result<T, String>) -> Option<T> {
+    match outcome {
+        Ok(tap) => Some(tap),
+        Err(reason) => {
+            tracing::warn!("System audio tap probe failed, downgrading to mic only: {reason}");
+            crate::audio::capture::emit_system_audio_status(
+                app,
+                false,
+                Some(crate::audio::system_tap::failure_reason(&reason)),
+                Some(reason),
+            );
+            None
+        }
+    }
+}
+
+/// Decide whether the session even tries to capture system audio. A skipped
+/// leg still owes the user a reason, otherwise a disabled setting looks
+/// exactly like a healthy session (SOU-119).
+fn system_audio_plan(
+    mode: PipelineMode,
+    setting_enabled: bool,
+    platform_supported: bool,
+) -> SystemAudioPlan {
+    if mode != PipelineMode::Meeting {
+        return SystemAudioPlan::Skip(None);
+    }
+    if !platform_supported {
+        return SystemAudioPlan::Skip(Some(SystemAudioReason::Unsupported));
+    }
+    if !setting_enabled {
+        return SystemAudioPlan::Skip(Some(SystemAudioReason::Disabled));
+    }
+    SystemAudioPlan::Attempt
+}
+
+/// Capture + diarize after the system-audio tap probe. A failed tap must not
+/// leave the actor in dual-lane mode (SOU-082).
+fn capture_and_diarize_after_probe(
+    capture_requested: bool,
+    tap_alive: bool,
+    engine_id: &str,
+) -> (bool, bool) {
+    let capture = capture_requested && tap_alive;
+    let diarize = capture && engine_id == crate::engine::KYUTAI_ENGINE_ID;
+    (capture, diarize)
+}
+
 /// Blocking core of starting a recording session, run via `spawn_blocking` so
 /// the long crossbeam reply wait (engine reset + filter-chain build) never
 /// blocks the Tauri command thread / window event loop. Preconditions and
@@ -256,23 +335,58 @@ fn start_pipeline_blocking(
     session_terms: Vec<String>,
     recording_target: Option<RecordingTarget>,
     on_segment: SegmentCallback,
+    app: Option<AppHandle>,
 ) -> Result<(), String> {
     // Snapshot settings and dictionary; the actor builds filter chains on its
     // own thread to keep ONNX/Metal work off the command thread.
     let settings = crate::settings::AppSettings::load(db)?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
 
-    // Meetings also capture system audio (the other participants) when the
-    // setting is on and the OS supports Core Audio taps.
-    let capture_system_audio = mode == PipelineMode::Meeting
-        && settings.capture_system_audio
-        && crate::platform::system_audio_capture_supported();
-    // Speaker labelling (Me/Them) needs a distinct system-audio leg AND an
-    // engine that can transcribe two batched lanes. Only Kyutai can today; other
-    // engines record meetings as a single mixed stream with no labels. This must
-    // match the engine's own capability so capture and the actor agree on
-    // whether to split the audio.
-    let diarize =
-        capture_system_audio && settings.transcription_engine_id == crate::engine::KYUTAI_ENGINE_ID;
+    // Zero the tallies before the first status of this session is built, so
+    // a previous meeting's samples cannot be read as this one's (SOU-119).
+    crate::audio::capture::begin_system_audio_session(session_id);
+    let capture_system_audio = apply_system_audio_plan(
+        app.as_ref(),
+        system_audio_plan(
+            mode,
+            settings.capture_system_audio,
+            crate::platform::system_audio_capture_supported(),
+        ),
+    );
+
+    // SOU-082: learn whether a tap will come up *before* committing the
+    // engine to dual-lane diarization. The probe must not stay alive across
+    // the microphone open: a live process-tap aggregate held while cpal
+    // builds/plays the AUHAL input stream is what wedged the built-in mic
+    // for a full `MIC_OPEN_TIMEOUT` in meeting repros (system audio fine,
+    // dictation-without-tap fine). Drop the probe; `start_meeting` opens
+    // the mic first, then spawns the real tap.
+    #[cfg(target_os = "macos")]
+    let tap_alive = if capture_system_audio {
+        use ringbuf::traits::Split;
+        let (tap_prod, _tap_cons) =
+            ringbuf::HeapRb::<f32>::new(crate::audio::mixer::MIX_RATE as usize * 2).split();
+        let probe =
+            crate::audio::system_tap::spawn_tap(tap_prod, std::time::Duration::from_secs(5));
+        match report_probe_outcome(app.as_ref(), probe) {
+            Some(tap) => {
+                drop(tap);
+                true
+            }
+            None => false,
+        }
+    } else {
+        true
+    };
+    #[cfg(not(target_os = "macos"))]
+    let tap_alive = true;
+
+    let (actual_capture_system_audio, diarize) = capture_and_diarize_after_probe(
+        capture_system_audio,
+        tap_alive,
+        &settings.transcription_engine_id,
+    );
 
     // Auto-stop detection only applies to meetings: dictation sessions are
     // short and user-driven, so "meeting is over" doesn't apply. This is a
@@ -321,9 +435,15 @@ fn start_pipeline_blocking(
             session_id,
             target_sample_rate: info.audio.sample_rate_hz,
             mic_gain: info.mic_gain,
-            capture_system_audio,
+            capture_system_audio: actual_capture_system_audio,
             diarize,
             record_path,
+            // No pre-spawned tap: start_meeting opens the mic first, then
+            // the tap (see the disposable probe above).
+            #[cfg(target_os = "macos")]
+            tap: None,
+            #[cfg(target_os = "macos")]
+            tap_cons: None,
         })
         .map_err(|e| format!("Audio start: {e}"))?;
 
@@ -436,11 +556,15 @@ fn build_dictation_on_segment(
 ///
 /// `async` + `spawn_blocking`: the engine-reset reply can take 0.5–2s, so the
 /// blocking wait runs off-thread and the window never freezes.
+///
+/// `cancel_on_escape` arms the transient Escape binding for toggle dictation
+/// (SOU-117). Push-to-talk passes false: releasing the PTT key is its cancel.
 #[tauri::command]
 #[specta::specta]
 pub async fn start_transcription(
     state: State<'_, AppState>,
     channel: Channel<crate::engine::TranscriptionSegment>,
+    cancel_on_escape: bool,
 ) -> Result<(), String> {
     info!("Starting streaming transcription");
 
@@ -468,6 +592,7 @@ pub async fn start_transcription(
     let actor = Arc::clone(&state.engine_actor);
     let audio = state.audio_cmd_sender.clone();
     let db = Arc::clone(&state.db);
+    let app = state.app_handle().ok();
     tauri::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
             &actor,
@@ -478,12 +603,19 @@ pub async fn start_transcription(
             Vec::new(),
             None,
             on_segment,
+            app,
         )
     })
     .await
     .map_err(|e| format!("Join start task: {e}"))??;
 
     state.apply_transition(StateAction::StartDictation { session_id })?;
+    crate::dictation_cancel::set_wanted(cancel_on_escape);
+    if let Ok(app) = state.app_handle()
+        && let Ok(machine) = state.current_machine_state()
+    {
+        crate::dictation_cancel::sync(&app, &machine);
+    }
 
     if let Ok(settings) = AppSettings::load(&state.db) {
         crate::audio::feedback::play_dictation_feedback(
@@ -746,6 +878,23 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
         // so the machine never gets stuck in Stopping. Segments already flushed
         // incrementally during the meeting are not lost even if this panics.
         let drain_and_save = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Read before stopping the pipeline: the capture thread clears the
+            // session snapshot on its way out, and this is the only chance to
+            // put the reason on the meeting itself (SOU-119).
+            let system_audio = crate::audio::capture::session_system_audio();
+            match &system_audio {
+                // The one line a support log was missing: why this meeting
+                // came out mic only (SOU-119).
+                Some(audio) if audio.degraded() => warn!(
+                    active = audio.active,
+                    samples = audio.samples,
+                    reason_code = ?audio.reason_code,
+                    reason = audio.reason.as_deref().unwrap_or("none"),
+                    "Meeting recorded without the system-audio leg"
+                ),
+                Some(audio) => info!(samples = audio.samples, "System-audio leg healthy"),
+                None => {}
+            }
             let pipeline_err =
                 stop_pipeline_blocking(&state.engine_actor, &state.audio_cmd_sender).err();
 
@@ -754,7 +903,18 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
             if let Ok(mut guard) = state.meeting_accumulator.lock()
                 && let Some(meeting) = guard.take()
             {
-                let transcript = meeting.into_transcript(chrono::Utc::now());
+                let mut transcript = meeting.into_transcript(chrono::Utc::now());
+                // A meeting can be resumed, and each session gets its own
+                // verdict: keep the one that explains the most missing
+                // system audio, so a healthy 30s resume does not erase the
+                // hour recorded mic only (SOU-119).
+                transcript.system_audio = crate::app_events::worse_system_audio(
+                    state
+                        .db
+                        .meeting_system_audio(&transcript.id)
+                        .unwrap_or(None),
+                    system_audio,
+                );
                 if let Err(e) = state.db.save_meeting(&transcript) {
                     tracing::error!(id = %transcript.id, "Failed to save meeting: {e}");
                 } else {
@@ -804,7 +964,23 @@ pub fn paste_text(
     delay_ms: u64,
     method: crate::settings::PasteMethod,
 ) -> Result<(), String> {
-    crate::clipboard::paste_text(&text, delay_ms, method)
+    // The insertion path left no trace at all, so afterwards a paste that
+    // was never requested, one that failed, and one the target app dropped
+    // all read the same: nothing in the log.
+    info!(
+        ?method,
+        chars = text.chars().count(),
+        delay_ms,
+        "Inserting dictation"
+    );
+    let started = std::time::Instant::now();
+    let result = crate::clipboard::paste_text(&text, delay_ms, method);
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    match &result {
+        Ok(()) => info!(elapsed_ms, "Dictation inserted"),
+        Err(e) => warn!(elapsed_ms, error = %e, "Dictation insert failed"),
+    }
+    result
 }
 
 /// Write text to the pasteboard without pasting. Cancels a pending clipboard
@@ -969,9 +1145,12 @@ pub fn clear_sleep_paused_meeting(state: State<'_, AppState>) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::report_probe_outcome;
     use super::{
-        MEETING_FLUSH_THRESHOLD, build_meeting_on_segment, dictation_live_preview,
-        paste_failure_notification_text,
+        MEETING_FLUSH_THRESHOLD, PipelineMode, SystemAudioPlan, SystemAudioReason,
+        apply_system_audio_plan, build_meeting_on_segment, capture_and_diarize_after_probe,
+        dictation_live_preview, paste_failure_notification_text, system_audio_plan,
     };
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
     use crate::state::MeetingAccumulator;
@@ -1158,5 +1337,143 @@ mod tests {
         assert_eq!(title_not_saved, "Copié — presse ⌘V");
         assert!(body_not_saved.contains("Accessibilité"));
         assert!(!body_not_saved.contains("l'historique"));
+    }
+
+    #[test]
+    fn tap_probe_failure_downgrades_to_single_stream() {
+        assert_eq!(
+            capture_and_diarize_after_probe(true, false, crate::engine::KYUTAI_ENGINE_ID),
+            (false, false)
+        );
+        assert_eq!(
+            capture_and_diarize_after_probe(true, true, crate::engine::KYUTAI_ENGINE_ID),
+            (true, true)
+        );
+        assert_eq!(
+            capture_and_diarize_after_probe(true, true, "whisper"),
+            (true, false)
+        );
+        assert_eq!(
+            capture_and_diarize_after_probe(false, true, crate::engine::KYUTAI_ENGINE_ID),
+            (false, false)
+        );
+    }
+
+    /// SOU-119 AC1/AC2: the defect was here, in the caller, not in the
+    /// helper: this path emitted `SystemAudioStatus` straight on the
+    /// AppHandle and stored nothing, so a webview that reloaded right after
+    /// found `None`. `report_probe_outcome` is the whole failure branch of
+    /// the probe, generic only so it can run without CoreAudio.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn probe_failure_is_stored_for_a_reloaded_webview() {
+        let _guard = crate::audio::capture::status_test_support::LOCK
+            .lock()
+            .unwrap();
+        crate::audio::capture::status_test_support::reset();
+
+        let outcome = report_probe_outcome::<()>(
+            None,
+            Err("AudioHardwareCreateProcessTap failed (560227702)".into()),
+        );
+
+        assert!(outcome.is_none());
+        let stored = crate::commands::get_system_audio_status().expect("status must be stored");
+        assert!(!stored.active);
+        assert_eq!(
+            stored.reason_code,
+            Some(SystemAudioReason::ProbeFailed),
+            "CreateProcessTap is not a verified permission denial"
+        );
+        assert!(stored.reason.is_some(), "the raw detail is kept too");
+    }
+
+    /// SOU-119 AC3: the same, for the branch that used to emit nothing at
+    /// all. `apply_system_audio_plan` is what `start_pipeline_blocking` runs
+    /// before it touches the capture thread.
+    #[test]
+    fn a_skipped_leg_is_emitted_and_stored_before_capture_starts() {
+        let _guard = crate::audio::capture::status_test_support::LOCK
+            .lock()
+            .unwrap();
+        crate::audio::capture::status_test_support::reset();
+
+        let attempt =
+            apply_system_audio_plan(None, system_audio_plan(PipelineMode::Meeting, false, true));
+
+        assert!(!attempt, "nothing to attempt with the setting off");
+        let stored = crate::commands::get_system_audio_status().expect("status must be stored");
+        assert!(!stored.active);
+        assert_eq!(stored.reason_code, Some(SystemAudioReason::Disabled));
+    }
+
+    /// Dictation has no system-audio leg: storing a status for it would show
+    /// up on the meeting screen of whatever runs next.
+    #[test]
+    fn a_dictation_session_stores_no_system_audio_status() {
+        let _guard = crate::audio::capture::status_test_support::LOCK
+            .lock()
+            .unwrap();
+        crate::audio::capture::status_test_support::reset();
+
+        let attempt =
+            apply_system_audio_plan(None, system_audio_plan(PipelineMode::Dictation, true, true));
+
+        assert!(!attempt);
+        assert!(crate::commands::get_system_audio_status().is_none());
+    }
+
+    #[test]
+    fn an_attempted_leg_stores_nothing_yet() {
+        let _guard = crate::audio::capture::status_test_support::LOCK
+            .lock()
+            .unwrap();
+        crate::audio::capture::status_test_support::reset();
+
+        let attempt =
+            apply_system_audio_plan(None, system_audio_plan(PipelineMode::Meeting, true, true));
+
+        assert!(attempt, "the probe decides from here");
+        assert!(
+            crate::commands::get_system_audio_status().is_none(),
+            "the probe or the capture thread reports the outcome, not the plan"
+        );
+    }
+
+    /// SOU-119 AC3: the two "we never even tried" cases each carry their own
+    /// reason instead of leaving the status at `None`.
+    #[test]
+    fn skipped_system_audio_names_why_it_was_skipped() {
+        assert_eq!(
+            system_audio_plan(PipelineMode::Meeting, false, true),
+            SystemAudioPlan::Skip(Some(SystemAudioReason::Disabled))
+        );
+        assert_eq!(
+            system_audio_plan(PipelineMode::Meeting, true, false),
+            SystemAudioPlan::Skip(Some(SystemAudioReason::Unsupported)),
+            "an unsupported platform must not be reported as a disabled setting"
+        );
+    }
+
+    #[test]
+    fn meeting_with_the_setting_on_attempts_the_tap() {
+        assert_eq!(
+            system_audio_plan(PipelineMode::Meeting, true, true),
+            SystemAudioPlan::Attempt
+        );
+    }
+
+    /// Dictation has no system-audio leg, so it must not store a status that
+    /// would then show up on the next meeting.
+    #[test]
+    fn dictation_reports_no_system_audio_reason() {
+        assert_eq!(
+            system_audio_plan(PipelineMode::Dictation, true, true),
+            SystemAudioPlan::Skip(None)
+        );
+        assert_eq!(
+            system_audio_plan(PipelineMode::Dictation, false, false),
+            SystemAudioPlan::Skip(None)
+        );
     }
 }

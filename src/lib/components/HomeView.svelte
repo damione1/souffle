@@ -115,6 +115,7 @@
         message={transcription.statusMessage}
         actionLabel={transcription.statusActionLabel}
         onAction={transcription.statusAction}
+        onDismiss={transcription.clearBanner}
         variant="warning"
       />
     {/if}
@@ -123,6 +124,7 @@
         message={meeting.statusMessage}
         actionLabel={meeting.statusActionLabel}
         onAction={meeting.statusAction}
+        onDismiss={meeting.clearBanner}
         variant="warning"
       />
     {/if}
@@ -188,7 +190,7 @@
         onStartEvent={(event) => void calendar.startFromEvent(event)}
         calendarEnabled={calendar.enabled}
         calendarPermission={calendar.permission}
-        onSetupCalendar={() => openSettings({ tab: "meetings" })}
+        onSetupCalendar={() => openSettings({ anchor: "meetings.calendar" })}
       />
     {:else}
       <!-- During a live session, the session card is the only focus. -->

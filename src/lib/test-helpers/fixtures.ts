@@ -152,6 +152,7 @@ export const mockMeeting: MeetingTranscript = {
   notes: null,
   calendar_event_id: null,
   participants: [],
+  system_audio: null,
 };
 
 export const mockMeetingList: MeetingListItem[] = [
@@ -211,6 +212,7 @@ export const mockSettings: AppSettings = {
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
+  autostart_enabled: false,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
   dictation_polish_enabled: true,
@@ -236,7 +238,6 @@ export const mockSettings: AppSettings = {
 export const mockShortcuts: ShortcutSettings = {
   toggle: "CommandOrControl+Shift+S",
   push_to_talk: "CommandOrControl+Shift+Space",
-  rewrite: "",
 };
 
 // ---------------------------------------------------------------------------

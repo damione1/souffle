@@ -12,15 +12,17 @@ import {
   updateDictationEntry,
 } from "../../api/transcription";
 import { learnFromEdit } from "../../api/dictionary";
-import { frontmostAppName, readFocusedText, readSelectedText } from "../../api/focus";
+import { frontmostAppName, readFocusedText } from "../../api/focus";
 import { events } from "../../api/generated";
 import { createTimelineController } from "../timeline/controller.svelte";
+import type { StatusReason } from "../../types/status";
 import type { TranscriptionCatalog, TranscriptionSegment } from "../../types";
 import { errorMessage, segmentGap } from "../../utils";
 import { tr } from "../../i18n";
 import { openPermissionsRepair, openSettings } from "../settings/open";
 import { formatSelectedTranscriptionLabel } from "./catalog";
 import { ensureModelLoaded, refreshTranscriptionRuntimeStatus } from "./runtime";
+import { applySnippet, refreshSnippets } from "./snippets";
 
 const LEARN_FROM_EDIT_DELAY_MS = 4000;
 const MAX_LEARN_FROM_EDIT_PAIRS = 8;
@@ -30,8 +32,6 @@ const POLISH_TIMEOUT_MS = 25_000;
 /** Exact `ACCESSIBILITY_STALE_ERROR` from clipboard.rs — copy succeeded, ⌘V is the recovery.
  * A parenthetical suffix means the copy itself failed; that is not "Copied". */
 const ACCESSIBILITY_PASTE_COPIED = "Accessibility permission missing.";
-
-type SessionMode = "insert" | "rewrite";
 
 function tokenizeWords(text: string): string[] {
   return text
@@ -85,11 +85,10 @@ function countCorrectionPairs(original: string, corrected: string): number {
   return count;
 }
 
-/** Finalize dictation text: invisible-char strip, optional LLM polish, skip-if-blank. */
+/** Finalize dictation text: invisible-char strip, snippet expansion, optional LLM polish, skip-if-blank. */
 async function finalizeDictationText(
   rawText: string,
   focusedApp: string | null,
-  rewriteOf: string | null,
 ): Promise<{ text: string; warning?: string }> {
   const trimmed = rawText.trim();
   if (!trimmed) {
@@ -97,6 +96,14 @@ async function finalizeDictationText(
   }
 
   const app = getAppState();
+
+  // Voice snippet (SOU-035): a registered trigger at the start of the raw
+  // transcript pastes its expansion as-is and skips the polish.
+  const expanded = applySnippet(trimmed, app.snippets);
+  if (expanded !== null) {
+    return { text: expanded };
+  }
+
   if (!app.settings.dictation_polish_enabled) {
     return { text: trimmed };
   }
@@ -106,7 +113,7 @@ async function finalizeDictationText(
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       // Settle polish so a late reject after timeout cannot become unhandled.
-      const polish = polishDictation(trimmed, focusedApp, rewriteOf).then(
+      const polish = polishDictation(trimmed, focusedApp).then(
         (result) => ({ kind: "ok" as const, result }),
         (error: unknown) => ({ kind: "error" as const, error }),
       );
@@ -167,32 +174,43 @@ function createTranscriptionControllerInstance() {
   let isStopping = $state(false);
   let transcript = $state("");
   let tentative = $state("");
-  let statusMessage = $state("");
-  let statusActionLabel = $state<string | undefined>();
-  let statusAction = $state<(() => void) | undefined>();
+  let statusReason = $state<StatusReason | null>(null);
   let catalog = $state<TranscriptionCatalog | null>(null);
 
-  function setBanner(message: string, action?: { label: string; run: () => void }) {
-    statusMessage = message;
-    statusActionLabel = action?.label;
-    statusAction = action?.run;
+  let bannerTimer: ReturnType<typeof setTimeout> | null = null;
+  const AUTO_HIDE_MS = 5000;
+
+  function clearBannerTimer() {
+    if (bannerTimer) {
+      clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+  }
+
+  function setBanner(reason: StatusReason | null) {
+    clearBannerTimer();
+    statusReason = reason;
+    // SOU-099: a banner that only reports a past event fades out on its own;
+    // one carrying a button waits for the user to act on it.
+    if (reason && !reason.onAction) {
+      bannerTimer = setTimeout(clearBanner, AUTO_HIDE_MS);
+    }
   }
 
   function clearBanner() {
-    setBanner("");
+    clearBannerTimer();
+    statusReason = null;
   }
 
   function modelRequiredBanner(message: string) {
-    setBanner(message, { label: tr("home.open_model"), run: () => openSettings({ tab: "transcription" }) });
+    setBanner({ type: "no_model", message, actionLabel: tr("home.open_model"), onAction: () => openSettings({ anchor: "transcription.model" }) });
   }
 
   // Incremented for every session start (and on abort) so segment-channel
   // callbacks from a previous session can never write into a new one.
   let sessionGeneration = 0;
-  let sessionMode: SessionMode = "insert";
   let sessionAutoPaste = false;
   let focusedApp: string | null = null;
-  let rewriteOf: string | null = null;
   let learnFromEditTimer: ReturnType<typeof setTimeout> | null = null;
   let ceilingTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionStartTime = 0;
@@ -228,8 +246,6 @@ function createTranscriptionControllerInstance() {
    */
   function clearSessionContext() {
     focusedApp = null;
-    rewriteOf = null;
-    sessionMode = "insert";
     sessionAutoPaste = false;
     if (ceilingTimer) {
       clearTimeout(ceilingTimer);
@@ -246,15 +262,6 @@ function createTranscriptionControllerInstance() {
       focusedApp = await frontmostAppName();
     } catch {
       focusedApp = null;
-    }
-    if (sessionMode === "rewrite") {
-      try {
-        rewriteOf = await readSelectedText();
-      } catch {
-        rewriteOf = null;
-      }
-    } else {
-      rewriteOf = null;
     }
   }
 
@@ -285,9 +292,32 @@ function createTranscriptionControllerInstance() {
     }, LEARN_FROM_EDIT_DELAY_MS);
   }
 
+  // Auto-dismiss: a banner whose cause is gone (permission granted from System
+  // Settings, model finished loading) clears itself, without waiting for the
+  // next session (SOU-089 AC6).
+  let disposeAutoDismiss: (() => void) | null = null;
+  function startAutoDismiss() {
+    if (disposeAutoDismiss) return;
+    disposeAutoDismiss = $effect.root(() => {
+      $effect(() => {
+        // Read once: clearBanner() nulls statusReason, so a second test against
+        // it in the same pass would dereference null.
+        const reason = statusReason;
+        if (!reason) return;
+
+        const resolved =
+          (reason.type === "accessibility_denied" && app.appPermissions?.accessibility === "granted")
+          || (reason.type === "no_model" && app.transcriptionRuntimePhase === "ready");
+        if (resolved) clearBanner();
+      });
+    });
+  }
+
   async function mount() {
+    startAutoDismiss();
     await refreshCatalog();
     await refreshRuntimeStatus();
+    await refreshSnippets();
 
     const unlisten = await Promise.all([
       events.shortcutToggle.listen(() => {
@@ -295,14 +325,6 @@ function createTranscriptionControllerInstance() {
         // not a way to stop someone else's recording.
         if (app.recordingMode === "meeting") return;
         if (!isStartingRecording && !isStopping) {
-          if (!isDictating) sessionMode = "insert";
-          void toggleRecording(true);
-        }
-      }),
-      events.shortcutRewrite.listen(() => {
-        if (app.recordingMode === "meeting") return;
-        if (!isStartingRecording && !isStopping) {
-          if (!isDictating) sessionMode = "rewrite";
           void toggleRecording(true);
         }
       }),
@@ -310,8 +332,7 @@ function createTranscriptionControllerInstance() {
         // Push-to-talk only starts from a fully idle machine: a meeting (or
         // an already-running dictation) must not be interrupted.
         if (app.recordingMode === "idle" && !isStartingRecording && !isStopping) {
-          sessionMode = "insert";
-          void toggleRecording(true);
+          void toggleRecording(true, { ptt: true });
         }
       }),
       events.shortcutPttStop.listen(() => {
@@ -325,6 +346,8 @@ function createTranscriptionControllerInstance() {
 
     return () => {
       unlisten.forEach((fn) => fn());
+      disposeAutoDismiss?.();
+      disposeAutoDismiss = null;
     };
   }
 
@@ -338,7 +361,7 @@ function createTranscriptionControllerInstance() {
         transcription_backend_id: catalog.selected_backend_id,
       };
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -346,7 +369,7 @@ function createTranscriptionControllerInstance() {
     try {
       await refreshTranscriptionRuntimeStatus(app, catalog);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
     }
   }
 
@@ -357,8 +380,9 @@ function createTranscriptionControllerInstance() {
    * runs Polish on the assembled text before pasting or storing.
    *
    * @param {boolean} fromShortcut - Whether the toggle was triggered via a global keyboard shortcut.
+   * @param opts.ptt - Push-to-talk start. Escape does not cancel PTT (SOU-117).
    */
-  async function toggleRecording(fromShortcut = false) {
+  async function toggleRecording(fromShortcut = false, opts?: { ptt?: boolean }) {
     if (isStartingRecording || isStopping) return;
 
     if (!isDictating && app.recordingMode !== "idle") {
@@ -376,7 +400,7 @@ function createTranscriptionControllerInstance() {
         } catch (e) {
           console.warn("Fast stop failed:", e);
         }
-        setBanner(tr("home.dictation_too_short"));
+        setBanner({ type: "transient", message: tr("home.dictation_too_short") });
         clearSessionContext();
         isStopping = false;
         return;
@@ -389,7 +413,6 @@ function createTranscriptionControllerInstance() {
       // polish or paste never leaves a zombie pill.
       const holdForPolish = app.settings.dictation_polish_enabled;
       const sessionFocusedApp = focusedApp;
-      const sessionRewriteOf = rewriteOf;
       const sessionShouldAutoPaste = sessionAutoPaste;
       if (holdForPolish) {
         try {
@@ -409,10 +432,9 @@ function createTranscriptionControllerInstance() {
         const finalized = await finalizeDictationText(
           rawText,
           sessionFocusedApp,
-          sessionRewriteOf,
         );
         if (finalized.warning) {
-          setBanner(finalized.warning);
+          setBanner({ type: "transient", message: finalized.warning });
         }
 
         if (savedId && finalized.text && finalized.text !== rawText) {
@@ -443,12 +465,9 @@ function createTranscriptionControllerInstance() {
                 }
               }
               if (message === ACCESSIBILITY_PASTE_COPIED) {
-                setBanner(tr("home.paste_copied"), {
-                  label: tr("permissions.repair"),
-                  run: openPermissionsRepair,
-                });
+                setBanner({ type: "accessibility_denied", message: tr("home.paste_copied"), actionLabel: tr("permissions.repair"), onAction: openPermissionsRepair });
               } else {
-                setBanner(tr("home.paste_failed", { error: message }));
+                setBanner({ type: "transient", message: tr("home.paste_failed", { error: message }) });
               }
               // A shortcut dictation runs from another app, so the status
               // banner above is likely not on screen: also notify outside
@@ -469,7 +488,7 @@ function createTranscriptionControllerInstance() {
           }
         }
       } catch (e) {
-        setBanner(errorMessage(e));
+        setBanner({ type: "transient", message: errorMessage(e) });
       } finally {
         clearSessionContext();
         if (holdForPolish) {
@@ -498,16 +517,15 @@ function createTranscriptionControllerInstance() {
         // Model was unloaded (e.g. the idle timeout freed it); reload through
         // the normal load flow before recording instead of leaving the user
         // stuck with a disabled button.
-        const ready = await ensureModelLoaded(app, catalog, (message) => { setBanner(message); });
+        const ready = await ensureModelLoaded(app, catalog, (message) => { setBanner({ type: "transient", message }); });
         if (!ready) {
-          modelRequiredBanner(statusMessage || tr("home.model_required_dictation"));
+          modelRequiredBanner(statusReason?.message || tr("home.model_required_dictation"));
           return;
         }
       }
 
       cancelLearnFromEditPoll();
       sessionAutoPaste = fromShortcut;
-      if (!fromShortcut) sessionMode = "insert";
       transcript = "";
       tentative = "";
       clearBanner();
@@ -531,9 +549,9 @@ function createTranscriptionControllerInstance() {
         }
         tentative = "";
         transcript += segmentGap(transcript, segment.text) + segment.text;
-      });
+      }, !opts?.ptt);
     } catch (e) {
-      setBanner(errorMessage(e));
+      setBanner({ type: "transient", message: errorMessage(e) });
       clearSessionContext();
     } finally {
       isStartingRecording = false;
@@ -550,10 +568,46 @@ function createTranscriptionControllerInstance() {
     }
   }
 
+  /** Discard the in-progress toggle dictation: stop capture, skip persist,
+   * polish, and paste. Same shape as the too-short abort above (SOU-117). */
+  async function cancelRecording() {
+    if (isStopping) return;
+    // `isStartingRecording` covers the window after StartDictation (Escape
+    // is already armed) but before the frontend has applied StateChanged.
+    if (!isDictating && !isStartingRecording) return;
+
+    isStopping = true;
+    sessionGeneration += 1;
+    pttStopQueued = false;
+    // Drop the take before awaiting stop so a drain-time abort cannot
+    // persist or polish the discarded text (SOU-117).
+    transcript = "";
+    tentative = "";
+    focusedApp = null;
+    sessionAutoPaste = false;
+    try {
+      await stopStreamingTranscription();
+    } catch (e) {
+      console.warn("Dictation cancel stop failed:", e);
+    }
+    setBanner({ type: "transient", message: tr("home.dictation_discarded") });
+    clearSessionContext();
+    isStartingRecording = false;
+    isStopping = false;
+  }
+
   /** The backend aborted the recording session (machine went to Error). */
   function handleRecordingAborted() {
+    if (isStopping) {
+      // Cancel or an in-flight stop already owns the session. Don't persist
+      // and don't wipe `transcript`: the stop path captured it, cancel
+      // already discarded it.
+      sessionGeneration += 1;
+      isStartingRecording = false;
+      pttStopQueued = false;
+      return;
+    }
     const sessionFocusedApp = focusedApp;
-    const sessionRewriteOf = rewriteOf;
     const rawText = transcript.trim();
     sessionGeneration += 1; // cut off in-flight segments from the dead session
     isStartingRecording = false;
@@ -564,23 +618,18 @@ function createTranscriptionControllerInstance() {
     if (rawText) {
       void (async () => {
         const savedId = await saveToHistory(rawText);
-        setBanner(
-          savedId
-            ? tr("home.recording_interrupted_saved")
-            : tr("home.recording_interrupted"),
-        );
+        setBanner({ type: "transient", message: savedId ? tr("home.recording_interrupted_saved") : tr("home.recording_interrupted") });
         const { text, warning } = await finalizeDictationText(
           rawText,
           sessionFocusedApp,
-          sessionRewriteOf,
         );
-        if (warning) setBanner(warning);
+        if (warning) setBanner({ type: "transient", message: warning });
         if (savedId && text && text !== rawText) {
           await updateHistory(savedId, text);
         }
       })();
     } else {
-      setBanner(tr("home.recording_interrupted"));
+      setBanner({ type: "transient", message: tr("home.recording_interrupted") });
     }
     clearSessionContext();
   }
@@ -591,9 +640,9 @@ function createTranscriptionControllerInstance() {
     get isStopping() { return isStopping; },
     get transcript() { return transcript; },
     get tentative() { return tentative; },
-    get statusMessage() { return statusMessage; },
-    get statusActionLabel() { return statusActionLabel; },
-    get statusAction() { return statusAction; },
+    get statusMessage() { return statusReason?.message ?? ""; },
+    get statusActionLabel() { return statusReason?.actionLabel; },
+    get statusAction() { return statusReason?.onAction; },
     get catalog() { return catalog; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },
     get modelOperationState() { return app.transcriptionModelOperationState; },
@@ -603,10 +652,12 @@ function createTranscriptionControllerInstance() {
     get downloadedBytes() { return app.downloadedBytes; },
     get downloadTotalBytes() { return app.downloadTotalBytes; },
     get activeProfileLabel() { return activeProfileLabel; },
+    clearBanner,
     mount,
     refreshCatalog,
     refreshRuntimeStatus,
     toggleRecording,
+    cancelRecording,
     handleRecordingAborted,
   };
 }
@@ -627,6 +678,15 @@ export function notifyDictationStopRequested() {
   }
 }
 
+/** Escape during a cancelable dictation. No-op when not dictating, so this
+ * cannot start a session or take down a meeting (SOU-117). */
+export function notifyDictationCancelRequested() {
+  if (!instance || instance.isStopping) return;
+  if (instance.app.recordingMode === "dictation" || instance.isStartingRecording) {
+    void instance.cancelRecording();
+  }
+}
+
 // Singleton: survives view mount/unmount cycles so transcript and Channel
 // callbacks are never lost when the user switches tabs during recording.
 let instance: ReturnType<typeof createTranscriptionControllerInstance> | null = null;
@@ -640,5 +700,6 @@ export function createTranscriptionController() {
 
 /** Reset the singleton for testing. */
 export function resetTranscriptionControllerForTest() {
+  instance?.clearBanner();
   instance = null;
 }

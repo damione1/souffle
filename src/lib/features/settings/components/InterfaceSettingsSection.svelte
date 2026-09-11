@@ -3,7 +3,9 @@
   import SettingsField from "../../../components/ui/SettingsField.svelte";
   import StatusBanner from "../../../components/ui/StatusBanner.svelte";
   import { SUPPORTED_LOCALES } from "../../../i18n";
-  import type { PasteMethod, Theme } from "../../../types";
+  import type { ModifierTapStatus, PasteMethod, Theme } from "../../../types";
+  import { openPermissionsRepair } from "../open";
+  import { shouldShowNativeTapBanner } from "../../../utils/shortcut";
 
   const themeOptions: Theme[] = ["dark", "light", "system"];
   const pasteMethods: PasteMethod[] = ["clipboard", "type", "ax"];
@@ -21,9 +23,9 @@
     pasteMethod,
     toggleShortcut,
     pttShortcut,
-    rewriteShortcut,
     recordingField,
     shortcutError,
+    modifierTapStatus = null,
     onThemeChange,
     onLocaleChange,
     onAutoPasteChange,
@@ -42,20 +44,24 @@
     pasteMethod: PasteMethod;
     toggleShortcut: string;
     pttShortcut: string;
-    rewriteShortcut: string;
-    recordingField: "toggle" | "ptt" | "rewrite" | null;
+    recordingField: "toggle" | "ptt" | null;
     shortcutError: string;
+    modifierTapStatus?: ModifierTapStatus | null;
     onThemeChange: (theme: Theme) => void;
     onLocaleChange: (locale: string) => void;
     onAutoPasteChange: (event: Event) => void;
     onPasteDelayChange: (event: Event) => void;
     onPasteMethodChange: (event: Event) => void;
-    onStartRecording: (field: "toggle" | "ptt" | "rewrite") => void;
-    onClearShortcut: (field: "toggle" | "ptt" | "rewrite") => void | Promise<void>;
+    onStartRecording: (field: "toggle" | "ptt") => void;
+    onClearShortcut: (field: "toggle" | "ptt") => void | Promise<void>;
     formatShortcut: (shortcut: string) => string;
     pillHidden: boolean;
     onPillHiddenChange: (event: Event) => void;
   } = $props();
+
+  const showNativeTapBanner = $derived(
+    shouldShowNativeTapBanner(pttShortcut, modifierTapStatus, toggleShortcut),
+  );
 </script>
 
 <section class="settings-group">
@@ -149,6 +155,7 @@
   {/if}
 
   <SettingsField
+    anchor="interface.shortcuts"
     label={$t("settings_interface.toggle_recording")}
     description={$t("settings_interface.toggle_recording_desc")}
   >
@@ -189,26 +196,6 @@
   </SettingsField>
 
   <SettingsField
-    label={$t("settings_interface.rewrite")}
-    description={$t("settings_interface.rewrite_desc")}
-  >
-    {#snippet control()}
-      <div class="flex gap-2 items-center">
-        <button
-          onclick={() => onStartRecording("rewrite")}
-          class="shortcut-button"
-          class:is-recording={recordingField === "rewrite"}
-        >
-          {recordingField === "rewrite" ? $t("settings_interface.press_keys") : formatShortcut(rewriteShortcut)}
-        </button>
-        {#if rewriteShortcut}
-          <button onclick={() => onClearShortcut("rewrite")} class="btn btn-ghost text-sm">{$t("settings_interface.clear")}</button>
-        {/if}
-      </div>
-    {/snippet}
-  </SettingsField>
-
-  <SettingsField
     label={$t("settings_interface.pill_hidden")}
     description={$t("settings_interface.pill_hidden_desc")}
   >
@@ -222,6 +209,15 @@
       />
     {/snippet}
   </SettingsField>
+
+  {#if showNativeTapBanner}
+    <StatusBanner
+      message={$t("settings_interface.native_tap_missing")}
+      variant="warning"
+      actionLabel={$t("settings_interface.native_tap_missing_action")}
+      onAction={openPermissionsRepair}
+    />
+  {/if}
 
   {#if shortcutError}
     <StatusBanner message={shortcutError} variant="danger" />

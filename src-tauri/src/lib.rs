@@ -2,6 +2,7 @@ pub mod app_events;
 pub mod apple_intelligence;
 pub mod archive;
 pub mod audio;
+pub mod autostart;
 pub mod ax_text;
 pub mod calendar;
 pub mod cli;
@@ -11,6 +12,7 @@ pub mod constants;
 pub mod db;
 pub mod debug;
 pub mod diagnostics;
+pub mod dictation_cancel;
 pub mod engine;
 pub mod errors;
 pub mod export;
@@ -20,6 +22,7 @@ pub mod lid;
 pub mod lock_ext;
 pub mod logging;
 pub mod models;
+mod modifier_shortcut;
 pub mod ort_runtime;
 pub mod permissions;
 pub mod pill;
@@ -83,6 +86,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_transcription_catalog,
             commands::get_model_status,
             commands::download_model,
+            commands::get_download_progress,
+            commands::get_system_audio_status,
+            commands::get_modifier_tap_status,
             commands::delete_model,
             commands::load_model,
             commands::start_transcription,
@@ -134,6 +140,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::pill_release,
             commands::get_settings,
             commands::save_settings,
+            commands::open_apple_intelligence_settings,
             commands::save_shortcuts,
             commands::get_shortcuts,
             commands::get_system_audio_support,
@@ -145,11 +152,16 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::update_dictionary_entry,
             commands::delete_dictionary_entry,
             commands::clear_dictionary,
+            commands::list_snippets,
+            commands::add_snippet,
+            commands::update_snippet,
+            commands::delete_snippet,
             commands::learn_from_edit,
             commands::get_permission_status,
             commands::request_permission,
             commands::repair_accessibility_permission,
             commands::list_calendars,
+            commands::open_calendar_settings,
             commands::list_todays_calendar_events,
             commands::export_archive,
             commands::get_data_stats,
@@ -167,16 +179,17 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             app_events::Navigate,
             app_events::ShortcutToggle,
-            app_events::ShortcutRewrite,
             app_events::ShortcutPttStart,
             app_events::ShortcutPttStop,
             app_events::StateChanged,
             app_events::TranscriptionHealth,
             app_events::PipelineError,
             app_events::SystemAudioStatus,
+            app_events::ModifierTapStatus,
             app_events::AudioLevel,
             app_events::MeetingStopRequested,
             app_events::DictationStopRequested,
+            app_events::DictationCancelRequested,
             app_events::MeetingFinalized,
             app_events::UpcomingMeeting,
             app_events::TodayCalendarUpdated,
@@ -282,6 +295,11 @@ pub fn run() {
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);
+            // Launch Services must resolve this binary before TCC looks it up,
+            // or System Settings shows the row of a previous build. Registering
+            // is not a TCC request: nothing at startup may prompt, a permission
+            // is only ever asked for on a user action.
+            crate::permissions::register_with_launch_services();
 
             // Store the AppHandle so state transitions can emit events
             let state = app.state::<AppState>();
@@ -307,6 +325,8 @@ pub fn run() {
                 }
             };
 
+            // `register_shortcuts` also installs the native tap, and only for
+            // a shortcut that needs it.
             if let Err(e) = commands::register_shortcuts(app.handle(), &shortcuts) {
                 tracing::warn!("Failed to register shortcuts on startup: {e}");
             }
@@ -448,10 +468,8 @@ pub fn run() {
                 tauri::RunEvent::Reopen {
                     has_visible_windows,
                     ..
-                } => {
-                    if tray::should_restore_main_on_reopen(has_visible_windows) {
-                        tray::show_main_window(app);
-                    }
+                } if tray::should_restore_main_on_reopen(has_visible_windows) => {
+                    tray::show_main_window(app);
                 }
                 _ => {}
             }

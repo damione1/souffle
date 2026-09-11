@@ -1,6 +1,7 @@
 //! Short bundled WAV cues for dictation start/stop confirmation.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -14,6 +15,46 @@ use crate::settings::AppSettings;
 pub enum DictationFeedbackKind {
     Start,
     Stop,
+}
+
+/// Cues currently on a playback thread. Each cue is 120 ms of audio plus the
+/// time it takes to open the output, so several at once means threads are
+/// piling up rather than overlapping.
+static FEEDBACK_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// How many playback threads may exist at once. `play()` and
+/// `build_output_stream` are synchronous CoreAudio calls with no deadline of
+/// their own — the same property that let a wedged input device stall a
+/// meeting for 72 s (SOU-125) — and this thread is never joined, so a wedged
+/// output device would otherwise leave one stuck thread behind per dictation
+/// toggle for the life of the app.
+///
+/// Four rather than two: a cue outlives its 120 ms by however long the
+/// device takes to open, which on a Bluetooth sink waking from idle is not
+/// negligible, and push-to-talk can fire start and stop inside that window.
+/// The cap exists to bound a wedge, not to serialise normal use. Once it is
+/// reached every further cue is skipped until a thread returns, which on a
+/// genuinely wedged output is the honest outcome — a device that cannot
+/// start cannot play a sound either.
+const MAX_FEEDBACK_THREADS: usize = 4;
+
+/// Take one of `max` slots, or report that none is free. Never blocks, and
+/// never overshoots under concurrent callers.
+fn try_reserve_slot(in_flight: &AtomicUsize, max: usize) -> bool {
+    in_flight
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            (current < max).then_some(current + 1)
+        })
+        .is_ok()
+}
+
+/// Releases its slot however the playback thread ends, panic included.
+struct FeedbackSlot(&'static AtomicUsize);
+
+impl Drop for FeedbackSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 /// Fire-and-forget playback on a background thread so capture never blocks.
@@ -30,14 +71,24 @@ pub fn play_dictation_feedback(settings: &AppSettings, kind: DictationFeedbackKi
         warn!("Feedback sound not found: {filename}");
         return;
     };
-    thread::Builder::new()
+    if !try_reserve_slot(&FEEDBACK_IN_FLIGHT, MAX_FEEDBACK_THREADS) {
+        // Earlier cues have not come back. The output device is not
+        // answering; skip this one rather than stacking another thread that
+        // may never return.
+        warn!("Feedback sound skipped: previous playback has not finished");
+        return;
+    }
+    let spawned = thread::Builder::new()
         .name("feedback-sound".into())
         .spawn(move || {
+            let _slot = FeedbackSlot(&FEEDBACK_IN_FLIGHT);
             if let Err(e) = play_wav_blocking(&path, volume) {
                 warn!("Feedback sound playback failed: {e}");
             }
-        })
-        .ok();
+        });
+    if spawned.is_err() {
+        FEEDBACK_IN_FLIGHT.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 fn normalized_volume(percent: u32) -> f32 {
@@ -157,6 +208,42 @@ fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A wedged output device never returns from `play()`, and the playback
+    /// thread is never joined. The cap is what keeps one stuck thread per
+    /// dictation toggle from piling up for the life of the app.
+    #[test]
+    fn playback_slots_are_capped_and_returned() {
+        static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+        assert!(try_reserve_slot(&IN_FLIGHT, 2));
+        assert!(try_reserve_slot(&IN_FLIGHT, 2));
+        assert!(
+            !try_reserve_slot(&IN_FLIGHT, 2),
+            "a third cue must be skipped, not stacked on a device that is not answering"
+        );
+
+        drop(FeedbackSlot(&IN_FLIGHT));
+        assert!(
+            try_reserve_slot(&IN_FLIGHT, 2),
+            "a finished playback must free its slot"
+        );
+    }
+
+    /// The slot is released however the playback thread ends: a panic inside
+    /// cpal would otherwise burn one permanently, and four of them would
+    /// silence the cues for the life of the app.
+    #[test]
+    fn a_panicking_playback_still_frees_its_slot() {
+        static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+        assert!(try_reserve_slot(&IN_FLIGHT, 1));
+        let panicked = std::panic::catch_unwind(|| {
+            let _slot = FeedbackSlot(&IN_FLIGHT);
+            panic!("cpal gave up mid-playback");
+        });
+        assert!(panicked.is_err());
+        assert_eq!(IN_FLIGHT.load(Ordering::Acquire), 0);
+        assert!(try_reserve_slot(&IN_FLIGHT, 1));
+    }
 
     #[test]
     fn normalized_volume_clamps() {

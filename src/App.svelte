@@ -27,13 +27,16 @@
   import {
     createTranscriptionController,
     notifyDictationAborted,
+    notifyDictationCancelRequested,
     notifyDictationStopRequested,
   } from "./lib/features/transcription/controller.svelte";
   import { getAppState, deriveRecordingMode } from "./lib/stores/app.svelte";
+  import { getPermissionStatus } from "./lib/api/permissions";
   import { openSettings } from "./lib/features/settings/open";
   import { applyTheme, errorMessage } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
   import { decideShowSetupWizard, readSetupFlags } from "./lib/features/onboarding/setup";
+  import { loadAfterOrphanedDownload } from "./lib/features/transcription/runtime";
   import type { TranscriptionCatalog } from "./lib/types";
 
   const app = getAppState();
@@ -48,8 +51,10 @@
   let unlistenPipelineError: (() => void) | null = null;
 
   let unlistenSystemAudio: (() => void) | null = null;
+  let unlistenModifierTap: (() => void) | null = null;
   let unlistenMeetingStop: (() => void) | null = null;
   let unlistenDictationStop: (() => void) | null = null;
+  let unlistenDictationCancel: (() => void) | null = null;
   let unlistenMeetingFinalized: (() => void) | null = null;
   let unlistenUpcomingMeeting: (() => void) | null = null;
   let unlistenMeetingIdle: (() => void) | null = null;
@@ -125,11 +130,30 @@
     }
   }
 
+  /** Refresh the app-wide permission snapshot. Read-only (`AXIsProcessTrusted`
+   * and friends, no prompt), so it is cheap enough to run on every focus: it is
+   * what lets a banner clear when the user grants a permission from System
+   * Settings without ever reopening the permissions panel (SOU-089 AC6). */
+  let permissionSyncGeneration = 0;
+  async function syncPermissions() {
+    const generation = ++permissionSyncGeneration;
+    try {
+      const status = await getPermissionStatus();
+      // Focus can fire twice in quick succession, and the permissions panel
+      // polls into the same field: drop a snapshot a newer one has overtaken,
+      // or a stale "denied" would resurrect a banner that correctly cleared.
+      if (generation === permissionSyncGeneration) app.appPermissions = status;
+    } catch {
+      // Best-effort: a failed snapshot just leaves the last known state.
+    }
+  }
+
   onMount(() => {
     let cleanupTranscription = () => {};
     (async () => {
       try {
         const result = await bootstrapAppState(app);
+        await syncPermissions();
         whatsNew = result.whatsNew;
         if (result.whatsNew) {
           const targetVersion = result.whatsNew.version;
@@ -141,7 +165,7 @@
         }
       } catch {
         // First run, no settings yet — still offer the setup wizard.
-        if (decideShowSetupWizard("download_required", readSetupFlags())) {
+        if (decideShowSetupWizard("download_required", readSetupFlags(), app.machineState.state)) {
           app.showOnboarding = true;
         }
       }
@@ -177,6 +201,7 @@
     });
 
     events.stateChanged.listen((event) => {
+      const previous = app.machineState;
       // Detect a backend-initiated session abort (recording → error) so the
       // recorder controllers can reset their local state.
       const aborted = event.payload.state === "error" ? wasRecording(app.machineState) : null;
@@ -186,6 +211,9 @@
       // Lets a wake-resume that's waiting on a still-draining sleep-triggered
       // stop fire the moment the machine reports `ready`.
       notifyStateChanged(event.payload);
+      // A download that finished into a Channel the previous webview took
+      // with it still needs its model loaded (SOU-073).
+      loadAfterOrphanedDownload(app, previous, event.payload);
     }).then((fn) => {
       unlistenState = fn;
     });
@@ -208,6 +236,12 @@
       unlistenSystemAudio = fn;
     });
 
+    events.modifierTapStatus.listen((event) => {
+      app.modifierTapStatus = event.payload;
+    }).then((fn) => {
+      unlistenModifierTap = fn;
+    });
+
     events.meetingStopRequested.listen(() => {
       notifyMeetingStopRequested();
     }).then((fn) => {
@@ -218,6 +252,12 @@
       notifyDictationStopRequested();
     }).then((fn) => {
       unlistenDictationStop = fn;
+    });
+
+    events.dictationCancelRequested.listen(() => {
+      notifyDictationCancelRequested();
+    }).then((fn) => {
+      unlistenDictationCancel = fn;
     });
 
     events.meetingFinalized.listen((event) => {
@@ -259,6 +299,7 @@
       if (document.visibilityState === "visible") notifySystemWokeUp();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", syncPermissions);
 
     return () => {
       cleanupTranscription();
@@ -268,14 +309,17 @@
       unlistenHealth?.();
       unlistenPipelineError?.();
       unlistenSystemAudio?.();
+      unlistenModifierTap?.();
       unlistenMeetingStop?.();
       unlistenDictationStop?.();
+      unlistenDictationCancel?.();
       unlistenMeetingFinalized?.();
       unlistenUpcomingMeeting?.();
       unlistenMeetingIdle?.();
       unlistenSystemWokeUp?.();
       unlistenInputRoute?.();
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", syncPermissions);
     };
   });
   function dismissWhatsNew() {
@@ -452,7 +496,7 @@
         detail={routeToastCopy.detail}
         hint={routeToastCopy.hint}
         actionLabel={routeToastCopy.hasAction ? $t("permissions.open_settings") : undefined}
-        onAction={routeToastCopy.hasAction ? () => openSettings({ tab: "audio" }) : undefined}
+        onAction={routeToastCopy.hasAction ? () => openSettings({ anchor: "audio.mic" }) : undefined}
         onDismiss={() => micToast.dismiss()}
       />
     </div>

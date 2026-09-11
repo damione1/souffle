@@ -10,5 +10,7 @@
 	<string>Soufflé reads your calendar to show today's meetings and start transcriptions from them.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Soufflé reads your calendar to show today's meetings and start transcriptions from them.</string>
+	<key>NSInputMonitoringUsageDescription</key>
+	<string>Soufflé watches keyboard and mouse events to catch the single key you set as a dictation shortcut.</string>
 </dict>
 </plist>

@@ -94,7 +94,7 @@ function paragraphIsFrozen(
 export function createLiveTranscript(pauseThreshold: number) {
   let committed = $state<LiveParagraph[]>([]);
   let tail = $state<LiveParagraph[]>([]);
-  let tentative = $state("");
+  let tentative = $state<{ speaker: string | null; text: string }[]>([]);
   let segmentCount = $state(0);
 
   // Not reactive state on purpose: only the derived paragraphs need to drive
@@ -102,6 +102,31 @@ export function createLiveTranscript(pauseThreshold: number) {
   // outside the (bounded) tail.
   let tailSegments: IndexedSegment[] = [];
   let nextParagraphId = 0;
+  let tentativeTimeouts = new Map<string | null, ReturnType<typeof setTimeout>>();
+
+  function setTentative(speaker: string | null, text: string) {
+    const existing = tentative.find(t => t.speaker === speaker);
+    if (existing) {
+      existing.text = text;
+    } else {
+      tentative.push({ speaker, text });
+    }
+    const existingTimeout = tentativeTimeouts.get(speaker);
+    if (existingTimeout) clearTimeout(existingTimeout);
+    tentativeTimeouts.set(speaker, setTimeout(() => {
+      clearTentative(speaker);
+    }, 5000));
+  }
+
+  function clearTentative(speaker: string | null) {
+    const idx = tentative.findIndex(t => t.speaker === speaker);
+    if (idx !== -1) tentative.splice(idx, 1);
+    const existingTimeout = tentativeTimeouts.get(speaker);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      tentativeTimeouts.delete(speaker);
+    }
+  }
 
   function globalIndices(
     range: ParagraphRange,
@@ -182,11 +207,12 @@ export function createLiveTranscript(pauseThreshold: number) {
   }
 
   function append(segment: TranscriptionSegment, segmentIndex: number) {
+    const speaker = segment.speaker ?? null;
     if (!segment.is_final) {
-      tentative = segment.text;
+      setTentative(speaker, segment.text);
       return;
     }
-    tentative = "";
+    clearTentative(speaker);
     segmentCount++;
 
     tailSegments.push({ segment, index: segmentIndex });
@@ -213,9 +239,11 @@ export function createLiveTranscript(pauseThreshold: number) {
     tailSegments = [];
     committed = [];
     tail = [];
-    tentative = "";
+    tentative = [];
     segmentCount = 0;
     nextParagraphId = 0;
+    for (const timeout of tentativeTimeouts.values()) clearTimeout(timeout);
+    tentativeTimeouts.clear();
   }
 
   return {

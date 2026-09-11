@@ -5,6 +5,7 @@ pub mod migrate;
 pub mod schema;
 pub mod search;
 pub mod settings;
+pub mod snippets;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -194,6 +195,21 @@ impl Database {
                 schema::migrate_model_unload_default_to_v14(&conn)?;
                 conn.execute("UPDATE schema_version SET version = 14", [])
                     .map_err(|e| format!("Update schema version v14: {e}"))?;
+            }
+
+            if current_version < 15 {
+                schema::migrate_snippets_to_v15(&conn)?;
+                conn.execute("UPDATE schema_version SET version = 15", [])
+                    .map_err(|e| format!("Update schema version v15: {e}"))?;
+            }
+
+            if current_version < 16 {
+                // JSON MeetingSystemAudio; NULL on meetings recorded before
+                // the leg was tracked, which reads as "unknown", not "fine".
+                conn.execute("ALTER TABLE meetings ADD COLUMN system_audio TEXT", [])
+                    .map_err(|e| format!("Schema migration v16 (system audio): {e}"))?;
+                conn.execute("UPDATE schema_version SET version = 16", [])
+                    .map_err(|e| format!("Update schema version v16: {e}"))?;
             }
 
             info!("Schema migration complete");

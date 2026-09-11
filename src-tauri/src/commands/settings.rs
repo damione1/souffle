@@ -5,7 +5,8 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_specta::Event;
 use tracing::info;
 
-use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutRewrite, ShortcutToggle};
+use crate::app_events::{ShortcutPttStart, ShortcutPttStop, ShortcutToggle};
+use crate::modifier_shortcut::{ShortcutRegistrationTarget, shortcut_registration_target};
 use crate::settings::{AppSettings, ShortcutSettings};
 use crate::state::AppState;
 
@@ -13,7 +14,12 @@ use crate::state::AppState;
 #[tauri::command]
 #[specta::specta]
 pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
-    AppSettings::load(&state.db)
+    let mut settings = AppSettings::load(&state.db)?;
+    #[cfg(target_os = "macos")]
+    {
+        settings.autostart_enabled = crate::autostart::is_enabled();
+    }
+    Ok(settings)
 }
 
 /// Save the typed application settings.
@@ -26,6 +32,14 @@ pub fn save_settings(
 ) -> Result<(), String> {
     let mut settings = settings.sanitize_for_save()?;
     let stored = AppSettings::load(&state.db)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        if settings.autostart_enabled != crate::autostart::is_enabled() {
+            crate::autostart::set_enabled(settings.autostart_enabled)?;
+        }
+    }
+
     let recording = state
         .current_machine_state()
         .map(|machine| machine.is_recording())
@@ -67,8 +81,40 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
 
     gs.unregister_all()
         .map_err(|e| format!("Unregister: {e}"))?;
+    crate::dictation_cancel::mark_unregistered();
 
-    if !shortcuts.toggle.is_empty() {
+    let toggle_target = shortcut_registration_target(&shortcuts.toggle);
+    let ptt_target = shortcut_registration_target(&shortcuts.push_to_talk);
+
+    if let Some(state) = app.try_state::<AppState>() {
+        {
+            let mut lock = state.modifier_toggle_shortcut.write().unwrap();
+            *lock = match toggle_target {
+                ShortcutRegistrationTarget::Native => Some(shortcuts.toggle.clone()),
+                _ => None,
+            };
+        }
+        {
+            let mut lock = state.modifier_ptt_shortcut.write().unwrap();
+            *lock = match ptt_target {
+                ShortcutRegistrationTarget::Native => Some(shortcuts.push_to_talk.clone()),
+                _ => None,
+            };
+        }
+        // Key-repeat latch for Toggle. Do not touch `ptt_start_armed`: a
+        // settings save while native PTT is held would swallow the release
+        // and leave dictation running (SOU-115 AC6).
+        state.toggle_armed.store(false, Ordering::SeqCst);
+    }
+
+    // The tap only goes in the event path for a single-key binding, and a
+    // binding is always a user action: it never installs itself at startup.
+    crate::modifier_shortcut::sync_modifier_tap(
+        app,
+        crate::modifier_shortcut::tap_is_needed(&shortcuts.toggle, &shortcuts.push_to_talk),
+    );
+
+    if toggle_target == ShortcutRegistrationTarget::Plugin {
         gs.on_shortcut(shortcuts.toggle.as_str(), move |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 let _ = ShortcutToggle.emit(app);
@@ -76,19 +122,14 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
         })
         .map_err(|e| format!("Register toggle shortcut '{}': {e}", shortcuts.toggle))?;
         info!(shortcut = shortcuts.toggle, "Toggle shortcut registered");
+    } else if toggle_target == ShortcutRegistrationTarget::Native {
+        info!(
+            shortcut = shortcuts.toggle,
+            "Toggle shortcut registered via native tap"
+        );
     }
 
-    if !shortcuts.rewrite.is_empty() {
-        gs.on_shortcut(shortcuts.rewrite.as_str(), move |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                let _ = ShortcutRewrite.emit(app);
-            }
-        })
-        .map_err(|e| format!("Register rewrite shortcut '{}': {e}", shortcuts.rewrite))?;
-        info!(shortcut = shortcuts.rewrite, "Rewrite shortcut registered");
-    }
-
-    if !shortcuts.push_to_talk.is_empty() {
+    if ptt_target == ShortcutRegistrationTarget::Plugin {
         gs.on_shortcut(
             shortcuts.push_to_talk.as_str(),
             move |app, _shortcut, event| match event.state {
@@ -117,6 +158,17 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
             shortcut = shortcuts.push_to_talk,
             "Push-to-talk shortcut registered"
         );
+    } else if ptt_target == ShortcutRegistrationTarget::Native {
+        info!(
+            shortcut = shortcuts.push_to_talk,
+            "Push-to-talk shortcut registered via native tap"
+        );
+    }
+
+    if let Some(state) = app.try_state::<AppState>()
+        && let Ok(machine) = state.current_machine_state()
+    {
+        crate::dictation_cancel::sync(app, &machine);
     }
 
     Ok(())
@@ -147,4 +199,22 @@ pub fn save_shortcuts(
 #[specta::specta]
 pub fn get_shortcuts(state: State<'_, AppState>) -> Result<ShortcutSettings, String> {
     ShortcutSettings::load(&state.db)
+}
+
+/// Last native PTT `CGEventTap` install status, for a webview that reloaded
+/// after the `ModifierTapStatus` event already fired (SOU-116). `None` before
+/// the first install attempt (including the startup delay).
+#[tauri::command]
+#[specta::specta]
+pub fn get_modifier_tap_status() -> Option<crate::app_events::ModifierTapStatus> {
+    crate::modifier_shortcut::modifier_tap_status()
+}
+
+/// Open the macOS System Settings to the Apple Intelligence & Siri pane.
+#[tauri::command]
+#[specta::specta]
+pub fn open_apple_intelligence_settings() {
+    let _ = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.Siri-Settings.extension")
+        .spawn();
 }

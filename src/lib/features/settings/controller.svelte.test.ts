@@ -80,6 +80,7 @@ const defaultSettings: AppSettings = {
   meeting_autostop_enabled: true,
   meeting_autostop_minutes: 10,
   meeting_max_duration_minutes: 240,
+  autostart_enabled: false,
   meeting_audio_retention: "off",
   meeting_transcription_language: "auto",
   dictation_polish_enabled: true,
@@ -109,7 +110,6 @@ const fakeDevices: AudioInputDevice[] = [
 const fakeShortcuts: ShortcutSettings = {
   toggle: "CommandOrControl+Shift+Space",
   push_to_talk: "",
-  rewrite: "",
 };
 
 const fakeCatalog: TranscriptionCatalog = {
@@ -570,38 +570,6 @@ describe("settings controller", () => {
     });
   });
 
-  it("shortcut recording flow covers rewrite field", async () => {
-    const ctrl = createSettingsController();
-    await ctrl.mount();
-    expect(ctrl.rewriteShortcut).toBe("");
-
-    ctrl.startRecording("rewrite");
-    expect(ctrl.recordingField).toBe("rewrite");
-
-    const event = new KeyboardEvent("keydown", {
-      key: "r",
-      code: "KeyR",
-      metaKey: true,
-      shiftKey: true,
-    });
-    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
-    Object.defineProperty(event, "stopPropagation", { value: vi.fn() });
-
-    ctrl.handleKeyDown(event);
-
-    expect(ctrl.rewriteShortcut).toBe("CommandOrControl+Shift+R");
-    expect(ctrl.recordingField).toBeNull();
-    await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("save_shortcuts", {
-        shortcuts: expect.objectContaining({
-          rewrite: "CommandOrControl+Shift+R",
-          toggle: "CommandOrControl+Shift+Space",
-          push_to_talk: "",
-        }),
-      });
-    });
-  });
-
   it("plain key without modifier shows error", async () => {
     const ctrl = createSettingsController();
     await ctrl.mount();
@@ -717,6 +685,41 @@ describe("settings controller", () => {
     }));
     expect(ctrl.calendarPermission).toBe("granted");
     expect(ctrl.calendars).toEqual([{ id: "cal-1", title: "Work", source_title: "iCloud" }]);
+  });
+
+  it("persists the autostart toggle when the login item registers", async () => {
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    const target = { checked: true };
+    await ctrl.onAutostartChange({ target } as unknown as Event);
+
+    expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+      settings: expect.objectContaining({ autostart_enabled: true }),
+    }));
+    expect(target.checked).toBe(true);
+    expect(ctrl.app.settings.autostart_enabled).toBe(true);
+  });
+
+  // SOU-036 AC4: SMAppService refused, so the backend wrote nothing. The
+  // switch must go back where it was and the reason must be shown.
+  it("reverts the autostart toggle and shows the reason when the login item is refused", async () => {
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "save_settings") {
+        return Promise.reject("Failed to register login item: Operation not permitted");
+      }
+      return defaultInvoke(cmd, args);
+    });
+
+    const ctrl = createSettingsController();
+    await ctrl.mount();
+
+    const target = { checked: true };
+    await ctrl.onAutostartChange({ target } as unknown as Event);
+
+    expect(target.checked).toBe(false);
+    expect(ctrl.app.settings.autostart_enabled).toBe(false);
+    expect(ctrl.statusMessage).toMatch(/Failed to register login item/);
   });
 
   it("enabling calendar integration does not persist when permission is denied", async () => {
