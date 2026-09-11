@@ -16,11 +16,12 @@
     "home": "Home",
     "releases": "Releases",
     "download": "Download",
-    "menu": "Menu"
+    "menu": "Menu",
+    "copy": "Copy"
   },
   "hero": {
     "badge": "macOS 13+ · APPLE SILICON",
-    "title": "Your voice never<br>leaves your Mac.",
+    "title": "Your voice never<br>leaves<br>your Mac.",
     "sub": "Soufflé dictates into any app, transcribes meetings that tell your voice from everyone else's, and writes the summary, all of it on-device. No cloud, no account, no API key.",
     "cta": "Download for macOS",
     "note": "Free and open source",
@@ -77,7 +78,6 @@
     }
   ],
   "overlay": {
-    "eyebrow": "Anywhere you type",
     "title": "The same dictation, in every app you use.",
     "body": "Soufflé is not a window you type into. Press the shortcut and a small overlay appears above whatever you are in, then the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the overlay does not care which, and it never turns up in a screen recording.",
     "bullets": [
@@ -94,7 +94,6 @@
     "caption": "Press the shortcut anywhere, talk, and the tidied text lands where your cursor already was."
   },
   "models": {
-    "eyebrow": "Speech models",
     "title": "Pick the trade-off you want.",
     "sub": "All four run locally, downloaded on first use. The two Kyutai models stream text as you speak; the other two transcribe once you stop.",
     "cards": [
@@ -144,7 +143,6 @@
     ]
   },
   "owndata": {
-    "eyebrow": "Your data",
     "title": "Everything stays yours to take with you.",
     "sub": "No proprietary format, no export fee, nothing holding you in.",
     "points": [
@@ -414,7 +412,6 @@
     "meetingElapsed": "12:40"
   },
   "docs": {
-    "eyebrow": "Documentation",
     "title": "Everything Soufflé does, and what it needs.",
     "intro": "What Soufflé does, what it needs, and where it keeps things. Nothing here requires an account, an API key, or a network connection beyond the first model download.",
     "groups": [
@@ -1055,7 +1052,6 @@
     ]
   },
   "privacy": {
-    "eyebrow": "Privacy",
     "title": "Private by design, not by promise.",
     "sub": "Transcription, summaries and audio all happen on your Mac. There is no server to send them to.",
     "points": [

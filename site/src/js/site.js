@@ -1,4 +1,4 @@
-/* Page chrome: copy-to-clipboard chips and reveal-on-scroll. */
+/* Copy-to-clipboard on the ruled command lines. */
 (function () {
   "use strict";
 
@@ -21,21 +21,80 @@
       }
     });
   });
+})();
 
-  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var items = document.querySelectorAll(".reveal");
-  if (reduced || !("IntersectionObserver" in window)) {
-    items.forEach(function (el) { el.classList.add("is-in"); });
-    return;
-  }
-  var io = new IntersectionObserver(function (entries) {
-    entries.forEach(function (e) {
-      if (!e.isIntersecting) return;
-      e.target.classList.add("is-in");
-      io.unobserve(e.target);
+/* The billing size-step: the page's one authored moment.
+   Nothing here fades in or slides up — every element is visible from the
+   start and this only changes rank. The act you are reading takes top
+   billing (its heading steps up a size) and inverts its name in the run
+   across the top; the acts behind you take a struck rule, the way a bill
+   marks a set that has already played.
+
+   Under reduced motion the size step is disabled in CSS and rank survives
+   as the inversion and the strike alone. */
+(function () {
+  "use strict";
+  var acts = Array.prototype.slice.call(document.querySelectorAll("[data-act-watch]"));
+  if (!acts.length) return;
+
+  var runLinks = {};
+  document.querySelectorAll(".run-acts a[data-act]").forEach(function (a) {
+    runLinks[a.getAttribute("data-act")] = a;
+  });
+
+  /* Document order of the groups, so acts behind the reader can be struck. */
+  var groupOrder = [];
+  acts.forEach(function (el) {
+    var g = el.getAttribute("data-act-watch");
+    if (g && groupOrder.indexOf(g) < 0) groupOrder.push(g);
+  });
+
+  /* Rank is read off one line across the viewport rather than off an
+     intersection band: the act in play is simply the last one whose top has
+     passed that line. A band leaves gaps between acts where nothing
+     qualifies, and the bill would blink empty on the way down. */
+  var current = function () {
+    var line = window.innerHeight * 0.35;
+    var found = null;
+    acts.forEach(function (el) {
+      if (el.getBoundingClientRect().top <= line) found = el;
     });
-  }, { rootMargin: "0px 0px -12% 0px", threshold: 0.08 });
-  items.forEach(function (el) { io.observe(el); });
+    return found;
+  };
+
+  var last;
+  var paint = function () {
+    var playing = current();
+    if (playing === last) return;
+    last = playing;
+    var playingAt = playing ? acts.indexOf(playing) : -1;
+
+    acts.forEach(function (el, i) {
+      var head = el.matches("[data-act-head]") ? el : el.querySelector("[data-act-head]");
+      if (head) head.classList.toggle("is-playing", el === playing);
+      el.classList.toggle("is-played", playingAt >= 0 && i < playingAt);
+    });
+
+    var group = playing ? playing.getAttribute("data-act-watch") : null;
+    var groupAt = group ? groupOrder.indexOf(group) : -1;
+    groupOrder.forEach(function (key, i) {
+      var a = runLinks[key];
+      if (!a) return;
+      a.classList.toggle("is-playing", key === group);
+      a.classList.toggle("is-played", groupAt >= 0 && i < groupAt);
+    });
+  };
+
+  var queued = false;
+  var onScroll = function () {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; paint(); });
+  };
+
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  paint();
 })();
 
 /* Docs sidebar: highlight the section you are reading. */
@@ -58,40 +117,44 @@
     var current = order.filter(function (id) { return visible.indexOf(id) >= 0; })[0];
     links.forEach(function (a) { a.classList.remove("is-active"); });
     if (current && byId[current]) byId[current].classList.add("is-active");
-  }, { rootMargin: "-96px 0px -70% 0px" });
+  }, { rootMargin: "-24px 0px -70% 0px" });
   sections.forEach(function (s) { io.observe(s); });
 })();
 
-/* Mobile nav: the links live in a panel under the bar, opened by the
-   hamburger. The panel is CSS-hidden above 860px, so the desktop nav is
-   unaffected and the class left behind by a resize costs nothing. */
+/* Narrow screens: the bill of acts folds into the top line, opened by the
+   toggle. CSS hides the panel above 780px, so a class left behind by a
+   resize costs nothing. */
 (function () {
   "use strict";
-  var toggle = document.querySelector(".nav-toggle");
-  var panel = document.getElementById("nav-menu");
-  if (!toggle || !panel) return;
+  var toggle = document.querySelector(".run-toggle");
+  var run = document.getElementById("margin-run");
+  if (!toggle || !run) return;
 
-  var close = function () {
-    panel.classList.remove("is-open");
-    toggle.setAttribute("aria-expanded", "false");
+  var open = toggle.querySelector(".run-toggle-open");
+  var shut = toggle.querySelector(".run-toggle-close");
+
+  var set = function (isOpen) {
+    run.classList.toggle("is-open", isOpen);
+    toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    if (open) open.hidden = isOpen;
+    if (shut) shut.hidden = !isOpen;
   };
 
   toggle.addEventListener("click", function () {
-    var open = panel.classList.toggle("is-open");
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    set(!run.classList.contains("is-open"));
   });
 
-  panel.addEventListener("click", function (e) {
-    if (e.target.closest("a")) close();
+  run.addEventListener("click", function (e) {
+    if (e.target.closest(".run-acts a, .run-langs a")) set(false);
   });
 
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") close();
+    if (e.key === "Escape") set(false);
   });
 
   document.addEventListener("click", function (e) {
-    if (!e.target.closest(".nav")) close();
+    if (!e.target.closest("#margin-run")) set(false);
   });
 
-  window.matchMedia("(min-width: 861px)").addEventListener("change", close);
+  window.matchMedia("(min-width: 781px)").addEventListener("change", function () { set(false); });
 })();
