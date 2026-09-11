@@ -47,6 +47,10 @@ fi
 # a DR of the form `identifier ... and certificate leaf[subject.OU] = X6H966RSDB`,
 # which survives a rebuild. No notarization needed: a locally built bundle
 # carries no quarantine flag, so Gatekeeper never asks.
+#
+# The first build after this fails with `errSecInternalComponent` unless the
+# keychain prompt for the signing key is answered with "Always Allow": the
+# private key's ACL does not list codesign. One click, once per machine.
 export APPLE_SIGNING_IDENTITY="Developer ID Application: Damien Goehrig (X6H966RSDB)"
 
 npm run tauri -- build --debug --bundles app
