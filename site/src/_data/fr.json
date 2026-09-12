@@ -57,7 +57,7 @@
       "body": "Avec le modèle par défaut, le texte s'affiche pendant que vous parlez encore, ponctué et avec les majuscules. Un passage local peut en polir la formulation avant que vous l'utilisiez, et ce même modèle gère le français et l'anglais sans que vous ayez à basculer.",
       "bullets": [
         "Le texte s'affiche pendant que vous parlez, pas à la fin",
-        "Un appui pour lancer et arrêter, ou maintenu tant que vous parlez",
+        "Un appui pour lancer et arrêter, ou maintenu tant que vous parlez, y compris sur un modificateur seul",
         "Dites une phrase déclencheur pour coller un extrait vocal au lieu d'une dictée libre",
         "Corrigez un nom mal entendu une fois : il reste corrigé ensuite",
         "Une IA locale peut s'occuper de polir la formulation, avec des instructions que vous pouvez changer",
@@ -591,7 +591,7 @@
               ],
               [
                 "Accessibilité",
-                "Insère le texte dans l'app que vous utilisiez, relit vos corrections quand « apprendre de mes corrections » est actif, et installe le tap d'événements natif qui permet d'assigner un raccourci de dictée à une seule touche (Fn, un modificateur seul, ou F5–F12)."
+                "Insère le texte dans l'app que vous utilisiez, relit vos corrections quand « apprendre de mes corrections » est actif, et installe le tap d'événements natif qui permet d'assigner un raccourci de dictée à une seule touche (un modificateur seul, ou F5–F12)."
               ],
               [
                 "Calendrier",
@@ -642,7 +642,7 @@
         "h": "Raccourcis",
         "blocks": [
           {
-            "p": "Les deux raccourcis de dictée se règlent dans Paramètres → Interface. La bascule utilise une combinaison classique avec modificateur (<kbd>⌘⇧Espace</kbd> par défaut). Le push-to-talk peut faire de même, ou une seule touche (Fn, un modificateur seul, ou F5–F12), qui demande la permission Accessibilité pour que le tap natif s'installe. Les deux ne peuvent pas partager la même combinaison."
+            "p": "Les deux raccourcis de dictée se règlent dans Paramètres → Interface. La bascule utilise une combinaison classique avec modificateur (<kbd>⌘⇧Espace</kbd> par défaut). Le push-to-talk peut faire de même, ou une seule touche (un modificateur seul, ou F5–F12), qui demande la permission Accessibilité pour que le tap natif s'installe. Les deux ne peuvent pas partager la même combinaison."
           },
           {
             "table": [
@@ -652,7 +652,7 @@
               ],
               [
                 "Maintenir pour parler",
-                "Maintenir pour enregistrer, relâcher pour arrêter. Non assigné par défaut ; liez une combinaison classique ou une seule touche (Fn, modificateur seul, F5–F12) si vous préférez maintenir."
+                "Maintenir pour enregistrer, relâcher pour arrêter. Non assigné par défaut ; liez une combinaison classique ou une seule touche (modificateur seul, F5–F12) si vous préférez maintenir."
               ]
             ]
           }
@@ -971,7 +971,7 @@
               ],
               [
                 "Un raccourci push-to-talk à une touche ne fait rien",
-                "Fn, les modificateurs seuls et F5–F12 demandent la permission Accessibilité pour le tap natif. Paramètres → Système → Permissions y renvoie."
+                "Les modificateurs seuls et F5–F12 demandent la permission Accessibilité pour le tap natif. Paramètres → Système → Permissions y renvoie."
               ],
               [
                 "Le texte dicté n'est pas inséré",
