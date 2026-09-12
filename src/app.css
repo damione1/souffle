@@ -1,20 +1,15 @@
 @import "tailwindcss";
 
 /* ─── Self-hosted variable fonts ─── */
+/* One variable grotesk does every job: the width axis condenses it for
+   labels and relaxes it for reading, so headings and body are one face. */
 @font-face {
-  font-family: "Space Grotesk";
+  font-family: "Archivo";
   font-style: normal;
-  font-weight: 300 700;
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
   font-display: swap;
-  src: url("/fonts/space-grotesk-var.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Hanken Grotesk";
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url("/fonts/hanken-grotesk-var.woff2") format("woff2");
+  src: url("/fonts/archivo-var.woff2") format("woff2");
 }
 
 @font-face {
@@ -57,17 +52,20 @@
   --color-on-danger: #2a0e09;
 
   --color-ghost-border: rgba(235, 210, 170, 0.09);
+  --color-rule: rgba(235, 210, 170, 0.11);
   --color-glass-bg: rgba(30, 24, 17, 0.72);
 
   /* Cards lift with a soft warm shadow in light mode; none in dark. */
   --shadow-card: none;
 
-  --font-heading: "Space Grotesk", system-ui, sans-serif;
-  --font-body: "Hanken Grotesk", system-ui, sans-serif;
+  --font-heading: "Archivo", system-ui, sans-serif;
+  --font-body: "Archivo", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --radius-default: 0.625rem;
-  --radius-card: 1rem;
+  /* Controls stay rounded because this is a macOS app; panels do not,
+     because they are bands between rules rather than cards. */
+  --radius-default: 0.25rem;
+  --radius-card: 0rem;
   --radius-pill: 9999px;
 }
 
@@ -87,29 +85,33 @@
 
 .light {
   color-scheme: light;
-  --color-canvas: #fdf6e8;
-  --color-surface-1: #fffaf0;
-  --color-surface-2: #efe0c1;
-  --color-surface-3: #e5d1a3;
-  --color-surface-4: #d8c08a;
-  --color-input: #f4e8cf;
-  --color-accent: #b5791f;
-  --color-accent-hover: #9c6714;
-  --color-secondary: #a85a2e;
-  --color-text-primary: #2c1c0c;
-  --color-text-secondary: #4a3620;
-  --color-text-tertiary: #6b5638;
-  --color-text-muted: #8c7454;
-  --color-text-faint: #ab9573;
-  --color-success: #b5791f;
-  --color-warning: #c5893f;
-  --color-danger: #b8503c;
-  --color-danger-soft: #c97a63;
-  --color-danger-strong: #9c4a3a;
-  --color-on-danger: #fff8ef;
-  --color-ghost-border: rgba(150, 115, 70, 0.12);
-  --color-glass-bg: rgba(255, 250, 240, 0.72);
-  --shadow-card: 0 1px 2px rgba(90, 62, 30, 0.04), 0 10px 28px -16px rgba(90, 62, 30, 0.16);
+  /* Warm white rather than cream: a window read for hours needs more
+     distance between ground and ink than a page scrolled past once. */
+  --color-canvas: #fbf7ed;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f0e9dc;
+  --color-surface-3: #e2d8c6;
+  --color-surface-4: #d3c6ad;
+  --color-input: #f6f1e4;
+  --color-accent: #a8701a;
+  --color-accent-hover: #8d5c12;
+  --color-secondary: #6b2710;
+  --color-text-primary: #17110b;
+  --color-text-secondary: #3a2d1c;
+  --color-text-tertiary: #55432e;
+  --color-text-muted: #6f5a3f;
+  --color-text-faint: #8a7457;
+  --color-success: #4f7a52;
+  --color-warning: #a8701a;
+  --color-danger: #a8402c;
+  --color-danger-soft: #c07460;
+  --color-danger-strong: #8a3222;
+  --color-on-danger: #f7efdf;
+  --color-ghost-border: rgba(23, 17, 11, 0.18);
+  --color-rule: rgba(23, 17, 11, 0.14);
+  --color-glass-bg: rgba(251, 247, 237, 0.72);
+  /* Nothing lifts off its ground; separation is a hairline. */
+  --shadow-card: none;
 }
 
 body {
@@ -165,13 +167,18 @@ img {
   outline: 1px solid var(--color-ghost-border);
 }
 
-/* ─── Surface card ─── */
+/* ─── Surface panel ───
+   A band between hairlines, not a card that lifts. The inline padding is
+   zero so a panel's content lines up with the heading above it; a header
+   running wider than its own body is the first thing you notice on a
+   sparse UI. */
 .surface-card {
-  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
+  background: transparent;
   border-radius: var(--radius-card);
-  outline: 1px solid var(--color-ghost-border);
-  box-shadow: var(--shadow-card);
-  padding: 1.125rem 1.25rem;
+  outline: 0;
+  border-top: 1px solid var(--color-rule);
+  box-shadow: none;
+  padding: 1rem 0 0;
 }
 
 /* ─── Buttons ─── */
@@ -439,7 +446,7 @@ img {
   font-weight: 500;
   line-height: 1.2;
   padding: 0.5rem 0.75rem;
-  border-radius: calc(var(--radius-card) - 2px);
+  border-radius: 0;
   transition: color 120ms ease, background-color 120ms ease;
 }
 
@@ -451,7 +458,6 @@ img {
 .settings-tab-active {
   color: var(--color-text-primary);
   background: var(--color-surface-2);
-  box-shadow: var(--shadow-card);
 }
 
 .settings-tab-active:hover {
@@ -498,15 +504,14 @@ img {
 .settings-rows {
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
-  border-radius: var(--radius-card);
-  outline: 1px solid var(--color-ghost-border);
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
+  background: transparent;
+  border-radius: 0;
+  outline: 0;
+  border-top: 1px solid var(--color-rule);
 }
 
 .settings-rows > * {
-  padding: 0.9375rem 1.125rem;
+  padding: 0.9375rem 0;
   border-top: 1px solid color-mix(in srgb, var(--color-ghost-border) 60%, transparent);
 }
 
