@@ -57,7 +57,7 @@
       "body": "With the default model the text streams in while you are still talking, punctuated and capitalised. A local pass can tidy the phrasing before you use it, and that same model handles French and English without you switching anything.",
       "bullets": [
         "Text appears as you speak, not once you stop",
-        "Press once to start and stop, or hold to talk — including Fn or a lone modifier",
+        "Press once to start and stop, or hold to talk",
         "Say a trigger phrase to paste a voice snippet instead of free dictation",
         "Fix a misheard name by hand once, and it stays fixed",
         "A local LLM pass can polish the wording, with editable prompts",

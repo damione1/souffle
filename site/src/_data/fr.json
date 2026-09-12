@@ -57,7 +57,7 @@
       "body": "Avec le modèle par défaut, le texte s'affiche pendant que vous parlez encore, ponctué et avec les majuscules. Un passage local peut en polir la formulation avant que vous l'utilisiez, et ce même modèle gère le français et l'anglais sans que vous ayez à basculer.",
       "bullets": [
         "Le texte s'affiche pendant que vous parlez, pas à la fin",
-        "Un appui pour lancer et arrêter, ou maintenu tant que vous parlez — y compris Fn ou un modificateur seul",
+        "Un appui pour lancer et arrêter, ou maintenu tant que vous parlez",
         "Dites une phrase déclencheur pour coller un extrait vocal au lieu d'une dictée libre",
         "Corrigez un nom mal entendu une fois : il reste corrigé ensuite",
         "Une IA locale peut s'occuper de polir la formulation, avec des instructions que vous pouvez changer",

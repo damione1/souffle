@@ -1,0 +1,115 @@
+/* ─────────────────────────────────────────────────────────────
+   PROPOSAL, not the shipped app.
+
+   The site's world translated into the app, in Operate register.
+   `mocks.css` stays the faithful record of what Soufflé looks like
+   today; this file sits on top of it and shows what it could look
+   like if the sheet's discipline moved into the product.
+
+   What transfers from the site: the closed ink set with no fifth
+   colour and no gradient, hairline rules instead of a fill plus a
+   shadow, inversion as the whole state vocabulary, one variable
+   face, and no card ever nested inside another card.
+
+   What deliberately does NOT transfer: poster-scale type, uppercase
+   body text, flush-set headlines, the billing size-step, and zero
+   radius on everything. This is a window someone keeps open for
+   hours, on a platform with its own conventions. Expression must
+   not get in front of the task, the state, or a familiar control.
+   ───────────────────────────────────────────────────────────── */
+
+.mock.is-proposal {
+  /* Paper, the same ground the sheet uses, so the app and the site
+     are recognisably one product rather than two. */
+  --m-canvas: #f4ead3;
+  --m-surface-1: #faf4e6;
+  --m-surface-2: #ebdfc4;
+  --m-surface-3: #ddcba4;
+  --m-input: #fbf6ea;
+  --m-accent: #a8701a;
+  --m-secondary: #6b2710;
+  --m-t1: #17110b;
+  --m-t2: #3d2f1d;
+  --m-t3: #5c4630;
+  --m-t4: #7d6647;
+  --m-t5: #9c8663;
+  --m-danger: #a8402c;
+  --m-on-danger: #f7efdf;
+  --m-ghost: rgba(23, 17, 11, 0.16);
+  --m-rule: rgba(23, 17, 11, 0.13);
+  --m-shadow: none;
+
+  /* One face, as on the sheet: condensed where it labels, relaxed
+     where it is read. */
+  --font-heading: "Archivo", system-ui, sans-serif;
+  --font-body: "Archivo", system-ui, sans-serif;
+}
+
+/* ── No card lifts off the page. Panels are bands between rules. ── */
+.is-proposal .m-card,
+.is-proposal .m-card-sm {
+  border-radius: 0;
+  background: transparent;
+  outline: 0;
+  border-top: 1px solid var(--m-rule);
+  box-shadow: none;
+}
+
+/* ── Rows: no rounded pill per row, one rule between them ── */
+.is-proposal .m-list { padding: 0; border-radius: 0; background: transparent; gap: 0; }
+.is-proposal .m-row { border-radius: 0; padding: 11px 0; border-top: 1px solid var(--m-rule); }
+.is-proposal .m-row:first-child { border-top: 0; }
+.is-proposal .m-row.is-now { background: transparent; }
+.is-proposal .m-row-icon { border-radius: 0; background: transparent; outline: 1px solid var(--m-ghost); }
+
+/* ── The two action tiles become one ruled pair, not two cards ── */
+.is-proposal .hero-grid { gap: 0; }
+.is-proposal .action {
+  border-radius: 0; background: transparent; outline: 0;
+  border: 1px solid var(--m-ghost); margin-left: -1px; padding: 18px;
+}
+.is-proposal .hero-grid > .action:first-child { margin-left: 0; }
+.is-proposal .action-icon { border-radius: 0; background: transparent; outline: 1px solid var(--m-ghost); }
+
+/* ── Controls keep a small radius: this is still a macOS app ── */
+.is-proposal .m-search,
+.is-proposal .notes-field,
+.is-proposal .dict-card,
+.is-proposal .tr-card { border-radius: 4px; }
+.is-proposal .m-search { background: var(--m-input); outline: 1px solid var(--m-ghost); }
+
+/* ── Status reads by inversion, not by a tinted pill ── */
+.is-proposal .live-badge {
+  border-radius: 0; background: var(--m-danger); color: var(--m-on-danger);
+  outline: 0; padding: 5px 11px;
+}
+.is-proposal .live-badge .rec-dot { background: var(--m-on-danger); }
+.is-proposal .live-stop { border-radius: 4px; }
+.is-proposal .win-status { border-radius: 0; outline: 1px solid var(--m-ghost); background: transparent; }
+.is-proposal .now-tag,
+.is-proposal .m-chip,
+.is-proposal .kbd { border-radius: 0; }
+.is-proposal .now-tag { background: var(--m-t1); color: var(--m-canvas); }
+
+/* ── Labels take the condensed cut; body text stays readable ── */
+.is-proposal .m-section h4,
+.is-proposal .tr-head h3,
+.is-proposal .notes-head h3 {
+  font-variation-settings: "wdth" 88;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--m-t4);
+}
+.is-proposal .action-title { font-variation-settings: "wdth" 92; }
+
+/* ── The window itself: the app's own chrome, one hairline ── */
+.is-proposal .win-bar { background: var(--m-canvas); border-bottom: 1px solid var(--m-rule); }
+.is-proposal .win-body { background: var(--m-canvas); }
+
+/* ── Outcomes: the summary panels lose their fills ── */
+.is-proposal .oc-card,
+.is-proposal .oc-item,
+.is-proposal .oc-chip { border-radius: 0; }
+.is-proposal .oc-item { background: transparent; border-top: 1px solid var(--m-rule); }
+.is-proposal .oc-chip { background: transparent; outline: 1px solid var(--m-ghost); }
