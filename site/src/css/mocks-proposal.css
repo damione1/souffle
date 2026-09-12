@@ -19,24 +19,29 @@
    ───────────────────────────────────────────────────────────── */
 
 .mock.is-proposal {
-  /* Paper, the same ground the sheet uses, so the app and the site
-     are recognisably one product rather than two. */
-  --m-canvas: #f4ead3;
-  --m-surface-1: #faf4e6;
-  --m-surface-2: #ebdfc4;
-  --m-surface-3: #ddcba4;
-  --m-input: #fbf6ea;
+  /* Warm white, not cream. The sheet's own paper is right for a page you
+     scroll past once; in a window you read for hours it leaves too little
+     distance between the ground and the ink, and the quiet text tiers go
+     muddy on it. Keeping the warmth and dropping the saturation also stops
+     the mocks dissolving into the site's paper, which they did when the two
+     grounds were the same value. A trace of cream is kept so it still reads
+     as warm paper rather than as a white sheet. */
+  --m-canvas: #fbf7ed;
+  --m-surface-1: #ffffff;
+  --m-surface-2: #f0e9dc;
+  --m-surface-3: #e2d8c6;
+  --m-input: #f6f1e4;
   --m-accent: #a8701a;
   --m-secondary: #6b2710;
   --m-t1: #17110b;
-  --m-t2: #3d2f1d;
-  --m-t3: #5c4630;
-  --m-t4: #7d6647;
-  --m-t5: #9c8663;
+  --m-t2: #3a2d1c;
+  --m-t3: #55432e;
+  --m-t4: #6f5a3f;
+  --m-t5: #8a7457;
   --m-danger: #a8402c;
   --m-on-danger: #f7efdf;
-  --m-ghost: rgba(23, 17, 11, 0.16);
-  --m-rule: rgba(23, 17, 11, 0.13);
+  --m-ghost: rgba(23, 17, 11, 0.18);
+  --m-rule: rgba(23, 17, 11, 0.14);
   --m-shadow: none;
 
   /* One face, as on the sheet: condensed where it labels, relaxed
@@ -54,13 +59,44 @@
   border-top: 1px solid var(--m-rule);
   box-shadow: none;
 }
+.is-proposal .tr-card,
+.is-proposal .dict-card,
+.is-proposal .notes,
+.is-proposal .out {
+  padding-inline: 0;
+  padding-top: 16px;
+}
+/* A rule separates two things. The first panel in a view has nothing above
+   it but the window chrome, so it starts clean. */
+.is-proposal .win-body > :first-child .m-card:first-child,
+.is-proposal .win-body > :first-child .m-card-sm:first-child,
+.is-proposal .m-stack > .m-card:first-child,
+.is-proposal .m-stack > .m-card-sm:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
 
 /* ── Rows: no rounded pill per row, one rule between them ── */
-.is-proposal .m-list { padding: 0; border-radius: 0; background: transparent; gap: 0; }
-.is-proposal .m-row { border-radius: 0; padding: 11px 0; border-top: 1px solid var(--m-rule); }
+.is-proposal .m-list {
+  padding: 0; border-radius: 0; background: transparent;
+  outline: 0; gap: 0; box-shadow: none;
+}
+.is-proposal .m-row { border-radius: 0; padding: 12px 0; border-top: 1px solid var(--m-rule); }
 .is-proposal .m-row:first-child { border-top: 0; }
 .is-proposal .m-row.is-now { background: transparent; }
-.is-proposal .m-row-icon { border-radius: 0; background: transparent; outline: 1px solid var(--m-ghost); }
+.is-proposal .m-row-icon {
+  border-radius: 0; background: transparent; outline: 0;
+  width: 22px; height: 22px; color: var(--m-t4);
+}
+.is-proposal .m-row-icon.accent { color: var(--m-accent); }
+.is-proposal .m-row-icon.secondary { color: var(--m-secondary); }
+.is-proposal .m-section { gap: 6px; }
+.is-proposal .m-section h4 { padding-inline: 0; }
+/* The play affordance is a glyph too, not a tinted tile. */
+.is-proposal .m-play {
+  border-radius: 0; background: transparent; outline: 0;
+  width: 22px; height: 22px; color: var(--m-t4);
+}
 
 /* ── The two action tiles become one ruled pair, not two cards ── */
 .is-proposal .hero-grid { gap: 0; }
@@ -69,7 +105,14 @@
   border: 1px solid var(--m-ghost); margin-left: -1px; padding: 18px;
 }
 .is-proposal .hero-grid > .action:first-child { margin-left: 0; }
-.is-proposal .action-icon { border-radius: 0; background: transparent; outline: 1px solid var(--m-ghost); }
+/* The tile is already a bordered control; a second box around its icon is
+   a box inside a box, which is the one thing this system refuses. */
+.is-proposal .action-icon {
+  border-radius: 0; background: transparent; outline: 0;
+  width: 26px; height: 26px;
+}
+.is-proposal .action-icon.accent { color: var(--m-accent); }
+.is-proposal .action-icon.secondary { color: var(--m-secondary); }
 
 /* ── Controls keep a small radius: this is still a macOS app ── */
 .is-proposal .m-search,
@@ -87,8 +130,8 @@
 .is-proposal .live-stop { border-radius: 4px; }
 .is-proposal .win-status { border-radius: 0; outline: 1px solid var(--m-ghost); background: transparent; }
 .is-proposal .now-tag,
-.is-proposal .m-chip,
-.is-proposal .kbd { border-radius: 0; }
+.is-proposal .kbd,
+.is-proposal .tr-who { border-radius: 0; }
 .is-proposal .now-tag { background: var(--m-t1); color: var(--m-canvas); }
 
 /* ── Labels take the condensed cut; body text stays readable ── */
@@ -108,8 +151,17 @@
 .is-proposal .win-body { background: var(--m-canvas); }
 
 /* ── Outcomes: the summary panels lose their fills ── */
-.is-proposal .oc-card,
-.is-proposal .oc-item,
-.is-proposal .oc-chip { border-radius: 0; }
-.is-proposal .oc-item { background: transparent; border-top: 1px solid var(--m-rule); }
-.is-proposal .oc-chip { background: transparent; outline: 1px solid var(--m-ghost); }
+.is-proposal .out-chip,
+.is-proposal .out-item { border-radius: 0; }
+.is-proposal .out-item {
+  background: transparent; outline: 0;
+  border-top: 1px solid var(--m-rule);
+}
+.is-proposal .out-chip {
+  background: transparent;
+  outline: 1px solid var(--m-rule);
+  color: var(--m-t2);
+}
+.is-proposal .out-chip.decision { color: var(--m-accent); }
+.is-proposal .out-chip.question { color: var(--m-t3); }
+.is-proposal .out-group { gap: 6px; }

@@ -98,6 +98,8 @@
   align-items: start;
 }
 .overlay-stage > .win { grid-row: 1 / span 2; }
+/* Centre the pill on the window, not on the window plus its margin column. */
+.overlay-stage .pill-overlay { left: calc(min(var(--plate), 100%) / 2); }
 .overlay-stage .mock-caption {
   grid-column: 2; grid-row: 2;
   max-width: none; margin: 0; padding-top: 10px;
@@ -529,6 +531,8 @@ html { scrollbar-color: var(--ink) var(--paper); }
   :root { --gut: 22px; }
   .hero-under, .close-under { grid-template-columns: minmax(0, 1fr); gap: 26px; align-items: start; }
   .hero-plate, .act-plate, .overlay-stage { grid-template-columns: minmax(0, 1fr); }
+  /* One column again, so the window is the whole stage. */
+  .overlay-stage .pill-overlay { left: 50%; }
   .overlay-stage > .win { grid-row: auto; }
   .overlay-stage .mock-caption, .overlay-stage .stage-steps { grid-column: 1; grid-row: auto; }
   .act-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; }

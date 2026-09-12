@@ -476,5 +476,6 @@
   .tr-card { padding: 16px 14px; }
   .dict-card { padding: 20px 18px; min-height: 190px; }
   .dict-text { font-size: 16px; line-height: 1.8; }
-  .pill-overlay, .pill-overlay.is-expanded { width: calc(100% - 24px); }
+  .pill-overlay { width: min(240px, calc(100% - 72px)); }
+  .pill-overlay.is-expanded { width: min(300px, calc(100% - 76px)); }
 }
