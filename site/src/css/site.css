@@ -46,32 +46,36 @@
 /* ─── Mock palette: the app's own `.light` cream, untouched ───
    The mocks reproduce the app, so they keep the app's own faces. Those two
    files are scoped here and are never the page's voice, which is Archivo. */
-/* impeccable-disable-next-line overused-font: the mocks reproduce the app, which ships this face; the page's own voice is Archivo. */
-@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("/fonts/space-grotesk-var.woff2") format("woff2"); }
-@font-face { font-family: "Hanken Grotesk"; font-style: normal; font-weight: 400 600; font-display: swap; src: url("/fonts/hanken-grotesk-var.woff2") format("woff2"); }
-
 .mock, .overlay-stage {
-  --font-heading: "Space Grotesk", system-ui, sans-serif;
-  --font-body: "Hanken Grotesk", system-ui, sans-serif;
+  --font-heading: "Archivo", system-ui, sans-serif;
+  --font-body: "Archivo", system-ui, sans-serif;
 }
 
 .mock {
-  --m-canvas: #fdf6e8;
-  --m-surface-1: #fffaf0;
-  --m-surface-2: #efe0c1;
-  --m-surface-3: #e5d1a3;
-  --m-input: #f4e8cf;
-  --m-accent: #b5791f;
-  --m-secondary: #a85a2e;
-  --m-t1: #2c1c0c;
-  --m-t2: #4a3620;
-  --m-t3: #6b5638;
-  --m-t4: #8c7454;
-  --m-t5: #ab9573;
-  --m-danger: #b8503c;
-  --m-on-danger: #fff8ef;
-  --m-ghost: rgba(150, 115, 70, 0.12);
-  --m-shadow: 0 1px 2px rgba(90, 62, 30, 0.04), 0 10px 28px -16px rgba(90, 62, 30, 0.16);
+  /* Warm white, not cream. The sheet's own paper is right for a page you
+     scroll past once; in a window read for hours it leaves too little
+     distance between ground and ink, and the quiet text tiers go muddy.
+     Keeping the warmth and dropping the saturation also stops the mocks
+     dissolving into the site's paper, which they did when the two grounds
+     were the same value. */
+  --m-canvas: #fbf7ed;
+  --m-surface-1: #ffffff;
+  --m-surface-2: #f0e9dc;
+  --m-surface-3: #e2d8c6;
+  --m-input: #f6f1e4;
+  --m-accent: #a8701a;
+  --m-secondary: #6b2710;
+  --m-t1: #17110b;
+  --m-t2: #3a2d1c;
+  --m-t3: #55432e;
+  --m-t4: #6f5a3f;
+  --m-t5: #8a7457;
+  --m-danger: #a8402c;
+  --m-on-danger: #f7efdf;
+  --m-ghost: rgba(23, 17, 11, 0.18);
+  --m-rule: rgba(23, 17, 11, 0.14);
+  /* Nothing in this world lifts off its ground. */
+  --m-shadow: none;
 }
 
 /* The mocks reproduce the app and are not edited to suit the page. What

@@ -10,9 +10,6 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="{{ '/css/site.css' | bust }}">
   <link rel="stylesheet" href="{{ '/css/mocks.css' | bust }}">
-  {#- Local preview only: ?proposal renders the mocks in the proposed app
-      dialect. Inert without the flag, and not part of the shipped design. -#}
-  <link rel="stylesheet" href="{{ '/css/mocks-proposal.css' | bust }}">
   {% set altEn = "/docs/" if isDocs else "/" %}
   {% set altFr = "/fr/docs/" if isDocs else "/fr/" %}
   <link rel="canonical" href="{{ site.url }}{{ page.url }}">
@@ -60,13 +57,5 @@
   {% include "partials/footer.njk" %}
   <script src="{{ '/js/site.js' | bust }}" defer></script>
   <script src="{{ '/js/mocks.js' | bust }}" defer></script>
-  <script>
-    /* ?proposal flips every mock into the proposed app dialect so the two
-       can be compared side by side. Nothing applies without the flag. */
-    if (location.search.indexOf("proposal") > -1) {
-      document.querySelectorAll(".mock").forEach(function (m) { m.classList.add("is-proposal"); });
-      document.documentElement.setAttribute("data-proposal", "on");
-    }
-  </script>
 </body>
 </html>

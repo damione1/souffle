@@ -85,16 +85,31 @@ real components, and they run the app's own behaviour:
 | Outcomes | `MeetingStructuredSummarySection` | static |
 | Overlay | `PillApp` over a generic chat client | the full dictate → reformulate → paste cycle |
 
-Colours come from the `.light` palette in `src/app.css`, so the screens read
-as the app in day mode against the dark page. `js/mocks.js` ports the draw
-loop from `Waveform.svelte` (48 bars, 3 px wide, 2 px gap, same easing and
-alpha curve) and feeds it a synthetic speech envelope instead of the
-backend's `AudioLevel` events.
+`js/mocks.js` ports the draw loop from `Waveform.svelte` (48 bars, 3 px wide,
+2 px gap, same easing and alpha curve) and feeds it a synthetic speech
+envelope instead of the backend's `AudioLevel` events.
 
 Scenes idle until scrolled into view, stop when scrolled away or when the
 tab is hidden, and render their finished state under
 `prefers-reduced-motion: reduce`.
 
-If a component in the app changes shape, the matching mock should be
-updated with it — the values here were copied deliberately rather than
-approximated.
+If a component in the app changes shape, the matching mock should be updated
+with it. The values here were copied deliberately rather than approximated.
+
+### The mocks currently run ahead of the app
+
+They used to take their colours straight from the `.light` palette in
+`src/app.css`. They no longer do. The screens now render the design the site
+itself uses, in its Operate register: a warm white ground, panels as bands
+between hairlines instead of cards with a fill and a shadow, inversion as the
+whole state vocabulary, and one variable face.
+
+That is a deliberate, temporary inversion of the usual contract. The mocks are
+the specification for the app rather than a record of it, and the app is being
+brought up to them. **Until it is, the site is showing a UI the shipped build
+does not have.** When the app lands, this section goes and the palette is
+sourced from `app.css` again.
+
+The pill is the one part already verified against the real thing: its values
+come from `src-tauri/swift/pill_panel.swift`, which replaced the original
+implementation after these mocks were written.
