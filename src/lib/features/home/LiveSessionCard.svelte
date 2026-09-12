@@ -208,9 +208,9 @@
 <div class="flex flex-col gap-[18px]">
   <div class="flex items-center gap-3.5">
     <span
-      class="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-danger/13 px-[13px] py-1.5 text-[12.5px] font-semibold text-danger-soft outline-1 outline-danger/28"
+      class="inline-flex items-center gap-2 whitespace-nowrap bg-danger px-[11px] py-[5px] text-[12.5px] font-semibold text-on-danger"
     >
-      <span class="h-2 w-2 rounded-full bg-danger" style="animation: pulse-soft 1.2s ease-in-out infinite;"></span>
+      <span class="h-2 w-2 rounded-full bg-on-danger" style="animation: pulse-soft 1.2s ease-in-out infinite;"></span>
       {mode === "meeting" ? $t("home.live_meeting") : $t("home.live_dictation")}
     </span>
     <div class="min-w-0 flex-1">
@@ -220,7 +220,7 @@
     <button
       onclick={stop}
       disabled={stopping}
-      class="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-[11px] bg-danger px-4 py-[9px] text-[13.5px] font-semibold text-on-danger transition-colors hover:bg-danger/90 disabled:cursor-default disabled:opacity-60"
+      class="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-default bg-danger px-4 py-[9px] text-[13.5px] font-semibold text-on-danger transition-colors hover:bg-danger/90 disabled:cursor-default disabled:opacity-60"
     >
       {#if stopping}
         <Spinner />
@@ -233,7 +233,7 @@
   </div>
 
   {#if mode === "dictation"}
-    <div class="flex min-h-[340px] flex-col rounded-[18px] bg-surface-1 p-[30px] px-8 outline-1 outline-ghost-border">
+    <div class="flex min-h-[340px] flex-col rounded-default px-[22px] py-5 outline-1 outline-ghost-border">
       <p class="m-0 text-[19px] font-normal leading-[1.85] text-text-secondary">
         {liveText}{#if liveTentativeDictation}<span class="opacity-50">{segmentGap(liveText, liveTentativeDictation)}{liveTentativeDictation}</span>{/if}<span
           class="ml-0.5 inline-block h-5 w-0.5 bg-accent align-[-3px]"
@@ -242,7 +242,7 @@
       </p>
       <div class="flex-1"></div>
       {#if meeting.app.settings.auto_paste}
-        <div class="flex items-center gap-[9px] border-t border-ghost-border pt-5 text-[12.5px] text-text-muted">
+        <div class="mt-5 flex items-center gap-[9px] text-[12.5px] text-text-muted">
           <ClipboardCheck size={15} class="shrink-0 text-accent" aria-hidden="true" />
           {$t("home.autopaste_hint")}
         </div>
@@ -251,7 +251,7 @@
   {:else}
     {#if liveNotice}
       <div
-        class="flex items-start gap-3 rounded-default bg-warning/10 px-4 py-3 outline-1 outline-warning/30"
+        class="flex items-start gap-3 rounded-default px-4 py-3 outline-1 outline-warning/30"
         title={liveNotice.detail ?? ""}
       >
         <MicOff size={16} class="mt-px shrink-0 text-warning" aria-hidden="true" />
@@ -262,7 +262,7 @@
       </div>
     {/if}
     {#if mode === "meeting" && meeting.idleSignal}
-      <div class="flex items-center gap-3 rounded-default bg-warning/10 px-4 py-3 outline-1 outline-warning/30">
+      <div class="flex items-center gap-3 rounded-default px-4 py-3 outline-1 outline-warning/30">
         <AlarmClockOff size={16} class="shrink-0 text-warning" aria-hidden="true" />
         <p class="m-0 min-w-0 flex-1 text-sm text-warning">
           {$t("home.idle_silence_banner", { values: { minutes: idleSilenceMinutes } })}
@@ -276,9 +276,9 @@
       </div>
     {/if}
 
-    <div class="flex min-h-[300px] flex-col gap-[18px] rounded-[18px] bg-surface-1 px-6 py-[22px] outline-1 outline-ghost-border">
+    <div class="flex min-h-[300px] flex-col gap-4 rounded-default px-[18px] py-4 outline-1 outline-ghost-border">
       <div class="flex items-center justify-between gap-3">
-        <h3 class="text-sm font-semibold text-text-primary">{$t("home.live_transcript")}</h3>
+        <h3 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted [font-variation-settings:'wdth'_88]">{$t("home.live_transcript")}</h3>
         <span class="inline-flex items-center gap-1.5 text-[11.5px] text-text-muted">
           <span
             class={`h-1.5 w-1.5 rounded-full ${systemAudioState === "active" ? "bg-accent" : "bg-surface-4"}`}

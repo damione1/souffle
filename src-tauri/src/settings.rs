@@ -242,7 +242,7 @@ const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 60..=7
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            theme: Theme::Dark,
+            theme: Theme::Light,
             locale: String::new(),
             auto_paste: false,
             paste_delay_ms: 100,

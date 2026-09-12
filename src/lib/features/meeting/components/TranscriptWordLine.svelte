@@ -46,7 +46,7 @@
     {:else if isClickableTranscriptWord(token.text)}
       <button
         type="button"
-        class="cursor-pointer rounded-[3px] border-0 bg-transparent p-0 font-inherit text-inherit hover:bg-accent/10 hover:text-accent"
+        class="cursor-pointer rounded-default border-0 bg-transparent p-0 font-inherit text-inherit hover:bg-accent/10 hover:text-accent"
         onmousedown={swallowPointerEvent}
         onclick={(event) => openAlias(i, event)}
         ondblclick={swallowPointerEvent}

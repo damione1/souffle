@@ -152,7 +152,7 @@
         onMeeting={() => void meeting.startRecording()}
       />
 
-      <label class="flex items-center gap-[11px] rounded-xl bg-input px-[15px] py-[11px] outline-1 outline-ghost-border focus-within:outline-accent/50">
+      <label class="flex items-center gap-[11px] rounded-default bg-input px-[15px] py-[11px] outline-1 outline-ghost-border focus-within:outline-accent/50">
         <Search size={16} class="shrink-0 text-text-muted" aria-hidden="true" />
         <input
           type="text"

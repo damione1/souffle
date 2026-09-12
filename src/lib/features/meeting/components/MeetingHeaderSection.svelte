@@ -103,12 +103,12 @@
 <div class="flex items-start justify-between gap-4 flex-wrap">
   <div class="flex flex-col gap-[9px]">
     {#if isRecordingMeeting}
-      <span class="inline-flex items-center gap-2 self-start rounded-full bg-danger/13 px-[13px] py-1.5 text-[12.5px] font-semibold text-danger-soft outline-1 outline-danger/28">
+      <span class="inline-flex items-center gap-2 self-start bg-danger px-[11px] py-[5px] text-[12.5px] font-semibold text-on-danger">
         <span class="recording-dot"></span> {$t("meeting_header.recording_badge")}
         {#if systemAudioStatus?.active}
-          <span class="font-normal text-text-muted">· {$t("meeting_header.system_audio_active")}</span>
+          <span class="font-normal text-on-danger/70">· {$t("meeting_header.system_audio_active")}</span>
         {:else if liveNotice}
-          <span class="font-normal text-text-muted" title={liveNotice.detail ?? ""}
+          <span class="font-normal text-on-danger/70" title={liveNotice.detail ?? ""}
             >· {$t("meeting_header.system_audio_unavailable")}</span
           >
         {/if}
@@ -151,13 +151,13 @@
         <span>{sessionCount} {$t("meeting_header.session_plural")}</span>
       {/if}
       <span
-        class="ml-0.5 rounded-full bg-secondary/10 px-2 py-0.5 text-[11px] text-secondary outline-1 outline-secondary/20"
+        class="ml-0.5 px-2 py-0.5 font-mono text-[11px] text-secondary outline-1 outline-rule"
         title={meeting.transcription_profile.engine_label}
       >{meeting.transcription_profile.model_label}</span>
     </div>
     {#if notice}
       <p
-        class="flex items-start gap-[7px] rounded-[9px] bg-warning/10 px-[11px] py-[7px] text-[12.5px] text-text-secondary outline-1 outline-warning/25"
+        class="flex items-start gap-[7px] rounded-default px-[11px] py-[7px] text-[12.5px] text-text-secondary outline-1 outline-warning/30"
         title={notice.detail ?? ""}
       >
         <MicOff size={14} class="mt-px shrink-0 text-warning" aria-hidden="true" />
@@ -177,7 +177,7 @@
         <Users size={13} class="shrink-0 text-text-muted" aria-hidden="true" />
         {#each meeting.participants as participant (participant.name + (participant.email ?? ""))}
           <span
-            class="rounded-full bg-surface-2 px-[9px] py-[2.5px] text-[11.5px] text-text-tertiary outline-1 outline-ghost-border"
+            class="px-[9px] py-[2.5px] text-[11.5px] text-text-tertiary outline-1 outline-rule"
             title={participant.email ?? ""}
           >
             {participant.name}{participant.is_organizer
@@ -194,7 +194,7 @@
       <button
         onclick={onStopRecording}
         disabled={isStopping}
-        class="inline-flex cursor-pointer items-center gap-2 rounded-[11px] bg-danger px-4 py-[9px] text-[13.5px] font-semibold text-on-danger transition-colors hover:bg-danger/90 disabled:cursor-default disabled:opacity-60"
+        class="inline-flex cursor-pointer items-center gap-2 rounded-default bg-danger px-4 py-[9px] text-[13.5px] font-semibold text-on-danger transition-colors hover:bg-danger/90 disabled:cursor-default disabled:opacity-60"
       >
         {#if isStopping}
           <Spinner />
@@ -233,11 +233,11 @@
             aria-label={$t("ui.cancel")}
             onclick={() => (showExportMenu = false)}
           ></button>
-          <div class="absolute right-0 z-20 mt-1.5 w-44 rounded-[11px] bg-surface-1 p-1.5 shadow-lg outline-1 outline-ghost-border">
+          <div class="absolute right-0 z-20 mt-1.5 w-44 rounded-default bg-surface-1 p-1.5 outline-1 outline-ghost-border">
             {#each EXPORT_FORMATS as { format, labelKey } (format)}
               <button
                 onclick={() => pickExport(format)}
-                class="block w-full cursor-pointer rounded-[8px] px-2.5 py-1.5 text-left text-[12.5px] text-text-primary transition-colors hover:bg-surface-2"
+                class="block w-full cursor-pointer rounded-default px-2.5 py-1.5 text-left text-[12.5px] text-text-primary transition-colors hover:bg-surface-2"
               >
                 {$t(labelKey)}
               </button>
@@ -245,7 +245,7 @@
             {#if hasAudio}
               <button
                 onclick={pickExportAudio}
-                class="block w-full cursor-pointer rounded-[8px] px-2.5 py-1.5 text-left text-[12.5px] text-text-primary transition-colors hover:bg-surface-2"
+                class="block w-full cursor-pointer rounded-default px-2.5 py-1.5 text-left text-[12.5px] text-text-primary transition-colors hover:bg-surface-2"
               >
                 {$t("meeting_header.export_audio")}
               </button>

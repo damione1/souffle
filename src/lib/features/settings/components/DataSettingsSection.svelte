@@ -198,7 +198,7 @@
       {#if mcpSetup}
         <div class="flex flex-col gap-1.5">
           <span class="setting-label">{$t("settings_data.mcp_binary")}</span>
-          <code class="break-all rounded-md bg-surface-raised px-2.5 py-2 font-mono text-[11px] text-text-muted">
+          <code class="break-all border border-rule px-2.5 py-2 font-mono text-[11px] text-text-muted">
             {mcpSetup.binary_path}
           </code>
           {#if !mcpSetup.exists}
@@ -214,7 +214,7 @@
             </div>
             <CopyButton text={mcpSetup.claude_desktop_snippet} />
           </div>
-          <pre class="max-h-36 overflow-auto rounded-md bg-surface-raised px-2.5 py-2 font-mono text-[11px] text-text-muted">{mcpSetup.claude_desktop_snippet}</pre>
+          <pre class="max-h-36 overflow-auto border border-rule px-2.5 py-2 font-mono text-[11px] text-text-muted">{mcpSetup.claude_desktop_snippet}</pre>
         </div>
 
         <div class="flex flex-col gap-1.5">
@@ -225,7 +225,7 @@
             </div>
             <CopyButton text={mcpSetup.claude_code_command} />
           </div>
-          <code class="break-all rounded-md bg-surface-raised px-2.5 py-2 font-mono text-[11px] text-text-muted">
+          <code class="break-all border border-rule px-2.5 py-2 font-mono text-[11px] text-text-muted">
             {mcpSetup.claude_code_command}
           </code>
         </div>

@@ -12,7 +12,7 @@
 
   const wrapperClass = $derived(
     {
-      footer: "w-full h-10 shrink-0 border-t border-ghost-border bg-surface-1",
+      footer: "w-full h-10 shrink-0 border-t border-rule",
       inline: "w-full h-12 shrink-0",
       pill: "w-full h-8 shrink-0",
     }[variant],

@@ -55,10 +55,10 @@
   ></button>
 
   <div
-    class="fixed z-50 rounded-[11px] bg-surface-1 p-3 shadow-lg outline-1 outline-ghost-border"
+    class="fixed z-50 rounded-default bg-surface-1 p-3 outline-1 outline-ghost-border"
     style={panelStyle}
   >
-    <p class="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">
+    <p class="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted [font-variation-settings:'wdth'_88]">
       {$t("dictionary_alias.title")}
     </p>
     <p class="m-0 mb-3 text-[12px] leading-relaxed text-text-muted">

@@ -102,7 +102,7 @@
       {#snippet control()}
         <div class="flex w-full flex-col gap-2">
           <pre
-            class="max-h-48 overflow-auto rounded-lg border border-ghost-border bg-surface-1/80 p-3 font-mono text-[11px] leading-relaxed text-text-secondary"
+            class="max-h-48 overflow-auto border border-rule p-3 font-mono text-[11px] leading-relaxed text-text-secondary"
             aria-live="polite"
           >{logTail || $t("settings_diagnostics.log_empty")}</pre>
           {#if tailError}

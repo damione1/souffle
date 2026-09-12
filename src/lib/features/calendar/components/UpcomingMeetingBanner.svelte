@@ -31,8 +31,8 @@
   let isAutostart = $derived(reminder.kind === "autostart");
 </script>
 
-<div class="surface-card flex items-center gap-3 border border-accent/40 px-4 py-3">
-  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent/15 text-accent" aria-hidden="true">
+<div class="flex items-center gap-3 border-t border-accent/50 py-3">
+  <span class="flex h-[22px] w-[22px] shrink-0 items-center justify-center text-accent" aria-hidden="true">
     <CalendarClock size={16} />
   </span>
   <div class="min-w-0 flex-1">

@@ -223,7 +223,7 @@
 <div class="flex flex-col gap-2">
   {#each rows as row (row.kind)}
     {@const s = stateOf(row.kind)}
-    <div class="flex flex-col gap-2 rounded-lg bg-surface-1/70 p-3">
+    <div data-permission-row class="flex flex-col gap-2 border-t border-rule py-3 first:border-t-0">
       <div class="flex items-center gap-3">
         <row.icon size={20} class="shrink-0 text-text-muted" aria-hidden="true" />
         <div class="min-w-0 flex-1">

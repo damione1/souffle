@@ -31,7 +31,7 @@
 </script>
 
 <span
-  class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-[11px] py-[5px] text-xs text-text-tertiary outline-1 outline-ghost-border"
+  class="inline-flex items-center gap-[5px] px-[9px] py-[3px] text-[11px] text-text-muted outline-1 outline-ghost-border"
   role="status"
 >
   {#if status.tone === "ready"}

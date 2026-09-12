@@ -725,8 +725,13 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
-button {
-  border: 0;
-  background: none;
-  color: inherit;
+/* Layered on purpose. Unlayered, this reset outranks every Tailwind utility,
+   so `bg-*`, `text-*` and `border-*` silently did nothing on a bare <button>
+   and inversion could not be expressed at all. */
+@layer base {
+  button {
+    border: 0;
+    background: none;
+    color: inherit;
+  }
 }

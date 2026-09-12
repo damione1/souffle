@@ -21,7 +21,7 @@
 
 <div
   role="status"
-  class="flex max-w-sm items-start gap-2.5 rounded-xl bg-black/75 px-3.5 py-2.5 text-sm text-white shadow-lg backdrop-blur-md"
+  class="flex max-w-sm items-start gap-2.5 rounded-default bg-black/75 px-3.5 py-2.5 text-sm text-white backdrop-blur-md"
 >
   <div class="min-w-0 flex-1">
     <p class="font-medium">{title}</p>
@@ -34,7 +34,7 @@
     {#if actionLabel && onAction}
       <button
         type="button"
-        class="mt-2 rounded bg-white/20 px-2 py-1 text-xs font-semibold hover:bg-white/30 transition-colors"
+        class="mt-2 rounded-default bg-white/20 px-2 py-1 text-xs font-semibold hover:bg-white/30 transition-colors"
         onclick={() => {
           onAction?.();
           onDismiss();
@@ -46,7 +46,7 @@
   </div>
   <button
     type="button"
-    class="shrink-0 rounded-md p-0.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+    class="shrink-0 rounded-default p-0.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
     aria-label={$t("mic_toast.dismiss")}
     onclick={onDismiss}
   >

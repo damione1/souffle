@@ -16,7 +16,7 @@
 
 <div class="flex flex-col gap-1.5">
   <div
-    class="h-2 w-full overflow-hidden rounded-full bg-surface-2 outline-1 outline-ghost-border"
+    class="h-2 w-full overflow-hidden bg-surface-2 outline-1 outline-ghost-border"
     role="progressbar"
     aria-valuemin={0}
     aria-valuemax={safeMax}
@@ -24,7 +24,7 @@
     aria-label={label || "Progress"}
   >
     <div
-      class="h-full rounded-full bg-accent transition-[width] duration-200 ease-out"
+      class="h-full bg-accent transition-[width] duration-200 ease-out"
       style={`width: ${percent}%`}
     ></div>
   </div>
