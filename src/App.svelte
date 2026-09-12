@@ -347,7 +347,7 @@
 <div class="flex h-screen flex-col overflow-hidden">
   <header
     data-tauri-drag-region
-    class="flex h-[52px] shrink-0 items-center gap-3 border-b border-rule px-[18px] pl-[88px]"
+    class="flex h-[52px] shrink-0 items-center gap-3 border-b border-rule pl-[88px] pr-[26px]"
   >
     <div class="flex items-center gap-[9px]" data-tauri-drag-region>
       <img
@@ -399,7 +399,7 @@
   </header>
 
   <div class="flex flex-1 flex-col min-w-0 overflow-hidden">
-    <main class="flex-1 overflow-y-auto px-7 pb-[34px] pt-[26px]">
+    <main class="flex-1 overflow-y-auto px-[26px] pb-[34px] pt-[26px]">
       <!-- Keep HomeView mounted. Its singleton controllers own `$derived`
            values; destroying the view (settings `{#if}`) froze them on
            Svelte 5.55+ and left the live session card stuck after stop. -->
@@ -407,7 +407,7 @@
         <HomeView />
       </div>
       {#if app.settingsOpen}
-        <div class="mx-auto flex w-full max-w-[720px] flex-col gap-[22px]">
+        <div class="mx-auto flex w-full max-w-[820px] flex-col gap-[22px]">
           <button
             onclick={() => (app.settingsOpen = false)}
             class="btn btn-ghost -ml-1.5 gap-1.5 self-start px-2.5 py-1 text-[13px]"

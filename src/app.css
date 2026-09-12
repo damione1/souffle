@@ -41,8 +41,8 @@
   --color-text-primary: #f1e9dd; /* t1 */
   --color-text-secondary: #e6dccb; /* t2 — body / transcript text */
   --color-text-tertiary: #c2b39a; /* t3 */
-  --color-text-muted: #9c8c72; /* t4 */
-  --color-text-faint: #8a7a63; /* t5 */
+  --color-text-muted: #b3a284; /* t4 */
+  --color-text-faint: #9c8c70; /* t5 */
 
   --color-success: #e9ae55;
   --color-warning: #e0a458;
@@ -52,6 +52,7 @@
   --color-on-danger: #2a0e09;
 
   --color-ghost-border: rgba(235, 210, 170, 0.42);
+  --color-border-soft: rgba(235, 210, 170, 0.16);
   --color-rule: rgba(235, 210, 170, 0.22);
   --canvas-opacity: 82%;
   --color-glass-bg: rgba(30, 24, 17, 0.72);
@@ -109,6 +110,7 @@
   --color-danger-strong: #8a3222;
   --color-on-danger: #f7efdf;
   --color-ghost-border: rgba(23, 17, 11, 0.46);
+  --color-border-soft: rgba(23, 17, 11, 0.16);
   --color-rule: rgba(23, 17, 11, 0.28);
   --canvas-opacity: 100%;
   --color-glass-bg: rgba(251, 247, 237, 0.72);
@@ -336,7 +338,8 @@ img {
 
 .field-input:focus,
 .field-select:focus {
-  outline: 1px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  outline-offset: 0;
 }
 
 .field-select {
@@ -436,9 +439,9 @@ img {
   flex-wrap: wrap;
   gap: 0.25rem;
   padding: 0.25rem;
-  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
-  border-radius: var(--radius-card);
-  outline: 1px solid var(--color-ghost-border);
+  background: transparent;
+  border-radius: var(--radius-default);
+  outline: 1px solid var(--color-border-soft);
 }
 
 .settings-tab {
@@ -516,7 +519,7 @@ img {
 
 .settings-rows > * {
   padding: 0.9375rem var(--settings-inset);
-  border-top: 1px solid color-mix(in srgb, var(--color-ghost-border) 60%, transparent);
+  border-top: 1px solid var(--color-border-soft);
 }
 
 .settings-rows > :first-child {
@@ -733,7 +736,16 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline-offset: 1px;
+}
+
+/* A field already has an edge, so an offset ring drew a second line beside
+   it and read as heavy. The ring sits on the edge instead, one line, and
+   keeps the 2px a focus indicator needs to stay visible. */
+.field-input:focus-visible,
+.field-select:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
 }
 
 /* Layered on purpose. Unlayered, this reset outranks every Tailwind utility,

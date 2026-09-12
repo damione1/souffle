@@ -73,6 +73,7 @@
   --m-danger: #a8402c;
   --m-on-danger: #f7efdf;
   --m-ghost: rgba(23, 17, 11, 0.46);
+  --m-soft: rgba(23, 17, 11, 0.16);
   --m-rule: rgba(23, 17, 11, 0.28);
   /* Nothing in this world lifts off its ground. */
   --m-shadow: none;

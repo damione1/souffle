@@ -151,7 +151,7 @@
         {#each microphoneList as entry, index (entry.uid)}
           <li
             class={`flex items-center gap-2 border px-2.5 py-2 ${
-              entry.connected ? "border-ghost-border" : "border-rule opacity-70"
+              entry.connected ? "border-border-soft" : "border-rule opacity-70"
             }`}
           >
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">

@@ -60,7 +60,7 @@
 /* ─── Cards ─── */
 .m-card {
   border-radius: 4px; background: transparent;
-  outline: 1px solid var(--m-ghost); box-shadow: none;
+  outline: 1px solid var(--m-soft); box-shadow: none;
 }
 .m-card-sm { border-radius: 0; background: transparent; outline: 0; border-top: 1px solid var(--m-rule); }
 .m-stack { display: flex; flex-direction: column; gap: 18px; }

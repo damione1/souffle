@@ -170,7 +170,7 @@
     {/if}
 
     {#if summaryPhase === "summary_recording" || summaryPhase === "summary_stale" || summaryPhase === "summary_current"}
-      <div class="min-h-[100px] max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-default p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-ghost-border">{meeting.summary}</div>
+      <div class="min-h-[100px] max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-default p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-border-soft">{meeting.summary}</div>
     {:else if summaryPhase === "recording"}
       <div class="flex items-center gap-2.5 py-2 text-sm text-text-muted">
         <Clock3 size={16} aria-hidden="true" />
@@ -185,7 +185,7 @@
           {stageLabel}
         </div>
       {/if}
-      <div class="min-h-[80px] overflow-y-auto whitespace-pre-wrap rounded-default p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-ghost-border">{summaryStream}<span class="text-accent" style="animation: blink 1s step-end infinite;">|</span></div>
+      <div class="min-h-[80px] overflow-y-auto whitespace-pre-wrap rounded-default p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-border-soft">{summaryStream}<span class="text-accent" style="animation: blink 1s step-end infinite;">|</span></div>
     {/if}
 
     {#if !isRecordingMeeting && segments.length > 0}

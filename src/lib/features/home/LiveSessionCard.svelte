@@ -233,7 +233,7 @@
   </div>
 
   {#if mode === "dictation"}
-    <div class="flex min-h-[340px] flex-col rounded-default px-[22px] py-5 outline-1 outline-ghost-border">
+    <div class="flex min-h-[340px] flex-col rounded-default px-[22px] py-5 outline-1 outline-border-soft">
       <p class="m-0 text-[19px] font-normal leading-[1.85] text-text-secondary">
         {liveText}{#if liveTentativeDictation}<span class="opacity-50">{segmentGap(liveText, liveTentativeDictation)}{liveTentativeDictation}</span>{/if}<span
           class="ml-0.5 inline-block h-5 w-0.5 bg-accent align-[-3px]"
@@ -276,7 +276,7 @@
       </div>
     {/if}
 
-    <div class="flex min-h-[300px] flex-col gap-4 rounded-default px-[18px] py-4 outline-1 outline-ghost-border">
+    <div class="flex min-h-[300px] flex-col gap-4 rounded-default px-[18px] py-4 outline-1 outline-border-soft">
       <div class="flex items-center justify-between gap-3">
         <h3 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted [font-variation-settings:'wdth'_88]">{$t("home.live_transcript")}</h3>
         <span class="inline-flex items-center gap-1.5 text-[11.5px] text-text-muted">
