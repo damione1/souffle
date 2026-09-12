@@ -106,17 +106,17 @@
 }
 .overlay-stage .stage-steps {
   grid-column: 2; grid-row: 1;
-  display: flex; flex-wrap: wrap; gap: 0;
-  justify-content: flex-start; margin-top: 0;
+  display: flex; flex-direction: column; align-items: stretch;
+  flex-wrap: nowrap; gap: 0; margin-top: 0;
 }
 .overlay-stage .stage-step {
-  padding: 6px 13px; border: 1px solid var(--rule); border-radius: 0;
-  margin-left: -1px; outline: 0;
+  padding: 7px 13px; border: 1px solid var(--rule); border-radius: 0;
+  margin-top: -1px; outline: 0; white-space: nowrap;
   font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--fg-2); background: transparent;
   transition: background-color 200ms linear, color 200ms linear;
 }
-.overlay-stage .stage-step:first-child { margin-left: 0; }
+.overlay-stage .stage-step:first-child { margin-top: 0; }
 .overlay-stage .stage-step.is-active {
   background: var(--ink); color: var(--ground); border-color: var(--ink); outline: 0;
 }
