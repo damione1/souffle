@@ -75,3 +75,7 @@ site/_site/
 .impeccable/live/deferred-svelte-component-accepts.json
 .impeccable/live/*.png
 # impeccable-ignore-end
+
+# Asset generation pipeline: scripts and their PNG frame dumps. Kept out of
+# the repo on purpose, the shipped output in docs/ is what is versioned.
+/tools/social-assets/
