@@ -63,17 +63,17 @@
   --m-surface-2: #f0e9dc;
   --m-surface-3: #e2d8c6;
   --m-input: #f6f1e4;
-  --m-accent: #a8701a;
+  --m-accent: #95610f;
   --m-secondary: #6b2710;
   --m-t1: #17110b;
   --m-t2: #3a2d1c;
   --m-t3: #55432e;
-  --m-t4: #6f5a3f;
-  --m-t5: #8a7457;
+  --m-t4: #6b573c;
+  --m-t5: #7b6547;
   --m-danger: #a8402c;
   --m-on-danger: #f7efdf;
-  --m-ghost: rgba(23, 17, 11, 0.18);
-  --m-rule: rgba(23, 17, 11, 0.14);
+  --m-ghost: rgba(23, 17, 11, 0.46);
+  --m-rule: rgba(23, 17, 11, 0.28);
   /* Nothing in this world lifts off its ground. */
   --m-shadow: none;
 }
