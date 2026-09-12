@@ -19,9 +19,15 @@ copy of the pipeline is in the Obsidian vault under
 
 The poster set carries the message on its own and works as a standalone
 post. The app set is the raw screen, for a post whose words are in the
-caption. The chat scene has two messages in it, so its app-only 4:5 frame
-runs airier than the meeting one: the poster variant fills that ratio
-better.
+caption. Both are drawn at roughly 2x the app's own layout, because these
+are read on a phone, often at 450px or less, and at 1x the transcript is
+decorative rather than legible.
+
+The chat scene has two messages in it, so its app-only 4:5 frame runs
+airier than the meeting one. Its square poster also cuts the composer off
+the bottom of the frame: a full window plus a headline does not fit a 1:1
+at this scale, and the pill dictating is the part worth keeping. The 4:5
+poster shows the whole cycle, text landing included.
 
 The two `og-*.png` cards are not here: they are served by the site itself
 and live in `site/src/`, wired into `base.njk` as `og:image`.
