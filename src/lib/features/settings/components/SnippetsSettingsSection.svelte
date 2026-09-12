@@ -119,9 +119,9 @@
     </div>
 
     {#if entries.length > 0}
-      <div class="flex flex-col gap-1 mt-2">
+      <div class="mt-2 flex flex-col">
         {#each entries as entry (entry.id)}
-          <div class="flex flex-col gap-2 rounded-[9px] bg-surface-2/60 px-2.5 py-1.5 text-sm text-text-secondary">
+          <div class="flex flex-col gap-2 border-t border-rule py-2 text-sm text-text-secondary">
             {#if editingId === entry.id}
               <div class="flex flex-col gap-1">
                 <label for={`snippet-edit-trigger-${entry.id}`} class="field-label">{$t("settings_snippets.trigger")}</label>

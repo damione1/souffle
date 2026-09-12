@@ -114,16 +114,16 @@
   <!-- Collapsed CTA until a summary exists, per the design. -->
   <button
     onclick={onSummarize}
-    class="surface-card flex cursor-pointer items-center gap-[13px] !px-[18px] !py-[15px] text-left text-text-primary transition-[outline-color,transform] duration-150 hover:outline-accent/40 active:scale-[0.99]"
+    class="flex cursor-pointer items-center gap-[13px] p-[18px] text-left text-text-primary outline-1 -outline-offset-1 outline-ghost-border transition-[outline-color,transform] duration-150 hover:outline-accent/40 active:scale-[0.99]"
   >
-    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-accent/12 text-accent">
-      <WandSparkles size={17} aria-hidden="true" />
+    <span class="flex h-[26px] w-[26px] shrink-0 items-center justify-center text-accent">
+      <WandSparkles size={20} aria-hidden="true" />
     </span>
     <span class="flex flex-1 flex-col gap-0.5">
       <span class="text-sm font-semibold">{$t("meeting_summary.generate_summary")}</span>
       <span class="text-xs text-text-muted">{$t("meeting_summary.generate_hint")}</span>
     </span>
-    <span class="shrink-0 rounded-[9px] bg-accent/12 px-3.5 py-[7px] text-[12.5px] font-semibold text-accent">
+    <span class="shrink-0 text-[12.5px] font-semibold text-accent">
       {$t("meeting_summary.generate_cta")}
     </span>
   </button>
@@ -149,8 +149,8 @@
     {#if keyPoints.length > 0}
       <div class="grid grid-cols-2 gap-2.5 max-[640px]:grid-cols-1">
         {#each keyPoints as point, index}
-          <div class="flex items-start gap-[11px] rounded-xl bg-input px-3.5 py-[13px] outline-1 outline-ghost-border">
-            <span class="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[7px] bg-accent/14 font-mono text-[11px] font-medium text-accent">{index + 1}</span>
+          <div class="flex items-start gap-[11px] border-t border-rule py-3">
+            <span class="w-[18px] shrink-0 pt-px font-mono text-[11px] font-medium text-accent">{index + 1}</span>
             <p class="m-0 text-[12.5px] leading-[1.55] text-text-tertiary">{point.replace(/^[-•*\d.)]+\s*/, "").trim()}</p>
           </div>
         {/each}
@@ -170,7 +170,7 @@
     {/if}
 
     {#if summaryPhase === "summary_recording" || summaryPhase === "summary_stale" || summaryPhase === "summary_current"}
-      <div class="min-h-[100px] max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-xl bg-input p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-ghost-border">{meeting.summary}</div>
+      <div class="min-h-[100px] max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-default p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-border-soft">{meeting.summary}</div>
     {:else if summaryPhase === "recording"}
       <div class="flex items-center gap-2.5 py-2 text-sm text-text-muted">
         <Clock3 size={16} aria-hidden="true" />
@@ -185,7 +185,7 @@
           {stageLabel}
         </div>
       {/if}
-      <div class="min-h-[80px] overflow-y-auto whitespace-pre-wrap rounded-xl bg-input p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-ghost-border">{summaryStream}<span class="text-accent" style="animation: blink 1s step-end infinite;">|</span></div>
+      <div class="min-h-[80px] overflow-y-auto whitespace-pre-wrap rounded-default p-3.5 text-sm leading-relaxed text-text-secondary outline-1 outline-border-soft">{summaryStream}<span class="text-accent" style="animation: blink 1s step-end infinite;">|</span></div>
     {/if}
 
     {#if !isRecordingMeeting && segments.length > 0}

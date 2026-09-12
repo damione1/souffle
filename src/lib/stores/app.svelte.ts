@@ -82,7 +82,7 @@ let downloadTotalBytes = $state<number | null>(null);
 // getSettings() overwrites these on every successful bootstrap; these are only
 // active if the backend is unreachable on first launch (onboarding flow).
 let settings = $state<AppSettings>({
-  theme: "dark",
+  theme: "light",
   locale: "",
   auto_paste: false,
   paste_delay_ms: 100,

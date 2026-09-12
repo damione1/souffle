@@ -37,13 +37,11 @@ app-icon.png
 
 # Agent / assistant working files
 .serena/
-# Local Claude state stays out, but skills are shared with the repo.
-# The first line re-includes the directory, which a global ignore also
-# excludes; git cannot descend into an excluded directory otherwise.
-!.claude/
-.claude/*
-!.claude/skills/
+# Local assistant state, skills included: tooling for whoever is working on
+# the repo, not part of what it ships.
+.claude/
 .cursor/
+claudedocs/
 
 # CodeQL CLI local databases / SARIF (scripts/codeql-local.sh)
 .codeql/
@@ -52,26 +50,11 @@ app-icon.png
 site/_site/
 
 # impeccable-ignore-start
-# Ephemeral output, runtime state, and per-dev overrides.
-# Unanchored: .impeccable may sit at the repo root or under a nested
-# workspace (apps/web/.impeccable/...); anchored patterns would miss it.
-# Shared artifacts stay tracked: config.json, live/config.json,
-# design.json, surfaces/*.md, critique/*.md.
-.impeccable/config.local.json
-.impeccable/hook.cache.json
-.impeccable/hook.pending.json
-.impeccable/*.png
-.impeccable/review/
-.impeccable/questions/
-.impeccable/live/server.json
-.impeccable/live/sessions/
-.impeccable/live/previews/
-.impeccable/live/annotations/
-.impeccable/live/cache/
-.impeccable/live/manual-edit-apply-transaction.json
-.impeccable/live/manual-edit-events.jsonl
-.impeccable/live/manual-edit-evidence/
-.impeccable/live/pending-manual-edits.json
-.impeccable/live/deferred-svelte-component-accepts.json
-.impeccable/live/*.png
+# The whole directory is local: design notes and surface briefs are
+# working material, and DESIGN.md at the root is the shared record.
+.impeccable/
 # impeccable-ignore-end
+
+# Asset generation pipeline: scripts and their PNG frame dumps. Kept out of
+# the repo on purpose, the shipped output in docs/ is what is versioned.
+/tools/social-assets/

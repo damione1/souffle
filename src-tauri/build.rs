@@ -19,6 +19,10 @@ fn main() {
     {
         build_apple_intelligence_bridge();
         build_pill_panel_bridge();
+        // Both bridges link against the Swift runtime, but the rpath belongs
+        // to the link line rather than to either of them: emitting it from
+        // both made the linker warn that it was ignoring the duplicate.
+        println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     }
 
     tauri_build::build();
@@ -155,8 +159,6 @@ fn build_apple_intelligence_bridge() {
         println!("cargo:rustc-link-arg=-weak_framework");
         println!("cargo:rustc-link-arg=FoundationModels");
     }
-
-    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -254,5 +256,4 @@ fn build_pill_panel_bridge() {
     // AppKit and Foundation needed for the native HUD panel
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=Foundation");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
 }

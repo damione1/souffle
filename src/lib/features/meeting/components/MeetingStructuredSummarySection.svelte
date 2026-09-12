@@ -48,7 +48,7 @@
         </h4>
         <div class="flex flex-wrap gap-2">
           {#each decisions as decision}
-            <span class="rounded-full bg-accent/12 px-3 py-1.5 text-[12.5px] leading-snug text-text-secondary outline-1 outline-accent/20">
+            <span class="px-3 py-1.5 text-[12.5px] leading-snug text-accent outline-1 outline-rule">
               {decision}
             </span>
           {/each}
@@ -63,7 +63,7 @@
         </h4>
         <div class="grid grid-cols-2 gap-2.5 max-[640px]:grid-cols-1">
           {#each actionItems as item}
-            <div class="flex flex-col gap-1 rounded-xl bg-input px-3.5 py-[13px] outline-1 outline-ghost-border">
+            <div class="flex flex-col gap-1 border-t border-rule py-3">
               <p class="m-0 text-[12.5px] leading-[1.55] text-text-secondary">{item.text}</p>
               {#if item.owner}
                 <span class="font-mono text-[11px] text-text-muted">
@@ -84,7 +84,7 @@
         </h4>
         <div class="flex flex-wrap gap-2">
           {#each openQuestions as question}
-            <span class="rounded-full bg-input px-3 py-1.5 text-[12.5px] leading-snug text-text-secondary outline-1 outline-ghost-border">
+            <span class="px-3 py-1.5 text-[12.5px] leading-snug text-text-tertiary outline-1 outline-rule">
               {question}
             </span>
           {/each}

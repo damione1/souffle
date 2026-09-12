@@ -24,7 +24,7 @@ function statusWith(microphone: PermState): PermissionStatus {
 }
 
 function rowFor(label: string): HTMLElement {
-  const row = screen.getByText(label).closest(".rounded-lg");
+  const row = screen.getByText(label).closest("[data-permission-row]");
   if (!(row instanceof HTMLElement)) {
     throw new Error(`row not found for label "${label}"`);
   }

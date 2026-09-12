@@ -146,14 +146,14 @@
   </div>
 
   {#if entries.length > 0}
-    <div class="flex flex-col gap-1">
+    <div class="flex flex-col">
       {#each entries as entry (entry.id)}
-        <div class="flex items-center gap-2 rounded-[9px] bg-surface-2/60 px-2.5 py-1.5 text-sm text-text-secondary">
+        <div class="flex items-center gap-2 border-t border-rule py-2 text-sm text-text-secondary">
           <span class="flex-1 font-medium">
             {entry.term}{#if aliasesOf(entry).length}
               <span class="ml-1 inline-flex flex-wrap gap-1 font-normal">
                 {#each aliasesOf(entry) as alias (alias)}
-                  <span class="inline-flex items-center gap-0.5 rounded-md bg-surface-3 px-1.5 py-0.5 text-xs text-text-muted">
+                  <span class="inline-flex items-center gap-0.5 border border-rule px-1.5 py-0.5 text-xs text-text-muted">
                     {alias}
                     <button
                       type="button"

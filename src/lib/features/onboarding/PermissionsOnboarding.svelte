@@ -17,7 +17,7 @@
   aria-modal="true"
   aria-label={$t("permissions.title")}
 >
-  <div class="surface-card w-full max-w-md flex flex-col gap-5">
+  <div class="flex w-full max-w-md flex-col gap-5 bg-canvas p-6 outline-1 outline-ghost-border">
     <div class="flex flex-col gap-1">
       <h2 class="font-heading text-lg font-bold">{$t("permissions.title")}</h2>
       <p class="text-sm text-text-muted">{$t("permissions.subtitle")}</p>

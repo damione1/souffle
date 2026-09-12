@@ -83,7 +83,7 @@
 </script>
 
 {#if currentPath}
-  <section class="surface-card flex items-center gap-3 px-4 py-2.5">
+  <section class="surface-card flex items-center gap-3">
     <!-- svelte-ignore a11y_media_has_caption -->
     <audio
       bind:this={audioEl}

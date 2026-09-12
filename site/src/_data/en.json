@@ -57,7 +57,7 @@
       "body": "With the default model the text streams in while you are still talking, punctuated and capitalised. A local pass can tidy the phrasing before you use it, and that same model handles French and English without you switching anything.",
       "bullets": [
         "Text appears as you speak, not once you stop",
-        "Press once to start and stop, or hold to talk — including Fn or a lone modifier",
+        "Press once to start and stop, or hold to talk, including on a lone modifier key",
         "Say a trigger phrase to paste a voice snippet instead of free dictation",
         "Fix a misheard name by hand once, and it stays fixed",
         "A local LLM pass can polish the wording, with editable prompts",
@@ -591,7 +591,7 @@
               ],
               [
                 "Accessibility",
-                "Inserts the text into the app you were using, reads back your corrections when “learn from edits” is on, and installs the native event tap that lets a dictation shortcut bind to a single key (Fn, a lone modifier, or F5–F12)."
+                "Inserts the text into the app you were using, reads back your corrections when “learn from edits” is on, and installs the native event tap that lets a dictation shortcut bind to a single key (a lone modifier, or F5–F12)."
               ],
               [
                 "Calendar",
@@ -642,7 +642,7 @@
         "h": "Shortcuts",
         "blocks": [
           {
-            "p": "Both dictation shortcuts are set in Settings → Interface. Toggle uses a classic combo with a modifier (default <kbd>⌘⇧Space</kbd>). Push-to-talk can use the same style, or a single key (Fn, a lone modifier, or F5–F12), which needs the Accessibility permission so the native tap can install. The two bindings cannot share a combination."
+            "p": "Both dictation shortcuts are set in Settings → Interface. Toggle uses a classic combo with a modifier (default <kbd>⌘⇧Space</kbd>). Push-to-talk can use the same style, or a single key (a lone modifier, or F5–F12), which needs the Accessibility permission so the native tap can install. The two bindings cannot share a combination."
           },
           {
             "table": [
@@ -652,7 +652,7 @@
               ],
               [
                 "Push-to-talk",
-                "Hold to record, release to stop. Not set by default; bind a classic combo or a single key (Fn, lone modifier, F5–F12) if you prefer holding."
+                "Hold to record, release to stop. Not set by default; bind a classic combo or a single key (lone modifier, F5–F12) if you prefer holding."
               ]
             ]
           }
@@ -971,7 +971,7 @@
               ],
               [
                 "A single-key push-to-talk shortcut does nothing",
-                "Fn, lone modifiers and F5–F12 need the Accessibility permission for the native tap. Settings → System → Permissions links there."
+                "Lone modifiers and F5–F12 need the Accessibility permission for the native tap. Settings → System → Permissions links there."
               ],
               [
                 "The dictated text is not inserted",

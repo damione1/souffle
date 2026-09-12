@@ -102,7 +102,7 @@
     </div>
 
     {#if pinUnavailable && selectedDevice}
-      <p class="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning" role="status">
+      <p class="rounded-default border border-warning/40 px-3 py-2 text-sm text-warning" role="status">
         {$t("settings_audio.pin_unavailable")}
       </p>
     {/if}
@@ -121,7 +121,7 @@
 
     {#if rateIsHigh}
       <p
-        class="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning"
+        class="rounded-default border border-warning/40 px-3 py-2 text-sm text-warning"
         role="status"
         data-testid="sample-rate-warning"
       >
@@ -150,16 +150,14 @@
       <ul class="mt-2 flex flex-col gap-1.5" aria-label={$t("settings_audio.priority_title")}>
         {#each microphoneList as entry, index (entry.uid)}
           <li
-            class={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
-              entry.connected
-                ? "border-ghost-border bg-surface-1"
-                : "border-ghost-border/60 bg-surface-1/40 opacity-70"
+            class={`flex items-center gap-2 border px-2.5 py-2 ${
+              entry.connected ? "border-border-soft" : "border-rule opacity-70"
             }`}
           >
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
               <div class="flex flex-wrap items-center gap-1.5">
                 <span class="truncate text-sm font-medium">{entry.name}</span>
-                <span class="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-text-muted">
+                <span class="border border-rule px-2 py-0.5 text-[11px] text-text-muted">
                   {$t(transportLabelKey(entry.transport))}
                 </span>
                 {#if entry.isDefault}

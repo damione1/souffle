@@ -35,7 +35,7 @@
   aria-modal="true"
   aria-label={$t("whats_new.title")}
 >
-  <div class="surface-card flex w-full max-w-lg max-h-[80vh] flex-col gap-4">
+  <div class="flex max-h-[80vh] w-full max-w-lg flex-col gap-4 bg-canvas p-6 outline-1 outline-ghost-border">
     <div class="flex flex-col gap-1">
       <h2 class="font-heading text-lg font-bold">{$t("whats_new.title")}</h2>
       <p class="text-sm text-text-muted">
@@ -45,7 +45,7 @@
 
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div
-      class="release-notes min-h-0 flex-1 overflow-y-auto rounded-lg bg-surface-1/70 p-4 text-sm leading-relaxed text-text-secondary"
+      class="release-notes min-h-0 flex-1 overflow-y-auto rounded-default p-4 text-sm leading-relaxed text-text-secondary outline-1 outline-ghost-border"
       onclick={handleNotesClick}
     >
       {@html notesHtml}

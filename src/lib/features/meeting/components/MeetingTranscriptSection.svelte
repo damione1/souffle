@@ -176,12 +176,12 @@
             </div>
           {:else}
             <div class="my-1 flex items-center gap-3 text-text-muted/80">
-              <div class="h-px flex-1 bg-ghost-border"></div>
+              <div class="h-px flex-1 bg-rule"></div>
               <div class="flex flex-col items-center gap-0.5 text-center">
                 <p class="m-0 text-[0.625rem] font-medium uppercase tracking-[0.16em] text-text-muted/75">{block.endLabel}</p>
                 <p class="m-0 text-xs font-medium text-text-muted">{block.startLabel}</p>
               </div>
-              <div class="h-px flex-1 bg-ghost-border"></div>
+              <div class="h-px flex-1 bg-rule"></div>
             </div>
           {/if}
         {/each}

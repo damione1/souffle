@@ -1,20 +1,15 @@
 @import "tailwindcss";
 
 /* ─── Self-hosted variable fonts ─── */
+/* One variable grotesk does every job: the width axis condenses it for
+   labels and relaxes it for reading, so headings and body are one face. */
 @font-face {
-  font-family: "Space Grotesk";
+  font-family: "Archivo";
   font-style: normal;
-  font-weight: 300 700;
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
   font-display: swap;
-  src: url("/fonts/space-grotesk-var.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Hanken Grotesk";
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url("/fonts/hanken-grotesk-var.woff2") format("woff2");
+  src: url("/fonts/archivo-var.woff2") format("woff2");
 }
 
 @font-face {
@@ -46,8 +41,8 @@
   --color-text-primary: #f1e9dd; /* t1 */
   --color-text-secondary: #e6dccb; /* t2 — body / transcript text */
   --color-text-tertiary: #c2b39a; /* t3 */
-  --color-text-muted: #857761; /* t4 */
-  --color-text-faint: #5e5344; /* t5 */
+  --color-text-muted: #b3a284; /* t4 */
+  --color-text-faint: #9c8c70; /* t5 */
 
   --color-success: #e9ae55;
   --color-warning: #e0a458;
@@ -56,18 +51,23 @@
   --color-danger-strong: #8a5148;
   --color-on-danger: #2a0e09;
 
-  --color-ghost-border: rgba(235, 210, 170, 0.09);
+  --color-ghost-border: rgba(235, 210, 170, 0.42);
+  --color-border-soft: rgba(235, 210, 170, 0.16);
+  --color-rule: rgba(235, 210, 170, 0.22);
+  --canvas-opacity: 82%;
   --color-glass-bg: rgba(30, 24, 17, 0.72);
 
   /* Cards lift with a soft warm shadow in light mode; none in dark. */
   --shadow-card: none;
 
-  --font-heading: "Space Grotesk", system-ui, sans-serif;
-  --font-body: "Hanken Grotesk", system-ui, sans-serif;
+  --font-heading: "Archivo", system-ui, sans-serif;
+  --font-body: "Archivo", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --radius-default: 0.625rem;
-  --radius-card: 1rem;
+  /* Controls stay rounded because this is a macOS app; panels do not,
+     because they are bands between rules rather than cards. */
+  --radius-default: 0.25rem;
+  --radius-card: 0rem;
   --radius-pill: 9999px;
 }
 
@@ -87,37 +87,45 @@
 
 .light {
   color-scheme: light;
-  --color-canvas: #fdf6e8;
-  --color-surface-1: #fffaf0;
-  --color-surface-2: #efe0c1;
-  --color-surface-3: #e5d1a3;
-  --color-surface-4: #d8c08a;
-  --color-input: #f4e8cf;
-  --color-accent: #b5791f;
-  --color-accent-hover: #9c6714;
-  --color-secondary: #a85a2e;
-  --color-text-primary: #2c1c0c;
-  --color-text-secondary: #4a3620;
-  --color-text-tertiary: #6b5638;
-  --color-text-muted: #8c7454;
-  --color-text-faint: #ab9573;
-  --color-success: #b5791f;
-  --color-warning: #c5893f;
-  --color-danger: #b8503c;
-  --color-danger-soft: #c97a63;
-  --color-danger-strong: #9c4a3a;
-  --color-on-danger: #fff8ef;
-  --color-ghost-border: rgba(150, 115, 70, 0.12);
-  --color-glass-bg: rgba(255, 250, 240, 0.72);
-  --shadow-card: 0 1px 2px rgba(90, 62, 30, 0.04), 0 10px 28px -16px rgba(90, 62, 30, 0.16);
+  /* Warm white rather than cream: a window read for hours needs more
+     distance between ground and ink than a page scrolled past once. */
+  --color-canvas: #fbf7ed;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f0e9dc;
+  --color-surface-3: #e2d8c6;
+  --color-surface-4: #d3c6ad;
+  --color-input: #f6f1e4;
+  --color-accent: #95610f;
+  --color-accent-hover: #7a4e09;
+  --color-secondary: #6b2710;
+  --color-text-primary: #17110b;
+  --color-text-secondary: #3a2d1c;
+  --color-text-tertiary: #55432e;
+  --color-text-muted: #6b573c;
+  --color-text-faint: #7b6547;
+  --color-success: #4f7a52;
+  --color-warning: #a8701a;
+  --color-danger: #a8402c;
+  --color-danger-soft: #c07460;
+  --color-danger-strong: #8a3222;
+  --color-on-danger: #f7efdf;
+  --color-ghost-border: rgba(23, 17, 11, 0.46);
+  --color-border-soft: rgba(23, 17, 11, 0.16);
+  --color-rule: rgba(23, 17, 11, 0.28);
+  --canvas-opacity: 100%;
+  --color-glass-bg: rgba(251, 247, 237, 0.72);
+  /* Nothing lifts off its ground; separation is a hairline. */
+  --shadow-card: none;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  /* Semi-opaque over the native vibrancy material (underWindowBackground);
-     the solid token remains the fallback tint. */
-  background: color-mix(in srgb, var(--color-canvas) 82%, transparent);
+  /* Over the native vibrancy material (underWindowBackground). Dark stays
+     semi-opaque, where the desktop showing through reads as depth. Light
+     paints opaque: a warm white diluted by 18% of whatever is behind the
+     window desaturates to grey and loses the paper entirely. */
+  background: color-mix(in srgb, var(--color-canvas) var(--canvas-opacity), transparent);
   color: var(--color-text-primary);
 }
 
@@ -165,13 +173,18 @@ img {
   outline: 1px solid var(--color-ghost-border);
 }
 
-/* ─── Surface card ─── */
+/* ─── Surface panel ───
+   A band between hairlines, not a card that lifts. The inline padding is
+   zero so a panel's content lines up with the heading above it; a header
+   running wider than its own body is the first thing you notice on a
+   sparse UI. */
 .surface-card {
-  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
+  background: transparent;
   border-radius: var(--radius-card);
-  outline: 1px solid var(--color-ghost-border);
-  box-shadow: var(--shadow-card);
-  padding: 1.125rem 1.25rem;
+  outline: 0;
+  border-top: 1px solid var(--color-rule);
+  box-shadow: none;
+  padding: 1rem var(--settings-inset) 0;
 }
 
 /* ─── Buttons ─── */
@@ -253,9 +266,9 @@ img {
 }
 
 .btn-active {
-  background: color-mix(in srgb, var(--color-accent) 16%, transparent) !important;
-  color: var(--color-accent) !important;
-  outline: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent) !important;
+  background: var(--color-text-primary) !important;
+  color: var(--color-canvas) !important;
+  outline: 0 !important;
 }
 
 /* ─── Pills / Badges ─── */
@@ -325,7 +338,8 @@ img {
 
 .field-input:focus,
 .field-select:focus {
-  outline: 1px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  outline-offset: 0;
 }
 
 .field-select {
@@ -409,13 +423,13 @@ img {
   background: var(--color-success);
 }
 
-/* Ready dot with the design's soft gold glow. */
+/* Ready dot. No glow: a zero-offset coloured halo is decoration, and
+   nothing in this system lifts off its ground. */
 .ready-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--color-accent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 60%, transparent);
   flex-shrink: 0;
 }
 
@@ -425,9 +439,9 @@ img {
   flex-wrap: wrap;
   gap: 0.25rem;
   padding: 0.25rem;
-  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
-  border-radius: var(--radius-card);
-  outline: 1px solid var(--color-ghost-border);
+  background: transparent;
+  border-radius: var(--radius-default);
+  outline: 1px solid var(--color-border-soft);
 }
 
 .settings-tab {
@@ -439,7 +453,7 @@ img {
   font-weight: 500;
   line-height: 1.2;
   padding: 0.5rem 0.75rem;
-  border-radius: calc(var(--radius-card) - 2px);
+  border-radius: 0;
   transition: color 120ms ease, background-color 120ms ease;
 }
 
@@ -451,7 +465,6 @@ img {
 .settings-tab-active {
   color: var(--color-text-primary);
   background: var(--color-surface-2);
-  box-shadow: var(--shadow-card);
 }
 
 .settings-tab-active:hover {
@@ -487,7 +500,7 @@ img {
 }
 
 .settings-group > h3 {
-  padding: 0 2px;
+  padding: 0 var(--settings-inset);
   font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.15em;
@@ -498,21 +511,24 @@ img {
 .settings-rows {
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
-  border-radius: var(--radius-card);
-  outline: 1px solid var(--color-ghost-border);
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
+  background: transparent;
+  border-radius: 0;
+  outline: 0;
+  border-top: 1px solid var(--color-rule);
 }
 
 .settings-rows > * {
-  padding: 0.9375rem 1.125rem;
-  border-top: 1px solid color-mix(in srgb, var(--color-ghost-border) 60%, transparent);
+  padding: 0.9375rem var(--settings-inset);
+  border-top: 1px solid var(--color-border-soft);
 }
 
 .settings-rows > :first-child {
   border-top: none;
 }
+
+/* --settings-inset: the separator spans the row, the content sits inside it,
+   so a toggle or a button never ends flush with the rule beneath it. */
+:root { --settings-inset: 0.75rem; }
 
 /* ─── Settings field typography ─── */
 .setting-label {
@@ -678,11 +694,14 @@ img {
 }
 
 /* ─── Recording dot ─── */
+/* The dot only ever sits inside a badge already filled with `danger`, so
+   painting it `danger` made it invisible against its own bubble. It takes
+   the badge's foreground, like the label beside it. */
 .recording-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--color-danger);
+  background: var(--color-on-danger);
   animation: pulse-soft 1.2s ease-in-out infinite;
 }
 
@@ -717,11 +736,25 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
-button {
-  border: 0;
-  background: none;
-  color: inherit;
+/* A field already has an edge, so an offset ring drew a second line beside
+   it and read as heavy. The ring sits on the edge instead, one line, and
+   keeps the 2px a focus indicator needs to stay visible. */
+.field-input:focus-visible,
+.field-select:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
+}
+
+/* Layered on purpose. Unlayered, this reset outranks every Tailwind utility,
+   so `bg-*`, `text-*` and `border-*` silently did nothing on a bare <button>
+   and inversion could not be expressed at all. */
+@layer base {
+  button {
+    border: 0;
+    background: none;
+    color: inherit;
+  }
 }

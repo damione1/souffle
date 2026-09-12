@@ -17,7 +17,7 @@
 </script>
 
 <div
-  class={`rounded-default bg-surface-3 px-4 py-3 outline-1 flex items-center justify-between gap-4 ${
+  class={`rounded-default px-4 py-3 outline-1 flex items-center justify-between gap-4 ${
     variant === "warning"
       ? "outline-warning/30"
       : variant === "danger"

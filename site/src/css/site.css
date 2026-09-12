@@ -46,32 +46,37 @@
 /* ─── Mock palette: the app's own `.light` cream, untouched ───
    The mocks reproduce the app, so they keep the app's own faces. Those two
    files are scoped here and are never the page's voice, which is Archivo. */
-/* impeccable-disable-next-line overused-font: the mocks reproduce the app, which ships this face; the page's own voice is Archivo. */
-@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("/fonts/space-grotesk-var.woff2") format("woff2"); }
-@font-face { font-family: "Hanken Grotesk"; font-style: normal; font-weight: 400 600; font-display: swap; src: url("/fonts/hanken-grotesk-var.woff2") format("woff2"); }
-
 .mock, .overlay-stage {
-  --font-heading: "Space Grotesk", system-ui, sans-serif;
-  --font-body: "Hanken Grotesk", system-ui, sans-serif;
+  --font-heading: "Archivo", system-ui, sans-serif;
+  --font-body: "Archivo", system-ui, sans-serif;
 }
 
 .mock {
-  --m-canvas: #fdf6e8;
-  --m-surface-1: #fffaf0;
-  --m-surface-2: #efe0c1;
-  --m-surface-3: #e5d1a3;
-  --m-input: #f4e8cf;
-  --m-accent: #b5791f;
-  --m-secondary: #a85a2e;
-  --m-t1: #2c1c0c;
-  --m-t2: #4a3620;
-  --m-t3: #6b5638;
-  --m-t4: #8c7454;
-  --m-t5: #ab9573;
-  --m-danger: #b8503c;
-  --m-on-danger: #fff8ef;
-  --m-ghost: rgba(150, 115, 70, 0.12);
-  --m-shadow: 0 1px 2px rgba(90, 62, 30, 0.04), 0 10px 28px -16px rgba(90, 62, 30, 0.16);
+  /* Warm white, not cream. The sheet's own paper is right for a page you
+     scroll past once; in a window read for hours it leaves too little
+     distance between ground and ink, and the quiet text tiers go muddy.
+     Keeping the warmth and dropping the saturation also stops the mocks
+     dissolving into the site's paper, which they did when the two grounds
+     were the same value. */
+  --m-canvas: #fbf7ed;
+  --m-surface-1: #ffffff;
+  --m-surface-2: #f0e9dc;
+  --m-surface-3: #e2d8c6;
+  --m-input: #f6f1e4;
+  --m-accent: #95610f;
+  --m-secondary: #6b2710;
+  --m-t1: #17110b;
+  --m-t2: #3a2d1c;
+  --m-t3: #55432e;
+  --m-t4: #6b573c;
+  --m-t5: #7b6547;
+  --m-danger: #a8402c;
+  --m-on-danger: #f7efdf;
+  --m-ghost: rgba(23, 17, 11, 0.46);
+  --m-soft: rgba(23, 17, 11, 0.16);
+  --m-rule: rgba(23, 17, 11, 0.28);
+  /* Nothing in this world lifts off its ground. */
+  --m-shadow: none;
 }
 
 /* The mocks reproduce the app and are not edited to suit the page. What
@@ -98,6 +103,8 @@
   align-items: start;
 }
 .overlay-stage > .win { grid-row: 1 / span 2; }
+/* Centre the pill on the window, not on the window plus its margin column. */
+.overlay-stage .pill-overlay { left: calc(min(var(--plate), 100%) / 2); }
 .overlay-stage .mock-caption {
   grid-column: 2; grid-row: 2;
   max-width: none; margin: 0; padding-top: 10px;
@@ -106,17 +113,17 @@
 }
 .overlay-stage .stage-steps {
   grid-column: 2; grid-row: 1;
-  display: flex; flex-wrap: wrap; gap: 0;
-  justify-content: flex-start; margin-top: 0;
+  display: flex; flex-direction: column; align-items: stretch;
+  flex-wrap: nowrap; gap: 0; margin-top: 0;
 }
 .overlay-stage .stage-step {
-  padding: 6px 13px; border: 1px solid var(--rule); border-radius: 0;
-  margin-left: -1px; outline: 0;
+  padding: 7px 13px; border: 1px solid var(--rule); border-radius: 0;
+  margin-top: -1px; outline: 0; white-space: nowrap;
   font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--fg-2); background: transparent;
   transition: background-color 200ms linear, color 200ms linear;
 }
-.overlay-stage .stage-step:first-child { margin-left: 0; }
+.overlay-stage .stage-step:first-child { margin-top: 0; }
 .overlay-stage .stage-step.is-active {
   background: var(--ink); color: var(--ground); border-color: var(--ink); outline: 0;
 }
@@ -529,6 +536,8 @@ html { scrollbar-color: var(--ink) var(--paper); }
   :root { --gut: 22px; }
   .hero-under, .close-under { grid-template-columns: minmax(0, 1fr); gap: 26px; align-items: start; }
   .hero-plate, .act-plate, .overlay-stage { grid-template-columns: minmax(0, 1fr); }
+  /* One column again, so the window is the whole stage. */
+  .overlay-stage .pill-overlay { left: 50%; }
   .overlay-stage > .win { grid-row: auto; }
   .overlay-stage .mock-caption, .overlay-stage .stage-steps { grid-column: 1; grid-row: auto; }
   .act-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; }

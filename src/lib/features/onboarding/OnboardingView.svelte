@@ -51,7 +51,7 @@
 <svelte:window onkeydown={(event) => controller.handleKeyDown(event)} />
 
 <div class="flex h-screen items-center justify-center p-8">
-  <div class="surface-card flex w-full max-w-lg flex-col gap-6 p-8">
+  <div class="flex w-full max-w-lg flex-col gap-6">
     <div class="flex flex-col items-center gap-3 text-center">
       <img src="/favicon.svg" alt="" class="h-16 w-16 rounded-2xl" aria-hidden="true" />
       <h1 class="font-heading text-2xl font-bold">Soufflé</h1>
@@ -86,7 +86,7 @@
       >
         {#each controller.steps as _, i}
           <span
-            class={`h-1.5 w-6 rounded-full ${i === controller.stepIndex ? "bg-accent" : "bg-surface-3"}`}
+            class={`h-1.5 w-6 ${i === controller.stepIndex ? "bg-accent" : "bg-surface-3"}`}
           ></span>
         {/each}
       </div>
@@ -202,7 +202,7 @@
         </label>
         {#if controller.accessibility !== "granted"}
           <p
-            class="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning"
+            class="rounded-default border border-warning/40 px-3 py-2 text-sm text-warning"
             role="status"
             data-testid="auto-paste-accessibility-warning"
           >

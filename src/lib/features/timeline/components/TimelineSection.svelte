@@ -86,27 +86,27 @@
 
 <div class="flex flex-col gap-[26px]">
   {#if upcoming.length > 0}
-    <section class="flex flex-col gap-2.5">
-      <h4 class="px-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-text-muted">
+    <section class="flex flex-col gap-1.5">
+      <h4 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted [font-variation-settings:'wdth'_88]">
         {$t("timeline.upcoming_today")}
       </h4>
-      <div class="surface-card flex flex-col gap-0.5 !p-1.5">
+      <div class="flex flex-col">
         {#each upcoming as event (occurrenceKey(event))}
           {@const phase = eventPhase(event)}
           <div
-            class="flex items-center gap-3 rounded-[11px] px-3 py-[11px] transition-colors hover:bg-surface-2 {phase === 'past'
+            class="flex items-center gap-3 border-t border-rule py-3 transition-colors hover:bg-surface-2 {phase === 'past'
               ? 'opacity-50'
-              : ''} {phase === 'now' ? 'bg-accent/7' : ''}"
+              : ''}"
           >
-            <span class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-secondary/12 text-secondary" aria-hidden="true">
-              <CalendarClock size={15} />
+            <span class="flex h-[22px] w-[22px] shrink-0 items-center justify-center text-secondary" aria-hidden="true">
+              <CalendarClock size={16} />
             </span>
             <span class="flex min-w-0 flex-1 items-center gap-[9px]">
               <span class="truncate text-[13.5px] text-text-primary">{event.title}</span>
               {#if phase === "now"}
-                <span class="shrink-0 rounded-full bg-accent/13 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-accent">{$t("calendar.now")}</span>
+                <span class="shrink-0 bg-text-primary px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-canvas">{$t("calendar.now")}</span>
               {:else if phase === "next"}
-                <span class="shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-text-muted">{$t("calendar.next")}</span>
+                <span class="shrink-0 border border-rule px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-text-muted">{$t("calendar.next")}</span>
               {/if}
             </span>
             {#if event.participants.length > 0}
@@ -120,7 +120,7 @@
             </span>
             {#if onStartEvent && phase !== "past"}
               <button
-                class="flex h-[30px] w-[30px] shrink-0 cursor-pointer items-center justify-center rounded-[9px] bg-accent/10 text-accent outline-1 outline-accent/25 transition-colors hover:bg-accent/20 disabled:cursor-default disabled:opacity-50"
+                class="flex h-[22px] w-[22px] shrink-0 cursor-pointer items-center justify-center text-text-muted transition-colors hover:text-accent disabled:cursor-default disabled:opacity-50"
                 disabled={!canStartEvent}
                 onclick={() => onStartEvent(event)}
                 aria-label={$t("calendar.start_transcription")}
@@ -134,20 +134,22 @@
       </div>
     </section>
   {:else if showCalendarSetupCta && onSetupCalendar}
-    <button
-      type="button"
-      onclick={onSetupCalendar}
-      class="surface-card flex items-center gap-3 !p-3 text-left transition-colors hover:bg-surface-2"
-    >
-      <span class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-secondary/12 text-secondary" aria-hidden="true">
-        <CalendarPlus size={15} />
-      </span>
-      <span class="min-w-0 flex-1">
-        <span class="block truncate text-[13.5px] text-text-primary">{$t("calendar.setup_cta_title")}</span>
-        <span class="block truncate text-xs text-text-muted">{$t("calendar.setup_cta_desc")}</span>
-      </span>
-      <span class="shrink-0 text-xs font-semibold text-accent">{$t("calendar.setup_cta_action")}</span>
-    </button>
+    <div class="border-t border-rule">
+      <button
+        type="button"
+        onclick={onSetupCalendar}
+        class="flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-surface-2"
+      >
+        <span class="flex h-[22px] w-[22px] shrink-0 items-center justify-center text-secondary" aria-hidden="true">
+          <CalendarPlus size={16} />
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-[13.5px] text-text-primary">{$t("calendar.setup_cta_title")}</span>
+          <span class="block truncate text-xs text-text-muted">{$t("calendar.setup_cta_desc")}</span>
+        </span>
+        <span class="shrink-0 text-xs font-semibold text-accent">{$t("calendar.setup_cta_action")}</span>
+      </button>
+    </div>
   {/if}
 
   {#if isEmpty}
@@ -162,11 +164,11 @@
     />
   {:else}
     {#each groups as group (group.day)}
-      <section class="flex flex-col gap-2.5">
-        <h4 class="px-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-text-muted">
+      <section class="flex flex-col gap-1.5">
+        <h4 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted [font-variation-settings:'wdth'_88]">
           {dayLabel(group.day)}
         </h4>
-        <div class="surface-card flex flex-col gap-0.5 !p-1.5">
+        <div class="flex flex-col">
           {#each group.items as item (item.kind + item.id)}
             <TimelineItem
               {item}

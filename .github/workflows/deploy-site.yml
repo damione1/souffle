@@ -1,0 +1,61 @@
+name: Deploy site
+
+# The Pages project is a direct-upload project with no Git provider attached,
+# so pushing to master publishes nothing on its own: something has to run
+# `wrangler pages deploy`. That is what this does.
+#
+# Path-filtered because master also carries app releases, and a Rust change
+# has no business redeploying the marketing site.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+# Two pushes in a row would otherwise race to publish, and the loser could
+# land last and serve the older build. Never cancel in flight: a half-finished
+# upload is worse than a redundant one.
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - uses: actions/setup-node@v6.1.0
+        with:
+          node-version: 24
+          check-latest: true
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Build
+        working-directory: site
+        run: |
+          npm ci
+          npm run build
+
+      # A build that silently produced nothing would otherwise be published
+      # over a working site as an empty directory.
+      - name: Check the build produced a page
+        run: test -s site/_site/index.html
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # --branch master is what makes this a Production deployment on a
+          # direct-upload project; without it the upload lands as a preview
+          # and usesouffle.app keeps serving the previous build.
+          command: pages deploy site/_site --project-name souffle --branch master

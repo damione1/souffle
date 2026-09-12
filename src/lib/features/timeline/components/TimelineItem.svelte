@@ -28,18 +28,18 @@
 </script>
 
 <div class="group">
-  <div class="flex items-center gap-3 rounded-[11px] px-3 py-[11px] transition-colors hover:bg-surface-2">
+  <div class="flex items-center gap-3 border-t border-rule py-3 transition-colors hover:bg-surface-2">
     <button onclick={onOpen} class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
       <span
-        class={`flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] ${
-          item.kind === "meeting" ? "bg-accent/13 text-accent" : "bg-surface-2 text-text-muted"
+        class={`flex h-[22px] w-[22px] shrink-0 items-center justify-center ${
+          item.kind === "meeting" ? "text-accent" : "text-text-muted"
         }`}
         aria-hidden="true"
       >
         {#if item.kind === "meeting"}
-          <Users size={15} />
+          <Users size={16} />
         {:else}
-          <FileText size={15} />
+          <FileText size={16} />
         {/if}
       </span>
 
@@ -74,7 +74,7 @@
         {#if confirmingDelete}
           <button
             onclick={() => { confirmingDelete = false; onRemove(); }}
-            class="rounded-md px-1.5 py-0.5 text-xs text-danger-soft hover:bg-danger/15"
+            class="rounded-default px-1.5 py-0.5 text-xs text-danger-soft hover:bg-danger/15"
           >
             {$t("timeline.confirm_delete")}
           </button>
@@ -82,7 +82,7 @@
           <button
             onclick={() => (confirmingDelete = true)}
             onblur={() => (confirmingDelete = false)}
-            class="cursor-pointer rounded-md p-1 text-text-muted hover:bg-surface-3 hover:text-danger-soft"
+            class="cursor-pointer rounded-default p-1 text-text-muted hover:bg-surface-3 hover:text-danger-soft"
             aria-label={$t("timeline.delete")}
           >
             <Trash2 size={14} aria-hidden="true" />
@@ -93,7 +93,7 @@
   </div>
 
   {#if item.kind === "dictation" && expanded}
-    <div transition:slide={{ duration: 150 }} class="px-[3.25rem] pb-3">
+    <div transition:slide={{ duration: 150 }} class="pl-[34px] pb-3">
       <p class="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">{item.title}</p>
     </div>
   {/if}

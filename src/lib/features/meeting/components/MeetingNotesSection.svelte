@@ -16,9 +16,15 @@
   } = $props();
 </script>
 
-<section class="surface-card flex flex-1 flex-col {large ? 'gap-[11px]' : 'gap-2.5 !px-5 !py-4'}">
+<section class="surface-card flex flex-1 flex-col {large ? 'gap-[11px]' : 'gap-2.5'}">
   <div class="flex items-center justify-between gap-2">
-    <h3 class="flex items-center gap-2 font-semibold {large ? 'text-sm text-text-primary' : 'text-[13px] text-text-tertiary'}">
+    <h3
+      class={`flex items-center gap-2 font-semibold ${
+        large
+          ? "text-sm text-text-primary"
+          : "text-[11px] uppercase tracking-[0.1em] text-text-muted [font-variation-settings:'wdth'_88]"
+      }`}
+    >
       <PenLine size={large ? 15 : 14} class="text-accent" aria-hidden="true" />
       {$t("meeting_notes.title")}
     </h3>
@@ -33,8 +39,8 @@
     oninput={(event) => onNotesChange((event.target as HTMLTextAreaElement).value)}
     placeholder={$t("meeting_notes.placeholder")}
     spellcheck="false"
-    class={`w-full flex-1 resize-y rounded-[11px] border-none bg-input text-[13.5px] leading-[1.65] text-text-secondary outline-1 outline-ghost-border placeholder:text-text-muted focus:outline-accent/50 ${
-      large ? "min-h-24 px-[15px] py-[13px]" : "min-h-[60px] px-3.5 py-[11px]"
+    class={`w-full flex-1 resize-y border-none bg-transparent px-0 text-[13.5px] leading-[1.65] text-text-secondary placeholder:text-text-muted ${
+      large ? "min-h-24 pt-[13px]" : "min-h-[60px] pt-[11px]"
     }`}
     aria-label={$t("meeting_notes.title")}
   ></textarea>
