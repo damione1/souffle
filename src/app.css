@@ -52,7 +52,7 @@
   --color-on-danger: #2a0e09;
 
   --color-ghost-border: rgba(235, 210, 170, 0.09);
-  --color-rule: rgba(235, 210, 170, 0.11);
+  --color-rule: rgba(235, 210, 170, 0.16);
   --color-glass-bg: rgba(30, 24, 17, 0.72);
 
   /* Cards lift with a soft warm shadow in light mode; none in dark. */
@@ -260,9 +260,9 @@ img {
 }
 
 .btn-active {
-  background: color-mix(in srgb, var(--color-accent) 16%, transparent) !important;
-  color: var(--color-accent) !important;
-  outline: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent) !important;
+  background: var(--color-text-primary) !important;
+  color: var(--color-canvas) !important;
+  outline: 0 !important;
 }
 
 /* ─── Pills / Badges ─── */
@@ -416,13 +416,13 @@ img {
   background: var(--color-success);
 }
 
-/* Ready dot with the design's soft gold glow. */
+/* Ready dot. No glow: a zero-offset coloured halo is decoration, and
+   nothing in this system lifts off its ground. */
 .ready-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--color-accent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 60%, transparent);
   flex-shrink: 0;
 }
 

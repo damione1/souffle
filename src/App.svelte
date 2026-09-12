@@ -347,7 +347,7 @@
 <div class="flex h-screen flex-col overflow-hidden">
   <header
     data-tauri-drag-region
-    class="flex h-[52px] shrink-0 items-center gap-3 border-b border-ghost-border bg-white/[0.015] px-[18px] pl-[88px]"
+    class="flex h-[52px] shrink-0 items-center gap-3 border-b border-rule px-[18px] pl-[88px]"
   >
     <div class="flex items-center gap-[9px]" data-tauri-drag-region>
       <img
@@ -362,7 +362,7 @@
     <span class="flex-1" data-tauri-drag-region></span>
     {#if recordingMode !== "idle"}
       <span
-        class="inline-flex items-center gap-[7px] rounded-full bg-danger/14 px-[11px] py-[5px] text-xs font-semibold text-danger-soft outline-1 outline-danger/30"
+        class="inline-flex items-center gap-[7px] bg-danger px-[11px] py-[5px] text-xs font-semibold text-on-danger"
       >
         <span class="recording-dot"></span>
         {$t("meeting_header.recording_badge")}
@@ -378,7 +378,7 @@
     {/if}
     <button
       onclick={toggleTheme}
-      class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[9px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+      class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-default text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
       aria-label={$t("ui.toggle_theme")}
       title={$t("ui.toggle_theme")}
     >
@@ -390,7 +390,7 @@
     </button>
     <button
       onclick={() => (app.settingsOpen = !app.settingsOpen)}
-      class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[9px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+      class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-default text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
       aria-label={$t("settings.title")}
       title="⌘,"
     >
@@ -430,7 +430,7 @@
           {$t("pipeline.error")}: {machineError.message}
         </span>
         <button
-          class="shrink-0 rounded-md border border-danger/40 px-2 py-0.5 text-xs hover:bg-danger/20 disabled:opacity-50"
+          class="shrink-0 rounded-default border border-danger/40 px-2 py-0.5 text-xs hover:bg-danger/20 disabled:opacity-50"
           disabled={isRecovering}
           onclick={recoverFromError}
         >
@@ -446,7 +446,7 @@
           {$t("pipeline.error")}: {app.pipelineError.message}
         </span>
         <button
-          class="shrink-0 rounded-md px-2 py-0.5 text-xs hover:bg-danger/20"
+          class="shrink-0 rounded-default px-2 py-0.5 text-xs hover:bg-danger/20"
           onclick={() => (app.pipelineError = null)}
         >
           {$t("pipeline.dismiss")}
