@@ -1086,7 +1086,15 @@ pub fn handle_system_will_sleep(app: &AppHandle) {
 
     let meeting_id = match &machine {
         AppStateMachine::RecordingMeeting { meeting_id, .. } => Some(meeting_id.clone()),
-        _ => None,
+        AppStateMachine::Idle
+        | AppStateMachine::Downloading { .. }
+        | AppStateMachine::Downloaded { .. }
+        | AppStateMachine::Loading { .. }
+        | AppStateMachine::Ready { .. }
+        | AppStateMachine::RecordingDictation { .. }
+        | AppStateMachine::Stopping { .. }
+        | AppStateMachine::Unloading { .. }
+        | AppStateMachine::Error { .. } => None,
     };
     if let Some(id) = &meeting_id {
         state.set_sleep_paused_meeting(id.clone());

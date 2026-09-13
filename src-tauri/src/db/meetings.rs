@@ -379,6 +379,9 @@ impl Database {
     pub fn load_meeting(&self, id: &str) -> Result<MeetingTranscript, String> {
         let conn = self.conn.acquire()?;
 
+        // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
+        // variants here would be neither possible nor useful.
+        #[allow(clippy::wildcard_enum_match_arm)]
         let meeting = conn
             .query_row(
                 "SELECT
@@ -501,6 +504,9 @@ impl Database {
     /// worst verdict of its sessions rather than the last one (SOU-119).
     pub fn meeting_system_audio(&self, id: &str) -> Result<Option<MeetingSystemAudio>, String> {
         let conn = self.conn.acquire()?;
+        // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
+        // variants here would be neither possible nor useful.
+        #[allow(clippy::wildcard_enum_match_arm)]
         let raw: Option<String> = conn
             .query_row(
                 "SELECT system_audio FROM meetings WHERE id = ?1",

@@ -1,6 +1,18 @@
 [workspace]
 members = [".", "souffle-mcp", "tts-fixtures"]
 
+# The contract rule from AGENTS.md, made mechanical: a `_ =>` arm that covers
+# enum variants is exactly the pattern the rule forbids, and clippy already
+# knows how to spot it. The lint lives in `restriction`, so it is off by
+# default and has to be asked for. Denying it here means `cargo clippy` picks
+# it up locally and in CI without either changing its command line.
+#
+# Where the fallback genuinely is the semantics (a foreign `non_exhaustive`
+# enum, or a transition table that would need 10 states by 12 actions), the
+# site carries a commented `#[allow]` rather than the lint being weakened.
+[workspace.lints.clippy]
+wildcard_enum_match_arm = "deny"
+
 [package]
 name = "souffle"
 # Placeholder. The release workflow rewrites this line from the release tag, so
@@ -20,6 +32,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "souffle"
 path = "src/main.rs"
+
+[lints]
+workspace = true
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
