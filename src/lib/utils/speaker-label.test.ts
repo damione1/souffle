@@ -1,21 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { resolveSpeakerLabel, speakerPlainLabel } from "./speaker-label";
+import {
+  SPEAKERS,
+  isSpeaker,
+  resolveSpeaker,
+  speakerI18nKey,
+  speakerPlainLabel,
+  speakerTextClass,
+} from "./speaker-label";
 
-describe("resolveSpeakerLabel", () => {
+describe("SPEAKERS", () => {
+  it("enumerates the generated union", () => {
+    expect([...SPEAKERS].sort()).toEqual(["me", "them"]);
+  });
+});
+
+describe("resolveSpeaker", () => {
   it("returns null for no speaker", () => {
-    expect(resolveSpeakerLabel(null)).toBeNull();
-    expect(resolveSpeakerLabel(undefined)).toBeNull();
+    expect(resolveSpeaker(null)).toBeNull();
+    expect(resolveSpeaker(undefined)).toBeNull();
   });
 
   it("resolves me and them", () => {
-    expect(resolveSpeakerLabel("me")).toEqual({ kind: "me" });
-    expect(resolveSpeakerLabel("them")).toEqual({ kind: "them" });
+    expect(resolveSpeaker("me")).toBe("me");
+    expect(resolveSpeaker("them")).toBe("them");
   });
 
   it("returns null for leftover persistent labels and garbage", () => {
-    expect(resolveSpeakerLabel("spk:1")).toBeNull();
-    expect(resolveSpeakerLabel("spk:abc")).toBeNull();
-    expect(resolveSpeakerLabel("garbage")).toBeNull();
+    expect(resolveSpeaker("spk:1")).toBeNull();
+    expect(resolveSpeaker("spk:abc")).toBeNull();
+    expect(resolveSpeaker("garbage")).toBeNull();
+    expect(resolveSpeaker("")).toBeNull();
+  });
+
+  it("does not resolve inherited object properties", () => {
+    expect(isSpeaker("toString")).toBe(false);
+    expect(isSpeaker("constructor")).toBe(false);
   });
 });
 
@@ -25,5 +44,14 @@ describe("speakerPlainLabel", () => {
     expect(speakerPlainLabel("them")).toBe("Them");
     expect(speakerPlainLabel("spk:1")).toBeNull();
     expect(speakerPlainLabel(null)).toBeNull();
+  });
+});
+
+describe("badge lookups", () => {
+  it("cover every variant of the union", () => {
+    for (const speaker of SPEAKERS) {
+      expect(speakerI18nKey(speaker)).toMatch(/^transcript\./);
+      expect(speakerTextClass(speaker)).not.toBe("");
+    }
   });
 });

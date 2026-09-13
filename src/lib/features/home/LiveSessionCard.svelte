@@ -9,7 +9,14 @@
   import type { LiveParagraph } from "../meeting/live-transcript.svelte";
   import type { createMeetingController } from "../meeting/controller.svelte";
   import type { createTranscriptionController } from "../transcription/controller.svelte";
-  import { elapsedSecondsSince, formatDuration, resolveSpeakerLabel, segmentGap } from "../../utils";
+  import {
+    elapsedSecondsSince,
+    formatDuration,
+    resolveSpeaker,
+    segmentGap,
+    speakerI18nKey,
+    speakerTextClass,
+  } from "../../utils";
   import {
     leadingRemovedCount,
     measureLeadingHeight,
@@ -302,17 +309,14 @@
           <span class="text-sm text-text-muted">{$t("home.listening")}</span>
         {:else}
           {#each liveParagraphs as paragraph, i (paragraph.id)}
-            {@const label = resolveSpeakerLabel(paragraph.speaker)}
+            {@const speaker = resolveSpeaker(paragraph.speaker)}
             {@const isLastForSpeaker = lastIndexBySpeaker.get(paragraph.speaker ?? null) === i}
             {@const speakerTentative = isLastForSpeaker ? liveTentativeMeeting.find(t => t.speaker === (paragraph.speaker ?? null))?.text : null}
             <div class="flex flex-col gap-[3px]" style="animation: rise-in 240ms ease;">
               <div class="flex items-center gap-2">
-                {#if label}
-                  <span
-                    class="text-[11.5px] font-semibold"
-                    class:text-accent={label.kind === "me"}
-                    class:text-secondary={label.kind === "them"}
-                  >{label.kind === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
+                {#if speaker}
+                  <span class="text-[11.5px] font-semibold {speakerTextClass(speaker)}"
+                  >{$t(speakerI18nKey(speaker))}</span>
                 {/if}
                 <span class="font-mono text-[10.5px] text-text-faint">{paragraph.timestamp}</span>
               </div>
@@ -364,15 +368,12 @@
           {/each}
           {#each liveTentativeMeeting as tentative (tentative.speaker)}
             {#if !lastIndexBySpeaker.has(tentative.speaker)}
-              {@const label = resolveSpeakerLabel(tentative.speaker)}
+              {@const speaker = resolveSpeaker(tentative.speaker)}
               <div class="flex flex-col gap-[3px]" style="animation: rise-in 240ms ease;">
                 <div class="flex items-center gap-2">
-                  {#if label}
-                    <span
-                      class="text-[11.5px] font-semibold"
-                      class:text-accent={label.kind === "me"}
-                      class:text-secondary={label.kind === "them"}
-                    >{label.kind === "me" ? $t("transcript.me") : $t("transcript.them")}</span>
+                  {#if speaker}
+                    <span class="text-[11.5px] font-semibold {speakerTextClass(speaker)}"
+                    >{$t(speakerI18nKey(speaker))}</span>
                   {/if}
                 </div>
                 <p class="m-0 text-[15px] leading-[1.75] text-text-secondary opacity-50">{tentative.text}</p>
