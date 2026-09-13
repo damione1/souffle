@@ -161,6 +161,7 @@
     {#if activeTab === "transcription"}
       <ModelSettingsSection
         catalog={controller.catalog}
+        settingsOptions={controller.settingsOptions}
         selectedEngineId={controller.app.settings.transcription_engine_id}
         selectedModelId={controller.app.settings.transcription_model_id}
         runtimePhase={controller.runtimePhase}
@@ -252,6 +253,7 @@
       />
 
       <AudioSettingsSection
+        settingsOptions={controller.settingsOptions}
         audioDevices={controller.audioDevices}
         captureSystemAudio={controller.app.settings.capture_system_audio}
         systemAudioSupported={controller.systemAudioSupported}

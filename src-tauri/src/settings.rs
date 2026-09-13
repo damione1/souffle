@@ -239,6 +239,33 @@ const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
 const MEETING_AUTOSTOP_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 3..=60;
 const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 60..=720;
 
+/// The discrete steps the settings UI offers inside the two ranges above.
+/// They live here, next to the bounds that validate them, so that narrowing a
+/// range breaks `offered_options_survive_sanitize` instead of silently
+/// folding the user's choice back to the default on the next save.
+const MEETING_AUTOSTOP_MINUTES_OPTIONS: [u32; 4] = [5, 10, 15, 30];
+const MEETING_MAX_DURATION_MINUTES_OPTIONS: [u32; 3] = [120, 240, 480];
+
+/// The numeric choices the settings UI may offer, served from the same file
+/// that validates them. `sanitize_for_save` alone decides what is acceptable;
+/// this is how the UI finds out instead of restating it.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct SettingsOptions {
+    pub model_unload_timeout_minutes: Vec<u32>,
+    pub meeting_autostop_minutes: Vec<u32>,
+    pub meeting_max_duration_minutes: Vec<u32>,
+}
+
+impl SettingsOptions {
+    pub fn current() -> Self {
+        Self {
+            model_unload_timeout_minutes: ALLOWED_UNLOAD_TIMEOUT_MINUTES.to_vec(),
+            meeting_autostop_minutes: MEETING_AUTOSTOP_MINUTES_OPTIONS.to_vec(),
+            meeting_max_duration_minutes: MEETING_MAX_DURATION_MINUTES_OPTIONS.to_vec(),
+        }
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -1050,13 +1077,61 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        AppSettings, MeetingAudioRetention, PasteMethod, ShortcutSettings, SummaryProviderChoice,
-        Theme,
+        AppSettings, MeetingAudioRetention, PasteMethod, SettingsOptions, ShortcutSettings,
+        SummaryProviderChoice, Theme,
     };
     use crate::audio::InputPriority;
     use crate::constants::OLLAMA_DEFAULT_URL;
     use crate::logging::LogLevel;
     use crate::test_helpers::fixtures::test_db;
+
+    /// AC2: every step the settings UI is told to offer must survive
+    /// `sanitize_for_save` untouched. Narrowing a range, or editing an option
+    /// list out of its range, fails here instead of silently folding the
+    /// user's choice back to the default at the next save.
+    #[test]
+    fn offered_options_survive_sanitize() {
+        let options = SettingsOptions::current();
+
+        for minutes in options.model_unload_timeout_minutes {
+            let normalized = AppSettings {
+                model_unload_timeout_minutes: minutes,
+                ..AppSettings::default()
+            }
+            .sanitize_for_save()
+            .unwrap();
+            assert_eq!(normalized.model_unload_timeout_minutes, minutes);
+        }
+
+        for minutes in options.meeting_autostop_minutes {
+            let normalized = AppSettings {
+                meeting_autostop_minutes: minutes,
+                ..AppSettings::default()
+            }
+            .sanitize_for_save()
+            .unwrap();
+            assert_eq!(normalized.meeting_autostop_minutes, minutes);
+        }
+
+        for minutes in options.meeting_max_duration_minutes {
+            let normalized = AppSettings {
+                meeting_max_duration_minutes: minutes,
+                ..AppSettings::default()
+            }
+            .sanitize_for_save()
+            .unwrap();
+            assert_eq!(normalized.meeting_max_duration_minutes, minutes);
+        }
+    }
+
+    /// AC3: the menus the user sees are unchanged by this refactor.
+    #[test]
+    fn offered_options_are_unchanged() {
+        let options = SettingsOptions::current();
+        assert_eq!(options.model_unload_timeout_minutes, vec![0, 5, 15, 60]);
+        assert_eq!(options.meeting_autostop_minutes, vec![5, 10, 15, 30]);
+        assert_eq!(options.meeting_max_duration_minutes, vec![120, 240, 480]);
+    }
 
     #[test]
     fn app_settings_round_trip() {
