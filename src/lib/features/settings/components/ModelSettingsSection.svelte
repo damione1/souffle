@@ -5,10 +5,15 @@
   import StatusChip from "../../../components/ui/StatusChip.svelte";
   import { listAvailableModelOptions } from "../../transcription/catalog";
   import type { TranscriptionModelOperationState } from "../../transcription/state";
-  import type { TranscriptionCatalog, TranscriptionRuntimePhase } from "../../../types";
+  import type {
+    SettingsOptions,
+    TranscriptionCatalog,
+    TranscriptionRuntimePhase,
+  } from "../../../types";
+  import { minuteOptions } from "../minute-options";
 
-  const unloadTimeoutOptions = [0, 5, 15, 60] as const;
-  const unloadTimeoutKeys: Record<(typeof unloadTimeoutOptions)[number], string> = {
+  /** Wording only. The values are served by `get_settings_options`. */
+  const unloadTimeoutKeys: Record<number, string> = {
     0: "settings_model.unload_timeout_never",
     5: "settings_model.unload_timeout_5min",
     15: "settings_model.unload_timeout_15min",
@@ -17,6 +22,7 @@
 
   let {
     catalog,
+    settingsOptions,
     selectedEngineId,
     selectedModelId,
     runtimePhase,
@@ -30,6 +36,7 @@
     onUnloadTimeoutChange,
   }: {
     catalog: TranscriptionCatalog | null;
+    settingsOptions: SettingsOptions | null;
     selectedEngineId: string;
     selectedModelId: string;
     runtimePhase: TranscriptionRuntimePhase;
@@ -42,6 +49,10 @@
     onSelectModel: (key: string) => void | Promise<void>;
     onUnloadTimeoutChange: (event: Event) => void;
   } = $props();
+
+  const unloadTimeoutChoices = $derived(
+    minuteOptions(settingsOptions?.model_unload_timeout_minutes, unloadTimeoutKeys),
+  );
 
   const options = $derived(listAvailableModelOptions(catalog));
   const selectedKey = $derived(`${selectedEngineId}:${selectedModelId}`);
@@ -108,8 +119,10 @@
           onchange={onUnloadTimeoutChange}
           class="field-select max-w-48"
         >
-          {#each unloadTimeoutOptions as minutes}
-            <option value={minutes}>{$t(unloadTimeoutKeys[minutes])}</option>
+          {#each unloadTimeoutChoices as choice (choice.value)}
+            <option value={choice.value}>
+              {choice.labelKey ? $t(choice.labelKey) : choice.value}
+            </option>
           {/each}
         </select>
       {/snippet}

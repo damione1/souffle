@@ -1,29 +1,38 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
-  import type { AudioInputDevice } from "../../../types";
+  import type {
+    AudioInputDevice,
+    MeetingTranscriptionLanguage,
+    SettingsOptions,
+  } from "../../../types";
+  import { minuteOptions } from "../minute-options";
 
-  const autostopMinutesOptions = [5, 10, 15, 30] as const;
-  const autostopMinutesKeys: Record<(typeof autostopMinutesOptions)[number], string> = {
+  /** Wording only. The values are served by `get_settings_options`. */
+  const autostopMinutesKeys: Record<number, string> = {
     5: "settings_audio.meeting_autostop_5min",
     10: "settings_audio.meeting_autostop_10min",
     15: "settings_audio.meeting_autostop_15min",
     30: "settings_audio.meeting_autostop_30min",
   };
 
-  const maxDurationMinutesOptions = [120, 240, 480] as const;
-  const maxDurationMinutesKeys: Record<(typeof maxDurationMinutesOptions)[number], string> = {
+  const maxDurationMinutesKeys: Record<number, string> = {
     120: "settings_audio.meeting_max_duration_2h",
     240: "settings_audio.meeting_max_duration_4h",
     480: "settings_audio.meeting_max_duration_8h",
   };
 
-  const meetingLanguageOptions = ["auto", "en", "fr"] as const;
-  const meetingLanguageKeys: Record<(typeof meetingLanguageOptions)[number], string> = {
+  /** Keyed on the generated union, so a language added in Rust fails
+   * `npm run check` here instead of vanishing from the menu. */
+  const meetingLanguageKeys: Record<MeetingTranscriptionLanguage, string> = {
     auto: "settings_audio.meeting_transcription_language_auto",
     en: "settings_audio.meeting_transcription_language_en",
     fr: "settings_audio.meeting_transcription_language_fr",
   };
+
+  const meetingLanguageOptions = Object.keys(
+    meetingLanguageKeys,
+  ) as MeetingTranscriptionLanguage[];
 
   let {
     audioDevices,
@@ -38,6 +47,7 @@
     meetingAutostopEnabled,
     meetingAutostopMinutes,
     meetingMaxDurationMinutes,
+    settingsOptions,
     meetingTranscriptionLanguage,
     onCaptureSystemAudioChange,
     onClamshellDeviceChange,
@@ -62,7 +72,8 @@
     meetingAutostopEnabled: boolean;
     meetingAutostopMinutes: number;
     meetingMaxDurationMinutes: number;
-    meetingTranscriptionLanguage: (typeof meetingLanguageOptions)[number];
+    meetingTranscriptionLanguage: MeetingTranscriptionLanguage;
+    settingsOptions: SettingsOptions | null;
     onCaptureSystemAudioChange: (event: Event) => void | Promise<void>;
     onClamshellDeviceChange: (event: Event) => void | Promise<void>;
     onVadEnabledChange: (event: Event) => void | Promise<void>;
@@ -74,6 +85,13 @@
     onMeetingMaxDurationMinutesChange: (event: Event) => void | Promise<void>;
     onMeetingTranscriptionLanguageChange: (event: Event) => void | Promise<void>;
   } = $props();
+
+  const autostopChoices = $derived(
+    minuteOptions(settingsOptions?.meeting_autostop_minutes, autostopMinutesKeys),
+  );
+  const maxDurationChoices = $derived(
+    minuteOptions(settingsOptions?.meeting_max_duration_minutes, maxDurationMinutesKeys),
+  );
 </script>
 
 <section class="settings-group">
@@ -152,8 +170,10 @@
           onchange={onMeetingAutostopMinutesChange}
           class="field-select max-w-48"
         >
-          {#each autostopMinutesOptions as minutes}
-            <option value={minutes}>{$t(autostopMinutesKeys[minutes])}</option>
+          {#each autostopChoices as choice (choice.value)}
+            <option value={choice.value}>
+              {choice.labelKey ? $t(choice.labelKey) : choice.value}
+            </option>
           {/each}
         </select>
       {/snippet}
@@ -170,8 +190,10 @@
           onchange={onMeetingMaxDurationMinutesChange}
           class="field-select max-w-48"
         >
-          {#each maxDurationMinutesOptions as minutes}
-            <option value={minutes}>{$t(maxDurationMinutesKeys[minutes])}</option>
+          {#each maxDurationChoices as choice (choice.value)}
+            <option value={choice.value}>
+              {choice.labelKey ? $t(choice.labelKey) : choice.value}
+            </option>
           {/each}
         </select>
       {/snippet}
