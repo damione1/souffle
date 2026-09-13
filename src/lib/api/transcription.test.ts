@@ -26,6 +26,7 @@ import {
   clearDictationHistory,
   pasteText,
 } from './transcription';
+import { COMMAND } from "../test-helpers/commands";
 
 describe('transcription API', () => {
   const selection = {
@@ -44,7 +45,7 @@ describe('transcription API', () => {
 
     const result = await getTranscriptionCatalog();
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_transcription_catalog', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getTranscriptionCatalog, expect.any(Object), undefined);
     expect(result).toEqual(catalog);
   });
 
@@ -54,7 +55,7 @@ describe('transcription API', () => {
 
     const result = await getModelStatus(selection);
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_model_status', expect.objectContaining({ selection }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getModelStatus, expect.objectContaining({ selection }), undefined);
     expect(result).toEqual(status);
   });
 
@@ -65,7 +66,7 @@ describe('transcription API', () => {
     await downloadModel(selection, onProgress);
 
     expect(mockInvoke).toHaveBeenCalledWith(
-      'download_model',
+      COMMAND.downloadModel,
       expect.objectContaining({ selection, channel: expect.any(Object) }),
       undefined,
     );
@@ -76,7 +77,7 @@ describe('transcription API', () => {
 
     await loadModel(selection);
 
-    expect(mockInvoke).toHaveBeenCalledWith('load_model', expect.objectContaining({ selection }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.loadModel, expect.objectContaining({ selection }), undefined);
   });
 
   it('startStreamingTranscription creates channel and invokes', async () => {
@@ -85,7 +86,7 @@ describe('transcription API', () => {
 
     await startStreamingTranscription(onSegment);
 
-    expect(mockInvoke).toHaveBeenCalledWith('start_transcription', expect.objectContaining({ channel: expect.any(Object), cancelOnEscape: true }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.startTranscription, expect.objectContaining({ channel: expect.any(Object), cancelOnEscape: true }), undefined);
   });
 
   it('startStreamingTranscription can skip the Escape cancel binding', async () => {
@@ -93,7 +94,7 @@ describe('transcription API', () => {
 
     await startStreamingTranscription(vi.fn(), false);
 
-    expect(mockInvoke).toHaveBeenCalledWith('start_transcription', expect.objectContaining({ cancelOnEscape: false }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.startTranscription, expect.objectContaining({ cancelOnEscape: false }), undefined);
   });
 
   it('stopStreamingTranscription calls correct command', async () => {
@@ -101,7 +102,7 @@ describe('transcription API', () => {
 
     await stopStreamingTranscription();
 
-    expect(mockInvoke).toHaveBeenCalledWith('stop_transcription', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription, expect.any(Object), undefined);
   });
 
   it('listDictationEntries passes limit', async () => {
@@ -110,7 +111,7 @@ describe('transcription API', () => {
 
     const result = await listDictationEntries(10);
 
-    expect(mockInvoke).toHaveBeenCalledWith('list_dictation_entries', expect.objectContaining({ limit: 10 }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.listDictationEntries, expect.objectContaining({ limit: 10 }), undefined);
     expect(result).toEqual(entries);
   });
 
@@ -119,7 +120,7 @@ describe('transcription API', () => {
 
     const id = await addDictationEntry('test text');
 
-    expect(mockInvoke).toHaveBeenCalledWith('add_dictation_entry', expect.objectContaining({ text: 'test text' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.addDictationEntry, expect.objectContaining({ text: 'test text' }), undefined);
     expect(id).toBe('entry-42');
   });
 
@@ -128,7 +129,7 @@ describe('transcription API', () => {
 
     await updateDictationEntry('entry-42', 'polished text');
 
-    expect(mockInvoke).toHaveBeenCalledWith('update_dictation_entry', expect.objectContaining({ id: 'entry-42', text: 'polished text' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.updateDictationEntry, expect.objectContaining({ id: 'entry-42', text: 'polished text' }), undefined);
   });
 
   it('deleteDictationEntry passes id', async () => {
@@ -136,7 +137,7 @@ describe('transcription API', () => {
 
     await deleteDictationEntry('entry-1');
 
-    expect(mockInvoke).toHaveBeenCalledWith('delete_dictation_entry', expect.objectContaining({ id: 'entry-1' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.deleteDictationEntry, expect.objectContaining({ id: 'entry-1' }), undefined);
   });
 
   it('clearDictationHistory calls correct command', async () => {
@@ -144,7 +145,7 @@ describe('transcription API', () => {
 
     await clearDictationHistory();
 
-    expect(mockInvoke).toHaveBeenCalledWith('clear_dictation_history', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.clearDictationHistory, expect.any(Object), undefined);
   });
 
   it('pasteText passes text, delay, and method', async () => {
@@ -152,6 +153,6 @@ describe('transcription API', () => {
 
     await pasteText('hello world', 150, 'type');
 
-    expect(mockInvoke).toHaveBeenCalledWith('paste_text', expect.objectContaining({ text: 'hello world', delayMs: 150, method: 'type' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.objectContaining({ text: 'hello world', delayMs: 150, method: 'type' }), undefined);
   });
 });

@@ -23,6 +23,7 @@ import {
   resetInputSampleRate,
 } from './settings';
 import { mockSettings } from '../test-helpers/fixtures';
+import { COMMAND } from "../test-helpers/commands";
 
 describe('settings API', () => {
   beforeEach(() => {
@@ -34,7 +35,7 @@ describe('settings API', () => {
 
     const result = await getSettings();
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_settings', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getSettings, expect.any(Object), undefined);
     expect(result).toEqual(mockSettings);
   });
 
@@ -44,7 +45,7 @@ describe('settings API', () => {
 
     await saveSettings(settings);
 
-    expect(mockInvoke).toHaveBeenCalledWith('save_settings', expect.objectContaining({ settings }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, expect.objectContaining({ settings }), undefined);
   });
 
   it('getShortcuts returns shortcut settings', async () => {
@@ -53,7 +54,7 @@ describe('settings API', () => {
 
     const result = await getShortcuts();
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_shortcuts', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getShortcuts, expect.any(Object), undefined);
     expect(result).toEqual(shortcuts);
   });
 
@@ -63,7 +64,7 @@ describe('settings API', () => {
 
     await saveShortcuts(shortcuts);
 
-    expect(mockInvoke).toHaveBeenCalledWith('save_shortcuts', expect.objectContaining({ shortcuts }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveShortcuts, expect.objectContaining({ shortcuts }), undefined);
   });
 
   it('listAudioDevices calls correct command', async () => {
@@ -77,7 +78,7 @@ describe('settings API', () => {
 
     const result = await listAudioDevices();
 
-    expect(mockInvoke).toHaveBeenCalledWith('list_audio_devices', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.listAudioDevices, expect.any(Object), undefined);
     expect(result).toEqual(devices);
   });
 
@@ -86,7 +87,7 @@ describe('settings API', () => {
 
     await selectAudioDevice('ExternalMicUid');
 
-    expect(mockInvoke).toHaveBeenCalledWith('select_audio_device', expect.objectContaining({ deviceUid: 'ExternalMicUid' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.selectAudioDevice, expect.objectContaining({ deviceUid: 'ExternalMicUid' }), undefined);
   });
 
   it('getInputSampleRate calls correct command', async () => {
@@ -94,7 +95,7 @@ describe('settings API', () => {
 
     const result = await getInputSampleRate('BuiltInMic');
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_input_sample_rate', expect.objectContaining({ deviceUid: 'BuiltInMic' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getInputSampleRate, expect.objectContaining({ deviceUid: 'BuiltInMic' }), undefined);
     expect(result).toBe(96000);
   });
 
@@ -103,7 +104,7 @@ describe('settings API', () => {
 
     const result = await resetInputSampleRate('BuiltInMic');
 
-    expect(mockInvoke).toHaveBeenCalledWith('reset_input_sample_rate', expect.objectContaining({ deviceUid: 'BuiltInMic' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.resetInputSampleRate, expect.objectContaining({ deviceUid: 'BuiltInMic' }), undefined);
     expect(result).toBe(48000);
   });
 });

@@ -30,6 +30,7 @@ import {
   saveMeetingExport,
   saveMeetingAudioExport,
 } from './meetings';
+import { COMMAND } from "../test-helpers/commands";
 
 describe('meetings API', () => {
   beforeEach(() => {
@@ -42,7 +43,7 @@ describe('meetings API', () => {
 
     const result = await listMeetings();
 
-    expect(mockInvoke).toHaveBeenCalledWith('list_meetings', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.listMeetings, expect.any(Object), undefined);
     expect(result).toEqual(meetings);
   });
 
@@ -52,7 +53,7 @@ describe('meetings API', () => {
 
     const result = await getMeeting('abc');
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_meeting', expect.objectContaining({ id: 'abc' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getMeeting, expect.objectContaining({ id: 'abc' }), undefined);
     expect(result).toEqual(meeting);
   });
 
@@ -62,12 +63,12 @@ describe('meetings API', () => {
 
     await startMeetingRecording('Daily Standup', null, onSegment);
 
-    expect(mockInvoke).toHaveBeenCalledWith('start_meeting_recording', expect.objectContaining({ title: 'Daily Standup', calendar: null }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.startMeetingRecording, expect.objectContaining({ title: 'Daily Standup', calendar: null }), undefined);
 
     const calendar = { event_id: 'evt-1', participants: [{ name: 'Alice', email: null, is_organizer: true, is_current_user: false }] };
     await startMeetingRecording('Planning', calendar, onSegment);
 
-    expect(mockInvoke).toHaveBeenCalledWith('start_meeting_recording', expect.objectContaining({ title: 'Planning', calendar }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.startMeetingRecording, expect.objectContaining({ title: 'Planning', calendar }), undefined);
   });
 
   it('resumeMeetingRecording passes id and channel', async () => {
@@ -76,7 +77,7 @@ describe('meetings API', () => {
 
     await resumeMeetingRecording('meeting-1', onSegment);
 
-    expect(mockInvoke).toHaveBeenCalledWith('resume_meeting_recording', expect.objectContaining({ meetingId: 'meeting-1' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.resumeMeetingRecording, expect.objectContaining({ meetingId: 'meeting-1' }), undefined);
   });
 
   it('stopMeetingRecording calls correct command', async () => {
@@ -84,7 +85,7 @@ describe('meetings API', () => {
 
     const result = await stopMeetingRecording();
 
-    expect(mockInvoke).toHaveBeenCalledWith('stop_meeting_recording', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopMeetingRecording, expect.any(Object), undefined);
     expect(result).toBe('meeting-id-123');
   });
 
@@ -95,7 +96,7 @@ describe('meetings API', () => {
     await summarizeMeeting('meeting-1', 'llama3', 'brief_overview', onProgress);
 
     expect(mockInvoke).toHaveBeenCalledWith(
-      'summarize_meeting',
+      COMMAND.summarizeMeeting,
       expect.objectContaining({ id: 'meeting-1', model: 'llama3', templateId: 'brief_overview' }),
       undefined,
     );
@@ -106,7 +107,7 @@ describe('meetings API', () => {
 
     await deleteMeeting('meeting-1');
 
-    expect(mockInvoke).toHaveBeenCalledWith('delete_meeting', expect.objectContaining({ id: 'meeting-1' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.deleteMeeting, expect.objectContaining({ id: 'meeting-1' }), undefined);
   });
 
   it('searchText passes query and limit', async () => {
@@ -115,7 +116,7 @@ describe('meetings API', () => {
 
     const result = await searchText('Hello', 10);
 
-    expect(mockInvoke).toHaveBeenCalledWith('search_text', expect.objectContaining({ query: 'Hello', limit: 10 }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.searchText, expect.objectContaining({ query: 'Hello', limit: 10 }), undefined);
     expect(result).toEqual(results);
   });
 
@@ -124,7 +125,7 @@ describe('meetings API', () => {
 
     await searchText('test');
 
-    expect(mockInvoke).toHaveBeenCalledWith('search_text', expect.objectContaining({ query: 'test', limit: null }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.searchText, expect.objectContaining({ query: 'test', limit: null }), undefined);
   });
 
   it('saveEditedTranscript passes id and text', async () => {
@@ -132,7 +133,7 @@ describe('meetings API', () => {
 
     await saveEditedTranscript('meeting-1', 'Edited text');
 
-    expect(mockInvoke).toHaveBeenCalledWith('save_edited_transcript', expect.objectContaining({ id: 'meeting-1', editedTranscript: 'Edited text' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveEditedTranscript, expect.objectContaining({ id: 'meeting-1', editedTranscript: 'Edited text' }), undefined);
   });
 
   it('saveEditedTranscript passes null to clear', async () => {
@@ -140,7 +141,7 @@ describe('meetings API', () => {
 
     await saveEditedTranscript('meeting-1', null);
 
-    expect(mockInvoke).toHaveBeenCalledWith('save_edited_transcript', expect.objectContaining({ id: 'meeting-1', editedTranscript: null }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveEditedTranscript, expect.objectContaining({ id: 'meeting-1', editedTranscript: null }), undefined);
   });
 
   it('exportMeetingFilename passes id and format, returns the suggested name', async () => {
@@ -148,7 +149,7 @@ describe('meetings API', () => {
 
     const result = await exportMeetingFilename('meeting-1', 'markdown');
 
-    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_filename', expect.objectContaining({ id: 'meeting-1', format: 'markdown' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.exportMeetingFilename, expect.objectContaining({ id: 'meeting-1', format: 'markdown' }), undefined);
     expect(result).toBe('2026-07-09-weekly-sync.md');
   });
 
@@ -157,7 +158,7 @@ describe('meetings API', () => {
 
     const result = await exportMeetingPreview('meeting-1', 'srt');
 
-    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_preview', expect.objectContaining({ id: 'meeting-1', format: 'srt' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.exportMeetingPreview, expect.objectContaining({ id: 'meeting-1', format: 'srt' }), undefined);
     expect(result).toBe('# Weekly Sync\n');
   });
 
@@ -166,7 +167,7 @@ describe('meetings API', () => {
 
     await exportMeetingToFile('meeting-1', 'vtt', '/tmp/export.vtt');
 
-    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_to_file', expect.objectContaining({ id: 'meeting-1', format: 'vtt', path: '/tmp/export.vtt' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.exportMeetingToFile, expect.objectContaining({ id: 'meeting-1', format: 'vtt', path: '/tmp/export.vtt' }), undefined);
   });
 
   it('exportMeetingAudioFilename passes id, returns the suggested ogg name', async () => {
@@ -174,7 +175,7 @@ describe('meetings API', () => {
 
     const result = await exportMeetingAudioFilename('meeting-1');
 
-    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_audio_filename', expect.objectContaining({ id: 'meeting-1' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.exportMeetingAudioFilename, expect.objectContaining({ id: 'meeting-1' }), undefined);
     expect(result).toBe('2026-07-09-weekly-sync.ogg');
   });
 
@@ -183,7 +184,7 @@ describe('meetings API', () => {
 
     await exportMeetingAudioToFile('meeting-1', '/tmp/weekly-sync.ogg');
 
-    expect(mockInvoke).toHaveBeenCalledWith('export_meeting_audio_to_file', expect.objectContaining({ id: 'meeting-1', path: '/tmp/weekly-sync.ogg' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.exportMeetingAudioToFile, expect.objectContaining({ id: 'meeting-1', path: '/tmp/weekly-sync.ogg' }), undefined);
   });
 
   it('saveMeetingExport passes id and format', async () => {
@@ -191,7 +192,7 @@ describe('meetings API', () => {
 
     await saveMeetingExport('meeting-1', 'markdown');
 
-    expect(mockInvoke).toHaveBeenCalledWith('save_meeting_export', expect.objectContaining({ id: 'meeting-1', format: 'markdown' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveMeetingExport, expect.objectContaining({ id: 'meeting-1', format: 'markdown' }), undefined);
   });
 
   it('saveMeetingAudioExport passes id', async () => {
@@ -199,6 +200,6 @@ describe('meetings API', () => {
 
     await saveMeetingAudioExport('meeting-1');
 
-    expect(mockInvoke).toHaveBeenCalledWith('save_meeting_audio_export', expect.objectContaining({ id: 'meeting-1' }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveMeetingAudioExport, expect.objectContaining({ id: 'meeting-1' }), undefined);
   });
 });
