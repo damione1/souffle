@@ -642,23 +642,53 @@ fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
     turns.into_iter().flat_map(|t| t.segments).collect()
 }
 
-/// Keep Me/Them; leftover `spk:<id>` labels (and anything else) become
-/// unlabeled, matching the app's `Speaker::parse`.
-fn normalize_speaker(raw: Option<String>) -> Option<String> {
-    match raw.as_deref() {
-        Some("me") | Some("them") => raw,
-        _ => None,
+/// Mirror of the app's `engine::Speaker`. The sidecar is a standalone binary
+/// that depends on neither `souffle` nor `tauri`, so the enum is restated
+/// here rather than imported. Restating it as an enum is what matters: both
+/// helpers below branch on it exhaustively, so a third speaker cannot be
+/// silently folded into an existing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Speaker {
+    Me,
+    Them,
+}
+
+impl Speaker {
+    /// DB encoding, identical to `Speaker::as_str` in the app.
+    fn as_str(self) -> &'static str {
+        match self {
+            Speaker::Me => "me",
+            Speaker::Them => "them",
+        }
+    }
+
+    /// Display prefix, identical to `Speaker::display_name` in the app.
+    fn display_name(self) -> &'static str {
+        match self {
+            Speaker::Me => "Me",
+            Speaker::Them => "Them",
+        }
+    }
+
+    /// Leftover `spk:<id>` labels (and anything else) become `None`,
+    /// matching the app's `Speaker::parse`.
+    fn parse(raw: &str) -> Option<Speaker> {
+        match raw {
+            "me" => Some(Speaker::Me),
+            "them" => Some(Speaker::Them),
+            _ => None,
+        }
     }
 }
 
-/// Display prefix for a raw `segments.speaker` value: "me" -> "Me", "them" ->
-/// "Them". Unlabeled / leftover values get no prefix.
+fn normalize_speaker(raw: Option<String>) -> Option<String> {
+    raw.as_deref()
+        .and_then(Speaker::parse)
+        .map(|speaker| speaker.as_str().to_string())
+}
+
 fn speaker_label(raw: &str) -> Option<&'static str> {
-    match raw {
-        "me" => Some("Me"),
-        "them" => Some("Them"),
-        _ => None,
-    }
+    Speaker::parse(raw).map(Speaker::display_name)
 }
 
 /// Simplified stand-in for the frontend's paragraph engine

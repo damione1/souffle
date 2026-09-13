@@ -11,7 +11,11 @@ export { segmentGap } from "./segment-join";
 export { renderReleaseNotesMarkdown } from "./markdown";
 export { createDebouncedSearch, filterResultsByType, findSnippet, matchedIdsForType } from "./search.svelte";
 export type { DebouncedSearch } from "./search.svelte";
-export { resolveSpeakerLabel, speakerPlainLabel } from "./speaker-label";
-export type { SpeakerLabel } from "./speaker-label";
+export {
+  resolveSpeaker,
+  speakerI18nKey,
+  speakerPlainLabel,
+  speakerTextClass,
+} from "./speaker-label";
 export { portal, fixedPopoverStyle } from "./portal";
 export type { AnchorRect } from "./portal";

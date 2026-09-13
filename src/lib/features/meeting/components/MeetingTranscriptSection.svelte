@@ -5,8 +5,10 @@
   import type { MeetingRecordingSession, Speaker, TranscriptionSegment } from "../../../types";
   import {
     buildMeetingTranscriptBlocks,
-    resolveSpeakerLabel,
+    resolveSpeaker,
+    speakerI18nKey,
     speakerPlainLabel,
+    speakerTextClass,
   } from "../../../utils";
   import TranscriptWordLine from "./TranscriptWordLine.svelte";
 
@@ -61,12 +63,6 @@
   function copyLinePrefix(speaker: Speaker | null | undefined): string {
     const label = speakerPlainLabel(speaker);
     return label ? `${label} ` : "";
-  }
-
-  function speakerDisplayText(
-    label: NonNullable<ReturnType<typeof resolveSpeakerLabel>>,
-  ): string {
-    return label.kind === "me" ? $t("transcript.me") : $t("transcript.them");
   }
 
   let copyText = $derived(
@@ -143,15 +139,12 @@
       {#if phase === "has_content"}
         {#each transcriptBlocks as block}
           {#if block.type === "paragraph"}
-            {@const label = resolveSpeakerLabel(block.speaker)}
+            {@const speaker = resolveSpeaker(block.speaker)}
             <div class="flex flex-col gap-[3px]">
               <div class="flex items-center gap-2">
-                {#if label}
-                  <span
-                    class="text-[11.5px] font-semibold"
-                    class:text-accent={label.kind === "me"}
-                    class:text-secondary={label.kind === "them"}
-                  >{speakerDisplayText(label)}</span>
+                {#if speaker}
+                  <span class="text-[11.5px] font-semibold {speakerTextClass(speaker)}"
+                  >{$t(speakerI18nKey(speaker))}</span>
                 {/if}
                 {#if onParagraphClick}
                   <button

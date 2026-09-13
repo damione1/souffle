@@ -1,11 +1,15 @@
-use crate::engine::{Speaker, TranscriptionSegment};
+use crate::engine::TranscriptionSegment;
 use crate::export::{PARAGRAPH_PAUSE_THRESHOLD_SECONDS, paragraphs};
 
 /// Format one grouped paragraph as a labeled turn for the summary LLM.
 fn format_turn(paragraph: &paragraphs::Paragraph) -> String {
     match paragraph.speaker {
-        Some(Speaker::Me) => format!("[{}] Me: {}", paragraph.timestamp, paragraph.text),
-        Some(Speaker::Them) => format!("[{}] Them: {}", paragraph.timestamp, paragraph.text),
+        Some(speaker) => format!(
+            "[{}] {}: {}",
+            paragraph.timestamp,
+            speaker.display_name(),
+            paragraph.text
+        ),
         None => format!("[{}] {}", paragraph.timestamp, paragraph.text),
     }
 }

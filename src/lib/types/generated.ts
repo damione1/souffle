@@ -1740,6 +1740,21 @@ export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
 export type SnippetEntry = { id: number; trigger: string; expansion: string; created_at: string }
+/**
+ * Who produced a segment in a meeting: the microphone is the local user
+ * (`Me`), system audio is everyone else (`Them`). `None` = single-stream
+ * session (dictation, or a meeting recorded without system-audio capture).
+ * 
+ * Wire and DB encoding is the snake_case variant name, "me" or "them", and
+ * specta emits the union `"me" | "them"` so the frontend branches on the
+ * contract instead of re-declaring the two values.
+ * 
+ * The DB column is free `TEXT` and still holds `spk:<id>` labels from the
+ * dropped persistent-speaker feature. `Speaker::parse` and
+ * `deserialize_optional_speaker` absorb those into `None` so old meetings
+ * keep loading; that tolerance lives there, not in `Deserialize`.
+ */
+export type Speaker = "me" | "them"
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.
@@ -1932,7 +1947,7 @@ export type TranscriptionSegment = { text: string; start_time: number; end_time:
 /**
  * Set by the pipeline for meetings with Me/Them lanes; `None` otherwise.
  */
-speaker?: string | null }
+speaker?: Speaker | null }
 /**
  * Human-facing transport label for an input device.
  */
