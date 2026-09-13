@@ -1,4 +1,5 @@
 import {
+  getDefaultSettings,
   getSettings,
   getModifierTapStatus,
   getSystemAudioStatus,
@@ -21,6 +22,26 @@ export type BootstrapResult = {
  * checkout the release workflow never stamped. */
 export const LOCAL_BUILD = "local build";
 
+/** Fill the settings store, from the database if it has them and from
+ * `AppSettings::default()` otherwise. Returns false when the real settings
+ * could not be read, which is the first-launch case the setup wizard exists
+ * for. Throws only if the backend cannot answer at all, in which case there is
+ * no working app to degrade into.
+ *
+ * `get_default_settings` reads no database, so the common failure ("no rows
+ * yet") is answered by it rather than leaving the store empty. */
+export async function loadSettingsOrDefaults(
+  app: ReturnType<typeof getAppState>,
+): Promise<boolean> {
+  try {
+    app.settings = await getSettings();
+    return true;
+  } catch {
+    app.settings = await getDefaultSettings();
+    return false;
+  }
+}
+
 export async function bootstrapAppState(
   app: ReturnType<typeof getAppState>,
 ): Promise<BootstrapResult> {
@@ -34,8 +55,13 @@ export async function bootstrapAppState(
 
   await resyncAfterReload(app);
 
-  const settings = await getSettings();
-  app.settings = settings;
+  if (!(await loadSettingsOrDefaults(app))) {
+    // Same signal as before: the caller shows the setup wizard. The store now
+    // already holds the backend's own defaults, so nothing downstream reads a
+    // value the frontend invented.
+    throw new Error("Settings are not available yet");
+  }
+  const settings = app.settings;
   app.selectedDevice = settings.audio_device ?? "";
   applyTheme(app.settings.theme);
 

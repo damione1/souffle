@@ -26,7 +26,7 @@ vi.mock("../../api/permissions", () => permissionsApi);
 
 import OnboardingView from "./OnboardingView.svelte";
 import { getAppState } from "../../stores/app.svelte";
-import { mockCatalog, mockShortcuts } from "../../test-helpers/fixtures";
+import { mockCatalog, mockSettings, mockShortcuts } from "../../test-helpers/fixtures";
 import { PERMISSIONS_STORAGE_KEY } from "./setup";
 
 const fakeDevices = [
@@ -38,6 +38,7 @@ describe("OnboardingView shortcut step (SOU-053)", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    app.settings = { ...mockSettings };
     // Skip the permissions step: the wizard must still know the real
     // Accessibility state through the mount-time probe, not just through
     // PermissionsStep being on screen.
@@ -102,6 +103,7 @@ describe("OnboardingView step count (SOU-131)", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    app.settings = { ...mockSettings };
     app.showOnboarding = true;
     app.machineState = { state: "idle" };
     app.transcriptionRuntimePhase = "ready";

@@ -671,6 +671,17 @@ async getSettings() : Promise<Result<AppSettings, string>> {
 }
 },
 /**
+ * The shipped defaults, with nothing read from the database.
+ * 
+ * `get_settings` returns the *effective* settings, so it is no help when the
+ * database does not exist yet. The webview needs a starting point before its
+ * first successful read, and this is it: `AppSettings::default()` stays the
+ * only declaration of those values.
+ */
+async getDefaultSettings() : Promise<AppSettings> {
+    return await TAURI_INVOKE("get_default_settings");
+},
+/**
  * Save the typed application settings.
  */
 async saveSettings(settings: AppSettings) : Promise<Result<null, string>> {
