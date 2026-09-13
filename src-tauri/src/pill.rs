@@ -193,7 +193,13 @@ fn hud_stop_target(machine: &AppStateMachine) -> Option<HudStopTarget> {
             was_recording: RecordingKind::Dictation,
             ..
         } => Some(HudStopTarget::Dictation),
-        _ => None,
+        AppStateMachine::Idle
+        | AppStateMachine::Downloading { .. }
+        | AppStateMachine::Downloaded { .. }
+        | AppStateMachine::Loading { .. }
+        | AppStateMachine::Ready { .. }
+        | AppStateMachine::Unloading { .. }
+        | AppStateMachine::Error { .. } => None,
     }
 }
 

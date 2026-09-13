@@ -415,6 +415,9 @@ impl McpDb {
     }
 
     pub fn get_meeting(&self, id: &str, include: IncludeSet) -> Result<MeetingDetail, McpDbError> {
+        // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
+        // variants here would be neither possible nor useful.
+        #[allow(clippy::wildcard_enum_match_arm)]
         let row = self
             .conn()?
             .query_row(
@@ -434,6 +437,9 @@ impl McpDb {
     }
 
     pub fn latest_meeting(&self, include: IncludeSet) -> Result<MeetingDetail, McpDbError> {
+        // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
+        // variants here would be neither possible nor useful.
+        #[allow(clippy::wildcard_enum_match_arm)]
         let id: Option<String> = self
             .conn()?
             .query_row(
