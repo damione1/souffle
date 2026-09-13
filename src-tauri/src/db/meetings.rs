@@ -4,6 +4,8 @@ use rusqlite::params;
 use crate::app_events::MeetingSystemAudio;
 use crate::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
+
+use super::search::SearchSource;
 use crate::transcript::{
     MeetingListItem, MeetingParticipant, MeetingRecordingSession, MeetingTranscript,
     StructuredSummary,
@@ -20,14 +22,14 @@ fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> St
 
 fn reindex_meeting_fts(tx: &rusqlite::Transaction<'_>, id: &str, text: &str) -> Result<(), String> {
     tx.execute(
-        "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
-        params![id],
+        "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+        params![SearchSource::Meeting, id],
     )
     .map_err(|e| format!("Delete FTS: {e}"))?;
     if !text.is_empty() {
         tx.execute(
             "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
-            params![text, "meeting", id],
+            params![text, SearchSource::Meeting, id],
         )
         .map_err(|e| format!("Insert FTS: {e}"))?;
     }
@@ -574,8 +576,8 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         conn.execute(
-            "DELETE FROM text_search WHERE source_type = 'meeting' AND source_id = ?1",
-            params![id],
+            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            params![SearchSource::Meeting, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
