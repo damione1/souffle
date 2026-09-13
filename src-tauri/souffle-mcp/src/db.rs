@@ -40,6 +40,60 @@ pub enum McpDbError {
     NoMeetings,
     #[error("Database lock poisoned: {0}")]
     Lock(String),
+    #[error(
+        "This Souffle database is at schema version {found}, newer than version {expected}, \
+         which is the newest this MCP server knows how to read. Update Souffle (the sidecar \
+         ships with the app) and restart your MCP client."
+    )]
+    SchemaTooNew { found: i64, expected: i64 },
+    #[error(
+        "Could not read the Souffle database schema version: {0}. Launch Souffle at least \
+         once so it can create and migrate the database."
+    )]
+    SchemaUnreadable(String),
+}
+
+/// Why the database cannot be served. Kept as data rather than as a
+/// `McpDbError` because the verdict is taken once, at open, and returned on
+/// every tool call afterwards.
+#[derive(Debug, Clone)]
+enum SchemaVerdict {
+    TooNew { found: i64 },
+    Unreadable(String),
+}
+
+impl SchemaVerdict {
+    fn to_error(&self) -> McpDbError {
+        match self {
+            SchemaVerdict::TooNew { found } => McpDbError::SchemaTooNew {
+                found: *found,
+                expected: souffle_schema::SCHEMA_VERSION,
+            },
+            SchemaVerdict::Unreadable(detail) => McpDbError::SchemaUnreadable(detail.clone()),
+        }
+    }
+}
+
+/// Read `schema_version` and decide whether this build can serve the file.
+///
+/// The rule is asymmetric on purpose. A database newer than this build is
+/// refused: a migration may have moved or redefined the columns the queries
+/// below read, and a wrong answer is worse than no answer. An older database
+/// is served, because a user who has not launched the new app yet still has
+/// every column these queries touch.
+///
+/// A missing or unreadable table is refused rather than assumed compatible.
+fn check_schema(conn: &Connection) -> Result<i64, SchemaVerdict> {
+    let found: i64 = conn
+        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .map_err(|e| SchemaVerdict::Unreadable(e.to_string()))?;
+
+    if found > souffle_schema::SCHEMA_VERSION {
+        return Err(SchemaVerdict::TooNew { found });
+    }
+    Ok(found)
 }
 
 /// Resolve the Souffle SQLite database path: the `SOUFFLE_DB` env var
@@ -123,21 +177,8 @@ pub struct ParticipantInfo {
     pub is_organizer: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct StructuredActionItem {
-    pub text: String,
-    pub owner: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
-pub struct StructuredSummary {
-    #[serde(default)]
-    pub decisions: Vec<String>,
-    #[serde(default)]
-    pub action_items: Vec<StructuredActionItem>,
-    #[serde(default)]
-    pub open_questions: Vec<String>,
-}
+/// Declared once, in `souffle-schema`, and read by both processes.
+pub use souffle_schema::{StructuredActionItem, StructuredSummary};
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct MeetingSummary {
@@ -240,6 +281,9 @@ pub struct McpDb {
     /// macros generate `Send` futures that hold `&SouffleMcpServer` across
     /// await points, and `rusqlite::Connection` alone is `!Sync`.
     conn: Mutex<Connection>,
+    /// Taken once at open. `Err` makes every tool call refuse with the same
+    /// explanation instead of querying columns that may have moved.
+    schema: Result<i64, SchemaVerdict>,
 }
 
 impl McpDb {
@@ -254,12 +298,32 @@ impl McpDb {
             .map_err(McpDbError::Open)?;
         conn.busy_timeout(Duration::from_secs(5))
             .map_err(McpDbError::Open)?;
+        // Read-only, single row, no transaction: this cannot hold a lock the
+        // app would wait on.
+        let schema = check_schema(&conn);
+        if let Err(verdict) = &schema {
+            // stdout carries MCP protocol traffic, so diagnostics go to stderr.
+            eprintln!("souffle-mcp: {}", verdict.to_error());
+        }
         Ok(Self {
             conn: Mutex::new(conn),
+            schema,
         })
     }
 
+    /// The schema version of the open database, or the reason it cannot be
+    /// served.
+    pub fn schema_version(&self) -> Result<i64, McpDbError> {
+        self.schema
+            .as_ref()
+            .copied()
+            .map_err(SchemaVerdict::to_error)
+    }
+
     fn conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, McpDbError> {
+        if let Err(verdict) = &self.schema {
+            return Err(verdict.to_error());
+        }
         self.conn
             .lock()
             .map_err(|e| McpDbError::Lock(e.to_string()))
@@ -795,10 +859,88 @@ mod tests {
             CREATE VIRTUAL TABLE text_search USING fts5(
                 content, source_type, source_id
             );
+            CREATE TABLE schema_version (
+                version INTEGER NOT NULL
+            );
             ",
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES (?1)",
+            params![souffle_schema::SCHEMA_VERSION],
+        )
+        .unwrap();
         (conn, dir, path)
+    }
+
+    fn set_schema_version(conn: &Connection, version: i64) {
+        conn.execute("UPDATE schema_version SET version = ?1", params![version])
+            .unwrap();
+    }
+
+    /// AC1: a database written by a newer app is refused, and the message
+    /// names both versions.
+    #[test]
+    fn refuses_a_database_newer_than_this_build() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        set_schema_version(&conn, souffle_schema::SCHEMA_VERSION + 1);
+        drop(conn);
+
+        let db = McpDb::open(&path).expect("opening must still succeed");
+        let err = db.list_meetings(None, None, None, 10).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains(&(souffle_schema::SCHEMA_VERSION + 1).to_string()),
+            "{message}"
+        );
+        assert!(
+            message.contains(&souffle_schema::SCHEMA_VERSION.to_string()),
+            "{message}"
+        );
+        assert!(db.schema_version().is_err());
+    }
+
+    /// AC3: no `schema_version` table means no assumption of compatibility.
+    #[test]
+    fn refuses_a_database_with_no_schema_version_table() {
+        let (conn, _dir, path) = fixture_db();
+        conn.execute_batch("DROP TABLE schema_version;").unwrap();
+        drop(conn);
+
+        let db = McpDb::open(&path).expect("opening must still succeed");
+        let err = db.list_meetings(None, None, None, 10).unwrap_err();
+        assert!(
+            err.to_string().contains("schema version"),
+            "{}",
+            err.to_string()
+        );
+    }
+
+    /// The guard is asymmetric: a user who has not launched the new app yet
+    /// still has every column these queries read.
+    #[test]
+    fn serves_a_database_older_than_this_build() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        set_schema_version(&conn, 1);
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), 1);
+        assert_eq!(db.list_meetings(None, None, None, 10).unwrap().len(), 1);
+    }
+
+    /// AC2: at the version this build knows, nothing changes.
+    #[test]
+    fn serves_a_database_at_the_known_version() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), souffle_schema::SCHEMA_VERSION);
+        assert_eq!(db.list_meetings(None, None, None, 10).unwrap().len(), 1);
     }
 
     fn insert_meeting(
