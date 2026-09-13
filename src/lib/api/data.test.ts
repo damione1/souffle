@@ -12,6 +12,7 @@ Object.defineProperty(window, '__TAURI_INTERNALS__', {
 });
 
 import { getDataStats, exportArchive, revealDataDir, getMcpSetupInfo, testMcpConnection } from './data';
+import { COMMAND } from "../test-helpers/commands";
 
 describe('data API', () => {
   beforeEach(() => {
@@ -24,7 +25,7 @@ describe('data API', () => {
 
     const result = await getDataStats();
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_data_stats', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getDataStats, expect.any(Object), undefined);
     expect(result).toEqual(stats);
   });
 
@@ -34,7 +35,7 @@ describe('data API', () => {
     await exportArchive('/Users/damien/Desktop');
 
     expect(mockInvoke).toHaveBeenCalledWith(
-      'export_archive',
+      COMMAND.exportArchive,
       expect.objectContaining({ destDir: '/Users/damien/Desktop' }),
       undefined,
     );
@@ -51,7 +52,7 @@ describe('data API', () => {
 
     await revealDataDir();
 
-    expect(mockInvoke).toHaveBeenCalledWith('reveal_data_dir', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.revealDataDir, expect.any(Object), undefined);
   });
 
   it('getMcpSetupInfo returns the setup object', async () => {
@@ -65,7 +66,7 @@ describe('data API', () => {
 
     const result = await getMcpSetupInfo();
 
-    expect(mockInvoke).toHaveBeenCalledWith('get_mcp_setup_info', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getMcpSetupInfo, expect.any(Object), undefined);
     expect(result).toEqual(info);
   });
 
@@ -74,7 +75,7 @@ describe('data API', () => {
 
     const result = await testMcpConnection();
 
-    expect(mockInvoke).toHaveBeenCalledWith('test_mcp_connection', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.testMcpConnection, expect.any(Object), undefined);
     expect(result).toBe('list_meetings, get_meeting');
   });
 });

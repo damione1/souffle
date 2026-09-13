@@ -42,6 +42,7 @@ import type {
   TranscriptionCatalog,
   TranscriptionRuntimeStatus,
 } from "../../types";
+import { COMMAND } from "../../test-helpers/commands";
 
 // --- Test fixtures ---
 
@@ -213,23 +214,23 @@ const fakeStatus: TranscriptionRuntimeStatus = {
 describe("settings controller", () => {
   function defaultInvoke(cmd: string, _args?: Record<string, unknown>) {
     switch (cmd) {
-      case "get_settings":
+      case COMMAND.getSettings:
         return Promise.resolve(defaultSettings);
-      case "save_settings":
+      case COMMAND.saveSettings:
         return Promise.resolve(null);
-      case "get_shortcuts":
+      case COMMAND.getShortcuts:
         return Promise.resolve(fakeShortcuts);
-      case "save_shortcuts":
+      case COMMAND.saveShortcuts:
         return Promise.resolve(null);
-      case "list_audio_devices":
+      case COMMAND.listAudioDevices:
         return Promise.resolve(fakeDevices);
-      case "select_audio_device":
+      case COMMAND.selectAudioDevice:
         return Promise.resolve(null);
-      case "get_input_sample_rate":
+      case COMMAND.getInputSampleRate:
         return Promise.resolve(48_000);
-      case "reset_input_sample_rate":
+      case COMMAND.resetInputSampleRate:
         return Promise.resolve(48_000);
-      case "check_summary_providers":
+      case COMMAND.checkSummaryProviders:
         return Promise.resolve({
           ollama_url: "http://localhost:11434",
           ollama_available: false,
@@ -237,9 +238,9 @@ describe("settings controller", () => {
           apple_intelligence_is_stub: true,
           models: [],
         });
-      case "get_transcription_catalog":
+      case COMMAND.getTranscriptionCatalog:
         return Promise.resolve(fakeCatalog);
-      case "get_model_status":
+      case COMMAND.getModelStatus:
         return Promise.resolve(fakeStatus);
       default:
         return Promise.resolve(null);
@@ -266,12 +267,12 @@ describe("settings controller", () => {
     const ctrl = createSettingsController();
     await ctrl.mount();
 
-    expect(mockInvoke).toHaveBeenCalledWith("get_settings");
-    expect(mockInvoke).toHaveBeenCalledWith("get_shortcuts");
-    expect(mockInvoke).toHaveBeenCalledWith("list_audio_devices");
-    expect(mockInvoke).toHaveBeenCalledWith("check_summary_providers");
-    expect(mockInvoke).toHaveBeenCalledWith("get_transcription_catalog");
-    expect(mockInvoke).toHaveBeenCalledWith("get_model_status", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getSettings);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getShortcuts);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.listAudioDevices);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.checkSummaryProviders);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getTranscriptionCatalog);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getModelStatus, {
       selection: {
         engine_id: "kyutai",
         model_id: "stt-1b-en_fr",
@@ -294,7 +295,7 @@ describe("settings controller", () => {
 
     expect(mockApplyTheme).toHaveBeenCalledWith("light");
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, expect.objectContaining({
         settings: expect.objectContaining({ theme: "light" }),
       }));
     });
@@ -309,7 +310,7 @@ describe("settings controller", () => {
     } as unknown as Event);
 
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, expect.objectContaining({
         settings: expect.objectContaining({ auto_update_check_enabled: false }),
       }));
     });
@@ -325,8 +326,8 @@ describe("settings controller", () => {
 
     await ctrl.onDeviceChange(fakeEvent);
 
-    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceUid: "usb-mic" });
-    expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.selectAudioDevice, { deviceUid: "usb-mic" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, expect.objectContaining({
       settings: expect.objectContaining({ audio_device: "usb-mic" }),
     }));
   });
@@ -335,24 +336,24 @@ describe("settings controller", () => {
     let currentModelId = "stt-1b-en_fr";
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       switch (cmd) {
-        case "get_settings":
+        case COMMAND.getSettings:
           return Promise.resolve(defaultSettings);
-        case "save_settings":
+        case COMMAND.saveSettings:
           currentModelId = (args?.settings as AppSettings).transcription_model_id;
           return Promise.resolve(null);
-        case "get_shortcuts":
+        case COMMAND.getShortcuts:
           return Promise.resolve(fakeShortcuts);
-        case "save_shortcuts":
+        case COMMAND.saveShortcuts:
           return Promise.resolve(null);
-        case "list_audio_devices":
+        case COMMAND.listAudioDevices:
           return Promise.resolve(fakeDevices);
-        case "select_audio_device":
+        case COMMAND.selectAudioDevice:
           return Promise.resolve(null);
-        case "get_input_sample_rate":
+        case COMMAND.getInputSampleRate:
           return Promise.resolve(48_000);
-        case "reset_input_sample_rate":
+        case COMMAND.resetInputSampleRate:
           return Promise.resolve(48_000);
-        case "check_summary_providers":
+        case COMMAND.checkSummaryProviders:
           return Promise.resolve({
             ollama_url: "http://localhost:11434",
             ollama_available: false,
@@ -360,12 +361,12 @@ describe("settings controller", () => {
             apple_intelligence_is_stub: true,
             models: [],
           });
-        case "get_transcription_catalog":
+        case COMMAND.getTranscriptionCatalog:
           return Promise.resolve({
             ...fakeCatalog,
             selected_model_id: currentModelId,
           });
-        case "get_model_status":
+        case COMMAND.getModelStatus:
           return Promise.resolve(
             currentModelId === "stt-1b-en_fr"
               ? { ...fakeStatus, phase: "ready" }
@@ -392,7 +393,7 @@ describe("settings controller", () => {
     await ctrl.selectModelOption("kyutai:stt-2.6b-en");
 
     expect(ctrl.app.settings.transcription_model_id).toBe("stt-2.6b-en");
-    expect(mockInvoke).toHaveBeenCalledWith("get_model_status", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getModelStatus, {
       selection: {
         engine_id: "kyutai",
         model_id: "stt-2.6b-en",
@@ -401,7 +402,7 @@ describe("settings controller", () => {
     });
     // The simple picker chains the download automatically.
     expect(mockInvoke).toHaveBeenCalledWith(
-      "download_model",
+      COMMAND.downloadModel,
       expect.objectContaining({
         selection: {
           engine_id: "kyutai",
@@ -416,12 +417,12 @@ describe("settings controller", () => {
     let currentModelId = "stt-1b-en_fr";
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       switch (cmd) {
-        case "save_settings":
+        case COMMAND.saveSettings:
           currentModelId = (args?.settings as AppSettings).transcription_model_id;
           return Promise.resolve(null);
-        case "get_transcription_catalog":
+        case COMMAND.getTranscriptionCatalog:
           return Promise.resolve({ ...fakeCatalog, selected_model_id: currentModelId });
-        case "get_model_status":
+        case COMMAND.getModelStatus:
           return Promise.resolve(
             currentModelId === "stt-1b-en_fr"
               ? { ...fakeStatus, phase: "ready" }
@@ -457,10 +458,10 @@ describe("settings controller", () => {
 
     await ctrl.selectModelOption("kyutai:stt-2.6b-en");
 
-    expect(mockInvoke).toHaveBeenCalledWith("load_model", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.loadModel, {
       selection: { engine_id: "kyutai", model_id: "stt-2.6b-en", backend_id: "candle" },
     });
-    expect(mockInvoke).not.toHaveBeenCalledWith("download_model", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.downloadModel, expect.anything());
   });
 
   it("selectModelOption does not persist while a meeting is recording", async () => {
@@ -486,8 +487,8 @@ describe("settings controller", () => {
     mockInvoke.mockClear();
     await ctrl.selectModelOption("kyutai:stt-2.6b-en");
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("load_model", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.saveSettings, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.loadModel, expect.anything());
     expect(ctrl.app.settings.transcription_engine_id).toBe("kyutai");
     expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
     expect(ctrl.app.settings.transcription_backend_id).toBe("candle");
@@ -516,13 +517,13 @@ describe("settings controller", () => {
     mockInvoke.mockClear();
     await ctrl.selectModelOption("kyutai:stt-2.6b-en");
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.saveSettings, expect.anything());
     expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
   });
 
   it("restores the previous model triple when save_settings refuses the switch", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "save_settings") {
+      if (cmd === COMMAND.saveSettings) {
         const settings = args?.settings as AppSettings;
         if (settings.transcription_model_id !== "stt-1b-en_fr") {
           return Promise.reject("Cannot change the transcription model while recording");
@@ -540,7 +541,7 @@ describe("settings controller", () => {
     expect(ctrl.app.settings.transcription_engine_id).toBe("kyutai");
     expect(ctrl.app.settings.transcription_model_id).toBe("stt-1b-en_fr");
     expect(ctrl.app.settings.transcription_backend_id).toBe("candle");
-    expect(mockInvoke).not.toHaveBeenCalledWith("load_model", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.loadModel, expect.anything());
   });
 
   it("shortcut recording flow", async () => {
@@ -564,7 +565,7 @@ describe("settings controller", () => {
     expect(ctrl.toggleShortcut).toBe("CommandOrControl+Shift+K");
     expect(ctrl.recordingField).toBeNull();
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("save_shortcuts", {
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveShortcuts, {
         shortcuts: expect.objectContaining({ toggle: "CommandOrControl+Shift+K" }),
       });
     });
@@ -623,7 +624,7 @@ describe("settings controller", () => {
     expect(ctrl.toggleShortcut).toBe("");
     expect(ctrl.recordingField).toBeNull();
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("save_shortcuts", {
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveShortcuts, {
         shortcuts: expect.objectContaining({ toggle: "" }),
       });
     });
@@ -664,11 +665,11 @@ describe("settings controller", () => {
 
   it("enabling calendar integration persists only when permission is granted", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "request_permission") {
+      if (cmd === COMMAND.requestPermission) {
         expect(args).toEqual({ kind: "calendar" });
         return Promise.resolve("granted");
       }
-      if (cmd === "list_calendars") {
+      if (cmd === COMMAND.listCalendars) {
         return Promise.resolve([{ id: "cal-1", title: "Work", source_title: "iCloud" }]);
       }
       return defaultInvoke(cmd, args);
@@ -679,8 +680,8 @@ describe("settings controller", () => {
 
     await ctrl.onCalendarEnabledChange({ target: { checked: true } } as unknown as Event);
 
-    expect(mockInvoke).toHaveBeenCalledWith("request_permission", { kind: "calendar" });
-    expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.requestPermission, { kind: "calendar" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, expect.objectContaining({
       settings: expect.objectContaining({ calendar_integration_enabled: true }),
     }));
     expect(ctrl.calendarPermission).toBe("granted");
@@ -694,7 +695,7 @@ describe("settings controller", () => {
     const target = { checked: true };
     await ctrl.onAutostartChange({ target } as unknown as Event);
 
-    expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.objectContaining({
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, expect.objectContaining({
       settings: expect.objectContaining({ autostart_enabled: true }),
     }));
     expect(target.checked).toBe(true);
@@ -705,7 +706,7 @@ describe("settings controller", () => {
   // switch must go back where it was and the reason must be shown.
   it("reverts the autostart toggle and shows the reason when the login item is refused", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "save_settings") {
+      if (cmd === COMMAND.saveSettings) {
         return Promise.reject("Failed to register login item: Operation not permitted");
       }
       return defaultInvoke(cmd, args);
@@ -724,7 +725,7 @@ describe("settings controller", () => {
 
   it("enabling calendar integration does not persist when permission is denied", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "request_permission") return Promise.resolve("denied");
+      if (cmd === COMMAND.requestPermission) return Promise.resolve("denied");
       return defaultInvoke(cmd, args);
     });
 
@@ -734,7 +735,7 @@ describe("settings controller", () => {
     const target = { checked: true };
     await ctrl.onCalendarEnabledChange({ target } as unknown as Event);
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.objectContaining({
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.saveSettings, expect.objectContaining({
       settings: expect.objectContaining({ calendar_integration_enabled: true }),
     }));
     expect(target.checked).toBe(false);
@@ -747,8 +748,8 @@ describe("settings controller", () => {
       { id: "cal-2", title: "Perso", source_title: "Google" },
     ];
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "request_permission") return Promise.resolve("granted");
-      if (cmd === "list_calendars") return Promise.resolve(cals);
+      if (cmd === COMMAND.requestPermission) return Promise.resolve("granted");
+      if (cmd === COMMAND.listCalendars) return Promise.resolve(cals);
       return defaultInvoke(cmd, args);
     });
 
@@ -766,7 +767,7 @@ describe("settings controller", () => {
     // The last selected calendar cannot be removed.
     ctrl.toggleCalendarSelected("cal-2");
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("save_settings", expect.anything());
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, expect.anything());
     });
     expect(app.settings.calendar_selected_ids).toEqual(["cal-2"]);
 
@@ -779,7 +780,7 @@ describe("settings controller", () => {
 
   it("downloadRecommendedOllamaModel pulls then refreshes providers", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "check_summary_providers") {
+      if (cmd === COMMAND.checkSummaryProviders) {
         return Promise.resolve({
           ollama_url: "http://localhost:11434",
           ollama_available: true,
@@ -789,7 +790,7 @@ describe("settings controller", () => {
           models: [],
         });
       }
-      if (cmd === "pull_recommended_ollama_model") {
+      if (cmd === COMMAND.pullRecommendedOllamaModel) {
         return Promise.resolve("qwen2.5:7b");
       }
       return defaultInvoke(cmd, args);
@@ -805,7 +806,7 @@ describe("settings controller", () => {
     await pull;
 
     expect(mockInvoke).toHaveBeenCalledWith(
-      "pull_recommended_ollama_model",
+      COMMAND.pullRecommendedOllamaModel,
       expect.objectContaining({ channel: expect.anything() }),
     );
     expect(ctrl.ollamaPulling).toBe(false);
@@ -814,7 +815,7 @@ describe("settings controller", () => {
 
   it("downloadRecommendedOllamaModel records pull errors", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "check_summary_providers") {
+      if (cmd === COMMAND.checkSummaryProviders) {
         return Promise.resolve({
           ollama_url: "http://localhost:11434",
           ollama_available: true,
@@ -824,7 +825,7 @@ describe("settings controller", () => {
           models: [],
         });
       }
-      if (cmd === "pull_recommended_ollama_model") {
+      if (cmd === COMMAND.pullRecommendedOllamaModel) {
         return Promise.reject("connection refused");
       }
       return defaultInvoke(cmd, args);
@@ -849,7 +850,7 @@ describe("settings controller", () => {
       },
     };
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      if (cmd === COMMAND.getSettings) return Promise.resolve(settingsWithGhost);
       return defaultInvoke(cmd, args);
     });
 
@@ -859,13 +860,13 @@ describe("settings controller", () => {
 
     await ctrl.onRemoveDevice("ghost-mic");
 
-    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, {
       settings: expect.objectContaining({
         audio_device: null,
         input_priority: { priorities: ["usb-mic"], hidden: [], known: [] },
       }),
     });
-    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceUid: "" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.selectAudioDevice, { deviceUid: "" });
     expect(ctrl.app.settings.audio_device).toBeNull();
     expect(ctrl.pinUnavailable).toBe(false);
   });
@@ -881,7 +882,7 @@ describe("settings controller", () => {
       },
     };
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      if (cmd === COMMAND.getSettings) return Promise.resolve(settingsWithGhost);
       return defaultInvoke(cmd, args);
     });
 
@@ -891,10 +892,10 @@ describe("settings controller", () => {
 
     await ctrl.onRemoveDevice("ghost-mic");
 
-    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, {
       settings: expect.objectContaining({ audio_device: "usb-mic" }),
     });
-    expect(mockInvoke).not.toHaveBeenCalledWith("select_audio_device", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.selectAudioDevice, expect.anything());
   });
 
   it("onResetDevices keeps only connected devices and clears dangling pins", async () => {
@@ -912,7 +913,7 @@ describe("settings controller", () => {
       },
     };
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
+      if (cmd === COMMAND.getSettings) return Promise.resolve(settingsWithGhost);
       return defaultInvoke(cmd, args);
     });
 
@@ -922,7 +923,7 @@ describe("settings controller", () => {
 
     await ctrl.onResetDevices();
 
-    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, {
       settings: expect.objectContaining({
         audio_device: null,
         clamshell_audio_device: null,
@@ -933,7 +934,7 @@ describe("settings controller", () => {
         },
       }),
     });
-    expect(mockInvoke).toHaveBeenCalledWith("select_audio_device", { deviceUid: "" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.selectAudioDevice, { deviceUid: "" });
     expect(ctrl.app.settings.audio_device).toBeNull();
     expect(ctrl.app.settings.clamshell_audio_device).toBeNull();
     expect(ctrl.pinUnavailable).toBe(false);
@@ -957,8 +958,8 @@ describe("settings controller", () => {
     };
     let listAudioDevicesCalls = 0;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_settings") return Promise.resolve(settingsWithLateMic);
-      if (cmd === "list_audio_devices") {
+      if (cmd === COMMAND.getSettings) return Promise.resolve(settingsWithLateMic);
+      if (cmd === COMMAND.listAudioDevices) {
         listAudioDevicesCalls += 1;
         // Mount sees a stale snapshot without "late-mic"; by the time the
         // user confirms the reset, the device has reconnected.
@@ -976,7 +977,7 @@ describe("settings controller", () => {
     mockInvoke.mockClear();
     await ctrl.onResetDevices();
 
-    expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.saveSettings, {
       settings: expect.objectContaining({
         audio_device: "late-mic",
         input_priority: {
@@ -986,7 +987,7 @@ describe("settings controller", () => {
         },
       }),
     });
-    expect(mockInvoke).not.toHaveBeenCalledWith("select_audio_device", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.selectAudioDevice, expect.anything());
     expect(ctrl.app.settings.audio_device).toBe("late-mic");
     expect(ctrl.pinUnavailable).toBe(false);
   });
@@ -1003,8 +1004,8 @@ describe("settings controller", () => {
     };
     let listAudioDevicesCalls = 0;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_settings") return Promise.resolve(settingsWithGhost);
-      if (cmd === "list_audio_devices") {
+      if (cmd === COMMAND.getSettings) return Promise.resolve(settingsWithGhost);
+      if (cmd === COMMAND.listAudioDevices) {
         listAudioDevicesCalls += 1;
         // Mount succeeds; the refresh triggered by the reset click fails.
         if (listAudioDevicesCalls === 1) return Promise.resolve(fakeDevices);
@@ -1019,7 +1020,7 @@ describe("settings controller", () => {
 
     await ctrl.onResetDevices();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("save_settings", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.saveSettings, expect.anything());
     expect(ctrl.statusMessage).toBe("device enumeration failed");
     expect(ctrl.app.settings.audio_device).toBe("ghost-mic");
     expect(ctrl.app.settings.input_priority).toEqual({
@@ -1033,34 +1034,34 @@ describe("settings controller", () => {
     const ctrl = createSettingsController();
     await ctrl.mount();
 
-    expect(mockInvoke).toHaveBeenCalledWith("get_input_sample_rate", { deviceUid: "builtin-mic" });
-    expect(mockInvoke).not.toHaveBeenCalledWith("reset_input_sample_rate", expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getInputSampleRate, { deviceUid: "builtin-mic" });
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.resetInputSampleRate, expect.anything());
     expect(ctrl.inputSampleRate).toBe(48_000);
   });
 
   it("onResetSampleRate writes 48 kHz only after the click", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_input_sample_rate") return Promise.resolve(96_000);
-      if (cmd === "reset_input_sample_rate") return Promise.resolve(48_000);
+      if (cmd === COMMAND.getInputSampleRate) return Promise.resolve(96_000);
+      if (cmd === COMMAND.resetInputSampleRate) return Promise.resolve(48_000);
       return defaultInvoke(cmd, args);
     });
 
     const ctrl = createSettingsController();
     await ctrl.mount();
     expect(ctrl.inputSampleRate).toBe(96_000);
-    expect(mockInvoke).not.toHaveBeenCalledWith("reset_input_sample_rate", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.resetInputSampleRate, expect.anything());
 
     mockInvoke.mockClear();
     await ctrl.onResetSampleRate();
 
-    expect(mockInvoke).toHaveBeenCalledWith("reset_input_sample_rate", { deviceUid: "builtin-mic" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.resetInputSampleRate, { deviceUid: "builtin-mic" });
     expect(ctrl.inputSampleRate).toBe(48_000);
   });
 
   it("a sample-rate read that lands after a mic switch does not overwrite the new one", async () => {
     const pending: Record<string, (hz: number) => void> = {};
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_input_sample_rate") {
+      if (cmd === COMMAND.getInputSampleRate) {
         const uid = (args as { deviceUid: string }).deviceUid;
         return new Promise<number>((resolve) => {
           pending[uid] = resolve;
@@ -1104,7 +1105,7 @@ describe("settings controller", () => {
 
     await ctrl.handleDeleteModel();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("delete_model", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.deleteModel, expect.anything());
     expect(ctrl.statusMessage).toMatch(/downloading, loading, or unloading/i);
   });
 
@@ -1129,7 +1130,7 @@ describe("settings controller", () => {
     expect(ctrl.modelOperationState).toBe("unloading");
     await ctrl.handleDeleteModel();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("delete_model", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.deleteModel, expect.anything());
     expect(ctrl.statusMessage).toMatch(/unloading/i);
   });
 });

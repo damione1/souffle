@@ -18,6 +18,7 @@ import {
   getReleaseNotesForVersion,
   getAppVersion,
 } from './diagnostics';
+import { COMMAND } from "../test-helpers/commands";
 
 describe('diagnostics API', () => {
   beforeEach(() => {
@@ -27,14 +28,14 @@ describe('diagnostics API', () => {
   it('getLogTail passes max lines', async () => {
     mockInvoke.mockResolvedValue('line 1\nline 2');
     const result = await getLogTail(50);
-    expect(mockInvoke).toHaveBeenCalledWith('get_log_tail', expect.objectContaining({ maxLines: 50 }), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getLogTail, expect.objectContaining({ maxLines: 50 }), undefined);
     expect(result).toBe('line 1\nline 2');
   });
 
   it('getDiagnosticsText calls backend', async () => {
     mockInvoke.mockResolvedValue('diagnostics blob');
     const result = await getDiagnosticsText();
-    expect(mockInvoke).toHaveBeenCalledWith('get_diagnostics_text', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getDiagnosticsText, expect.any(Object), undefined);
     expect(result).toBe('diagnostics blob');
   });
 
@@ -49,7 +50,7 @@ describe('diagnostics API', () => {
     };
     mockInvoke.mockResolvedValue(payload);
     const result = await checkForUpdates();
-    expect(mockInvoke).toHaveBeenCalledWith('check_for_updates', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.checkForUpdates, expect.any(Object), undefined);
     expect(result).toEqual(payload);
   });
 
@@ -57,7 +58,7 @@ describe('diagnostics API', () => {
     mockInvoke.mockResolvedValue('  Release notes  ');
     const result = await getReleaseNotesForVersion('0.1.1');
     expect(mockInvoke).toHaveBeenCalledWith(
-      'get_release_notes_for_version',
+      COMMAND.getReleaseNotesForVersion,
       expect.objectContaining({ version: '0.1.1' }),
       undefined,
     );
@@ -73,7 +74,7 @@ describe('diagnostics API', () => {
   it('getAppVersion returns version string', async () => {
     mockInvoke.mockResolvedValue('0.1.0');
     const result = await getAppVersion();
-    expect(mockInvoke).toHaveBeenCalledWith('get_app_version', expect.any(Object), undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getAppVersion, expect.any(Object), undefined);
     expect(result).toBe('0.1.0');
   });
 });

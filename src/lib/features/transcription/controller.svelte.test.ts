@@ -37,6 +37,7 @@ import type {
   TranscriptionRuntimeStatus,
   DictationEntry,
 } from "../../types";
+import { COMMAND } from "../../test-helpers/commands";
 
 // --- Test fixtures ---
 
@@ -122,49 +123,49 @@ describe("transcription controller", () => {
 
   function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
     switch (cmd) {
-      case "get_transcription_catalog":
+      case COMMAND.getTranscriptionCatalog:
         return Promise.resolve(fakeCatalog);
-      case "get_model_status":
+      case COMMAND.getModelStatus:
         return Promise.resolve(fakeStatus);
-      case "list_dictation_entries":
+      case COMMAND.listDictationEntries:
         return Promise.resolve(fakeHistory);
-      case "start_transcription":
+      case COMMAND.startTranscription:
         return Promise.resolve(null);
-      case "stop_transcription":
+      case COMMAND.stopTranscription:
         return Promise.resolve(null);
-      case "add_dictation_entry":
+      case COMMAND.addDictationEntry:
         return Promise.resolve("entry-test-id");
-      case "update_dictation_entry":
+      case COMMAND.updateDictationEntry:
         return Promise.resolve(null);
-      case "delete_dictation_entry":
+      case COMMAND.deleteDictationEntry:
         return Promise.resolve(null);
-      case "list_snippets":
+      case COMMAND.listSnippets:
         return Promise.resolve([]);
-      case "clear_dictation_history":
+      case COMMAND.clearDictationHistory:
         return Promise.resolve(null);
-      case "paste_text":
+      case COMMAND.pasteText:
         return Promise.resolve(null);
-      case "copy_text":
+      case COMMAND.copyText:
         return Promise.resolve(null);
-      case "polish_dictation":
+      case COMMAND.polishDictation:
         return Promise.resolve({ text: args?.text ?? "", skipped: true, warning: null });
-      case "pill_hold":
+      case COMMAND.pillHold:
         return Promise.resolve(null);
-      case "pill_release":
+      case COMMAND.pillRelease:
         return Promise.resolve(null);
-      case "load_model":
+      case COMMAND.loadModel:
         return Promise.resolve(null);
-      case "download_model":
+      case COMMAND.downloadModel:
         return Promise.resolve(null);
-      case "save_settings":
+      case COMMAND.saveSettings:
         return Promise.resolve(null);
-      case "frontmost_app_name":
+      case COMMAND.frontmostAppName:
         return Promise.resolve(null);
-      case "read_selected_text":
+      case COMMAND.readSelectedText:
         return Promise.resolve(null);
-      case "read_focused_text":
+      case COMMAND.readFocusedText:
         return Promise.resolve(null);
-      case "learn_from_edit":
+      case COMMAND.learnFromEdit:
         return Promise.resolve(0);
       default:
         return Promise.resolve(null);
@@ -209,8 +210,8 @@ describe("transcription controller", () => {
     const ctrl = createTranscriptionController();
     await ctrl.mount();
 
-    expect(mockInvoke).toHaveBeenCalledWith("get_transcription_catalog");
-    expect(mockInvoke).toHaveBeenCalledWith("get_model_status", { selection });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getTranscriptionCatalog);
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.getModelStatus, { selection });
     expect(ctrl.runtimePhase).toBe("ready");
   });
 
@@ -229,7 +230,7 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording();
 
-    expect(mockInvoke).toHaveBeenCalledWith("start_transcription", expect.objectContaining({ channel: expect.any(Object) }));
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.startTranscription, expect.objectContaining({ channel: expect.any(Object) }));
   });
 
   it("toggleRecording stop saves to history", async () => {
@@ -243,7 +244,7 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording();
 
-    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription);
   });
 
   it("toggleRecording stop auto-pastes when fromShortcut and auto_paste enabled", async () => {
@@ -259,9 +260,9 @@ describe("transcription controller", () => {
     // Stop with fromShortcut=true — transcript is "" so paste won't trigger for empty text
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription);
     // pasteText is NOT called because transcript is empty (Channel is mocked)
-    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
   });
 
   // SOU-053: a shortcut dictation runs from another app, so the in-app
@@ -270,11 +271,11 @@ describe("transcription controller", () => {
   it("notifies outside the window when a shortcut paste fails", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "paste_text") {
+      if (cmd === COMMAND.pasteText) {
         return Promise.reject("Accessibility permission missing.");
       }
       return defaultInvoke(cmd, args);
@@ -299,10 +300,10 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.copyText, expect.anything());
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
-    expect(mockInvoke).toHaveBeenCalledWith("notify_paste_failed", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.notifyPasteFailed, {
       error: "Accessibility permission missing.",
       savedToHistory: true,
     });
@@ -319,11 +320,11 @@ describe("transcription controller", () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
 
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "paste_text") {
+      if (cmd === COMMAND.pasteText) {
         return Promise.reject("Accessibility permission missing.");
       }
       return defaultInvoke(cmd, args);
@@ -365,14 +366,14 @@ describe("transcription controller", () => {
   it("notifies outside the window when a shortcut paste fails and history fails", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "paste_text") {
+      if (cmd === COMMAND.pasteText) {
         return Promise.reject("Accessibility permission missing.");
       }
-      if (cmd === "add_dictation_entry") {
+      if (cmd === COMMAND.addDictationEntry) {
         return Promise.reject("DB error");
       }
       return defaultInvoke(cmd, args);
@@ -397,10 +398,10 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.copyText, expect.anything());
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
-    expect(mockInvoke).toHaveBeenCalledWith("notify_paste_failed", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.notifyPasteFailed, {
       error: "Accessibility permission missing.",
       savedToHistory: false,
     });
@@ -409,7 +410,7 @@ describe("transcription controller", () => {
   it("does not notify when a shortcut paste succeeds", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
@@ -435,19 +436,19 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("notify_paste_failed", expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.copyText, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.notifyPasteFailed, expect.anything());
   });
 
   it("copies via Rust and reports paste_failed when paste fails for a non-AX reason", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "paste_text") {
+      if (cmd === COMMAND.pasteText) {
         return Promise.reject("Enigo init: some OS error");
       }
       return defaultInvoke(cmd, args);
@@ -472,12 +473,12 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.anything());
-    expect(mockInvoke).toHaveBeenCalledWith("copy_text", { text: "hello world" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.copyText, { text: "hello world" });
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
     expect(ctrl.statusMessage).toBe("Paste failed: Enigo init: some OS error");
     expect(ctrl.statusActionLabel).toBeUndefined();
-    expect(mockInvoke).toHaveBeenCalledWith("notify_paste_failed", {
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.notifyPasteFailed, {
       error: "Enigo init: some OS error",
       savedToHistory: true,
     });
@@ -486,11 +487,11 @@ describe("transcription controller", () => {
   it("does not claim Copied when Accessibility paste fails after a failed copy", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "paste_text") {
+      if (cmd === COMMAND.pasteText) {
         return Promise.reject("Accessibility permission missing. (no pasteboard)");
       }
       return defaultInvoke(cmd, args);
@@ -515,7 +516,7 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("copy_text", { text: "hello world" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.copyText, { text: "hello world" });
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
     expect(ctrl.statusMessage).toBe(
       "Paste failed: Accessibility permission missing. (no pasteboard)",
@@ -526,7 +527,7 @@ describe("transcription controller", () => {
   it("toggleRecording stop skips polish IPC when polish disabled", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
@@ -548,25 +549,25 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording();
 
-    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
-    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
-    expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription);
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.polishDictation, expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.addDictationEntry, { text: "hello world" });
   });
 
   it("persists raw history before polish returns (SOU-048)", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     let resolvePolish: ((value: unknown) => void) | undefined;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "polish_dictation") {
+      if (cmd === COMMAND.polishDictation) {
         return new Promise((resolve) => {
           resolvePolish = resolve;
         });
       }
-      if (cmd === "add_dictation_entry") {
+      if (cmd === COMMAND.addDictationEntry) {
         return Promise.resolve("raw-id");
       }
       return defaultInvoke(cmd, args);
@@ -587,9 +588,9 @@ describe("transcription controller", () => {
 
     const stopPromise = ctrl.toggleRecording();
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.addDictationEntry, { text: "hello world" });
     });
-    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.updateDictationEntry, expect.anything());
     expect(ctrl.isStopping).toBe(true);
 
     await vi.waitFor(() => {
@@ -597,20 +598,20 @@ describe("transcription controller", () => {
     });
     resolvePolish!({ text: "hello world", skipped: false, warning: null });
     await stopPromise;
-    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.updateDictationEntry, expect.anything());
   });
 
   it("updates the same history row when polish returns different text (SOU-048)", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "polish_dictation") {
+      if (cmd === COMMAND.polishDictation) {
         return Promise.resolve({ text: "Hello, world.", skipped: false, warning: null });
       }
-      if (cmd === "add_dictation_entry") {
+      if (cmd === COMMAND.addDictationEntry) {
         return Promise.resolve("raw-id");
       }
       return defaultInvoke(cmd, args);
@@ -631,8 +632,8 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording();
 
-    const addCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "add_dictation_entry");
-    const updateCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "update_dictation_entry");
+    const addCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === COMMAND.addDictationEntry);
+    const updateCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === COMMAND.updateDictationEntry);
     expect(addCalls).toHaveLength(1);
     expect(addCalls[0][1]).toEqual({ text: "hello world" });
     expect(updateCalls).toHaveLength(1);
@@ -646,14 +647,14 @@ describe("transcription controller", () => {
       sawAdd = resolve;
     });
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "polish_dictation") {
+      if (cmd === COMMAND.polishDictation) {
         return new Promise(() => {});
       }
-      if (cmd === "add_dictation_entry") {
+      if (cmd === COMMAND.addDictationEntry) {
         sawAdd();
         return Promise.resolve("raw-id");
       }
@@ -677,13 +678,13 @@ describe("transcription controller", () => {
     try {
       const stopPromise = ctrl.toggleRecording();
       await addSeen;
-      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.addDictationEntry, { text: "hello world" });
 
       await vi.advanceTimersByTimeAsync(25_000);
       await stopPromise;
 
       expect(ctrl.statusMessage).toBe("Polish took too long. Saved the original text.");
-      expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.anything());
+      expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.updateDictationEntry, expect.anything());
     } finally {
       vi.useRealTimers();
     }
@@ -697,16 +698,16 @@ describe("transcription controller", () => {
       sawAdd = resolve;
     });
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "polish_dictation") {
+      if (cmd === COMMAND.polishDictation) {
         return new Promise((_, reject) => {
           rejectPolish = reject;
         });
       }
-      if (cmd === "add_dictation_entry") {
+      if (cmd === COMMAND.addDictationEntry) {
         sawAdd();
         return Promise.resolve("raw-id");
       }
@@ -752,14 +753,14 @@ describe("transcription controller", () => {
     simulateRecordingStarted(ctrl.app);
     await ctrl.toggleRecording();
 
-    const holdIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === "pill_hold");
-    const stopIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === "stop_transcription");
-    const releaseIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === "pill_release");
+    const holdIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === COMMAND.pillHold);
+    const stopIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === COMMAND.stopTranscription);
+    const releaseIndex = mockInvoke.mock.calls.findIndex((call) => call[0] === COMMAND.pillRelease);
 
     expect(holdIndex).toBeGreaterThanOrEqual(0);
     expect(stopIndex).toBeGreaterThan(holdIndex);
     expect(releaseIndex).toBeGreaterThan(stopIndex);
-    expect(mockInvoke).toHaveBeenCalledWith("pill_hold", { kind: "polishing" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pillHold, { kind: "polishing" });
   });
 
   it("toggleRecording stop never holds the pill when polish is disabled", async () => {
@@ -771,13 +772,13 @@ describe("transcription controller", () => {
     simulateRecordingStarted(ctrl.app);
     await ctrl.toggleRecording();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("pill_hold", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("pill_release", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pillHold, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pillRelease, expect.anything());
   });
 
   it("toggleRecording stop releases the pill hold even when the stop pipeline throws", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "stop_transcription") {
+      if (cmd === COMMAND.stopTranscription) {
         return Promise.reject(new Error("drain failed"));
       }
       return defaultInvoke(cmd, args);
@@ -791,8 +792,8 @@ describe("transcription controller", () => {
     simulateRecordingStarted(ctrl.app);
     await ctrl.toggleRecording();
 
-    expect(mockInvoke).toHaveBeenCalledWith("pill_hold", { kind: "polishing" });
-    expect(mockInvoke).toHaveBeenCalledWith("pill_release");
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pillHold, { kind: "polishing" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pillRelease);
     expect(ctrl.statusMessage).toContain("drain failed");
   });
 
@@ -805,13 +806,13 @@ describe("transcription controller", () => {
     await ctrl.toggleRecording();
 
     // No paste or clipboard since transcript is empty
-    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it("toggleRecording not loaded shows message", async () => {
     mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "get_model_status") {
+      if (cmd === COMMAND.getModelStatus) {
         return Promise.resolve({ ...fakeStatus, phase: "download_required" });
       }
       return defaultInvoke(cmd);
@@ -822,7 +823,7 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.startTranscription, expect.anything());
     expect(ctrl.statusMessage).toContain("Download and load");
     expect(ctrl.statusActionLabel).toBe("Open model");
     ctrl.statusAction?.();
@@ -833,7 +834,7 @@ describe("transcription controller", () => {
   it("toggleRecording guards double start", async () => {
     let resolveStart: (() => void) | undefined;
     mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         return new Promise<void>((r) => { resolveStart = r; });
       }
       return defaultInvoke(cmd);
@@ -852,18 +853,18 @@ describe("transcription controller", () => {
     await first;
     await second;
 
-    const startCalls = mockInvoke.mock.calls.filter((call) => call[0] === "start_transcription");
+    const startCalls = mockInvoke.mock.calls.filter((call) => call[0] === COMMAND.startTranscription);
     expect(startCalls).toHaveLength(1);
   });
 
   it("clears a stale Repair action at the start of a start attempt", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "paste_text") {
+      if (cmd === COMMAND.pasteText) {
         return Promise.reject("Accessibility permission missing.");
       }
       return defaultInvoke(cmd, args);
@@ -888,7 +889,7 @@ describe("transcription controller", () => {
     });
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.copyText, expect.anything());
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
     expect(ctrl.statusActionLabel).toBe("Repair permissions");
 
@@ -904,10 +905,10 @@ describe("transcription controller", () => {
   it("does not double-start while ensureModelLoaded is still pending", async () => {
     let resolveLoad: (() => void) | undefined;
     mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "get_model_status") {
+      if (cmd === COMMAND.getModelStatus) {
         return Promise.resolve({ ...fakeStatus, phase: "load_required" });
       }
-      if (cmd === "load_model") {
+      if (cmd === COMMAND.loadModel) {
         return new Promise<void>((r) => {
           resolveLoad = r;
         });
@@ -925,21 +926,21 @@ describe("transcription controller", () => {
     await vi.waitFor(() => {
       expect(resolveLoad).toBeTypeOf("function");
     });
-    expect(mockInvoke.mock.calls.filter((call) => call[0] === "load_model")).toHaveLength(1);
+    expect(mockInvoke.mock.calls.filter((call) => call[0] === COMMAND.loadModel)).toHaveLength(1);
 
     resolveLoad!();
     await first;
     await second;
 
-    expect(mockInvoke.mock.calls.filter((call) => call[0] === "load_model")).toHaveLength(1);
+    expect(mockInvoke.mock.calls.filter((call) => call[0] === COMMAND.loadModel)).toHaveLength(1);
   });
 
   it("model download (runtime) tracks progress", async () => {
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_model_status") {
+      if (cmd === COMMAND.getModelStatus) {
         return Promise.resolve({ ...fakeStatus, phase: "load_required" });
       }
-      if (cmd === "download_model") {
+      if (cmd === COMMAND.downloadModel) {
         const channel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         if (channel?.onmessage) {
           channel.onmessage({
@@ -970,7 +971,7 @@ describe("transcription controller", () => {
     await startTranscriptionModelDownload(ctrl.app, ctrl.catalog, () => {});
 
     expect(mockInvoke).toHaveBeenCalledWith(
-      "download_model",
+      COMMAND.downloadModel,
       expect.objectContaining({ selection, channel: expect.any(Object) }),
     );
     expect(ctrl.modelOperationState).toBe("idle");
@@ -981,7 +982,7 @@ describe("transcription controller", () => {
   it("model load (runtime) sets runtimePhase to ready", async () => {
     let statusCallCount = 0;
     mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "get_model_status") {
+      if (cmd === COMMAND.getModelStatus) {
         statusCallCount++;
         return Promise.resolve(statusCallCount <= 1
           ? { ...fakeStatus, phase: "load_required" }
@@ -997,7 +998,7 @@ describe("transcription controller", () => {
 
     await startTranscriptionModelLoad(ctrl.app, ctrl.catalog, () => {});
 
-    expect(mockInvoke).toHaveBeenCalledWith("load_model", { selection });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.loadModel, { selection });
     expect(ctrl.runtimePhase).toBe("ready");
     expect(ctrl.modelOperationState).toBe("idle");
   });
@@ -1005,11 +1006,11 @@ describe("transcription controller", () => {
   it("insert start polishes with focusedApp", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "frontmost_app_name") return Promise.resolve("Mail");
+      if (cmd === COMMAND.frontmostAppName) return Promise.resolve("Mail");
       return defaultInvoke(cmd, args);
     });
 
@@ -1018,8 +1019,8 @@ describe("transcription controller", () => {
     ctrl.app.settings = { ...ctrl.app.settings, dictation_polish_enabled: true };
 
     await ctrl.toggleRecording();
-    expect(mockInvoke).toHaveBeenCalledWith("frontmost_app_name");
-    expect(mockInvoke).not.toHaveBeenCalledWith("read_selected_text");
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.frontmostAppName);
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.readSelectedText);
 
     simulateRecordingStarted(ctrl.app);
     (transcriptionChannel as { onmessage: ((msg: unknown) => void) | null } | null)?.onmessage?.({
@@ -1030,7 +1031,7 @@ describe("transcription controller", () => {
     });
     await ctrl.toggleRecording();
 
-    expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.polishDictation, expect.objectContaining({
       text: "hello world",
       focusedApp: "Mail",
     }));
@@ -1041,13 +1042,13 @@ describe("transcription controller", () => {
     try {
       let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
       mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-        if (cmd === "start_transcription") {
+        if (cmd === COMMAND.startTranscription) {
           transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
           return Promise.resolve(null);
         }
-        if (cmd === "frontmost_app_name") return Promise.resolve("Notes");
-        if (cmd === "read_focused_text") return Promise.resolve("hello Kubernetes");
-        if (cmd === "learn_from_edit") return Promise.resolve(1);
+        if (cmd === COMMAND.frontmostAppName) return Promise.resolve("Notes");
+        if (cmd === COMMAND.readFocusedText) return Promise.resolve("hello Kubernetes");
+        if (cmd === COMMAND.learnFromEdit) return Promise.resolve(1);
         return defaultInvoke(cmd, args);
       });
 
@@ -1070,12 +1071,12 @@ describe("transcription controller", () => {
       });
       await ctrl.toggleRecording(true);
 
-      expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.anything());
-      expect(mockInvoke).not.toHaveBeenCalledWith("learn_from_edit", expect.anything());
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
+      expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.learnFromEdit, expect.anything());
 
       await vi.advanceTimersByTimeAsync(4000);
-      expect(mockInvoke).toHaveBeenCalledWith("read_focused_text");
-      expect(mockInvoke).toHaveBeenCalledWith("learn_from_edit", {
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.readFocusedText);
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.learnFromEdit, {
         original: "hello world",
         corrected: "hello Kubernetes",
       });
@@ -1090,13 +1091,13 @@ describe("transcription controller", () => {
       let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
       let frontmost = "Notes";
       mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-        if (cmd === "start_transcription") {
+        if (cmd === COMMAND.startTranscription) {
           transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
           return Promise.resolve(null);
         }
-        if (cmd === "frontmost_app_name") return Promise.resolve(frontmost);
-        if (cmd === "read_focused_text") return Promise.resolve("hello Kubernetes");
-        if (cmd === "learn_from_edit") return Promise.resolve(1);
+        if (cmd === COMMAND.frontmostAppName) return Promise.resolve(frontmost);
+        if (cmd === COMMAND.readFocusedText) return Promise.resolve("hello Kubernetes");
+        if (cmd === COMMAND.learnFromEdit) return Promise.resolve(1);
         return defaultInvoke(cmd, args);
       });
 
@@ -1121,7 +1122,7 @@ describe("transcription controller", () => {
       frontmost = "Safari";
 
       await vi.advanceTimersByTimeAsync(4000);
-      expect(mockInvoke).not.toHaveBeenCalledWith("learn_from_edit", expect.anything());
+      expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.learnFromEdit, expect.anything());
     } finally {
       vi.useRealTimers();
     }
@@ -1133,13 +1134,13 @@ describe("transcription controller", () => {
       let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
       let frontmost: string | null = "Notes";
       mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-        if (cmd === "start_transcription") {
+        if (cmd === COMMAND.startTranscription) {
           transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
           return Promise.resolve(null);
         }
-        if (cmd === "frontmost_app_name") return Promise.resolve(frontmost);
-        if (cmd === "read_focused_text") return Promise.resolve("hello Kubernetes");
-        if (cmd === "learn_from_edit") return Promise.resolve(1);
+        if (cmd === COMMAND.frontmostAppName) return Promise.resolve(frontmost);
+        if (cmd === COMMAND.readFocusedText) return Promise.resolve("hello Kubernetes");
+        if (cmd === COMMAND.learnFromEdit) return Promise.resolve(1);
         return defaultInvoke(cmd, args);
       });
 
@@ -1164,7 +1165,7 @@ describe("transcription controller", () => {
       frontmost = null;
 
       await vi.advanceTimersByTimeAsync(4000);
-      expect(mockInvoke).not.toHaveBeenCalledWith("learn_from_edit", expect.anything());
+      expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.learnFromEdit, expect.anything());
     } finally {
       vi.useRealTimers();
     }
@@ -1175,13 +1176,13 @@ describe("transcription controller", () => {
     try {
       let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
       mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-        if (cmd === "start_transcription") {
+        if (cmd === COMMAND.startTranscription) {
           transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
           return Promise.resolve(null);
         }
-        if (cmd === "frontmost_app_name") return Promise.resolve(null);
-        if (cmd === "read_focused_text") return Promise.resolve("hello Kubernetes");
-        if (cmd === "learn_from_edit") return Promise.resolve(1);
+        if (cmd === COMMAND.frontmostAppName) return Promise.resolve(null);
+        if (cmd === COMMAND.readFocusedText) return Promise.resolve("hello Kubernetes");
+        if (cmd === COMMAND.learnFromEdit) return Promise.resolve(1);
         return defaultInvoke(cmd, args);
       });
 
@@ -1205,7 +1206,7 @@ describe("transcription controller", () => {
       await ctrl.toggleRecording(true);
 
       await vi.advanceTimersByTimeAsync(4000);
-      expect(mockInvoke).not.toHaveBeenCalledWith("learn_from_edit", expect.anything());
+      expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.learnFromEdit, expect.anything());
     } finally {
       vi.useRealTimers();
     }
@@ -1214,7 +1215,7 @@ describe("transcription controller", () => {
   function captureTranscriptionChannel() {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
@@ -1269,14 +1270,14 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.polishDictation, expect.objectContaining({
       text: "hello",
     }));
-    expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello" });
-    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.objectContaining({
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.addDictationEntry, { text: "hello" });
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.objectContaining({
       text: "hello",
     }));
-    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.objectContaining({
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.polishDictation, expect.objectContaining({
       text: expect.stringContaining("pending"),
     }));
   });
@@ -1292,7 +1293,7 @@ describe("transcription controller", () => {
     channel.emit({ text: "hello", is_final: true });
     await ctrl.toggleRecording(false);
 
-    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.objectContaining({ text: "hello" }));
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.objectContaining({ text: "hello" }));
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
@@ -1307,7 +1308,7 @@ describe("transcription controller", () => {
     channel.emit({ text: "hello", is_final: true });
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
   });
 
@@ -1315,11 +1316,11 @@ describe("transcription controller", () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     let resolvePolish: ((value: unknown) => void) | undefined;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "polish_dictation") {
+      if (cmd === COMMAND.polishDictation) {
         return new Promise((resolve) => {
           resolvePolish = resolve;
         });
@@ -1352,7 +1353,7 @@ describe("transcription controller", () => {
     resolvePolish!({ text: "hello", skipped: false, warning: null });
     await stopPromise;
 
-    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.objectContaining({ text: "hello" }));
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.objectContaining({ text: "hello" }));
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
@@ -1372,9 +1373,9 @@ describe("transcription controller", () => {
 
     expect(ctrl.tentative).toBe("");
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello" });
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.addDictationEntry, { text: "hello" });
     });
-    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", {
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.addDictationEntry, {
       text: expect.stringContaining("pending"),
     });
   });
@@ -1383,16 +1384,16 @@ describe("transcription controller", () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     let resolvePolish: ((value: unknown) => void) | undefined;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
-      if (cmd === "polish_dictation") {
+      if (cmd === COMMAND.polishDictation) {
         return new Promise((resolve) => {
           resolvePolish = resolve;
         });
       }
-      if (cmd === "add_dictation_entry") {
+      if (cmd === COMMAND.addDictationEntry) {
         return Promise.resolve("raw-id");
       }
       return defaultInvoke(cmd, args);
@@ -1414,21 +1415,21 @@ describe("transcription controller", () => {
     ctrl.handleRecordingAborted();
 
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello" });
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.addDictationEntry, { text: "hello" });
     });
-    expect(mockInvoke).not.toHaveBeenCalledWith("update_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.updateDictationEntry, expect.anything());
 
     await vi.waitFor(() => {
       expect(resolvePolish).toBeTypeOf("function");
     });
     resolvePolish!({ text: "Hello.", skipped: false, warning: null });
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("update_dictation_entry", {
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.updateDictationEntry, {
         id: "raw-id",
         text: "Hello.",
       });
     });
-    const addCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "add_dictation_entry");
+    const addCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === COMMAND.addDictationEntry);
     expect(addCalls).toHaveLength(1);
   });
 
@@ -1465,16 +1466,16 @@ describe("transcription controller", () => {
     expect(ctrl.tentative).toBe("");
     expect(ctrl.transcript).toBe("");
     expect(ctrl.statusMessage).toBe("Hold a little longer");
-    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
-    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription);
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.addDictationEntry, expect.anything());
   });
 
   it("does not auto-hide a banner that carries an action", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       mockInvoke.mockImplementation((cmd: string) => {
-        if (cmd === "get_model_status") {
+        if (cmd === COMMAND.getModelStatus) {
           return Promise.resolve({ ...fakeStatus, phase: "download_required" });
         }
         return defaultInvoke(cmd);
@@ -1574,7 +1575,7 @@ describe("transcription controller", () => {
 
       await vi.advanceTimersByTimeAsync(5000);
       await vi.waitFor(() => {
-        expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+        expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription);
       });
     } finally {
       vi.useRealTimers();
@@ -1603,8 +1604,8 @@ describe("transcription controller", () => {
 
     eventListeners["shortcut-toggle"]?.({ payload: null });
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
-    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.stopTranscription);
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.startTranscription, expect.anything());
     // The meeting's own state must survive untouched.
     expect(ctrl.app.machineState.state).toBe("recording_meeting");
   });
@@ -1619,7 +1620,7 @@ describe("transcription controller", () => {
 
     notifyDictationStopRequested();
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription);
     });
   });
 
@@ -1645,8 +1646,8 @@ describe("transcription controller", () => {
 
     notifyDictationStopRequested();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
-    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.stopTranscription);
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.startTranscription, expect.anything());
     expect(ctrl.app.machineState.state).toBe("recording_meeting");
   });
 
@@ -1657,7 +1658,7 @@ describe("transcription controller", () => {
     await ctrl.toggleRecording();
 
     expect(mockInvoke).toHaveBeenCalledWith(
-      "start_transcription",
+      COMMAND.startTranscription,
       expect.objectContaining({ cancelOnEscape: true }),
     );
   });
@@ -1669,7 +1670,7 @@ describe("transcription controller", () => {
     eventListeners["shortcut-ptt-start"]?.({ payload: null });
     await vi.waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith(
-        "start_transcription",
+        COMMAND.startTranscription,
         expect.objectContaining({ cancelOnEscape: false }),
       );
     });
@@ -1690,12 +1691,12 @@ describe("transcription controller", () => {
       expect(ctrl.statusMessage).toBe("Dictation discarded");
     });
 
-    expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
-    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("copy_text", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("pill_hold", expect.anything());
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription);
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.addDictationEntry, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.polishDictation, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.copyText, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pillHold, expect.anything());
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
     expect(ctrl.transcript).toBe("");
   });
@@ -1716,7 +1717,7 @@ describe("transcription controller", () => {
 
     channel.emit({ text: "late word", is_final: true });
     expect(ctrl.transcript).toBe("");
-    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.addDictationEntry, expect.anything());
   });
 
   it("abort during cancel does not persist or polish (SOU-117)", async () => {
@@ -1724,7 +1725,7 @@ describe("transcription controller", () => {
     const channel = captureTranscriptionChannel();
     const innerInvoke = mockInvoke.getMockImplementation()!;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "stop_transcription") {
+      if (cmd === COMMAND.stopTranscription) {
         return new Promise<void>((r) => { releaseStop = r; });
       }
       return innerInvoke(cmd, args);
@@ -1749,14 +1750,14 @@ describe("transcription controller", () => {
       expect(ctrl.statusMessage).toBe("Dictation discarded");
     });
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.addDictationEntry, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.polishDictation, expect.anything());
   });
 
   it("cancels while start_transcription is still in flight (SOU-117)", async () => {
     let releaseStart: (() => void) | undefined;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         return new Promise<void>((r) => { releaseStart = r; });
       }
       return defaultInvoke(cmd, args);
@@ -1775,10 +1776,10 @@ describe("transcription controller", () => {
     await start;
 
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("stop_transcription");
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.stopTranscription);
     });
-    expect(mockInvoke).not.toHaveBeenCalledWith("add_dictation_entry", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("paste_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.addDictationEntry, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.pasteText, expect.anything());
   });
 
   it("notifyDictationCancelRequested is a no-op while idle (SOU-117)", async () => {
@@ -1787,7 +1788,7 @@ describe("transcription controller", () => {
 
     notifyDictationCancelRequested();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.stopTranscription);
   });
 
   it("notifyDictationCancelRequested is a no-op while a meeting is recording (SOU-117)", async () => {
@@ -1812,7 +1813,7 @@ describe("transcription controller", () => {
 
     notifyDictationCancelRequested();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.stopTranscription);
     expect(ctrl.app.machineState.state).toBe("recording_meeting");
   });
 
@@ -1828,7 +1829,7 @@ describe("transcription controller", () => {
     channel.emit({ text: "hello", is_final: true });
     await ctrl.toggleRecording(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("paste_text", expect.objectContaining({ text: "hello" }));
+    expect(mockInvoke).toHaveBeenCalledWith(COMMAND.pasteText, expect.objectContaining({ text: "hello" }));
     expect(ctrl.transcript).toBe("");
     ctrl.app.machineState = { state: "idle" };
 
@@ -1838,7 +1839,7 @@ describe("transcription controller", () => {
     ctrl.handleRecordingAborted();
 
     expect(ctrl.transcript).toBe("");
-    const pasteCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "paste_text");
+    const pasteCalls = mockInvoke.mock.calls.filter(([cmd]) => cmd === COMMAND.pasteText);
     expect(pasteCalls).toHaveLength(1);
     expect(pasteCalls[0][1]).toEqual(expect.objectContaining({ text: "hello" }));
   });
@@ -1846,7 +1847,7 @@ describe("transcription controller", () => {
   it("queued PTT stop does not stop a later dictation after abort (SOU-045)", async () => {
     let releaseStart: (() => void) | undefined;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         return new Promise<void>((r) => { releaseStart = r; });
       }
       return defaultInvoke(cmd, args);
@@ -1870,13 +1871,13 @@ describe("transcription controller", () => {
 
     mockInvoke.mockImplementation(defaultInvoke);
     await ctrl.toggleRecording(true);
-    const startCalls = mockInvoke.mock.calls.filter((call) => call[0] === "start_transcription");
+    const startCalls = mockInvoke.mock.calls.filter((call) => call[0] === COMMAND.startTranscription);
     expect(startCalls).toHaveLength(2);
     simulateRecordingStarted(ctrl.app);
 
     await new Promise((r) => setTimeout(r, 60));
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.stopTranscription);
   });
 
   it("toggleRecording directly is a no-op while a meeting is recording", async () => {
@@ -1901,8 +1902,8 @@ describe("transcription controller", () => {
 
     await ctrl.toggleRecording();
 
-    expect(mockInvoke).not.toHaveBeenCalledWith("start_transcription", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("stop_transcription");
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.startTranscription, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.stopTranscription);
   });
 
   const signatureSnippet = {
@@ -1915,8 +1916,8 @@ describe("transcription controller", () => {
   it("applies a snippet matching the start of dictation and skips polish", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "list_snippets") return Promise.resolve([signatureSnippet]);
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.listSnippets) return Promise.resolve([signatureSnippet]);
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
@@ -1937,25 +1938,25 @@ describe("transcription controller", () => {
 
     // The raw row written before finalization is replaced by the expansion (AC5).
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("update_dictation_entry", expect.objectContaining({
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.updateDictationEntry, expect.objectContaining({
         text: "Cordialement, Damien, et à bientôt.",
       }));
     });
     // A matched snippet never reaches the LLM (AC3).
-    expect(mockInvoke).not.toHaveBeenCalledWith("polish_dictation", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(COMMAND.polishDictation, expect.anything());
   });
 
   it("finalization makes no snippet IPC call when no trigger matches", async () => {
     let transcriptionChannel: { onmessage: ((msg: unknown) => void) | null } | null = null;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "start_transcription") {
+      if (cmd === COMMAND.startTranscription) {
         transcriptionChannel = args?.channel as { onmessage: ((msg: unknown) => void) | null };
         return Promise.resolve(null);
       }
       return defaultInvoke(cmd, args);
     });
     const listSnippetCalls = () =>
-      mockInvoke.mock.calls.filter(([cmd]) => cmd === "list_snippets").length;
+      mockInvoke.mock.calls.filter(([cmd]) => cmd === COMMAND.listSnippets).length;
 
     const ctrl = createTranscriptionController();
     await ctrl.mount();
@@ -1971,7 +1972,7 @@ describe("transcription controller", () => {
     await ctrl.toggleRecording();
 
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("add_dictation_entry", { text: "hello world" });
+      expect(mockInvoke).toHaveBeenCalledWith(COMMAND.addDictationEntry, { text: "hello world" });
     });
     expect(listSnippetCalls()).toBe(1);
   });

@@ -16,7 +16,8 @@ const PASTE_DELAY_MS_KEY: &str = "paste_delay_ms";
 const OLLAMA_URL_KEY: &str = "ollama_url";
 const OLLAMA_MODEL_KEY: &str = "ollama_model";
 const SUMMARY_PROVIDER_KEY: &str = "summary_provider";
-const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
+/// Read from `debug` as well, which is why this one is `pub`.
+pub const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
 const AUDIO_DEVICE_KEY: &str = "audio_device";
 const CLAMSHELL_AUDIO_DEVICE_KEY: &str = "clamshell_audio_device";
 const INPUT_PRIORITY_KEY: &str = "input_priority";
