@@ -13,6 +13,7 @@ import type {
   UpcomingMeeting,
 } from "../types";
 import type { TranscriptionModelOperationState } from "../features/transcription/state";
+import { recordingKindMode } from "../utils/recording-kind";
 
 // Settings sheet visibility (the app is otherwise a single home surface)
 let settingsOpen = $state(false);
@@ -145,16 +146,40 @@ let settings = $state<AppSettings>({
   dictation_ceiling_seconds: 300,
 });
 
-export function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {
+/** What the session UI is showing: a dictation, a meeting, or nothing. */
+export type RecordingMode = "idle" | "dictation" | "meeting";
+
+export function deriveRecordingMode(state: AppStateMachine): RecordingMode {
   switch (state.state) {
     case "recording_dictation":
       return "dictation";
     case "recording_meeting":
       return "meeting";
     case "stopping":
-      return typeof state.data.was_recording === "object" ? "meeting" : "dictation";
-    default:
+      return recordingKindMode(state.data.was_recording);
+    case "idle":
+    case "downloading":
+    case "downloaded":
+    case "loading":
+    case "ready":
+    case "unloading":
+    case "error":
       return "idle";
+  }
+}
+
+/** The mode the live session card runs in, or `null` when there is no live
+ * session. The card is only mounted inside one, so `null` never reaches it;
+ * naming the three cases is what makes a fourth recording mode a compile
+ * error rather than a silent fall into the dictation card. */
+export function liveSessionMode(mode: RecordingMode): "dictation" | "meeting" | null {
+  switch (mode) {
+    case "dictation":
+      return "dictation";
+    case "meeting":
+      return "meeting";
+    case "idle":
+      return null;
   }
 }
 
@@ -224,7 +249,14 @@ function deriveModelOperationState(state: AppStateMachine): TranscriptionModelOp
     case "downloading": return "downloading";
     case "loading": return "loading";
     case "unloading": return "unloading";
-    default: return "idle";
+    case "idle":
+    case "downloaded":
+    case "ready":
+    case "recording_dictation":
+    case "recording_meeting":
+    case "stopping":
+    case "error":
+      return "idle";
   }
 }
 

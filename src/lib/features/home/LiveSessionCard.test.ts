@@ -91,3 +91,42 @@ describe("LiveSessionCard system-audio notice (SOU-119 AC5)", () => {
     expect(screen.getByText("Checking system audio")).toBeTruthy();
   });
 });
+
+describe("LiveSessionCard system-audio dot (SOU-135 AC3)", () => {
+  function dotClass(status: SystemAudioStatus | null): string {
+    const { container } = render(LiveSessionCard, {
+      props: {
+        mode: "meeting",
+        transcription: stubTranscription() as never,
+        meeting: stubMeeting(status) as never,
+      },
+    });
+    const dot = container.querySelector(".h-1\\.5.w-1\\.5.rounded-full");
+    expect(dot).not.toBeNull();
+    return dot!.className;
+  }
+
+  const active = {
+    active: true,
+    reason: null,
+    reason_code: null,
+    samples: 48_000,
+    signal_samples: 48_000,
+  } satisfies SystemAudioStatus;
+  const unavailable = {
+    active: false,
+    reason: null,
+    reason_code: "disabled",
+    samples: 0,
+    signal_samples: 0,
+  } satisfies SystemAudioStatus;
+
+  it("gives the three states three different dots", () => {
+    const classes = [dotClass(active), dotClass(unavailable), dotClass(null)];
+    expect(new Set(classes).size).toBe(3);
+  });
+
+  it("no longer paints pending like unavailable", () => {
+    expect(dotClass(null)).not.toBe(dotClass(unavailable));
+  });
+});
