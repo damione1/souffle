@@ -30,6 +30,8 @@ const baseProps = {
   formatShortcut: (s: string) => s || "Not set",
   pillHidden: false,
   onPillHiddenChange: vi.fn(),
+  // What `getNativeShortcuts` hands the store at startup.
+  nativeShortcuts: ["Fn", "MetaRight", "F5", "F8"],
 };
 
 describe("InterfaceSettingsSection native tap banner (SOU-116)", () => {
