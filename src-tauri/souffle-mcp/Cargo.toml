@@ -14,6 +14,9 @@ path = "src/lib.rs"
 name = "souffle-mcp"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 rmcp = { version = "2.2.0", features = ["server", "macros", "transport-io", "schemars"] }
 schemars = "1.0"

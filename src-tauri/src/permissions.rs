@@ -158,7 +158,11 @@ pub fn system_audio_state_with(
 pub fn microphone_snapshot_state(live: PermState, observed_grant: bool) -> PermState {
     match live {
         PermState::Unknown if observed_grant => PermState::Granted,
-        state => state,
+        PermState::Unknown
+        | PermState::Granted
+        | PermState::Denied
+        | PermState::Unsupported
+        | PermState::NoDevice => live,
     }
 }
 
@@ -464,11 +468,13 @@ fn request_microphone_with(
             open_settings();
             PermState::Denied
         }
-        _ => match request_access() {
-            Some(true) => granted_or_no_device(has_device),
-            Some(false) => PermState::Denied,
-            None => PermState::Unknown,
-        },
+        PermState::Unknown | PermState::Unsupported | PermState::NoDevice => {
+            match request_access() {
+                Some(true) => granted_or_no_device(has_device),
+                Some(false) => PermState::Denied,
+                None => PermState::Unknown,
+            }
+        }
     }
 }
 
