@@ -19,13 +19,16 @@ describe('app store', () => {
     expect(state.downloadFile).toBe('');
     expect(state.downloadCompletedFiles).toBe(0);
     expect(state.downloadTotalFiles).toBe(0);
-    expect(state.settings.theme).toBe('light');
-    expect(state.settings.auto_paste).toBe(false);
-    expect(state.settings.transcription_engine_id).toBe('kyutai');
-    expect(state.settings.transcription_model_id).toBe('stt-1b-en_fr');
-    expect(state.settings.transcription_backend_id).toBe('candle');
-    expect(state.settings.dictation_polish_templates.every((t) => t.prompt === "")).toBe(true);
     expect(state.permissionsPanelOpen).toBe(false);
+  });
+
+  // SOU-138: the store used to carry 47 hand-written copies of
+  // `AppSettings::default()`. It now carries none, and reading settings before
+  // `loadSettingsOrDefaults` has filled them is a loud error rather than a
+  // silently wrong value.
+  it('refuses to serve settings before bootstrap has filled them', () => {
+    const state = getAppState();
+    expect(() => state.settings).toThrow(/before bootstrap/);
   });
 
   it('openMeeting sets id and navigates to the meetings view', () => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   getSettings,
+  getDefaultSettings,
   saveSettings,
   getAppVersion,
   runStartupModelFlow,
@@ -12,6 +13,7 @@ const {
   getModifierTapStatus,
 } = vi.hoisted(() => ({
   getSettings: vi.fn(),
+  getDefaultSettings: vi.fn(),
   saveSettings: vi.fn(),
   getAppVersion: vi.fn(),
   runStartupModelFlow: vi.fn(),
@@ -24,6 +26,7 @@ const {
 
 vi.mock("./api/settings", () => ({
   getSettings,
+  getDefaultSettings,
   getSystemAudioStatus,
   getModifierTapStatus,
   saveSettings,
@@ -47,7 +50,7 @@ vi.mock("./utils/theme", () => ({
   applyTheme: vi.fn(),
 }));
 
-import { LOCAL_BUILD, bootstrapAppState } from "./bootstrap";
+import { LOCAL_BUILD, bootstrapAppState, primeSettingsDefaults } from "./bootstrap";
 import { getAppState } from "./stores/app.svelte";
 import { mockRuntimeStatus, mockSettings } from "./test-helpers/fixtures";
 import { SETUP_STORAGE_KEY } from "./features/onboarding/setup";
@@ -61,6 +64,7 @@ describe("bootstrapAppState what's new", () => {
     app.settings = { ...mockSettings };
     app.showOnboarding = false;
     getSettings.mockResolvedValue({ ...mockSettings });
+    getDefaultSettings.mockResolvedValue({ ...mockSettings });
     saveSettings.mockResolvedValue(undefined);
     getAppVersion.mockResolvedValue("0.4.0");
     runStartupModelFlow.mockResolvedValue(undefined);
@@ -146,6 +150,7 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
     app.downloadedBytes = 0;
     app.downloadTotalBytes = null;
     getSettings.mockResolvedValue({ ...mockSettings });
+    getDefaultSettings.mockResolvedValue({ ...mockSettings });
     saveSettings.mockResolvedValue(undefined);
     getAppVersion.mockResolvedValue("0.4.0");
     runStartupModelFlow.mockResolvedValue(undefined);
@@ -284,5 +289,46 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
     pillRelease.mockRejectedValueOnce(new Error("backend busy"));
 
     await expect(bootstrapAppState(app)).resolves.toEqual({ whatsNew: null });
+  });
+});
+
+describe("primeSettingsDefaults (SOU-138)", () => {
+  const app = getAppState();
+
+  beforeEach(() => {
+    getSettings.mockReset();
+    getDefaultSettings.mockReset();
+  });
+
+  it("seeds the store from the backend's own defaults, reading no database", async () => {
+    getDefaultSettings.mockResolvedValue({ ...mockSettings, theme: "light" });
+
+    await primeSettingsDefaults(app);
+
+    expect(app.settings.theme).toBe("light");
+    expect(getDefaultSettings).toHaveBeenCalledOnce();
+    // The authoritative read belongs to bootstrapAppState, not here.
+    expect(getSettings).not.toHaveBeenCalled();
+  });
+
+  it("leaves the seeded defaults in place when the stored settings cannot be read", async () => {
+    getDefaultSettings.mockResolvedValue({ ...mockSettings });
+    getSettings.mockRejectedValue(new Error("no settings row yet"));
+
+    await primeSettingsDefaults(app);
+    await expect(bootstrapAppState(app)).rejects.toThrow();
+
+    expect(app.settings).toEqual(mockSettings);
+  });
+
+  it("reads the stored settings exactly once on the happy path", async () => {
+    getDefaultSettings.mockResolvedValue({ ...mockSettings });
+    getSettings.mockResolvedValue({ ...mockSettings, theme: "dark" });
+
+    await primeSettingsDefaults(app);
+    await bootstrapAppState(app);
+
+    expect(getSettings).toHaveBeenCalledOnce();
+    expect(app.settings.theme).toBe("dark");
   });
 });

@@ -139,6 +139,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::pill_hold,
             commands::pill_release,
             commands::get_settings,
+            commands::get_default_settings,
             commands::save_settings,
             commands::open_apple_intelligence_settings,
             commands::save_shortcuts,

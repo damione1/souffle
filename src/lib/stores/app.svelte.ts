@@ -78,72 +78,11 @@ let downloadTotalFiles = $state(0);
 let downloadedBytes = $state(0);
 let downloadTotalBytes = $state<number | null>(null);
 
-// Settings with defaults matching AppSettings::default() in src-tauri/src/settings.rs.
-// getSettings() overwrites these on every successful bootstrap; these are only
-// active if the backend is unreachable on first launch (onboarding flow).
-let settings = $state<AppSettings>({
-  theme: "light",
-  locale: "",
-  auto_paste: false,
-  paste_delay_ms: 100,
-  paste_method: "clipboard",
-  ollama_url: "http://localhost:11434",
-  summary_provider: "auto",
-  ollama_model: "",
-  debug_transcription: false,
-  log_level: "info",
-  audio_device: null,
-  clamshell_audio_device: null,
-  input_priority: { priorities: [], hidden: [], known: [] },
-  allow_bluetooth_mic: false,
-  // Matches KYUTAI_ENGINE_ID / KYUTAI_MODEL_ID / CANDLE_BACKEND_ID in engine/mod.rs
-  transcription_engine_id: "kyutai",
-  transcription_model_id: "stt-1b-en_fr",
-  transcription_backend_id: "candle",
-  vad_enabled: true,
-  filler_removal: true,
-  stutter_collapse: false,
-  dictionary_correction: true,
-  capture_system_audio: true,
-  calendar_integration_enabled: false,
-  calendar_selected_ids: [],
-  calendar_reminder_minutes: 2,
-  calendar_autostart_enabled: true,
-  feedback_sounds_enabled: true,
-  pill_hidden: false,
-  feedback_sounds_volume: 70,
-  model_unload_timeout_minutes: 60,
-  meeting_autostop_enabled: true,
-  meeting_autostop_minutes: 10,
-  meeting_max_duration_minutes: 240,
-  autostart_enabled: false,
-  meeting_audio_retention: "off",
-  meeting_transcription_language: "auto",
-  dictation_polish_enabled: true,
-  dictation_polish_template_id: "clean",
-  // Fallback only, used when getSettings() has not yet succeeded. Prompts
-  // are empty on purpose: merge_polish_templates keeps a stored empty prompt
-  // (it is not in the superseded-builtin list), but effective_template_prompt
-  // falls back to the shipped defaults at polish time, so a bootstrap-failure
-  // path cannot persist the old stub one-liners as the live polish text.
-  dictation_polish_templates: [
-    { id: "clean", label: "Clean up", prompt: "" },
-    { id: "email", label: "Professional email", prompt: "" },
-    { id: "bullets", label: "Bullet points", prompt: "" },
-    { id: "no_fillers", label: "Remove fillers", prompt: "" },
-  ],
-  auto_update_check_enabled: true,
-  dictation_learn_from_edit: true,
-  default_summary_template_id: "default",
-  // Stub prompts: same rationale as dictation_polish_templates above.
-  summary_templates: [
-    { id: "default", name: "Default", prompt: "" },
-    { id: "detailed_minutes", name: "Detailed minutes", prompt: "" },
-    { id: "brief_overview", name: "Brief overview", prompt: "" },
-  ],
-  last_seen_version: "",
-  dictation_ceiling_seconds: 300,
-});
+// No default written here: `AppSettings::default()` in src-tauri/src/settings.rs
+// is the only declaration, and it reaches the webview through
+// `get_default_settings`. `main.ts` fills this in before mounting, so the
+// getter below never sees null in the running app.
+let settings = $state<AppSettings | null>(null);
 
 export function deriveRecordingMode(state: AppStateMachine): "idle" | "dictation" | "meeting" {
   switch (state.state) {
@@ -248,7 +187,14 @@ export function getAppState() {
     get currentMeetingId() { return currentMeetingId; },
     set currentMeetingId(id: string | null) { currentMeetingId = id; },
 
-    get settings() { return settings; },
+    get settings(): AppSettings {
+      if (settings === null) {
+        throw new Error(
+          "app settings read before bootstrap: main.ts awaits loadSettingsOrDefaults() before mounting",
+        );
+      }
+      return settings;
+    },
     set settings(s: AppSettings) { settings = s; },
 
     get selectedDevice() { return selectedDevice; },
@@ -268,7 +214,11 @@ export function getAppState() {
       // Only when the machine is talking about the selected model: otherwise a
       // stray event would report the *old* model's phase (e.g. "ready") for a
       // model the user just picked and that still needs a download or a load.
-      if (deriveModelOperationState(s) === "idle" && machineMatchesSelection(s, settings)) {
+      if (
+        settings !== null
+        && deriveModelOperationState(s) === "idle"
+        && machineMatchesSelection(s, settings)
+      ) {
         transcriptionRuntimePhase = deriveRuntimePhase(s);
       }
       // Health snapshots only make sense while recording

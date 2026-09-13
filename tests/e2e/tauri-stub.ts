@@ -43,6 +43,10 @@ import {
 export const DEFAULT_RESPONSES: Record<string, unknown> = {
   get_machine_state: { state: "ready", data: { profile: mockRuntimeStatus.profile } },
   get_settings: { ...mockSettings, audio_device: null, last_seen_version: "" },
+  // `main.ts` awaits this before mounting: the settings store holds no
+  // hand-written defaults any more, so an unstubbed answer here means the app
+  // never renders (SOU-138).
+  get_default_settings: { ...mockSettings, audio_device: null, last_seen_version: "" },
   save_settings: null,
   get_transcription_catalog: mockCatalog,
   get_model_status: mockRuntimeStatus,

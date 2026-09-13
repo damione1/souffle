@@ -1,4 +1,5 @@
 import {
+  getDefaultSettings,
   getSettings,
   getModifierTapStatus,
   getSystemAudioStatus,
@@ -21,6 +22,20 @@ export type BootstrapResult = {
  * checkout the release workflow never stamped. */
 export const LOCAL_BUILD = "local build";
 
+/** Seed the settings store with the shipped defaults, before anything can
+ * read it.
+ *
+ * `AppSettings::default()` in Rust is the only declaration of those values;
+ * `get_default_settings` reads no database, so it answers even on a first
+ * launch, which is the one case the store's old hand-written copy existed for.
+ * `bootstrapAppState` still does the authoritative `getSettings()` read a
+ * moment later and overwrites this. */
+export async function primeSettingsDefaults(
+  app: ReturnType<typeof getAppState>,
+): Promise<void> {
+  app.settings = await getDefaultSettings();
+}
+
 export async function bootstrapAppState(
   app: ReturnType<typeof getAppState>,
 ): Promise<BootstrapResult> {
@@ -34,6 +49,9 @@ export async function bootstrapAppState(
 
   await resyncAfterReload(app);
 
+  // Throws on a first launch, which is the signal the caller turns into the
+  // setup wizard. The store keeps the defaults `primeSettingsDefaults` put
+  // there, so nothing downstream reads a value the frontend invented.
   const settings = await getSettings();
   app.settings = settings;
   app.selectedDevice = settings.audio_device ?? "";

@@ -194,6 +194,18 @@ pub fn save_shortcuts(
     Ok(())
 }
 
+/// The shipped defaults, with nothing read from the database.
+///
+/// `get_settings` returns the *effective* settings, so it is no help when the
+/// database does not exist yet. The webview needs a starting point before its
+/// first successful read, and this is it: `AppSettings::default()` stays the
+/// only declaration of those values.
+#[tauri::command]
+#[specta::specta]
+pub fn get_default_settings() -> AppSettings {
+    AppSettings::default()
+}
+
 /// Get current shortcut settings
 #[tauri::command]
 #[specta::specta]

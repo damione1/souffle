@@ -11,6 +11,13 @@ export async function getSettings(): Promise<AppSettings> {
   return unwrap(commands.getSettings());
 }
 
+/** The shipped defaults, read from `AppSettings::default()` with nothing from
+ * the database. The store starts from these until `getSettings()` succeeds,
+ * which is why the frontend no longer writes any default value of its own. */
+export async function getDefaultSettings(): Promise<AppSettings> {
+  return commands.getDefaultSettings();
+}
+
 export async function saveSettings(settings: AppSettings): Promise<void> {
   await unwrap(commands.saveSettings(settings));
 }
