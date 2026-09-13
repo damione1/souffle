@@ -28,8 +28,19 @@
     return Math.min(100, Math.round((status.downloaded_bytes / status.total_bytes) * 100));
   });
 
+  /** One i18n key per blocking reason. Adding a variant in Rust fails
+   * `npm run check` here instead of producing a missing key at runtime. */
+  const BLOCK_LABEL_KEY: Record<InstallBlockReason, string> = {
+    recording_dictation: "update_available.blocked_recording_dictation",
+    recording_meeting: "update_available.blocked_recording_meeting",
+    stopping: "update_available.blocked_stopping",
+    downloading: "update_available.blocked_downloading",
+    loading: "update_available.blocked_loading",
+    unloading: "update_available.blocked_unloading",
+  };
+
   function blockLabel(reason: InstallBlockReason): string {
-    return $t(`update_available.blocked_${reason}`);
+    return $t(BLOCK_LABEL_KEY[reason]);
   }
 
   const btnClass = $derived(compact ? "text-xs text-accent hover:underline cursor-pointer" : "btn btn-active");

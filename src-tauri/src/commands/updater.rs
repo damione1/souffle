@@ -473,6 +473,25 @@ mod tests {
     }
 
     #[test]
+    fn install_block_reason_wire_encoding_matches_as_str() {
+        for reason in [
+            InstallBlockReason::RecordingDictation,
+            InstallBlockReason::RecordingMeeting,
+            InstallBlockReason::Stopping,
+            InstallBlockReason::Downloading,
+            InstallBlockReason::Loading,
+            InstallBlockReason::Unloading,
+        ] {
+            let json = serde_json::to_string(&reason).unwrap();
+            assert_eq!(json, format!("\"{}\"", reason.as_str()));
+            assert_eq!(
+                serde_json::from_str::<InstallBlockReason>(&json).unwrap(),
+                reason
+            );
+        }
+    }
+
+    #[test]
     fn install_is_allowed_when_idle_ready_or_error() {
         let p = profile();
         assert!(install_blocked_reason(&AppStateMachine::Idle).is_none());

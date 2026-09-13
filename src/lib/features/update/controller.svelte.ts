@@ -13,21 +13,7 @@ import {
 import { openReleasePage } from "../../api/diagnostics";
 import { errorMessage } from "../../utils";
 import { getAppState } from "../../stores/app.svelte";
-
-/** Machine states that must disable Install (mirrors Rust `install_blocked_reason`). */
-const BLOCKING_STATES = new Set([
-  "recording_dictation",
-  "recording_meeting",
-  "stopping",
-  "downloading",
-  "loading",
-  "unloading",
-]);
-
-function blockFromMachine(state: string): InstallBlockReason | null {
-  if (!BLOCKING_STATES.has(state)) return null;
-  return state as InstallBlockReason;
-}
+import { blockFromMachine } from "./install-block";
 
 function idleStatus(): UpdateDownloadStatus {
   return {
