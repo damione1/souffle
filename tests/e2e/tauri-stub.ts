@@ -48,6 +48,14 @@ export const DEFAULT_RESPONSES: Record<string, unknown> = {
   get_model_status: mockRuntimeStatus,
   get_app_version: "0.1.0",
   get_shortcuts: mockShortcuts,
+  // The settings controller reads this to build its numeric dropdowns. The
+  // stub returns null for an unknown command, which would leave them empty
+  // (SOU-140).
+  get_settings_options: {
+    model_unload_timeout_minutes: [0, 5, 15, 60],
+    meeting_autostop_minutes: [5, 10, 15, 30],
+    meeting_max_duration_minutes: [120, 240, 480],
+  },
   check_summary_providers: mockSummaryProvidersStatus,
   list_todays_calendar_events: [],
   list_calendars: [],
