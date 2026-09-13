@@ -22,7 +22,7 @@ pub fn init_from_db(db: &Database) {
         return;
     }
 
-    if let Ok(Some(value)) = db.get_setting("debug_transcription")
+    if let Ok(Some(value)) = db.get_setting(crate::settings::DEBUG_TRANSCRIPTION_KEY)
         && let Some(enabled) = parse_bool(&value)
     {
         set_transcription_debug(enabled);
