@@ -226,6 +226,15 @@ pub fn get_native_shortcuts() -> Vec<String> {
         .collect()
 }
 
+/// The numeric choices the settings UI may offer. Declared in
+/// `settings::SettingsOptions`, next to the bounds `sanitize_for_save`
+/// validates them against, so the components do not restate them.
+#[tauri::command]
+#[specta::specta]
+pub fn get_settings_options() -> crate::settings::SettingsOptions {
+    crate::settings::SettingsOptions::current()
+}
+
 /// Last native PTT `CGEventTap` install status, for a webview that reloaded
 /// after the `ModifierTapStatus` event already fired (SOU-116). `None` before
 /// the first install attempt (including the startup delay).

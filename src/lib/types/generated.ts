@@ -73,6 +73,14 @@ async getNativeShortcuts() : Promise<string[]> {
     return await TAURI_INVOKE("get_native_shortcuts");
 },
 /**
+ * The numeric choices the settings UI may offer. Declared in
+ * `settings::SettingsOptions`, next to the bounds `sanitize_for_save`
+ * validates them against, so the components do not restate them.
+ */
+async getSettingsOptions() : Promise<SettingsOptions> {
+    return await TAURI_INVOKE("get_settings_options");
+},
+/**
  * Delete a downloaded model from disk.
  */
 async deleteModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {
@@ -1764,6 +1772,12 @@ export type SearchResult = { source_type: SearchSource; source_id: string; snipp
  * spelling them themselves.
  */
 export type SearchSource = "meeting" | "dictation"
+/**
+ * The numeric choices the settings UI may offer, served from the same file
+ * that validates them. `sanitize_for_save` alone decides what is acceptable;
+ * this is how the UI finds out instead of restating it.
+ */
+export type SettingsOptions = { model_unload_timeout_minutes: number[]; meeting_autostop_minutes: number[]; meeting_max_duration_minutes: number[] }
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
