@@ -33,7 +33,7 @@
   import { getAppState, deriveRecordingMode } from "./lib/stores/app.svelte";
   import { getPermissionStatus } from "./lib/api/permissions";
   import { openSettings } from "./lib/features/settings/open";
-  import { applyTheme, errorMessage } from "./lib/utils";
+  import { applyTheme, errorMessage, recordingKindMode } from "./lib/utils";
   import { micToast, micToastCopy } from "./lib/features/audio/mic-toast.svelte";
   import { decideShowSetupWizard, readSetupFlags } from "./lib/features/onboarding/setup";
   import { loadAfterOrphanedDownload } from "./lib/features/transcription/runtime";
@@ -124,8 +124,14 @@
       case "recording_meeting":
         return "meeting";
       case "stopping":
-        return typeof state.data.was_recording === "object" ? "meeting" : "dictation";
-      default:
+        return recordingKindMode(state.data.was_recording);
+      case "idle":
+      case "downloading":
+      case "downloaded":
+      case "loading":
+      case "ready":
+      case "unloading":
+      case "error":
         return null;
     }
   }

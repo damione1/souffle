@@ -14,7 +14,7 @@
   import { createTimelineController } from "../features/timeline/controller.svelte";
   import TimelineSection from "../features/timeline/components/TimelineSection.svelte";
   import { createTranscriptionController } from "../features/transcription/controller.svelte";
-  import { deriveRecordingMode } from "../stores/app.svelte";
+  import { deriveRecordingMode, liveSessionMode } from "../stores/app.svelte";
   import StatusBanner from "./ui/StatusBanner.svelte";
   import StatusChip from "./ui/StatusChip.svelte";
   import { openSettings } from "../features/settings/open";
@@ -194,11 +194,10 @@
       />
     {:else}
       <!-- During a live session, the session card is the only focus. -->
-      <LiveSessionCard
-        mode={recordingMode === "meeting" ? "meeting" : "dictation"}
-        {transcription}
-        {meeting}
-      />
+      {@const liveMode = liveSessionMode(recordingMode)}
+      {#if liveMode}
+        <LiveSessionCard mode={liveMode} {transcription} {meeting} />
+      {/if}
     {/if}
   {/if}
 </div>
