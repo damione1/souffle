@@ -175,6 +175,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_release_notes_for_version,
             commands::get_app_version,
             commands::open_release_page,
+            commands::get_update_download_status,
+            commands::get_update_install_block,
+            commands::download_update,
+            commands::cancel_update_download,
+            commands::install_update,
         ])
         .events(collect_events![
             app_events::Navigate,
@@ -203,6 +208,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::InputPinUnavailable,
             app_events::InputRouteNotice,
             app_events::UpdateAvailable,
+            app_events::UpdateDownloadProgress,
         ])
 }
 
@@ -291,6 +297,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::new(cmd_tx, engine_actor, database, audio_rms))
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
