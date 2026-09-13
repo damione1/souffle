@@ -10,6 +10,9 @@ edition = "2024"
 name = "tts-fixtures"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 hound = "3.5"
 serde = { version = "1", features = ["derive"] }

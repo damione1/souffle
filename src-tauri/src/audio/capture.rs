@@ -991,7 +991,12 @@ fn mid_session_tap_reason(error: &str) -> crate::app_events::SystemAudioReason {
     use crate::app_events::SystemAudioReason;
     match crate::audio::system_tap::failure_reason(error) {
         reason @ (SystemAudioReason::PermissionDenied | SystemAudioReason::Unsupported) => reason,
-        _ => SystemAudioReason::TapLost,
+        SystemAudioReason::Silent
+        | SystemAudioReason::NoSamples
+        | SystemAudioReason::TapLost
+        | SystemAudioReason::StartFailed
+        | SystemAudioReason::ProbeFailed
+        | SystemAudioReason::Disabled => SystemAudioReason::TapLost,
     }
 }
 

@@ -35,6 +35,12 @@
 //! instead of through the outer AppHandle-spawning wrapper. Everything
 //! except that background-task glue itself is exercised.
 
+// `other => panic!("expected X, got {other:?}")` is the assertion itself here:
+// a new variant makes the test fail loudly with the state it actually saw,
+// which is the property the lint protects, reached another way. Enumerating
+// nine variants per assertion would bury it.
+#![allow(clippy::wildcard_enum_match_arm)]
+
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};

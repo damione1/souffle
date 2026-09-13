@@ -91,14 +91,14 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
             let mut lock = state.modifier_toggle_shortcut.write().unwrap();
             *lock = match toggle_target {
                 ShortcutRegistrationTarget::Native => Some(shortcuts.toggle.clone()),
-                _ => None,
+                ShortcutRegistrationTarget::None | ShortcutRegistrationTarget::Plugin => None,
             };
         }
         {
             let mut lock = state.modifier_ptt_shortcut.write().unwrap();
             *lock = match ptt_target {
                 ShortcutRegistrationTarget::Native => Some(shortcuts.push_to_talk.clone()),
-                _ => None,
+                ShortcutRegistrationTarget::None | ShortcutRegistrationTarget::Plugin => None,
             };
         }
         // Key-repeat latch for Toggle. Do not touch `ptt_start_armed`: a
