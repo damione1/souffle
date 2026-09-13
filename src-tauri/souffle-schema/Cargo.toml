@@ -1,0 +1,18 @@
+[package]
+name = "souffle-schema"
+version = "0.1.0"
+description = "Types and schema version shared by the Souffle app and its read-only MCP sidecar"
+authors = ["Damien Goehrig"]
+license = "GPL-3.0-or-later"
+edition = "2024"
+
+[lib]
+name = "souffle_schema"
+path = "src/lib.rs"
+
+# Deliberately tiny: this crate is pulled into the standalone MCP sidecar,
+# which must build and run without Tauri or any inference engine.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+schemars = "1.0"

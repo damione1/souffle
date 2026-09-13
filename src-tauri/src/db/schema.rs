@@ -4,9 +4,9 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 16: `meetings.system_audio` holds what the system-audio
-/// leg did over the recording, so a mic-only meeting still says why.
-pub const SCHEMA_VERSION: i64 = 16;
+/// Declared in `souffle-schema` so the read-only MCP sidecar builds against
+/// the same number and can refuse a database that has moved past it.
+pub use souffle_schema::SCHEMA_VERSION;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
