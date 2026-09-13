@@ -1734,7 +1734,16 @@ export type RepairAccessibilityResult = { reset_performed: boolean; prompt_shown
 /**
  * Search result from FTS5 full-text search
  */
-export type SearchResult = { source_type: string; source_id: string; snippet: string; rank: number }
+export type SearchResult = { source_type: SearchSource; source_id: string; snippet: string; rank: number }
+/**
+ * Which table a full-text hit came from.
+ * 
+ * The strings are the on-disk encoding of the `text_search.source_type`
+ * column, written by every version of the app, so they cannot change without
+ * a migration. Declaring them here is what stops the thirteen SQL sites from
+ * spelling them themselves.
+ */
+export type SearchSource = "meeting" | "dictation"
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }

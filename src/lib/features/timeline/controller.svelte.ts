@@ -4,7 +4,12 @@ import {
   listDictationEntries,
 } from "../../api/transcription";
 import { getAppState } from "../../stores/app.svelte";
-import type { AppStateMachine, DictationEntry, MeetingListItem } from "../../types";
+import type {
+  AppStateMachine,
+  DictationEntry,
+  MeetingListItem,
+  SearchSource,
+} from "../../types";
 import {
   createDebouncedSearch,
   errorMessage,
@@ -12,7 +17,9 @@ import {
 } from "../../utils";
 
 export interface TimelineItem {
-  kind: "dictation" | "meeting";
+  /** Which store the row came from, typed on the contract's own search
+   * source so a third one cannot appear here unannounced. */
+  kind: SearchSource;
   id: string;
   /** Meeting title, or the dictation text (also used as the excerpt). */
   title: string;
@@ -86,7 +93,10 @@ export function groupByDay(items: TimelineItem[]): TimelineGroup[] {
   return groups;
 }
 
-export type TimelineKindFilter = "all" | "meeting" | "dictation";
+/** UI filter: the contract's sources plus an "all" pseudo-value that only
+ * exists in the timeline. Composed on `SearchSource` so a new source in Rust
+ * shows up here instead of being silently unreachable. */
+export type TimelineKindFilter = "all" | SearchSource;
 
 function createTimelineControllerInstance() {
   const app = getAppState();
@@ -113,13 +123,11 @@ function createTimelineControllerInstance() {
     if (!query) return byKind;
 
     if (search.results.length > 0) {
-      const matchedDictations = matchedIdsForType(search.results, "dictation");
-      const matchedMeetings = matchedIdsForType(search.results, "meeting");
-      return byKind.filter((item) =>
-        item.kind === "dictation"
-          ? matchedDictations.has(item.id)
-          : matchedMeetings.has(item.id),
-      );
+      const matchedIds: Record<SearchSource, Set<string>> = {
+        dictation: matchedIdsForType(search.results, "dictation"),
+        meeting: matchedIdsForType(search.results, "meeting"),
+      };
+      return byKind.filter((item) => matchedIds[item.kind].has(item.id));
     }
 
     return byKind.filter((item) => item.title.toLowerCase().includes(query));
