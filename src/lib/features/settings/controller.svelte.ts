@@ -5,6 +5,7 @@ import {
 } from "../../api/transcription";
 import {
   getSettings,
+  getSettingsOptions,
   getShortcuts,
   getSystemAudioSupport,
   isLaptop as checkIsLaptop,
@@ -42,6 +43,7 @@ import type {
   SummaryProviderChoice,
   ShortcutSettings,
   Theme,
+  SettingsOptions,
   TranscriptionCatalog,
 } from "../../types";
 import { applyTheme, errorMessage, formatShortcutLabel, keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "../../utils";
@@ -93,6 +95,7 @@ export function createSettingsController() {
   let ollamaPullError = $state("");
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
+  let settingsOptions = $state<SettingsOptions | null>(null);
 
   let toggleShortcut = $state("CommandOrControl+Shift+Space");
   let pttShortcut = $state("");
@@ -119,6 +122,7 @@ export function createSettingsController() {
       refreshDevices(),
       refreshSummaryProviders(),
       loadCatalog(),
+      loadSettingsOptions(),
       loadDictionary(),
       refreshSnippets(),
       loadCalendars(),
@@ -134,6 +138,14 @@ export function createSettingsController() {
       app.selectedDevice = settings.audio_device ?? "";
     } catch (e) {
       console.warn("Failed to load settings:", e);
+    }
+  }
+
+  async function loadSettingsOptions() {
+    try {
+      settingsOptions = await getSettingsOptions();
+    } catch (e) {
+      statusMessage = errorMessage(e);
     }
   }
 
@@ -1047,6 +1059,7 @@ export function createSettingsController() {
     get ollamaPullError() { return ollamaPullError; },
     get statusMessage() { return statusMessage; },
     get catalog() { return catalog; },
+    get settingsOptions() { return settingsOptions; },
     get runtimePhase() { return app.transcriptionRuntimePhase; },
     get modelOperationState() { return app.transcriptionModelOperationState; },
     get downloadFile() { return app.downloadFile; },

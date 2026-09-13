@@ -3,6 +3,7 @@ import type {
   AppSettings,
   AudioInputDevice,
   ModifierTapStatus,
+  SettingsOptions,
   ShortcutSettings,
   SystemAudioStatus,
 } from "../types";
@@ -13,6 +14,12 @@ export async function getSettings(): Promise<AppSettings> {
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
   await unwrap(commands.saveSettings(settings));
+}
+
+/** The numeric choices the settings UI may offer. Declared once in
+ * `settings::SettingsOptions`, beside the bounds that validate them. */
+export async function getSettingsOptions(): Promise<SettingsOptions> {
+  return commands.getSettingsOptions();
 }
 
 export async function getShortcuts(): Promise<ShortcutSettings> {
