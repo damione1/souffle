@@ -364,6 +364,28 @@ pub struct UpdateAvailable {
     pub release_url: Option<String>,
 }
 
+/// Phase of the in-app updater download pipeline (not the app state machine).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdatePhase {
+    Idle,
+    Downloading,
+    Ready,
+    Failed,
+}
+
+/// Progress / phase of an in-app update download. Source of truth is Rust;
+/// the webview mirrors this (and can re-query after reload).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct UpdateDownloadProgress {
+    pub phase: UpdatePhase,
+    pub version: Option<String>,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub error: Option<String>,
+    pub manual_fallback: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

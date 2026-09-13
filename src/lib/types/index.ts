@@ -75,6 +75,10 @@ export type {
   TranscriptionSegment,
   SearchResult,
   UpdateCheckResult,
+  UpdateDownloadStatus,
+  UpdatePhase,
+  InstallBlockReason,
+  UpdateDownloadProgress,
 } from "./generated";
 
 /** Who produced a transcript segment: "me" (microphone) or "them"

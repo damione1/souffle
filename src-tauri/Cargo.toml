@@ -130,6 +130,7 @@ core-graphics = "0.25.0"
 core-foundation = "0.10.1"
 objc2-service-management = "0.3"
 fdaf-aec = "0.1.0"
+tauri-plugin-updater = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility-sys = "0.2"

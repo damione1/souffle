@@ -2,6 +2,8 @@
   import { t } from "svelte-i18n";
   import { openReleasePage } from "../../api/diagnostics";
   import { renderReleaseNotesMarkdown } from "../../utils";
+  import UpdateAction from "../update/UpdateAction.svelte";
+  import { useUpdateController } from "../update/controller.svelte";
 
   let {
     version,
@@ -14,6 +16,8 @@
     releaseUrl: string | null;
     onDismiss: () => void;
   } = $props();
+
+  useUpdateController();
 
   // renderReleaseNotesMarkdown escapes all input text and emits only a fixed
   // set of tags, so this HTML is safe to inject (see its module docs).
@@ -29,8 +33,8 @@
     void openReleasePage(anchor.href);
   }
 
-  function download() {
-    if (releaseUrl) void openReleasePage(releaseUrl);
+  // Dismiss is always safe: download continues in Rust if in flight.
+  function dismiss() {
     onDismiss();
   }
 </script>
@@ -59,15 +63,11 @@
       </div>
     {/if}
 
-    <div class="flex justify-end gap-2">
-      <button onclick={onDismiss} class="btn">
+    <div class="flex justify-end gap-2 items-start">
+      <button onclick={dismiss} class="btn">
         {$t("update_available.later")}
       </button>
-      {#if releaseUrl}
-        <button onclick={download} class="btn btn-active">
-          {$t("update_available.download")}
-        </button>
-      {/if}
+      <UpdateAction {releaseUrl} />
     </div>
   </div>
 </div>

@@ -62,6 +62,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "createUpdaterArtifacts": true,
     "macOS": {
       "entitlements": "./entitlements.plist",
       "minimumSystemVersion": "13.0",
@@ -71,5 +72,12 @@
       ]
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRCNEIzOEFGNTQwMUM1RkIKUldUN3hRRlVyemhMUzBqLzZuSWpCY2RtYnM0djNQUHZvdkFGNWxNVFA1d1hUZllDUjFJK3NPZzMK",
+      "endpoints": [
+        "https://github.com/damione1/souffle/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

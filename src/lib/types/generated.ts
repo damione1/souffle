@@ -1082,6 +1082,63 @@ async openReleasePage(url: string) : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Snapshot of the in-flight / ready update download. Source of truth for the UI.
+ */
+async getUpdateDownloadStatus() : Promise<Result<UpdateDownloadStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_update_download_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Why install is currently refused, if it is. Pure read — no side effects.
+ */
+async getUpdateInstallBlock() : Promise<Result<InstallBlockReason | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_update_install_block") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Start downloading the updater artifact. Detection has already happened via
+ * `update_check`; this only obtains a plugin handle and fetches bytes.
+ */
+async downloadUpdate() : Promise<Result<UpdateDownloadStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("download_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Abandon an in-flight download. No-op if nothing is downloading.
+ */
+async cancelUpdateDownload() : Promise<Result<UpdateDownloadStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_update_download") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Replace the on-disk bundle and restart. Refuses before any side effect when
+ * the state machine is busy.
+ */
+async installUpdate() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -1114,7 +1171,8 @@ systemWokeUp: SystemWokeUp,
 todayCalendarUpdated: TodayCalendarUpdated,
 transcriptionHealth: TranscriptionHealth,
 upcomingMeeting: UpcomingMeeting,
-updateAvailable: UpdateAvailable
+updateAvailable: UpdateAvailable,
+updateDownloadProgress: UpdateDownloadProgress
 }>({
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
@@ -1141,7 +1199,8 @@ systemWokeUp: "system-woke-up",
 todayCalendarUpdated: "today-calendar-updated",
 transcriptionHealth: "transcription-health",
 upcomingMeeting: "upcoming-meeting",
-updateAvailable: "update-available"
+updateAvailable: "update-available",
+updateDownloadProgress: "update-download-progress"
 })
 
 /** user-defined constants **/
@@ -1476,6 +1535,10 @@ export type InputRouteReason =
  * Capture device gone (and maybe no replacement yet).
  */
 "lost"
+/**
+ * Why "Install and restart" must stay disabled / refuse before any side effect.
+ */
+export type InstallBlockReason = "recording_dictation" | "recording_meeting" | "stopping" | "downloading" | "loading" | "unloading"
 /**
  * A device remembered across disconnects for display and preference ordering.
  */
@@ -1887,6 +1950,20 @@ export type UpcomingMeeting = { event: CalendarEvent; starts_in_seconds: number;
  */
 export type UpdateAvailable = { latest_version: string; release_notes: string | null; release_url: string | null }
 export type UpdateCheckResult = { current_version: string; latest_version: string | null; update_available: boolean; release_notes: string | null; release_url: string | null; check_error: string | null }
+/**
+ * Progress / phase of an in-app update download. Source of truth is Rust;
+ * the webview mirrors this (and can re-query after reload).
+ */
+export type UpdateDownloadProgress = { phase: UpdatePhase; version: string | null; downloaded_bytes: number; total_bytes: number | null; error: string | null; manual_fallback: boolean }
+export type UpdateDownloadStatus = { phase: UpdatePhase; version: string | null; downloaded_bytes: number; total_bytes: number | null; error: string | null; 
+/**
+ * Offer the GitHub release-page fallback when true.
+ */
+manual_fallback: boolean }
+/**
+ * Phase of the in-app updater download pipeline (not the app state machine).
+ */
+export type UpdatePhase = "idle" | "downloading" | "ready" | "failed"
 
 /** tauri-specta globals **/
 

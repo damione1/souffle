@@ -13,6 +13,7 @@ mod pill;
 mod settings;
 mod snippets;
 pub(crate) mod transcription;
+pub mod updater;
 
 pub use audio::*;
 pub use calendar::*;
@@ -29,3 +30,4 @@ pub use pill::*;
 pub use settings::*;
 pub use snippets::*;
 pub use transcription::*;
+pub use updater::*;
