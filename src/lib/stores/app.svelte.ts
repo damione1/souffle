@@ -63,6 +63,10 @@ let systemAudioStatus = $state<SystemAudioStatus | null>(null);
 // Native single-key PTT CGEventTap install status (SOU-116)
 let modifierTapStatus = $state<ModifierTapStatus | null>(null);
 
+// Accelerators the CGEventTap handles, read once from the backend so the
+// settings UI does not keep its own copy of the list (SOU-139).
+let nativeShortcuts = $state<string[]>([]);
+
 // Calendar reminder awaiting the user's decision (drives the home banner)
 let upcomingMeeting = $state<UpcomingMeeting | null>(null);
 
@@ -270,6 +274,8 @@ export function getAppState() {
     set systemAudioStatus(s: SystemAudioStatus | null) { systemAudioStatus = s; },
     get modifierTapStatus() { return modifierTapStatus; },
     set modifierTapStatus(s: ModifierTapStatus | null) { modifierTapStatus = s; },
+    get nativeShortcuts() { return nativeShortcuts; },
+    set nativeShortcuts(s: string[]) { nativeShortcuts = s; },
     get upcomingMeeting() { return upcomingMeeting; },
     set upcomingMeeting(u: UpcomingMeeting | null) { upcomingMeeting = u; },
 

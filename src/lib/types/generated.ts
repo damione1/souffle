@@ -64,6 +64,15 @@ async getModifierTapStatus() : Promise<ModifierTapStatus | null> {
     return await TAURI_INVOKE("get_modifier_tap_status");
 },
 /**
+ * Accelerators that are registered through the `CGEventTap` rather than
+ * `tauri-plugin-global-shortcut`. The settings UI needs the list to warn that
+ * a binding will require Accessibility; exposing it here is what keeps
+ * `src/lib/utils/shortcut.ts` from maintaining a second copy.
+ */
+async getNativeShortcuts() : Promise<string[]> {
+    return await TAURI_INVOKE("get_native_shortcuts");
+},
+/**
  * Delete a downloaded model from disk.
  */
 async deleteModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {

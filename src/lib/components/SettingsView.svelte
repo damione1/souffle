@@ -288,6 +288,7 @@
         recordingField={controller.recordingField}
         shortcutError={controller.shortcutError}
         modifierTapStatus={controller.app.modifierTapStatus}
+        nativeShortcuts={controller.app.nativeShortcuts}
         onThemeChange={controller.onThemeChange}
         onLocaleChange={controller.onLocaleChange}
         onAutoPasteChange={controller.onAutoPasteChange}
