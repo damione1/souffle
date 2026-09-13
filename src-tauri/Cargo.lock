@@ -6663,6 +6663,7 @@ dependencies = [
  "sha2",
  "souffle",
  "souffle-mcp",
+ "souffle-schema",
  "specta",
  "specta-typescript",
  "strsim",
@@ -6699,9 +6700,19 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "souffle-schema",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "souffle-schema"
+version = "0.1.0"
+dependencies = [
+ "schemars 1.2.1",
+ "serde",
+ "specta",
 ]
 
 [[package]]

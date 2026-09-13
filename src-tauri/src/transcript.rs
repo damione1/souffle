@@ -19,23 +19,9 @@ pub struct MeetingParticipant {
     pub is_current_user: bool,
 }
 
-/// A single action item extracted from a meeting summary pass.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
-pub struct StructuredActionItem {
-    pub text: String,
-    pub owner: Option<String>,
-}
-
-/// Typed structured summary: decisions, action items, open questions.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type, Default)]
-pub struct StructuredSummary {
-    #[serde(default)]
-    pub decisions: Vec<String>,
-    #[serde(default)]
-    pub action_items: Vec<StructuredActionItem>,
-    #[serde(default)]
-    pub open_questions: Vec<String>,
-}
+/// Declared in `souffle-schema`: the MCP sidecar reads the same column and
+/// used to restate both shapes on its side.
+pub use souffle_schema::{StructuredActionItem, StructuredSummary};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct MeetingRecordingSession {
