@@ -1182,10 +1182,12 @@ impl DiarizedMode {
 
     /// Returns a mutable reference to the buffer for the given speaker.
     /// Untagged audio (shouldn't happen in diarized mode) goes to the mic (Me).
+    /// Every variant is named on purpose: a third speaker must pick a buffer
+    /// here rather than land in the microphone lane by default.
     fn buf_for(&mut self, speaker: Option<Speaker>) -> &mut Vec<f32> {
         match speaker {
             Some(Speaker::Them) => &mut self.them_buf,
-            _ => &mut self.me_buf,
+            Some(Speaker::Me) | None => &mut self.me_buf,
         }
     }
 

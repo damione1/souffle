@@ -1,4 +1,4 @@
-import type { InputRouteNotice } from "../../types";
+import type { InputRouteNotice, InputRouteReason } from "../../types";
 
 const AUTO_HIDE_MS = 5_000;
 
@@ -47,8 +47,17 @@ function isSameLost(a: InputRouteNotice, b: InputRouteNotice): boolean {
   return a.reason === "lost" && b.reason === "lost" && a.from_name === b.from_name;
 }
 
-function isInformational(reason: InputRouteNotice["reason"]): boolean {
-  return reason === "connected";
+/** Whether a notice is merely informational (auto-hides) or needs the user to
+ * see it. Keyed on the union so a new reason has to be classified here rather
+ * than silently inheriting "needs attention". */
+const IS_INFORMATIONAL: Record<InputRouteReason, boolean> = {
+  switched: false,
+  connected: true,
+  lost: false,
+};
+
+function isInformational(reason: InputRouteReason): boolean {
+  return IS_INFORMATIONAL[reason];
 }
 
 export function createMicToast(hideMs = AUTO_HIDE_MS) {

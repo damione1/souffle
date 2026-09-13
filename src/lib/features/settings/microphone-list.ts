@@ -1,4 +1,5 @@
 import type { AudioInputDevice, InputPriority, TransportType } from "../../types";
+import { assertNever } from "../../utils/exhaustive";
 
 export type MicrophoneListEntry = {
   uid: string;
@@ -100,7 +101,9 @@ export function transportLabelKey(transport: TransportType): string {
       return "settings_audio.transport_virtual";
     case "aggregate":
       return "settings_audio.transport_aggregate";
-    default:
+    case "unknown":
       return "settings_audio.transport_unknown";
+    default:
+      return assertNever(transport, "TransportType");
   }
 }

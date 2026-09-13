@@ -6,6 +6,13 @@
   import { formatDuration } from "../../../utils";
   import type { TimelineItem } from "../controller.svelte";
 
+  /** Icon colour per timeline item kind, keyed on the union so a third kind
+   * has to pick a colour instead of inheriting the dictation one. */
+  const KIND_ICON_CLASS: Record<TimelineItem["kind"], string> = {
+    meeting: "text-accent",
+    dictation: "text-text-muted",
+  };
+
   let {
     item,
     expanded,
@@ -31,9 +38,7 @@
   <div class="flex items-center gap-3 border-t border-rule py-3 transition-colors hover:bg-surface-2">
     <button onclick={onOpen} class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
       <span
-        class={`flex h-[22px] w-[22px] shrink-0 items-center justify-center ${
-          item.kind === "meeting" ? "text-accent" : "text-text-muted"
-        }`}
+        class="flex h-[22px] w-[22px] shrink-0 items-center justify-center {KIND_ICON_CLASS[item.kind]}"
         aria-hidden="true"
       >
         {#if item.kind === "meeting"}
