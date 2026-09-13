@@ -101,7 +101,7 @@
         <button
           type="button"
           class={ghostClass}
-          onclick={() => updateController.openFallback(releaseUrl)}
+          onclick={() => void updateController.openFallback(releaseUrl)}
         >
           {$t("update_available.open_release_page")}
         </button>
@@ -109,11 +109,15 @@
     </div>
   {/if}
 
+  {#if phase !== "failed" && actionError}
+    <p class="text-xs text-danger-soft {compact ? 'text-right' : ''}">{actionError}</p>
+  {/if}
+
   {#if phase !== "failed" && status.manual_fallback && releaseUrl}
     <button
       type="button"
       class={ghostClass}
-      onclick={() => updateController.openFallback(releaseUrl)}
+      onclick={() => void updateController.openFallback(releaseUrl)}
     >
       {$t("update_available.open_release_page")}
     </button>

@@ -40,14 +40,28 @@ function idleStatus(): UpdateDownloadStatus {
   };
 }
 
+function statusLoadFailed(): UpdateDownloadStatus {
+  return {
+    phase: "failed",
+    version: null,
+    downloaded_bytes: 0,
+    total_bytes: null,
+    error: "Could not restore update progress. Retry the download.",
+    manual_fallback: true,
+  };
+}
+
 /** Shared mirror of the Rust updater download state. Survives dialog close. */
 class UpdateController {
   status = $state<UpdateDownloadStatus>(idleStatus());
+  /** True only for short acknowledgements (cancel/install), never for the transfer itself. */
   busy = $state(false);
   actionError = $state<string | null>(null);
   installBlock = $state<InstallBlockReason | null>(null);
   #started = false;
   #unlisten: (() => void) | null = null;
+  /** True while `downloadUpdate()` is awaiting the long transfer. */
+  #downloadInFlight = false;
 
   get phase(): UpdatePhase {
     return this.status.phase;
@@ -70,15 +84,18 @@ class UpdateController {
   async start() {
     if (this.#started) return;
     this.#started = true;
-    try {
-      this.status = await getUpdateDownloadStatus();
-    } catch {
-      this.status = idleStatus();
-    }
-    this.syncInstallBlock();
+    // Register the listener before the snapshot so a completing download cannot
+    // land between the two and leave the UI on a stale progress event.
     this.#unlisten = await listenUpdateDownloadProgress((status) => {
       this.status = status;
     });
+    try {
+      this.status = await getUpdateDownloadStatus();
+    } catch {
+      this.status = statusLoadFailed();
+      this.actionError = this.status.error;
+    }
+    this.syncInstallBlock();
   }
 
   stop() {
@@ -88,7 +105,8 @@ class UpdateController {
   }
 
   async download() {
-    this.busy = true;
+    if (this.#downloadInFlight || this.status.phase === "downloading") return;
+    this.#downloadInFlight = true;
     this.actionError = null;
     try {
       this.status = await downloadUpdate();
@@ -101,7 +119,7 @@ class UpdateController {
         manual_fallback: true,
       };
     } finally {
-      this.busy = false;
+      this.#downloadInFlight = false;
     }
   }
 
@@ -137,8 +155,13 @@ class UpdateController {
     }
   }
 
-  openFallback(releaseUrl: string | null) {
-    if (releaseUrl) void openReleasePage(releaseUrl);
+  async openFallback(releaseUrl: string | null) {
+    if (!releaseUrl) return;
+    try {
+      await openReleasePage(releaseUrl);
+    } catch (e) {
+      this.actionError = errorMessage(e);
+    }
   }
 }
 
