@@ -1,6 +1,7 @@
 import {
   getSettings,
   getModifierTapStatus,
+  getNativeShortcuts,
   getSystemAudioStatus,
   saveSettings,
   selectAudioDevice,
@@ -137,6 +138,16 @@ async function resyncAfterReload(app: ReturnType<typeof getAppState>): Promise<v
     }
   } catch {
     // Banner stays hidden until the next install attempt emits.
+  }
+
+  // The tap's key list, so the settings UI can flag a native binding without
+  // restating the seventeen values (SOU-139). Left empty on failure: the
+  // banner then stays hidden, which is what it already does before the first
+  // tap status arrives.
+  try {
+    app.nativeShortcuts = await getNativeShortcuts();
+  } catch {
+    // Keep the empty list.
   }
 }
 

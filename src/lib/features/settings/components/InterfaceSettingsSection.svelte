@@ -26,6 +26,7 @@
     recordingField,
     shortcutError,
     modifierTapStatus = null,
+    nativeShortcuts,
     onThemeChange,
     onLocaleChange,
     onAutoPasteChange,
@@ -47,6 +48,7 @@
     recordingField: "toggle" | "ptt" | null;
     shortcutError: string;
     modifierTapStatus?: ModifierTapStatus | null;
+    nativeShortcuts: readonly string[];
     onThemeChange: (theme: Theme) => void;
     onLocaleChange: (locale: string) => void;
     onAutoPasteChange: (event: Event) => void;
@@ -60,7 +62,12 @@
   } = $props();
 
   const showNativeTapBanner = $derived(
-    shouldShowNativeTapBanner(pttShortcut, modifierTapStatus, toggleShortcut),
+    shouldShowNativeTapBanner(
+      pttShortcut,
+      modifierTapStatus,
+      toggleShortcut,
+      nativeShortcuts,
+    ),
   );
 </script>
 

@@ -32,30 +32,15 @@ export function shortcutMissingModifier(event: KeyboardEvent): boolean {
   );
 }
 
-/** Mirrors `modifier_shortcut::is_native_ptt_shortcut` — single-key bindings
- * that need the CGEventTap (and Accessibility), not the global-shortcut plugin. */
-const NATIVE_PTT_SHORTCUTS = new Set([
-  "Fn",
-  "MetaLeft",
-  "MetaRight",
-  "ShiftLeft",
-  "ShiftRight",
-  "AltLeft",
-  "AltRight",
-  "ControlLeft",
-  "ControlRight",
-  "F5",
-  "F6",
-  "F7",
-  "F8",
-  "F9",
-  "F10",
-  "F11",
-  "F12",
-]);
-
-export function isNativePttShortcut(shortcut: string): boolean {
-  return NATIVE_PTT_SHORTCUTS.has(shortcut);
+/** True when `shortcut` is one of the single-key bindings the CGEventTap
+ * handles (and which therefore need Accessibility) rather than the
+ * global-shortcut plugin. The list is not declared here: it comes from
+ * `modifier_shortcut::NATIVE_SHORTCUTS` through `getNativeShortcuts`. */
+export function isNativeShortcut(
+  shortcut: string,
+  nativeShortcuts: readonly string[],
+): boolean {
+  return shortcut !== "" && nativeShortcuts.includes(shortcut);
 }
 
 /** Settings banner when a native Toggle or PTT key is bound and the tap is
@@ -64,10 +49,12 @@ export function isNativePttShortcut(shortcut: string): boolean {
 export function shouldShowNativeTapBanner(
   pttShortcut: string,
   tapStatus: { installed: boolean } | null,
-  toggleShortcut = "",
+  toggleShortcut: string,
+  nativeShortcuts: readonly string[],
 ): boolean {
   const nativeBound =
-    isNativePttShortcut(pttShortcut) || isNativePttShortcut(toggleShortcut);
+    isNativeShortcut(pttShortcut, nativeShortcuts)
+    || isNativeShortcut(toggleShortcut, nativeShortcuts);
   return nativeBound && tapStatus?.installed === false;
 }
 
