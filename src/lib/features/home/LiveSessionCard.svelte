@@ -24,6 +24,16 @@
     windowedParagraphs,
   } from "./live-paragraph-window";
   import { liveSystemAudioNotice, liveSystemAudioState } from "../meeting/system-audio";
+  import type { LiveSystemAudioState } from "../meeting/system-audio";
+
+  /** Dot colour per system-audio state. Keyed on the union so the three cases
+   * the label below already distinguishes cannot collapse back into two: the
+   * dot used to read "pending" as "unavailable". */
+  const SYSTEM_AUDIO_DOT: Record<LiveSystemAudioState, string> = {
+    active: "bg-accent",
+    pending: "bg-warning",
+    unavailable: "bg-surface-4",
+  };
 
   let {
     mode,
@@ -287,9 +297,7 @@
       <div class="flex items-center justify-between gap-3">
         <h3 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted [font-variation-settings:'wdth'_88]">{$t("home.live_transcript")}</h3>
         <span class="inline-flex items-center gap-1.5 text-[11.5px] text-text-muted">
-          <span
-            class={`h-1.5 w-1.5 rounded-full ${systemAudioState === "active" ? "bg-accent" : "bg-surface-4"}`}
-          ></span>
+          <span class="h-1.5 w-1.5 rounded-full {SYSTEM_AUDIO_DOT[systemAudioState]}"></span>
           {#if systemAudioState === "active"}
             {$t("home.system_audio_active")}
           {:else if systemAudioState === "pending"}

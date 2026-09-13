@@ -1,3 +1,5 @@
+export { assertNever } from "./exhaustive";
+export { recordingKindMode } from "./recording-kind";
 export { formatTimestamp, formatDate, formatDuration, formatShortcutLabel, formatBytes } from "./format";
 export { elapsedSecondsSince } from "./elapsed";
 export { keyEventToShortcut, modifierToShortcut, shortcutMissingModifier } from "./shortcut";
