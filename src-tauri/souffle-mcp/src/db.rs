@@ -242,6 +242,30 @@ pub struct McpDb {
     conn: Mutex<Connection>,
 }
 
+/// Mirror of the app's `db::search::SearchSource`. The sidecar is a standalone
+/// binary that depends on neither `souffle` nor `tauri`, so the enum is
+/// restated here rather than imported. Only `Meeting` is needed: the sidecar
+/// never reads dictation rows out of the full-text index. The string is the
+/// on-disk encoding of `text_search.source_type` and must match the app's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchSource {
+    Meeting,
+}
+
+impl SearchSource {
+    const fn as_str(self) -> &'static str {
+        match self {
+            SearchSource::Meeting => "meeting",
+        }
+    }
+}
+
+impl rusqlite::ToSql for SearchSource {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
+    }
+}
+
 impl McpDb {
     /// Open the database read-only. WAL mode lets this coexist with the app
     /// writing concurrently; `busy_timeout` covers the rare case where a
@@ -283,7 +307,7 @@ impl McpDb {
                      FROM meetings m
                      WHERE m.id IN (
                          SELECT source_id FROM text_search
-                         WHERE source_type = 'meeting' AND text_search MATCH ?1
+                         WHERE source_type = ?5 AND text_search MATCH ?1
                      )
                      AND (?2 IS NULL OR julianday(m.started_at) >= julianday(?2))
                      AND (?3 IS NULL OR julianday(m.started_at) <= julianday(?3))
@@ -291,7 +315,10 @@ impl McpDb {
                      LIMIT ?4",
                 )
                 .map_err(McpDbError::Query)?;
-            query_meeting_rows(&mut stmt, params![q, from, to, limit])?
+            query_meeting_rows(
+                &mut stmt,
+                params![q, from, to, limit, SearchSource::Meeting],
+            )?
         } else {
             let mut stmt = conn
                 .prepare(
@@ -461,13 +488,13 @@ impl McpDb {
                         snippet(text_search, 0, '**', '**', '...', 32)
                  FROM text_search ts
                  JOIN meetings m ON m.id = ts.source_id
-                 WHERE ts.source_type = 'meeting' AND text_search MATCH ?1
+                 WHERE ts.source_type = ?3 AND text_search MATCH ?1
                  ORDER BY rank
                  LIMIT ?2",
             )
             .map_err(McpDbError::Query)?;
 
-        stmt.query_map(params![query, limit], |row| {
+        stmt.query_map(params![query, limit, SearchSource::Meeting], |row| {
             Ok(MeetingSearchHit {
                 id: row.get(0)?,
                 title: row.get(1)?,

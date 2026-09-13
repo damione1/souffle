@@ -75,6 +75,7 @@ export type {
   TranscriptionRuntimeStatus,
   TranscriptionSegment,
   SearchResult,
+  SearchSource,
   UpdateCheckResult,
   UpdateDownloadStatus,
   UpdatePhase,

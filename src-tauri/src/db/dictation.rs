@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::lock_ext::MutexExt;
 
 use super::Database;
+use super::search::SearchSource;
 
 /// A dictation history entry
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -52,14 +53,14 @@ impl Database {
         .map_err(|e| format!("Insert/Update dictation: {e}"))?;
 
         tx.execute(
-            "DELETE FROM text_search WHERE source_type = 'dictation' AND source_id = ?1",
-            params![id],
+            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            params![SearchSource::Dictation, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
         tx.execute(
             "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
-            params![text, "dictation", id],
+            params![text, SearchSource::Dictation, id],
         )
         .map_err(|e| format!("FTS insert: {e}"))?;
 
@@ -89,14 +90,14 @@ impl Database {
         }
 
         tx.execute(
-            "DELETE FROM text_search WHERE source_type = 'dictation' AND source_id = ?1",
-            params![id],
+            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            params![SearchSource::Dictation, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
         tx.execute(
             "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
-            params![text, "dictation", id],
+            params![text, SearchSource::Dictation, id],
         )
         .map_err(|e| format!("FTS insert: {e}"))?;
 
@@ -110,8 +111,8 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         conn.execute(
-            "DELETE FROM text_search WHERE source_type = 'dictation' AND source_id = ?1",
-            params![id],
+            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            params![SearchSource::Dictation, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
@@ -137,8 +138,8 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         conn.execute(
-            "DELETE FROM text_search WHERE source_type = 'dictation'",
-            [],
+            "DELETE FROM text_search WHERE source_type = ?1",
+            params![SearchSource::Dictation],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
@@ -151,6 +152,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
+    use super::SearchSource;
     use crate::test_helpers::fixtures::test_db;
 
     #[test]
@@ -253,7 +255,7 @@ mod tests {
         assert!(db.search_text("raw", 20).unwrap().is_empty());
         let results = db.search_text("kubernetes", 20).unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].source_type, "dictation");
+        assert_eq!(results[0].source_type, SearchSource::Dictation);
         assert_eq!(results[0].source_id, "d1");
     }
 
