@@ -57,6 +57,13 @@ export async function getModifierTapStatus(): Promise<ModifierTapStatus | null> 
   return commands.getModifierTapStatus();
 }
 
+/** Accelerators that go through the CGEventTap rather than the global-shortcut
+ * plugin, so the settings UI can warn that a binding needs Accessibility. The
+ * list is declared once, in `modifier_shortcut::NATIVE_SHORTCUTS`. */
+export async function getNativeShortcuts(): Promise<string[]> {
+  return commands.getNativeShortcuts();
+}
+
 export async function isLaptop(): Promise<boolean> {
   return commands.isLaptop();
 }

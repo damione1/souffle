@@ -48,6 +48,28 @@ export const DEFAULT_RESPONSES: Record<string, unknown> = {
   get_model_status: mockRuntimeStatus,
   get_app_version: "0.1.0",
   get_shortcuts: mockShortcuts,
+  // `bootstrap.ts` reads this once at startup. The stub returns null for an
+  // unknown command, and the settings banner would then call `.includes` on
+  // it (SOU-139).
+  get_native_shortcuts: [
+    "Fn",
+    "MetaLeft",
+    "MetaRight",
+    "ShiftLeft",
+    "ShiftRight",
+    "AltLeft",
+    "AltRight",
+    "ControlLeft",
+    "ControlRight",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
+  ],
   check_summary_providers: mockSummaryProvidersStatus,
   list_todays_calendar_events: [],
   list_calendars: [],

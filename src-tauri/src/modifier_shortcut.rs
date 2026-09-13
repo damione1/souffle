@@ -55,26 +55,32 @@ pub(crate) enum ShortcutRegistrationTarget {
 
 /// Single-key bindings that the plugin cannot register. Combos stay on
 /// `tauri-plugin-global-shortcut` (SOU-032). Shared by Toggle and PTT (SOU-115).
+///
+/// The settings UI needs the same list to warn that a binding will require
+/// Accessibility, so `commands::settings::get_native_shortcuts` hands it over
+/// rather than letting the frontend keep a copy.
+pub(crate) const NATIVE_SHORTCUTS: [&str; 17] = [
+    "Fn",
+    "MetaLeft",
+    "MetaRight",
+    "ShiftLeft",
+    "ShiftRight",
+    "AltLeft",
+    "AltRight",
+    "ControlLeft",
+    "ControlRight",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
+];
+
 pub(crate) fn is_native_shortcut(shortcut: &str) -> bool {
-    matches!(
-        shortcut,
-        "Fn" | "MetaLeft"
-            | "MetaRight"
-            | "ShiftLeft"
-            | "ShiftRight"
-            | "AltLeft"
-            | "AltRight"
-            | "ControlLeft"
-            | "ControlRight"
-            | "F5"
-            | "F6"
-            | "F7"
-            | "F8"
-            | "F9"
-            | "F10"
-            | "F11"
-            | "F12"
-    )
+    NATIVE_SHORTCUTS.contains(&shortcut)
 }
 
 /// Route a stored accelerator to the native tap or the global-shortcut plugin.
@@ -402,9 +408,50 @@ fn shortcut_matches_keycode(shortcut: &str, keycode: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ShortcutRegistrationTarget, is_native_shortcut, shortcut_matches_keycode,
+        NATIVE_SHORTCUTS, ShortcutRegistrationTarget, is_native_shortcut, shortcut_matches_keycode,
         shortcut_registration_target, tap_is_needed,
     };
+
+    /// AC5: the seventeen values are what users already have bound. The list
+    /// is now the only declaration, and the frontend reads it over IPC, so a
+    /// change here silently changes existing bindings on both sides.
+    #[test]
+    fn native_shortcut_list_is_unchanged() {
+        assert_eq!(
+            NATIVE_SHORTCUTS,
+            [
+                "Fn",
+                "MetaLeft",
+                "MetaRight",
+                "ShiftLeft",
+                "ShiftRight",
+                "AltLeft",
+                "AltRight",
+                "ControlLeft",
+                "ControlRight",
+                "F5",
+                "F6",
+                "F7",
+                "F8",
+                "F9",
+                "F10",
+                "F11",
+                "F12",
+            ]
+        );
+    }
+
+    #[test]
+    fn every_listed_shortcut_routes_to_the_tap() {
+        for shortcut in NATIVE_SHORTCUTS {
+            assert!(is_native_shortcut(shortcut), "{shortcut}");
+            assert_eq!(
+                shortcut_registration_target(shortcut),
+                ShortcutRegistrationTarget::Native,
+                "{shortcut}"
+            );
+        }
+    }
 
     #[test]
     fn modifier_and_fn_keycodes() {

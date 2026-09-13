@@ -201,6 +201,19 @@ pub fn get_shortcuts(state: State<'_, AppState>) -> Result<ShortcutSettings, Str
     ShortcutSettings::load(&state.db)
 }
 
+/// Accelerators that are registered through the `CGEventTap` rather than
+/// `tauri-plugin-global-shortcut`. The settings UI needs the list to warn that
+/// a binding will require Accessibility; exposing it here is what keeps
+/// `src/lib/utils/shortcut.ts` from maintaining a second copy.
+#[tauri::command]
+#[specta::specta]
+pub fn get_native_shortcuts() -> Vec<String> {
+    crate::modifier_shortcut::NATIVE_SHORTCUTS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
+}
+
 /// Last native PTT `CGEventTap` install status, for a webview that reloaded
 /// after the `ModifierTapStatus` event already fired (SOU-116). `None` before
 /// the first install attempt (including the startup delay).

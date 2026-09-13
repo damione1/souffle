@@ -89,6 +89,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_download_progress,
             commands::get_system_audio_status,
             commands::get_modifier_tap_status,
+            commands::get_native_shortcuts,
             commands::delete_model,
             commands::load_model,
             commands::start_transcription,
