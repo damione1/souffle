@@ -50,7 +50,7 @@ vi.mock("./utils/theme", () => ({
   applyTheme: vi.fn(),
 }));
 
-import { LOCAL_BUILD, bootstrapAppState, loadSettingsOrDefaults } from "./bootstrap";
+import { LOCAL_BUILD, bootstrapAppState, primeSettingsDefaults } from "./bootstrap";
 import { getAppState } from "./stores/app.svelte";
 import { mockRuntimeStatus, mockSettings } from "./test-helpers/fixtures";
 import { SETUP_STORAGE_KEY } from "./features/onboarding/setup";
@@ -292,7 +292,7 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
   });
 });
 
-describe("loadSettingsOrDefaults (SOU-138)", () => {
+describe("primeSettingsDefaults (SOU-138)", () => {
   const app = getAppState();
 
   beforeEach(() => {
@@ -300,29 +300,35 @@ describe("loadSettingsOrDefaults (SOU-138)", () => {
     getDefaultSettings.mockReset();
   });
 
-  it("uses the stored settings when they can be read", async () => {
-    getSettings.mockResolvedValue({ ...mockSettings, theme: "dark" });
-
-    await expect(loadSettingsOrDefaults(app)).resolves.toBe(true);
-    expect(app.settings.theme).toBe("dark");
-    expect(getDefaultSettings).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the backend's own defaults on a first launch", async () => {
-    getSettings.mockRejectedValue(new Error("no settings row yet"));
+  it("seeds the store from the backend's own defaults, reading no database", async () => {
     getDefaultSettings.mockResolvedValue({ ...mockSettings, theme: "light" });
 
-    await expect(loadSettingsOrDefaults(app)).resolves.toBe(false);
+    await primeSettingsDefaults(app);
+
     expect(app.settings.theme).toBe("light");
     expect(getDefaultSettings).toHaveBeenCalledOnce();
+    // The authoritative read belongs to bootstrapAppState, not here.
+    expect(getSettings).not.toHaveBeenCalled();
   });
 
-  it("makes bootstrap signal the setup wizard when the stored settings are missing", async () => {
-    getSettings.mockRejectedValue(new Error("no settings row yet"));
+  it("leaves the seeded defaults in place when the stored settings cannot be read", async () => {
     getDefaultSettings.mockResolvedValue({ ...mockSettings });
+    getSettings.mockRejectedValue(new Error("no settings row yet"));
 
+    await primeSettingsDefaults(app);
     await expect(bootstrapAppState(app)).rejects.toThrow();
-    // The store still holds usable settings, straight from the backend.
+
     expect(app.settings).toEqual(mockSettings);
+  });
+
+  it("reads the stored settings exactly once on the happy path", async () => {
+    getDefaultSettings.mockResolvedValue({ ...mockSettings });
+    getSettings.mockResolvedValue({ ...mockSettings, theme: "dark" });
+
+    await primeSettingsDefaults(app);
+    await bootstrapAppState(app);
+
+    expect(getSettings).toHaveBeenCalledOnce();
+    expect(app.settings.theme).toBe("dark");
   });
 });
