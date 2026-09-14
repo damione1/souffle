@@ -3,6 +3,7 @@ import type {
   AppSettings,
   AudioInputDevice,
   ModifierTapStatus,
+  SettingsOptions,
   ShortcutSettings,
   SystemAudioStatus,
 } from "../types";
@@ -11,8 +12,21 @@ export async function getSettings(): Promise<AppSettings> {
   return unwrap(commands.getSettings());
 }
 
+/** The shipped defaults, read from `AppSettings::default()` with nothing from
+ * the database. The store starts from these until `getSettings()` succeeds,
+ * which is why the frontend no longer writes any default value of its own. */
+export async function getDefaultSettings(): Promise<AppSettings> {
+  return commands.getDefaultSettings();
+}
+
 export async function saveSettings(settings: AppSettings): Promise<void> {
   await unwrap(commands.saveSettings(settings));
+}
+
+/** The numeric choices the settings UI may offer. Declared once in
+ * `settings::SettingsOptions`, beside the bounds that validate them. */
+export async function getSettingsOptions(): Promise<SettingsOptions> {
+  return commands.getSettingsOptions();
 }
 
 export async function getShortcuts(): Promise<ShortcutSettings> {
@@ -55,6 +69,13 @@ export async function getSystemAudioStatus(): Promise<SystemAudioStatus | null> 
  * `null` before the first install attempt. */
 export async function getModifierTapStatus(): Promise<ModifierTapStatus | null> {
   return commands.getModifierTapStatus();
+}
+
+/** Accelerators that go through the CGEventTap rather than the global-shortcut
+ * plugin, so the settings UI can warn that a binding needs Accessibility. The
+ * list is declared once, in `modifier_shortcut::NATIVE_SHORTCUTS`. */
+export async function getNativeShortcuts(): Promise<string[]> {
+  return commands.getNativeShortcuts();
 }
 
 export async function isLaptop(): Promise<boolean> {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  isNativePttShortcut,
+  isNativeShortcut,
   keyEventToShortcut,
   modifierToShortcut,
   shortcutMissingModifier,
@@ -62,36 +62,62 @@ describe("shortcutMissingModifier", () => {
   });
 });
 
+/** Stands in for what `getNativeShortcuts` returns at runtime. Only a subset
+ * is needed: the point of the test is that the caller supplies the list, not
+ * that this file knows it. */
+const NATIVE = ["Fn", "MetaRight", "F5", "F8"];
+
+describe("isNativeShortcut", () => {
+  it("uses the list it is given, not a copy of its own", () => {
+    expect(isNativeShortcut("MetaRight", NATIVE)).toBe(true);
+    expect(isNativeShortcut("F4", NATIVE)).toBe(false);
+  });
+
+  it("treats a key the backend added as native with no change here", () => {
+    expect(isNativeShortcut("F13", NATIVE)).toBe(false);
+    expect(isNativeShortcut("F13", [...NATIVE, "F13"])).toBe(true);
+  });
+
+  it("never matches an unset shortcut, even against an empty list", () => {
+    expect(isNativeShortcut("", NATIVE)).toBe(false);
+    expect(isNativeShortcut("", [])).toBe(false);
+  });
+});
+
 describe("shouldShowNativeTapBanner (SOU-116)", () => {
   it("shows only when a native PTT shortcut is bound and the tap is missing", () => {
-    expect(shouldShowNativeTapBanner("Fn", { installed: false })).toBe(true);
-    expect(shouldShowNativeTapBanner("F5", { installed: false })).toBe(true);
+    expect(shouldShowNativeTapBanner("Fn", { installed: false }, "", NATIVE)).toBe(true);
+    expect(shouldShowNativeTapBanner("F5", { installed: false }, "", NATIVE)).toBe(true);
   });
 
   it("shows when Toggle is native and the tap is missing (SOU-115)", () => {
-    expect(shouldShowNativeTapBanner("", { installed: false }, "Fn")).toBe(true);
-    expect(shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false }, "F8")).toBe(
-      true,
-    );
+    expect(shouldShowNativeTapBanner("", { installed: false }, "Fn", NATIVE)).toBe(true);
+    expect(
+      shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false }, "F8", NATIVE),
+    ).toBe(true);
   });
 
   it("hides when no native shortcut is bound (AC6)", () => {
-    expect(shouldShowNativeTapBanner("", { installed: false })).toBe(false);
-    expect(shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false })).toBe(
-      false,
-    );
+    expect(shouldShowNativeTapBanner("", { installed: false }, "", NATIVE)).toBe(false);
     expect(
-      shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false }, "Alt+Space"),
+      shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false }, "", NATIVE),
+    ).toBe(false);
+    expect(
+      shouldShowNativeTapBanner(
+        "CommandOrControl+Shift+Space",
+        { installed: false },
+        "Alt+Space",
+        NATIVE,
+      ),
     ).toBe(false);
   });
 
   it("hides while status is unknown or the tap is installed", () => {
-    expect(shouldShowNativeTapBanner("Fn", null)).toBe(false);
-    expect(shouldShowNativeTapBanner("Fn", { installed: true })).toBe(false);
+    expect(shouldShowNativeTapBanner("Fn", null, "", NATIVE)).toBe(false);
+    expect(shouldShowNativeTapBanner("Fn", { installed: true }, "", NATIVE)).toBe(false);
   });
 
-  it("mirrors the backend native PTT set", () => {
-    expect(isNativePttShortcut("MetaRight")).toBe(true);
-    expect(isNativePttShortcut("F4")).toBe(false);
+  it("hides before the list has been read from the backend", () => {
+    expect(shouldShowNativeTapBanner("Fn", { installed: false }, "", [])).toBe(false);
   });
 });

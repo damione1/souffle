@@ -40,6 +40,60 @@ pub enum McpDbError {
     NoMeetings,
     #[error("Database lock poisoned: {0}")]
     Lock(String),
+    #[error(
+        "This Souffle database is at schema version {found}, newer than version {expected}, \
+         which is the newest this MCP server knows how to read. Update Souffle (the sidecar \
+         ships with the app) and restart your MCP client."
+    )]
+    SchemaTooNew { found: i64, expected: i64 },
+    #[error(
+        "Could not read the Souffle database schema version: {0}. Launch Souffle at least \
+         once so it can create and migrate the database."
+    )]
+    SchemaUnreadable(String),
+}
+
+/// Why the database cannot be served. Kept as data rather than as a
+/// `McpDbError` because the verdict is taken once, at open, and returned on
+/// every tool call afterwards.
+#[derive(Debug, Clone)]
+enum SchemaVerdict {
+    TooNew { found: i64 },
+    Unreadable(String),
+}
+
+impl SchemaVerdict {
+    fn to_error(&self) -> McpDbError {
+        match self {
+            SchemaVerdict::TooNew { found } => McpDbError::SchemaTooNew {
+                found: *found,
+                expected: souffle_schema::SCHEMA_VERSION,
+            },
+            SchemaVerdict::Unreadable(detail) => McpDbError::SchemaUnreadable(detail.clone()),
+        }
+    }
+}
+
+/// Read `schema_version` and decide whether this build can serve the file.
+///
+/// The rule is asymmetric on purpose. A database newer than this build is
+/// refused: a migration may have moved or redefined the columns the queries
+/// below read, and a wrong answer is worse than no answer. An older database
+/// is served, because a user who has not launched the new app yet still has
+/// every column these queries touch.
+///
+/// A missing or unreadable table is refused rather than assumed compatible.
+fn check_schema(conn: &Connection) -> Result<i64, SchemaVerdict> {
+    let found: i64 = conn
+        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .map_err(|e| SchemaVerdict::Unreadable(e.to_string()))?;
+
+    if found > souffle_schema::SCHEMA_VERSION {
+        return Err(SchemaVerdict::TooNew { found });
+    }
+    Ok(found)
 }
 
 /// Resolve the Souffle SQLite database path: the `SOUFFLE_DB` env var
@@ -123,21 +177,8 @@ pub struct ParticipantInfo {
     pub is_organizer: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct StructuredActionItem {
-    pub text: String,
-    pub owner: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
-pub struct StructuredSummary {
-    #[serde(default)]
-    pub decisions: Vec<String>,
-    #[serde(default)]
-    pub action_items: Vec<StructuredActionItem>,
-    #[serde(default)]
-    pub open_questions: Vec<String>,
-}
+/// Declared once, in `souffle-schema`, and read by both processes.
+pub use souffle_schema::{StructuredActionItem, StructuredSummary};
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct MeetingSummary {
@@ -240,6 +281,33 @@ pub struct McpDb {
     /// macros generate `Send` futures that hold `&SouffleMcpServer` across
     /// await points, and `rusqlite::Connection` alone is `!Sync`.
     conn: Mutex<Connection>,
+    /// Taken once at open. `Err` makes every tool call refuse with the same
+    /// explanation instead of querying columns that may have moved.
+    schema: Result<i64, SchemaVerdict>,
+}
+
+/// Mirror of the app's `db::search::SearchSource`. The sidecar is a standalone
+/// binary that depends on neither `souffle` nor `tauri`, so the enum is
+/// restated here rather than imported. Only `Meeting` is needed: the sidecar
+/// never reads dictation rows out of the full-text index. The string is the
+/// on-disk encoding of `text_search.source_type` and must match the app's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchSource {
+    Meeting,
+}
+
+impl SearchSource {
+    const fn as_str(self) -> &'static str {
+        match self {
+            SearchSource::Meeting => "meeting",
+        }
+    }
+}
+
+impl rusqlite::ToSql for SearchSource {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
+    }
 }
 
 impl McpDb {
@@ -254,12 +322,32 @@ impl McpDb {
             .map_err(McpDbError::Open)?;
         conn.busy_timeout(Duration::from_secs(5))
             .map_err(McpDbError::Open)?;
+        // Read-only, single row, no transaction: this cannot hold a lock the
+        // app would wait on.
+        let schema = check_schema(&conn);
+        if let Err(verdict) = &schema {
+            // stdout carries MCP protocol traffic, so diagnostics go to stderr.
+            eprintln!("souffle-mcp: {}", verdict.to_error());
+        }
         Ok(Self {
             conn: Mutex::new(conn),
+            schema,
         })
     }
 
+    /// The schema version of the open database, or the reason it cannot be
+    /// served.
+    pub fn schema_version(&self) -> Result<i64, McpDbError> {
+        self.schema
+            .as_ref()
+            .copied()
+            .map_err(SchemaVerdict::to_error)
+    }
+
     fn conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, McpDbError> {
+        if let Err(verdict) = &self.schema {
+            return Err(verdict.to_error());
+        }
         self.conn
             .lock()
             .map_err(|e| McpDbError::Lock(e.to_string()))
@@ -283,7 +371,7 @@ impl McpDb {
                      FROM meetings m
                      WHERE m.id IN (
                          SELECT source_id FROM text_search
-                         WHERE source_type = 'meeting' AND text_search MATCH ?1
+                         WHERE source_type = ?5 AND text_search MATCH ?1
                      )
                      AND (?2 IS NULL OR julianday(m.started_at) >= julianday(?2))
                      AND (?3 IS NULL OR julianday(m.started_at) <= julianday(?3))
@@ -291,7 +379,10 @@ impl McpDb {
                      LIMIT ?4",
                 )
                 .map_err(McpDbError::Query)?;
-            query_meeting_rows(&mut stmt, params![q, from, to, limit])?
+            query_meeting_rows(
+                &mut stmt,
+                params![q, from, to, limit, SearchSource::Meeting],
+            )?
         } else {
             let mut stmt = conn
                 .prepare(
@@ -324,6 +415,9 @@ impl McpDb {
     }
 
     pub fn get_meeting(&self, id: &str, include: IncludeSet) -> Result<MeetingDetail, McpDbError> {
+        // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
+        // variants here would be neither possible nor useful.
+        #[allow(clippy::wildcard_enum_match_arm)]
         let row = self
             .conn()?
             .query_row(
@@ -343,6 +437,9 @@ impl McpDb {
     }
 
     pub fn latest_meeting(&self, include: IncludeSet) -> Result<MeetingDetail, McpDbError> {
+        // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
+        // variants here would be neither possible nor useful.
+        #[allow(clippy::wildcard_enum_match_arm)]
         let id: Option<String> = self
             .conn()?
             .query_row(
@@ -461,13 +558,13 @@ impl McpDb {
                         snippet(text_search, 0, '**', '**', '...', 32)
                  FROM text_search ts
                  JOIN meetings m ON m.id = ts.source_id
-                 WHERE ts.source_type = 'meeting' AND text_search MATCH ?1
+                 WHERE ts.source_type = ?3 AND text_search MATCH ?1
                  ORDER BY rank
                  LIMIT ?2",
             )
             .map_err(McpDbError::Query)?;
 
-        stmt.query_map(params![query, limit], |row| {
+        stmt.query_map(params![query, limit, SearchSource::Meeting], |row| {
             Ok(MeetingSearchHit {
                 id: row.get(0)?,
                 title: row.get(1)?,
@@ -642,23 +739,53 @@ fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
     turns.into_iter().flat_map(|t| t.segments).collect()
 }
 
-/// Keep Me/Them; leftover `spk:<id>` labels (and anything else) become
-/// unlabeled, matching the app's `Speaker::parse`.
-fn normalize_speaker(raw: Option<String>) -> Option<String> {
-    match raw.as_deref() {
-        Some("me") | Some("them") => raw,
-        _ => None,
+/// Mirror of the app's `engine::Speaker`. The sidecar is a standalone binary
+/// that depends on neither `souffle` nor `tauri`, so the enum is restated
+/// here rather than imported. Restating it as an enum is what matters: both
+/// helpers below branch on it exhaustively, so a third speaker cannot be
+/// silently folded into an existing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Speaker {
+    Me,
+    Them,
+}
+
+impl Speaker {
+    /// DB encoding, identical to `Speaker::as_str` in the app.
+    fn as_str(self) -> &'static str {
+        match self {
+            Speaker::Me => "me",
+            Speaker::Them => "them",
+        }
+    }
+
+    /// Display prefix, identical to `Speaker::display_name` in the app.
+    fn display_name(self) -> &'static str {
+        match self {
+            Speaker::Me => "Me",
+            Speaker::Them => "Them",
+        }
+    }
+
+    /// Leftover `spk:<id>` labels (and anything else) become `None`,
+    /// matching the app's `Speaker::parse`.
+    fn parse(raw: &str) -> Option<Speaker> {
+        match raw {
+            "me" => Some(Speaker::Me),
+            "them" => Some(Speaker::Them),
+            _ => None,
+        }
     }
 }
 
-/// Display prefix for a raw `segments.speaker` value: "me" -> "Me", "them" ->
-/// "Them". Unlabeled / leftover values get no prefix.
+fn normalize_speaker(raw: Option<String>) -> Option<String> {
+    raw.as_deref()
+        .and_then(Speaker::parse)
+        .map(|speaker| speaker.as_str().to_string())
+}
+
 fn speaker_label(raw: &str) -> Option<&'static str> {
-    match raw {
-        "me" => Some("Me"),
-        "them" => Some("Them"),
-        _ => None,
-    }
+    Speaker::parse(raw).map(Speaker::display_name)
 }
 
 /// Simplified stand-in for the frontend's paragraph engine
@@ -795,10 +922,88 @@ mod tests {
             CREATE VIRTUAL TABLE text_search USING fts5(
                 content, source_type, source_id
             );
+            CREATE TABLE schema_version (
+                version INTEGER NOT NULL
+            );
             ",
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES (?1)",
+            params![souffle_schema::SCHEMA_VERSION],
+        )
+        .unwrap();
         (conn, dir, path)
+    }
+
+    fn set_schema_version(conn: &Connection, version: i64) {
+        conn.execute("UPDATE schema_version SET version = ?1", params![version])
+            .unwrap();
+    }
+
+    /// AC1: a database written by a newer app is refused, and the message
+    /// names both versions.
+    #[test]
+    fn refuses_a_database_newer_than_this_build() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        set_schema_version(&conn, souffle_schema::SCHEMA_VERSION + 1);
+        drop(conn);
+
+        let db = McpDb::open(&path).expect("opening must still succeed");
+        let err = db.list_meetings(None, None, None, 10).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains(&(souffle_schema::SCHEMA_VERSION + 1).to_string()),
+            "{message}"
+        );
+        assert!(
+            message.contains(&souffle_schema::SCHEMA_VERSION.to_string()),
+            "{message}"
+        );
+        assert!(db.schema_version().is_err());
+    }
+
+    /// AC3: no `schema_version` table means no assumption of compatibility.
+    #[test]
+    fn refuses_a_database_with_no_schema_version_table() {
+        let (conn, _dir, path) = fixture_db();
+        conn.execute_batch("DROP TABLE schema_version;").unwrap();
+        drop(conn);
+
+        let db = McpDb::open(&path).expect("opening must still succeed");
+        let err = db.list_meetings(None, None, None, 10).unwrap_err();
+        assert!(
+            err.to_string().contains("schema version"),
+            "{}",
+            err.to_string()
+        );
+    }
+
+    /// The guard is asymmetric: a user who has not launched the new app yet
+    /// still has every column these queries read.
+    #[test]
+    fn serves_a_database_older_than_this_build() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        set_schema_version(&conn, 1);
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), 1);
+        assert_eq!(db.list_meetings(None, None, None, 10).unwrap().len(), 1);
+    }
+
+    /// AC2: at the version this build knows, nothing changes.
+    #[test]
+    fn serves_a_database_at_the_known_version() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), souffle_schema::SCHEMA_VERSION);
+        assert_eq!(db.list_meetings(None, None, None, 10).unwrap().len(), 1);
     }
 
     fn insert_meeting(

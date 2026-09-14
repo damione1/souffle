@@ -4,9 +4,9 @@ use rusqlite::{Connection, params};
 use crate::engine::TranscriptionProfile;
 use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_profile};
 
-/// Schema version 16: `meetings.system_audio` holds what the system-audio
-/// leg did over the recording, so a mic-only meeting still says why.
-pub const SCHEMA_VERSION: i64 = 16;
+/// Declared in `souffle-schema` so the read-only MCP sidecar builds against
+/// the same number and can refuse a database that has moved past it.
+pub use souffle_schema::SCHEMA_VERSION;
 
 pub const CREATE_SCHEMA_VERSION: &str = "
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -374,6 +374,9 @@ pub fn migrate_text_search_to_v4(conn: &mut Connection) -> Result<(), String> {
     tx.execute_batch(CREATE_TEXT_SEARCH)
         .map_err(|e| format!("Create content-storing text_search: {e}"))?;
 
+    // The two source_type literals below stay literals on purpose: a past
+    // migration writes what it wrote at the time, and must not follow a later
+    // rename of `db::search::SearchSource`.
     // Re-index all meetings: concatenate segment texts per meeting
     tx.execute_batch(
         "INSERT INTO text_search (content, source_type, source_id)

@@ -91,14 +91,14 @@ pub fn register_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Resu
             let mut lock = state.modifier_toggle_shortcut.write().unwrap();
             *lock = match toggle_target {
                 ShortcutRegistrationTarget::Native => Some(shortcuts.toggle.clone()),
-                _ => None,
+                ShortcutRegistrationTarget::None | ShortcutRegistrationTarget::Plugin => None,
             };
         }
         {
             let mut lock = state.modifier_ptt_shortcut.write().unwrap();
             *lock = match ptt_target {
                 ShortcutRegistrationTarget::Native => Some(shortcuts.push_to_talk.clone()),
-                _ => None,
+                ShortcutRegistrationTarget::None | ShortcutRegistrationTarget::Plugin => None,
             };
         }
         // Key-repeat latch for Toggle. Do not touch `ptt_start_armed`: a
@@ -194,11 +194,45 @@ pub fn save_shortcuts(
     Ok(())
 }
 
+/// The shipped defaults, with nothing read from the database.
+///
+/// `get_settings` returns the *effective* settings, so it is no help when the
+/// database does not exist yet. The webview needs a starting point before its
+/// first successful read, and this is it: `AppSettings::default()` stays the
+/// only declaration of those values.
+#[tauri::command]
+#[specta::specta]
+pub fn get_default_settings() -> AppSettings {
+    AppSettings::default()
+}
+
 /// Get current shortcut settings
 #[tauri::command]
 #[specta::specta]
 pub fn get_shortcuts(state: State<'_, AppState>) -> Result<ShortcutSettings, String> {
     ShortcutSettings::load(&state.db)
+}
+
+/// Accelerators that are registered through the `CGEventTap` rather than
+/// `tauri-plugin-global-shortcut`. The settings UI needs the list to warn that
+/// a binding will require Accessibility; exposing it here is what keeps
+/// `src/lib/utils/shortcut.ts` from maintaining a second copy.
+#[tauri::command]
+#[specta::specta]
+pub fn get_native_shortcuts() -> Vec<String> {
+    crate::modifier_shortcut::NATIVE_SHORTCUTS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
+}
+
+/// The numeric choices the settings UI may offer. Declared in
+/// `settings::SettingsOptions`, next to the bounds `sanitize_for_save`
+/// validates them against, so the components do not restate them.
+#[tauri::command]
+#[specta::specta]
+pub fn get_settings_options() -> crate::settings::SettingsOptions {
+    crate::settings::SettingsOptions::current()
 }
 
 /// Last native PTT `CGEventTap` install status, for a webview that reloaded

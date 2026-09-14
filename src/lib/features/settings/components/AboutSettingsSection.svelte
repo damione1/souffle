@@ -2,9 +2,11 @@
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import SettingsField from "../../../components/ui/SettingsField.svelte";
-  import { checkForUpdates, getAppVersion, openReleasePage } from "../../../api/diagnostics";
+  import { checkForUpdates, getAppVersion } from "../../../api/diagnostics";
   import type { UpdateCheckResult } from "../../../types";
   import { errorMessage } from "../../../utils";
+  import UpdateAction from "../../update/UpdateAction.svelte";
+  import { updateController, useUpdateController } from "../../update/controller.svelte";
 
   let {
     selectedTranscriptionLabel,
@@ -18,11 +20,20 @@
     onAutoUpdateCheckChange: (event: Event) => void;
   } = $props();
 
+  useUpdateController();
+
   let appVersion = $state("");
   let checking = $state(false);
   let updateResult = $state<UpdateCheckResult | null>(null);
   let statusMessage = $state("");
   let statusIsError = $state(false);
+
+  const showUpdateAction = $derived(
+    Boolean(updateResult?.update_available) ||
+      updateController.phase === "downloading" ||
+      updateController.phase === "ready" ||
+      updateController.phase === "failed",
+  );
 
   onMount(() => {
     void getAppVersion().then((v) => {
@@ -84,13 +95,8 @@
         >
           {checking ? $t("settings_about.checking") : $t("settings_about.check_updates")}
         </button>
-        {#if updateResult?.update_available && updateResult.release_url}
-          <button
-            onclick={() => void openReleasePage(updateResult!.release_url!)}
-            class="text-xs text-accent hover:underline cursor-pointer"
-          >
-            {$t("settings_about.download_update")}
-          </button>
+        {#if showUpdateAction}
+          <UpdateAction releaseUrl={updateResult?.release_url ?? null} compact />
         {/if}
       </div>
     </div>

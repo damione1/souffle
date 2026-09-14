@@ -276,9 +276,9 @@
     "checking": "Checking…",
     "up_to_date": "You're on the latest release.",
     "update_available": "Version {version} is available.",
-    "download_update": "Download on GitHub",
+    "download_update": "Download update",
     "auto_check": "Check daily for updates",
-    "auto_check_desc": "Ask GitHub once a day whether a newer version exists, and show a dialog when there is one. Nothing is downloaded or installed."
+    "auto_check_desc": "Ask GitHub once a day whether a newer version exists, and show a dialog when there is one. Download and install stay under your control."
   },
   "whats_new": {
     "title": "What's New",
@@ -592,6 +592,18 @@
     "title": "Update available",
     "subtitle": "Soufflé v{version} is out.",
     "later": "Later",
-    "download": "Download"
+    "download": "Download",
+    "download_update": "Download update",
+    "downloading": "Downloading…",
+    "cancel": "Cancel",
+    "install_restart": "Install and restart",
+    "retry": "Try again",
+    "open_release_page": "Open release page",
+    "blocked_recording_dictation": "Finish dictation before installing.",
+    "blocked_recording_meeting": "Stop the meeting before installing.",
+    "blocked_stopping": "Wait for recording to finish stopping.",
+    "blocked_downloading": "Wait for the model download to finish.",
+    "blocked_loading": "Wait for the model to finish loading.",
+    "blocked_unloading": "Wait for the model to finish unloading."
   }
 }

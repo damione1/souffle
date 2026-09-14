@@ -3,8 +3,7 @@
   "identifier": "default",
   "description": "Capability for the app windows",
   "windows": [
-    "main",
-    "pill"
+    "main"
   ],
   "permissions": [
     "core:default",
@@ -16,6 +15,7 @@
     "fs:default",
     "dialog:allow-save",
     "dialog:allow-open",
-    "log:default"
+    "log:default",
+    "updater:default"
   ]
 }

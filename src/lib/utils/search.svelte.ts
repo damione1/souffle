@@ -1,5 +1,5 @@
 import { searchText } from "../api/meetings";
-import type { SearchResult } from "../types";
+import type { SearchResult, SearchSource } from "../types";
 
 export interface DebouncedSearch {
   readonly results: SearchResult[];
@@ -46,14 +46,14 @@ export function createDebouncedSearch(debounceMs = 250, limit = 20): DebouncedSe
 }
 
 /** Filter search results by source type. */
-export function filterResultsByType(results: SearchResult[], sourceType: string): SearchResult[] {
+export function filterResultsByType(results: SearchResult[], sourceType: SearchSource): SearchResult[] {
   return results.filter((r) => r.source_type === sourceType);
 }
 
 /** Find the FTS5 snippet for a given source in search results. */
 export function findSnippet(
   searchResults: SearchResult[],
-  sourceType: string,
+  sourceType: SearchSource,
   sourceId: string,
 ): string | null {
   const result = searchResults.find(
@@ -63,7 +63,7 @@ export function findSnippet(
 }
 
 /** Get the set of matched IDs for a given source type from search results. */
-export function matchedIdsForType(results: SearchResult[], sourceType: string): Set<string> {
+export function matchedIdsForType(results: SearchResult[], sourceType: SearchSource): Set<string> {
   return new Set(
     results
       .filter((r) => r.source_type === sourceType)

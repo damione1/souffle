@@ -193,7 +193,13 @@ fn hud_stop_target(machine: &AppStateMachine) -> Option<HudStopTarget> {
             was_recording: RecordingKind::Dictation,
             ..
         } => Some(HudStopTarget::Dictation),
-        _ => None,
+        AppStateMachine::Idle
+        | AppStateMachine::Downloading { .. }
+        | AppStateMachine::Downloaded { .. }
+        | AppStateMachine::Loading { .. }
+        | AppStateMachine::Ready { .. }
+        | AppStateMachine::Unloading { .. }
+        | AppStateMachine::Error { .. } => None,
     }
 }
 
@@ -341,17 +347,18 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
     } else {
         match machine {
             AppStateMachine::RecordingMeeting { .. } => PillPanelMode::Meeting,
-            AppStateMachine::Stopping { was_recording, .. } => {
-                if matches!(
-                    was_recording,
-                    crate::state_machine::RecordingKind::Meeting { .. }
-                ) {
-                    PillPanelMode::Meeting
-                } else {
-                    PillPanelMode::Dictation
-                }
-            }
-            _ => PillPanelMode::Dictation,
+            AppStateMachine::Stopping { was_recording, .. } => match was_recording {
+                crate::state_machine::RecordingKind::Meeting { .. } => PillPanelMode::Meeting,
+                crate::state_machine::RecordingKind::Dictation => PillPanelMode::Dictation,
+            },
+            AppStateMachine::Idle
+            | AppStateMachine::Downloading { .. }
+            | AppStateMachine::Downloaded { .. }
+            | AppStateMachine::Loading { .. }
+            | AppStateMachine::Ready { .. }
+            | AppStateMachine::RecordingDictation { .. }
+            | AppStateMachine::Unloading { .. }
+            | AppStateMachine::Error { .. } => PillPanelMode::Dictation,
         }
     };
 

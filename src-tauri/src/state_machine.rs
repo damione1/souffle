@@ -317,6 +317,11 @@ impl AppStateMachine {
 }
 
 #[cfg(test)]
+// `other => panic!("expected X, got {other:?}")` is the assertion itself here:
+// a new variant makes the test fail loudly with the state it actually saw,
+// which is the property the lint protects, reached another way. Enumerating
+// nine variants per assertion would bury it.
+#[allow(clippy::wildcard_enum_match_arm)]
 mod tests {
     use super::*;
     use crate::engine::default_transcription_profile;

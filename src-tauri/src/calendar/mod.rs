@@ -129,7 +129,7 @@ mod macos {
                 open_calendar_settings();
                 return PermState::Denied;
             }
-            _ => {}
+            PermState::Unknown | PermState::Unsupported | PermState::NoDevice => {}
         }
 
         let (tx, rx) = std::sync::mpsc::channel::<bool>();

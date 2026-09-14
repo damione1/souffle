@@ -276,9 +276,9 @@
     "checking": "Vérification…",
     "up_to_date": "Vous utilisez la dernière version.",
     "update_available": "La version {version} est disponible.",
-    "download_update": "Télécharger sur GitHub",
+    "download_update": "Télécharger la mise à jour",
     "auto_check": "Vérifier les mises à jour chaque jour",
-    "auto_check_desc": "Demande à GitHub une fois par jour si une version plus récente existe, et affiche une fenêtre le cas échéant. Rien n'est téléchargé ni installé."
+    "auto_check_desc": "Demande à GitHub une fois par jour si une version plus récente existe, et affiche une fenêtre le cas échéant. Téléchargement et installation restent sous votre contrôle."
   },
   "whats_new": {
     "title": "Nouveautés",
@@ -592,6 +592,18 @@
     "title": "Mise à jour disponible",
     "subtitle": "Soufflé v{version} est disponible.",
     "later": "Plus tard",
-    "download": "Télécharger"
+    "download": "Télécharger",
+    "download_update": "Télécharger la mise à jour",
+    "downloading": "Téléchargement…",
+    "cancel": "Annuler",
+    "install_restart": "Installer et redémarrer",
+    "retry": "Réessayer",
+    "open_release_page": "Ouvrir la page de release",
+    "blocked_recording_dictation": "Terminez la dictée avant d'installer.",
+    "blocked_recording_meeting": "Arrêtez la réunion avant d'installer.",
+    "blocked_stopping": "Attendez la fin de l'arrêt de l'enregistrement.",
+    "blocked_downloading": "Attendez la fin du téléchargement du modèle.",
+    "blocked_loading": "Attendez la fin du chargement du modèle.",
+    "blocked_unloading": "Attendez la fin du déchargement du modèle."
   }
 }

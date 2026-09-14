@@ -64,6 +64,23 @@ async getModifierTapStatus() : Promise<ModifierTapStatus | null> {
     return await TAURI_INVOKE("get_modifier_tap_status");
 },
 /**
+ * Accelerators that are registered through the `CGEventTap` rather than
+ * `tauri-plugin-global-shortcut`. The settings UI needs the list to warn that
+ * a binding will require Accessibility; exposing it here is what keeps
+ * `src/lib/utils/shortcut.ts` from maintaining a second copy.
+ */
+async getNativeShortcuts() : Promise<string[]> {
+    return await TAURI_INVOKE("get_native_shortcuts");
+},
+/**
+ * The numeric choices the settings UI may offer. Declared in
+ * `settings::SettingsOptions`, next to the bounds `sanitize_for_save`
+ * validates them against, so the components do not restate them.
+ */
+async getSettingsOptions() : Promise<SettingsOptions> {
+    return await TAURI_INVOKE("get_settings_options");
+},
+/**
  * Delete a downloaded model from disk.
  */
 async deleteModel(selection: TranscriptionProfileSelection) : Promise<Result<null, string>> {
@@ -671,6 +688,17 @@ async getSettings() : Promise<Result<AppSettings, string>> {
 }
 },
 /**
+ * The shipped defaults, with nothing read from the database.
+ * 
+ * `get_settings` returns the *effective* settings, so it is no help when the
+ * database does not exist yet. The webview needs a starting point before its
+ * first successful read, and this is it: `AppSettings::default()` stays the
+ * only declaration of those values.
+ */
+async getDefaultSettings() : Promise<AppSettings> {
+    return await TAURI_INVOKE("get_default_settings");
+},
+/**
  * Save the typed application settings.
  */
 async saveSettings(settings: AppSettings) : Promise<Result<null, string>> {
@@ -1082,6 +1110,63 @@ async openReleasePage(url: string) : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Snapshot of the in-flight / ready update download. Source of truth for the UI.
+ */
+async getUpdateDownloadStatus() : Promise<Result<UpdateDownloadStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_update_download_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Why install is currently refused, if it is. Pure read — no side effects.
+ */
+async getUpdateInstallBlock() : Promise<Result<InstallBlockReason | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_update_install_block") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Start downloading the updater artifact. Detection has already happened via
+ * `update_check`; this only obtains a plugin handle and fetches bytes.
+ */
+async downloadUpdate() : Promise<Result<UpdateDownloadStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("download_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Abandon an in-flight download. No-op if nothing is downloading.
+ */
+async cancelUpdateDownload() : Promise<Result<UpdateDownloadStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_update_download") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Replace the on-disk bundle and restart. Refuses before any side effect when
+ * the state machine is busy.
+ */
+async installUpdate() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -1114,7 +1199,8 @@ systemWokeUp: SystemWokeUp,
 todayCalendarUpdated: TodayCalendarUpdated,
 transcriptionHealth: TranscriptionHealth,
 upcomingMeeting: UpcomingMeeting,
-updateAvailable: UpdateAvailable
+updateAvailable: UpdateAvailable,
+updateDownloadProgress: UpdateDownloadProgress
 }>({
 archiveExportProgress: "archive-export-progress",
 audioLevel: "audio-level",
@@ -1141,7 +1227,8 @@ systemWokeUp: "system-woke-up",
 todayCalendarUpdated: "today-calendar-updated",
 transcriptionHealth: "transcription-health",
 upcomingMeeting: "upcoming-meeting",
-updateAvailable: "update-available"
+updateAvailable: "update-available",
+updateDownloadProgress: "update-download-progress"
 })
 
 /** user-defined constants **/
@@ -1477,6 +1564,10 @@ export type InputRouteReason =
  */
 "lost"
 /**
+ * Why "Install and restart" must stay disabled / refuse before any side effect.
+ */
+export type InstallBlockReason = "recording_dictation" | "recording_meeting" | "stopping" | "downloading" | "loading" | "unloading"
+/**
  * A device remembered across disconnects for display and preference ordering.
  */
 export type KnownDevice = { uid: string; name: string; 
@@ -1671,12 +1762,42 @@ export type RepairAccessibilityResult = { reset_performed: boolean; prompt_shown
 /**
  * Search result from FTS5 full-text search
  */
-export type SearchResult = { source_type: string; source_id: string; snippet: string; rank: number }
+export type SearchResult = { source_type: SearchSource; source_id: string; snippet: string; rank: number }
+/**
+ * Which table a full-text hit came from.
+ * 
+ * The strings are the on-disk encoding of the `text_search.source_type`
+ * column, written by every version of the app, so they cannot change without
+ * a migration. Declaring them here is what stops the thirteen SQL sites from
+ * spelling them themselves.
+ */
+export type SearchSource = "meeting" | "dictation"
+/**
+ * The numeric choices the settings UI may offer, served from the same file
+ * that validates them. `sanitize_for_save` alone decides what is acceptable;
+ * this is how the UI finds out instead of restating it.
+ */
+export type SettingsOptions = { model_unload_timeout_minutes: number[]; meeting_autostop_minutes: number[]; meeting_max_duration_minutes: number[] }
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
 export type ShortcutToggle = null
 export type SnippetEntry = { id: number; trigger: string; expansion: string; created_at: string }
+/**
+ * Who produced a segment in a meeting: the microphone is the local user
+ * (`Me`), system audio is everyone else (`Them`). `None` = single-stream
+ * session (dictation, or a meeting recorded without system-audio capture).
+ * 
+ * Wire and DB encoding is the snake_case variant name, "me" or "them", and
+ * specta emits the union `"me" | "them"` so the frontend branches on the
+ * contract instead of re-declaring the two values.
+ * 
+ * The DB column is free `TEXT` and still holds `spk:<id>` labels from the
+ * dropped persistent-speaker feature. `Speaker::parse` and
+ * `deserialize_optional_speaker` absorb those into `None` so old meetings
+ * keep loading; that tolerance lives there, not in `Deserialize`.
+ */
+export type Speaker = "me" | "them"
 export type StateChanged = AppStateMachine
 /**
  * A single action item extracted from a meeting summary pass.
@@ -1869,7 +1990,7 @@ export type TranscriptionSegment = { text: string; start_time: number; end_time:
 /**
  * Set by the pipeline for meetings with Me/Them lanes; `None` otherwise.
  */
-speaker?: string | null }
+speaker?: Speaker | null }
 /**
  * Human-facing transport label for an input device.
  */
@@ -1887,6 +2008,20 @@ export type UpcomingMeeting = { event: CalendarEvent; starts_in_seconds: number;
  */
 export type UpdateAvailable = { latest_version: string; release_notes: string | null; release_url: string | null }
 export type UpdateCheckResult = { current_version: string; latest_version: string | null; update_available: boolean; release_notes: string | null; release_url: string | null; check_error: string | null }
+/**
+ * Progress / phase of an in-app update download. Source of truth is Rust;
+ * the webview mirrors this (and can re-query after reload).
+ */
+export type UpdateDownloadProgress = { phase: UpdatePhase; version: string | null; downloaded_bytes: number; total_bytes: number | null; error: string | null; manual_fallback: boolean }
+export type UpdateDownloadStatus = { phase: UpdatePhase; version: string | null; downloaded_bytes: number; total_bytes: number | null; error: string | null; 
+/**
+ * Offer the GitHub release-page fallback when true.
+ */
+manual_fallback: boolean }
+/**
+ * Phase of the in-app updater download pipeline (not the app state machine).
+ */
+export type UpdatePhase = "idle" | "downloading" | "ready" | "failed"
 
 /** tauri-specta globals **/
 

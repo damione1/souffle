@@ -31,6 +31,7 @@ export type {
   MeetingRecordingSession,
   MeetingSystemAudio,
   MeetingTranscript,
+  MeetingTranscriptionLanguage,
   ModelArtifactDescriptor,
   OllamaPullProgress,
   SummaryModelDescriptor,
@@ -38,6 +39,7 @@ export type {
   SummaryProvidersStatus,
   SummaryTemplate,
   SnippetEntry,
+  Speaker,
   PermState,
   PermissionKind,
   PermissionStatus,
@@ -45,6 +47,7 @@ export type {
   PillHoldChanged,
   PillHoldKind,
   RecordingKind,
+  SettingsOptions,
   ShortcutSettings,
   SummarizeProgress,
   Theme,
@@ -74,11 +77,11 @@ export type {
   TranscriptionRuntimeStatus,
   TranscriptionSegment,
   SearchResult,
+  SearchSource,
   UpdateCheckResult,
+  UpdateDownloadStatus,
+  UpdatePhase,
+  InstallBlockReason,
+  UpdateDownloadProgress,
 } from "./generated";
-
-/** Who produced a transcript segment: "me" (microphone) or "them"
- * (system audio). Backend wire format (see `engine::Speaker` in Rust);
- * specta emits it as a plain `string`. Compare with `===`. */
-export type Speaker = string;
 export type { StatusReason } from './status';

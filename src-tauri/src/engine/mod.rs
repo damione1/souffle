@@ -296,22 +296,39 @@ pub trait TranscriptionEngine {
 /// (`Me`), system audio is everyone else (`Them`). `None` = single-stream
 /// session (dictation, or a meeting recorded without system-audio capture).
 ///
-/// Wire/DB encoding is a plain string: "me" or "them". Unknown values
-/// (including leftover `spk:<id>` labels from the dropped persistent-speaker
-/// feature) parse as `None` so old meetings still load.
-/// Serialize/Deserialize/specta::Type are implemented by hand so the
-/// generated TypeScript type is a plain `string` rather than a tagged union.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Wire and DB encoding is the snake_case variant name, "me" or "them", and
+/// specta emits the union `"me" | "them"` so the frontend branches on the
+/// contract instead of re-declaring the two values.
+///
+/// The DB column is free `TEXT` and still holds `spk:<id>` labels from the
+/// dropped persistent-speaker feature. `Speaker::parse` and
+/// `deserialize_optional_speaker` absorb those into `None` so old meetings
+/// keep loading; that tolerance lives there, not in `Deserialize`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, specta::Type,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum Speaker {
     Me,
     Them,
 }
 
 impl Speaker {
-    pub fn as_str(self) -> String {
+    /// Wire and DB encoding. Must stay in step with `#[serde(rename_all)]`
+    /// above; `speaker_wire_encoding_matches_as_str` proves it does.
+    pub fn as_str(self) -> &'static str {
         match self {
-            Speaker::Me => "me".to_string(),
-            Speaker::Them => "them".to_string(),
+            Speaker::Me => "me",
+            Speaker::Them => "them",
+        }
+    }
+
+    /// Plain, non-localized label used by every exporter. The frontend
+    /// mirrors it in `speakerPlainLabel`.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Speaker::Me => "Me",
+            Speaker::Them => "Them",
         }
     }
 
@@ -321,38 +338,6 @@ impl Speaker {
             "them" => Some(Speaker::Them),
             _ => None,
         }
-    }
-}
-
-impl serde::Serialize for Speaker {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.as_str())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Speaker {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Speaker::parse(&s)
-            .ok_or_else(|| serde::de::Error::custom(format!("invalid speaker: {s:?}")))
-    }
-}
-
-/// Manual impl (rather than `#[derive(specta::Type)]`) so the generated
-/// TypeScript type is a plain `string` ("me" | "them"), matching
-/// the hand-written `Serialize`/`Deserialize` above.
-impl specta::Type for Speaker {
-    fn inline(
-        type_map: &mut specta::TypeCollection,
-        generics: specta::Generics,
-    ) -> specta::DataType {
-        <String as specta::Type>::inline(type_map, generics)
     }
 }
 
@@ -809,6 +794,35 @@ fn slug_id(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speaker_wire_encoding_matches_as_str() {
+        for speaker in [Speaker::Me, Speaker::Them] {
+            let json = serde_json::to_string(&speaker).unwrap();
+            assert_eq!(json, format!("\"{}\"", speaker.as_str()));
+            assert_eq!(serde_json::from_str::<Speaker>(&json).unwrap(), speaker);
+            assert_eq!(Speaker::parse(speaker.as_str()), Some(speaker));
+        }
+    }
+
+    #[test]
+    fn legacy_speaker_labels_deserialize_to_none() {
+        for raw in ["spk:1", "spk:abc", "garbage", ""] {
+            let json = format!(
+                r#"{{"text":"x","start_time":0.0,"end_time":1.0,"is_final":true,"speaker":"{raw}"}}"#
+            );
+            let segment: TranscriptionSegment = serde_json::from_str(&json).unwrap();
+            assert_eq!(segment.speaker, None, "{raw} should not parse");
+        }
+    }
+
+    #[test]
+    fn missing_speaker_field_deserializes_to_none() {
+        let segment: TranscriptionSegment =
+            serde_json::from_str(r#"{"text":"x","start_time":0.0,"end_time":1.0,"is_final":true}"#)
+                .unwrap();
+        assert_eq!(segment.speaker, None);
+    }
 
     #[test]
     fn default_profile_uses_kyutai_1b_candle() {

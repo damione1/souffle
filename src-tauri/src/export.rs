@@ -305,19 +305,11 @@ fn render_structured_markdown(out: &mut String, structured: &StructuredSummary) 
     }
 }
 
-/// Display name for a speaker label: Me -> "Me", Them -> "Them".
-fn speaker_display_name(speaker: Speaker) -> &'static str {
-    match speaker {
-        Speaker::Me => "Me",
-        Speaker::Them => "Them",
-    }
-}
-
 fn render_paragraph_markdown(p: &paragraphs::Paragraph) -> String {
     match p.speaker {
         Some(speaker) => format!(
             "**{}** [{}] {}",
-            speaker_display_name(speaker),
+            speaker.display_name(),
             p.timestamp,
             p.text
         ),
@@ -351,7 +343,7 @@ fn time_ordered_segments(segments: &[TranscriptionSegment]) -> Vec<&Transcriptio
 
 fn speaker_prefix(speaker: Option<Speaker>, text: &str) -> String {
     match speaker {
-        Some(speaker) => format!("{}: {text}", speaker_display_name(speaker)),
+        Some(speaker) => format!("{}: {text}", speaker.display_name()),
         None => text.to_string(),
     }
 }

@@ -43,11 +43,45 @@ import {
 export const DEFAULT_RESPONSES: Record<string, unknown> = {
   get_machine_state: { state: "ready", data: { profile: mockRuntimeStatus.profile } },
   get_settings: { ...mockSettings, audio_device: null, last_seen_version: "" },
+  // `main.ts` awaits this before mounting: the settings store holds no
+  // hand-written defaults any more, so an unstubbed answer here means the app
+  // never renders (SOU-138).
+  get_default_settings: { ...mockSettings, audio_device: null, last_seen_version: "" },
   save_settings: null,
   get_transcription_catalog: mockCatalog,
   get_model_status: mockRuntimeStatus,
   get_app_version: "0.1.0",
   get_shortcuts: mockShortcuts,
+  // `bootstrap.ts` reads this once at startup. The stub returns null for an
+  // unknown command, and the settings banner would then call `.includes` on
+  // it (SOU-139).
+  get_native_shortcuts: [
+    "Fn",
+    "MetaLeft",
+    "MetaRight",
+    "ShiftLeft",
+    "ShiftRight",
+    "AltLeft",
+    "AltRight",
+    "ControlLeft",
+    "ControlRight",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
+  ],
+  // The settings controller reads this to build its numeric dropdowns. The
+  // stub returns null for an unknown command, which would leave them empty
+  // (SOU-140).
+  get_settings_options: {
+    model_unload_timeout_minutes: [0, 5, 15, 60],
+    meeting_autostop_minutes: [5, 10, 15, 30],
+    meeting_max_duration_minutes: [120, 240, 480],
+  },
   check_summary_providers: mockSummaryProvidersStatus,
   list_todays_calendar_events: [],
   list_calendars: [],
