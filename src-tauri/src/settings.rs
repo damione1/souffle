@@ -1771,9 +1771,15 @@ mod tests {
 
         let mut settings = AppSettings::default();
         settings.paste_delay_ms = opts.paste_delay_ms_min;
-        assert_eq!(settings.clone().sanitized().paste_delay_ms, opts.paste_delay_ms_min);
+        assert_eq!(
+            settings.clone().sanitized().paste_delay_ms,
+            opts.paste_delay_ms_min
+        );
 
         settings.paste_delay_ms = opts.paste_delay_ms_max;
-        assert_eq!(settings.clone().sanitized().paste_delay_ms, opts.paste_delay_ms_max);
+        assert_eq!(
+            settings.clone().sanitized().paste_delay_ms,
+            opts.paste_delay_ms_max
+        );
     }
 }
