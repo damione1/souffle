@@ -26,6 +26,7 @@ fn main() {
     }
 
     tauri_build::build();
+    slint_build::compile("ui/app.slint").unwrap();
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
