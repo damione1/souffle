@@ -39,18 +39,25 @@ component LiveViewDictation inherits VerticalBox {
     Text { text: "Mode Dictée"; font-size: 20px; font-weight: 700; color: Theme.text; }
     
     ScrollView {
-        Text {
-            text: final-text + draft-text + " |"; // fake cursor
-            color: Theme.text;
-            wrap: word-wrap;
+        HorizontalBox {
+            alignment: start;
+            Text {
+                text: final-text;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            Text {
+                text: draft-text + " |";
+                color: Theme.draft-text;
+                wrap: word-wrap;
+            }
         }
     }
 }
 
 component LiveViewMeeting inherits VerticalBox {
     in property <[Paragraph]> paragraphs: [];
-    callback edit-paragraph(int, string);
-    callback stop-edit(int);
+    callback toggle-edit(int);
     
     Text { text: "Mode Réunion"; font-size: 20px; font-weight: 700; color: Theme.text; }
     
@@ -62,10 +69,13 @@ component LiveViewMeeting inherits VerticalBox {
                 VerticalBox {
                     padding: 10px;
                     Text { text: p.speaker; color: Theme.primary; font-weight: 700; }
-                    if !p.is-editing : Text {
-                        text: p.text;
-                        color: Theme.text;
-                        wrap: word-wrap;
+                    if !p.is-editing : TouchArea {
+                        clicked => { root.toggle-edit(i); }
+                        Text {
+                            text: p.text;
+                            color: Theme.text;
+                            wrap: word-wrap;
+                        }
                     }
                     if p.is-editing : TextEdit {
                         text: p.text;
@@ -91,19 +101,21 @@ export component AppWindow inherits Window {
     in property <string> dict-draft-text: "";
     
     // Meeting state
-    in property <[Paragraph]> meeting-paragraphs: [];
+    in-out property <[Paragraph]> meeting-paragraphs: [];
     
     callback start-dictation();
     callback start-meeting();
     callback open-settings();
     callback cancel-edit();
     callback toggle-theme();
+    callback drag-window();
+    callback toggle-paragraph-edit(int);
 
     // Chrome drag area
     forward-focus: key-handler;
     key-handler := FocusScope {
         key-pressed(event) => {
-            if event.text == "," && event.modifiers.control { // simulate cmd+,
+            if event.text == "," && event.modifiers.meta { // Cmd+, on macOS
                 root.open-settings();
                 return accept;
             }
@@ -119,6 +131,11 @@ export component AppWindow inherits Window {
             TouchArea {
                 height: 30px;
                 width: 100%;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        root.drag-window();
+                    }
+                }
                 Text { text: "Soufflé (Drag me)"; color: Theme.text; horizontal-alignment: center; }
             }
             
@@ -139,8 +156,10 @@ export component AppWindow inherits Window {
             
             if current-view == "meeting" : LiveViewMeeting {
                 paragraphs: root.meeting-paragraphs;
+                toggle-edit(idx) => { root.toggle-paragraph-edit(idx); }
             }
         }
     }
 }
+
 

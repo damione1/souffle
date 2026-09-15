@@ -3,7 +3,7 @@ slint::include_modules!();
 use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2_foundation::{MainThreadMarker, NSString};
-use slint::VecModel;
+use slint::{Model, VecModel};
 use std::rc::Rc;
 
 fn setup_macos_menu(_mtm: MainThreadMarker) {
@@ -94,6 +94,29 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_cancel_edit({
         move || {
             println!("Edit cancelled");
+        }
+    });
+
+    ui.on_drag_window({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                let _ = ui.window().show();
+            }
+        }
+    });
+
+    ui.on_toggle_paragraph_edit({
+        let ui_handle = ui_handle.clone();
+        move |idx| {
+            if let Some(ui) = ui_handle.upgrade() {
+                let model = ui.get_meeting_paragraphs();
+                let idx = idx as usize;
+                if let Some(mut p) = model.row_data(idx) {
+                    p.is_editing = !p.is_editing;
+                    model.set_row_data(idx, p);
+                }
+            }
         }
     });
 
