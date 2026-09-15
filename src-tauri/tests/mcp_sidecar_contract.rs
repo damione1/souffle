@@ -18,21 +18,25 @@ use souffle_lib::transcript::{
 use souffle_mcp::db::{IncludeSet, McpDb};
 use tempfile::TempDir;
 
-fn build_meeting() -> MeetingTranscript {
+fn build_meeting(id: &str, title: &str, is_ongoing: bool) -> MeetingTranscript {
     let started_at = Utc::now();
-    let ended_at = started_at + chrono::Duration::seconds(120);
+    let ended_at = if is_ongoing {
+        None
+    } else {
+        Some(started_at + chrono::Duration::seconds(120))
+    };
 
     MeetingTranscript {
-        id: "contract-1".to_string(),
-        title: "Contract Test Meeting".to_string(),
+        id: id.to_string(),
+        title: title.to_string(),
         started_at,
-        ended_at: Some(ended_at),
+        ended_at,
         duration_seconds: 120.0,
         transcription_profile: TranscriptionProfile::default(),
         recording_sessions: vec![MeetingRecordingSession::completed(
             "contract-1-session".to_string(),
             started_at,
-            ended_at,
+            if is_ongoing { started_at } else { ended_at.unwrap() },
             0,
             2,
         )],
@@ -59,7 +63,7 @@ fn build_meeting() -> MeetingTranscript {
         summary: Some("A short summary of the contract test meeting.".to_string()),
         summary_is_stale: false,
         summary_model: Some("qwen2.5".to_string()),
-        summary_generated_at: Some(ended_at),
+        summary_generated_at: ended_at,
         structured_summary: Some(StructuredSummary {
             decisions: vec!["Proceed with schema contract test".to_string()],
             action_items: vec![StructuredActionItem {
@@ -89,8 +93,10 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
     // Write through the real app database, using the real writers — this is
     // the source of truth for what the schema actually looks like.
     let app_db = Database::open(&db_path).unwrap();
-    let meeting = build_meeting();
+    let meeting = build_meeting("contract-1", "Contract Test Meeting", false);
     app_db.save_meeting(&meeting).unwrap();
+    let ongoing_meeting = build_meeting("contract-ongoing", "Ongoing Test Meeting", true);
+    app_db.save_meeting(&ongoing_meeting).unwrap();
     app_db
         .add_dictation_entry(
             "dict-1",
@@ -104,12 +110,20 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
     let sidecar = McpDb::open(&db_path).unwrap();
 
     let list = sidecar.list_meetings(None, None, None, 10).unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].id, "contract-1");
-    assert_eq!(list[0].title, "Contract Test Meeting");
-    assert_eq!(list[0].participants, vec!["Alice Martin".to_string()]);
-    assert!(list[0].has_summary);
-    assert!(list[0].has_notes);
+    assert_eq!(list.len(), 2);
+    // ordered by started_at DESC, and ongoing was created second
+    assert_eq!(list[0].id, "contract-ongoing");
+    assert_eq!(list[0].title, "Ongoing Test Meeting");
+    assert!(list[0].is_ongoing);
+    assert_eq!(list[0].ended_at, None);
+
+    assert_eq!(list[1].id, "contract-1");
+    assert_eq!(list[1].title, "Contract Test Meeting");
+    assert_eq!(list[1].participants, vec!["Alice Martin".to_string()]);
+    assert!(list[1].has_summary);
+    assert!(list[1].has_notes);
+    assert!(!list[1].is_ongoing);
+    assert!(list[1].ended_at.is_some());
 
     let detail = sidecar
         .get_meeting("contract-1", IncludeSet::all())
@@ -150,12 +164,18 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
     assert_eq!(metadata.summary_model.as_deref(), Some("qwen2.5"));
     assert_eq!(metadata.segment_count, 2);
 
+    let ongoing_detail = sidecar
+        .get_meeting("contract-ongoing", IncludeSet::all())
+        .unwrap();
+    assert!(ongoing_detail.is_ongoing);
+    assert_eq!(ongoing_detail.ended_at, None);
+
     let latest = sidecar.latest_meeting(IncludeSet::all()).unwrap();
-    assert_eq!(latest.id, "contract-1");
+    assert_eq!(latest.id, "contract-ongoing");
 
     let hits = sidecar.search_meetings("schema drift", 10).unwrap();
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].id, "contract-1");
+    assert_eq!(hits.len(), 2);
+    // hits[0] and hits[1] order can vary depending on FTS ranking or rowid, but both have it
 
     let dictations = sidecar.list_dictations(10).unwrap();
     assert_eq!(dictations.len(), 1);
@@ -169,7 +189,9 @@ fn sidecar_get_meeting_include_filter_matches_across_the_boundary() {
     let db_path = dir.path().join("souffle.db");
 
     let app_db = Database::open(&db_path).unwrap();
-    app_db.save_meeting(&build_meeting()).unwrap();
+    app_db
+        .save_meeting(&build_meeting("contract-1", "Contract Test Meeting", false))
+        .unwrap();
     drop(app_db);
 
     let sidecar = McpDb::open(&db_path).unwrap();
