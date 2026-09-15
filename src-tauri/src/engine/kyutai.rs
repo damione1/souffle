@@ -34,9 +34,6 @@ const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
 /// (Kyutai/Unmute recommend clearing KV between speech turns).
 const REFRESH_SOFT_CONTEXT_NUM: usize = 6;
 const REFRESH_SOFT_CONTEXT_DEN: usize = 10;
-/// Hard deadline margin: force refresh this many frames before `context`
-/// even mid-speech so attention never runs fully masked.
-const REFRESH_HARD_MARGIN_FRAMES: usize = 25;
 
 /// Extract frame `f` (MIMI_FRAME_SIZE samples) from `buf`, zero-padding when the
 /// buffer is short or the frame is past its end. Used to align the two diarized
@@ -126,7 +123,8 @@ impl KyutaiConfig {
 pub enum RefreshKind {
     /// Pause-aligned refresh inside the soft context window (preferred).
     SoftPause,
-    /// Forced refresh before the LM context window saturates.
+    /// Legacy: formerly forced a refresh before the LM context window saturated.
+    /// Kept for test assertions and debug logging.
     HardDeadline,
     /// Per-lane reset triggered by consecutive language mismatches.
     LanguageMismatch,
@@ -164,11 +162,6 @@ fn decide_refresh(
         return RefreshDecision::None;
     }
     let soft = (context * REFRESH_SOFT_CONTEXT_NUM) / REFRESH_SOFT_CONTEXT_DEN;
-    let hard = context.saturating_sub(REFRESH_HARD_MARGIN_FRAMES);
-
-    if frames_since_refresh >= hard {
-        return RefreshDecision::Full(RefreshKind::HardDeadline);
-    }
 
     if frames_since_refresh < soft {
         return RefreshDecision::None;
@@ -1506,8 +1499,8 @@ mod tests {
     #[test]
     fn energy_pause_streak_can_soft_refresh_a_checkpoint_without_vad_heads() {
         // 2.6B: no AsrMsg::Step, streak stays 0 unless energy fills it.
-        // Without this fallback, 300 frames into a 375 context is HardDeadline
-        // or nothing — never SoftPause.
+        // Without this fallback, 300 frames into a 375 context is nothing
+        // — never SoftPause.
         let silence = vec![0.0f32; MIMI_FRAME_SIZE];
         let mut streaks = [0usize];
         let drained = drained_pause_frames(STT_26B_DELAY);
@@ -1551,10 +1544,10 @@ mod tests {
     }
 
     #[test]
-    fn decide_refresh_hard_deadline_near_context() {
+    fn decide_refresh_no_hard_deadline_past_soft_window_without_pause() {
         assert_eq!(
             decide_refresh(350, 375, &[0], 1, STT_1B_DELAY),
-            RefreshDecision::Full(RefreshKind::HardDeadline)
+            RefreshDecision::None
         );
         assert_eq!(
             decide_refresh(
@@ -1564,7 +1557,7 @@ mod tests {
                 1,
                 STT_1B_DELAY
             ),
-            RefreshDecision::Full(RefreshKind::HardDeadline)
+            RefreshDecision::Full(RefreshKind::SoftPause)
         );
     }
 
