@@ -1769,16 +1769,21 @@ mod tests {
         assert_eq!(opts.paste_delay_ms_min, super::MIN_PASTE_DELAY_MS);
         assert_eq!(opts.paste_delay_ms_max, super::MAX_PASTE_DELAY_MS);
 
-        let mut settings = AppSettings::default();
-        settings.paste_delay_ms = opts.paste_delay_ms_min;
+        let settings_min = AppSettings {
+            paste_delay_ms: opts.paste_delay_ms_min,
+            ..Default::default()
+        };
         assert_eq!(
-            settings.clone().sanitized().paste_delay_ms,
+            settings_min.sanitized().paste_delay_ms,
             opts.paste_delay_ms_min
         );
 
-        settings.paste_delay_ms = opts.paste_delay_ms_max;
+        let settings_max = AppSettings {
+            paste_delay_ms: opts.paste_delay_ms_max,
+            ..Default::default()
+        };
         assert_eq!(
-            settings.clone().sanitized().paste_delay_ms,
+            settings_max.sanitized().paste_delay_ms,
             opts.paste_delay_ms_max
         );
     }
