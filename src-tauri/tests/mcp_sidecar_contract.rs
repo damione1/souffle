@@ -36,7 +36,11 @@ fn build_meeting(id: &str, title: &str, is_ongoing: bool) -> MeetingTranscript {
         recording_sessions: vec![MeetingRecordingSession::completed(
             "contract-1-session".to_string(),
             started_at,
-            if is_ongoing { started_at } else { ended_at.unwrap() },
+            if is_ongoing {
+                started_at
+            } else {
+                ended_at.unwrap()
+            },
             0,
             2,
         )],
