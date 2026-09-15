@@ -48,6 +48,7 @@ const catalog: TranscriptionCatalog = {
   selected_backend_id: "candle",
 };
 
+/** Render model settings with the standard contract options fixture. */
 function renderSection(recording: boolean) {
   render(ModelSettingsSection, {
     props: {
@@ -57,6 +58,9 @@ function renderSection(recording: boolean) {
         model_unload_timeout_minutes: [0, 5, 15, 60],
         meeting_autostop_minutes: [5, 10, 15, 30],
         meeting_max_duration_minutes: [120, 240, 480],
+        paste_delay_ms_min: 50,
+        paste_delay_ms_max: 1000,
+        default_shortcuts: { toggle: "CommandOrControl+Shift+Space", push_to_talk: "" },
       },
       selectedEngineId: "kyutai",
       selectedModelId: "stt-1b-en_fr",

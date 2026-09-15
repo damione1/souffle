@@ -1,4 +1,4 @@
-import { getSummaryProvidersStatus, pullRecommendedOllamaModel, RECOMMENDED_OLLAMA_MODEL } from "../../api/summary";
+import { getSummaryProvidersStatus, pullRecommendedOllamaModel } from "../../api/summary";
 import {
   deleteModel,
   getTranscriptionCatalog,
@@ -69,6 +69,7 @@ import {
 } from "../transcription/runtime";
 import { refreshSnippets } from "../transcription/snippets";
 
+/** Create the state and actions used by the settings view. */
 export function createSettingsController() {
   const app = getAppState();
 
@@ -96,6 +97,7 @@ export function createSettingsController() {
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
   let settingsOptions = $state<SettingsOptions | null>(null);
+  let recommendedOllamaModel = $state("qwen2.5:7b");
 
   let toggleShortcut = $state("CommandOrControl+Shift+Space");
   let pttShortcut = $state("");
@@ -172,11 +174,12 @@ export function createSettingsController() {
     }
   }
 
+  /** Load saved shortcuts, falling back to defaults published by the backend. */
   async function loadShortcuts() {
     try {
       const shortcuts = await getShortcuts();
-      toggleShortcut = shortcuts.toggle;
-      pttShortcut = shortcuts.push_to_talk;
+      toggleShortcut = shortcuts.toggle || settingsOptions?.default_shortcuts.toggle || "CommandOrControl+Shift+Space";
+      pttShortcut = shortcuts.push_to_talk || settingsOptions?.default_shortcuts.push_to_talk || "";
     } catch (e) {
       console.warn("Failed to load shortcuts:", e);
     }
@@ -399,6 +402,7 @@ export function createSettingsController() {
     });
   }
 
+  /** Refresh provider availability, models, and the backend-recommended Ollama model. */
   async function refreshSummaryProviders() {
     try {
       const status = await getSummaryProvidersStatus();
@@ -406,6 +410,7 @@ export function createSettingsController() {
       appleIntelligenceAvailable = status.apple_intelligence_available;
       appleIntelligenceUnavailableReason = status.apple_intelligence_unavailable_reason;
       ollamaModels = status.models.filter((model) => model.provider === "ollama");
+      recommendedOllamaModel = status.recommended_ollama_model;
 
       const availableSummaryModels = status.models.filter(
         (model) => model.can_summarize && model.provider === "ollama",
@@ -1051,7 +1056,8 @@ export function createSettingsController() {
     get ollamaAvailable() { return ollamaAvailable; },
     get ollamaModels() { return ollamaModels; },
     get summaryModels() { return summaryModels; },
-    get recommendedOllamaModel() { return RECOMMENDED_OLLAMA_MODEL; },
+    /** Return the Ollama model recommended by the latest provider status. */
+    get recommendedOllamaModel() { return recommendedOllamaModel; },
     get ollamaPulling() { return ollamaPulling; },
     get ollamaPullStatus() { return ollamaPullStatus; },
     get ollamaPullDownloaded() { return ollamaPullDownloaded; },

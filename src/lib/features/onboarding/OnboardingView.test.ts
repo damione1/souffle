@@ -12,6 +12,7 @@ const { transcriptionApi, settingsApi, permissionsApi } = vi.hoisted(() => ({
     saveShortcuts: vi.fn(),
     listAudioDevices: vi.fn(),
     selectAudioDevice: vi.fn(),
+    getSettingsOptions: vi.fn(),
   },
   permissionsApi: {
     getPermissionStatus: vi.fn(),
@@ -54,6 +55,7 @@ describe("OnboardingView shortcut step (SOU-053)", () => {
     settingsApi.saveSettings.mockResolvedValue(undefined);
     settingsApi.listAudioDevices.mockResolvedValue(fakeDevices);
     settingsApi.selectAudioDevice.mockResolvedValue(undefined);
+    settingsApi.getSettingsOptions.mockResolvedValue({ default_shortcuts: { toggle: "CommandOrControl+Shift+Space", push_to_talk: "" } });
   });
 
   afterEach(cleanup);
@@ -115,6 +117,7 @@ describe("OnboardingView step count (SOU-131)", () => {
     settingsApi.saveSettings.mockResolvedValue(undefined);
     settingsApi.listAudioDevices.mockResolvedValue(fakeDevices);
     settingsApi.selectAudioDevice.mockResolvedValue(undefined);
+    settingsApi.getSettingsOptions.mockResolvedValue({ default_shortcuts: { toggle: "CommandOrControl+Shift+Space", push_to_talk: "" } });
     permissionsApi.getPermissionStatus.mockResolvedValue({
       microphone: "granted",
       system_audio: "granted",

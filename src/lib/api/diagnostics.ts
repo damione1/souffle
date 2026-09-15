@@ -1,5 +1,5 @@
 import { commands, unwrap } from "./generated";
-import type { DiagnosticsBundle, LogLevel, UpdateCheckResult } from "../types";
+import type { DiagnosticsBundle, LogLevel, UpdateCheckResult, AppVersion } from "../types";
 
 export async function getLogTail(maxLines = 80): Promise<string> {
   return unwrap(commands.getLogTail(maxLines));
@@ -25,7 +25,8 @@ export async function getReleaseNotesForVersion(
   return trimmed ? trimmed : null;
 }
 
-export async function getAppVersion(): Promise<string> {
+/** Return version metadata for the running backend binary. */
+export async function getAppVersion(): Promise<AppVersion> {
   return commands.getAppVersion();
 }
 

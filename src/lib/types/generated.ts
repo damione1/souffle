@@ -1093,7 +1093,7 @@ async getReleaseNotesForVersion(version: string) : Promise<Result<string | null,
 /**
  * App version string from the running binary.
  */
-async getAppVersion() : Promise<string> {
+async getAppVersion() : Promise<AppVersion> {
     return await TAURI_INVOKE("get_app_version");
 },
 /**
@@ -1389,6 +1389,7 @@ last_seen_version: string }
  * with a single enum that enforces valid transitions.
  */
 export type AppStateMachine = { state: "idle" } | { state: "downloading"; data: { profile: TranscriptionProfile } } | { state: "downloaded"; data: { profile: TranscriptionProfile } } | { state: "loading"; data: { profile: TranscriptionProfile } } | { state: "ready"; data: { profile: TranscriptionProfile } } | { state: "recording_dictation"; data: { profile: TranscriptionProfile; session_id: number } } | { state: "recording_meeting"; data: { profile: TranscriptionProfile; session_id: number; meeting_id: string } } | { state: "stopping"; data: { profile: TranscriptionProfile; was_recording: RecordingKind } } | { state: "unloading"; data: { profile: TranscriptionProfile; next_profile: TranscriptionProfile | null } } | { state: "error"; data: { message: string; recovery: ErrorRecovery } }
+export type AppVersion = { version: string; is_local_build: boolean }
 export type AppView = "home" | "settings"
 /**
  * Progress for a full data archive export (`commands::data::export_archive`),
@@ -1777,7 +1778,7 @@ export type SearchSource = "meeting" | "dictation"
  * that validates them. `sanitize_for_save` alone decides what is acceptable;
  * this is how the UI finds out instead of restating it.
  */
-export type SettingsOptions = { model_unload_timeout_minutes: number[]; meeting_autostop_minutes: number[]; meeting_max_duration_minutes: number[] }
+export type SettingsOptions = { model_unload_timeout_minutes: number[]; meeting_autostop_minutes: number[]; meeting_max_duration_minutes: number[]; paste_delay_ms_min: number; paste_delay_ms_max: number; default_shortcuts: ShortcutSettings }
 export type ShortcutPttStart = null
 export type ShortcutPttStop = null
 export type ShortcutSettings = { toggle: string; push_to_talk: string }
@@ -1859,7 +1860,7 @@ apple_intelligence_is_stub: boolean;
 /**
  * Machine-readable reason Apple Intelligence is unavailable, `None` when available.
  */
-apple_intelligence_unavailable_reason: string | null; models: SummaryModelDescriptor[] }
+apple_intelligence_unavailable_reason: string | null; recommended_ollama_model: string; models: SummaryModelDescriptor[] }
 /**
  * A meeting-summary template: `prompt` replaces the final-pass system
  * prompt only (map/merge prompts stay fixed). Built-ins ship with

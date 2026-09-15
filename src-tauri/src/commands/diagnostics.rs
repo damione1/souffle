@@ -35,11 +35,21 @@ pub fn get_diagnostics_text(state: State<'_, AppState>) -> Result<String, String
     Ok(format_bundle_text(&bundle, &log_tail))
 }
 
-/// App version string from the running binary.
+/// Version metadata reported to the frontend during application bootstrap.
+#[derive(serde::Serialize, specta::Type)]
+pub struct AppVersion {
+    pub version: String,
+    pub is_local_build: bool,
+}
+
+/// Return the running binary's version and whether it is an unstamped local build.
 #[tauri::command]
 #[specta::specta]
-pub fn get_app_version() -> String {
-    crate::update_check::current_version()
+pub fn get_app_version() -> AppVersion {
+    AppVersion {
+        version: crate::update_check::current_version(),
+        is_local_build: crate::update_check::is_local_build(),
+    }
 }
 
 /// Check GitHub releases for a newer version. Network errors are returned in
