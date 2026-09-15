@@ -233,19 +233,11 @@ pub struct AppSettings {
     pub last_seen_version: String,
 }
 
-/// Allowed values for `model_unload_timeout_minutes`: 0 (never) plus the
-/// options offered in the settings UI.
-const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
-
-const MEETING_AUTOSTOP_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 3..=60;
-const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 60..=720;
-
-/// The discrete steps the settings UI offers inside the two ranges above.
-/// They live here, next to the bounds that validate them, so that narrowing a
-/// range breaks `offered_options_survive_sanitize` instead of silently
-/// folding the user's choice back to the default on the next save.
-const MEETING_AUTOSTOP_MINUTES_OPTIONS: [u32; 4] = [5, 10, 15, 30];
-const MEETING_MAX_DURATION_MINUTES_OPTIONS: [u32; 3] = [120, 240, 480];
+const MEETING_AUTOSTOP_MINUTES_RANGE: std::ops::RangeInclusive<u32> =
+    souffle_schema::MEETING_AUTOSTOP_MINUTES_MIN..=souffle_schema::MEETING_AUTOSTOP_MINUTES_MAX;
+const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> =
+    souffle_schema::MEETING_MAX_DURATION_MINUTES_MIN
+        ..=souffle_schema::MEETING_MAX_DURATION_MINUTES_MAX;
 
 /// The numeric choices the settings UI may offer, served from the same file
 /// that validates them. `sanitize_for_save` alone decides what is acceptable;
@@ -260,9 +252,10 @@ pub struct SettingsOptions {
 impl SettingsOptions {
     pub fn current() -> Self {
         Self {
-            model_unload_timeout_minutes: ALLOWED_UNLOAD_TIMEOUT_MINUTES.to_vec(),
-            meeting_autostop_minutes: MEETING_AUTOSTOP_MINUTES_OPTIONS.to_vec(),
-            meeting_max_duration_minutes: MEETING_MAX_DURATION_MINUTES_OPTIONS.to_vec(),
+            model_unload_timeout_minutes: souffle_schema::ALLOWED_UNLOAD_TIMEOUT_MINUTES.to_vec(),
+            meeting_autostop_minutes: souffle_schema::MEETING_AUTOSTOP_MINUTES_OPTIONS.to_vec(),
+            meeting_max_duration_minutes: souffle_schema::MEETING_MAX_DURATION_MINUTES_OPTIONS
+                .to_vec(),
         }
     }
 }
@@ -711,7 +704,9 @@ impl AppSettings {
             normalized.feedback_sounds_volume = Self::default().feedback_sounds_volume;
         }
 
-        if !ALLOWED_UNLOAD_TIMEOUT_MINUTES.contains(&normalized.model_unload_timeout_minutes) {
+        if !souffle_schema::ALLOWED_UNLOAD_TIMEOUT_MINUTES
+            .contains(&normalized.model_unload_timeout_minutes)
+        {
             normalized.model_unload_timeout_minutes = Self::default().model_unload_timeout_minutes;
         }
 

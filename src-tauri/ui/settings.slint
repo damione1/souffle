@@ -1,0 +1,67 @@
+import { Theme } from "theme.slint";
+import { Button, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+
+export component SettingsView inherits VerticalBox {
+    in-out property <string> active-tab: "About";
+    callback close-settings();
+    callback download-model();
+    callback delete-model();
+
+    HorizontalBox {
+        // Sidebar for tabs
+        VerticalBox {
+            width: 200px;
+            ScrollView {
+                VerticalBox {
+                    alignment: start;
+                    for tab in ["About", "Advanced", "Audio", "Autostart", "Calendar", "Data", "Diagnostics", "DictationPolish", "Dictionary", "FeedbackSounds", "Intelligence", "Interface", "Microphone", "Model", "Permissions", "Snippets", "SummaryTemplates"] : TouchArea {
+                        height: 30px;
+                        clicked => { active-tab = tab; }
+                        Text {
+                            text: tab;
+                            color: active-tab == tab ? Theme.primary : Theme.text;
+                            font-weight: active-tab == tab ? 700 : 400;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Content area
+        VerticalBox {
+            padding: 20px;
+            Text {
+                text: active-tab + " Settings";
+                font-size: 24px;
+                color: Theme.text;
+                font-weight: 700;
+            }
+            
+            ScrollView {
+                if active-tab == "About" : Text { text: "About Soufflé"; color: Theme.text; }
+                if active-tab == "Model" : VerticalBox {
+                    alignment: start;
+                    spacing: 10px;
+                    Text { text: "Transcription Model Settings"; color: Theme.text; }
+                    Button { text: "Download Model"; clicked => { root.download-model(); } }
+                    Button { text: "Delete Model"; clicked => { root.delete-model(); } }
+                }
+                if active-tab == "Advanced" : Text { text: "Advanced options..."; color: Theme.text; }
+                if active-tab == "Audio" : Text { text: "Audio settings..."; color: Theme.text; }
+                if active-tab == "Autostart" : Text { text: "Autostart settings..."; color: Theme.text; }
+                if active-tab == "Calendar" : Text { text: "Calendar settings..."; color: Theme.text; }
+                if active-tab == "Data" : Text { text: "Data settings..."; color: Theme.text; }
+                if active-tab == "Diagnostics" : Text { text: "Diagnostics settings..."; color: Theme.text; }
+                if active-tab == "DictationPolish" : Text { text: "DictationPolish settings..."; color: Theme.text; }
+                if active-tab == "Dictionary" : Text { text: "Dictionary settings..."; color: Theme.text; }
+                if active-tab == "FeedbackSounds" : Text { text: "FeedbackSounds settings..."; color: Theme.text; }
+                if active-tab == "Intelligence" : Text { text: "Intelligence settings..."; color: Theme.text; }
+                if active-tab == "Interface" : Text { text: "Interface settings..."; color: Theme.text; }
+                if active-tab == "Microphone" : Text { text: "Microphone settings..."; color: Theme.text; }
+                if active-tab == "Permissions" : Text { text: "Permissions settings..."; color: Theme.text; }
+                if active-tab == "Snippets" : Text { text: "Snippets settings..."; color: Theme.text; }
+                if active-tab == "SummaryTemplates" : Text { text: "SummaryTemplates settings..."; color: Theme.text; }
+            }
+        }
+    }
+}

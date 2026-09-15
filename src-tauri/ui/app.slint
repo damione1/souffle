@@ -1,6 +1,6 @@
 import { Theme } from "theme.slint";
 import { Button, VerticalBox, HorizontalBox, LineEdit, ScrollView, TextEdit } from "std-widgets.slint";
-
+import { SettingsView } from "settings.slint";
 export struct Paragraph {
     speaker: string,
     text: string,
@@ -110,6 +110,8 @@ export component AppWindow inherits Window {
     callback toggle-theme();
     callback drag-window();
     callback toggle-paragraph-edit(int);
+    callback download-model();
+    callback delete-model();
 
     // Chrome drag area
     forward-focus: key-handler;
@@ -157,6 +159,12 @@ export component AppWindow inherits Window {
             if current-view == "meeting" : LiveViewMeeting {
                 paragraphs: root.meeting-paragraphs;
                 toggle-edit(idx) => { root.toggle-paragraph-edit(idx); }
+            }
+            
+            if current-view == "settings" : SettingsView {
+                close-settings => { root.current-view = "idle"; }
+                download-model => { root.download-model(); }
+                delete-model => { root.delete-model(); }
             }
         }
     }

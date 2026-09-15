@@ -86,7 +86,11 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     ui.on_open_settings({
+        let ui_handle = ui_handle.clone();
         move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_current_view("settings".into());
+            }
             println!("Settings opened");
         }
     });

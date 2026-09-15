@@ -16,6 +16,20 @@ use serde::{Deserialize, Serialize};
 /// stored version is higher, because the columns it reads may have moved.
 pub const SCHEMA_VERSION: i64 = 16;
 
+/// Allowed values for `model_unload_timeout_minutes`: 0 (never) plus the
+/// options offered in the settings UI.
+pub const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
+
+pub const MEETING_AUTOSTOP_MINUTES_MIN: u32 = 3;
+pub const MEETING_AUTOSTOP_MINUTES_MAX: u32 = 60;
+
+pub const MEETING_MAX_DURATION_MINUTES_MIN: u32 = 60;
+pub const MEETING_MAX_DURATION_MINUTES_MAX: u32 = 720;
+
+/// The discrete steps the settings UI offers inside the two ranges above.
+pub const MEETING_AUTOSTOP_MINUTES_OPTIONS: [u32; 4] = [5, 10, 15, 30];
+pub const MEETING_MAX_DURATION_MINUTES_OPTIONS: [u32; 3] = [120, 240, 480];
+
 /// A single action item extracted from a meeting summary pass.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type, schemars::JsonSchema)]
 pub struct StructuredActionItem {
