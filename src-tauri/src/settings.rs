@@ -247,6 +247,9 @@ const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 60..=7
 const MEETING_AUTOSTOP_MINUTES_OPTIONS: [u32; 4] = [5, 10, 15, 30];
 const MEETING_MAX_DURATION_MINUTES_OPTIONS: [u32; 3] = [120, 240, 480];
 
+pub const MIN_PASTE_DELAY_MS: u64 = 50;
+pub const MAX_PASTE_DELAY_MS: u64 = 1000;
+
 /// The numeric choices the settings UI may offer, served from the same file
 /// that validates them. `sanitize_for_save` alone decides what is acceptable;
 /// this is how the UI finds out instead of restating it.
@@ -255,6 +258,9 @@ pub struct SettingsOptions {
     pub model_unload_timeout_minutes: Vec<u32>,
     pub meeting_autostop_minutes: Vec<u32>,
     pub meeting_max_duration_minutes: Vec<u32>,
+    pub paste_delay_ms_min: u64,
+    pub paste_delay_ms_max: u64,
+    pub default_shortcuts: ShortcutSettings,
 }
 
 impl SettingsOptions {
@@ -263,6 +269,9 @@ impl SettingsOptions {
             model_unload_timeout_minutes: ALLOWED_UNLOAD_TIMEOUT_MINUTES.to_vec(),
             meeting_autostop_minutes: MEETING_AUTOSTOP_MINUTES_OPTIONS.to_vec(),
             meeting_max_duration_minutes: MEETING_MAX_DURATION_MINUTES_OPTIONS.to_vec(),
+            paste_delay_ms_min: MIN_PASTE_DELAY_MS,
+            paste_delay_ms_max: MAX_PASTE_DELAY_MS,
+            default_shortcuts: ShortcutSettings::default(),
         }
     }
 }
@@ -584,7 +593,7 @@ impl AppSettings {
             return Err("Ollama URL cannot be empty".into());
         }
 
-        if !(50..=1000).contains(&self.paste_delay_ms) {
+        if !(MIN_PASTE_DELAY_MS..=MAX_PASTE_DELAY_MS).contains(&self.paste_delay_ms) {
             return Err("Paste delay must be between 50 and 1000 ms".into());
         }
 
@@ -690,7 +699,7 @@ impl AppSettings {
             normalized.transcription_backend_id = CANDLE_BACKEND_ID.to_string();
         }
 
-        if !(50..=1000).contains(&normalized.paste_delay_ms) {
+        if !(MIN_PASTE_DELAY_MS..=MAX_PASTE_DELAY_MS).contains(&normalized.paste_delay_ms) {
             normalized.paste_delay_ms = Self::default().paste_delay_ms;
         }
 

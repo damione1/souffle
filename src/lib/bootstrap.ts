@@ -19,9 +19,6 @@ export type BootstrapResult = {
   whatsNew: { version: string; releaseNotes: string } | null;
 };
 
-/** Mirrors `update_check::LOCAL_BUILD`: what get_app_version returns from a
- * checkout the release workflow never stamped. */
-export const LOCAL_BUILD = "local build";
 
 /** Seed the settings store with the shipped defaults, before anything can
  * read it.
@@ -71,15 +68,16 @@ export async function bootstrapAppState(
   // (or when no model is downloaded yet).
   await runStartupModelFlow(app);
 
-  const currentVersion = await getAppVersion();
-  const previousVersion = app.settings.last_seen_version.trim();
+  const appVersion = await getAppVersion();
+  const currentVersion = appVersion.version;
+  const previousVersion = appVersion.is_local_build ? "" : app.settings.last_seen_version.trim();
   const setupDone = readSetupFlags().setupDone;
 
   // A build made from a checkout has no release notes to show, and its version
   // string is not a number, so "Updated to vlocal build." would be the whole
   // dialog. Leave last_seen_version alone too: the next real release should
   // still announce itself.
-  if (currentVersion === LOCAL_BUILD) {
+  if (appVersion.is_local_build) {
     return { whatsNew: null };
   }
 

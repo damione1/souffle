@@ -1,6 +1,7 @@
 export type {
   AppSettings,
   AppStateMachine,
+  AppVersion,
   AppView,
   ArchiveExportProgress,
   AudioInputDevice,
