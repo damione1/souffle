@@ -12,15 +12,15 @@ if ! command -v codeql >/dev/null 2>&1; then
 fi
 
 out=".codeql"
-rm -rf "$out"
+rm -rf "$out/rust" "$out/js" "$out/actions" "$out" 2>/dev/null || true
 mkdir -p "$out"
 
 # Match CI: build-mode none (no cargo build) for rust; extractors for js/actions.
-codeql database create "$out/rust" \
+codeql database create "$out/rust" --overwrite \
   --language=rust --build-mode=none --source-root=.
-codeql database create "$out/js" \
+codeql database create "$out/js" --overwrite \
   --language=javascript-typescript --source-root=.
-codeql database create "$out/actions" \
+codeql database create "$out/actions" --overwrite \
   --language=actions --source-root=.
 
 # Suites are named by pack spec, not by bare name. The bare name only
