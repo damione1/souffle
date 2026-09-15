@@ -1762,4 +1762,18 @@ mod tests {
             "\"keep_forever\""
         );
     }
+
+    #[test]
+    fn paste_delay_bounds_match_settings_options() {
+        let opts = SettingsOptions::current();
+        assert_eq!(opts.paste_delay_ms_min, super::MIN_PASTE_DELAY_MS);
+        assert_eq!(opts.paste_delay_ms_max, super::MAX_PASTE_DELAY_MS);
+
+        let mut settings = AppSettings::default();
+        settings.paste_delay_ms = opts.paste_delay_ms_min;
+        assert_eq!(settings.clone().sanitized().paste_delay_ms, opts.paste_delay_ms_min);
+
+        settings.paste_delay_ms = opts.paste_delay_ms_max;
+        assert_eq!(settings.clone().sanitized().paste_delay_ms, opts.paste_delay_ms_max);
+    }
 }
