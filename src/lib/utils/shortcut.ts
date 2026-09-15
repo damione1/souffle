@@ -8,6 +8,7 @@ export function modifierToShortcut(event: KeyboardEvent): string | null {
   return null;
 }
 
+/** Build an accelerator from a non-modifier key and any held modifiers. */
 export function keyEventToShortcut(event: KeyboardEvent): string | null {
   if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return null;
   const parts: string[] = [];
