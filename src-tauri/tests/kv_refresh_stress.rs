@@ -124,6 +124,10 @@ fn run_stress(engine: &mut KyutaiEngine, pcm: &[f32], audio_duration_s: f64) -> 
     let mut finals: Vec<_> = all_segments.into_iter().filter(|s| s.is_final).collect();
     finals.sort_by(|a, b| a.start_time.partial_cmp(&b.start_time).unwrap());
 
+    assert!(
+        !finals.is_empty(),
+        "engine produced no final segments — total failure on fixture"
+    );
     let mut max_gap_s: f64 = 0.0;
     let mut prev_end: Option<f64> = None;
 
