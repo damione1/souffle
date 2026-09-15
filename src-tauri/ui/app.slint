@@ -1,26 +1,165 @@
-import { Button, VerticalBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Button, VerticalBox, HorizontalBox, LineEdit, ScrollView, TextEdit } from "std-widgets.slint";
 
-export component AppWindow inherits Window {
-    title: "Soufflé Slint Spike";
-    width: 400px;
-    height: 300px;
-    in property <string> text-state: "Ready";
-    callback button-clicked();
+export struct Paragraph {
+    speaker: string,
+    text: string,
+    is-editing: bool,
+}
 
-    VerticalBox {
-        Text {
-            text: text-state;
-            font-size: 24px;
-            horizontal-alignment: center;
+component IdleView inherits VerticalBox {
+    callback start-dictation();
+    callback start-meeting();
+
+    HorizontalBox {
+        alignment: center;
+        Button { text: "Dicter"; clicked => { root.start-dictation(); } }
+        Button { text: "Réunion"; clicked => { root.start-meeting(); } }
+    }
+    
+    LineEdit { placeholder-text: "Recherche..."; }
+    
+    HorizontalBox {
+        Text { text: "Filtres: Tout | Récents | Favoris"; color: Theme.text; }
+    }
+    
+    ScrollView {
+        VerticalBox {
+            Text { text: "Historique récent..."; color: Theme.text; }
+            Text { text: "- Réunion 1"; color: Theme.text; }
+            Text { text: "- Dictée 1"; color: Theme.text; }
         }
-        LineEdit {
-            placeholder-text: "Type here to test Copy/Paste...";
-        }
-        Button {
-            text: "Click Me";
-            clicked => {
-                root.button-clicked();
+    }
+}
+
+component LiveViewDictation inherits VerticalBox {
+    in property <string> final-text: "";
+    in property <string> draft-text: "";
+    
+    Text { text: "Mode Dictée"; font-size: 20px; font-weight: 700; color: Theme.text; }
+    
+    ScrollView {
+        HorizontalBox {
+            alignment: start;
+            Text {
+                text: final-text;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            Text {
+                text: draft-text + " |";
+                color: Theme.draft-text;
+                wrap: word-wrap;
             }
         }
     }
 }
+
+component LiveViewMeeting inherits VerticalBox {
+    in property <[Paragraph]> paragraphs: [];
+    callback toggle-edit(int);
+    
+    Text { text: "Mode Réunion"; font-size: 20px; font-weight: 700; color: Theme.text; }
+    
+    ScrollView {
+        VerticalBox {
+            for p[i] in paragraphs : Rectangle {
+                background: Theme.surface;
+                border-radius: 4px;
+                VerticalBox {
+                    padding: 10px;
+                    Text { text: p.speaker; color: Theme.primary; font-weight: 700; }
+                    if !p.is-editing : TouchArea {
+                        clicked => { root.toggle-edit(i); }
+                        Text {
+                            text: p.text;
+                            color: Theme.text;
+                            wrap: word-wrap;
+                        }
+                    }
+                    if p.is-editing : TextEdit {
+                        text: p.text;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Soufflé Slint Spike";
+    width: 800px;
+    height: 600px;
+    background: Theme.background;
+    no-frame: true; // Chrome macOS AC6
+
+    in-out property <bool> is-dark <=> Theme.is-dark;
+    in-out property <string> current-view: "idle"; // idle, dictation, meeting
+    
+    // Dictation state
+    in property <string> dict-final-text: "";
+    in property <string> dict-draft-text: "";
+    
+    // Meeting state
+    in-out property <[Paragraph]> meeting-paragraphs: [];
+    
+    callback start-dictation();
+    callback start-meeting();
+    callback open-settings();
+    callback cancel-edit();
+    callback toggle-theme();
+    callback drag-window();
+    callback toggle-paragraph-edit(int);
+
+    // Chrome drag area
+    forward-focus: key-handler;
+    key-handler := FocusScope {
+        key-pressed(event) => {
+            if event.text == "," && event.modifiers.meta { // Cmd+, on macOS
+                root.open-settings();
+                return accept;
+            }
+            if event.text == Key.Escape {
+                root.cancel-edit();
+                return accept;
+            }
+            return reject;
+        }
+        
+        VerticalBox {
+            // Header for dragging
+            TouchArea {
+                height: 30px;
+                width: 100%;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        root.drag-window();
+                    }
+                }
+                Text { text: "Soufflé (Drag me)"; color: Theme.text; horizontal-alignment: center; }
+            }
+            
+            HorizontalBox {
+                Button { text: "Toggle Theme"; clicked => { root.toggle-theme(); } }
+                Button { text: "Back to Home"; clicked => { root.current-view = "idle"; } }
+            }
+
+            if current-view == "idle" : IdleView {
+                start-dictation => { root.start-dictation(); }
+                start-meeting => { root.start-meeting(); }
+            }
+            
+            if current-view == "dictation" : LiveViewDictation {
+                final-text: root.dict-final-text;
+                draft-text: root.dict-draft-text;
+            }
+            
+            if current-view == "meeting" : LiveViewMeeting {
+                paragraphs: root.meeting-paragraphs;
+                toggle-edit(idx) => { root.toggle-paragraph-edit(idx); }
+            }
+        }
+    }
+}
+
+
