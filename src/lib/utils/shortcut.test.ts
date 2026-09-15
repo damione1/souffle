@@ -40,10 +40,7 @@ describe("modifierToShortcut", () => {
     expect(modifierToShortcut(key({ key: "Alt", code: "AltRight" }))).toBe("AltRight");
   });
 
-  it("maps fn / Globe, including the Clear key some layouts report", () => {
-    expect(modifierToShortcut(key({ key: "Fn", code: "Fn" }))).toBe("Fn");
-    expect(modifierToShortcut(key({ key: "Clear", code: "NumLock" }))).toBe("Fn");
-  });
+
 
   it("ignores ordinary keys", () => {
     expect(modifierToShortcut(key({ key: "F5", code: "F5" }))).toBeNull();
@@ -65,7 +62,7 @@ describe("shortcutMissingModifier", () => {
 /** Stands in for what `getNativeShortcuts` returns at runtime. Only a subset
  * is needed: the point of the test is that the caller supplies the list, not
  * that this file knows it. */
-const NATIVE = ["Fn", "MetaRight", "F5", "F8"];
+const NATIVE = ["ShiftLeft", "MetaRight", "F5", "F8"];
 
 describe("isNativeShortcut", () => {
   it("uses the list it is given, not a copy of its own", () => {
@@ -86,12 +83,12 @@ describe("isNativeShortcut", () => {
 
 describe("shouldShowNativeTapBanner (SOU-116)", () => {
   it("shows only when a native PTT shortcut is bound and the tap is missing", () => {
-    expect(shouldShowNativeTapBanner("Fn", { installed: false }, "", NATIVE)).toBe(true);
+    expect(shouldShowNativeTapBanner("MetaRight", { installed: false }, "", NATIVE)).toBe(true);
     expect(shouldShowNativeTapBanner("F5", { installed: false }, "", NATIVE)).toBe(true);
   });
 
   it("shows when Toggle is native and the tap is missing (SOU-115)", () => {
-    expect(shouldShowNativeTapBanner("", { installed: false }, "Fn", NATIVE)).toBe(true);
+    expect(shouldShowNativeTapBanner("", { installed: false }, "MetaRight", NATIVE)).toBe(true);
     expect(
       shouldShowNativeTapBanner("CommandOrControl+Shift+Space", { installed: false }, "F8", NATIVE),
     ).toBe(true);
@@ -113,11 +110,11 @@ describe("shouldShowNativeTapBanner (SOU-116)", () => {
   });
 
   it("hides while status is unknown or the tap is installed", () => {
-    expect(shouldShowNativeTapBanner("Fn", null, "", NATIVE)).toBe(false);
-    expect(shouldShowNativeTapBanner("Fn", { installed: true }, "", NATIVE)).toBe(false);
+    expect(shouldShowNativeTapBanner("MetaRight", null, "", NATIVE)).toBe(false);
+    expect(shouldShowNativeTapBanner("MetaRight", { installed: true }, "", NATIVE)).toBe(false);
   });
 
   it("hides before the list has been read from the backend", () => {
-    expect(shouldShowNativeTapBanner("Fn", { installed: false }, "", [])).toBe(false);
+    expect(shouldShowNativeTapBanner("MetaRight", { installed: false }, "", [])).toBe(false);
   });
 });

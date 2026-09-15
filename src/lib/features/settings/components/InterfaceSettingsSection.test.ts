@@ -31,7 +31,7 @@ const baseProps = {
   pillHidden: false,
   onPillHiddenChange: vi.fn(),
   // What `getNativeShortcuts` hands the store at startup.
-  nativeShortcuts: ["Fn", "MetaRight", "F5", "F8"],
+  nativeShortcuts: ["ShiftLeft", "MetaRight", "F5", "F8"],
 };
 
 describe("InterfaceSettingsSection native tap banner (SOU-116)", () => {
@@ -44,7 +44,7 @@ describe("InterfaceSettingsSection native tap banner (SOU-116)", () => {
     render(InterfaceSettingsSection, {
       props: {
         ...baseProps,
-        pttShortcut: "Fn",
+        pttShortcut: "MetaRight",
         modifierTapStatus: { installed: false },
       },
     });
@@ -60,7 +60,7 @@ describe("InterfaceSettingsSection native tap banner (SOU-116)", () => {
     render(InterfaceSettingsSection, {
       props: {
         ...baseProps,
-        toggleShortcut: "Fn",
+        toggleShortcut: "MetaRight",
         pttShortcut: "",
         modifierTapStatus: { installed: false },
       },

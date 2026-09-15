@@ -2,7 +2,6 @@
  * (`CommandOrControl+Shift+Space`). Returns null for modifier-only or
  * unmapped keys. */
 export function modifierToShortcut(event: KeyboardEvent): string | null {
-  if (event.key === "Fn" || event.code === "Fn" || event.key === "Clear") return "Fn";
   if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
     return event.code; // e.g. MetaLeft, AltRight
   }
@@ -10,7 +9,7 @@ export function modifierToShortcut(event: KeyboardEvent): string | null {
 }
 
 export function keyEventToShortcut(event: KeyboardEvent): string | null {
-  if (event.key === "Fn" || ["Control", "Shift", "Alt", "Meta"].includes(event.key)) return null;
+  if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return null;
   const parts: string[] = [];
   if (event.metaKey || event.ctrlKey) parts.push("CommandOrControl");
   if (event.shiftKey) parts.push("Shift");
