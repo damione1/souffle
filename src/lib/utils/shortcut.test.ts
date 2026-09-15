@@ -40,7 +40,10 @@ describe("modifierToShortcut", () => {
     expect(modifierToShortcut(key({ key: "Alt", code: "AltRight" }))).toBe("AltRight");
   });
 
-
+  it("rejects fn / Globe and Clear keys", () => {
+    expect(modifierToShortcut(key({ key: "Fn", code: "Fn" }))).toBeNull();
+    expect(modifierToShortcut(key({ key: "Clear", code: "NumLock" }))).toBeNull();
+  });
 
   it("ignores ordinary keys", () => {
     expect(modifierToShortcut(key({ key: "F5", code: "F5" }))).toBeNull();
