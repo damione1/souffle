@@ -1,0 +1,134 @@
+sample_rate_hz = 24000
+out_dir = "fixtures/audio/sou-184"
+
+[backend]
+kind = "macos_say"
+voice = "Daniel"
+rate_wpm = 165
+
+# ── Fixture 1 · Meeting opening (~90 s) ────────────────────────────────────────
+[[fixture]]
+name = "ecorp-q4-intro"
+lead_ms = 500
+trail_ms = 800
+gaps_ms = [400, 350, 500, 300, 400, 350, 500, 300, 400, 350, 300, 400]
+voice_per_clause = [
+  "Daniel",
+  "Fred",
+  "Samantha",
+  "Daniel",
+  "Reed (English (US))",
+  "Daniel",
+  "Amélie",
+  "Daniel",
+  "Fred",
+  "Samantha",
+  "Amélie",
+  "Daniel",
+  "Fred",
+]
+clauses = [
+  "Good morning everyone. Let's get started. This is the E Corp Q4 infrastructure review.",
+  "Thank you Philip. I've prepared a full status on the recovery systems.",
+  "Before we dive in, I want to confirm that NDAs are in place for today's discussion.",
+  "Angela, that's been handled. Scott, can you give us the financial exposure summary first?",
+  "Sure. Current exposure on the remediation side is approximately four hundred million. That's within the projected range.",
+  "Good. François, what's the security posture coming out of last quarter?",
+  "On notre côté, les systèmes sont stabilisés. On a déployé les nouvelles politiques d'accès la semaine dernière.",
+  "Can you give us that in English for the record?",
+  "He said the access policies are deployed and systems are stable. I can confirm the architecture is holding.",
+  "Tyrell, I'll need a written confirmation of that by end of week.",
+  "Absolument. Je vais préparer le rapport complet pour vendredi.",
+  "Perfect. Let's move to the incident timeline. Tyrell, walk us through what happened.",
+  "On September the second, at approximately fourteen hundred hours Eastern, we detected anomalous traffic on the Steel Mountain relay.",
+]
+
+# ── Fixture 2 · Incident review (~3 min, FR/EN stress) ─────────────────────────
+[[fixture]]
+name = "ecorp-q4-incident"
+lead_ms = 400
+trail_ms = 800
+gaps_ms = [350, 400, 300, 500, 350, 300, 400, 350, 500, 300, 400, 350, 300, 400, 500, 350, 300, 400, 350, 300, 400, 350]
+voice_per_clause = [
+  "Fred",
+  "Daniel",
+  "Fred",
+  "Samantha",
+  "Fred",
+  "Amélie",
+  "Fred",
+  "Amélie",
+  "Daniel",
+  "Fred",
+  "Reed (English (US))",
+  "Fred",
+  "Daniel",
+  "Samantha",
+  "Fred",
+  "Amélie",
+  "Daniel",
+  "Fred",
+  "Reed (English (US))",
+  "Samantha",
+  "Daniel",
+  "Fred",
+  "Daniel",
+]
+clauses = [
+  "The initial vector was a misconfigured load balancer on the DR cluster. Traffic was being silently redirected for approximately six hours before detection.",
+  "Six hours. How does that happen without an alert?",
+  "The alerting threshold was set during the migration last spring. It hadn't been tuned for the new architecture.",
+  "Tyrell, that's exactly the kind of gap I flagged in the August audit. We need a change management process.",
+  "I understand Angela. The fix was deployed within four hours of detection. The cluster is now isolated and monitored.",
+  "Du côté sécurité, on a lancé une analyse forensique complète. Les résultats préliminaires indiquent qu'il n'y a pas eu d'exfiltration de données.",
+  "François is saying there was no data exfiltration confirmed. That's the key finding.",
+  "Exactement. Mais on a identifié trois vecteurs d'entrée potentiels qu'on est en train de fermer.",
+  "Three potential entry vectors. Scott, does that change the financial exposure number?",
+  "It could. If any of those vectors were exploited before the forensic window, we're looking at a reporting obligation under the new SEC guidelines.",
+  "That's a significant if. What's the timeline on the forensic report?",
+  "We expect the full report by the fourteenth. If the preliminary holds, exposure stays at four hundred million.",
+  "Alright. François, what are the three vectors?",
+  "Can I ask that this part stays out of the written minutes? For legal reasons.",
+  "Noted. François, go ahead. This is off record.",
+  "Le premier vecteur c'est le VPN legacy qu'on n'a pas encore migré. Le deuxième c'est une clé SSH orpheline sur le serveur de build. Le troisième, c'est plus délicat, c'est un accès admin qui n'a pas été révoqué après un départ.",
+  "An un-revoked admin access. Tyrell, whose account?",
+  "We've identified it. It's been disabled as of this morning. I would prefer not to name names in this forum.",
+  "We'll need that name, Tyrell. Privately, after this call.",
+  "I agree. That's a legal liability that has to be documented.",
+  "Fine. We'll handle it after. Let's move to remediation status.",
+  "Remediation is on track. We expect full hardening of all three vectors by end of month.",
+  "Good. Scott, assuming no exfiltration confirmed, are we within guidance for the Q4 investor call?",
+]
+
+# ── Fixture 3 · Closing action items (~90 s) ───────────────────────────────────
+[[fixture]]
+name = "ecorp-q4-close"
+lead_ms = 400
+trail_ms = 1000
+gaps_ms = [300, 400, 350, 300, 400, 350, 300, 500, 350, 300]
+voice_per_clause = [
+  "Reed (English (US))",
+  "Daniel",
+  "Fred",
+  "Samantha",
+  "Amélie",
+  "Daniel",
+  "Fred",
+  "Daniel",
+  "Samantha",
+  "Amélie",
+  "Daniel",
+]
+clauses = [
+  "Assuming the forensic clears, yes. We stay within the range we communicated at Q3.",
+  "Good. Action items: François, forensic report by the fourteenth. Tyrell, written architecture confirmation by Friday.",
+  "Understood.",
+  "Tyrell, I'll need that legal summary as well. One page, no jargon.",
+  "Je vais coordonner avec les équipes pour avoir tout ça avant vendredi.",
+  "Angela, make sure outside counsel is looped in before that report lands.",
+  "Philip, one more thing. The DR cluster. We need a decision on whether we rebuild or decommission.",
+  "Rebuild. We are not reducing capacity going into Q1. That's final. Anything else?",
+  "Nothing from legal.",
+  "Non, c'est tout de notre côté.",
+  "Good. Thank you everyone. This stays in this room. We'll reconvene on the fourteenth.",
+]

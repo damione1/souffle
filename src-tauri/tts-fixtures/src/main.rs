@@ -33,6 +33,8 @@ struct Fixture {
     /// entries; a single value is reused between every pair.
     #[serde(default)]
     gaps_ms: Vec<u32>,
+    #[serde(default)]
+    voice_per_clause: Vec<Option<String>>,
     #[serde(default = "default_lead_ms")]
     lead_ms: u32,
     #[serde(default = "default_trail_ms")]
@@ -46,6 +48,8 @@ struct Ladder {
     name: String,
     clauses: Vec<String>,
     gaps_ms: Vec<u32>,
+    #[serde(default)]
+    voice_per_clause: Vec<Option<String>>,
     #[serde(default = "default_lead_ms")]
     lead_ms: u32,
     #[serde(default = "default_trail_ms")]
@@ -99,6 +103,7 @@ impl Ladder {
                 name: format!("{}-gap{gap:04}ms", self.name),
                 clauses: self.clauses.clone(),
                 gaps_ms: vec![*gap],
+                voice_per_clause: self.voice_per_clause.clone(),
                 lead_ms: self.lead_ms,
                 trail_ms: self.trail_ms,
             })
@@ -127,8 +132,9 @@ impl Fixture {
 
 /// Turns a clause into mono PCM at the spec's sample rate.
 trait SpeechBackend {
-    fn synthesize(&self, text: &str, sample_rate_hz: u32) -> Res<Vec<i16>>;
+    fn synthesize(&self, text: &str, voice: &str, sample_rate_hz: u32) -> Res<Vec<i16>>;
     fn describe(&self) -> String;
+    fn default_voice(&self) -> &str;
 }
 
 struct MacosSay {
@@ -137,14 +143,14 @@ struct MacosSay {
 }
 
 impl SpeechBackend for MacosSay {
-    fn synthesize(&self, text: &str, sample_rate_hz: u32) -> Res<Vec<i16>> {
+    fn synthesize(&self, text: &str, voice: &str, sample_rate_hz: u32) -> Res<Vec<i16>> {
         if !cfg!(target_os = "macos") {
             return Err("macos_say requires macOS (`say` is not available)".into());
         }
         let tmp = TempWav::new();
         let status = Command::new("say")
             .arg("-v")
-            .arg(&self.voice)
+            .arg(voice)
             .arg("-r")
             .arg(self.rate_wpm.to_string())
             .arg(format!("--data-format=LEI16@{sample_rate_hz}"))
@@ -154,9 +160,13 @@ impl SpeechBackend for MacosSay {
             .arg(text)
             .status()?;
         if !status.success() {
-            return Err(format!("say failed for {text:?} (voice {})", self.voice).into());
+            return Err(format!("say failed for {text:?} (voice {voice})").into());
         }
         read_mono_i16(&tmp.0, sample_rate_hz)
+    }
+
+    fn default_voice(&self) -> &str {
+        &self.voice
     }
 
     fn describe(&self) -> String {
@@ -221,7 +231,7 @@ fn render(
     fixture: &Fixture,
     backend: &dyn SpeechBackend,
     sample_rate_hz: u32,
-    cache: &mut HashMap<String, Vec<i16>>,
+    cache: &mut HashMap<(String, String), Vec<i16>>,
 ) -> Res<Vec<i16>> {
     if fixture.clauses.is_empty() {
         return Err(format!("fixture {}: no clauses", fixture.name).into());
@@ -231,13 +241,20 @@ fn render(
         if idx > 0 {
             pcm.extend(silence(fixture.gap_before(idx)?, sample_rate_hz));
         }
+        let voice = fixture
+            .voice_per_clause
+            .get(idx)
+            .and_then(|v| v.as_deref())
+            .unwrap_or(backend.default_voice());
+        let key = (clause.clone(), voice.to_string());
+
         // One synthesis per distinct clause: a ladder reuses the same speech
         // at every rung, so only the silence between them varies.
-        if !cache.contains_key(clause) {
-            let rendered = backend.synthesize(clause, sample_rate_hz)?;
-            cache.insert(clause.clone(), rendered);
+        if !cache.contains_key(&key) {
+            let rendered = backend.synthesize(clause, voice, sample_rate_hz)?;
+            cache.insert(key.clone(), rendered);
         }
-        pcm.extend_from_slice(&cache[clause]);
+        pcm.extend_from_slice(&cache[&key]);
     }
     pcm.extend(silence(fixture.trail_ms, sample_rate_hz));
     Ok(pcm)
@@ -322,7 +339,7 @@ fn main() -> Res<()> {
 
     println!("backend: {}", backend.describe());
     println!("output:  {}", out_dir.display());
-    let mut cache = HashMap::new();
+    let mut cache: HashMap<(String, String), Vec<i16>> = HashMap::new();
     for fixture in &fixtures {
         let path = out_dir.join(format!("{}.wav", fixture.name));
         if args.dry_run {
@@ -362,6 +379,7 @@ mod tests {
             name: name.into(),
             clauses: clauses.iter().map(|s| (*s).to_string()).collect(),
             gaps_ms: gaps_ms.to_vec(),
+            voice_per_clause: vec![],
             lead_ms: 300,
             trail_ms: 800,
         }
@@ -373,6 +391,7 @@ mod tests {
             name: "hesitation-a".into(),
             clauses: vec!["a".into(), "b".into()],
             gaps_ms: vec![100, 1000],
+            voice_per_clause: vec![],
             lead_ms: 300,
             trail_ms: 800,
         };
