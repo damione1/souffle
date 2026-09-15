@@ -33,13 +33,19 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "souffle"
 path = "src/main.rs"
 
+[[bin]]
+name = "souffle-slint"
+path = "src/bin/souffle-slint.rs"
+
 [lints]
 workspace = true
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+slint-build = "1.9"
 
 [dependencies]
+slint = "1.9"
 tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png", "protocol-asset"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"

@@ -1,0 +1,26 @@
+import { Button, VerticalBox, LineEdit } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "Soufflé Slint Spike";
+    width: 400px;
+    height: 300px;
+    in property <string> text-state: "Ready";
+    callback button-clicked();
+
+    VerticalBox {
+        Text {
+            text: text-state;
+            font-size: 24px;
+            horizontal-alignment: center;
+        }
+        LineEdit {
+            placeholder-text: "Type here to test Copy/Paste...";
+        }
+        Button {
+            text: "Click Me";
+            clicked => {
+                root.button-clicked();
+            }
+        }
+    }
+}
