@@ -59,8 +59,7 @@ pub(crate) enum ShortcutRegistrationTarget {
 /// The settings UI needs the same list to warn that a binding will require
 /// Accessibility, so `commands::settings::get_native_shortcuts` hands it over
 /// rather than letting the frontend keep a copy.
-pub(crate) const NATIVE_SHORTCUTS: [&str; 17] = [
-    "Fn",
+pub(crate) const NATIVE_SHORTCUTS: [&str; 16] = [
     "MetaLeft",
     "MetaRight",
     "ShiftLeft",
@@ -282,7 +281,6 @@ fn install_and_run(app: AppHandle) -> bool {
                     56 | 60 => flags.contains(CGEventFlags::CGEventFlagShift),
                     58 | 61 => flags.contains(CGEventFlags::CGEventFlagAlternate),
                     59 | 62 => flags.contains(CGEventFlags::CGEventFlagControl),
-                    63 => flags.contains(CGEventFlags::CGEventFlagSecondaryFn),
                     _ => false,
                 };
 
@@ -385,8 +383,7 @@ fn emit_ptt_start(state: &AppState, app: &AppHandle) {
 fn shortcut_matches_keycode(shortcut: &str, keycode: i64) -> bool {
     matches!(
         (shortcut, keycode),
-        ("Fn", 63)
-            | ("MetaLeft", 55)
+        ("MetaLeft", 55)
             | ("MetaRight", 54)
             | ("ShiftLeft", 56)
             | ("ShiftRight", 60)
@@ -412,7 +409,7 @@ mod tests {
         shortcut_registration_target, tap_is_needed,
     };
 
-    /// AC5: the seventeen values are what users already have bound. The list
+    /// AC5: the sixteen values are what users already have bound. The list
     /// is now the only declaration, and the frontend reads it over IPC, so a
     /// change here silently changes existing bindings on both sides.
     #[test]
@@ -420,7 +417,6 @@ mod tests {
         assert_eq!(
             NATIVE_SHORTCUTS,
             [
-                "Fn",
                 "MetaLeft",
                 "MetaRight",
                 "ShiftLeft",
@@ -454,11 +450,11 @@ mod tests {
     }
 
     #[test]
-    fn modifier_and_fn_keycodes() {
-        assert!(shortcut_matches_keycode("Fn", 63));
+    fn modifier_keycodes() {
+        assert!(shortcut_matches_keycode("ShiftLeft", 56));
         assert!(shortcut_matches_keycode("MetaLeft", 55));
         assert!(shortcut_matches_keycode("ControlRight", 62));
-        assert!(!shortcut_matches_keycode("Fn", 55));
+        assert!(!shortcut_matches_keycode("ShiftLeft", 55));
     }
 
     #[test]
@@ -484,7 +480,7 @@ mod tests {
     #[test]
     fn native_toggle_routes_to_tap_not_plugin() {
         assert_eq!(
-            shortcut_registration_target("Fn"),
+            shortcut_registration_target("ShiftLeft"),
             ShortcutRegistrationTarget::Native
         );
         assert_eq!(
@@ -515,11 +511,11 @@ mod tests {
             "CommandOrControl+Shift+D"
         ));
         assert!(!tap_is_needed("", ""));
-        assert!(tap_is_needed("Fn", "CommandOrControl+Shift+D"));
+        assert!(tap_is_needed("ShiftLeft", "CommandOrControl+Shift+D"));
         assert!(tap_is_needed(
             "CommandOrControl+Shift+Space",
             "ControlRight"
         ));
-        assert!(tap_is_needed("F8", "Fn"));
+        assert!(tap_is_needed("F8", "ShiftLeft"));
     }
 }
