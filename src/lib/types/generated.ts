@@ -1190,6 +1190,7 @@ modifierTapStatus: ModifierTapStatus,
 navigate: Navigate,
 pillHoldChanged: PillHoldChanged,
 pipelineError: PipelineError,
+pipelineErrorCleared: PipelineErrorCleared,
 shortcutPttStart: ShortcutPttStart,
 shortcutPttStop: ShortcutPttStop,
 shortcutToggle: ShortcutToggle,
@@ -1218,6 +1219,7 @@ modifierTapStatus: "modifier-tap-status",
 navigate: "navigate",
 pillHoldChanged: "pill-hold-changed",
 pipelineError: "pipeline-error",
+pipelineErrorCleared: "pipeline-error-cleared",
 shortcutPttStart: "shortcut-ptt-start",
 shortcutPttStop: "shortcut-ptt-stop",
 shortcutToggle: "shortcut-toggle",
@@ -1742,6 +1744,7 @@ export type PillHoldKind = "polishing"
  * Pipeline failure surfaced to the frontend instead of dying silently in logs.
  */
 export type PipelineError = { scope: PipelineErrorScope; message: string }
+export type PipelineErrorCleared = { message: string }
 export type PipelineErrorScope = 
 /**
  * A single frame failed to transcribe and was skipped.
