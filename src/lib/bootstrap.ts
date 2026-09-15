@@ -34,6 +34,7 @@ export async function primeSettingsDefaults(
   app.settings = await getDefaultSettings();
 }
 
+/** Synchronize persisted and runtime backend state into a newly loaded webview. */
 export async function bootstrapAppState(
   app: ReturnType<typeof getAppState>,
 ): Promise<BootstrapResult> {

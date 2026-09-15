@@ -48,6 +48,7 @@ const catalog: TranscriptionCatalog = {
   selected_backend_id: "candle",
 };
 
+/** Render model settings with the standard contract options fixture. */
 function renderSection(recording: boolean) {
   render(ModelSettingsSection, {
     props: {

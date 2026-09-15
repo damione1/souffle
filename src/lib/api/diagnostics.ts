@@ -25,6 +25,7 @@ export async function getReleaseNotesForVersion(
   return trimmed ? trimmed : null;
 }
 
+/** Return version metadata for the running backend binary. */
 export async function getAppVersion(): Promise<AppVersion> {
   return commands.getAppVersion();
 }

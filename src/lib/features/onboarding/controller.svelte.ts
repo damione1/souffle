@@ -32,6 +32,7 @@ import {
   type SetupStep,
 } from "./setup";
 
+/** Create the state and actions that drive the first-run onboarding wizard. */
 export function createOnboardingController() {
   const app = getAppState();
 
@@ -83,6 +84,7 @@ export function createOnboardingController() {
     app.settings = nextSettings;
   }
 
+  /** Load the backend-owned defaults and device state needed by the wizard. */
   async function mount() {
     const flags = readSetupFlags();
     recoveryOnly = flags.setupDone;

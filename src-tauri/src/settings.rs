@@ -264,6 +264,7 @@ pub struct SettingsOptions {
 }
 
 impl SettingsOptions {
+    /// Return the settings constraints and defaults exposed through the IPC contract.
     pub fn current() -> Self {
         Self {
             model_unload_timeout_minutes: ALLOWED_UNLOAD_TIMEOUT_MINUTES.to_vec(),
@@ -586,6 +587,7 @@ impl AppSettings {
         Ok(())
     }
 
+    /// Normalize settings for persistence and reject values that cannot be corrected safely.
     pub fn sanitize_for_save(&self) -> Result<Self, String> {
         let mut normalized = self.sanitized();
 
@@ -628,6 +630,7 @@ impl AppSettings {
         true
     }
 
+    /// Normalize recoverable settings values, replacing invalid choices with defaults.
     fn sanitized(&self) -> Self {
         let mut normalized = self.clone();
         normalized.locale = normalized.locale.trim().to_string();
@@ -1763,6 +1766,7 @@ mod tests {
         );
     }
 
+    /// Ensure the frontend's published paste-delay limits match backend sanitization.
     #[test]
     fn paste_delay_bounds_match_settings_options() {
         let opts = SettingsOptions::current();

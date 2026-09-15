@@ -69,6 +69,7 @@ import {
 } from "../transcription/runtime";
 import { refreshSnippets } from "../transcription/snippets";
 
+/** Create the state and actions used by the settings view. */
 export function createSettingsController() {
   const app = getAppState();
 
@@ -173,6 +174,7 @@ export function createSettingsController() {
     }
   }
 
+  /** Load saved shortcuts, falling back to defaults published by the backend. */
   async function loadShortcuts() {
     try {
       const shortcuts = await getShortcuts();
@@ -400,6 +402,7 @@ export function createSettingsController() {
     });
   }
 
+  /** Refresh provider availability, models, and the backend-recommended Ollama model. */
   async function refreshSummaryProviders() {
     try {
       const status = await getSummaryProvidersStatus();
@@ -1053,6 +1056,7 @@ export function createSettingsController() {
     get ollamaAvailable() { return ollamaAvailable; },
     get ollamaModels() { return ollamaModels; },
     get summaryModels() { return summaryModels; },
+    /** Return the Ollama model recommended by the latest provider status. */
     get recommendedOllamaModel() { return recommendedOllamaModel; },
     get ollamaPulling() { return ollamaPulling; },
     get ollamaPullStatus() { return ollamaPullStatus; },

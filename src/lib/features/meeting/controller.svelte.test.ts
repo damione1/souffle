@@ -174,6 +174,7 @@ function makeMeeting(overrides: Partial<MeetingTranscript> = {}): MeetingTranscr
   };
 }
 
+/** Build provider status fixtures with optional per-test overrides. */
 function makeSummaryProvidersStatus(
   overrides: Partial<SummaryProvidersStatus> = {},
 ): SummaryProvidersStatus {

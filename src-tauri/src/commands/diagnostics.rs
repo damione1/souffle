@@ -35,13 +35,14 @@ pub fn get_diagnostics_text(state: State<'_, AppState>) -> Result<String, String
     Ok(format_bundle_text(&bundle, &log_tail))
 }
 
+/// Version metadata reported to the frontend during application bootstrap.
 #[derive(serde::Serialize, specta::Type)]
 pub struct AppVersion {
     pub version: String,
     pub is_local_build: bool,
 }
 
-/// App version string from the running binary.
+/// Return the running binary's version and whether it is an unstamped local build.
 #[tauri::command]
 #[specta::specta]
 pub fn get_app_version() -> AppVersion {
