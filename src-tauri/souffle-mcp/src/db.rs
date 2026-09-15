@@ -185,6 +185,8 @@ pub struct MeetingSummary {
     pub id: String,
     pub title: String,
     pub started_at: String,
+    pub ended_at: Option<String>,
+    pub is_ongoing: bool,
     pub duration_seconds: f64,
     pub participants: Vec<String>,
     pub has_summary: bool,
@@ -206,6 +208,7 @@ pub struct MeetingDetail {
     pub title: String,
     pub started_at: String,
     pub ended_at: Option<String>,
+    pub is_ongoing: bool,
     pub duration_seconds: f64,
     pub transcript: Option<String>,
     pub summary: Option<String>,
@@ -409,6 +412,8 @@ impl McpDb {
                 id: row.id,
                 title: row.title,
                 started_at: row.started_at,
+                is_ongoing: row.ended_at.is_none(),
+                ended_at: row.ended_at,
                 duration_seconds: row.duration_seconds,
             })
             .collect())
@@ -507,6 +512,7 @@ impl McpDb {
             id: row.id,
             title: row.title,
             started_at: row.started_at,
+            is_ongoing: row.ended_at.is_none(),
             ended_at: row.ended_at,
             duration_seconds: row.duration_seconds,
             transcript,
