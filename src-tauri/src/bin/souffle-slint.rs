@@ -98,10 +98,21 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     ui.on_drag_window({
-        let ui_handle = ui_handle.clone();
         move || {
-            if let Some(ui) = ui_handle.upgrade() {
-                let _ = ui.window().show();
+            #[cfg(target_os = "macos")]
+            unsafe {
+                use objc2::runtime::AnyClass;
+                if let Some(ns_app_class) = AnyClass::get(c"NSApplication") {
+                    let app: Retained<objc2::runtime::AnyObject> =
+                        msg_send![ns_app_class, sharedApplication];
+                    let current_event: Option<Retained<objc2::runtime::AnyObject>> =
+                        msg_send![&app, currentEvent];
+                    let main_window: Option<Retained<objc2::runtime::AnyObject>> =
+                        msg_send![&app, mainWindow];
+                    if let (Some(win), Some(event)) = (main_window, current_event) {
+                        let _: () = msg_send![&win, performWindowDragWithEvent: &*event];
+                    }
+                }
             }
         }
     });
