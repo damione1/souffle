@@ -111,6 +111,30 @@ mod tests {
         assert_eq!(fold_trigger("re\u{301}sume\u{301}"), fold_trigger("résumé"));
     }
 
+    #[derive(serde::Deserialize)]
+    struct FoldTestCase {
+        input: String,
+        expected: String,
+    }
+
+    #[test]
+    fn fold_trigger_matches_fixtures() {
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../src/lib/features/transcription/snippet-fold-test-cases.json");
+        let file = std::fs::File::open(fixture_path).expect("failed to open fixture");
+        let test_cases: Vec<FoldTestCase> =
+            serde_json::from_reader(file).expect("failed to parse fixture");
+
+        for case in test_cases {
+            assert_eq!(
+                fold_trigger(&case.input),
+                case.expected,
+                "Failed on input: {}",
+                case.input
+            );
+        }
+    }
+
     #[test]
     fn snippets_crud() {
         let (db, _dir) = test_db();
