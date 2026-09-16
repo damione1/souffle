@@ -8,6 +8,7 @@ Private, on-device speech-to-text for macOS (Apple Silicon only). Tauri 2 app: R
 - `npm run check` type-checks Svelte and TypeScript
 - `npm run build` builds the frontend
 - `make nightly` builds the debug app as **Soufflé Nightly** (`com.souffle.desktop.nightly`) and opens it; `make nightly-fresh` wipes Nightly data and TCC first; `make nightly-dmg` wraps it in a `.dmg`. Does not touch the installed Soufflé.
+- `./scripts/bundle-slint-release.sh` builds the native Slint Rust application (`souffle-slint`) in release mode, bundles it into `Souffle.app`, and packages it into a `.dmg`.
 - `cargo test --manifest-path src-tauri/Cargo.toml --workspace` runs backend tests
 - `npm run generate:types` regenerates `src/lib/types/generated.ts` and `src/lib/api/generated.ts` from the Rust commands; run it after changing any `#[tauri::command]` signature
 - `./scripts/codeql-local.sh` runs CodeQL (rust, javascript-typescript, actions) locally; required before opening or updating a PR. Needs `brew install --cask codeql`. CI CodeQL runs only on push to `develop`, not on PRs.
