@@ -269,8 +269,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_handle = ui_handle.clone();
         move || {
             if let Some(ui) = ui_handle.upgrade() {
-                ui.set_update_downloading(true);
-                ui.set_update_progress(0.5);
+                ui.set_update_downloading(false);
+                ui.set_update_progress(1.0);
                 ui.set_update_ready(true);
             }
         }
