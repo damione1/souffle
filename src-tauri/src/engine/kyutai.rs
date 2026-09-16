@@ -152,21 +152,14 @@ fn drained_pause_frames(emission_delay_frames: usize) -> usize {
 /// [`VAD_FLUSH_MARGIN_FRAMES`]: shorter pauses still have an in-flight word (and
 /// the last `audio_delay` seconds of audio) sitting in `ItemState`.
 ///
-/// `frames_since_lane_reset` gates the per-lane `Lane` decision on that lane's
-/// *own* cooldown, not just the shared `frames_since_refresh`. Without it, once
-/// `frames_since_refresh` first crosses `soft` it never drops back down except
-/// on a rare simultaneous-both-lanes `Full` refresh — so a lane that stays
-/// paused (the listener side of a conversation, say) would re-clear on every
-/// `pause_threshold` frames indefinitely, cold-starting that lane's KV every
-/// ~1s for the rest of the session (SOU-193). Requiring the lane's own
-/// `frames_since_lane_reset` to also clear `soft` makes a `Lane` refresh
-/// one-shot per pause episode, matching how `Full` naturally self-limits via
-/// `frames_since_refresh`.
+/// `pause_refresh_consumed` makes a pause-aligned refresh one-shot per lane and
+/// pause episode. A lane becomes eligible again only after speech clears its
+/// marker and a new pause has drained the ASR delay window (SOU-193).
 fn decide_refresh(
     frames_since_refresh: usize,
     context: usize,
     vad_pause_streak: &[usize],
-    frames_since_lane_reset: &[usize],
+    pause_refresh_consumed: &[bool],
     batch_size: usize,
     emission_delay_frames: usize,
 ) -> RefreshDecision {
@@ -185,11 +178,7 @@ fn decide_refresh(
         .enumerate()
         .filter(|(idx, streak)| {
             **streak >= pause_threshold
-                && frames_since_lane_reset
-                    .get(*idx)
-                    .copied()
-                    .unwrap_or(usize::MAX)
-                    >= soft
+                && !pause_refresh_consumed.get(*idx).copied().unwrap_or(true)
         })
         .map(|(idx, _)| idx)
         .collect();
@@ -228,17 +217,28 @@ fn is_energy_pause(pcm: &[f32]) -> bool {
     pcm_rms(pcm) < ENERGY_PAUSE_RMS
 }
 
+fn note_pause_state(streak: &mut usize, consumed: &mut bool, is_pause: bool) {
+    if is_pause {
+        *streak = streak.saturating_add(1);
+    } else {
+        *streak = 0;
+        *consumed = false;
+    }
+}
+
 /// Advance per-lane pause streaks from frame energy. Used when the checkpoint
 /// has no semantic VAD heads, so `AsrMsg::Step` is never emitted and the
 /// heads-based `note_vad_pause` path cannot run.
-fn note_energy_pause_streaks(streaks: &mut [usize], lane_pcm: &[&[f32]]) {
+fn note_energy_pause_streaks(
+    streaks: &mut [usize],
+    pause_refresh_consumed: &mut [bool],
+    lane_pcm: &[&[f32]],
+) {
     for (idx, pcm) in lane_pcm.iter().enumerate() {
-        if let Some(streak) = streaks.get_mut(idx) {
-            if is_energy_pause(pcm) {
-                *streak = streak.saturating_add(1);
-            } else {
-                *streak = 0;
-            }
+        if let (Some(streak), Some(consumed)) =
+            (streaks.get_mut(idx), pause_refresh_consumed.get_mut(idx))
+        {
+            note_pause_state(streak, consumed, is_energy_pause(pcm));
         }
     }
 }
@@ -271,10 +271,11 @@ struct LoadedModel {
     /// `refresh_lane` restarts one lane's moshi clock and not the other's.
     epoch_origin_seconds: Vec<f64>,
     /// LM frames fed to each lane since that lane's last KV clear, full or
-    /// per-lane. This is what a lane's epoch credit is computed from, and
-    /// also what `decide_refresh` checks so a `Lane` refresh cools down
-    /// per-lane instead of re-firing on every drained pause (SOU-193).
+    /// per-lane. This is what a lane's epoch credit is computed from.
     frames_since_lane_reset: Vec<usize>,
+    /// Whether each lane has already had a pause-triggered KV clear during
+    /// its current pause episode. Cleared only when that lane resumes speech.
+    pause_refresh_consumed: Vec<bool>,
     /// Last start_time emitted per lane. Guarantees monotonicity even if a
     /// lane's internal clock restarts (reset_batch_idx).
     last_emitted_start: Vec<f64>,
@@ -416,6 +417,7 @@ impl KyutaiEngine {
             time_offset_seconds: vec![0.0; batch_size],
             epoch_origin_seconds: vec![0.0; batch_size],
             frames_since_lane_reset: vec![0; batch_size],
+            pause_refresh_consumed: vec![false; batch_size],
             last_emitted_start: vec![0.0; batch_size],
             frames_since_refresh: 0,
             refresh_count: 0,
@@ -646,6 +648,9 @@ impl KyutaiEngine {
         model.prefix_pending = true;
         model.frames_since_refresh = 0;
         model.vad_pause_streak = vec![0; model.state.batch_size()];
+        if kind == RefreshKind::SoftPause {
+            model.pause_refresh_consumed.fill(true);
+        }
         model.language_tracker.reset_all();
         let mut orphaned: Vec<PendingWord> = Vec::new();
         for pending in &mut model.pending_words {
@@ -693,6 +698,11 @@ impl KyutaiEngine {
         if let Some(streak) = model.vad_pause_streak.get_mut(batch_idx) {
             *streak = 0;
         }
+        if kind == RefreshKind::SoftPause
+            && let Some(consumed) = model.pause_refresh_consumed.get_mut(batch_idx)
+        {
+            *consumed = true;
+        }
         model.language_tracker.reset_lane(batch_idx);
         let pending = model
             .pending_words
@@ -719,7 +729,7 @@ impl KyutaiEngine {
             model.frames_since_refresh,
             model.config.context,
             &model.vad_pause_streak,
-            &model.frames_since_lane_reset,
+            &model.pause_refresh_consumed,
             batch_size,
             Self::emission_delay_frames(model),
         ) {
@@ -759,12 +769,11 @@ impl KyutaiEngine {
     fn note_vad_pause(model: &mut LoadedModel, prs: &[Vec<f32>]) {
         if let Some(pause_head) = prs.get(VAD_PAUSE_HEAD) {
             for (batch_idx, p) in pause_head.iter().enumerate() {
-                if let Some(streak) = model.vad_pause_streak.get_mut(batch_idx) {
-                    if *p > VAD_PAUSE_THRESHOLD {
-                        *streak += 1;
-                    } else {
-                        *streak = 0;
-                    }
+                if let (Some(streak), Some(consumed)) = (
+                    model.vad_pause_streak.get_mut(batch_idx),
+                    model.pause_refresh_consumed.get_mut(batch_idx),
+                ) {
+                    note_pause_state(streak, consumed, *p > VAD_PAUSE_THRESHOLD);
                 }
             }
         }
@@ -865,7 +874,11 @@ impl KyutaiEngine {
         }
         FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
         if !model.has_extra_heads {
-            note_energy_pause_streaks(&mut model.vad_pause_streak, &[chunk_data]);
+            note_energy_pause_streaks(
+                &mut model.vad_pause_streak,
+                &mut model.pause_refresh_consumed,
+                &[chunk_data],
+            );
         }
         Ok(asr_msgs)
     }
@@ -893,6 +906,7 @@ impl KyutaiEngine {
         if !model.has_extra_heads && data.len() >= 2 * MIMI_FRAME_SIZE {
             note_energy_pause_streaks(
                 &mut model.vad_pause_streak,
+                &mut model.pause_refresh_consumed,
                 &[
                     &data[..MIMI_FRAME_SIZE],
                     &data[MIMI_FRAME_SIZE..2 * MIMI_FRAME_SIZE],
@@ -1063,6 +1077,8 @@ impl KyutaiEngine {
     /// `frames_since_refresh`, `refresh_count`, `vad_pause_streak`,
     /// `language_tracker`, `pending_words`, `prefix_pending`) is always
     /// reinitialised: the point of the reset is to discard the wedged state.
+    /// Stall recovery also carries the pause-episode markers so rebuilding
+    /// during silence cannot re-arm a pause refresh without resumed speech.
     fn rebuild_model(&mut self, preserve_timeline: bool) -> Result<(), EngineError> {
         FRAME_COUNT.store(0, Ordering::Relaxed);
         if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
@@ -1089,6 +1105,8 @@ impl KyutaiEngine {
                 &old.last_emitted_start,
             )
         });
+        let carried_pause_refresh_consumed =
+            preserve_timeline.then(|| old.pause_refresh_consumed.clone());
         // A word mid-utterance when the rebuild happens has no EndWord yet
         // and is silently dropped by the `..` below: there is no return path
         // here for a trailing segment without a larger change to this
@@ -1136,6 +1154,17 @@ impl KyutaiEngine {
                     old_lanes = epoch_origin_seconds.len(),
                     new_lanes = rebuilt.epoch_origin_seconds.len(),
                     "Stall recovery rebuild changed lane count; timeline not carried over"
+                );
+            }
+        }
+        if let Some(consumed) = carried_pause_refresh_consumed {
+            if consumed.len() == rebuilt.pause_refresh_consumed.len() {
+                rebuilt.pause_refresh_consumed = consumed;
+            } else {
+                warn!(
+                    old_lanes = consumed.len(),
+                    new_lanes = rebuilt.pause_refresh_consumed.len(),
+                    "Stall recovery rebuild changed lane count; pause markers not carried over"
                 );
             }
         }
@@ -1509,13 +1538,17 @@ mod tests {
         let silence = vec![0.0f32; MIMI_FRAME_SIZE];
         let speech = vec![0.2f32; MIMI_FRAME_SIZE];
         let mut streaks = [0usize, 0];
+        let mut consumed = [true, true];
 
-        note_energy_pause_streaks(&mut streaks, &[&silence, &speech]);
+        note_energy_pause_streaks(&mut streaks, &mut consumed, &[&silence, &speech]);
         assert_eq!(streaks, [1, 0]);
-        note_energy_pause_streaks(&mut streaks, &[&silence, &silence]);
+        assert_eq!(consumed, [true, false]);
+        note_energy_pause_streaks(&mut streaks, &mut consumed, &[&silence, &silence]);
         assert_eq!(streaks, [2, 1]);
-        note_energy_pause_streaks(&mut streaks, &[&speech, &silence]);
+        assert_eq!(consumed, [true, false]);
+        note_energy_pause_streaks(&mut streaks, &mut consumed, &[&speech, &silence]);
         assert_eq!(streaks, [0, 2]);
+        assert_eq!(consumed, [false, false]);
     }
 
     #[test]
@@ -1525,16 +1558,17 @@ mod tests {
         // — never SoftPause.
         let silence = vec![0.0f32; MIMI_FRAME_SIZE];
         let mut streaks = [0usize];
+        let mut consumed = [false];
         let drained = drained_pause_frames(STT_26B_DELAY);
         for _ in 0..drained {
-            note_energy_pause_streaks(&mut streaks, &[&silence]);
+            note_energy_pause_streaks(&mut streaks, &mut consumed, &[&silence]);
         }
         assert_eq!(
-            decide_refresh(300, 375, &streaks, &[300], 1, STT_26B_DELAY),
+            decide_refresh(300, 375, &streaks, &consumed, 1, STT_26B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
         assert_eq!(
-            decide_refresh(300, 375, &[0], &[300], 1, STT_26B_DELAY),
+            decide_refresh(300, 375, &[0], &[false], 1, STT_26B_DELAY),
             RefreshDecision::None
         );
     }
@@ -1543,15 +1577,15 @@ mod tests {
     fn decide_refresh_none_before_soft_window() {
         let streak = [0usize];
         assert_eq!(
-            decide_refresh(100, 375, &streak, &[100], 1, STT_1B_DELAY),
+            decide_refresh(100, 375, &streak, &[false], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(224, 375, &streak, &[224], 1, STT_1B_DELAY),
+            decide_refresh(224, 375, &streak, &[false], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(225, 375, &[0], &[225], 1, STT_1B_DELAY),
+            decide_refresh(225, 375, &[0], &[false], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
     }
@@ -1560,7 +1594,7 @@ mod tests {
     fn decide_refresh_soft_pause_at_60_percent_context() {
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(225, 375, &[drained], &[225], 1, STT_1B_DELAY),
+            decide_refresh(225, 375, &[drained], &[false], 1, STT_1B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
     }
@@ -1568,7 +1602,7 @@ mod tests {
     #[test]
     fn decide_refresh_no_hard_deadline_past_soft_window_without_pause() {
         assert_eq!(
-            decide_refresh(350, 375, &[0], &[350], 1, STT_1B_DELAY),
+            decide_refresh(350, 375, &[0], &[false], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
@@ -1576,7 +1610,7 @@ mod tests {
                 350,
                 375,
                 &[drained_pause_frames(STT_1B_DELAY)],
-                &[350],
+                &[false],
                 1,
                 STT_1B_DELAY
             ),
@@ -1588,11 +1622,11 @@ mod tests {
     fn decide_refresh_ignores_zero_context_or_fresh_epoch() {
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(400, 0, &[drained], &[400], 1, STT_1B_DELAY),
+            decide_refresh(400, 0, &[drained], &[false], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(0, 375, &[drained], &[0], 1, STT_1B_DELAY),
+            decide_refresh(0, 375, &[drained], &[false], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
     }
@@ -1601,7 +1635,7 @@ mod tests {
     fn decide_refresh_dual_one_lane_paused_other_active() {
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[drained, 2], &[300, 300], 2, STT_1B_DELAY),
+            decide_refresh(300, 375, &[drained, 2], &[false, false], 2, STT_1B_DELAY),
             RefreshDecision::Lane {
                 batch_idx: 0,
                 kind: RefreshKind::SoftPause,
@@ -1617,7 +1651,7 @@ mod tests {
                 300,
                 375,
                 &[drained, drained + 2],
-                &[300, 300],
+                &[false, false],
                 2,
                 STT_1B_DELAY
             ),
@@ -1631,15 +1665,15 @@ mod tests {
         // times below the 2.6B delay. Either way, six frames of pause still
         // hold an in-flight word.
         assert_eq!(
-            decide_refresh(225, 375, &[6], &[225], 1, STT_1B_DELAY),
+            decide_refresh(225, 375, &[6], &[false], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(300, 375, &[6], &[300], 1, STT_26B_DELAY),
+            decide_refresh(300, 375, &[6], &[false], 1, STT_26B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(300, 375, &[8, 2], &[300, 300], 2, STT_26B_DELAY),
+            decide_refresh(300, 375, &[8, 2], &[false, false], 2, STT_26B_DELAY),
             RefreshDecision::None
         );
     }
@@ -1648,11 +1682,11 @@ mod tests {
     fn decide_refresh_fires_once_the_delay_window_holds_only_silence() {
         let drained = drained_pause_frames(STT_26B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[drained], &[300], 1, STT_26B_DELAY),
+            decide_refresh(300, 375, &[drained], &[false], 1, STT_26B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
         assert_eq!(
-            decide_refresh(300, 375, &[drained, 2], &[300, 300], 2, STT_26B_DELAY),
+            decide_refresh(300, 375, &[drained, 2], &[false, false], 2, STT_26B_DELAY),
             RefreshDecision::Lane {
                 batch_idx: 0,
                 kind: RefreshKind::SoftPause,
@@ -1661,27 +1695,34 @@ mod tests {
     }
 
     #[test]
-    fn decide_refresh_lane_cooldown_blocks_immediate_retrigger() {
-        // SOU-193: right after a Lane refresh, that lane's own
-        // frames_since_lane_reset is 0 even though the global
-        // frames_since_refresh is still well past soft (it only resets on a
-        // Full refresh). If the lane goes straight back into a drained pause
-        // (the listener side of a conversation staying silent), the old code
-        // fired another Lane refresh immediately — this must not clear.
+    fn decide_refresh_lane_pause_marker_blocks_retrigger_during_long_silence() {
+        // SOU-193: elapsed frames must not re-arm a lane that has remained
+        // silent since its pause-triggered refresh.
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[drained, 2], &[0, 300], 2, STT_1B_DELAY),
+            decide_refresh(300, 375, &[drained], &[true], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, 2], &[true, false], 2, STT_1B_DELAY),
             RefreshDecision::None
         );
     }
 
     #[test]
-    fn decide_refresh_lane_cooldown_clears_once_soft_window_elapses_again() {
-        // Same lane as above, but its own counter has climbed back past
-        // `soft` (225 @ context 375) since that Lane refresh: eligible again.
+    fn decide_refresh_lane_rearms_after_speech_and_a_new_pause() {
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let speech = vec![0.2f32; MIMI_FRAME_SIZE];
         let drained = drained_pause_frames(STT_1B_DELAY);
+        let mut streaks = [drained, 2];
+        let mut consumed = [true, false];
+
+        note_energy_pause_streaks(&mut streaks, &mut consumed, &[&speech, &speech]);
+        for _ in 0..drained {
+            note_energy_pause_streaks(&mut streaks, &mut consumed, &[&silence, &speech]);
+        }
         assert_eq!(
-            decide_refresh(300, 375, &[drained, 2], &[225, 300], 2, STT_1B_DELAY),
+            decide_refresh(300, 375, &streaks, &consumed, 2, STT_1B_DELAY),
             RefreshDecision::Lane {
                 batch_idx: 0,
                 kind: RefreshKind::SoftPause,
@@ -1690,15 +1731,21 @@ mod tests {
     }
 
     #[test]
-    fn decide_refresh_lane_cooldown_is_per_lane_not_global() {
-        // Lane 0 just reset and is still paused (blocked by its own
-        // cooldown); lane 1 is independently paused and its cooldown has
-        // elapsed. Only lane 1 should refresh — a fresh lane 0 must not
-        // suppress a ready lane 1, and the pair must not be treated as
+    fn decide_refresh_lane_pause_marker_is_per_lane_not_global() {
+        // Lane 0 has already refreshed in its current pause; lane 1 is in an
+        // independent, unconsumed pause. Only lane 1 should refresh — lane 0
+        // must not suppress it, and the pair must not be treated as
         // "both paused" (Full) just because lane 0 also has a long streak.
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[drained, drained], &[0, 300], 2, STT_1B_DELAY),
+            decide_refresh(
+                300,
+                375,
+                &[drained, drained],
+                &[true, false],
+                2,
+                STT_1B_DELAY
+            ),
             RefreshDecision::Lane {
                 batch_idx: 1,
                 kind: RefreshKind::SoftPause,
