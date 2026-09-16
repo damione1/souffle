@@ -2935,6 +2935,11 @@ impl AudioCapture {
     }
 
     fn clear_mic_loss_ladder(&mut self) {
+        if self.mic_loss_warned {
+            self.emit_pipeline_warning_cleared(
+                "Microphone lost; still recording system audio.".to_string(),
+            );
+        }
         reset_mic_loss_ladder(
             &mut self.mic_rebuild_failures,
             &mut self.last_counted_failure,
@@ -3103,6 +3108,13 @@ impl AudioCapture {
                 message,
             }
             .emit(app);
+        }
+    }
+
+    fn emit_pipeline_warning_cleared(&self, message: String) {
+        use tauri_specta::Event;
+        if let Some(app) = &self.app {
+            let _ = crate::app_events::PipelineErrorCleared { message }.emit(app);
         }
     }
 

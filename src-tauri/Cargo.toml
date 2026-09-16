@@ -176,6 +176,7 @@ souffle = { path = ".", features = ["test-support"] }
 # MockRuntime + mock_builder for driving Tauri commands in integration tests
 # without a real webview.
 tauri = { version = "2", features = ["test"] }
+serde_json = "1"
 
 [profile.release]
 strip = true

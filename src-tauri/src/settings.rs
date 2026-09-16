@@ -1047,6 +1047,13 @@ impl ShortcutSettings {
             push_to_talk: self.push_to_talk.trim().to_string(),
         };
 
+        if normalized.toggle == "Fn" {
+            normalized.toggle = crate::DEFAULT_TOGGLE_SHORTCUT.to_string();
+        }
+        if normalized.push_to_talk == "Fn" {
+            normalized.push_to_talk = String::new();
+        }
+
         if conflicting_pair(&normalized.toggle, &normalized.push_to_talk) {
             normalized.push_to_talk.clear();
         }
@@ -1319,8 +1326,8 @@ mod tests {
     #[test]
     fn shortcut_settings_reject_duplicate_native_bindings() {
         let shortcuts = ShortcutSettings {
-            toggle: "Fn".into(),
-            push_to_talk: "Fn".into(),
+            toggle: "ShiftLeft".into(),
+            push_to_talk: "ShiftLeft".into(),
         };
 
         assert_eq!(
@@ -1333,13 +1340,28 @@ mod tests {
     fn native_toggle_shortcut_persists_across_load() {
         let (db, _dir) = test_db();
         let s = ShortcutSettings {
-            toggle: "Fn".into(),
+            toggle: "ShiftLeft".into(),
             push_to_talk: "MetaRight".into(),
         };
         s.save(&db).unwrap();
         let loaded = ShortcutSettings::load(&db).unwrap();
-        assert_eq!(loaded.toggle, "Fn");
+        assert_eq!(loaded.toggle, "ShiftLeft");
         assert_eq!(loaded.push_to_talk, "MetaRight");
+    }
+
+    #[test]
+    fn fn_shortcut_normalizes_to_default_on_load() {
+        let (db, _dir) = test_db();
+
+        // Can't use s.save(&db) directly because normalize() would error on duplicates.
+        // We bypass it to test the load time migration.
+        super::write_json_setting(&db, super::SHORTCUT_TOGGLE_KEY, &"Fn".to_string()).unwrap();
+        super::write_json_setting(&db, super::SHORTCUT_PUSH_TO_TALK_KEY, &"Fn".to_string())
+            .unwrap();
+
+        let loaded = ShortcutSettings::load(&db).unwrap();
+        assert_eq!(loaded.toggle, crate::DEFAULT_TOGGLE_SHORTCUT.to_string());
+        assert_eq!(loaded.push_to_talk, String::new());
     }
 
     #[test]

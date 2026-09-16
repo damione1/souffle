@@ -65,6 +65,11 @@ pub struct PipelineError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct PipelineErrorCleared {
+    pub message: String,
+}
+
 /// Emitted by the floating recording pill (or the tray) to ask the meeting
 /// controller in the main window to stop the active meeting through its
 /// normal stop pipeline.

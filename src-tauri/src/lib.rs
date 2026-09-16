@@ -192,6 +192,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             app_events::StateChanged,
             app_events::TranscriptionHealth,
             app_events::PipelineError,
+            app_events::PipelineErrorCleared,
             app_events::SystemAudioStatus,
             app_events::ModifierTapStatus,
             app_events::AudioLevel,
