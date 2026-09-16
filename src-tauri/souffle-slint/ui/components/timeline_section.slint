@@ -1,5 +1,6 @@
 import { TimelineEntry, TimelineItemRow } from "timeline_item.slint";
 import { EmptyState } from "empty_state.slint";
+import { TimelineKind } from "../types.slint";
 
 export struct TimelineDayGroup {
     day-label: string,
@@ -16,8 +17,8 @@ export component TimelineSection inherits VerticalLayout {
     in property <bool> has-matches: true;
     in property <string> live-meeting-id;
 
-    callback item-opened(string /* kind */, string /* id */);
-    callback item-removed(string /* kind */, string /* id */);
+    callback item-opened(TimelineKind, string /* id */);
+    callback item-removed(TimelineKind, string /* id */);
 
     spacing: 18px;
 
@@ -43,7 +44,7 @@ export component TimelineSection inherits VerticalLayout {
 
             for entry in group.entries: TimelineItemRow {
                 entry: entry;
-                is-live: entry.kind == "meeting" && entry.id == root.live-meeting-id;
+                is-live: entry.kind == TimelineKind.meeting && entry.id == root.live-meeting-id;
                 opened => { root.item-opened(entry.kind, entry.id); }
                 removed => { root.item-removed(entry.kind, entry.id); }
             }

@@ -1,6 +1,8 @@
 import { IdleView } from "idle_view.slint";
 import { RecordingView } from "recording_view.slint";
+import { MeetingDetail } from "meeting_detail.slint";
 import { TimelineDayGroup } from "components/timeline_section.slint";
+import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState } from "types.slint";
 
 export component MainWindow inherits Window {
     title: "Soufflé";
@@ -10,30 +12,45 @@ export component MainWindow inherits Window {
     in property <string> dictation-shortcut;
     in property <bool> model-ready: true;
     in-out property <string> search-query;
-    in-out property <string> kind-filter: "all";
+    in-out property <TimelineFilter> kind-filter: TimelineFilter.all;
     in property <string> transcription-status-message;
     in property <string> meeting-status-message;
     in property <[TimelineDayGroup]> timeline-groups;
     in property <bool> timeline-is-empty: true;
     in property <bool> timeline-has-matches: true;
     in property <string> live-meeting-id;
-    // "idle" | "dictation" | "meeting" - Rust-driven, set after a real
-    // start/stop command succeeds, never optimistically from the UI alone.
-    in-out property <string> recording-mode: "idle";
+    // Rust-driven, set after a real start/stop command succeeds, never
+    // optimistically from the UI alone.
+    in-out property <RecordingMode> recording-mode: RecordingMode.idle;
     in-out property <string> live-text;
     in-out property <string> live-tentative;
 
+    // Non-empty while a completed meeting is open in MeetingDetail. Empty
+    // means "show the Timeline instead" - checked together with
+    // recording-mode below so a live meeting always shows RecordingView
+    // first, never MeetingDetail underneath it.
+    in-out property <string> active-meeting-id;
+    in property <string> meeting-detail-title;
+    in property <string> meeting-detail-meta;
+    in property <string> meeting-detail-model-label;
+    in property <[string]> meeting-detail-participants;
+    in-out property <string> meeting-detail-notes;
+    in property <NotesSaveState> meeting-detail-notes-save-state;
+
     callback dictate-requested();
     callback meeting-requested();
-    callback filter-changed(string);
+    callback filter-changed(TimelineFilter);
     callback search-changed(string);
     callback dismiss-transcription-status();
     callback dismiss-meeting-status();
-    callback timeline-item-opened(string, string);
-    callback timeline-item-removed(string, string);
+    callback timeline-item-opened(TimelineKind, string);
+    callback timeline-item-removed(TimelineKind, string);
     callback stop-requested();
+    callback meeting-detail-back();
+    callback meeting-detail-rename(string);
+    callback meeting-detail-notes-changed(string);
 
-    if root.recording-mode == "idle": IdleView {
+    if root.recording-mode == RecordingMode.idle && root.active-meeting-id == "": IdleView {
         dictation-shortcut: root.dictation-shortcut;
         model-ready: root.model-ready;
         search-query <=> root.search-query;
@@ -54,7 +71,19 @@ export component MainWindow inherits Window {
         timeline-item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
     }
 
-    if root.recording-mode != "idle": RecordingView {
+    if root.recording-mode == RecordingMode.idle && root.active-meeting-id != "": MeetingDetail {
+        title: root.meeting-detail-title;
+        meta-line: root.meeting-detail-meta;
+        model-label: root.meeting-detail-model-label;
+        participant-labels: root.meeting-detail-participants;
+        notes <=> root.meeting-detail-notes;
+        notes-save-state: root.meeting-detail-notes-save-state;
+        back-requested => { root.meeting-detail-back(); }
+        rename-requested(title) => { root.meeting-detail-rename(title); }
+        notes-changed(value) => { root.meeting-detail-notes-changed(value); }
+    }
+
+    if root.recording-mode != RecordingMode.idle: RecordingView {
         mode: root.recording-mode;
         live-text: root.live-text;
         live-tentative: root.live-tentative;

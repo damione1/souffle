@@ -1,4 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
+import { RecordingMode } from "types.slint";
 
 // Live-recording view for SOU-187. Milestone 4 proved the real start/stop
 // round-trip; milestone 5 adds the real live transcript (single running
@@ -6,7 +7,7 @@ import { ScrollView } from "std-widgets.slint";
 // parity - no paragraph/speaker-lane grouping, no inline word edit, no
 // waveform, no notes autosave. Said here honestly, not hidden.
 export component RecordingView inherits VerticalLayout {
-    in property <string> mode; // "dictation" | "meeting"
+    in property <RecordingMode> mode; // never RecordingMode.idle - see main_window.slint
     in property <string> live-text;
     in property <string> live-tentative;
 
@@ -20,7 +21,7 @@ export component RecordingView inherits VerticalLayout {
         alignment: space-between;
 
         Text {
-            text: root.mode == "meeting" ? "R\u{e9}union en cours\u{2026}" : "Dict\u{e9}e en cours\u{2026}";
+            text: root.mode == RecordingMode.meeting ? "R\u{e9}union en cours\u{2026}" : "Dict\u{e9}e en cours\u{2026}";
             font-size: 18px;
             font-weight: 600;
             vertical-alignment: center;

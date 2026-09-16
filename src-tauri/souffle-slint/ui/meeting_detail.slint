@@ -1,0 +1,164 @@
+import { LineEdit, TextEdit } from "std-widgets.slint";
+import { NotesSaveState } from "types.slint";
+
+// Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
+// completed-meeting variant only. The live-recording variant of
+// MeetingHeaderSection (stop button, recording badge, system-audio notice)
+// is out of scope: this app shows RecordingView instead while a meeting is
+// live (see main_window.slint), never this component.
+//
+// Milestone 6 scope, said here rather than hidden: header (title, rename,
+// date/duration/segment count, participants) + notes (load, edit, debounced
+// autosave). Not yet ported: audio player/waveform (milestone 7), transcript
+// with speaker labels (milestone 8), summary raw+structured (milestone 9),
+// export menu and resume-recording (need the native file dialog from
+// SOU-191, not available to this headless bridge yet).
+export component MeetingDetail inherits VerticalLayout {
+    in property <string> title;
+    in property <string> meta-line;
+    in property <string> model-label;
+    in property <[string]> participant-labels;
+    in-out property <string> notes;
+    in property <NotesSaveState> notes-save-state;
+
+    callback back-requested();
+    callback rename-requested(string);
+    callback notes-changed(string);
+
+    property <bool> editing-title: false;
+    property <string> title-draft;
+
+    padding: 24px;
+    spacing: 14px;
+
+    back-btn := Rectangle {
+        height: 22px;
+
+        accessible-role: button;
+        accessible-label: "Retour \u{e0} l'accueil";
+        accessible-action-default => { root.back-requested(); }
+
+        TouchArea {
+            clicked => { root.back-requested(); }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            Text { text: "\u{2190} Retour"; vertical-alignment: center; }
+        }
+    }
+
+    if !root.editing-title: title-btn := Rectangle {
+        height: 28px;
+
+        accessible-role: button;
+        accessible-label: "Renommer la r\u{e9}union";
+        accessible-action-default => {
+            root.title-draft = root.title;
+            root.editing-title = true;
+        }
+
+        TouchArea {
+            clicked => {
+                root.title-draft = root.title;
+                root.editing-title = true;
+            }
+        }
+
+        Text {
+            text: root.title;
+            font-size: 20px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+
+    if root.editing-title: LineEdit {
+        text <=> root.title-draft;
+        accepted => {
+            root.editing-title = false;
+            if (root.title-draft != "" && root.title-draft != root.title) {
+                root.rename-requested(root.title-draft);
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 9px;
+        alignment: start;
+
+        Text {
+            text: root.meta-line;
+            color: #888888;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        if root.model-label != "": Text {
+            text: "[" + root.model-label + "]";
+            color: #4a9eff;
+            font-family: "monospace";
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+
+    if root.participant-labels.length > 0: HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+
+        for label in root.participant-labels: Text {
+            text: label;
+            color: #aaaaaa;
+            font-size: 11px;
+        }
+    }
+
+    Text {
+        text: "Jalon 6 : en-t\u{ea}te + notes seulement - pas encore de lecteur audio/waveform, pas de transcript, pas de r\u{e9}sum\u{e9} ici.";
+        color: #888888;
+        font-size: 11px;
+        wrap: word-wrap;
+    }
+
+    Rectangle {
+        vertical-stretch: 1;
+        border-width: 1px;
+        border-color: #3a3a3a;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                alignment: space-between;
+
+                Text {
+                    text: "NOTES";
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #888888;
+                    vertical-alignment: center;
+                }
+
+                if root.notes-save-state == NotesSaveState.saved: Text {
+                    text: "Enregistr\u{e9}";
+                    font-size: 11px;
+                    color: #888888;
+                }
+                if root.notes-save-state == NotesSaveState.pending: Text {
+                    text: "Enregistrement\u{2026}";
+                    font-size: 11px;
+                    color: #888888;
+                }
+            }
+
+            notes-edit := TextEdit {
+                text <=> root.notes;
+                vertical-stretch: 1;
+                edited(value) => { root.notes-changed(value); }
+            }
+        }
+    }
+}

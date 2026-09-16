@@ -1,9 +1,11 @@
+import { TimelineKind } from "../types.slint";
+
 // Port of features/timeline/components/TimelineItem.svelte. Struct name
 // avoids "TimelineItem" itself: Slint generates a Rust type of the same
 // name, and that name is also the Svelte component's - kept distinct to
 // avoid confusing the two in Rust.
 export struct TimelineEntry {
-    kind: string, // "meeting" | "dictation"
+    kind: TimelineKind,
     id: string,
     title: string,
     time-label: string,
@@ -36,7 +38,7 @@ export component TimelineItemRow inherits Rectangle {
                 spacing: 10px;
 
                 Text {
-                    text: root.entry.kind == "meeting" ? "\u{1F465}" : "\u{1F4DD}";
+                    text: root.entry.kind == TimelineKind.meeting ? "\u{1F465}" : "\u{1F4DD}";
                     vertical-alignment: center;
                 }
 
@@ -67,7 +69,7 @@ export component TimelineItemRow inherits Rectangle {
                     vertical-alignment: center;
                 }
 
-                if root.entry.kind == "meeting": Text {
+                if root.entry.kind == TimelineKind.meeting: Text {
                     text: "\u{203A}";
                     vertical-alignment: center;
                 }

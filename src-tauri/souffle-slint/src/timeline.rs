@@ -7,7 +7,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use souffle_lib::db::dictation::DictationEntry;
 use souffle_lib::transcript::MeetingListItem;
 
-use crate::{TimelineDayGroup, TimelineEntry};
+use crate::{TimelineDayGroup, TimelineEntry, TimelineFilter, TimelineKind};
 
 const WEEKDAYS: [&str; 7] = [
     "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
@@ -78,7 +78,7 @@ fn merge_entries(
         entries.push((
             at,
             TimelineEntry {
-                kind: "dictation".into(),
+                kind: TimelineKind::Dictation,
                 id: entry.id.clone().into(),
                 title: entry.text.clone().into(),
                 time_label: time_label(at).into(),
@@ -93,7 +93,7 @@ fn merge_entries(
         entries.push((
             meeting.started_at,
             TimelineEntry {
-                kind: "meeting".into(),
+                kind: TimelineKind::Meeting,
                 id: meeting.id.clone().into(),
                 title: meeting.title.clone().into(),
                 time_label: time_label(meeting.started_at).into(),
@@ -115,15 +115,21 @@ fn merge_entries(
 pub fn build_groups(
     dictations: &[DictationEntry],
     meetings: &[MeetingListItem],
-    kind_filter: &str,
+    kind_filter: TimelineFilter,
     search_query: &str,
 ) -> Vec<TimelineDayGroup> {
     let query = search_query.trim().to_lowercase();
     let entries = merge_entries(dictations, meetings);
 
+    let matches_filter = |kind: TimelineKind| match kind_filter {
+        TimelineFilter::All => true,
+        TimelineFilter::Meeting => kind == TimelineKind::Meeting,
+        TimelineFilter::Dictation => kind == TimelineKind::Dictation,
+    };
+
     let mut groups: Vec<(NaiveDate, Vec<TimelineEntry>)> = Vec::new();
     for (at, entry) in entries {
-        if kind_filter != "all" && entry.kind != kind_filter {
+        if !matches_filter(entry.kind) {
             continue;
         }
         if !query.is_empty() && !entry.title.to_lowercase().contains(&query) {

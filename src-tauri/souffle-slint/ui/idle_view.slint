@@ -2,6 +2,7 @@ import { LineEdit, Button } from "std-widgets.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { TimelineSection, TimelineDayGroup } from "components/timeline_section.slint";
+import { TimelineFilter, TimelineKind } from "types.slint";
 
 // Port of components/HomeView.svelte's idle branch (search + filters +
 // Timeline).
@@ -9,7 +10,7 @@ export component IdleView inherits VerticalLayout {
     in property <string> dictation-shortcut;
     in property <bool> model-ready: true;
     in-out property <string> search-query;
-    in property <string> kind-filter: "all";
+    in property <TimelineFilter> kind-filter: TimelineFilter.all;
     in property <string> transcription-status-message;
     in property <string> meeting-status-message;
     in property <[TimelineDayGroup]> timeline-groups;
@@ -19,12 +20,12 @@ export component IdleView inherits VerticalLayout {
 
     callback dictate-requested();
     callback meeting-requested();
-    callback filter-changed(string);
+    callback filter-changed(TimelineFilter);
     callback search-changed(string);
     callback dismiss-transcription-status();
     callback dismiss-meeting-status();
-    callback timeline-item-opened(string, string);
-    callback timeline-item-removed(string, string);
+    callback timeline-item-opened(TimelineKind, string);
+    callback timeline-item-removed(TimelineKind, string);
 
     padding: 24px;
     spacing: 18px;
@@ -58,20 +59,20 @@ export component IdleView inherits VerticalLayout {
         Button {
             text: "Tout";
             checkable: true;
-            checked: root.kind-filter == "all";
-            clicked => { root.filter-changed("all"); }
+            checked: root.kind-filter == TimelineFilter.all;
+            clicked => { root.filter-changed(TimelineFilter.all); }
         }
         Button {
             text: "Réunions";
             checkable: true;
-            checked: root.kind-filter == "meeting";
-            clicked => { root.filter-changed("meeting"); }
+            checked: root.kind-filter == TimelineFilter.meeting;
+            clicked => { root.filter-changed(TimelineFilter.meeting); }
         }
         Button {
             text: "Dictées";
             checkable: true;
-            checked: root.kind-filter == "dictation";
-            clicked => { root.filter-changed("dictation"); }
+            checked: root.kind-filter == TimelineFilter.dictation;
+            clicked => { root.filter-changed(TimelineFilter.dictation); }
         }
     }
 

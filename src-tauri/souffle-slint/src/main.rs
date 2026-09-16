@@ -11,8 +11,16 @@ use souffle_lib::engine::{
     TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
 use souffle_lib::state::AppState;
+use souffle_lib::transcript::{MeetingParticipant, MeetingTranscript};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Duration;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
+
+/// Notes autosave debounce, matching `NOTES_DEBOUNCE_MS` in
+/// features/meeting/controller.svelte.ts.
+const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
 
 // Port of src/lib/utils/format.ts::formatShortcutLabel.
 fn format_shortcut_label(shortcut: &str) -> String {
@@ -32,7 +40,7 @@ fn format_shortcut_label(shortcut: &str) -> String {
 /// (already the source of truth via its in-out properties) rather than
 /// threading them through as parameters.
 fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
-    let kind_filter = window.get_kind_filter().to_string();
+    let kind_filter = window.get_kind_filter();
     let search_query = window.get_search_query().to_string();
 
     let state = tauri_handle.state::<souffle_lib::state::AppState>();
@@ -53,10 +61,64 @@ fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
     };
 
     let is_empty = dictations.is_empty() && meetings.is_empty();
-    let groups = timeline::build_groups(&dictations, &meetings, &kind_filter, &search_query);
+    let groups = timeline::build_groups(&dictations, &meetings, kind_filter, &search_query);
     window.set_timeline_has_matches(!groups.is_empty());
     window.set_timeline_groups(std::rc::Rc::new(slint::VecModel::from(groups)).into());
     window.set_timeline_is_empty(is_empty);
+}
+
+/// Port of the inline template in MeetingHeaderSection.svelte:
+/// `{name}{is_organizer ? " (organisateur)" : ""}{is_current_user ? " (vous)" : ""}`.
+fn participant_label(p: &MeetingParticipant) -> String {
+    let mut label = p.name.clone();
+    if p.is_organizer {
+        label.push_str(" (organisateur)");
+    }
+    if p.is_current_user {
+        label.push_str(" (vous)");
+    }
+    label
+}
+
+/// Port of the meta line in MeetingHeaderSection.svelte (date, duration,
+/// segment count, session count) for the completed-meeting case only - the
+/// live-recording case is out of scope here, see meeting_detail.slint.
+/// `formatDate`'s `new Date(iso).toLocaleString()` is locale/OS-dependent;
+/// this uses a fixed French `dd/mm/yyyy hh:mm` instead of trying to
+/// replicate that, consistent with the rest of this port (day_label etc.
+/// already hardcode French).
+fn meta_line(meeting: &MeetingTranscript) -> String {
+    let date = meeting
+        .started_at
+        .with_timezone(&chrono::Local)
+        .format("%d/%m/%Y %H:%M");
+    let duration = timeline::format_duration(meeting.duration_seconds);
+    let segments = meeting.segments.len();
+    let mut line = format!("{date} \u{b7} {duration} \u{b7} {segments} segments");
+    let sessions = meeting.recording_sessions.len();
+    if sessions > 1 {
+        line.push_str(&format!(" \u{b7} {sessions} sessions"));
+    }
+    line
+}
+
+/// Loads a meeting and pushes it into MeetingDetail's properties - mirrors
+/// `controller.svelte.ts`'s `openMeeting`/`loadMeeting` effect.
+fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
+    window.set_active_meeting_id(meeting.id.clone().into());
+    window.set_meeting_detail_title(meeting.title.clone().into());
+    window.set_meeting_detail_meta(meta_line(meeting).into());
+    window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
+    let participants: Vec<slint::SharedString> = meeting
+        .participants
+        .iter()
+        .map(|p| participant_label(p).into())
+        .collect();
+    window.set_meeting_detail_participants(
+        std::rc::Rc::new(slint::VecModel::from(participants)).into(),
+    );
+    window.set_meeting_detail_notes(meeting.notes.clone().unwrap_or_default().into());
+    window.set_meeting_detail_notes_save_state(NotesSaveState::Idle);
 }
 
 /// Mirrors `ensureModelLoaded` in transcription/runtime.ts: ready is a no-op,
@@ -238,7 +300,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                 Ok(()) => {
                     window.set_live_text("".into());
                     window.set_live_tentative("".into());
-                    window.set_recording_mode("dictation".into());
+                    window.set_recording_mode(RecordingMode::Dictation);
                 }
                 Err(e) => window.set_transcription_status_message(e.into()),
             }) {
@@ -258,7 +320,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                 Ok(()) => {
                     window.set_live_text("".into());
                     window.set_live_tentative("".into());
-                    window.set_recording_mode("meeting".into());
+                    window.set_recording_mode(RecordingMode::Meeting);
                 }
                 Err(e) => window.set_meeting_status_message(e.into()),
             }) {
@@ -273,21 +335,21 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(current) = weak.upgrade() else {
             return;
         };
-        let mode = current.get_recording_mode().to_string();
+        let mode = current.get_recording_mode();
         let weak = weak.clone();
         let handle = handle.clone();
         tauri::async_runtime::spawn(async move {
             let handle_for_refresh = handle.clone();
-            let result = if mode == "meeting" {
+            let result = if mode == RecordingMode::Meeting {
                 stop_meeting(handle).await
             } else {
                 stop_dictation(handle).await
             };
             if let Err(e) = weak.upgrade_in_event_loop(move |window| {
                 if let Err(e) = result {
-                    eprintln!("Failed to stop {mode}: {e}");
+                    eprintln!("Failed to stop {mode:?}: {e}");
                 }
-                window.set_recording_mode("idle".into());
+                window.set_recording_mode(RecordingMode::Idle);
                 window.set_live_text("".into());
                 window.set_live_tentative("".into());
                 refresh_timeline(&window, &handle_for_refresh);
@@ -314,25 +376,96 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
-    window.on_timeline_item_opened(|kind, id| {
-        // MeetingDetail is milestone 6; dictation inline-expand is not
-        // ported yet either - both real actions, neither wired yet.
-        eprintln!(
-            "timeline-item-opened: {kind} {id} (open flow not wired yet, see SOU-187 milestone 6)"
-        );
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_timeline_item_opened(move |kind, id| {
+        if kind != TimelineKind::Meeting {
+            // Dictation inline-expand has no Slint equivalent yet - real
+            // action, just not ported.
+            eprintln!("timeline-item-opened: dictation {id} (inline-expand not wired yet)");
+            return;
+        }
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::get_meeting(state, id.to_string()) {
+            Ok(meeting) => populate_meeting_detail(&window, &meeting),
+            Err(e) => eprintln!("Failed to load meeting {id}: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_meeting_detail_back(move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_active_meeting_id("".into());
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_meeting_detail_rename(move |new_title| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let id = window.get_active_meeting_id().to_string();
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::rename_meeting(state, id, new_title.to_string()) {
+            Ok(()) => {
+                window.set_meeting_detail_title(new_title);
+                refresh_timeline(&window, &handle);
+            }
+            Err(e) => eprintln!("Failed to rename meeting: {e}"),
+        }
+    });
+
+    // Debounced autosave: each edit restarts the timer, dropping the
+    // previous one (a live `slint::Timer` cancels on drop) - mirrors
+    // `onNotesChange`/`flushNotes` in controller.svelte.ts.
+    let notes_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_meeting_detail_notes_changed(move |value| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_meeting_detail_notes_save_state(NotesSaveState::Pending);
+        let meeting_id = window.get_active_meeting_id().to_string();
+        let value = value.to_string();
+        let handle = handle.clone();
+        let weak = weak.clone();
+        let timer = slint::Timer::default();
+        timer.start(slint::TimerMode::SingleShot, NOTES_DEBOUNCE, move || {
+            let state = handle.state::<AppState>();
+            let result = souffle_lib::commands::save_meeting_notes(
+                state,
+                meeting_id.clone(),
+                Some(value.clone()),
+            );
+            if let Some(window) = weak.upgrade() {
+                match result {
+                    Ok(()) => window.set_meeting_detail_notes_save_state(NotesSaveState::Saved),
+                    Err(e) => {
+                        eprintln!("Failed to save meeting notes: {e}");
+                        window.set_meeting_detail_notes_save_state(NotesSaveState::Idle);
+                    }
+                }
+            }
+        });
+        *notes_timer.borrow_mut() = Some(timer);
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     window.on_timeline_item_removed(move |kind, id| {
         let state = handle.state::<souffle_lib::state::AppState>();
-        let result = if kind == "dictation" {
+        let result = if kind == TimelineKind::Dictation {
             souffle_lib::commands::delete_dictation_entry(state, id.to_string())
         } else {
             souffle_lib::commands::delete_meeting(state, id.to_string())
         };
         if let Err(e) = result {
-            eprintln!("Failed to delete {kind} {id}: {e}");
+            eprintln!("Failed to delete {kind:?} {id}: {e}");
         }
         if let Some(window) = weak.upgrade() {
             refresh_timeline(&window, &handle);
