@@ -219,6 +219,30 @@ fn load_meeting_audio(
     }
 }
 
+/// Opens a meeting in MeetingDetail: stops whatever audio was previously
+/// loaded, fetches the meeting, and populates header/notes/transcript/audio.
+/// Shared by "open from Timeline" and "just stopped this meeting recording",
+/// the latter of which must land the user on the meeting they just
+/// finished, not back on the Timeline.
+fn open_meeting_detail(
+    window: &MainWindow,
+    handle: &AppHandle,
+    meeting_id: &str,
+    player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    weak: slint::Weak<MainWindow>,
+) {
+    stop_audio_player(player, progress_timer);
+    let state = handle.state::<AppState>();
+    match souffle_lib::commands::get_meeting(state, meeting_id.to_string()) {
+        Ok(meeting) => {
+            populate_meeting_detail(window, &meeting);
+            load_meeting_audio(window, &meeting.id, player, progress_timer, weak);
+        }
+        Err(e) => eprintln!("Failed to load meeting {meeting_id}: {e}"),
+    }
+}
+
 /// Mirrors `ensureModelLoaded` in transcription/runtime.ts: ready is a no-op,
 /// load_required loads it, download_required is refused rather than
 /// triggering a real (multi-GB, network-bound) download from here - that
@@ -367,7 +391,7 @@ async fn stop_dictation(handle: AppHandle) -> Result<(), String> {
     .await
 }
 
-async fn stop_meeting(handle: AppHandle) -> Result<(), String> {
+async fn stop_meeting(handle: AppHandle) -> Result<String, String> {
     run_on_main_thread(move || {
         tauri::async_runtime::block_on(async move {
             let state = handle.state::<AppState>();
@@ -375,7 +399,6 @@ async fn stop_meeting(handle: AppHandle) -> Result<(), String> {
         })
     })
     .await
-    .map(|_meeting_id| ())
 }
 
 /// Milestone 3 wires the real Timeline (this function); milestones 4-6 wire
@@ -387,6 +410,12 @@ async fn stop_meeting(handle: AppHandle) -> Result<(), String> {
 /// `souffle` lib crate's own targets), which was the wrong tool here and
 /// silently swallowed these lines during milestone 2 verification.
 fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
+    // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
+    // and the play-pause/seek callbacks below - one loaded player at a
+    // time, for whichever meeting is currently open in MeetingDetail.
+    let player: Rc<RefCell<Option<audio_player::AudioPlayer>>> = Rc::new(RefCell::new(None));
+    let progress_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     window.on_dictate_requested(move || {
@@ -438,21 +467,50 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let handle = handle.clone();
         tauri::async_runtime::spawn(async move {
             let handle_for_refresh = handle.clone();
-            let result = if mode == RecordingMode::Meeting {
-                stop_meeting(handle).await
-            } else {
-                stop_dictation(handle).await
-            };
-            if let Err(e) = weak.upgrade_in_event_loop(move |window| {
-                if let Err(e) = result {
-                    eprintln!("Failed to stop {mode:?}: {e}");
+            if mode == RecordingMode::Meeting {
+                let result = stop_meeting(handle.clone()).await;
+                // Send-safe on purpose: this closure cannot capture the
+                // Rc<RefCell<AudioPlayer>> player state (Rc isn't Send, and
+                // upgrade_in_event_loop requires it) - re-invoking the
+                // already-registered timeline-item-opened callback (which
+                // does capture it, as a plain same-thread closure) reuses
+                // the real open-meeting path instead of duplicating it.
+                if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    match result {
+                        // A stopped meeting recording lands the user back on
+                        // that meeting's detail, not the Timeline - they
+                        // were just looking at it live.
+                        Ok(meeting_id) => {
+                            window.set_recording_mode(RecordingMode::Idle);
+                            window.invoke_timeline_item_opened(
+                                TimelineKind::Meeting,
+                                meeting_id.into(),
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to stop meeting: {e}");
+                            window.set_recording_mode(RecordingMode::Idle);
+                            refresh_timeline(&window, &handle_for_refresh);
+                        }
+                    }
+                }) {
+                    eprintln!("upgrade_in_event_loop failed (stop meeting): {e}");
                 }
-                window.set_recording_mode(RecordingMode::Idle);
-                window.set_live_text("".into());
-                window.set_live_tentative("".into());
-                refresh_timeline(&window, &handle_for_refresh);
-            }) {
-                eprintln!("upgrade_in_event_loop failed (stop): {e}");
+            } else {
+                let result = stop_dictation(handle).await;
+                if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                    if let Err(e) = result {
+                        eprintln!("Failed to stop dictation: {e}");
+                    }
+                    window.set_recording_mode(RecordingMode::Idle);
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    refresh_timeline(&window, &handle_for_refresh);
+                }) {
+                    eprintln!("upgrade_in_event_loop failed (stop dictation): {e}");
+                }
             }
         });
     });
@@ -474,12 +532,6 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
-    // Shared with load_meeting_audio/stop_audio_player and the play-pause/
-    // seek callbacks below - one loaded player at a time, for whichever
-    // meeting is currently open in MeetingDetail.
-    let player: Rc<RefCell<Option<audio_player::AudioPlayer>>> = Rc::new(RefCell::new(None));
-    let progress_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
-
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let player_for_open = player.clone();
@@ -494,21 +546,14 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        stop_audio_player(&player_for_open, &progress_timer_for_open);
-        let state = handle.state::<AppState>();
-        match souffle_lib::commands::get_meeting(state, id.to_string()) {
-            Ok(meeting) => {
-                populate_meeting_detail(&window, &meeting);
-                load_meeting_audio(
-                    &window,
-                    &meeting.id,
-                    &player_for_open,
-                    &progress_timer_for_open,
-                    weak.clone(),
-                );
-            }
-            Err(e) => eprintln!("Failed to load meeting {id}: {e}"),
-        }
+        open_meeting_detail(
+            &window,
+            &handle,
+            &id,
+            &player_for_open,
+            &progress_timer_for_open,
+            weak.clone(),
+        );
     });
 
     let weak = window.as_weak();

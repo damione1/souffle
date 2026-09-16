@@ -70,10 +70,18 @@ export component AudioPlayerSection inherits VerticalLayout {
         HorizontalLayout {
             spacing: 1px;
 
-            for peak[i] in root.peaks: Rectangle {
+            // Each bar is centered in its column (not top-anchored), so it
+            // extends both up and down from the row's vertical middle - the
+            // usual mirrored waveform look, not a bar chart hanging from
+            // the top.
+            for peak[i] in root.peaks: VerticalLayout {
                 horizontal-stretch: 1;
-                height: max(2px, peak * waveform-area.height);
-                background: (i * 1.0 / root.peaks.length) < root.progress ? #4a9eff : #555555;
+                alignment: center;
+
+                Rectangle {
+                    height: max(2px, peak * waveform-area.height);
+                    background: (i * 1.0 / root.peaks.length) < root.progress ? #4a9eff : #555555;
+                }
             }
         }
     }

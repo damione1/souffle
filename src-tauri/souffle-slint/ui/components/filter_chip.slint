@@ -1,0 +1,39 @@
+// A single-select filter chip. Not `std-widgets`' `Button { checkable:
+// true }`: a checkable Button toggles its own internal checked state on
+// click in addition to whatever `checked:` binding it's given, so three of
+// them driven by the same "kind-filter" source of truth could all end up
+// showing checked at once - a checkbox-group look for what's meant to be a
+// radio-button group (found by Damien manually exercising the app). This
+// component has no internal toggle state at all: `selected` is purely a
+// one-way reflection of the caller's filter value.
+export component FilterChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+
+    callback clicked();
+
+    height: 30px;
+    border-width: 1px;
+    border-color: root.selected ? #4a9eff : #3a3a3a;
+    background: root.selected ? #234b6e : (area.has-hover ? #2a2a2a : transparent);
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    area := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        alignment: center;
+
+        Text {
+            text: root.text;
+            color: root.selected ? white : #cccccc;
+            vertical-alignment: center;
+        }
+    }
+}
