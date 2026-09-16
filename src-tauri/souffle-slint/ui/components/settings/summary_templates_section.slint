@@ -1,0 +1,107 @@
+import { ComboBox, LineEdit, TextEdit, Button } from "std-widgets.slint";
+import { SettingsField } from "settings_field.slint";
+
+// Port of SummaryTemplatesSettingsSection.svelte. Which template is being
+// edited is tracked in Rust (`summary_templates_state` in main.rs), not as
+// local `.slint` state, because switching the edit target needs Rust to
+// resolve the corresponding name/prompt/is-builtin fields anyway - same
+// picker-forwards-a-label pattern as the rest of this port.
+export component SummaryTemplatesSection inherits VerticalLayout {
+    in property <[string]> template-labels;
+    in property <string> default-template-label;
+    in property <string> editing-template-label;
+    in property <bool> editing-is-builtin;
+    in property <string> editing-name;
+    in property <string> editing-prompt;
+    in-out property <string> new-template-draft: "";
+
+    callback default-changed(string);
+    callback edit-target-changed(string);
+    callback delete-requested();
+    callback name-changed(string);
+    callback prompt-changed(string);
+    callback add-requested(string);
+
+    spacing: 10px;
+
+    Text {
+        text: "Modèles de résumé";
+        font-size: 13.5px;
+        font-weight: 700;
+        color: white;
+    }
+    Text {
+        text: "Le modèle par défaut est utilisé pour résumer automatiquement une réunion terminée.";
+        font-size: 11.5px;
+        color: #999;
+        wrap: word-wrap;
+    }
+
+    SettingsField {
+        label: "Modèle par défaut";
+
+        ComboBox {
+            model: root.template-labels;
+            current-value: root.default-template-label;
+            selected(value) => { root.default-changed(value); }
+        }
+    }
+
+    SettingsField {
+        label: "Modifier";
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            ComboBox {
+                model: root.template-labels;
+                current-value: root.editing-template-label;
+                selected(value) => { root.edit-target-changed(value); }
+            }
+            if !root.editing-is-builtin: Button {
+                text: "Supprimer";
+                clicked => { root.delete-requested(); }
+            }
+        }
+    }
+
+    if !root.editing-is-builtin: SettingsField {
+        label: "Nom";
+
+        LineEdit {
+            text: root.editing-name;
+            edited(value) => { root.name-changed(value); }
+        }
+    }
+
+    SettingsField {
+        label: "Instruction";
+        description: root.editing-is-builtin
+            ? "Modèle intégré : le prompt peut être personnalisé mais pas supprimé."
+            : "Prompt envoyé à l'IA pour générer le résumé.";
+
+        TextEdit {
+            text: root.editing-prompt;
+            height: 110px;
+            wrap: word-wrap;
+            edited(value) => { root.prompt-changed(value); }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 6px;
+
+        LineEdit {
+            text <=> root.new-template-draft;
+            placeholder-text: "Nom du nouveau modèle";
+        }
+        Button {
+            text: "Ajouter";
+            enabled: root.new-template-draft != "";
+            clicked => {
+                root.add-requested(root.new-template-draft);
+                root.new-template-draft = "";
+            }
+        }
+    }
+}

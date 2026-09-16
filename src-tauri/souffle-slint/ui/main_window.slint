@@ -139,6 +139,33 @@ export component MainWindow inherits Window {
     in property <bool> settings-auto-update-check;
     in property <bool> settings-checking-updates;
     in property <string> settings-update-status;
+    in property <string> settings-summary-provider;
+    in property <bool> settings-apple-intelligence-available;
+    in property <string> settings-apple-intelligence-reason;
+    in property <string> settings-ollama-url;
+    in property <bool> settings-ollama-available;
+    in property <bool> settings-ollama-checking;
+    in property <int> settings-summary-model-count;
+    in property <bool> settings-summary-model-picker-visible;
+    in property <[string]> settings-summary-model-labels;
+    in property <string> settings-selected-summary-model-label;
+    in property <bool> settings-show-ollama-setup;
+    in property <bool> settings-ollama-pulling;
+    in property <string> settings-ollama-pull-status;
+    in property <string> settings-ollama-pull-error;
+    in property <string> settings-recommended-ollama-model;
+    in property <string> settings-summary-unusable-message;
+    in property <bool> settings-dictation-polish-enabled;
+    in property <bool> settings-dictation-polish-provider-available;
+    in property <[string]> settings-dictation-polish-template-labels;
+    in property <string> settings-active-dictation-polish-label;
+    in property <string> settings-active-dictation-polish-prompt;
+    in property <[string]> settings-summary-template-labels;
+    in property <string> settings-default-summary-template-label;
+    in property <string> settings-editing-summary-template-label;
+    in property <bool> settings-editing-summary-template-is-builtin;
+    in property <string> settings-editing-summary-template-name;
+    in property <string> settings-editing-summary-template-prompt;
 
     callback settings-requested();
     callback settings-closed();
@@ -191,6 +218,21 @@ export component MainWindow inherits Window {
     callback settings-mcp-test-requested();
     callback settings-check-updates-requested();
     callback settings-auto-update-check-changed(bool);
+    callback settings-summary-provider-changed(string);
+    callback settings-ollama-url-changed(string);
+    callback settings-ollama-model-changed(string);
+    callback settings-summary-providers-retry-requested();
+    callback settings-download-recommended-ollama-model-requested();
+    callback settings-open-apple-intelligence-settings-requested();
+    callback settings-dictation-polish-enabled-changed(bool);
+    callback settings-dictation-polish-template-changed(string);
+    callback settings-dictation-polish-prompt-changed(string);
+    callback settings-summary-template-default-changed(string);
+    callback settings-summary-template-edit-target-changed(string);
+    callback settings-summary-template-delete-requested();
+    callback settings-summary-template-name-changed(string);
+    callback settings-summary-template-prompt-changed(string);
+    callback settings-summary-template-add-requested(string);
 
     callback dictate-requested();
     callback meeting-requested();
@@ -354,6 +396,33 @@ export component MainWindow inherits Window {
         auto-update-check: root.settings-auto-update-check;
         checking-updates: root.settings-checking-updates;
         update-status: root.settings-update-status;
+        summary-provider: root.settings-summary-provider;
+        apple-intelligence-available: root.settings-apple-intelligence-available;
+        apple-intelligence-reason: root.settings-apple-intelligence-reason;
+        ollama-url: root.settings-ollama-url;
+        ollama-available: root.settings-ollama-available;
+        ollama-checking: root.settings-ollama-checking;
+        summary-model-count: root.settings-summary-model-count;
+        summary-model-picker-visible: root.settings-summary-model-picker-visible;
+        summary-model-labels: root.settings-summary-model-labels;
+        selected-summary-model-label: root.settings-selected-summary-model-label;
+        show-ollama-setup: root.settings-show-ollama-setup;
+        ollama-pulling: root.settings-ollama-pulling;
+        ollama-pull-status: root.settings-ollama-pull-status;
+        ollama-pull-error: root.settings-ollama-pull-error;
+        recommended-ollama-model: root.settings-recommended-ollama-model;
+        summary-unusable-message: root.settings-summary-unusable-message;
+        dictation-polish-enabled: root.settings-dictation-polish-enabled;
+        dictation-polish-provider-available: root.settings-dictation-polish-provider-available;
+        dictation-polish-template-labels: root.settings-dictation-polish-template-labels;
+        active-dictation-polish-label: root.settings-active-dictation-polish-label;
+        active-dictation-polish-prompt: root.settings-active-dictation-polish-prompt;
+        summary-template-labels: root.settings-summary-template-labels;
+        default-summary-template-label: root.settings-default-summary-template-label;
+        editing-summary-template-label: root.settings-editing-summary-template-label;
+        editing-summary-template-is-builtin: root.settings-editing-summary-template-is-builtin;
+        editing-summary-template-name: root.settings-editing-summary-template-name;
+        editing-summary-template-prompt: root.settings-editing-summary-template-prompt;
         close-requested => {
             root.settings-open = false;
             root.settings-closed();
@@ -407,5 +476,20 @@ export component MainWindow inherits Window {
         mcp-test-requested => { root.settings-mcp-test-requested(); }
         check-updates-requested => { root.settings-check-updates-requested(); }
         auto-update-check-changed(value) => { root.settings-auto-update-check-changed(value); }
+        summary-provider-changed(value) => { root.settings-summary-provider-changed(value); }
+        ollama-url-changed(value) => { root.settings-ollama-url-changed(value); }
+        ollama-model-changed(value) => { root.settings-ollama-model-changed(value); }
+        summary-providers-retry-requested => { root.settings-summary-providers-retry-requested(); }
+        download-recommended-ollama-model-requested => { root.settings-download-recommended-ollama-model-requested(); }
+        open-apple-intelligence-settings-requested => { root.settings-open-apple-intelligence-settings-requested(); }
+        dictation-polish-enabled-changed(value) => { root.settings-dictation-polish-enabled-changed(value); }
+        dictation-polish-template-changed(value) => { root.settings-dictation-polish-template-changed(value); }
+        dictation-polish-prompt-changed(value) => { root.settings-dictation-polish-prompt-changed(value); }
+        summary-template-default-changed(value) => { root.settings-summary-template-default-changed(value); }
+        summary-template-edit-target-changed(value) => { root.settings-summary-template-edit-target-changed(value); }
+        summary-template-delete-requested => { root.settings-summary-template-delete-requested(); }
+        summary-template-name-changed(value) => { root.settings-summary-template-name-changed(value); }
+        summary-template-prompt-changed(value) => { root.settings-summary-template-prompt-changed(value); }
+        summary-template-add-requested(name) => { root.settings-summary-template-add-requested(name); }
     }
 }

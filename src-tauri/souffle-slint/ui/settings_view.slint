@@ -9,6 +9,9 @@ import { MicrophoneSection, MicrophoneRow } from "components/settings/microphone
 import { AudioSection } from "components/settings/audio_section.slint";
 import { DataSection } from "components/settings/data_section.slint";
 import { AboutSection } from "components/settings/about_section.slint";
+import { IntelligenceSection } from "components/settings/intelligence_section.slint";
+import { DictationPolishSection } from "components/settings/dictation_polish_section.slint";
+import { SummaryTemplatesSection } from "components/settings/summary_templates_section.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -86,6 +89,33 @@ export component SettingsView inherits Rectangle {
     in property <bool> auto-update-check;
     in property <bool> checking-updates;
     in property <string> update-status;
+    in property <string> summary-provider;
+    in property <bool> apple-intelligence-available;
+    in property <string> apple-intelligence-reason;
+    in property <string> ollama-url;
+    in property <bool> ollama-available;
+    in property <bool> ollama-checking;
+    in property <int> summary-model-count;
+    in property <bool> summary-model-picker-visible;
+    in property <[string]> summary-model-labels;
+    in property <string> selected-summary-model-label;
+    in property <bool> show-ollama-setup;
+    in property <bool> ollama-pulling;
+    in property <string> ollama-pull-status;
+    in property <string> ollama-pull-error;
+    in property <string> recommended-ollama-model;
+    in property <string> summary-unusable-message;
+    in property <bool> dictation-polish-enabled;
+    in property <bool> dictation-polish-provider-available;
+    in property <[string]> dictation-polish-template-labels;
+    in property <string> active-dictation-polish-label;
+    in property <string> active-dictation-polish-prompt;
+    in property <[string]> summary-template-labels;
+    in property <string> default-summary-template-label;
+    in property <string> editing-summary-template-label;
+    in property <bool> editing-summary-template-is-builtin;
+    in property <string> editing-summary-template-name;
+    in property <string> editing-summary-template-prompt;
 
     callback close-requested();
     callback autostart-changed(bool);
@@ -137,6 +167,21 @@ export component SettingsView inherits Rectangle {
     callback mcp-test-requested();
     callback check-updates-requested();
     callback auto-update-check-changed(bool);
+    callback summary-provider-changed(string);
+    callback ollama-url-changed(string);
+    callback ollama-model-changed(string);
+    callback summary-providers-retry-requested();
+    callback download-recommended-ollama-model-requested();
+    callback open-apple-intelligence-settings-requested();
+    callback dictation-polish-enabled-changed(bool);
+    callback dictation-polish-template-changed(string);
+    callback dictation-polish-prompt-changed(string);
+    callback summary-template-default-changed(string);
+    callback summary-template-edit-target-changed(string);
+    callback summary-template-delete-requested();
+    callback summary-template-name-changed(string);
+    callback summary-template-prompt-changed(string);
+    callback summary-template-add-requested(string);
 
     // Opaque on purpose: this overlays IdleView/MeetingDetail rather than
     // replacing them (mirrors App.svelte hiding HomeView behind Settings
@@ -293,6 +338,70 @@ export component SettingsView inherits Rectangle {
                             filler-removal-changed(value) => { root.filler-removal-changed(value); }
                             stutter-collapse-changed(value) => { root.stutter-collapse-changed(value); }
                             dictionary-correction-changed(value) => { root.dictionary-correction-changed(value); }
+                        }
+                    }
+                }
+            }
+
+            Tab {
+                title: "IA";
+
+                ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 22px;
+                        alignment: start;
+
+                        IntelligenceSection {
+                            summary-provider: root.summary-provider;
+                            apple-intelligence-available: root.apple-intelligence-available;
+                            apple-intelligence-reason: root.apple-intelligence-reason;
+                            ollama-url: root.ollama-url;
+                            ollama-available: root.ollama-available;
+                            ollama-checking: root.ollama-checking;
+                            summary-model-count: root.summary-model-count;
+                            model-picker-visible: root.summary-model-picker-visible;
+                            model-labels: root.summary-model-labels;
+                            selected-model-label: root.selected-summary-model-label;
+                            show-ollama-setup: root.show-ollama-setup;
+                            ollama-pulling: root.ollama-pulling;
+                            ollama-pull-status: root.ollama-pull-status;
+                            ollama-pull-error: root.ollama-pull-error;
+                            recommended-model: root.recommended-ollama-model;
+                            unusable-message: root.summary-unusable-message;
+                            summary-provider-changed(value) => { root.summary-provider-changed(value); }
+                            ollama-url-changed(value) => { root.ollama-url-changed(value); }
+                            ollama-model-changed(value) => { root.ollama-model-changed(value); }
+                            retry-requested => { root.summary-providers-retry-requested(); }
+                            download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
+                            open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                        }
+
+                        DictationPolishSection {
+                            enabled: root.dictation-polish-enabled;
+                            provider-available: root.dictation-polish-provider-available;
+                            template-labels: root.dictation-polish-template-labels;
+                            active-template-label: root.active-dictation-polish-label;
+                            active-prompt: root.active-dictation-polish-prompt;
+                            enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
+                            template-changed(value) => { root.dictation-polish-template-changed(value); }
+                            prompt-changed(value) => { root.dictation-polish-prompt-changed(value); }
+                            open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                        }
+
+                        SummaryTemplatesSection {
+                            template-labels: root.summary-template-labels;
+                            default-template-label: root.default-summary-template-label;
+                            editing-template-label: root.editing-summary-template-label;
+                            editing-is-builtin: root.editing-summary-template-is-builtin;
+                            editing-name: root.editing-summary-template-name;
+                            editing-prompt: root.editing-summary-template-prompt;
+                            default-changed(value) => { root.summary-template-default-changed(value); }
+                            edit-target-changed(value) => { root.summary-template-edit-target-changed(value); }
+                            delete-requested => { root.summary-template-delete-requested(); }
+                            name-changed(value) => { root.summary-template-name-changed(value); }
+                            prompt-changed(value) => { root.summary-template-prompt-changed(value); }
+                            add-requested(name) => { root.summary-template-add-requested(name); }
                         }
                     }
                 }
