@@ -24,6 +24,29 @@ use tauri::{AppHandle, Manager};
 /// features/meeting/controller.svelte.ts.
 const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
 
+/// Matches `TranscriptSection`'s fixed `height: 260px` Rectangle - the
+/// windowing math below only needs to be approximately right (it pads with
+/// `TRANSCRIPT_SCROLL_MARGIN` on each side), not pixel-exact.
+const TRANSCRIPT_VIEWPORT_HEIGHT: f32 = 260.0;
+const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
+/// How often to re-check the transcript's scroll position and possibly
+/// mount a different slice (SOU-187 milestone 8b, AC15). Same idea as
+/// `start_audio_progress_timer`'s 150ms poll below, just faster since
+/// scrolling is more time-sensitive than a playback position label.
+const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
+
+/// Backing data for the virtualized transcript list: the full block list
+/// plus precomputed cumulative height estimates (see
+/// `transcript::compute_offsets`). `MeetingDetail`'s `transcript-blocks`
+/// property only ever holds the current visible slice of this, never the
+/// whole thing - that's the actual virtualization.
+struct TranscriptState {
+    blocks: Vec<TranscriptBlock>,
+    offsets: Vec<f32>,
+    mounted_start: usize,
+    mounted_end: usize,
+}
+
 // Port of src/lib/utils/format.ts::formatShortcutLabel.
 fn format_shortcut_label(shortcut: &str) -> String {
     if shortcut.is_empty() {
@@ -122,11 +145,114 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_notes(meeting.notes.clone().unwrap_or_default().into());
     window.set_meeting_detail_notes_save_state(NotesSaveState::Idle);
     window.set_meeting_detail_transcript_segment_count(meeting.segments.len() as i32);
+}
+
+/// Sets `transcript_state` to `meeting`'s full block list + offsets, mounts
+/// the initial (scroll-top) slice, and (re)starts the scroll-poll timer
+/// that keeps the mounted slice matched to `scroll-top` while the meeting
+/// is open. Separate from `populate_meeting_detail` because it owns
+/// mutable shared state the header/notes population doesn't need.
+fn load_meeting_transcript_window(
+    window: &MainWindow,
+    meeting: &MeetingTranscript,
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    weak: slint::Weak<MainWindow>,
+) {
     let blocks =
         transcript::build_transcript_blocks(&meeting.segments, &meeting.recording_sessions);
-    window.set_meeting_detail_transcript_blocks(
-        std::rc::Rc::new(slint::VecModel::from(blocks)).into(),
+    let offsets = transcript::compute_offsets(&blocks);
+    *transcript_state.borrow_mut() = Some(TranscriptState {
+        blocks,
+        offsets,
+        mounted_start: usize::MAX,
+        mounted_end: usize::MAX,
+    });
+    window.invoke_reset_meeting_detail_transcript_scroll();
+    update_transcript_window(window, transcript_state, 0.0);
+    *transcript_timer.borrow_mut() = Some(start_transcript_scroll_timer(
+        weak,
+        transcript_state.clone(),
+    ));
+}
+
+/// Recomputes which slice of `transcript_state`'s blocks should be mounted
+/// for `scroll_top` (px scrolled down from the top) and pushes it into
+/// `MeetingDetail`'s properties, but only when the slice actually changed -
+/// rebuilding the Slint model on every poll tick even while stationary
+/// would be wasted work.
+fn update_transcript_window(
+    window: &MainWindow,
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    scroll_top: f32,
+) {
+    let mut guard = transcript_state.borrow_mut();
+    let Some(state) = guard.as_mut() else {
+        return;
+    };
+    let win = transcript::visible_window(
+        &state.offsets,
+        scroll_top,
+        TRANSCRIPT_VIEWPORT_HEIGHT,
+        TRANSCRIPT_SCROLL_MARGIN,
     );
+    if win.start == state.mounted_start && win.end == state.mounted_end {
+        return;
+    }
+    state.mounted_start = win.start;
+    state.mounted_end = win.end;
+    let slice = state.blocks[win.start..win.end].to_vec();
+    let mounted = slice.len();
+    let total = state.blocks.len();
+    window.set_meeting_detail_transcript_blocks(
+        std::rc::Rc::new(slint::VecModel::from(slice)).into(),
+    );
+    window.set_meeting_detail_transcript_spacer_before(win.spacer_before);
+    window.set_meeting_detail_transcript_spacer_after(win.spacer_after);
+    // AC15's "active node counter" evidence: this stays small and bounded
+    // even for a meeting with thousands of paragraphs - see
+    // `transcript::tests::visible_window_slices_a_huge_transcript_to_a_bounded_count`
+    // for the automated version of this same claim.
+    eprintln!("transcript window: {mounted}/{total} blocks mounted (SOU-187 AC15)");
+}
+
+/// Repeatedly (80ms) reads the real Flickable scroll position out of
+/// `MeetingDetail` and re-windows the transcript if it moved - same
+/// Rust-polls-Slint pattern as `start_audio_progress_timer` below, needed
+/// because Slint's expression language can't do the offset/binary-search
+/// math `visible_window` does.
+fn start_transcript_scroll_timer(
+    weak: slint::Weak<MainWindow>,
+    transcript_state: Rc<RefCell<Option<TranscriptState>>>,
+) -> slint::Timer {
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        TRANSCRIPT_SCROLL_POLL,
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            // Flickable's viewport-y (and its `-px` mirror) is negative-going-
+            // down; scroll_top here is the usual positive "distance scrolled
+            // from the top".
+            let scroll_top = -window.get_meeting_detail_transcript_scroll_top_px();
+            update_transcript_window(&window, &transcript_state, scroll_top);
+        },
+    );
+    timer
+}
+
+/// Drops the transcript window state/timer - mirrors `stop_audio_player`.
+/// Called before loading a different meeting's transcript and when leaving
+/// MeetingDetail, so a stale huge block list never lingers in memory and
+/// the poll timer never fires against a slice that no longer applies.
+fn stop_transcript_window(
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
+) {
+    *transcript_timer.borrow_mut() = None;
+    *transcript_state.borrow_mut() = None;
 }
 
 /// Stops and drops any currently loaded audio player/progress timer -
@@ -224,20 +350,31 @@ fn load_meeting_audio(
 /// Shared by "open from Timeline" and "just stopped this meeting recording",
 /// the latter of which must land the user on the meeting they just
 /// finished, not back on the Timeline.
+#[allow(clippy::too_many_arguments)]
 fn open_meeting_detail(
     window: &MainWindow,
     handle: &AppHandle,
     meeting_id: &str,
     player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
     progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
     weak: slint::Weak<MainWindow>,
 ) {
     stop_audio_player(player, progress_timer);
+    stop_transcript_window(transcript_state, transcript_timer);
     let state = handle.state::<AppState>();
     match souffle_lib::commands::get_meeting(state, meeting_id.to_string()) {
         Ok(meeting) => {
             populate_meeting_detail(window, &meeting);
-            load_meeting_audio(window, &meeting.id, player, progress_timer, weak);
+            load_meeting_audio(window, &meeting.id, player, progress_timer, weak.clone());
+            load_meeting_transcript_window(
+                window,
+                &meeting,
+                transcript_state,
+                transcript_timer,
+                weak,
+            );
         }
         Err(e) => eprintln!("Failed to load meeting {meeting_id}: {e}"),
     }
@@ -415,6 +552,9 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     // time, for whichever meeting is currently open in MeetingDetail.
     let player: Rc<RefCell<Option<audio_player::AudioPlayer>>> = Rc::new(RefCell::new(None));
     let progress_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    // Same sharing pattern, for the virtualized transcript list (AC15).
+    let transcript_state: Rc<RefCell<Option<TranscriptState>>> = Rc::new(RefCell::new(None));
+    let transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
@@ -536,6 +676,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let handle = tauri_handle.clone();
     let player_for_open = player.clone();
     let progress_timer_for_open = progress_timer.clone();
+    let transcript_state_for_open = transcript_state.clone();
+    let transcript_timer_for_open = transcript_timer.clone();
     window.on_timeline_item_opened(move |kind, id| {
         if kind != TimelineKind::Meeting {
             // Dictation inline-expand has no Slint equivalent yet - real
@@ -552,6 +694,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             &id,
             &player_for_open,
             &progress_timer_for_open,
+            &transcript_state_for_open,
+            &transcript_timer_for_open,
             weak.clone(),
         );
     });
@@ -559,11 +703,14 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let weak = window.as_weak();
     let player_for_back = player.clone();
     let progress_timer_for_back = progress_timer.clone();
+    let transcript_state_for_back = transcript_state.clone();
+    let transcript_timer_for_back = transcript_timer.clone();
     window.on_meeting_detail_back(move || {
         if let Some(window) = weak.upgrade() {
             window.set_active_meeting_id("".into());
         }
         stop_audio_player(&player_for_back, &progress_timer_for_back);
+        stop_transcript_window(&transcript_state_for_back, &transcript_timer_for_back);
     });
 
     let weak = window.as_weak();

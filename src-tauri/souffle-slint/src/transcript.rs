@@ -192,6 +192,102 @@ pub fn build_transcript_blocks(
     blocks
 }
 
+// SOU-187 milestone 8b (AC15): height estimate + windowing math for the
+// virtualized transcript list. Slint has no built-in virtualization for
+// variable-height rows - `i-slint-compiler-1.17.1/widgets/common/listview.slint`
+// shows `std-widgets`' own `ListView`/`StandardListView` are a plain `for`
+// loop inside a `ScrollView`/`Flickable`: every model entry is mounted
+// unconditionally, regardless of what's on screen. This replaces "one row
+// per model entry" with "spacer + only the on-screen slice", computed here
+// since text wrapping/height can't be known from Slint's expression
+// language ahead of actually laying a row out.
+
+/// Rough text-wrap estimate, not real Slint text layout: assumes a fixed
+/// character-per-line count for the transcript column's known width/font
+/// size (13px body text in a ~370px-wide column, see
+/// `components/transcript_section.slint`). A few px of error per row only
+/// affects spacer sizing (scrollbar proportion), never the actually
+/// mounted rows: those are still laid out for real inside a `VerticalLayout`.
+const CHARS_PER_LINE: usize = 55;
+const LINE_HEIGHT_PX: f32 = 18.0;
+const HEADER_HEIGHT_PX: f32 = 20.0;
+const BLOCK_SPACING_PX: f32 = 12.0; // matches the VerticalLayout's `spacing: 12px`
+const SESSION_BREAK_HEIGHT_PX: f32 = 30.0;
+
+fn estimate_block_height(block: &TranscriptBlock) -> f32 {
+    let content_height = if block.is_session_break {
+        SESSION_BREAK_HEIGHT_PX
+    } else {
+        let lines = (block.text.chars().count().max(1) as f32 / CHARS_PER_LINE as f32).ceil();
+        HEADER_HEIGHT_PX + lines * LINE_HEIGHT_PX
+    };
+    content_height + BLOCK_SPACING_PX
+}
+
+/// Cumulative estimated y-offsets: `offsets[i]` is the top of `blocks[i]`,
+/// and `offsets[blocks.len()]` is the total estimated content height. One
+/// more entry than `blocks`, always non-decreasing.
+pub fn compute_offsets(blocks: &[TranscriptBlock]) -> Vec<f32> {
+    let mut offsets = Vec::with_capacity(blocks.len() + 1);
+    let mut y = 0.0f32;
+    offsets.push(y);
+    for block in blocks {
+        y += estimate_block_height(block);
+        offsets.push(y);
+    }
+    offsets
+}
+
+pub struct VisibleWindow {
+    pub start: usize,
+    pub end: usize, // exclusive
+    pub spacer_before: f32,
+    pub spacer_after: f32,
+}
+
+/// Which block indices (by index into the `blocks` slice `offsets` was
+/// built from) fall within `[scroll_top, scroll_top + viewport_height]`
+/// plus `margin` on each side, given `offsets` from `compute_offsets`.
+/// Always returns at least one block (when there is at least one) so the
+/// caller never has to special-case an empty slice.
+pub fn visible_window(
+    offsets: &[f32],
+    scroll_top: f32,
+    viewport_height: f32,
+    margin: f32,
+) -> VisibleWindow {
+    let block_count = offsets.len().saturating_sub(1);
+    if block_count == 0 {
+        return VisibleWindow {
+            start: 0,
+            end: 0,
+            spacer_before: 0.0,
+            spacer_after: 0.0,
+        };
+    }
+    let total = offsets[block_count];
+    let lo = (scroll_top - margin).max(0.0);
+    let hi = (scroll_top + viewport_height + margin).min(total);
+
+    // First block whose start offset is >= lo, then step back one: that
+    // earlier block may still overlap [lo, hi) even though it starts
+    // before lo.
+    let first_at_or_after_lo = offsets[..block_count].partition_point(|&top| top < lo);
+    let start = first_at_or_after_lo.saturating_sub(1).min(block_count - 1);
+
+    // First block whose start offset is > hi is the exclusive end.
+    let end = offsets[..=block_count]
+        .partition_point(|&top| top <= hi)
+        .clamp(start + 1, block_count);
+
+    VisibleWindow {
+        start,
+        end,
+        spacer_before: offsets[start],
+        spacer_after: total - offsets[end],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +358,89 @@ mod tests {
         assert!(blocks[1].is_session_break);
         assert!(!blocks[2].is_session_break);
         assert_eq!(blocks[2].recording_session_index, 1);
+    }
+
+    fn plain_block(text: &str) -> TranscriptBlock {
+        TranscriptBlock {
+            is_session_break: false,
+            speaker_label: "Moi".into(),
+            timestamp: "00:00".into(),
+            text: text.into(),
+            recording_session_index: -1,
+            start_time: 0.0,
+            end_label: "".into(),
+            start_label: "".into(),
+        }
+    }
+
+    #[test]
+    fn compute_offsets_is_monotonic_and_matches_block_count() {
+        let blocks: Vec<_> = (0..10).map(|i| plain_block(&format!("bloc {i}"))).collect();
+        let offsets = compute_offsets(&blocks);
+        assert_eq!(offsets.len(), blocks.len() + 1);
+        assert_eq!(offsets[0], 0.0);
+        assert!(
+            offsets.windows(2).all(|w| w[1] > w[0]),
+            "strictly increasing"
+        );
+    }
+
+    #[test]
+    fn visible_window_returns_everything_when_it_all_fits() {
+        let blocks: Vec<_> = (0..5).map(|i| plain_block(&format!("bloc {i}"))).collect();
+        let offsets = compute_offsets(&blocks);
+        let window = visible_window(&offsets, 0.0, 10_000.0, 0.0);
+        assert_eq!((window.start, window.end), (0, 5));
+        assert_eq!(window.spacer_before, 0.0);
+        assert_eq!(window.spacer_after, 0.0);
+    }
+
+    /// AC15's actual proof: scrolled to the middle of a 2000-paragraph
+    /// transcript, only a small, bounded slice is ever "mounted" (returned
+    /// as the visible range), independent of the 2000 total - this is the
+    /// same predicate `main.rs` uses to build the Slint model, so this
+    /// slice size is the real active-node count, not a separate estimate.
+    #[test]
+    fn visible_window_slices_a_huge_transcript_to_a_bounded_count() {
+        let blocks: Vec<_> = (0..2000)
+            .map(|i| {
+                plain_block(&format!(
+                    "Paragraphe numéro {i} avec un peu de texte réaliste."
+                ))
+            })
+            .collect();
+        let offsets = compute_offsets(&blocks);
+        let total_height = *offsets.last().unwrap();
+        let viewport_height = 260.0;
+        let margin = 3.0 * viewport_height;
+
+        let window = visible_window(&offsets, total_height / 2.0, viewport_height, margin);
+
+        assert!(window.start > 0, "not scrolled to the very top");
+        assert!(window.end < blocks.len(), "not scrolled to the very bottom");
+        let mounted = window.end - window.start;
+        assert!(
+            mounted < 60,
+            "expected a small bounded window regardless of 2000 total blocks, got {mounted}"
+        );
+        assert!(window.spacer_before > 0.0);
+        assert!(window.spacer_after > 0.0);
+    }
+
+    #[test]
+    fn visible_window_at_the_very_end_still_bounded_and_has_no_after_spacer() {
+        let blocks: Vec<_> = (0..2000)
+            .map(|i| plain_block(&format!("bloc {i}")))
+            .collect();
+        let offsets = compute_offsets(&blocks);
+        let total_height = *offsets.last().unwrap();
+        let viewport_height = 260.0;
+        let margin = 3.0 * viewport_height;
+
+        let window = visible_window(&offsets, total_height, viewport_height, margin);
+
+        assert_eq!(window.end, blocks.len());
+        assert_eq!(window.spacer_after, 0.0);
+        assert!(window.end - window.start < 60);
     }
 }

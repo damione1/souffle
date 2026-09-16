@@ -1,11 +1,9 @@
-import { ScrollView } from "std-widgets.slint";
-
 // Port of MeetingTranscriptSection.svelte - read-only display only so far
-// (milestone 8a): paragraph grouping with speaker labels and session-break
-// dividers, click-to-seek on a paragraph's timestamp. Not yet ported: bulk
-// edit mode, per-word inline edit + dictionary alias popover
-// (TranscriptWordLine.svelte, milestone 8d), virtualization for very long
-// transcripts (milestone 8c) - this is a plain scrollable list today.
+// (milestone 8a/8b): paragraph grouping with speaker labels and
+// session-break dividers, click-to-seek on a paragraph's timestamp, and
+// virtualized scrolling (AC15). Not yet ported: bulk edit mode, per-word
+// inline edit + dictionary alias popover (TranscriptWordLine.svelte,
+// milestone 8d).
 export struct TranscriptBlock {
     is-session-break: bool,
     speaker-label: string,
@@ -19,9 +17,30 @@ export struct TranscriptBlock {
 }
 
 export component TranscriptSection inherits VerticalLayout {
+    // Only the currently visible slice of the transcript, not the whole
+    // thing - `main.rs` owns the full block list and pushes a new slice in
+    // whenever `scroll-top` moves far enough (AC15: only on-screen rows +
+    // margin are ever mounted here, verifiable by `blocks.length` staying
+    // small regardless of how many total paragraphs the meeting has).
     in property <[TranscriptBlock]> blocks;
     in property <int> segment-count;
     in property <bool> has-audio: false;
+    // Estimated height in px (`main.rs`, see `transcript::compute_offsets`)
+    // of everything scrolled past above/below the current slice - plain
+    // `float`, not `length`, since `main.rs` only has access to Slint's
+    // stable `set_*`/`get_*` API, not the `length`-wrapping type used
+    // internally by generated component code. Rendered as blank spacers so
+    // the scrollbar/drag physics feel like a real list of `segment-count`
+    // items instead of just `blocks.length` of them.
+    in property <float> spacer-before: 0.0;
+    in property <float> spacer-after: 0.0;
+    // Two-way bound down from `MeetingDetail`/`MainWindow` to
+    // `flick.viewport-y` below, so `main.rs` can poll the real scroll
+    // position and decide the next slice - see the doc comment on
+    // `visible_window` in `transcript.rs` for why this can't be pure Slint
+    // (variable-height rows need real text layout to size precisely, which
+    // only the already-mounted rows have; the rest are estimates).
+    in-out property <length> scroll-top: 0px;
 
     // (recording-session-index, start-time) of the clicked paragraph.
     callback paragraph-clicked(int, float);
@@ -35,22 +54,29 @@ export component TranscriptSection inherits VerticalLayout {
         color: #888888;
     }
 
-    if root.blocks.length == 0: Text {
+    if root.segment-count == 0: Text {
         text: "Pas de transcript pour cette r\u{e9}union.";
         color: #888888;
         font-size: 12px;
     }
 
-    if root.blocks.length > 0: Rectangle {
+    if root.segment-count > 0: Rectangle {
         height: 260px;
         border-width: 1px;
         border-color: #3a3a3a;
+        clip: true;
 
-        ScrollView {
+        flick := Flickable {
+            width: 100%;
+            height: 100%;
+            viewport-y <=> root.scroll-top;
+
             VerticalLayout {
                 padding: 12px;
                 spacing: 12px;
                 alignment: start;
+
+                Rectangle { height: root.spacer-before * 1px; }
 
                 for block in root.blocks: VerticalLayout {
                     if !block.is-session-break: VerticalLayout {
@@ -123,6 +149,8 @@ export component TranscriptSection inherits VerticalLayout {
                         }
                     }
                 }
+
+                Rectangle { height: root.spacer-after * 1px; }
             }
         }
     }

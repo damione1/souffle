@@ -45,6 +45,16 @@ export component MainWindow inherits Window {
     in property <string> meeting-detail-audio-duration-label;
     in property <[TranscriptBlock]> meeting-detail-transcript-blocks;
     in property <int> meeting-detail-transcript-segment-count;
+    in property <float> meeting-detail-transcript-spacer-before: 0.0;
+    in property <float> meeting-detail-transcript-spacer-after: 0.0;
+    // `length`-typed so it can two-way bind all the way down to the real
+    // Flickable inside TranscriptSection (see that component's doc comment
+    // on `scroll-top`) - internal plumbing only, not read directly by Rust.
+    in-out property <length> meeting-detail-transcript-scroll-top: 0px;
+    // What `main.rs` actually polls on a timer to decide the next visible
+    // slice (AC15): the same value as above, converted to a plain float so
+    // Rust doesn't need Slint's internal `length`-wrapping type.
+    out property <float> meeting-detail-transcript-scroll-top-px: root.meeting-detail-transcript-scroll-top / 1px;
 
     callback dictate-requested();
     callback meeting-requested();
@@ -61,6 +71,16 @@ export component MainWindow inherits Window {
     callback meeting-detail-audio-play-pause-requested();
     callback meeting-detail-audio-seek-requested(float);
     callback meeting-detail-transcript-paragraph-clicked(int, float);
+
+    // Invoked by `main.rs` (as `invoke_reset_meeting_detail_transcript_scroll`)
+    // when a different meeting's transcript loads, so scrolling meeting A
+    // down doesn't leave meeting B's transcript scrolled down too - a
+    // `public function` rather than a Rust-side property write, since the
+    // property below needs `length`, which isn't part of Slint's stable
+    // Rust API (see the doc comment on it).
+    public function reset-meeting-detail-transcript-scroll() {
+        root.meeting-detail-transcript-scroll-top = 0px;
+    }
 
     if root.recording-mode == RecordingMode.idle && root.active-meeting-id == "": IdleView {
         dictation-shortcut: root.dictation-shortcut;
@@ -98,6 +118,9 @@ export component MainWindow inherits Window {
         audio-duration-label: root.meeting-detail-audio-duration-label;
         transcript-blocks: root.meeting-detail-transcript-blocks;
         transcript-segment-count: root.meeting-detail-transcript-segment-count;
+        transcript-spacer-before: root.meeting-detail-transcript-spacer-before;
+        transcript-spacer-after: root.meeting-detail-transcript-spacer-after;
+        transcript-scroll-top <=> root.meeting-detail-transcript-scroll-top;
         back-requested => { root.meeting-detail-back(); }
         rename-requested(title) => { root.meeting-detail-rename(title); }
         notes-changed(value) => { root.meeting-detail-notes-changed(value); }

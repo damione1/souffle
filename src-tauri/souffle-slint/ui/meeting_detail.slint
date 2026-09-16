@@ -32,6 +32,9 @@ export component MeetingDetail inherits VerticalLayout {
     in property <string> audio-duration-label;
     in property <[TranscriptBlock]> transcript-blocks;
     in property <int> transcript-segment-count;
+    in property <float> transcript-spacer-before: 0.0;
+    in property <float> transcript-spacer-after: 0.0;
+    in-out property <length> transcript-scroll-top: 0px;
 
     callback back-requested();
     callback rename-requested(string);
@@ -152,6 +155,9 @@ export component MeetingDetail inherits VerticalLayout {
                     blocks: root.transcript-blocks;
                     segment-count: root.transcript-segment-count;
                     has-audio: root.has-audio;
+                    spacer-before: root.transcript-spacer-before;
+                    spacer-after: root.transcript-spacer-after;
+                    scroll-top <=> root.transcript-scroll-top;
                     paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
                 }
 
