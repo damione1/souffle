@@ -7,14 +7,17 @@ slint::include_modules!();
 
 mod audio_player;
 mod settings_ui;
+mod shortcut_capture;
 mod summary;
 mod timeline;
 mod transcript;
 
+use slint::Model;
 use souffle_lib::engine::{
     TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
-use souffle_lib::settings::AppSettings;
+use souffle_lib::permissions::{PermState, PermissionKind};
+use souffle_lib::settings::{AppSettings, ShortcutSettings};
 use souffle_lib::state::AppState;
 use souffle_lib::transcript::{MeetingParticipant, MeetingTranscript};
 use std::cell::RefCell;
@@ -366,6 +369,35 @@ fn start_settings_log_timer(weak: slint::Weak<MainWindow>) -> slint::Timer {
         refresh_settings_log_tail(&window);
     });
     timer
+}
+
+/// Populates the calendar picker without prompting - mirrors
+/// `loadCalendars()`'s own guard (only queries EventKit when the
+/// integration is already on, which implies access was granted before).
+fn load_calendars_if_enabled(
+    window: &MainWindow,
+    settings_state: &Rc<RefCell<Option<AppSettings>>>,
+) {
+    let (enabled, selected_ids) = {
+        let guard = settings_state.borrow();
+        match guard.as_ref() {
+            Some(settings) => (
+                settings.calendar_integration_enabled,
+                settings.calendar_selected_ids.clone(),
+            ),
+            None => return,
+        }
+    };
+    if !enabled {
+        settings_ui::populate_calendars(window, &[], &[], PermState::Unknown);
+        return;
+    }
+    match souffle_lib::calendar::list_calendars() {
+        Ok(calendars) => {
+            settings_ui::populate_calendars(window, &calendars, &selected_ids, PermState::Granted)
+        }
+        Err(_) => settings_ui::populate_calendars(window, &[], &selected_ids, PermState::Denied),
+    }
 }
 
 /// Loads (decodes + opens a paused output stream for) the first recorded
@@ -907,10 +939,19 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     // cache and re-saves it, it never redeclares state on the Slint side.
     let settings_state: Rc<RefCell<Option<AppSettings>>> = Rc::new(RefCell::new(None));
     let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    // Not part of `AppSettings` (see `get_shortcuts`/`save_shortcuts`), so it
+    // gets its own cache next to `settings_state` rather than folding into it.
+    let shortcuts_state: Rc<RefCell<Option<ShortcutSettings>>> = Rc::new(RefCell::new(None));
+    // The modifier text (e.g. "MetaLeft") of a bare modifier key press still
+    // waiting to see whether it is released alone (-> commit) or followed by
+    // a real key (-> that combo wins instead) - mirrors `modifierDownEvent`
+    // in controller.svelte.ts's `handleKeyDown`/`handleKeyUp`.
+    let pending_modifier: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_open = settings_state.clone();
+    let shortcuts_state_for_open = shortcuts_state.clone();
     let settings_log_timer_for_open = settings_log_timer.clone();
     window.on_settings_requested(move || {
         let Some(window) = weak.upgrade() else {
@@ -928,11 +969,30 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             }
             Err(e) => eprintln!("Failed to load settings: {e}"),
         }
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::get_shortcuts(state) {
+            Ok(shortcuts) => {
+                let natives = souffle_lib::commands::get_native_shortcuts();
+                let tap_installed =
+                    souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
+                settings_ui::populate_shortcuts(&window, &shortcuts, &natives, tap_installed);
+                *shortcuts_state_for_open.borrow_mut() = Some(shortcuts);
+            }
+            Err(e) => eprintln!("Failed to load shortcuts: {e}"),
+        }
+        load_calendars_if_enabled(&window, &settings_state_for_open);
     });
 
+    let weak = window.as_weak();
     let settings_log_timer_for_close = settings_log_timer.clone();
+    let pending_modifier_for_close = pending_modifier.clone();
     window.on_settings_closed(move || {
         *settings_log_timer_for_close.borrow_mut() = None;
+        *pending_modifier_for_close.borrow_mut() = None;
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_recording_field("".into());
+            window.set_settings_shortcut_error("".into());
+        }
     });
 
     // Mutates `settings_state`'s cached `AppSettings` with `mutate`, saves
@@ -957,6 +1017,43 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
         {
             eprintln!("Failed to save settings: {e}");
+        }
+    }
+
+    // Mirrors `applyShortcutValue()` + `saveShortcutSettings()`: writes
+    // `value` into the cached `ShortcutSettings` under `field` ("toggle" or
+    // "ptt"), saves the whole thing (this also re-registers the global
+    // shortcut and syncs the native modifier tap, see
+    // `commands::settings::save_shortcuts`), and always clears the
+    // recording UI state regardless of outcome - only the error banner
+    // differs between success and failure, matching the Svelte controller.
+    fn apply_shortcut(
+        handle: &AppHandle,
+        shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
+        window: &MainWindow,
+        field: &str,
+        value: String,
+    ) {
+        window.set_settings_recording_field("".into());
+        let mut guard = shortcuts_state.borrow_mut();
+        let Some(shortcuts) = guard.as_mut() else {
+            return;
+        };
+        match field {
+            "toggle" => shortcuts.toggle = value,
+            "ptt" => shortcuts.push_to_talk = value,
+            _ => return,
+        }
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::save_shortcuts(handle.clone(), state, shortcuts.clone()) {
+            Ok(()) => {
+                window.set_settings_shortcut_error("".into());
+                let natives = souffle_lib::commands::get_native_shortcuts();
+                let tap_installed =
+                    souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
+                settings_ui::populate_shortcuts(window, shortcuts, &natives, tap_installed);
+            }
+            Err(e) => window.set_settings_shortcut_error(e.into()),
         }
     }
 
@@ -986,6 +1083,303 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         });
         if let Some(window) = weak.upgrade() {
             window.set_settings_log_level(value);
+        }
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_theme = settings_state.clone();
+    window.on_settings_theme_changed(move |value| {
+        let theme = settings_ui::theme_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_theme, |settings| {
+            settings.theme = theme;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_locale = settings_state.clone();
+    window.on_settings_locale_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_locale, |settings| {
+            settings.locale = value.to_string();
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_auto_paste = settings_state.clone();
+    window.on_settings_auto_paste_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_auto_paste, |settings| {
+            settings.auto_paste = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_paste_method = settings_state.clone();
+    window.on_settings_paste_method_changed(move |value| {
+        let method = settings_ui::paste_method_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_paste_method, |settings| {
+            settings.paste_method = method;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_paste_delay = settings_state.clone();
+    window.on_settings_paste_delay_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_paste_delay, |settings| {
+            settings.paste_delay_ms = value.max(0) as u64;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_pill_hidden = settings_state.clone();
+    window.on_settings_pill_hidden_changed(move |hidden| {
+        save_settings_field(&handle, &settings_state_for_pill_hidden, |settings| {
+            settings.pill_hidden = hidden;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_feedback_enabled = settings_state.clone();
+    window.on_settings_feedback_sounds_enabled_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_feedback_enabled, |settings| {
+            settings.feedback_sounds_enabled = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_feedback_volume = settings_state.clone();
+    window.on_settings_feedback_sounds_volume_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_feedback_volume, |settings| {
+            settings.feedback_sounds_volume = value.clamp(0, 100) as u32;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_calendar_enabled = settings_state.clone();
+    window.on_settings_calendar_enabled_changed(move |enabled| {
+        if !enabled {
+            save_settings_field(&handle, &settings_state_for_calendar_enabled, |settings| {
+                settings.calendar_integration_enabled = false;
+            });
+            if let Some(window) = weak.upgrade() {
+                settings_ui::populate_calendars(&window, &[], &[], PermState::Unknown);
+            }
+            return;
+        }
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let handle = handle.clone();
+        let settings_state = settings_state_for_calendar_enabled.clone();
+        // Not `tauri::async_runtime::spawn`: this closes over an
+        // `Rc<RefCell<..>>`, which is not `Send`. `request_permission`
+        // blocks on the native TCC prompt internally (off its own thread via
+        // `spawn_blocking`), so awaiting it on Slint's single-threaded local
+        // executor is exactly what it's for.
+        slint::spawn_local(async move {
+            let permission = souffle_lib::commands::request_permission(PermissionKind::Calendar)
+                .await
+                .unwrap_or(PermState::Denied);
+            if permission != PermState::Granted {
+                window.set_settings_calendar_enabled(false);
+                settings_ui::populate_calendars(&window, &[], &[], permission);
+                return;
+            }
+            save_settings_field(&handle, &settings_state, |settings| {
+                settings.calendar_integration_enabled = true;
+            });
+            window.set_settings_calendar_enabled(true);
+            let selected_ids = settings_state
+                .borrow()
+                .as_ref()
+                .map(|s| s.calendar_selected_ids.clone())
+                .unwrap_or_default();
+            match souffle_lib::calendar::list_calendars() {
+                Ok(list) => settings_ui::populate_calendars(
+                    &window,
+                    &list,
+                    &selected_ids,
+                    PermState::Granted,
+                ),
+                Err(_) => settings_ui::populate_calendars(&window, &[], &[], PermState::Denied),
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_calendar_autostart = settings_state.clone();
+    window.on_settings_calendar_autostart_enabled_changed(move |enabled| {
+        save_settings_field(
+            &handle,
+            &settings_state_for_calendar_autostart,
+            |settings| {
+                settings.calendar_autostart_enabled = enabled;
+            },
+        );
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_calendar_reminder = settings_state.clone();
+    window.on_settings_calendar_reminder_minutes_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_calendar_reminder, |settings| {
+            settings.calendar_reminder_minutes = value.clamp(1, 30) as u32;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_calendar_toggle = settings_state.clone();
+    window.on_settings_calendar_toggled(move |id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let model = window.get_settings_calendars();
+        let all_ids: Vec<String> = (0..model.row_count())
+            .filter_map(|i| model.row_data(i))
+            .map(|row| row.id.to_string())
+            .collect();
+        let mut guard = settings_state_for_calendar_toggle.borrow_mut();
+        let Some(settings) = guard.as_mut() else {
+            return;
+        };
+        let effective = if settings.calendar_selected_ids.is_empty() {
+            all_ids.clone()
+        } else {
+            settings.calendar_selected_ids.clone()
+        };
+        let id_string = id.to_string();
+        let mut next = effective.clone();
+        if let Some(pos) = next.iter().position(|existing| existing == &id_string) {
+            next.remove(pos);
+        } else {
+            next.push(id_string);
+        }
+        if next.is_empty() {
+            // Mirrors `toggleCalendarSelected()`: the last checked calendar
+            // cannot be unchecked.
+            return;
+        }
+        settings.calendar_selected_ids = if next.len() == all_ids.len() {
+            Vec::new()
+        } else {
+            next
+        };
+        let selected_ids = settings.calendar_selected_ids.clone();
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
+        {
+            eprintln!("Failed to save settings: {e}");
+        }
+        drop(guard);
+        match souffle_lib::calendar::list_calendars() {
+            Ok(calendars) => settings_ui::populate_calendars(
+                &window,
+                &calendars,
+                &selected_ids,
+                PermState::Granted,
+            ),
+            Err(_) => eprintln!("Failed to reload calendars after toggle"),
+        }
+    });
+
+    window.on_settings_calendar_open_system_settings_requested(move || {
+        souffle_lib::commands::open_calendar_settings();
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_shortcut_record_requested(move |field| {
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_recording_field(field);
+            window.set_settings_shortcut_error("".into());
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let shortcuts_state_for_capture = shortcuts_state.clone();
+    let pending_modifier_for_capture = pending_modifier.clone();
+    window.on_settings_shortcut_captured(move |field, text, ctrl, shift, alt, meta| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let modifiers = shortcut_capture::Modifiers {
+            control: ctrl,
+            shift,
+            alt,
+            meta,
+        };
+        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
+            // Wait for the matching key-released event (see
+            // `on_settings_shortcut_released`) instead of committing now -
+            // a real key pressed while this is still held wins instead.
+            *pending_modifier_for_capture.borrow_mut() = Some(name.to_string());
+            return;
+        }
+        *pending_modifier_for_capture.borrow_mut() = None;
+        if shortcut_capture::missing_modifier(&text, modifiers) {
+            window.set_settings_shortcut_error(
+                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
+            );
+            return;
+        }
+        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+            return;
+        };
+        apply_shortcut(&handle, &shortcuts_state_for_capture, &window, &field, value);
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let shortcuts_state_for_release = shortcuts_state.clone();
+    let pending_modifier_for_release = pending_modifier.clone();
+    window.on_settings_shortcut_released(move |field, text, _ctrl, _shift, _alt, _meta| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+            return;
+        };
+        let mut pending = pending_modifier_for_release.borrow_mut();
+        if pending.as_deref() != Some(name) {
+            return;
+        }
+        *pending = None;
+        drop(pending);
+        apply_shortcut(
+            &handle,
+            &shortcuts_state_for_release,
+            &window,
+            &field,
+            name.to_string(),
+        );
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let shortcuts_state_for_clear = shortcuts_state.clone();
+    let pending_modifier_for_clear = pending_modifier.clone();
+    window.on_settings_shortcut_cleared(move |field| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        *pending_modifier_for_clear.borrow_mut() = None;
+        apply_shortcut(
+            &handle,
+            &shortcuts_state_for_clear,
+            &window,
+            &field,
+            String::new(),
+        );
+    });
+
+    let weak = window.as_weak();
+    let pending_modifier_for_cancel = pending_modifier.clone();
+    window.on_settings_shortcut_cancelled(move || {
+        *pending_modifier_for_cancel.borrow_mut() = None;
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_recording_field("".into());
+            window.set_settings_shortcut_error("".into());
         }
     });
 

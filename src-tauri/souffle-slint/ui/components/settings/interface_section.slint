@@ -1,0 +1,286 @@
+import { Switch, ComboBox, SpinBox, Button } from "std-widgets.slint";
+import { SettingsField } from "settings_field.slint";
+
+// Captures the next key press as a shortcut accelerator. Slint's `KeyEvent`
+// only hands over a produced character (or one of i-slint-common's
+// private-use code points for named/modifier keys), not a DOM physical
+// `code`, so the actual accelerator-string parsing happens in Rust
+// (`shortcut_capture.rs`) from the raw `text`/modifier booleans forwarded
+// here - this component only owns focus/recording UI state.
+component ShortcutRecorderButton inherits FocusScope {
+    in property <string> shortcut-label;
+    in property <bool> recording;
+
+    callback record-requested();
+    callback captured(string, bool, bool, bool, bool);
+    callback released(string, bool, bool, bool, bool);
+    callback cleared();
+    callback cancelled();
+
+    width: 170px;
+    height: 30px;
+
+    Rectangle {
+        border-width: 1px;
+        border-color: root.recording ? #5b9dfa : #3a3a3a;
+        border-radius: 6px;
+        background: #262626;
+
+        Text {
+            text: root.recording ? "Appuyez sur une touche…" : (root.shortcut-label == "" ? "Non défini" : root.shortcut-label);
+            color: root.recording ? #5b9dfa : white;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            width: 100%;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            root.focus();
+            root.record-requested();
+        }
+    }
+
+    key-pressed(event) => {
+        if (!root.recording) {
+            return reject;
+        }
+        if (event.text == Key.Escape) {
+            root.cancelled();
+            return accept;
+        }
+        if (event.text == Key.Backspace || event.text == Key.Delete) {
+            root.cleared();
+            return accept;
+        }
+        root.captured(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta);
+        return accept;
+    }
+
+    key-released(event) => {
+        if (!root.recording) {
+            return reject;
+        }
+        root.released(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta);
+        return accept;
+    }
+}
+
+// Port of InterfaceSettingsSection.svelte. Runtime locale switching is out
+// of scope for this Slint shell (the whole UI is hardcoded French so far,
+// established in earlier SOU-185 milestones) - the locale field still
+// round-trips through the real `AppSettings.locale` for persistence parity
+// (AC4), it just has no visible effect yet.
+export component InterfaceSection inherits VerticalLayout {
+    in property <string> theme; // "dark" | "light" | "system"
+    in property <string> locale; // "en" | "fr" | ""
+    in property <bool> auto-paste;
+    in property <string> paste-method; // "clipboard" | "type" | "ax"
+    in property <int> paste-delay-ms;
+    in property <int> paste-delay-min;
+    in property <int> paste-delay-max;
+    in property <string> toggle-shortcut-label;
+    in property <string> ptt-shortcut-label;
+    in property <string> recording-field; // "" | "toggle" | "ptt"
+    in property <string> shortcut-error;
+    in property <bool> native-tap-warning-visible;
+    in property <bool> pill-hidden;
+
+    callback theme-changed(string);
+    callback locale-changed(string);
+    callback auto-paste-changed(bool);
+    callback paste-method-changed(string);
+    callback paste-delay-changed(int);
+    callback pill-hidden-changed(bool);
+    callback shortcut-record-requested(string);
+    callback shortcut-captured(string, string, bool, bool, bool, bool);
+    callback shortcut-released(string, string, bool, bool, bool, bool);
+    callback shortcut-cleared(string);
+    callback shortcut-cancelled();
+    callback permissions-review-requested();
+
+    pure function locale-label(value: string) -> string {
+        if value == "fr" { return "Français"; }
+        return "English";
+    }
+    pure function locale-value(label: string) -> string {
+        if label == "Français" { return "fr"; }
+        return "en";
+    }
+    pure function paste-method-label(value: string) -> string {
+        if value == "type" { return "Simulation de frappe"; }
+        if value == "ax" { return "Accessibilité"; }
+        return "Presse-papiers";
+    }
+    pure function paste-method-value(label: string) -> string {
+        if label == "Simulation de frappe" { return "type"; }
+        if label == "Accessibilité" { return "ax"; }
+        return "clipboard";
+    }
+
+    spacing: 10px;
+
+    Text {
+        text: "Interface";
+        font-size: 13.5px;
+        font-weight: 700;
+        color: white;
+    }
+
+    SettingsField {
+        label: "Langue";
+        description: "Langue de l'interface.";
+
+        ComboBox {
+            model: ["English", "Français"];
+            current-value: root.locale-label(root.locale);
+            selected(value) => { root.locale-changed(root.locale-value(value)); }
+        }
+    }
+
+    SettingsField {
+        label: "Thème";
+
+        HorizontalLayout {
+            spacing: 4px;
+
+            Button {
+                text: "Sombre";
+                checkable: true;
+                checked: root.theme == "dark";
+                clicked => { root.theme-changed("dark"); }
+            }
+            Button {
+                text: "Clair";
+                checkable: true;
+                checked: root.theme == "light";
+                clicked => { root.theme-changed("light"); }
+            }
+            Button {
+                text: "Système";
+                checkable: true;
+                checked: root.theme == "system";
+                clicked => { root.theme-changed("system"); }
+            }
+        }
+    }
+
+    SettingsField {
+        label: "Collage automatique";
+        description: "Coller automatiquement le texte transcrit dans l'application active.";
+
+        Switch {
+            checked: root.auto-paste;
+            toggled => { root.auto-paste-changed(self.checked); }
+        }
+    }
+
+    if root.auto-paste: SettingsField {
+        label: "Méthode de collage";
+
+        ComboBox {
+            model: ["Presse-papiers", "Simulation de frappe", "Accessibilité"];
+            current-value: root.paste-method-label(root.paste-method);
+            selected(value) => { root.paste-method-changed(root.paste-method-value(value)); }
+        }
+    }
+
+    if root.auto-paste: SettingsField {
+        label: "Délai de collage";
+        description: "Délai avant le collage automatique, en millisecondes.";
+
+        SpinBox {
+            minimum: root.paste-delay-min;
+            maximum: root.paste-delay-max;
+            step-size: 50;
+            value: root.paste-delay-ms;
+            edited(value) => { root.paste-delay-changed(value); }
+        }
+    }
+
+    SettingsField {
+        label: "Basculer l'enregistrement";
+        description: "Démarre ou arrête la dictée.";
+
+        ShortcutRecorderButton {
+            shortcut-label: root.toggle-shortcut-label;
+            recording: root.recording-field == "toggle";
+            record-requested => { root.shortcut-record-requested("toggle"); }
+            captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured("toggle", text, ctrl, shift, alt, meta); }
+            released(text, ctrl, shift, alt, meta) => { root.shortcut-released("toggle", text, ctrl, shift, alt, meta); }
+            cleared => { root.shortcut-cleared("toggle"); }
+            cancelled => { root.shortcut-cancelled(); }
+        }
+    }
+
+    SettingsField {
+        label: "Appui maintenu (dictée)";
+        description: "Enregistre tant que la touche est maintenue.";
+
+        ShortcutRecorderButton {
+            shortcut-label: root.ptt-shortcut-label;
+            recording: root.recording-field == "ptt";
+            record-requested => { root.shortcut-record-requested("ptt"); }
+            captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured("ptt", text, ctrl, shift, alt, meta); }
+            released(text, ctrl, shift, alt, meta) => { root.shortcut-released("ptt", text, ctrl, shift, alt, meta); }
+            cleared => { root.shortcut-cleared("ptt"); }
+            cancelled => { root.shortcut-cancelled(); }
+        }
+    }
+
+    SettingsField {
+        label: "Masquer la pastille";
+        description: "Ne pas afficher la pastille flottante pendant l'enregistrement.";
+
+        Switch {
+            checked: root.pill-hidden;
+            toggled => { root.pill-hidden-changed(self.checked); }
+        }
+    }
+
+    if root.native-tap-warning-visible: Rectangle {
+        border-width: 1px;
+        border-color: #a06a1a;
+        border-radius: 6px;
+        background: #3a2c14;
+
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 10px;
+            alignment: space-between;
+
+            Text {
+                text: "Ce raccourci nécessite la permission Accessibilité, qui n'est pas accordée.";
+                color: #f0c674;
+                font-size: 11.5px;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Vérifier les permissions";
+                clicked => { root.permissions-review-requested(); }
+            }
+        }
+    }
+
+    if root.shortcut-error != "": Rectangle {
+        border-width: 1px;
+        border-color: #a02a2a;
+        border-radius: 6px;
+        background: #3a1414;
+
+        VerticalLayout {
+            padding: 10px;
+
+            Text {
+                text: root.shortcut-error;
+                color: #f08080;
+                font-size: 11.5px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

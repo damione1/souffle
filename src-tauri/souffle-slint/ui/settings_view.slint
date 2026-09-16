@@ -2,6 +2,9 @@ import { TabWidget, ScrollView, Button, Palette } from "std-widgets.slint";
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
 import { DiagnosticsSection } from "components/settings/diagnostics_section.slint";
+import { InterfaceSection } from "components/settings/interface_section.slint";
+import { FeedbackSoundsSection } from "components/settings/feedback_sounds_section.slint";
+import { CalendarSection, CalendarRow } from "components/settings/calendar_section.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -17,6 +20,26 @@ export component SettingsView inherits Rectangle {
     in property <string> log-level;
     in property <string> log-tail;
     in property <bool> copying-diagnostics: false;
+    in property <string> theme;
+    in property <string> locale;
+    in property <bool> auto-paste;
+    in property <string> paste-method;
+    in property <int> paste-delay-ms;
+    in property <int> paste-delay-min;
+    in property <int> paste-delay-max;
+    in property <bool> pill-hidden;
+    in property <bool> feedback-sounds-enabled;
+    in property <int> feedback-sounds-volume;
+    in property <string> toggle-shortcut-label;
+    in property <string> ptt-shortcut-label;
+    in property <bool> native-tap-warning-visible;
+    in-out property <string> recording-field: "";
+    in-out property <string> shortcut-error: "";
+    in property <bool> calendar-enabled;
+    in property <string> calendar-permission;
+    in property <bool> calendar-autostart-enabled;
+    in property <int> calendar-reminder-minutes;
+    in property <[CalendarRow]> calendars;
 
     callback close-requested();
     callback autostart-changed(bool);
@@ -24,6 +47,24 @@ export component SettingsView inherits Rectangle {
     callback debug-transcription-changed(bool);
     callback log-level-changed(string);
     callback copy-diagnostics-requested();
+    callback theme-changed(string);
+    callback locale-changed(string);
+    callback auto-paste-changed(bool);
+    callback paste-method-changed(string);
+    callback paste-delay-changed(int);
+    callback pill-hidden-changed(bool);
+    callback feedback-sounds-enabled-changed(bool);
+    callback feedback-sounds-volume-changed(int);
+    callback shortcut-record-requested(string);
+    callback shortcut-captured(string, string, bool, bool, bool, bool);
+    callback shortcut-released(string, string, bool, bool, bool, bool);
+    callback shortcut-cleared(string);
+    callback shortcut-cancelled();
+    callback calendar-enabled-changed(bool);
+    callback calendar-autostart-enabled-changed(bool);
+    callback calendar-reminder-minutes-changed(int);
+    callback calendar-toggled(string);
+    callback calendar-open-system-settings-requested();
 
     // Opaque on purpose: this overlays IdleView/MeetingDetail rather than
     // replacing them (mirrors App.svelte hiding HomeView behind Settings
@@ -53,6 +94,78 @@ export component SettingsView inherits Rectangle {
         }
 
         TabWidget {
+            Tab {
+                title: "Interface";
+
+                ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 22px;
+                        alignment: start;
+
+                        InterfaceSection {
+                            theme: root.theme;
+                            locale: root.locale;
+                            auto-paste: root.auto-paste;
+                            paste-method: root.paste-method;
+                            paste-delay-ms: root.paste-delay-ms;
+                            paste-delay-min: root.paste-delay-min;
+                            paste-delay-max: root.paste-delay-max;
+                            toggle-shortcut-label: root.toggle-shortcut-label;
+                            ptt-shortcut-label: root.ptt-shortcut-label;
+                            recording-field: root.recording-field;
+                            shortcut-error: root.shortcut-error;
+                            native-tap-warning-visible: root.native-tap-warning-visible;
+                            pill-hidden: root.pill-hidden;
+                            theme-changed(value) => { root.theme-changed(value); }
+                            locale-changed(value) => { root.locale-changed(value); }
+                            auto-paste-changed(value) => { root.auto-paste-changed(value); }
+                            paste-method-changed(value) => { root.paste-method-changed(value); }
+                            paste-delay-changed(value) => { root.paste-delay-changed(value); }
+                            pill-hidden-changed(value) => { root.pill-hidden-changed(value); }
+                            shortcut-record-requested(field) => { root.shortcut-record-requested(field); }
+                            shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.shortcut-captured(field, text, ctrl, shift, alt, meta); }
+                            shortcut-released(field, text, ctrl, shift, alt, meta) => { root.shortcut-released(field, text, ctrl, shift, alt, meta); }
+                            shortcut-cleared(field) => { root.shortcut-cleared(field); }
+                            shortcut-cancelled => { root.shortcut-cancelled(); }
+                            permissions-review-requested => { root.permissions-review-requested(); }
+                        }
+
+                        FeedbackSoundsSection {
+                            enabled: root.feedback-sounds-enabled;
+                            volume: root.feedback-sounds-volume;
+                            enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
+                            volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
+                        }
+                    }
+                }
+            }
+
+            Tab {
+                title: "Réunions";
+
+                ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 22px;
+                        alignment: start;
+
+                        CalendarSection {
+                            enabled: root.calendar-enabled;
+                            permission: root.calendar-permission;
+                            autostart-enabled: root.calendar-autostart-enabled;
+                            reminder-minutes: root.calendar-reminder-minutes;
+                            calendars: root.calendars;
+                            enabled-changed(value) => { root.calendar-enabled-changed(value); }
+                            autostart-enabled-changed(value) => { root.calendar-autostart-enabled-changed(value); }
+                            reminder-minutes-changed(value) => { root.calendar-reminder-minutes-changed(value); }
+                            calendar-toggled(id) => { root.calendar-toggled(id); }
+                            open-system-settings-requested => { root.calendar-open-system-settings-requested(); }
+                        }
+                    }
+                }
+            }
+
             Tab {
                 title: "Système";
 
