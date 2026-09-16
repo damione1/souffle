@@ -1,0 +1,129 @@
+import { ScrollView } from "std-widgets.slint";
+
+// Port of MeetingTranscriptSection.svelte - read-only display only so far
+// (milestone 8a): paragraph grouping with speaker labels and session-break
+// dividers, click-to-seek on a paragraph's timestamp. Not yet ported: bulk
+// edit mode, per-word inline edit + dictionary alias popover
+// (TranscriptWordLine.svelte, milestone 8d), virtualization for very long
+// transcripts (milestone 8c) - this is a plain scrollable list today.
+export struct TranscriptBlock {
+    is-session-break: bool,
+    speaker-label: string,
+    timestamp: string,
+    text: string,
+    // -1 when the paragraph isn't attributed to any recorded audio session.
+    recording-session-index: int,
+    start-time: float,
+    end-label: string,
+    start-label: string,
+}
+
+export component TranscriptSection inherits VerticalLayout {
+    in property <[TranscriptBlock]> blocks;
+    in property <int> segment-count;
+    in property <bool> has-audio: false;
+
+    // (recording-session-index, start-time) of the clicked paragraph.
+    callback paragraph-clicked(int, float);
+
+    spacing: 8px;
+
+    Text {
+        text: "Transcript \u{b7} " + root.segment-count + " segments";
+        font-size: 11px;
+        font-weight: 600;
+        color: #888888;
+    }
+
+    if root.blocks.length == 0: Text {
+        text: "Pas de transcript pour cette r\u{e9}union.";
+        color: #888888;
+        font-size: 12px;
+    }
+
+    if root.blocks.length > 0: Rectangle {
+        height: 260px;
+        border-width: 1px;
+        border-color: #3a3a3a;
+
+        ScrollView {
+            VerticalLayout {
+                padding: 12px;
+                spacing: 12px;
+                alignment: start;
+
+                for block in root.blocks: VerticalLayout {
+                    if !block.is-session-break: VerticalLayout {
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+
+                            if block.speaker-label != "": Text {
+                                text: block.speaker-label;
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: #4a9eff;
+                                vertical-alignment: center;
+                            }
+
+                            ts-btn := Rectangle {
+                                width: 40px;
+
+                                accessible-role: button;
+                                accessible-label: "Aller \u{e0} " + block.timestamp;
+                                accessible-action-default => {
+                                    root.paragraph-clicked(block.recording-session-index, block.start-time);
+                                }
+
+                                TouchArea {
+                                    enabled: root.has-audio;
+                                    clicked => {
+                                        root.paragraph-clicked(block.recording-session-index, block.start-time);
+                                    }
+                                }
+
+                                Text {
+                                    text: block.timestamp;
+                                    font-family: "monospace";
+                                    font-size: 10.5px;
+                                    color: #777777;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: block.text;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if block.is-session-break: HorizontalLayout {
+                        spacing: 8px;
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+
+                        Rectangle {
+                            height: 1px;
+                            background: #3a3a3a;
+                            vertical-stretch: 1;
+                        }
+                        Text {
+                            text: block.end-label + " / " + block.start-label;
+                            font-size: 10px;
+                            color: #777777;
+                        }
+                        Rectangle {
+                            height: 1px;
+                            background: #3a3a3a;
+                            vertical-stretch: 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

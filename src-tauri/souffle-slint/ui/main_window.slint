@@ -2,6 +2,7 @@ import { IdleView } from "idle_view.slint";
 import { RecordingView } from "recording_view.slint";
 import { MeetingDetail } from "meeting_detail.slint";
 import { TimelineDayGroup } from "components/timeline_section.slint";
+import { TranscriptBlock } from "components/transcript_section.slint";
 import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState } from "types.slint";
 
 export component MainWindow inherits Window {
@@ -42,6 +43,8 @@ export component MainWindow inherits Window {
     in property <float> meeting-detail-audio-progress;
     in property <string> meeting-detail-audio-position-label;
     in property <string> meeting-detail-audio-duration-label;
+    in property <[TranscriptBlock]> meeting-detail-transcript-blocks;
+    in property <int> meeting-detail-transcript-segment-count;
 
     callback dictate-requested();
     callback meeting-requested();
@@ -57,6 +60,7 @@ export component MainWindow inherits Window {
     callback meeting-detail-notes-changed(string);
     callback meeting-detail-audio-play-pause-requested();
     callback meeting-detail-audio-seek-requested(float);
+    callback meeting-detail-transcript-paragraph-clicked(int, float);
 
     if root.recording-mode == RecordingMode.idle && root.active-meeting-id == "": IdleView {
         dictation-shortcut: root.dictation-shortcut;
@@ -92,11 +96,14 @@ export component MainWindow inherits Window {
         audio-progress: root.meeting-detail-audio-progress;
         audio-position-label: root.meeting-detail-audio-position-label;
         audio-duration-label: root.meeting-detail-audio-duration-label;
+        transcript-blocks: root.meeting-detail-transcript-blocks;
+        transcript-segment-count: root.meeting-detail-transcript-segment-count;
         back-requested => { root.meeting-detail-back(); }
         rename-requested(title) => { root.meeting-detail-rename(title); }
         notes-changed(value) => { root.meeting-detail-notes-changed(value); }
         audio-play-pause-requested => { root.meeting-detail-audio-play-pause-requested(); }
         audio-seek-requested(fraction) => { root.meeting-detail-audio-seek-requested(fraction); }
+        transcript-paragraph-clicked(session, time) => { root.meeting-detail-transcript-paragraph-clicked(session, time); }
     }
 
     if root.recording-mode != RecordingMode.idle: RecordingView {

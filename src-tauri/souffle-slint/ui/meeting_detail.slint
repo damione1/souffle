@@ -1,6 +1,7 @@
-import { LineEdit, TextEdit } from "std-widgets.slint";
+import { LineEdit, TextEdit, ScrollView } from "std-widgets.slint";
 import { NotesSaveState } from "types.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
+import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
 
 // Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
 // completed-meeting variant only. The live-recording variant of
@@ -8,12 +9,14 @@ import { AudioPlayerSection } from "components/audio_player_section.slint";
 // is out of scope: this app shows RecordingView instead while a meeting is
 // live (see main_window.slint), never this component.
 //
-// Milestones 6-7 scope, said here rather than hidden: header (title, rename,
-// date/duration/segment count, participants) + notes (load, edit, debounced
-// autosave) + native audio playback/waveform. Not yet ported: transcript
-// with speaker labels (milestone 8), summary raw+structured (milestone 9),
-// export menu and resume-recording (need the native file dialog from
-// SOU-191, not available to this headless bridge yet).
+// Milestones 6-8a scope, said here rather than hidden: header (title,
+// rename, date/duration/segment count, participants) + notes (load, edit,
+// debounced autosave) + native audio playback/waveform + read-only
+// transcript with speaker labels. Not yet ported: transcript bulk/per-word
+// edit + dictionary alias popover, transcript virtualization, summary
+// raw+structured (milestone 9), export menu and resume-recording (need the
+// native file dialog from SOU-191, not available to this headless bridge
+// yet).
 export component MeetingDetail inherits VerticalLayout {
     in property <string> title;
     in property <string> meta-line;
@@ -27,12 +30,15 @@ export component MeetingDetail inherits VerticalLayout {
     in property <float> audio-progress;
     in property <string> audio-position-label;
     in property <string> audio-duration-label;
+    in property <[TranscriptBlock]> transcript-blocks;
+    in property <int> transcript-segment-count;
 
     callback back-requested();
     callback rename-requested(string);
     callback notes-changed(string);
     callback audio-play-pause-requested();
     callback audio-seek-requested(float);
+    callback transcript-paragraph-clicked(int, float);
 
     property <bool> editing-title: false;
     property <string> title-draft;
@@ -124,60 +130,77 @@ export component MeetingDetail inherits VerticalLayout {
         }
     }
 
-    AudioPlayerSection {
-        has-audio: root.has-audio;
-        is-playing: root.audio-is-playing;
-        peaks: root.audio-peaks;
-        progress: root.audio-progress;
-        position-label: root.audio-position-label;
-        duration-label: root.audio-duration-label;
-        play-pause-requested => { root.audio-play-pause-requested(); }
-        seek-requested(fraction) => { root.audio-seek-requested(fraction); }
-    }
-
-    Text {
-        text: "Pas encore de transcript ni de r\u{e9}sum\u{e9} ici (jalons 8-9).";
-        color: #888888;
-        font-size: 11px;
-        wrap: word-wrap;
-    }
-
     Rectangle {
         vertical-stretch: 1;
-        border-width: 1px;
-        border-color: #3a3a3a;
 
-        VerticalLayout {
-            padding: 16px;
-            spacing: 8px;
+        ScrollView {
+            VerticalLayout {
+                spacing: 14px;
 
-            HorizontalLayout {
-                alignment: space-between;
+                AudioPlayerSection {
+                    has-audio: root.has-audio;
+                    is-playing: root.audio-is-playing;
+                    peaks: root.audio-peaks;
+                    progress: root.audio-progress;
+                    position-label: root.audio-position-label;
+                    duration-label: root.audio-duration-label;
+                    play-pause-requested => { root.audio-play-pause-requested(); }
+                    seek-requested(fraction) => { root.audio-seek-requested(fraction); }
+                }
+
+                TranscriptSection {
+                    blocks: root.transcript-blocks;
+                    segment-count: root.transcript-segment-count;
+                    has-audio: root.has-audio;
+                    paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
+                }
 
                 Text {
-                    text: "NOTES";
-                    font-size: 11px;
-                    font-weight: 600;
+                    text: "Pas encore de r\u{e9}sum\u{e9} ici (jalon 9).";
                     color: #888888;
-                    vertical-alignment: center;
+                    font-size: 11px;
+                    wrap: word-wrap;
                 }
 
-                if root.notes-save-state == NotesSaveState.saved: Text {
-                    text: "Enregistr\u{e9}";
-                    font-size: 11px;
-                    color: #888888;
-                }
-                if root.notes-save-state == NotesSaveState.pending: Text {
-                    text: "Enregistrement\u{2026}";
-                    font-size: 11px;
-                    color: #888888;
-                }
-            }
+                Rectangle {
+                    height: 220px;
+                    border-width: 1px;
+                    border-color: #3a3a3a;
 
-            notes-edit := TextEdit {
-                text <=> root.notes;
-                vertical-stretch: 1;
-                edited(value) => { root.notes-changed(value); }
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 8px;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+
+                            Text {
+                                text: "NOTES";
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: #888888;
+                                vertical-alignment: center;
+                            }
+
+                            if root.notes-save-state == NotesSaveState.saved: Text {
+                                text: "Enregistr\u{e9}";
+                                font-size: 11px;
+                                color: #888888;
+                            }
+                            if root.notes-save-state == NotesSaveState.pending: Text {
+                                text: "Enregistrement\u{2026}";
+                                font-size: 11px;
+                                color: #888888;
+                            }
+                        }
+
+                        notes-edit := TextEdit {
+                            text <=> root.notes;
+                            vertical-stretch: 1;
+                            edited(value) => { root.notes-changed(value); }
+                        }
+                    }
+                }
             }
         }
     }

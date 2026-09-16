@@ -51,6 +51,16 @@ impl AudioPlayer {
             .store(seek_index(fraction, self.samples.len()), Ordering::Relaxed);
     }
 
+    /// Seeks to an absolute position, e.g. a transcript paragraph's
+    /// `start_time`. Naive for a meeting with more than one recording
+    /// session (only the first session's audio is ever loaded, see
+    /// `load`'s doc comment) - correct for the common single-session case.
+    pub fn seek_to_seconds(&self, seconds: f64) {
+        let index = (seconds.max(0.0) * f64::from(self.sample_rate)) as usize;
+        self.position
+            .store(index.min(self.samples.len()), Ordering::Relaxed);
+    }
+
     pub fn position_seconds(&self) -> f64 {
         seconds_from_index(self.position.load(Ordering::Relaxed), self.sample_rate)
     }

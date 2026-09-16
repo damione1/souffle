@@ -7,6 +7,7 @@ slint::include_modules!();
 
 mod audio_player;
 mod timeline;
+mod transcript;
 
 use souffle_lib::engine::{
     TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
@@ -120,6 +121,12 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     );
     window.set_meeting_detail_notes(meeting.notes.clone().unwrap_or_default().into());
     window.set_meeting_detail_notes_save_state(NotesSaveState::Idle);
+    window.set_meeting_detail_transcript_segment_count(meeting.segments.len() as i32);
+    let blocks =
+        transcript::build_transcript_blocks(&meeting.segments, &meeting.recording_sessions);
+    window.set_meeting_detail_transcript_blocks(
+        std::rc::Rc::new(slint::VecModel::from(blocks)).into(),
+    );
 }
 
 /// Stops and drops any currently loaded audio player/progress timer -
@@ -536,6 +543,13 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     window.on_meeting_detail_audio_seek_requested(move |fraction| {
         if let Some(p) = player_for_seek.borrow().as_ref() {
             p.seek_to(fraction);
+        }
+    });
+
+    let player_for_paragraph = player.clone();
+    window.on_meeting_detail_transcript_paragraph_clicked(move |_session_index, start_time| {
+        if let Some(p) = player_for_paragraph.borrow().as_ref() {
+            p.seek_to_seconds(f64::from(start_time));
         }
     });
 
