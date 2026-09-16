@@ -75,6 +75,12 @@ pub fn build() -> tauri::App<tauri::Wry> {
         .build(crate::tauri_context())
         .expect("failed to build headless tauri app");
 
+    // Command bodies emit tauri-specta events (StateChanged, etc.) regardless
+    // of whether a webview is listening. Without this, the first such emit
+    // panics: "EventRegistry not found in Tauri state" - `run()`'s `.setup()`
+    // calls this too, but that closure never fires on this headless path.
+    crate::specta_builder().mount_events(&app);
+
     replay_setup(&app);
     app
 }

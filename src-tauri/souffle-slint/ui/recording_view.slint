@@ -1,0 +1,51 @@
+// Minimal live-recording placeholder for SOU-187 milestone 4: proves the
+// real start/stop round-trip (state transition, real audio capture) works.
+// The rich live transcript/waveform card (LiveSessionCard.svelte parity) is
+// milestone 5 - this is deliberately not that, and says so via its own
+// plainness rather than pretending to be finished.
+export component RecordingView inherits VerticalLayout {
+    in property <string> mode; // "dictation" | "meeting"
+
+    callback stop-requested();
+
+    padding: 24px;
+    spacing: 24px;
+    alignment: center;
+
+    Text {
+        text: root.mode == "meeting" ? "R\u{e9}union en cours\u{2026}" : "Dict\u{e9}e en cours\u{2026}";
+        font-size: 18px;
+        font-weight: 600;
+        horizontal-alignment: center;
+    }
+
+    Text {
+        text: "Jalon 5 : transcript live, waveform et carte de session pas encore branch\u{e9}s ici.";
+        color: #888888;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+
+    Rectangle {
+        height: 56px;
+        width: 160px;
+        border-radius: 28px;
+        background: #cc4444;
+
+        accessible-role: button;
+        accessible-label: "Arr\u{ea}ter";
+        accessible-action-default => { root.stop-requested(); }
+
+        TouchArea {
+            clicked => { root.stop-requested(); }
+        }
+
+        Text {
+            text: "Arr\u{ea}ter";
+            color: white;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

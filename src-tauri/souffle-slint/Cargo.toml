@@ -17,6 +17,7 @@ workspace = true
 slint = "1.9"
 souffle_lib = { path = "..", package = "souffle" }
 chrono = "0.4"
+tokio = { version = "1", features = ["sync"] }
 # SOU-187 documented exception to SOU-186 AC9 ("zero tauri* in this crate's
 # tree"): the recording backend is built on tauri::State/AppHandle, so the
 # headless bridge needs the `Manager` trait here too. Closed by SOU-191.

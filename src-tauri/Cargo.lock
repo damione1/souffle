@@ -9068,6 +9068,7 @@ dependencies = [
  "slint-build",
  "souffle",
  "tauri",
+ "tokio",
 ]
 
 [[package]]

@@ -7,6 +7,11 @@ slint::include_modules!();
 
 mod timeline;
 
+use souffle_lib::engine::{
+    TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
+};
+use souffle_lib::state::AppState;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 
 // Port of src/lib/utils/format.ts::formatShortcutLabel.
@@ -54,6 +59,127 @@ fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
     window.set_timeline_is_empty(is_empty);
 }
 
+/// Mirrors `ensureModelLoaded` in transcription/runtime.ts: ready is a no-op,
+/// load_required loads it, download_required is refused rather than
+/// triggering a real (multi-GB, network-bound) download from here - that
+/// flow belongs to SOU-190 (onboarding/dialogs), not this ticket.
+async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
+    let selection = TranscriptionProfileSelection::default();
+    let state = handle.state::<AppState>();
+    let status = souffle_lib::commands::get_model_status(state, selection)?;
+    match status.phase {
+        TranscriptionRuntimePhase::Ready => Ok(()),
+        TranscriptionRuntimePhase::LoadRequired => {
+            let handle = handle.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let state = handle.state::<AppState>();
+                souffle_lib::commands::load_model(state, TranscriptionProfileSelection::default())
+            })
+            .await
+            .map_err(|e| format!("Join load_model task: {e}"))?
+        }
+        TranscriptionRuntimePhase::DownloadRequired => {
+            Err("Modèle non téléchargé - ouvrez Réglages pour le télécharger.".into())
+        }
+    }
+}
+
+/// A no-op consumer: milestone 5 wires the live transcript display through
+/// this channel. Real `Channel`, not a stand-in - see the SOU-186 spike
+/// report for why this needs no webview to work.
+fn silent_segment_channel() -> Channel<TranscriptionSegment> {
+    Channel::new(|_segment| Ok(()))
+}
+
+/// Runs `f` on the real Slint/OS main thread and returns its result.
+///
+/// Found the hard way (milestone 4): `start_transcription` internally calls
+/// `dictation_cancel::sync`, which touches `app.global_shortcut()` to arm the
+/// Escape-cancels-dictation binding. That registration needs a thread with a
+/// live run loop; a background tokio worker thread (where a plain
+/// `tauri::async_runtime::spawn`ed task runs) has none, and the call hangs
+/// forever - confirmed by bisecting with temporary eprintln!s, not guessed.
+/// The real OS main thread (Slint's own, via `window.run()`) does have one.
+/// Model loading (the slow part, seconds) stays off-thread via
+/// `ensure_model_ready`'s `spawn_blocking`; only the fast (tens to hundreds
+/// of ms once the model is loaded) plugin-touching command call itself needs
+/// this - a brief, acceptable main-thread pause, not a multi-second freeze.
+async fn run_on_main_thread<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    slint::invoke_from_event_loop(move || {
+        let _ = tx.send(f());
+    })
+    .expect("Slint event loop is gone");
+    rx.await.expect("main-thread task dropped its result")
+}
+
+async fn start_dictation(handle: AppHandle) -> Result<(), String> {
+    ensure_model_ready(&handle).await?;
+    run_on_main_thread(move || {
+        tauri::async_runtime::block_on(async move {
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::start_transcription(state, silent_segment_channel(), true).await
+        })
+    })
+    .await
+}
+
+async fn start_meeting(handle: AppHandle) -> Result<(), String> {
+    ensure_model_ready(&handle).await?;
+    // Mirrors defaultMeetingTitle() in meeting/controller.svelte.ts.
+    let title = format!("Meeting {}", default_meeting_date());
+    run_on_main_thread(move || {
+        tauri::async_runtime::block_on(async move {
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::start_meeting_recording(
+                state,
+                title,
+                None,
+                silent_segment_channel(),
+            )
+            .await
+        })
+    })
+    .await
+}
+
+/// `M/D/YYYY`, matching `new Date().toLocaleDateString()`'s en-US default
+/// used by `defaultMeetingTitle()`.
+fn default_meeting_date() -> String {
+    let local = chrono::Local::now();
+    format!(
+        "{}/{}/{}",
+        local.format("%-m"),
+        local.format("%-d"),
+        local.format("%Y")
+    )
+}
+
+async fn stop_dictation(handle: AppHandle) -> Result<(), String> {
+    run_on_main_thread(move || {
+        tauri::async_runtime::block_on(async move {
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::stop_transcription(state).await
+        })
+    })
+    .await
+}
+
+async fn stop_meeting(handle: AppHandle) -> Result<(), String> {
+    run_on_main_thread(move || {
+        tauri::async_runtime::block_on(async move {
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::stop_meeting_recording(state).await
+        })
+    })
+    .await
+    .map(|_meeting_id| ())
+}
+
 /// Milestone 3 wires the real Timeline (this function); milestones 4-6 wire
 /// dictate/meeting start and opening a meeting's detail. Until then those
 /// two callbacks only log - no fabricated state change on click.
@@ -63,11 +189,64 @@ fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
 /// `souffle` lib crate's own targets), which was the wrong tool here and
 /// silently swallowed these lines during milestone 2 verification.
 fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
-    window.on_dictate_requested(|| {
-        eprintln!("dictate-requested (start flow not wired yet, see SOU-187 milestone 4)");
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_dictate_requested(move || {
+        let weak = weak.clone();
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = start_dictation(handle).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
+                Ok(()) => window.set_recording_mode("dictation".into()),
+                Err(e) => window.set_transcription_status_message(e.into()),
+            }) {
+                eprintln!("upgrade_in_event_loop failed (dictate): {e}");
+            }
+        });
     });
-    window.on_meeting_requested(|| {
-        eprintln!("meeting-requested (start flow not wired yet, see SOU-187 milestone 4)");
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_meeting_requested(move || {
+        let weak = weak.clone();
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = start_meeting(handle).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
+                Ok(()) => window.set_recording_mode("meeting".into()),
+                Err(e) => window.set_meeting_status_message(e.into()),
+            }) {
+                eprintln!("upgrade_in_event_loop failed (meeting): {e}");
+            }
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_stop_requested(move || {
+        let Some(current) = weak.upgrade() else {
+            return;
+        };
+        let mode = current.get_recording_mode().to_string();
+        let weak = weak.clone();
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let handle_for_refresh = handle.clone();
+            let result = if mode == "meeting" {
+                stop_meeting(handle).await
+            } else {
+                stop_dictation(handle).await
+            };
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                if let Err(e) = result {
+                    eprintln!("Failed to stop {mode}: {e}");
+                }
+                window.set_recording_mode("idle".into());
+                refresh_timeline(&window, &handle_for_refresh);
+            }) {
+                eprintln!("upgrade_in_event_loop failed (stop): {e}");
+            }
+        });
     });
 
     let weak = window.as_weak();
