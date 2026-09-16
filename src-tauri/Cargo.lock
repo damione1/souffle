@@ -9065,6 +9065,8 @@ version = "0.0.0"
 dependencies = [
  "slint",
  "slint-build",
+ "souffle",
+ "tauri",
 ]
 
 [[package]]

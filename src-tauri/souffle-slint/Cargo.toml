@@ -15,6 +15,11 @@ workspace = true
 
 [dependencies]
 slint = "1.9"
+souffle_lib = { path = "..", package = "souffle" }
+# SOU-187 documented exception to SOU-186 AC9 ("zero tauri* in this crate's
+# tree"): the recording backend is built on tauri::State/AppHandle, so the
+# headless bridge needs the `Manager` trait here too. Closed by SOU-191.
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png", "protocol-asset"] }
 
 [build-dependencies]
 slint-build = "1.9"

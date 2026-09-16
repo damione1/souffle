@@ -30,6 +30,7 @@ pub mod pipeline;
 pub mod platform;
 pub mod power;
 pub mod settings;
+pub mod slint_bridge;
 pub mod state;
 pub mod state_machine;
 pub mod summary;
@@ -78,6 +79,15 @@ fn install_panic_hook() {
         tracing::error!(thread = name, location = %location, "PANIC: {message}");
         default(info);
     }));
+}
+
+/// `tauri::generate_context!()` embeds a fixed-name static
+/// (`_EMBED_INFO_PLIST`) as a side effect of expansion; a second expansion
+/// anywhere else in this crate is a duplicate-symbol link error. This is the
+/// one call site - `slint_spike` reuses it instead of invoking the macro
+/// itself.
+pub fn tauri_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
 }
 
 fn specta_builder() -> Builder<tauri::Wry> {
@@ -454,7 +464,7 @@ pub fn run() {
             info!("Souffle started");
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(tauri_context())
         .unwrap_or_else(|e| {
             tracing::error!("Tauri build error: {e}");
             std::process::exit(1);
