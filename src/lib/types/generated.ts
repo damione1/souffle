@@ -1091,7 +1091,7 @@ async getReleaseNotesForVersion(version: string) : Promise<Result<string | null,
 }
 },
 /**
- * App version string from the running binary.
+ * Return the running binary's version and whether it is an unstamped local build.
  */
 async getAppVersion() : Promise<AppVersion> {
     return await TAURI_INVOKE("get_app_version");
@@ -1389,6 +1389,9 @@ last_seen_version: string }
  * with a single enum that enforces valid transitions.
  */
 export type AppStateMachine = { state: "idle" } | { state: "downloading"; data: { profile: TranscriptionProfile } } | { state: "downloaded"; data: { profile: TranscriptionProfile } } | { state: "loading"; data: { profile: TranscriptionProfile } } | { state: "ready"; data: { profile: TranscriptionProfile } } | { state: "recording_dictation"; data: { profile: TranscriptionProfile; session_id: number } } | { state: "recording_meeting"; data: { profile: TranscriptionProfile; session_id: number; meeting_id: string } } | { state: "stopping"; data: { profile: TranscriptionProfile; was_recording: RecordingKind } } | { state: "unloading"; data: { profile: TranscriptionProfile; next_profile: TranscriptionProfile | null } } | { state: "error"; data: { message: string; recovery: ErrorRecovery } }
+/**
+ * Version metadata reported to the frontend during application bootstrap.
+ */
 export type AppVersion = { version: string; is_local_build: boolean }
 export type AppView = "home" | "settings"
 /**
@@ -1860,7 +1863,11 @@ apple_intelligence_is_stub: boolean;
 /**
  * Machine-readable reason Apple Intelligence is unavailable, `None` when available.
  */
-apple_intelligence_unavailable_reason: string | null; recommended_ollama_model: string; models: SummaryModelDescriptor[] }
+apple_intelligence_unavailable_reason: string | null; 
+/**
+ * Ollama model recommended by the backend for one-click installation.
+ */
+recommended_ollama_model: string; models: SummaryModelDescriptor[] }
 /**
  * A meeting-summary template: `prompt` replaces the final-pass system
  * prompt only (map/merge prompts stay fixed). Built-ins ship with
