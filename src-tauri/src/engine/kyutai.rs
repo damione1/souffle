@@ -151,10 +151,22 @@ fn drained_pause_frames(emission_delay_frames: usize) -> usize {
 /// A pause-aligned clear is only safe once the VAD streak covers that lag plus
 /// [`VAD_FLUSH_MARGIN_FRAMES`]: shorter pauses still have an in-flight word (and
 /// the last `audio_delay` seconds of audio) sitting in `ItemState`.
+///
+/// `frames_since_lane_reset` gates the per-lane `Lane` decision on that lane's
+/// *own* cooldown, not just the shared `frames_since_refresh`. Without it, once
+/// `frames_since_refresh` first crosses `soft` it never drops back down except
+/// on a rare simultaneous-both-lanes `Full` refresh — so a lane that stays
+/// paused (the listener side of a conversation, say) would re-clear on every
+/// `pause_threshold` frames indefinitely, cold-starting that lane's KV every
+/// ~1s for the rest of the session (SOU-193). Requiring the lane's own
+/// `frames_since_lane_reset` to also clear `soft` makes a `Lane` refresh
+/// one-shot per pause episode, matching how `Full` naturally self-limits via
+/// `frames_since_refresh`.
 fn decide_refresh(
     frames_since_refresh: usize,
     context: usize,
     vad_pause_streak: &[usize],
+    frames_since_lane_reset: &[usize],
     batch_size: usize,
     emission_delay_frames: usize,
 ) -> RefreshDecision {
@@ -171,7 +183,14 @@ fn decide_refresh(
     let pausing: Vec<usize> = vad_pause_streak
         .iter()
         .enumerate()
-        .filter(|(_, streak)| **streak >= pause_threshold)
+        .filter(|(idx, streak)| {
+            **streak >= pause_threshold
+                && frames_since_lane_reset
+                    .get(*idx)
+                    .copied()
+                    .unwrap_or(usize::MAX)
+                    >= soft
+        })
         .map(|(idx, _)| idx)
         .collect();
 
@@ -252,7 +271,9 @@ struct LoadedModel {
     /// `refresh_lane` restarts one lane's moshi clock and not the other's.
     epoch_origin_seconds: Vec<f64>,
     /// LM frames fed to each lane since that lane's last KV clear, full or
-    /// per-lane. This is what a lane's epoch credit is computed from.
+    /// per-lane. This is what a lane's epoch credit is computed from, and
+    /// also what `decide_refresh` checks so a `Lane` refresh cools down
+    /// per-lane instead of re-firing on every drained pause (SOU-193).
     frames_since_lane_reset: Vec<usize>,
     /// Last start_time emitted per lane. Guarantees monotonicity even if a
     /// lane's internal clock restarts (reset_batch_idx).
@@ -698,6 +719,7 @@ impl KyutaiEngine {
             model.frames_since_refresh,
             model.config.context,
             &model.vad_pause_streak,
+            &model.frames_since_lane_reset,
             batch_size,
             Self::emission_delay_frames(model),
         ) {
@@ -1508,11 +1530,11 @@ mod tests {
             note_energy_pause_streaks(&mut streaks, &[&silence]);
         }
         assert_eq!(
-            decide_refresh(300, 375, &streaks, 1, STT_26B_DELAY),
+            decide_refresh(300, 375, &streaks, &[300], 1, STT_26B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
         assert_eq!(
-            decide_refresh(300, 375, &[0], 1, STT_26B_DELAY),
+            decide_refresh(300, 375, &[0], &[300], 1, STT_26B_DELAY),
             RefreshDecision::None
         );
     }
@@ -1521,15 +1543,15 @@ mod tests {
     fn decide_refresh_none_before_soft_window() {
         let streak = [0usize];
         assert_eq!(
-            decide_refresh(100, 375, &streak, 1, STT_1B_DELAY),
+            decide_refresh(100, 375, &streak, &[100], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(224, 375, &streak, 1, STT_1B_DELAY),
+            decide_refresh(224, 375, &streak, &[224], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(225, 375, &[0], 1, STT_1B_DELAY),
+            decide_refresh(225, 375, &[0], &[225], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
     }
@@ -1538,7 +1560,7 @@ mod tests {
     fn decide_refresh_soft_pause_at_60_percent_context() {
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(225, 375, &[drained], 1, STT_1B_DELAY),
+            decide_refresh(225, 375, &[drained], &[225], 1, STT_1B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
     }
@@ -1546,7 +1568,7 @@ mod tests {
     #[test]
     fn decide_refresh_no_hard_deadline_past_soft_window_without_pause() {
         assert_eq!(
-            decide_refresh(350, 375, &[0], 1, STT_1B_DELAY),
+            decide_refresh(350, 375, &[0], &[350], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
@@ -1554,6 +1576,7 @@ mod tests {
                 350,
                 375,
                 &[drained_pause_frames(STT_1B_DELAY)],
+                &[350],
                 1,
                 STT_1B_DELAY
             ),
@@ -1565,11 +1588,11 @@ mod tests {
     fn decide_refresh_ignores_zero_context_or_fresh_epoch() {
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(400, 0, &[drained], 1, STT_1B_DELAY),
+            decide_refresh(400, 0, &[drained], &[400], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(0, 375, &[drained], 1, STT_1B_DELAY),
+            decide_refresh(0, 375, &[drained], &[0], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
     }
@@ -1578,7 +1601,7 @@ mod tests {
     fn decide_refresh_dual_one_lane_paused_other_active() {
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[drained, 2], 2, STT_1B_DELAY),
+            decide_refresh(300, 375, &[drained, 2], &[300, 300], 2, STT_1B_DELAY),
             RefreshDecision::Lane {
                 batch_idx: 0,
                 kind: RefreshKind::SoftPause,
@@ -1590,7 +1613,14 @@ mod tests {
     fn decide_refresh_dual_both_paused_full_refresh() {
         let drained = drained_pause_frames(STT_1B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[drained, drained + 2], 2, STT_1B_DELAY),
+            decide_refresh(
+                300,
+                375,
+                &[drained, drained + 2],
+                &[300, 300],
+                2,
+                STT_1B_DELAY
+            ),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
     }
@@ -1601,15 +1631,15 @@ mod tests {
         // times below the 2.6B delay. Either way, six frames of pause still
         // hold an in-flight word.
         assert_eq!(
-            decide_refresh(225, 375, &[6], 1, STT_1B_DELAY),
+            decide_refresh(225, 375, &[6], &[225], 1, STT_1B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(300, 375, &[6], 1, STT_26B_DELAY),
+            decide_refresh(300, 375, &[6], &[300], 1, STT_26B_DELAY),
             RefreshDecision::None
         );
         assert_eq!(
-            decide_refresh(300, 375, &[8, 2], 2, STT_26B_DELAY),
+            decide_refresh(300, 375, &[8, 2], &[300, 300], 2, STT_26B_DELAY),
             RefreshDecision::None
         );
     }
@@ -1618,13 +1648,59 @@ mod tests {
     fn decide_refresh_fires_once_the_delay_window_holds_only_silence() {
         let drained = drained_pause_frames(STT_26B_DELAY);
         assert_eq!(
-            decide_refresh(300, 375, &[drained], 1, STT_26B_DELAY),
+            decide_refresh(300, 375, &[drained], &[300], 1, STT_26B_DELAY),
             RefreshDecision::Full(RefreshKind::SoftPause)
         );
         assert_eq!(
-            decide_refresh(300, 375, &[drained, 2], 2, STT_26B_DELAY),
+            decide_refresh(300, 375, &[drained, 2], &[300, 300], 2, STT_26B_DELAY),
             RefreshDecision::Lane {
                 batch_idx: 0,
+                kind: RefreshKind::SoftPause,
+            }
+        );
+    }
+
+    #[test]
+    fn decide_refresh_lane_cooldown_blocks_immediate_retrigger() {
+        // SOU-193: right after a Lane refresh, that lane's own
+        // frames_since_lane_reset is 0 even though the global
+        // frames_since_refresh is still well past soft (it only resets on a
+        // Full refresh). If the lane goes straight back into a drained pause
+        // (the listener side of a conversation staying silent), the old code
+        // fired another Lane refresh immediately — this must not clear.
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, 2], &[0, 300], 2, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
+    #[test]
+    fn decide_refresh_lane_cooldown_clears_once_soft_window_elapses_again() {
+        // Same lane as above, but its own counter has climbed back past
+        // `soft` (225 @ context 375) since that Lane refresh: eligible again.
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, 2], &[225, 300], 2, STT_1B_DELAY),
+            RefreshDecision::Lane {
+                batch_idx: 0,
+                kind: RefreshKind::SoftPause,
+            }
+        );
+    }
+
+    #[test]
+    fn decide_refresh_lane_cooldown_is_per_lane_not_global() {
+        // Lane 0 just reset and is still paused (blocked by its own
+        // cooldown); lane 1 is independently paused and its cooldown has
+        // elapsed. Only lane 1 should refresh — a fresh lane 0 must not
+        // suppress a ready lane 1, and the pair must not be treated as
+        // "both paused" (Full) just because lane 0 also has a long streak.
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, drained], &[0, 300], 2, STT_1B_DELAY),
+            RefreshDecision::Lane {
+                batch_idx: 1,
                 kind: RefreshKind::SoftPause,
             }
         );
