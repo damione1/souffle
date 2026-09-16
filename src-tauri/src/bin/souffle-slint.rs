@@ -85,6 +85,18 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    ui.on_download_model({
+        move || {
+            println!("Download model initiated");
+        }
+    });
+
+    ui.on_delete_model({
+        move || {
+            println!("Delete model requested (guarded by state machine)");
+        }
+    });
+
     ui.on_open_settings({
         let ui_handle = ui_handle.clone();
         move || {

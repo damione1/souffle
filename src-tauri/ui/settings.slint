@@ -1,11 +1,17 @@
 import { Theme } from "theme.slint";
-import { Button, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, ScrollView, CheckBox, Slider, LineEdit } from "std-widgets.slint";
 
 export component SettingsView inherits VerticalBox {
     in-out property <string> active-tab: "About";
+    in-out property <bool> autostart-enabled: false;
+    in-out property <bool> feedback-sounds-enabled: true;
+    in-out property <int> unload-timeout-minutes: 15;
+    in-out property <string> active-model-id: "kyutai-fr";
+    
     callback close-settings();
     callback download-model();
     callback delete-model();
+    callback save-settings();
 
     HorizontalBox {
         // Sidebar for tabs
@@ -38,30 +44,62 @@ export component SettingsView inherits VerticalBox {
             }
             
             ScrollView {
-                if active-tab == "About" : Text { text: "About Soufflé"; color: Theme.text; }
+                if active-tab == "About" : VerticalBox {
+                    Text { text: "Soufflé v0.4.0 (100% Rust / Slint Native UI)"; color: Theme.text; }
+                }
                 if active-tab == "Model" : VerticalBox {
                     alignment: start;
                     spacing: 10px;
-                    Text { text: "Transcription Model Settings"; color: Theme.text; }
-                    Button { text: "Download Model"; clicked => { root.download-model(); } }
-                    Button { text: "Delete Model"; clicked => { root.delete-model(); } }
+                    Text { text: "Transcription Model: " + active-model-id; color: Theme.text; }
+                    HorizontalBox {
+                        Button { text: "Download Model"; clicked => { root.download-model(); } }
+                        Button { text: "Delete Model"; clicked => { root.delete-model(); } }
+                    }
                 }
-                if active-tab == "Advanced" : Text { text: "Advanced options..."; color: Theme.text; }
-                if active-tab == "Audio" : Text { text: "Audio settings..."; color: Theme.text; }
-                if active-tab == "Autostart" : Text { text: "Autostart settings..."; color: Theme.text; }
-                if active-tab == "Calendar" : Text { text: "Calendar settings..."; color: Theme.text; }
-                if active-tab == "Data" : Text { text: "Data settings..."; color: Theme.text; }
-                if active-tab == "Diagnostics" : Text { text: "Diagnostics settings..."; color: Theme.text; }
-                if active-tab == "DictationPolish" : Text { text: "DictationPolish settings..."; color: Theme.text; }
-                if active-tab == "Dictionary" : Text { text: "Dictionary settings..."; color: Theme.text; }
-                if active-tab == "FeedbackSounds" : Text { text: "FeedbackSounds settings..."; color: Theme.text; }
-                if active-tab == "Intelligence" : Text { text: "Intelligence settings..."; color: Theme.text; }
-                if active-tab == "Interface" : Text { text: "Interface settings..."; color: Theme.text; }
-                if active-tab == "Microphone" : Text { text: "Microphone settings..."; color: Theme.text; }
-                if active-tab == "Permissions" : Text { text: "Permissions settings..."; color: Theme.text; }
-                if active-tab == "Snippets" : Text { text: "Snippets settings..."; color: Theme.text; }
-                if active-tab == "SummaryTemplates" : Text { text: "SummaryTemplates settings..."; color: Theme.text; }
+                if active-tab == "Audio" : VerticalBox {
+                    spacing: 10px;
+                    Text { text: "Audio Unload Timeout (minutes): " + unload-timeout-minutes; color: Theme.text; }
+                    Slider {
+                        minimum: 0;
+                        maximum: 60;
+                        value: unload-timeout-minutes;
+                        changed(v) => { root.unload-timeout-minutes = Math.floor(v); }
+                    }
+                }
+                if active-tab == "Autostart" : VerticalBox {
+                    CheckBox {
+                        text: "Lancer Soufflé au démarrage du système";
+                        checked: autostart-enabled;
+                        toggled => { autostart-enabled = self.checked; }
+                    }
+                }
+                if active-tab == "FeedbackSounds" : VerticalBox {
+                    CheckBox {
+                        text: "Sons de feedback audio actifs";
+                        checked: feedback-sounds-enabled;
+                        toggled => { feedback-sounds-enabled = self.checked; }
+                    }
+                }
+                if active-tab == "DictationPolish" : VerticalBox {
+                    CheckBox { text: "Nettoyage automatique de la dictée"; checked: true; }
+                }
+                if active-tab == "Microphone" : VerticalBox {
+                    Text { text: "Périphérique d'entrée: Microphone système par défaut"; color: Theme.text; }
+                }
+                if active-tab == "Permissions" : VerticalBox {
+                    Text { text: "Statut des permissions macOS: Micro (Accordé), Accessibilité (Accordé)"; color: Theme.text; }
+                }
+                if active-tab == "Advanced" : Text { text: "Commandes avancées et options développeur."; color: Theme.text; }
+                if active-tab == "Calendar" : Text { text: "Synchronisation EventKit Calendrier."; color: Theme.text; }
+                if active-tab == "Data" : Text { text: "Base de données SQLite et stockage."; color: Theme.text; }
+                if active-tab == "Diagnostics" : Text { text: "Journaux d'erreurs et télémétrie."; color: Theme.text; }
+                if active-tab == "Dictionary" : Text { text: "Dictionnaire personnalisé et réécritures."; color: Theme.text; }
+                if active-tab == "Intelligence" : Text { text: "Modèles Apple Intelligence locaux."; color: Theme.text; }
+                if active-tab == "Interface" : Text { text: "Options d'affichage et thèmes."; color: Theme.text; }
+                if active-tab == "Snippets" : Text { text: "Raccourcis texte et dictionnaire de remplacement."; color: Theme.text; }
+                if active-tab == "SummaryTemplates" : Text { text: "Modèles de résumé de réunion."; color: Theme.text; }
             }
         }
     }
 }
+
