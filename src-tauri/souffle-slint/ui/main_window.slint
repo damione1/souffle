@@ -20,6 +20,8 @@ export component MainWindow inherits Window {
     // "idle" | "dictation" | "meeting" - Rust-driven, set after a real
     // start/stop command succeeds, never optimistically from the UI alone.
     in-out property <string> recording-mode: "idle";
+    in-out property <string> live-text;
+    in-out property <string> live-tentative;
 
     callback dictate-requested();
     callback meeting-requested();
@@ -54,6 +56,8 @@ export component MainWindow inherits Window {
 
     if root.recording-mode != "idle": RecordingView {
         mode: root.recording-mode;
+        live-text: root.live-text;
+        live-tentative: root.live-tentative;
         stop-requested => { root.stop-requested(); }
     }
 }

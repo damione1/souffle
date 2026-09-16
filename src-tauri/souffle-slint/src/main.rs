@@ -84,11 +84,48 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
     }
 }
 
-/// A no-op consumer: milestone 5 wires the live transcript display through
-/// this channel. Real `Channel`, not a stand-in - see the SOU-186 spike
-/// report for why this needs no webview to work.
-fn silent_segment_channel() -> Channel<TranscriptionSegment> {
-    Channel::new(|_segment| Ok(()))
+/// Pushes each transcribed segment into the window's `live-text`/
+/// `live-tentative` properties. Runs on the engine-actor thread, not the
+/// Slint main thread, so every update is marshaled via
+/// `invoke_from_event_loop` - the same reasoning as `run_on_main_thread`,
+/// just fire-and-forget instead of awaited. Milestone 5 scope: a single
+/// running text block for both dictation and meetings, not the full
+/// paragraph-grouped/speaker-lane rendering LiveSessionCard.svelte does -
+/// that's real, separate work (windowing, speaker lanes, inline edit),
+/// deliberately deferred and noted here rather than half-built.
+fn live_segment_channel(weak: slint::Weak<MainWindow>) -> Channel<TranscriptionSegment> {
+    Channel::new(move |body| {
+        // Channel::send serializes via serde_json regardless of the type
+        // parameter (see IpcResponse's blanket impl) - the callback always
+        // receives the raw IPC body, typed or not.
+        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+            return Ok(());
+        };
+        let Ok(segment) = serde_json::from_str::<TranscriptionSegment>(&json) else {
+            return Ok(());
+        };
+        let weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            if segment.is_final {
+                let mut text = window.get_live_text().to_string();
+                let trimmed = segment.text.trim();
+                if !trimmed.is_empty() {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(trimmed);
+                }
+                window.set_live_text(text.into());
+                window.set_live_tentative("".into());
+            } else {
+                window.set_live_tentative(segment.text.into());
+            }
+        });
+        Ok(())
+    })
 }
 
 /// Runs `f` on the real Slint/OS main thread and returns its result.
@@ -117,18 +154,19 @@ where
     rx.await.expect("main-thread task dropped its result")
 }
 
-async fn start_dictation(handle: AppHandle) -> Result<(), String> {
+async fn start_dictation(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Result<(), String> {
     ensure_model_ready(&handle).await?;
     run_on_main_thread(move || {
         tauri::async_runtime::block_on(async move {
             let state = handle.state::<AppState>();
-            souffle_lib::commands::start_transcription(state, silent_segment_channel(), true).await
+            souffle_lib::commands::start_transcription(state, live_segment_channel(weak), true)
+                .await
         })
     })
     .await
 }
 
-async fn start_meeting(handle: AppHandle) -> Result<(), String> {
+async fn start_meeting(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Result<(), String> {
     ensure_model_ready(&handle).await?;
     // Mirrors defaultMeetingTitle() in meeting/controller.svelte.ts.
     let title = format!("Meeting {}", default_meeting_date());
@@ -139,7 +177,7 @@ async fn start_meeting(handle: AppHandle) -> Result<(), String> {
                 state,
                 title,
                 None,
-                silent_segment_channel(),
+                live_segment_channel(weak),
             )
             .await
         })
@@ -195,9 +233,13 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let weak = weak.clone();
         let handle = handle.clone();
         tauri::async_runtime::spawn(async move {
-            let result = start_dictation(handle).await;
+            let result = start_dictation(handle, weak.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
-                Ok(()) => window.set_recording_mode("dictation".into()),
+                Ok(()) => {
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    window.set_recording_mode("dictation".into());
+                }
                 Err(e) => window.set_transcription_status_message(e.into()),
             }) {
                 eprintln!("upgrade_in_event_loop failed (dictate): {e}");
@@ -211,9 +253,13 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let weak = weak.clone();
         let handle = handle.clone();
         tauri::async_runtime::spawn(async move {
-            let result = start_meeting(handle).await;
+            let result = start_meeting(handle, weak.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
-                Ok(()) => window.set_recording_mode("meeting".into()),
+                Ok(()) => {
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    window.set_recording_mode("meeting".into());
+                }
                 Err(e) => window.set_meeting_status_message(e.into()),
             }) {
                 eprintln!("upgrade_in_event_loop failed (meeting): {e}");
@@ -242,6 +288,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                     eprintln!("Failed to stop {mode}: {e}");
                 }
                 window.set_recording_mode("idle".into());
+                window.set_live_text("".into());
+                window.set_live_tentative("".into());
                 refresh_timeline(&window, &handle_for_refresh);
             }) {
                 eprintln!("upgrade_in_event_loop failed (stop): {e}");

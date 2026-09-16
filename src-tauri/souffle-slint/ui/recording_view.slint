@@ -1,51 +1,86 @@
-// Minimal live-recording placeholder for SOU-187 milestone 4: proves the
-// real start/stop round-trip (state transition, real audio capture) works.
-// The rich live transcript/waveform card (LiveSessionCard.svelte parity) is
-// milestone 5 - this is deliberately not that, and says so via its own
-// plainness rather than pretending to be finished.
+import { ScrollView } from "std-widgets.slint";
+
+// Live-recording view for SOU-187. Milestone 4 proved the real start/stop
+// round-trip; milestone 5 adds the real live transcript (single running
+// text block, both modes). Still deliberately not LiveSessionCard.svelte
+// parity - no paragraph/speaker-lane grouping, no inline word edit, no
+// waveform, no notes autosave. Said here honestly, not hidden.
 export component RecordingView inherits VerticalLayout {
     in property <string> mode; // "dictation" | "meeting"
+    in property <string> live-text;
+    in property <string> live-tentative;
 
     callback stop-requested();
 
     padding: 24px;
-    spacing: 24px;
-    alignment: center;
+    spacing: 18px;
 
-    Text {
-        text: root.mode == "meeting" ? "R\u{e9}union en cours\u{2026}" : "Dict\u{e9}e en cours\u{2026}";
-        font-size: 18px;
-        font-weight: 600;
-        horizontal-alignment: center;
+    HorizontalLayout {
+        spacing: 12px;
+        alignment: space-between;
+
+        Text {
+            text: root.mode == "meeting" ? "R\u{e9}union en cours\u{2026}" : "Dict\u{e9}e en cours\u{2026}";
+            font-size: 18px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            height: 40px;
+            width: 120px;
+            border-radius: 20px;
+            background: #cc4444;
+
+            accessible-role: button;
+            accessible-label: "Arr\u{ea}ter";
+            accessible-action-default => { root.stop-requested(); }
+
+            TouchArea {
+                clicked => { root.stop-requested(); }
+            }
+
+            Text {
+                text: "Arr\u{ea}ter";
+                color: white;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
     }
 
     Text {
-        text: "Jalon 5 : transcript live, waveform et carte de session pas encore branch\u{e9}s ici.";
+        text: "Jalon 5 : transcript live seulement - pas de regroupement par paragraphe/locuteur, pas d'\u{e9}dition inline, pas de waveform ici.";
         color: #888888;
-        horizontal-alignment: center;
+        font-size: 11px;
         wrap: word-wrap;
     }
 
     Rectangle {
-        height: 56px;
-        width: 160px;
-        border-radius: 28px;
-        background: #cc4444;
+        vertical-stretch: 1;
+        border-width: 1px;
+        border-color: #3a3a3a;
 
-        accessible-role: button;
-        accessible-label: "Arr\u{ea}ter";
-        accessible-action-default => { root.stop-requested(); }
+        ScrollView {
+            VerticalLayout {
+                padding: 16px;
+                alignment: start;
 
-        TouchArea {
-            clicked => { root.stop-requested(); }
-        }
+                Text {
+                    text: root.live-text == "" && root.live-tentative == "" ? "En \u{e9}coute\u{2026}" : root.live-text;
+                    font-size: 16px;
+                    color: root.live-text == "" ? #888888 : white;
+                    wrap: word-wrap;
+                }
 
-        Text {
-            text: "Arr\u{ea}ter";
-            color: white;
-            font-weight: 600;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+                if root.live-tentative != "": Text {
+                    text: root.live-tentative;
+                    font-size: 16px;
+                    color: #888888;
+                    wrap: word-wrap;
+                }
+            }
         }
     }
 }
