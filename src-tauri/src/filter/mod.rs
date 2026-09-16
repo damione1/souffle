@@ -223,6 +223,7 @@ mod tests {
     /// version mismatches (e.g. ort api-24 vs an older bundled runtime).
     /// Skips when the bundled resources are not present (e.g. bare CI).
     #[test]
+    #[ignore = "flaky/blocking on the CI runner - see SOU-186 AC11, approved live by Damien 2026-09-16"]
     fn silero_vad_runs_against_bundled_ort_dylib() {
         let Some(model_path) = resolve_vad_model_path() else {
             eprintln!("skipping: silero_vad_v4.onnx not found");
@@ -254,6 +255,7 @@ mod tests {
     /// must be fed. Overwriting with the last 30 ms (SOU-067) returned
     /// silence once hangover expired inside the same call.
     #[test]
+    #[ignore = "flaky/blocking on the CI runner - see SOU-186 AC11, approved live by Damien 2026-09-16"]
     fn silero_mixed_block_feeds_when_speech_is_not_last_frame() {
         let Some(model_path) = resolve_vad_model_path() else {
             eprintln!("skipping: silero_vad_v4.onnx not found");
