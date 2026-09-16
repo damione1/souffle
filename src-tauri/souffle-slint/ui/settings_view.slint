@@ -1,0 +1,88 @@
+import { TabWidget, ScrollView, Button, Palette } from "std-widgets.slint";
+import { AutostartSection } from "components/settings/autostart_section.slint";
+import { PermissionsSection } from "components/settings/permissions_section.slint";
+import { DiagnosticsSection } from "components/settings/diagnostics_section.slint";
+
+// Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
+// groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
+// / Réunions / Système); this mirrors that same grouping one-for-one so the
+// two stay comparable file-for-file. Only the tabs whose sections are
+// actually wired below are present - see the ticket journal for which
+// milestone added which tab. `TabWidget` does not support conditional
+// (`if`/`for`) tabs (a compiler-enforced restriction), so tabs are added
+// directly in this source as each is implemented, not hidden behind a flag.
+export component SettingsView inherits Rectangle {
+    in property <bool> autostart-enabled;
+    in property <bool> debug-transcription;
+    in property <string> log-level;
+    in property <string> log-tail;
+    in property <bool> copying-diagnostics: false;
+
+    callback close-requested();
+    callback autostart-changed(bool);
+    callback permissions-review-requested();
+    callback debug-transcription-changed(bool);
+    callback log-level-changed(string);
+    callback copy-diagnostics-requested();
+
+    // Opaque on purpose: this overlays IdleView/MeetingDetail rather than
+    // replacing them (mirrors App.svelte hiding HomeView behind Settings
+    // instead of unmounting it), so without a solid background both would
+    // paint into the same window at once.
+    background: Palette.background;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+
+        HorizontalLayout {
+            alignment: space-between;
+
+            Text {
+                text: "Paramètres";
+                font-size: 20px;
+                font-weight: 700;
+                color: white;
+                vertical-alignment: center;
+            }
+
+            Button {
+                text: "Terminé";
+                clicked => { root.close-requested(); }
+            }
+        }
+
+        TabWidget {
+            Tab {
+                title: "Système";
+
+                ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 22px;
+                        alignment: start;
+
+                        AutostartSection {
+                            autostart-enabled: root.autostart-enabled;
+                            autostart-changed(value) => { root.autostart-changed(value); }
+                        }
+
+                        PermissionsSection {
+                            review-requested => { root.permissions-review-requested(); }
+                        }
+
+                        DiagnosticsSection {
+                            debug-transcription: root.debug-transcription;
+                            log-level: root.log-level;
+                            log-tail: root.log-tail;
+                            copying-diagnostics: root.copying-diagnostics;
+                            debug-transcription-changed(value) => { root.debug-transcription-changed(value); }
+                            log-level-changed(value) => { root.log-level-changed(value); }
+                            copy-diagnostics-requested => { root.copy-diagnostics-requested(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

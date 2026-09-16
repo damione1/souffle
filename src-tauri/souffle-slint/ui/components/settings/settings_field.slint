@@ -1,0 +1,35 @@
+// Port of components/ui/SettingsField.svelte: a label/description pair on
+// the left, the actual control (Switch, ComboBox, Button...) on the right.
+// Every settings row in every section reuses this instead of re-laying out
+// the same two-column row 17 times.
+export component SettingsField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> description: "";
+
+    spacing: 16px;
+    alignment: space-between;
+
+    VerticalLayout {
+        spacing: 2px;
+        alignment: center;
+        horizontal-stretch: 1;
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            font-weight: 600;
+            color: white;
+            horizontal-alignment: left;
+        }
+
+        if root.description != "": Text {
+            text: root.description;
+            font-size: 11.5px;
+            color: #999;
+            wrap: word-wrap;
+            horizontal-alignment: left;
+        }
+    }
+
+    @children
+}

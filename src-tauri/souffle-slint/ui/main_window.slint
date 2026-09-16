@@ -1,6 +1,7 @@
 import { IdleView } from "idle_view.slint";
 import { RecordingView } from "recording_view.slint";
 import { MeetingDetail } from "meeting_detail.slint";
+import { SettingsView } from "settings_view.slint";
 import { TimelineDayGroup } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
@@ -64,6 +65,25 @@ export component MainWindow inherits Window {
     in property <[StructuredActionItem]> meeting-detail-summary-action-items;
     in property <[string]> meeting-detail-summary-open-questions;
 
+    // SOU-188: Settings overlay. Toggled from IdleView's gear button;
+    // `settings-requested` (not a plain property flip) because opening it
+    // must first load the real settings from disk (see main.rs) - closing
+    // needs no such round trip, so `settings-open` alone is enough there.
+    in-out property <bool> settings-open: false;
+    in property <bool> settings-autostart-enabled;
+    in property <bool> settings-debug-transcription;
+    in property <string> settings-log-level;
+    in property <string> settings-log-tail;
+    in property <bool> settings-copying-diagnostics;
+
+    callback settings-requested();
+    callback settings-closed();
+    callback settings-autostart-changed(bool);
+    callback settings-permissions-review-requested();
+    callback settings-debug-transcription-changed(bool);
+    callback settings-log-level-changed(string);
+    callback settings-copy-diagnostics-requested();
+
     callback dictate-requested();
     callback meeting-requested();
     callback filter-changed(TimelineFilter);
@@ -110,6 +130,7 @@ export component MainWindow inherits Window {
         dismiss-meeting-status => { root.dismiss-meeting-status(); }
         timeline-item-opened(kind, id) => { root.timeline-item-opened(kind, id); }
         timeline-item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
+        settings-requested => { root.settings-requested(); }
     }
 
     if root.recording-mode == RecordingMode.idle && root.active-meeting-id != "": MeetingDetail {
@@ -151,5 +172,26 @@ export component MainWindow inherits Window {
         live-text: root.live-text;
         live-tentative: root.live-tentative;
         stop-requested => { root.stop-requested(); }
+    }
+
+    // Drawn last so it overlays whatever is behind it, mirroring App.svelte
+    // hiding HomeView under the Settings overlay rather than replacing it.
+    if root.settings-open: SettingsView {
+        width: 100%;
+        height: 100%;
+        autostart-enabled: root.settings-autostart-enabled;
+        debug-transcription: root.settings-debug-transcription;
+        log-level: root.settings-log-level;
+        log-tail: root.settings-log-tail;
+        copying-diagnostics: root.settings-copying-diagnostics;
+        close-requested => {
+            root.settings-open = false;
+            root.settings-closed();
+        }
+        autostart-changed(value) => { root.settings-autostart-changed(value); }
+        permissions-review-requested => { root.settings-permissions-review-requested(); }
+        debug-transcription-changed(value) => { root.settings-debug-transcription-changed(value); }
+        log-level-changed(value) => { root.settings-log-level-changed(value); }
+        copy-diagnostics-requested => { root.settings-copy-diagnostics-requested(); }
     }
 }

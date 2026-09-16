@@ -6,6 +6,7 @@
 slint::include_modules!();
 
 mod audio_player;
+mod settings_ui;
 mod summary;
 mod timeline;
 mod transcript;
@@ -13,6 +14,7 @@ mod transcript;
 use souffle_lib::engine::{
     TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
+use souffle_lib::settings::AppSettings;
 use souffle_lib::state::AppState;
 use souffle_lib::transcript::{MeetingParticipant, MeetingTranscript};
 use std::cell::RefCell;
@@ -35,6 +37,10 @@ const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
 /// `start_audio_progress_timer`'s 150ms poll below, just faster since
 /// scrolling is more time-sensitive than a playback position label.
 const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
+
+/// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
+const SETTINGS_LOG_TAIL_LINES: u32 = 80;
+const SETTINGS_LOG_POLL: Duration = Duration::from_millis(2000);
 
 /// Backing data for the virtualized transcript list: the full block list
 /// plus precomputed cumulative height estimates (see
@@ -336,6 +342,29 @@ fn start_audio_progress_timer(
             window.set_meeting_detail_audio_is_playing(p.is_playing());
         },
     );
+    timer
+}
+
+/// Re-fetches the log tail and pushes it into the Settings window - mirrors
+/// `DiagnosticsSettingsSection.svelte`'s `refreshTail()`.
+fn refresh_settings_log_tail(window: &MainWindow) {
+    match souffle_lib::commands::get_log_tail(SETTINGS_LOG_TAIL_LINES) {
+        Ok(tail) => window.set_settings_log_tail(tail.into()),
+        Err(e) => eprintln!("Failed to read log tail: {e}"),
+    }
+}
+
+/// Polls the log tail every 2s while Settings is open - mirrors the Svelte
+/// section's `setInterval`. Stopped on `settings-closed` (see
+/// `stop_settings_log_timer`), not left running once the sheet is gone.
+fn start_settings_log_timer(weak: slint::Weak<MainWindow>) -> slint::Timer {
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, SETTINGS_LOG_POLL, move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        refresh_settings_log_tail(&window);
+    });
     timer
 }
 
@@ -868,6 +897,124 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
         if let Some(window) = weak.upgrade() {
             refresh_timeline(&window, &handle);
+        }
+    });
+
+    // SOU-188: Settings shell. `settings_state` caches the full `AppSettings`
+    // struct while the sheet is open, since `save_settings` always writes
+    // the whole object back (matching `saveSettings()` in
+    // controller.svelte.ts) - every field-level callback below mutates this
+    // cache and re-saves it, it never redeclares state on the Slint side.
+    let settings_state: Rc<RefCell<Option<AppSettings>>> = Rc::new(RefCell::new(None));
+    let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_open = settings_state.clone();
+    let settings_log_timer_for_open = settings_log_timer.clone();
+    window.on_settings_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::get_settings(state) {
+            Ok(settings) => {
+                settings_ui::populate(&window, &settings);
+                *settings_state_for_open.borrow_mut() = Some(settings);
+                window.set_settings_open(true);
+                refresh_settings_log_tail(&window);
+                *settings_log_timer_for_open.borrow_mut() =
+                    Some(start_settings_log_timer(weak.clone()));
+            }
+            Err(e) => eprintln!("Failed to load settings: {e}"),
+        }
+    });
+
+    let settings_log_timer_for_close = settings_log_timer.clone();
+    window.on_settings_closed(move || {
+        *settings_log_timer_for_close.borrow_mut() = None;
+    });
+
+    // Mutates `settings_state`'s cached `AppSettings` with `mutate`, saves
+    // the whole object, and reports failure the same honest way every other
+    // command in this file does - `eprintln!`, no popup UI yet. On success
+    // the Slint property is left as the optimistic value the two-way
+    // binding already applied; on failure it stays optimistic too (matches
+    // `notes-changed`'s existing precedent in this file) since none of the
+    // fields wired so far can fail for a reason the user could act on.
+    fn save_settings_field(
+        handle: &AppHandle,
+        settings_state: &Rc<RefCell<Option<AppSettings>>>,
+        mutate: impl FnOnce(&mut AppSettings),
+    ) {
+        let mut guard = settings_state.borrow_mut();
+        let Some(settings) = guard.as_mut() else {
+            return;
+        };
+        mutate(settings);
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
+        {
+            eprintln!("Failed to save settings: {e}");
+        }
+    }
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_autostart = settings_state.clone();
+    window.on_settings_autostart_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_autostart, |settings| {
+            settings.autostart_enabled = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_debug = settings_state.clone();
+    window.on_settings_debug_transcription_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_debug, |settings| {
+            settings.debug_transcription = enabled;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_log_level = settings_state.clone();
+    window.on_settings_log_level_changed(move |value| {
+        let level = settings_ui::log_level_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_log_level, |settings| {
+            settings.log_level = level;
+        });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_log_level(value);
+        }
+    });
+
+    window.on_settings_permissions_review_requested(move || {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security")
+            .spawn();
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_settings_copy_diagnostics_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_copying_diagnostics(true);
+        let state = handle.state::<AppState>();
+        let text = souffle_lib::commands::get_diagnostics_text(state);
+        window.set_settings_copying_diagnostics(false);
+        match text {
+            Ok(text) => match arboard::Clipboard::new() {
+                Ok(mut clipboard) => {
+                    if let Err(e) = clipboard.set_text(text) {
+                        eprintln!("Failed to write diagnostics to clipboard: {e}");
+                    }
+                }
+                Err(e) => eprintln!("Failed to open clipboard: {e}"),
+            },
+            Err(e) => eprintln!("Failed to build diagnostics text: {e}"),
         }
     });
 

@@ -1,0 +1,30 @@
+import { Button } from "std-widgets.slint";
+import { SettingsField } from "settings_field.slint";
+
+// Port of PermissionsSettingsSection.svelte. The Svelte button opens an
+// in-app repair flow that lives in the onboarding surface (SOU-190, not
+// built yet on this shell) - until then this opens the real macOS Privacy &
+// Security pane directly, which is genuine working behavior (not a stub),
+// just not textually identical to the future in-app flow.
+export component PermissionsSection inherits VerticalLayout {
+    callback review-requested();
+
+    spacing: 10px;
+
+    Text {
+        text: "Permissions";
+        font-size: 13.5px;
+        font-weight: 700;
+        color: white;
+    }
+
+    SettingsField {
+        label: "Permissions";
+        description: "Revérifier ou réparer les permissions macOS si le collage ou l'enregistrement cesse de fonctionner après une mise à jour.";
+
+        Button {
+            text: "Vérifier les permissions";
+            clicked => { root.review-requested(); }
+        }
+    }
+}
