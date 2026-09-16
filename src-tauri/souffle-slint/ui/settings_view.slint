@@ -5,6 +5,8 @@ import { DiagnosticsSection } from "components/settings/diagnostics_section.slin
 import { InterfaceSection } from "components/settings/interface_section.slint";
 import { FeedbackSoundsSection } from "components/settings/feedback_sounds_section.slint";
 import { CalendarSection, CalendarRow } from "components/settings/calendar_section.slint";
+import { MicrophoneSection, MicrophoneRow } from "components/settings/microphone_section.slint";
+import { AudioSection } from "components/settings/audio_section.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -40,6 +42,30 @@ export component SettingsView inherits Rectangle {
     in property <bool> calendar-autostart-enabled;
     in property <int> calendar-reminder-minutes;
     in property <[CalendarRow]> calendars;
+    in property <[string]> audio-device-labels;
+    in property <string> selected-device-label;
+    in property <bool> pin-unavailable;
+    in property <string> sample-rate-label;
+    in property <bool> sample-rate-high;
+    in property <bool> resetting-sample-rate;
+    in property <bool> allow-bluetooth-mic;
+    in property <[MicrophoneRow]> microphones;
+    in property <bool> has-disconnected-devices;
+    in property <bool> is-laptop;
+    in property <[string]> clamshell-device-labels;
+    in property <string> clamshell-device-label;
+    in property <bool> system-audio-supported;
+    in property <bool> capture-system-audio;
+    in property <string> meeting-transcription-language;
+    in property <bool> meeting-autostop-enabled;
+    in property <[string]> meeting-autostop-labels;
+    in property <string> meeting-autostop-label;
+    in property <[string]> meeting-max-duration-labels;
+    in property <string> meeting-max-duration-label;
+    in property <bool> vad-enabled;
+    in property <bool> filler-removal;
+    in property <bool> stutter-collapse;
+    in property <bool> dictionary-correction;
 
     callback close-requested();
     callback autostart-changed(bool);
@@ -65,6 +91,24 @@ export component SettingsView inherits Rectangle {
     callback calendar-reminder-minutes-changed(int);
     callback calendar-toggled(string);
     callback calendar-open-system-settings-requested();
+    callback device-changed(string);
+    callback refresh-devices-requested();
+    callback reset-devices-requested();
+    callback reset-sample-rate-requested();
+    callback allow-bluetooth-mic-changed(bool);
+    callback move-device-requested(string, int);
+    callback toggle-hidden-requested(string, bool);
+    callback remove-device-requested(string);
+    callback clamshell-device-changed(string);
+    callback capture-system-audio-changed(bool);
+    callback meeting-transcription-language-changed(string);
+    callback meeting-autostop-enabled-changed(bool);
+    callback meeting-autostop-changed(string);
+    callback meeting-max-duration-changed(string);
+    callback vad-enabled-changed(bool);
+    callback filler-removal-changed(bool);
+    callback stutter-collapse-changed(bool);
+    callback dictionary-correction-changed(bool);
 
     // Opaque on purpose: this overlays IdleView/MeetingDetail rather than
     // replacing them (mirrors App.svelte hiding HomeView behind Settings
@@ -161,6 +205,66 @@ export component SettingsView inherits Rectangle {
                             reminder-minutes-changed(value) => { root.calendar-reminder-minutes-changed(value); }
                             calendar-toggled(id) => { root.calendar-toggled(id); }
                             open-system-settings-requested => { root.calendar-open-system-settings-requested(); }
+                        }
+                    }
+                }
+            }
+
+            Tab {
+                title: "Audio";
+
+                ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 22px;
+                        alignment: start;
+
+                        MicrophoneSection {
+                            device-labels: root.audio-device-labels;
+                            selected-device-label: root.selected-device-label;
+                            pin-unavailable: root.pin-unavailable;
+                            sample-rate-label: root.sample-rate-label;
+                            sample-rate-high: root.sample-rate-high;
+                            resetting-sample-rate: root.resetting-sample-rate;
+                            allow-bluetooth-mic: root.allow-bluetooth-mic;
+                            microphones: root.microphones;
+                            has-disconnected: root.has-disconnected-devices;
+                            device-changed(value) => { root.device-changed(value); }
+                            refresh-requested => { root.refresh-devices-requested(); }
+                            reset-devices-requested => { root.reset-devices-requested(); }
+                            reset-sample-rate-requested => { root.reset-sample-rate-requested(); }
+                            allow-bluetooth-mic-changed(value) => { root.allow-bluetooth-mic-changed(value); }
+                            move-device-requested(uid, direction) => { root.move-device-requested(uid, direction); }
+                            toggle-hidden-requested(uid, hidden) => { root.toggle-hidden-requested(uid, hidden); }
+                            remove-device-requested(uid) => { root.remove-device-requested(uid); }
+                        }
+
+                        AudioSection {
+                            is-laptop: root.is-laptop;
+                            clamshell-device-labels: root.clamshell-device-labels;
+                            clamshell-device-label: root.clamshell-device-label;
+                            system-audio-supported: root.system-audio-supported;
+                            capture-system-audio: root.capture-system-audio;
+                            meeting-transcription-language: root.meeting-transcription-language;
+                            meeting-autostop-enabled: root.meeting-autostop-enabled;
+                            meeting-autostop-labels: root.meeting-autostop-labels;
+                            meeting-autostop-label: root.meeting-autostop-label;
+                            meeting-max-duration-labels: root.meeting-max-duration-labels;
+                            meeting-max-duration-label: root.meeting-max-duration-label;
+                            vad-enabled: root.vad-enabled;
+                            filler-removal: root.filler-removal;
+                            stutter-collapse: root.stutter-collapse;
+                            dictionary-correction: root.dictionary-correction;
+                            clamshell-device-changed(value) => { root.clamshell-device-changed(value); }
+                            capture-system-audio-changed(value) => { root.capture-system-audio-changed(value); }
+                            meeting-transcription-language-changed(value) => { root.meeting-transcription-language-changed(value); }
+                            meeting-autostop-enabled-changed(value) => { root.meeting-autostop-enabled-changed(value); }
+                            meeting-autostop-changed(value) => { root.meeting-autostop-changed(value); }
+                            meeting-max-duration-changed(value) => { root.meeting-max-duration-changed(value); }
+                            vad-enabled-changed(value) => { root.vad-enabled-changed(value); }
+                            filler-removal-changed(value) => { root.filler-removal-changed(value); }
+                            stutter-collapse-changed(value) => { root.stutter-collapse-changed(value); }
+                            dictionary-correction-changed(value) => { root.dictionary-correction-changed(value); }
                         }
                     }
                 }

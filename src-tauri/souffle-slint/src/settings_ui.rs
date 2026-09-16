@@ -9,7 +9,10 @@ use crate::{CalendarRow, MainWindow};
 use souffle_lib::calendar::CalendarInfo;
 use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::PermState;
-use souffle_lib::settings::{AppSettings, PasteMethod, SettingsOptions, ShortcutSettings, Theme};
+use souffle_lib::settings::{
+    AppSettings, MeetingTranscriptionLanguage, PasteMethod, SettingsOptions, ShortcutSettings,
+    Theme,
+};
 
 /// Pushes `settings` into the Slint properties this shell currently wires.
 /// Mirrors `controller.svelte.ts` setting `app.settings` after
@@ -33,9 +36,55 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_calendar_autostart_enabled(settings.calendar_autostart_enabled);
     window.set_settings_calendar_reminder_minutes(settings.calendar_reminder_minutes as i32);
 
+    window.set_settings_is_laptop(souffle_lib::commands::is_laptop());
+    window.set_settings_system_audio_supported(souffle_lib::commands::get_system_audio_support());
+    window.set_settings_allow_bluetooth_mic(settings.allow_bluetooth_mic);
+    window.set_settings_capture_system_audio(settings.capture_system_audio);
+    window.set_settings_meeting_transcription_language(
+        meeting_transcription_language_to_str(&settings.meeting_transcription_language).into(),
+    );
+    window.set_settings_meeting_autostop_enabled(settings.meeting_autostop_enabled);
+    window.set_settings_meeting_autostop_label(
+        crate::audio_ui::minute_label(settings.meeting_autostop_minutes).into(),
+    );
+    window.set_settings_meeting_max_duration_label(
+        crate::audio_ui::minute_label(settings.meeting_max_duration_minutes).into(),
+    );
+    window.set_settings_vad_enabled(settings.vad_enabled);
+    window.set_settings_filler_removal(settings.filler_removal);
+    window.set_settings_stutter_collapse(settings.stutter_collapse);
+    window.set_settings_dictionary_correction(settings.dictionary_correction);
+
     let bounds = SettingsOptions::current();
     window.set_settings_paste_delay_min(bounds.paste_delay_ms_min as i32);
     window.set_settings_paste_delay_max(bounds.paste_delay_ms_max as i32);
+    window.set_settings_meeting_autostop_labels(shared_string_model(
+        &crate::audio_ui::minute_labels(&bounds.meeting_autostop_minutes),
+    ));
+    window.set_settings_meeting_max_duration_labels(shared_string_model(
+        &crate::audio_ui::minute_labels(&bounds.meeting_max_duration_minutes),
+    ));
+}
+
+fn shared_string_model(values: &[String]) -> slint::ModelRc<slint::SharedString> {
+    let values: Vec<slint::SharedString> = values.iter().map(|v| v.as_str().into()).collect();
+    std::rc::Rc::new(slint::VecModel::from(values)).into()
+}
+
+fn meeting_transcription_language_to_str(value: &MeetingTranscriptionLanguage) -> &'static str {
+    match value {
+        MeetingTranscriptionLanguage::Auto => "auto",
+        MeetingTranscriptionLanguage::En => "en",
+        MeetingTranscriptionLanguage::Fr => "fr",
+    }
+}
+
+pub fn meeting_transcription_language_from_str(value: &str) -> MeetingTranscriptionLanguage {
+    match value {
+        "en" => MeetingTranscriptionLanguage::En,
+        "fr" => MeetingTranscriptionLanguage::Fr,
+        _ => MeetingTranscriptionLanguage::Auto,
+    }
 }
 
 /// Pushes the calendar picker's list + permission state - kept separate

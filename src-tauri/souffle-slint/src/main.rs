@@ -6,6 +6,8 @@
 slint::include_modules!();
 
 mod audio_player;
+mod audio_ui;
+mod microphone_list;
 mod settings_ui;
 mod shortcut_capture;
 mod summary;
@@ -13,6 +15,7 @@ mod timeline;
 mod transcript;
 
 use slint::Model;
+use souffle_lib::audio::AudioInputDevice;
 use souffle_lib::engine::{
     TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
@@ -397,6 +400,54 @@ fn load_calendars_if_enabled(
             settings_ui::populate_calendars(window, &calendars, &selected_ids, PermState::Granted)
         }
         Err(_) => settings_ui::populate_calendars(window, &[], &selected_ids, PermState::Denied),
+    }
+}
+
+/// Refreshes the audio device list, both device pickers, and the
+/// microphone priority list, then kicks off an async sample-rate fetch for
+/// whichever device `resolve_sample_rate_device_uid` picks - mirrors
+/// `refreshDevices()` + the `$effect` that calls `refreshInputSampleRate()`
+/// on device/selection change in controller.svelte.ts.
+fn load_audio_devices(
+    window: &MainWindow,
+    settings_state: &Rc<RefCell<Option<AppSettings>>>,
+    audio_devices_state: &Rc<RefCell<Vec<AudioInputDevice>>>,
+) {
+    let devices = souffle_lib::commands::list_audio_devices().unwrap_or_else(|e| {
+        eprintln!("Failed to list audio devices: {e}");
+        Vec::new()
+    });
+    let (selected, clamshell, priority) = {
+        let guard = settings_state.borrow();
+        match guard.as_ref() {
+            Some(settings) => (
+                settings.audio_device.clone().unwrap_or_default(),
+                settings.clamshell_audio_device.clone(),
+                settings.input_priority.clone(),
+            ),
+            None => return,
+        }
+    };
+    audio_ui::populate_device_pickers(window, &devices, &selected, clamshell.as_deref());
+    let list = microphone_list::build_microphone_list(&devices, &priority);
+    audio_ui::populate_microphones(window, &list);
+
+    let rate_uid = audio_ui::resolve_sample_rate_device_uid(&selected, &devices).map(String::from);
+    *audio_devices_state.borrow_mut() = devices;
+
+    window.set_settings_sample_rate_label("".into());
+    window.set_settings_sample_rate_high(false);
+    if let Some(uid) = rate_uid {
+        let weak = window.as_weak();
+        slint::spawn_local(async move {
+            if let Ok(hz) = souffle_lib::commands::get_input_sample_rate(uid).await
+                && let Some(window) = weak.upgrade()
+            {
+                window.set_settings_sample_rate_label(audio_ui::format_sample_rate_hz(hz).into());
+                window.set_settings_sample_rate_high(audio_ui::sample_rate_blocks_conferencing(hz));
+            }
+        })
+        .expect("slint event loop not running");
     }
 }
 
@@ -947,11 +998,15 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     // a real key (-> that combo wins instead) - mirrors `modifierDownEvent`
     // in controller.svelte.ts's `handleKeyDown`/`handleKeyUp`.
     let pending_modifier: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    // Cached so device-picker/microphone-list callbacks (move/hide/remove,
+    // label->uid resolution) don't each re-query CoreAudio.
+    let audio_devices_state: Rc<RefCell<Vec<AudioInputDevice>>> = Rc::new(RefCell::new(Vec::new()));
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_open = settings_state.clone();
     let shortcuts_state_for_open = shortcuts_state.clone();
+    let audio_devices_state_for_open = audio_devices_state.clone();
     let settings_log_timer_for_open = settings_log_timer.clone();
     window.on_settings_requested(move || {
         let Some(window) = weak.upgrade() else {
@@ -981,6 +1036,11 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             Err(e) => eprintln!("Failed to load shortcuts: {e}"),
         }
         load_calendars_if_enabled(&window, &settings_state_for_open);
+        load_audio_devices(
+            &window,
+            &settings_state_for_open,
+            &audio_devices_state_for_open,
+        );
     });
 
     let weak = window.as_weak();
@@ -1285,6 +1345,301 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
 
     window.on_settings_calendar_open_system_settings_requested(move || {
         souffle_lib::commands::open_calendar_settings();
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_device = settings_state.clone();
+    let audio_devices_state_for_device = audio_devices_state.clone();
+    window.on_settings_device_changed(move |label| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_device.borrow(), &label)
+            .unwrap_or_default();
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::select_audio_device(handle.clone(), state, uid.clone())
+        {
+            eprintln!("Failed to select audio device: {e}");
+        }
+        save_settings_field(&handle, &settings_state_for_device, |settings| {
+            settings.audio_device = if uid.is_empty() { None } else { Some(uid) };
+        });
+        load_audio_devices(
+            &window,
+            &settings_state_for_device,
+            &audio_devices_state_for_device,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_refresh = settings_state.clone();
+    let audio_devices_state_for_refresh = audio_devices_state.clone();
+    window.on_settings_refresh_devices_requested(move || {
+        if let Some(window) = weak.upgrade() {
+            load_audio_devices(
+                &window,
+                &settings_state_for_refresh,
+                &audio_devices_state_for_refresh,
+            );
+        }
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_bt = settings_state.clone();
+    window.on_settings_allow_bluetooth_mic_changed(move |allowed| {
+        save_settings_field(&handle, &settings_state_for_bt, |settings| {
+            settings.allow_bluetooth_mic = allowed;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_clamshell = settings_state.clone();
+    let audio_devices_state_for_clamshell = audio_devices_state.clone();
+    window.on_settings_clamshell_device_changed(move |label| {
+        let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_clamshell.borrow(), &label);
+        save_settings_field(&handle, &settings_state_for_clamshell, |settings| {
+            settings.clamshell_audio_device = uid;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_system_audio = settings_state.clone();
+    window.on_settings_capture_system_audio_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_system_audio, |settings| {
+            settings.capture_system_audio = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_meeting_lang = settings_state.clone();
+    window.on_settings_meeting_transcription_language_changed(move |value| {
+        let language = settings_ui::meeting_transcription_language_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_meeting_lang, |settings| {
+            settings.meeting_transcription_language = language;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_autostop_enabled = settings_state.clone();
+    window.on_settings_meeting_autostop_enabled_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_autostop_enabled, |settings| {
+            settings.meeting_autostop_enabled = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_autostop_minutes = settings_state.clone();
+    window.on_settings_meeting_autostop_changed(move |label| {
+        let Some(minutes) = audio_ui::parse_minute_label(&label) else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_autostop_minutes, |settings| {
+            settings.meeting_autostop_minutes = minutes;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_max_duration = settings_state.clone();
+    window.on_settings_meeting_max_duration_changed(move |label| {
+        let Some(minutes) = audio_ui::parse_minute_label(&label) else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_max_duration, |settings| {
+            settings.meeting_max_duration_minutes = minutes;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_vad = settings_state.clone();
+    window.on_settings_vad_enabled_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_vad, |settings| {
+            settings.vad_enabled = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_filler = settings_state.clone();
+    window.on_settings_filler_removal_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_filler, |settings| {
+            settings.filler_removal = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_stutter = settings_state.clone();
+    window.on_settings_stutter_collapse_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_stutter, |settings| {
+            settings.stutter_collapse = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_dictionary = settings_state.clone();
+    window.on_settings_dictionary_correction_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_dictionary, |settings| {
+            settings.dictionary_correction = enabled;
+        });
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_move = settings_state.clone();
+    let audio_devices_state_for_move = audio_devices_state.clone();
+    let handle = tauri_handle.clone();
+    window.on_settings_move_device_requested(move |uid, direction| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let devices = audio_devices_state_for_move.borrow().clone();
+        let mut guard = settings_state_for_move.borrow_mut();
+        let Some(settings) = guard.as_mut() else {
+            return;
+        };
+        let list = microphone_list::build_microphone_list(&devices, &settings.input_priority);
+        let Some(next) = microphone_list::reorder_microphone_list(&list, &uid, direction) else {
+            return;
+        };
+        settings.input_priority.priorities = next;
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
+        {
+            eprintln!("Failed to save settings: {e}");
+        }
+        drop(guard);
+        load_audio_devices(
+            &window,
+            &settings_state_for_move,
+            &audio_devices_state_for_move,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_hide = settings_state.clone();
+    let audio_devices_state_for_hide = audio_devices_state.clone();
+    let handle = tauri_handle.clone();
+    window.on_settings_toggle_hidden_requested(move |uid, hidden| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_hide, |settings| {
+            let hidden_set = &mut settings.input_priority.hidden;
+            hidden_set.retain(|existing| existing.as_str() != uid.as_str());
+            if hidden {
+                hidden_set.push(uid.to_string());
+            }
+        });
+        load_audio_devices(
+            &window,
+            &settings_state_for_hide,
+            &audio_devices_state_for_hide,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_remove = settings_state.clone();
+    let audio_devices_state_for_remove = audio_devices_state.clone();
+    let handle = tauri_handle.clone();
+    window.on_settings_remove_device_requested(move |uid| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        let mut guard = settings_state_for_remove.borrow_mut();
+        let Some(settings) = guard.as_mut() else {
+            return;
+        };
+        settings.input_priority =
+            microphone_list::remove_known_device(&settings.input_priority, &uid);
+        if settings.audio_device.as_deref() == Some(uid.as_str()) {
+            settings.audio_device = None;
+        }
+        if settings.clamshell_audio_device.as_deref() == Some(uid.as_str()) {
+            settings.clamshell_audio_device = None;
+        }
+        if let Err(e) =
+            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
+        {
+            eprintln!("Failed to save settings: {e}");
+        }
+        drop(guard);
+        load_audio_devices(
+            &window,
+            &settings_state_for_remove,
+            &audio_devices_state_for_remove,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_reset_devices = settings_state.clone();
+    let audio_devices_state_for_reset_devices = audio_devices_state.clone();
+    let handle = tauri_handle.clone();
+    window.on_settings_reset_devices_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let connected = souffle_lib::commands::list_audio_devices().unwrap_or_default();
+        let connected_uids: Vec<String> = connected.iter().map(|d| d.uid.clone()).collect();
+        save_settings_field(&handle, &settings_state_for_reset_devices, |settings| {
+            settings
+                .input_priority
+                .priorities
+                .retain(|uid| connected_uids.contains(uid));
+            settings
+                .input_priority
+                .hidden
+                .retain(|uid| connected_uids.contains(uid));
+            settings
+                .input_priority
+                .known
+                .retain(|entry| connected_uids.contains(&entry.uid));
+        });
+        load_audio_devices(
+            &window,
+            &settings_state_for_reset_devices,
+            &audio_devices_state_for_reset_devices,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_reset_rate = settings_state.clone();
+    let audio_devices_state_for_reset_rate = audio_devices_state.clone();
+    window.on_settings_reset_sample_rate_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let selected = settings_state_for_reset_rate
+            .borrow()
+            .as_ref()
+            .and_then(|s| s.audio_device.clone())
+            .unwrap_or_default();
+        let devices = audio_devices_state_for_reset_rate.borrow().clone();
+        let Some(uid) =
+            audio_ui::resolve_sample_rate_device_uid(&selected, &devices).map(String::from)
+        else {
+            return;
+        };
+        window.set_settings_resetting_sample_rate(true);
+        let weak = weak.clone();
+        slint::spawn_local(async move {
+            let result = souffle_lib::commands::reset_input_sample_rate(uid).await;
+            if let Some(window) = weak.upgrade() {
+                window.set_settings_resetting_sample_rate(false);
+                match result {
+                    Ok(hz) => {
+                        window.set_settings_sample_rate_label(
+                            audio_ui::format_sample_rate_hz(hz).into(),
+                        );
+                        window.set_settings_sample_rate_high(
+                            audio_ui::sample_rate_blocks_conferencing(hz),
+                        );
+                    }
+                    Err(e) => eprintln!("Failed to reset sample rate: {e}"),
+                }
+            }
+        })
+        .expect("slint event loop not running");
     });
 
     let weak = window.as_weak();

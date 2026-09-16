@@ -3,6 +3,7 @@ import { RecordingView } from "recording_view.slint";
 import { MeetingDetail } from "meeting_detail.slint";
 import { SettingsView } from "settings_view.slint";
 import { CalendarRow } from "components/settings/calendar_section.slint";
+import { MicrophoneRow } from "components/settings/microphone_section.slint";
 import { TimelineDayGroup } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
@@ -96,6 +97,30 @@ export component MainWindow inherits Window {
     in property <bool> settings-calendar-autostart-enabled;
     in property <int> settings-calendar-reminder-minutes;
     in property <[CalendarRow]> settings-calendars;
+    in property <[string]> settings-audio-device-labels;
+    in property <string> settings-selected-device-label;
+    in property <bool> settings-pin-unavailable;
+    in property <string> settings-sample-rate-label;
+    in property <bool> settings-sample-rate-high;
+    in property <bool> settings-resetting-sample-rate;
+    in property <bool> settings-allow-bluetooth-mic;
+    in property <[MicrophoneRow]> settings-microphones;
+    in property <bool> settings-has-disconnected-devices;
+    in property <bool> settings-is-laptop;
+    in property <[string]> settings-clamshell-device-labels;
+    in property <string> settings-clamshell-device-label;
+    in property <bool> settings-system-audio-supported;
+    in property <bool> settings-capture-system-audio;
+    in property <string> settings-meeting-transcription-language;
+    in property <bool> settings-meeting-autostop-enabled;
+    in property <[string]> settings-meeting-autostop-labels;
+    in property <string> settings-meeting-autostop-label;
+    in property <[string]> settings-meeting-max-duration-labels;
+    in property <string> settings-meeting-max-duration-label;
+    in property <bool> settings-vad-enabled;
+    in property <bool> settings-filler-removal;
+    in property <bool> settings-stutter-collapse;
+    in property <bool> settings-dictionary-correction;
 
     callback settings-requested();
     callback settings-closed();
@@ -122,6 +147,24 @@ export component MainWindow inherits Window {
     callback settings-calendar-reminder-minutes-changed(int);
     callback settings-calendar-toggled(string);
     callback settings-calendar-open-system-settings-requested();
+    callback settings-device-changed(string);
+    callback settings-refresh-devices-requested();
+    callback settings-reset-devices-requested();
+    callback settings-reset-sample-rate-requested();
+    callback settings-allow-bluetooth-mic-changed(bool);
+    callback settings-move-device-requested(string, int);
+    callback settings-toggle-hidden-requested(string, bool);
+    callback settings-remove-device-requested(string);
+    callback settings-clamshell-device-changed(string);
+    callback settings-capture-system-audio-changed(bool);
+    callback settings-meeting-transcription-language-changed(string);
+    callback settings-meeting-autostop-enabled-changed(bool);
+    callback settings-meeting-autostop-changed(string);
+    callback settings-meeting-max-duration-changed(string);
+    callback settings-vad-enabled-changed(bool);
+    callback settings-filler-removal-changed(bool);
+    callback settings-stutter-collapse-changed(bool);
+    callback settings-dictionary-correction-changed(bool);
 
     callback dictate-requested();
     callback meeting-requested();
@@ -243,6 +286,30 @@ export component MainWindow inherits Window {
         calendar-autostart-enabled: root.settings-calendar-autostart-enabled;
         calendar-reminder-minutes: root.settings-calendar-reminder-minutes;
         calendars: root.settings-calendars;
+        audio-device-labels: root.settings-audio-device-labels;
+        selected-device-label: root.settings-selected-device-label;
+        pin-unavailable: root.settings-pin-unavailable;
+        sample-rate-label: root.settings-sample-rate-label;
+        sample-rate-high: root.settings-sample-rate-high;
+        resetting-sample-rate: root.settings-resetting-sample-rate;
+        allow-bluetooth-mic: root.settings-allow-bluetooth-mic;
+        microphones: root.settings-microphones;
+        has-disconnected-devices: root.settings-has-disconnected-devices;
+        is-laptop: root.settings-is-laptop;
+        clamshell-device-labels: root.settings-clamshell-device-labels;
+        clamshell-device-label: root.settings-clamshell-device-label;
+        system-audio-supported: root.settings-system-audio-supported;
+        capture-system-audio: root.settings-capture-system-audio;
+        meeting-transcription-language: root.settings-meeting-transcription-language;
+        meeting-autostop-enabled: root.settings-meeting-autostop-enabled;
+        meeting-autostop-labels: root.settings-meeting-autostop-labels;
+        meeting-autostop-label: root.settings-meeting-autostop-label;
+        meeting-max-duration-labels: root.settings-meeting-max-duration-labels;
+        meeting-max-duration-label: root.settings-meeting-max-duration-label;
+        vad-enabled: root.settings-vad-enabled;
+        filler-removal: root.settings-filler-removal;
+        stutter-collapse: root.settings-stutter-collapse;
+        dictionary-correction: root.settings-dictionary-correction;
         close-requested => {
             root.settings-open = false;
             root.settings-closed();
@@ -270,5 +337,23 @@ export component MainWindow inherits Window {
         calendar-reminder-minutes-changed(value) => { root.settings-calendar-reminder-minutes-changed(value); }
         calendar-toggled(id) => { root.settings-calendar-toggled(id); }
         calendar-open-system-settings-requested => { root.settings-calendar-open-system-settings-requested(); }
+        device-changed(value) => { root.settings-device-changed(value); }
+        refresh-devices-requested => { root.settings-refresh-devices-requested(); }
+        reset-devices-requested => { root.settings-reset-devices-requested(); }
+        reset-sample-rate-requested => { root.settings-reset-sample-rate-requested(); }
+        allow-bluetooth-mic-changed(value) => { root.settings-allow-bluetooth-mic-changed(value); }
+        move-device-requested(uid, direction) => { root.settings-move-device-requested(uid, direction); }
+        toggle-hidden-requested(uid, hidden) => { root.settings-toggle-hidden-requested(uid, hidden); }
+        remove-device-requested(uid) => { root.settings-remove-device-requested(uid); }
+        clamshell-device-changed(value) => { root.settings-clamshell-device-changed(value); }
+        capture-system-audio-changed(value) => { root.settings-capture-system-audio-changed(value); }
+        meeting-transcription-language-changed(value) => { root.settings-meeting-transcription-language-changed(value); }
+        meeting-autostop-enabled-changed(value) => { root.settings-meeting-autostop-enabled-changed(value); }
+        meeting-autostop-changed(value) => { root.settings-meeting-autostop-changed(value); }
+        meeting-max-duration-changed(value) => { root.settings-meeting-max-duration-changed(value); }
+        vad-enabled-changed(value) => { root.settings-vad-enabled-changed(value); }
+        filler-removal-changed(value) => { root.settings-filler-removal-changed(value); }
+        stutter-collapse-changed(value) => { root.settings-stutter-collapse-changed(value); }
+        dictionary-correction-changed(value) => { root.settings-dictionary-correction-changed(value); }
     }
 }
