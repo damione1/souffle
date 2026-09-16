@@ -1,0 +1,26 @@
+[
+  {
+    "input": "hello",
+    "expected": "hello"
+  },
+  {
+    "input": "cafe",
+    "expected": "cafe"
+  },
+  {
+    "input": "café",
+    "expected": "cafe"
+  },
+  {
+    "input": "cafe\u0301",
+    "expected": "cafe"
+  },
+  {
+    "input": "e\u0301\u0302",
+    "expected": "e"
+  },
+  {
+    "input": "İ",
+    "expected": "i"
+  }
+]

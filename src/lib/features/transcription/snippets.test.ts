@@ -15,6 +15,13 @@ describe("foldSnippetTrigger", () => {
   it("gives decomposed and precomposed input the same key", () => {
     expect(foldSnippetTrigger("re\u0301sume\u0301")).toBe(foldSnippetTrigger("résumé"));
   });
+
+  it("matches output with shared Rust fixtures", async () => {
+    const testCases = (await import("./snippet-fold-test-cases.json")).default;
+    for (const testCase of testCases) {
+      expect(foldSnippetTrigger(testCase.input)).toBe(testCase.expected);
+    }
+  });
 });
 
 describe("applySnippet", () => {
