@@ -6,6 +6,7 @@
 slint::include_modules!();
 
 mod audio_player;
+mod summary;
 mod timeline;
 mod transcript;
 
@@ -145,6 +146,45 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_notes(meeting.notes.clone().unwrap_or_default().into());
     window.set_meeting_detail_notes_save_state(NotesSaveState::Idle);
     window.set_meeting_detail_transcript_segment_count(meeting.segments.len() as i32);
+
+    let summary_text = meeting.summary.clone().unwrap_or_default();
+    let key_points: Vec<slint::SharedString> = summary::extract_key_points(&summary_text)
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    window.set_meeting_detail_summary(summary_text.into());
+    window.set_meeting_detail_summary_is_stale(meeting.summary_is_stale);
+    window.set_meeting_detail_summary_model_label(
+        meeting.summary_model.clone().unwrap_or_default().into(),
+    );
+    window.set_meeting_detail_summary_key_points(
+        std::rc::Rc::new(slint::VecModel::from(key_points)).into(),
+    );
+    let structured = meeting.structured_summary.clone().unwrap_or_default();
+    let decisions: Vec<slint::SharedString> =
+        structured.decisions.into_iter().map(Into::into).collect();
+    let action_items: Vec<StructuredActionItem> = structured
+        .action_items
+        .into_iter()
+        .map(|item| StructuredActionItem {
+            text: item.text.into(),
+            owner: item.owner.unwrap_or_default().into(),
+        })
+        .collect();
+    let open_questions: Vec<slint::SharedString> = structured
+        .open_questions
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    window.set_meeting_detail_summary_decisions(
+        std::rc::Rc::new(slint::VecModel::from(decisions)).into(),
+    );
+    window.set_meeting_detail_summary_action_items(
+        std::rc::Rc::new(slint::VecModel::from(action_items)).into(),
+    );
+    window.set_meeting_detail_summary_open_questions(
+        std::rc::Rc::new(slint::VecModel::from(open_questions)).into(),
+    );
 }
 
 /// Sets `transcript_state` to `meeting`'s full block list + offsets, mounts

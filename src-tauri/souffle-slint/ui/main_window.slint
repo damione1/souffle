@@ -3,6 +3,7 @@ import { RecordingView } from "recording_view.slint";
 import { MeetingDetail } from "meeting_detail.slint";
 import { TimelineDayGroup } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
+import { StructuredActionItem } from "components/summary_section.slint";
 import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState } from "types.slint";
 
 export component MainWindow inherits Window {
@@ -55,6 +56,13 @@ export component MainWindow inherits Window {
     // slice (AC15): the same value as above, converted to a plain float so
     // Rust doesn't need Slint's internal `length`-wrapping type.
     out property <float> meeting-detail-transcript-scroll-top-px: root.meeting-detail-transcript-scroll-top / 1px;
+    in property <string> meeting-detail-summary;
+    in property <bool> meeting-detail-summary-is-stale;
+    in property <string> meeting-detail-summary-model-label;
+    in property <[string]> meeting-detail-summary-key-points;
+    in property <[string]> meeting-detail-summary-decisions;
+    in property <[StructuredActionItem]> meeting-detail-summary-action-items;
+    in property <[string]> meeting-detail-summary-open-questions;
 
     callback dictate-requested();
     callback meeting-requested();
@@ -121,6 +129,13 @@ export component MainWindow inherits Window {
         transcript-spacer-before: root.meeting-detail-transcript-spacer-before;
         transcript-spacer-after: root.meeting-detail-transcript-spacer-after;
         transcript-scroll-top <=> root.meeting-detail-transcript-scroll-top;
+        summary: root.meeting-detail-summary;
+        summary-is-stale: root.meeting-detail-summary-is-stale;
+        summary-model-label: root.meeting-detail-summary-model-label;
+        summary-key-points: root.meeting-detail-summary-key-points;
+        summary-decisions: root.meeting-detail-summary-decisions;
+        summary-action-items: root.meeting-detail-summary-action-items;
+        summary-open-questions: root.meeting-detail-summary-open-questions;
         back-requested => { root.meeting-detail-back(); }
         rename-requested(title) => { root.meeting-detail-rename(title); }
         notes-changed(value) => { root.meeting-detail-notes-changed(value); }

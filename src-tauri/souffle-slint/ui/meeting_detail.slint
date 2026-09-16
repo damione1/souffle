@@ -2,6 +2,7 @@ import { LineEdit, TextEdit, ScrollView } from "std-widgets.slint";
 import { NotesSaveState } from "types.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
+import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
 
 // Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
 // completed-meeting variant only. The live-recording variant of
@@ -9,14 +10,14 @@ import { TranscriptSection, TranscriptBlock } from "components/transcript_sectio
 // is out of scope: this app shows RecordingView instead while a meeting is
 // live (see main_window.slint), never this component.
 //
-// Milestones 6-8a scope, said here rather than hidden: header (title,
+// Milestones 6-9 scope, said here rather than hidden: header (title,
 // rename, date/duration/segment count, participants) + notes (load, edit,
 // debounced autosave) + native audio playback/waveform + read-only
-// transcript with speaker labels. Not yet ported: transcript bulk/per-word
-// edit + dictionary alias popover, transcript virtualization, summary
-// raw+structured (milestone 9), export menu and resume-recording (need the
-// native file dialog from SOU-191, not available to this headless bridge
-// yet).
+// transcript with speaker labels, virtualized for long meetings + read-only
+// summary (raw + structured). Not yet ported: transcript bulk/per-word edit
+// + dictionary alias popover, summary generation itself (model/template
+// pickers, streaming), export menu and resume-recording (need the native
+// file dialog from SOU-191, not available to this headless bridge yet).
 export component MeetingDetail inherits VerticalLayout {
     in property <string> title;
     in property <string> meta-line;
@@ -35,6 +36,13 @@ export component MeetingDetail inherits VerticalLayout {
     in property <float> transcript-spacer-before: 0.0;
     in property <float> transcript-spacer-after: 0.0;
     in-out property <length> transcript-scroll-top: 0px;
+    in property <string> summary;
+    in property <bool> summary-is-stale: false;
+    in property <string> summary-model-label;
+    in property <[string]> summary-key-points;
+    in property <[string]> summary-decisions;
+    in property <[StructuredActionItem]> summary-action-items;
+    in property <[string]> summary-open-questions;
 
     callback back-requested();
     callback rename-requested(string);
@@ -161,11 +169,14 @@ export component MeetingDetail inherits VerticalLayout {
                     paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
                 }
 
-                Text {
-                    text: "Pas encore de r\u{e9}sum\u{e9} ici (jalon 9).";
-                    color: #888888;
-                    font-size: 11px;
-                    wrap: word-wrap;
+                SummarySection {
+                    summary: root.summary;
+                    summary-is-stale: root.summary-is-stale;
+                    summary-model-label: root.summary-model-label;
+                    key-points: root.summary-key-points;
+                    decisions: root.summary-decisions;
+                    action-items: root.summary-action-items;
+                    open-questions: root.summary-open-questions;
                 }
 
                 Rectangle {

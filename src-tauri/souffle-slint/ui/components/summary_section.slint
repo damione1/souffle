@@ -1,0 +1,156 @@
+// Port of MeetingSummarySection.svelte + MeetingStructuredSummarySection.svelte
+// - read-only display only (SOU-187 milestone 9, remaining part of AC13).
+// Generation itself (model/template pickers, the "Générer"/"Regénérer"
+// button, streaming progress) is not wired here: it needs the same
+// Channel-based streaming plumbing as milestone 5's live transcript, which
+// is a separate, substantial piece of work. Said here rather than a
+// missing button being mistaken for an oversight.
+export struct StructuredActionItem {
+    text: string,
+    owner: string, // empty when there's no owner
+}
+
+export component SummarySection inherits VerticalLayout {
+    in property <string> summary; // empty means "no summary yet"
+    in property <bool> summary-is-stale: false;
+    in property <string> summary-model-label;
+    in property <[string]> key-points;
+    in property <[string]> decisions;
+    in property <[StructuredActionItem]> action-items;
+    in property <[string]> open-questions;
+
+    spacing: 8px;
+
+    if root.summary == "": Text {
+        text: "Aucun r\u{e9}sum\u{e9} g\u{e9}n\u{e9}r\u{e9} pour cette r\u{e9}union (g\u{e9}n\u{e9}ration pas encore branch\u{e9}e ici).";
+        color: #888888;
+        font-size: 11px;
+        wrap: word-wrap;
+    }
+
+    if root.summary != "": VerticalLayout {
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: space-between;
+
+            Text {
+                text: "R\u{e9}sum\u{e9}";
+                font-size: 11px;
+                font-weight: 600;
+                color: #888888;
+                vertical-alignment: center;
+            }
+
+            if root.summary-model-label != "": Text {
+                text: root.summary-model-label;
+                font-family: "monospace";
+                font-size: 10.5px;
+                color: #777777;
+                vertical-alignment: center;
+            }
+        }
+
+        if root.summary-is-stale: Text {
+            text: "R\u{e9}sum\u{e9} obsol\u{e8}te (audio ajout\u{e9} depuis)";
+            color: #d4a72c;
+            font-size: 11px;
+        }
+
+        if root.key-points.length > 0: VerticalLayout {
+            spacing: 6px;
+
+            for point[index] in root.key-points: HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: (index + 1) + ".";
+                    font-family: "monospace";
+                    font-size: 11px;
+                    color: #4a9eff;
+                    width: 18px;
+                }
+                Text {
+                    text: point;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        Rectangle {
+            border-width: 1px;
+            border-color: #3a3a3a;
+
+            VerticalLayout {
+                padding: 12px;
+
+                Text {
+                    text: root.summary;
+                    font-size: 12.5px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if root.decisions.length > 0: VerticalLayout {
+            spacing: 6px;
+
+            Text {
+                text: "D\u{e9}cisions";
+                font-size: 11px;
+                font-weight: 600;
+                color: #888888;
+            }
+            for decision in root.decisions: Text {
+                text: "\u{2022} " + decision;
+                font-size: 12px;
+                color: #4a9eff;
+                wrap: word-wrap;
+            }
+        }
+
+        if root.action-items.length > 0: VerticalLayout {
+            spacing: 6px;
+
+            Text {
+                text: "Actions";
+                font-size: 11px;
+                font-weight: 600;
+                color: #888888;
+            }
+            for item in root.action-items: VerticalLayout {
+                Text {
+                    text: item.text;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                if item.owner != "": Text {
+                    text: "\u{2192} " + item.owner;
+                    font-family: "monospace";
+                    font-size: 10.5px;
+                    color: #777777;
+                }
+            }
+        }
+
+        if root.open-questions.length > 0: VerticalLayout {
+            spacing: 6px;
+
+            Text {
+                text: "Questions ouvertes";
+                font-size: 11px;
+                font-weight: 600;
+                color: #888888;
+            }
+            for question in root.open-questions: Text {
+                text: "\u{2022} " + question;
+                font-size: 12px;
+                color: #cccccc;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
