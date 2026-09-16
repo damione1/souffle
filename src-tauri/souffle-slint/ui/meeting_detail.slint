@@ -1,5 +1,6 @@
 import { LineEdit, TextEdit } from "std-widgets.slint";
 import { NotesSaveState } from "types.slint";
+import { AudioPlayerSection } from "components/audio_player_section.slint";
 
 // Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
 // completed-meeting variant only. The live-recording variant of
@@ -7,9 +8,9 @@ import { NotesSaveState } from "types.slint";
 // is out of scope: this app shows RecordingView instead while a meeting is
 // live (see main_window.slint), never this component.
 //
-// Milestone 6 scope, said here rather than hidden: header (title, rename,
+// Milestones 6-7 scope, said here rather than hidden: header (title, rename,
 // date/duration/segment count, participants) + notes (load, edit, debounced
-// autosave). Not yet ported: audio player/waveform (milestone 7), transcript
+// autosave) + native audio playback/waveform. Not yet ported: transcript
 // with speaker labels (milestone 8), summary raw+structured (milestone 9),
 // export menu and resume-recording (need the native file dialog from
 // SOU-191, not available to this headless bridge yet).
@@ -20,10 +21,18 @@ export component MeetingDetail inherits VerticalLayout {
     in property <[string]> participant-labels;
     in-out property <string> notes;
     in property <NotesSaveState> notes-save-state;
+    in property <bool> has-audio: false;
+    in property <bool> audio-is-playing: false;
+    in property <[float]> audio-peaks;
+    in property <float> audio-progress;
+    in property <string> audio-position-label;
+    in property <string> audio-duration-label;
 
     callback back-requested();
     callback rename-requested(string);
     callback notes-changed(string);
+    callback audio-play-pause-requested();
+    callback audio-seek-requested(float);
 
     property <bool> editing-title: false;
     property <string> title-draft;
@@ -115,8 +124,19 @@ export component MeetingDetail inherits VerticalLayout {
         }
     }
 
+    AudioPlayerSection {
+        has-audio: root.has-audio;
+        is-playing: root.audio-is-playing;
+        peaks: root.audio-peaks;
+        progress: root.audio-progress;
+        position-label: root.audio-position-label;
+        duration-label: root.audio-duration-label;
+        play-pause-requested => { root.audio-play-pause-requested(); }
+        seek-requested(fraction) => { root.audio-seek-requested(fraction); }
+    }
+
     Text {
-        text: "Jalon 6 : en-t\u{ea}te + notes seulement - pas encore de lecteur audio/waveform, pas de transcript, pas de r\u{e9}sum\u{e9} ici.";
+        text: "Pas encore de transcript ni de r\u{e9}sum\u{e9} ici (jalons 8-9).";
         color: #888888;
         font-size: 11px;
         wrap: word-wrap;

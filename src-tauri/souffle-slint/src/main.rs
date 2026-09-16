@@ -5,6 +5,7 @@
 // in-process function calls, no IPC, no serialization.
 slint::include_modules!();
 
+mod audio_player;
 mod timeline;
 
 use souffle_lib::engine::{
@@ -119,6 +120,96 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     );
     window.set_meeting_detail_notes(meeting.notes.clone().unwrap_or_default().into());
     window.set_meeting_detail_notes_save_state(NotesSaveState::Idle);
+}
+
+/// Stops and drops any currently loaded audio player/progress timer -
+/// dropping `AudioPlayer` stops its `cpal` stream. Called before loading a
+/// different meeting's audio and when leaving MeetingDetail, so switching
+/// meetings never leaves a stale stream playing in the background.
+fn stop_audio_player(
+    player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+) {
+    *progress_timer.borrow_mut() = None;
+    *player.borrow_mut() = None;
+}
+
+/// Repeatedly (150ms) reflects the loaded player's real position/playing
+/// state into the window's properties - mirrors the `<audio>` element's
+/// `timeupdate` event that `MeetingAudioPlayerSection.svelte` listens to.
+/// Left running for as long as MeetingDetail with audio is open (not just
+/// while playing): simpler and safe (no self-drop from inside its own
+/// callback) at the cost of a harmless no-op tick every 150ms while paused.
+fn start_audio_progress_timer(
+    weak: slint::Weak<MainWindow>,
+    player: Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+) -> slint::Timer {
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(150),
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let guard = player.borrow();
+            let Some(p) = guard.as_ref() else {
+                return;
+            };
+            window.set_meeting_detail_audio_progress(p.progress());
+            window.set_meeting_detail_audio_position_label(
+                timeline::format_duration(p.position_seconds()).into(),
+            );
+            window.set_meeting_detail_audio_is_playing(p.is_playing());
+        },
+    );
+    timer
+}
+
+/// Loads (decodes + opens a paused output stream for) the first recorded
+/// session of `meeting_id`, if any - mirrors `getMeetingAudio` populating
+/// `MeetingAudioPlayerSection`. Multiple recording sessions (a meeting
+/// resumed after being stopped) are real but out of scope here: only the
+/// first session plays, same honest v1 boundary as the rest of this
+/// milestone, not silently wrong for the common single-session case.
+fn load_meeting_audio(
+    window: &MainWindow,
+    meeting_id: &str,
+    player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    weak: slint::Weak<MainWindow>,
+) {
+    let sessions = souffle_lib::commands::get_meeting_audio(meeting_id.to_string())
+        .inspect_err(|e| eprintln!("Failed to list meeting audio: {e}"))
+        .unwrap_or_default();
+    let Some(session) = sessions.first() else {
+        window.set_meeting_detail_has_audio(false);
+        window.set_meeting_detail_audio_peaks(
+            std::rc::Rc::new(slint::VecModel::from(Vec::<f32>::new())).into(),
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&session.path);
+    match audio_player::load(&path) {
+        Ok((loaded, peaks)) => {
+            window.set_meeting_detail_has_audio(true);
+            window.set_meeting_detail_audio_peaks(
+                std::rc::Rc::new(slint::VecModel::from(peaks)).into(),
+            );
+            window.set_meeting_detail_audio_duration_label(
+                timeline::format_duration(loaded.duration_seconds()).into(),
+            );
+            window.set_meeting_detail_audio_position_label(timeline::format_duration(0.0).into());
+            window.set_meeting_detail_audio_progress(0.0);
+            window.set_meeting_detail_audio_is_playing(false);
+            *player.borrow_mut() = Some(loaded);
+            *progress_timer.borrow_mut() = Some(start_audio_progress_timer(weak, player.clone()));
+        }
+        Err(e) => {
+            eprintln!("Failed to load meeting audio: {e}");
+            window.set_meeting_detail_has_audio(false);
+        }
+    }
 }
 
 /// Mirrors `ensureModelLoaded` in transcription/runtime.ts: ready is a no-op,
@@ -376,8 +467,16 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
+    // Shared with load_meeting_audio/stop_audio_player and the play-pause/
+    // seek callbacks below - one loaded player at a time, for whichever
+    // meeting is currently open in MeetingDetail.
+    let player: Rc<RefCell<Option<audio_player::AudioPlayer>>> = Rc::new(RefCell::new(None));
+    let progress_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
+    let player_for_open = player.clone();
+    let progress_timer_for_open = progress_timer.clone();
     window.on_timeline_item_opened(move |kind, id| {
         if kind != TimelineKind::Meeting {
             // Dictation inline-expand has no Slint equivalent yet - real
@@ -388,17 +487,55 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
+        stop_audio_player(&player_for_open, &progress_timer_for_open);
         let state = handle.state::<AppState>();
         match souffle_lib::commands::get_meeting(state, id.to_string()) {
-            Ok(meeting) => populate_meeting_detail(&window, &meeting),
+            Ok(meeting) => {
+                populate_meeting_detail(&window, &meeting);
+                load_meeting_audio(
+                    &window,
+                    &meeting.id,
+                    &player_for_open,
+                    &progress_timer_for_open,
+                    weak.clone(),
+                );
+            }
             Err(e) => eprintln!("Failed to load meeting {id}: {e}"),
         }
     });
 
     let weak = window.as_weak();
+    let player_for_back = player.clone();
+    let progress_timer_for_back = progress_timer.clone();
     window.on_meeting_detail_back(move || {
         if let Some(window) = weak.upgrade() {
             window.set_active_meeting_id("".into());
+        }
+        stop_audio_player(&player_for_back, &progress_timer_for_back);
+    });
+
+    let weak = window.as_weak();
+    let player_for_play = player.clone();
+    window.on_meeting_detail_audio_play_pause_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let guard = player_for_play.borrow();
+        let Some(p) = guard.as_ref() else {
+            return;
+        };
+        if p.is_playing() {
+            p.pause();
+        } else {
+            p.play();
+        }
+        window.set_meeting_detail_audio_is_playing(p.is_playing());
+    });
+
+    let player_for_seek = player.clone();
+    window.on_meeting_detail_audio_seek_requested(move |fraction| {
+        if let Some(p) = player_for_seek.borrow().as_ref() {
+            p.seek_to(fraction);
         }
     });
 

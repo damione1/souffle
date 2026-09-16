@@ -147,6 +147,66 @@ pub fn next_session_index(meeting_id: &str) -> std::io::Result<usize> {
     Ok(next_session_index_from(&list_session_files(meeting_id)?))
 }
 
+/// Decodes an Ogg Opus recording (written by [`OggOpusWriter`]) to mono f32
+/// PCM at 48kHz - the rate Opus's own granule positions are always expressed
+/// in (RFC 7845), so decoding at 48kHz is always lossless with respect to
+/// whatever the encoder's original input rate was.
+pub fn decode_ogg_opus(path: &std::path::Path) -> Result<Vec<f32>, String> {
+    const DECODE_RATE: u32 = 48_000;
+    // Largest frame this decoder will ever see: 120ms at 48kHz, comfortably
+    // above the encoder's fixed 20ms frames.
+    const MAX_FRAME_SAMPLES: usize = 5_760;
+
+    let file = std::fs::File::open(path).map_err(|e| format!("Open recording: {e}"))?;
+    let mut reader = ogg::reading::PacketReader::new(file);
+    let mut decoder = opus::Decoder::new(DECODE_RATE, Channels::Mono)
+        .map_err(|e| format!("Create Opus decoder: {e}"))?;
+
+    let mut packet_index = 0u64;
+    let mut samples = Vec::new();
+    let mut out_buf = [0f32; MAX_FRAME_SAMPLES];
+    loop {
+        let packet = match reader.read_packet() {
+            Ok(Some(packet)) => packet,
+            Ok(None) => break,
+            Err(e) => return Err(format!("Read Ogg packet: {e}")),
+        };
+        packet_index += 1;
+        // Packet 1 is OpusHead, packet 2 is OpusTags - neither carries audio.
+        if packet_index <= 2 {
+            continue;
+        }
+        let len = decoder
+            .decode_float(&packet.data, &mut out_buf, false)
+            .map_err(|e| format!("Decode Opus packet: {e}"))?;
+        samples.extend_from_slice(&out_buf[..len]);
+    }
+    Ok(samples)
+}
+
+/// Downsamples `samples` into `bucket_count` peak (max absolute value)
+/// buckets, normalized to `0.0..=1.0` - a bar-style overview, not a literal
+/// point-by-point waveform (the same kind of summary any DAW peak view
+/// shows).
+pub fn waveform_peaks(samples: &[f32], bucket_count: usize) -> Vec<f32> {
+    if bucket_count == 0 || samples.is_empty() {
+        return Vec::new();
+    }
+    let bucket_size = samples.len().div_ceil(bucket_count);
+    let mut peaks: Vec<f32> = samples
+        .chunks(bucket_size)
+        .map(|chunk| chunk.iter().fold(0.0f32, |acc, s| acc.max(s.abs())))
+        .collect();
+    peaks.resize(bucket_count, 0.0);
+    let max_peak = peaks.iter().cloned().fold(0.0f32, f32::max);
+    if max_peak > 0.0 {
+        for p in &mut peaks {
+            *p /= max_peak;
+        }
+    }
+    peaks
+}
+
 fn opus_head(pre_skip: u16, input_rate: u32) -> Vec<u8> {
     let mut v = Vec::with_capacity(19);
     v.extend_from_slice(b"OpusHead");
@@ -564,6 +624,44 @@ mod tests {
             listed.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
             vec![0, 1]
         );
+    }
+
+    #[test]
+    fn decode_ogg_opus_round_trips_a_sine_wave() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("0.ogg");
+        let file = std::fs::File::create(&path).expect("create");
+        let mut writer = OggOpusWriter::new(std::io::BufWriter::new(file), 16_000).expect("writer");
+        writer.write_chunk(&sine(1.0, 16_000)).expect("write");
+        writer.finish().expect("finish");
+        drop(writer);
+
+        let decoded = decode_ogg_opus(&path).expect("decode");
+        // Decoded at 48kHz regardless of the 16kHz encode rate; allow slack
+        // for the encoder's pre-skip and frame rounding either side of the
+        // nominal 1s * 48_000 sample count.
+        assert!(
+            decoded.len() > 40_000 && decoded.len() < 56_000,
+            "unexpected decoded length: {}",
+            decoded.len()
+        );
+        let rms = (decoded.iter().map(|s| s * s).sum::<f32>() / decoded.len() as f32).sqrt();
+        assert!(rms > 0.05, "decoded audio looks silent: rms={rms}");
+    }
+
+    #[test]
+    fn waveform_peaks_normalizes_and_buckets() {
+        let samples = sine(1.0, 48_000);
+        let peaks = waveform_peaks(&samples, 100);
+        assert_eq!(peaks.len(), 100);
+        assert!(peaks.iter().any(|p| *p > 0.9));
+        assert!(peaks.iter().all(|p| (0.0..=1.0).contains(p)));
+    }
+
+    #[test]
+    fn waveform_peaks_handles_empty_input() {
+        assert!(waveform_peaks(&[], 100).is_empty());
+        assert!(waveform_peaks(&[0.1, 0.2], 0).is_empty());
     }
 
     #[test]
