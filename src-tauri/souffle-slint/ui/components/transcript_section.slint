@@ -1,14 +1,29 @@
-// Port of MeetingTranscriptSection.svelte - read-only display only so far
-// (milestone 8a/8b): paragraph grouping with speaker labels and
-// session-break dividers, click-to-seek on a paragraph's timestamp, and
-// virtualized scrolling (AC15). Not yet ported: bulk edit mode, per-word
-// inline edit + dictionary alias popover (TranscriptWordLine.svelte,
-// milestone 8d).
+import { LineEdit } from "std-widgets.slint";
+
+// Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
+// labels and session-break dividers, click-to-seek on a paragraph's
+// timestamp, virtualized scrolling (AC15), and per-word dictionary-alias
+// popover (TranscriptWordLine.svelte, milestone 8d). Not yet ported: bulk
+// edit mode.
 export struct TranscriptBlock {
     is-session-break: bool,
     speaker-label: string,
     timestamp: string,
     text: string,
+    // Same content as `text`, but with clickable words wrapped as Markdown
+    // links, pre-parsed in Rust (`slint::StyledText::from_markdown`, see
+    // `transcript::build_markdown_text`) - `@markdown(...)` only accepts a
+    // compile-time string literal (interpolated `\{value}` slots are
+    // inserted as literal escaped text, not re-parsed as markup, confirmed
+    // empirically: a dynamic string through `@markdown("\{expr}")` renders
+    // its brackets/parens literally instead of becoming links). Rendered
+    // via `StyledText` instead of `Text` so individual words stay clickable
+    // while the paragraph still wraps normally: Slint has no inline-flow
+    // layout primitive (confirmed against
+    // `i-slint-compiler-1.17.1/builtins.slint` - `Text`/`HorizontalLayout`
+    // can't mix per-word click targets with natural wrapping), but
+    // `StyledText`'s Markdown link support gives the same effect for free.
+    markdown-text: styled-text,
     // -1 when the paragraph isn't attributed to any recorded audio session.
     recording-session-index: int,
     start-time: float,
@@ -44,8 +59,137 @@ export component TranscriptSection inherits VerticalLayout {
 
     // (recording-session-index, start-time) of the clicked paragraph.
     callback paragraph-clicked(int, float);
+    // (term, pronunciation) once the user saves the alias popover.
+    callback alias-save-requested(string, string);
+
+    // Draft state for the alias popup below, kept on `root` rather than on
+    // the `PopupWindow` itself: Slint rejects *any* access (read, write, or
+    // function call) to something declared inside a `PopupWindow` from its
+    // enclosing component ("Cannot access property or callback ... inside
+    // of a PopupWindow from enclosing component") - only the two builtin
+    // `show()`/`close()` methods are callable from outside. Living on
+    // `root` instead means the popup's own content just reads/writes
+    // `root.*`, which is ordinary parent-scope access, unaffected by that
+    // restriction.
+    property <string> alias-term-draft;
+    property <string> alias-pronunciation-draft;
 
     spacing: 8px;
+
+    // One shared popup, repositioned/relabeled per click rather than one
+    // instance per word (there can be hundreds of words on screen at once
+    // even virtualized).
+    alias-popup := PopupWindow {
+        width: 260px;
+        height: 190px;
+        // The default `close-policy` (`close-on-click`, now deprecated)
+        // dismisses the popup on *any* click, including ones on its own
+        // `LineEdit`s/button - not just clicks outside it (found the hard
+        // way: every attempt to focus a field or press Save just closed the
+        // popup instead, confirmed by reading `i-slint-core-1.17.1/window.rs`:
+        // the old property maps to closing on every pressed event, while
+        // `close-on-click-outside` specifically checks `!mouse_inside_popup()`).
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        alias-popup-focus := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    alias-popup.close();
+                    accept
+                } else {
+                    reject
+                }
+            }
+
+            Rectangle {
+                background: #2a2a2a;
+                border-width: 1px;
+                border-color: #4a9eff;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        alignment: space-between;
+
+                        Text {
+                            text: "Alias de dictionnaire";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: #cccccc;
+                            vertical-alignment: center;
+                        }
+
+                        cancel-btn := Rectangle {
+                            width: 16px;
+                            height: 16px;
+
+                            accessible-role: button;
+                            accessible-label: "Fermer";
+                            accessible-action-default => { alias-popup.close(); }
+
+                            TouchArea {
+                                clicked => { alias-popup.close(); }
+                            }
+
+                            Text {
+                                text: "\u{2715}";
+                                font-size: 11px;
+                                color: #888888;
+                            }
+                        }
+                    }
+
+                    LineEdit {
+                        placeholder-text: "Terme correct";
+                        text <=> root.alias-term-draft;
+                        accepted => { root.save-and-close-alias-popup(); }
+                    }
+
+                    LineEdit {
+                        placeholder-text: "Prononciation entendue";
+                        text <=> root.alias-pronunciation-draft;
+                        accepted => { root.save-and-close-alias-popup(); }
+                    }
+
+                    save-btn := Rectangle {
+                        height: 26px;
+                        background: root.alias-term-draft == "" ? #3a3a3a : (save-area.has-hover ? #3a7bc8 : #4a9eff);
+
+                        accessible-role: button;
+                        accessible-label: "Enregistrer l'alias";
+                        accessible-action-default => { root.save-and-close-alias-popup(); }
+
+                        save-area := TouchArea {
+                            enabled: root.alias-term-draft != "";
+                            clicked => { root.save-and-close-alias-popup(); }
+                        }
+
+                        Text {
+                            text: "Enregistrer";
+                            color: white;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function open-alias-popup(heard-as: string) {
+        root.alias-term-draft = "";
+        root.alias-pronunciation-draft = heard-as;
+        alias-popup.show();
+    }
+
+    function save-and-close-alias-popup() {
+        if root.alias-term-draft != "" {
+            root.alias-save-requested(root.alias-term-draft, root.alias-pronunciation-draft);
+            alias-popup.close();
+        }
+    }
 
     Text {
         text: "Transcript \u{b7} " + root.segment-count + " segments";
@@ -120,10 +264,18 @@ export component TranscriptSection inherits VerticalLayout {
                             }
                         }
 
-                        Text {
-                            text: block.text;
-                            font-size: 13px;
-                            wrap: word-wrap;
+                        StyledText {
+                            text: block.markdown-text;
+                            default-color: white;
+                            default-font-size: 13px;
+                            link-color: #4a9eff;
+                            // Not positioned under the exact clicked word:
+                            // `PopupWindow`'s `x`/`y` are relative to this
+                            // component and `StyledText` doesn't expose a
+                            // clicked link's on-screen position - a fixed,
+                            // honest v1 position, not a missing feature
+                            // hidden as a bug.
+                            link-clicked(word) => { root.open-alias-popup(word); }
                         }
                     }
 

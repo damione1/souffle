@@ -50,6 +50,7 @@ export component MeetingDetail inherits VerticalLayout {
     callback audio-play-pause-requested();
     callback audio-seek-requested(float);
     callback transcript-paragraph-clicked(int, float);
+    callback transcript-alias-save-requested(string, string);
 
     property <bool> editing-title: false;
     property <string> title-draft;
@@ -167,6 +168,7 @@ export component MeetingDetail inherits VerticalLayout {
                     spacer-after: root.transcript-spacer-after;
                     scroll-top <=> root.transcript-scroll-top;
                     paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
+                    alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
                 }
 
                 SummarySection {

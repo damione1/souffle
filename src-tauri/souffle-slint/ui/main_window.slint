@@ -79,6 +79,7 @@ export component MainWindow inherits Window {
     callback meeting-detail-audio-play-pause-requested();
     callback meeting-detail-audio-seek-requested(float);
     callback meeting-detail-transcript-paragraph-clicked(int, float);
+    callback meeting-detail-transcript-alias-save-requested(string, string);
 
     // Invoked by `main.rs` (as `invoke_reset_meeting_detail_transcript_scroll`)
     // when a different meeting's transcript loads, so scrolling meeting A
@@ -142,6 +143,7 @@ export component MainWindow inherits Window {
         audio-play-pause-requested => { root.meeting-detail-audio-play-pause-requested(); }
         audio-seek-requested(fraction) => { root.meeting-detail-audio-seek-requested(fraction); }
         transcript-paragraph-clicked(session, time) => { root.meeting-detail-transcript-paragraph-clicked(session, time); }
+        transcript-alias-save-requested(term, pronunciation) => { root.meeting-detail-transcript-alias-save-requested(term, pronunciation); }
     }
 
     if root.recording-mode != RecordingMode.idle: RecordingView {

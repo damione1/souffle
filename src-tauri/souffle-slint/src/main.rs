@@ -785,6 +785,22 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
+    let handle = tauri_handle.clone();
+    window.on_meeting_detail_transcript_alias_save_requested(move |term, pronunciation| {
+        let term = term.trim().to_string();
+        if term.is_empty() {
+            return;
+        }
+        let pronunciation = pronunciation.trim();
+        let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::add_dictionary_entry(state, term, pronunciation, None)
+        {
+            eprintln!("Failed to add dictionary alias: {e}");
+        }
+    });
+
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     window.on_meeting_detail_rename(move |new_title| {

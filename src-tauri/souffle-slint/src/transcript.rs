@@ -31,6 +31,85 @@ fn seg_end(seg: &TranscriptionSegment) -> f64 {
     }
 }
 
+/// Port of `tokenizeTranscriptWords`/`isClickableTranscriptWord`
+/// (`src/lib/utils/transcript-words.ts`) - milestone 8d. The Svelte
+/// original uses a Unicode-property regex (`\p{L}\p{M}\p{N}'-`); this
+/// treats `char::is_alphanumeric()` plus `'`/`-` as word characters, which
+/// only differs for decomposed combining-mark sequences (`\p{M}` alone) -
+/// not something ASR output produces (it's NFC-normalized), so not a real
+/// gap in practice.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '\'' || c == '-'
+}
+
+/// At least 2 chars and contains a letter - excludes bare numbers and
+/// single-character tokens (matches the Svelte reference exactly).
+fn is_clickable_word(word: &str) -> bool {
+    word.chars().count() >= 2 && word.chars().any(char::is_alphabetic)
+}
+
+/// Splits `text` into alternating runs of word-characters and everything
+/// else (whitespace, punctuation), preserving order and never dropping
+/// characters - `text` is exactly the concatenation of the returned pieces.
+fn tokenize_words(text: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    let mut start = 0;
+    let mut chars = text.char_indices().peekable();
+    let Some(&(_, first)) = chars.peek() else {
+        return tokens;
+    };
+    let mut in_word = is_word_char(first);
+    for (i, c) in chars {
+        let word = is_word_char(c);
+        if word != in_word {
+            tokens.push(&text[start..i]);
+            start = i;
+            in_word = word;
+        }
+    }
+    tokens.push(&text[start..]);
+    tokens
+}
+
+/// Builds the Markdown source `StyledText` renders (see the doc comment on
+/// `TranscriptBlock.markdown-text`): clickable words become Markdown links
+/// (`[word](word)`, the word itself as both label and target - simpler than
+/// an index since a click only ever needs to know which word text was
+/// clicked, not which occurrence), everything else passes through with
+/// Markdown special characters escaped. Word tokens never need escaping:
+/// `is_word_char` never matches `\`, `*`, `_`, `[`, `]`, `<`, or `>`.
+fn build_markdown_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for token in tokenize_words(text) {
+        if is_word_char(token.chars().next().unwrap_or(' ')) && is_clickable_word(token) {
+            out.push('[');
+            out.push_str(token);
+            out.push_str("](");
+            out.push_str(token);
+            out.push(')');
+        } else {
+            for c in token.chars() {
+                if matches!(c, '\\' | '*' | '_' | '[' | ']' | '<' | '>') {
+                    out.push('\\');
+                }
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+/// Parses `text` (via `build_markdown_text`) into the real `StyledText`
+/// value `TranscriptBlock.markdown-text` needs - `slint::StyledText` isn't
+/// constructible from a plain Slint expression (see the doc comment on
+/// that field), so this has to happen in Rust. Falls back to unstyled
+/// plain text on a parse error rather than panicking: better to show the
+/// paragraph without clickable words than to crash on one malformed one.
+fn styled_transcript_text(text: &str) -> slint::StyledText {
+    slint::StyledText::from_markdown(&build_markdown_text(text))
+        .unwrap_or_else(|_| slint::StyledText::from_plain_text(text))
+}
+
 /// Groups one contiguous run of segments (already known to belong to a
 /// single recording session, or none) into paragraph blocks: a new
 /// paragraph starts when the pause since the previous segment exceeds
@@ -60,6 +139,7 @@ fn group_paragraphs(
             is_session_break: false,
             speaker_label: speaker_label(first.speaker).into(),
             timestamp: crate::timeline::format_duration(first.start_time).into(),
+            markdown_text: styled_transcript_text(&text),
             text: text.into(),
             recording_session_index: session_index.map(|i| i as i32).unwrap_or(-1),
             start_time: first.start_time as f32,
@@ -95,6 +175,7 @@ fn session_break_block() -> TranscriptBlock {
         speaker_label: "".into(),
         timestamp: "".into(),
         text: "".into(),
+        markdown_text: slint::StyledText::from_plain_text(""),
         recording_session_index: -1,
         start_time: 0.0,
         end_label: "Fin de l'enregistrement pr\u{e9}c\u{e9}dent".into(),
@@ -365,6 +446,7 @@ mod tests {
             is_session_break: false,
             speaker_label: "Moi".into(),
             timestamp: "00:00".into(),
+            markdown_text: styled_transcript_text(text),
             text: text.into(),
             recording_session_index: -1,
             start_time: 0.0,
@@ -442,5 +524,42 @@ mod tests {
         assert_eq!(window.end, blocks.len());
         assert_eq!(window.spacer_after, 0.0);
         assert!(window.end - window.start < 60);
+    }
+
+    #[test]
+    fn tokenize_words_never_loses_characters() {
+        let text = "Bonjour, comment ça va - super bien !";
+        let tokens = tokenize_words(text);
+        assert_eq!(tokens.concat(), text);
+    }
+
+    #[test]
+    fn is_clickable_word_excludes_short_and_numeric_tokens() {
+        assert!(is_clickable_word("bonjour"));
+        assert!(is_clickable_word("ça"));
+        assert!(!is_clickable_word("a"));
+        assert!(!is_clickable_word("42"));
+        assert!(!is_clickable_word(""));
+    }
+
+    #[test]
+    fn build_markdown_text_links_clickable_words_only() {
+        // "42" is numeric-only (not clickable), "ans" is a real word (linked).
+        let markdown = build_markdown_text("Bonjour, 42 ans.");
+        assert_eq!(markdown, "[Bonjour](Bonjour), 42 [ans](ans).");
+    }
+
+    #[test]
+    fn build_markdown_text_escapes_special_characters_outside_words() {
+        let markdown = build_markdown_text("valeur * 2 <ok>");
+        assert_eq!(markdown, "[valeur](valeur) \\* 2 \\<[ok](ok)\\>");
+    }
+
+    #[test]
+    fn build_markdown_text_round_trips_through_the_real_link_target() {
+        // The link target is the raw word, unescaped - what `link-clicked`
+        // hands back to Rust must match the original word exactly.
+        let markdown = build_markdown_text("aujourd'hui");
+        assert_eq!(markdown, "[aujourd'hui](aujourd'hui)");
     }
 }
