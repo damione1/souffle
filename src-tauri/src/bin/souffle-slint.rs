@@ -37,6 +37,7 @@ fn main() -> Result<(), slint::PlatformError> {
     if let Some(mtm) = MainThreadMarker::new() {
         setup_macos_menu(mtm);
     }
+    souffle_lib::native_tray::NativeTray::init();
 
     let ui = AppWindow::new()?;
 
