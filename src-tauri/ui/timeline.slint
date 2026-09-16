@@ -1,0 +1,125 @@
+import { Theme } from "theme.slint";
+import { Button, VerticalBox, HorizontalBox, ScrollView, ListView, LineEdit, TextEdit } from "std-widgets.slint";
+
+export struct MeetingInfo {
+    id: string,
+    title: string,
+    date: string,
+    duration: string,
+}
+
+export struct Paragraph {
+    speaker: string,
+    text: string,
+    is-editing: bool,
+}
+
+export component AudioPlayer inherits Rectangle {
+    background: Theme.surface;
+    height: 60px;
+    HorizontalBox {
+        Button { text: "Play"; }
+        Text { text: "|||||||||||||||||||||||"; color: Theme.primary; vertical-alignment: center; }
+    }
+}
+
+export component TranscriptWordLine inherits HorizontalBox {
+    in property <string> text;
+    Text { text: text; color: Theme.text; wrap: word-wrap; }
+}
+
+export component DictionaryPopover inherits Rectangle {
+    in property <bool> is-visible: false;
+    background: Theme.surface;
+    border-radius: 4px;
+    if is-visible: Text { text: "Alias Dictionnaire Popover"; color: Theme.text; padding: 5px; }
+}
+
+export component TranscriptView inherits VerticalBox {
+    in property <[Paragraph]> paragraphs;
+    callback toggle-edit(int);
+    
+    ListView {
+        for p[i] in paragraphs: Rectangle {
+            background: Theme.background;
+            padding: 5px;
+            VerticalBox {
+                Text { text: p.speaker; color: Theme.primary; font-weight: 700; }
+                if !p.is-editing: TouchArea {
+                    clicked => { root.toggle-edit(i); }
+                    TranscriptWordLine { text: p.text; }
+                }
+                if p.is-editing: TextEdit {
+                    text: p.text;
+                }
+            }
+        }
+    }
+    DictionaryPopover { is-visible: true; height: 30px; }
+}
+
+export component SummaryView inherits VerticalBox {
+    in property <string> raw;
+    in property <string> structured;
+    
+    Text { text: "Résumé"; font-size: 18px; font-weight: 700; color: Theme.text; }
+    ScrollView {
+        VerticalBox {
+            Text { text: "Brut:"; font-weight: 700; color: Theme.text; }
+            Text { text: raw; color: Theme.text; wrap: word-wrap; }
+            Text { text: "Structuré:"; font-weight: 700; color: Theme.text; }
+            Text { text: structured; color: Theme.text; wrap: word-wrap; }
+        }
+    }
+}
+
+export component MeetingDetailView inherits VerticalBox {
+    in property <MeetingInfo> meeting;
+    in property <[Paragraph]> paragraphs;
+    in property <string> summary-raw;
+    in property <string> summary-structured;
+    
+    callback toggle-edit(int);
+    callback back();
+    
+    HorizontalBox {
+        Button { text: "Retour"; clicked => { root.back(); } }
+        Text { text: meeting.title; font-size: 24px; font-weight: 700; color: Theme.text; }
+    }
+    Text { text: meeting.date + " | " + meeting.duration; color: Theme.text; }
+    
+    AudioPlayer {}
+    
+    HorizontalBox {
+        TranscriptView { paragraphs: paragraphs; toggle-edit(idx) => { root.toggle-edit(idx); } }
+        SummaryView { raw: summary-raw; structured: summary-structured; }
+    }
+}
+
+export component TimelineView inherits VerticalBox {
+    in property <[MeetingInfo]> meetings;
+    callback open-meeting(string);
+    
+    Rectangle {
+        background: Theme.primary;
+        padding: 10px;
+        Text { text: "Prochaines réunions: Point de sync - 10:00"; color: Theme.background; }
+    }
+    
+    HorizontalBox {
+        LineEdit { placeholder-text: "Filtre par date..."; }
+        Button { text: "Filtrer"; }
+    }
+    
+    ListView {
+        for m in meetings: Rectangle {
+            background: Theme.surface;
+            VerticalBox {
+                padding: 10px;
+                Text { text: m.title; font-weight: 700; color: Theme.text; }
+                Text { text: m.date + " - " + m.duration; color: Theme.text; }
+                Button { text: "Ouvrir"; clicked => { root.open-meeting(m.id); } }
+            }
+        }
+    }
+}

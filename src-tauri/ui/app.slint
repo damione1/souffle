@@ -1,12 +1,9 @@
 import { Theme } from "theme.slint";
 import { Button, VerticalBox, HorizontalBox, LineEdit, ScrollView, TextEdit } from "std-widgets.slint";
 import { SettingsView } from "settings.slint";
-export struct Paragraph {
-    speaker: string,
-    text: string,
-    is-editing: bool,
-}
+import { TimelineView, MeetingDetailView, MeetingInfo, Paragraph } from "timeline.slint";
 
+export { Paragraph, MeetingInfo }
 component IdleView inherits VerticalBox {
     callback start-dictation();
     callback start-meeting();
@@ -102,10 +99,16 @@ export component AppWindow inherits Window {
     
     // Meeting state
     in-out property <[Paragraph]> meeting-paragraphs: [];
+    in-out property <[MeetingInfo]> timeline-meetings: [];
+    in-out property <MeetingInfo> current-meeting;
+    in property <string> summary-raw: "";
+    in property <string> summary-structured: "";
     
     callback start-dictation();
     callback start-meeting();
     callback open-settings();
+    callback open-timeline();
+    callback open-meeting-detail(string);
     callback cancel-edit();
     callback toggle-theme();
     callback drag-window();
@@ -143,6 +146,7 @@ export component AppWindow inherits Window {
             
             HorizontalBox {
                 Button { text: "Toggle Theme"; clicked => { root.toggle-theme(); } }
+                Button { text: "Timeline"; clicked => { root.open-timeline(); } }
                 Button { text: "Back to Home"; clicked => { root.current-view = "idle"; } }
             }
 
@@ -165,6 +169,20 @@ export component AppWindow inherits Window {
                 close-settings => { root.current-view = "idle"; }
                 download-model => { root.download-model(); }
                 delete-model => { root.delete-model(); }
+            }
+            
+            if current-view == "timeline" : TimelineView {
+                meetings: root.timeline-meetings;
+                open-meeting(id) => { root.open-meeting-detail(id); }
+            }
+            
+            if current-view == "meeting-detail" : MeetingDetailView {
+                meeting: root.current-meeting;
+                paragraphs: root.meeting-paragraphs;
+                summary-raw: root.summary-raw;
+                summary-structured: root.summary-structured;
+                toggle-edit(idx) => { root.toggle-paragraph-edit(idx); }
+                back => { root.open-timeline(); }
             }
         }
     }

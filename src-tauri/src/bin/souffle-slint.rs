@@ -147,5 +147,59 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    ui.on_open_timeline({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_current_view("timeline".into());
+                let meetings = Rc::new(VecModel::from(vec![
+                    MeetingInfo {
+                        id: "m1".into(),
+                        title: "Réunion 1".into(),
+                        date: "2023-10-27".into(),
+                        duration: "45 min".into(),
+                    },
+                    MeetingInfo {
+                        id: "m2".into(),
+                        title: "Réunion 2".into(),
+                        date: "2023-10-28".into(),
+                        duration: "30 min".into(),
+                    },
+                ]));
+                ui.set_timeline_meetings(meetings.into());
+            }
+        }
+    });
+
+    ui.on_open_meeting_detail({
+        let ui_handle = ui_handle.clone();
+        move |id| {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_current_view("meeting-detail".into());
+
+                let meeting = MeetingInfo {
+                    id: id.clone(),
+                    title: format!("Détail de {}", id).into(),
+                    date: "2023-10-27".into(),
+                    duration: "45 min".into(),
+                };
+                ui.set_current_meeting(meeting);
+
+                let mut paras = Vec::new();
+                for i in 0..1500 {
+                    paras.push(Paragraph {
+                        speaker: format!("Speaker {}", i % 2).into(),
+                        text: format!("Paragraph {}", i).into(),
+                        is_editing: false,
+                    });
+                }
+
+                ui.set_meeting_paragraphs(Rc::new(VecModel::from(paras)).into());
+                ui.set_summary_raw("Raw summary...".into());
+                ui.set_summary_structured("Structured summary...".into());
+            }
+        }
+    });
+
     ui.run()
 }
