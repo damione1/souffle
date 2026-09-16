@@ -120,7 +120,7 @@ export function createOnboardingController() {
     try {
       const shortcuts = await getShortcuts();
       const options = await getSettingsOptions();
-      toggleShortcut = shortcuts.toggle || options.default_shortcuts.toggle || "CommandOrControl+Shift+Space";
+      toggleShortcut = shortcuts.toggle || options.default_shortcuts.toggle || "";
       pushToTalk = shortcuts.push_to_talk || options.default_shortcuts.push_to_talk || "";
     } catch {
       // Keep the built-in default.

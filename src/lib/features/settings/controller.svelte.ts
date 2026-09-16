@@ -97,9 +97,9 @@ export function createSettingsController() {
   let statusMessage = $state("");
   let catalog = $state<TranscriptionCatalog | null>(null);
   let settingsOptions = $state<SettingsOptions | null>(null);
-  let recommendedOllamaModel = $state("qwen2.5:7b");
+  let recommendedOllamaModel = $state("");
 
-  let toggleShortcut = $state("CommandOrControl+Shift+Space");
+  let toggleShortcut = $state("");
   let pttShortcut = $state("");
   let recordingField = $state<"toggle" | "ptt" | null>(null);
   let shortcutError = $state("");
@@ -119,12 +119,12 @@ export function createSettingsController() {
     checkIsLaptop()
       .then((laptop) => { isLaptop = laptop; })
       .catch(() => { isLaptop = false; });
+    await loadSettingsOptions();
     await Promise.all([
       loadShortcuts(),
       refreshDevices(),
       refreshSummaryProviders(),
       loadCatalog(),
-      loadSettingsOptions(),
       loadDictionary(),
       refreshSnippets(),
       loadCalendars(),
@@ -178,7 +178,7 @@ export function createSettingsController() {
   async function loadShortcuts() {
     try {
       const shortcuts = await getShortcuts();
-      toggleShortcut = shortcuts.toggle || settingsOptions?.default_shortcuts.toggle || "CommandOrControl+Shift+Space";
+      toggleShortcut = shortcuts.toggle || settingsOptions?.default_shortcuts.toggle || "";
       pttShortcut = shortcuts.push_to_talk || settingsOptions?.default_shortcuts.push_to_talk || "";
     } catch (e) {
       console.warn("Failed to load shortcuts:", e);
