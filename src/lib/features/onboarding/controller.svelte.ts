@@ -2,6 +2,7 @@ import { getAppState } from "../../stores/app.svelte";
 import { getTranscriptionCatalog } from "../../api/transcription";
 import { getPermissionStatus, requestPermission } from "../../api/permissions";
 import {
+  getSettingsOptions,
   getShortcuts,
   listAudioDevices,
   saveSettings,
@@ -31,6 +32,7 @@ import {
   type SetupStep,
 } from "./setup";
 
+/** Create the state and actions that drive the first-run onboarding wizard. */
 export function createOnboardingController() {
   const app = getAppState();
 
@@ -46,7 +48,7 @@ export function createOnboardingController() {
   let audioDevices = $state<AudioInputDevice[]>([]);
   let selectedDevice = $state("");
 
-  let toggleShortcut = $state("CommandOrControl+Shift+Space");
+  let toggleShortcut = $state("");
   let pushToTalk = $state("");
   let recordingShortcut = $state(false);
   let shortcutError = $state("");
@@ -82,6 +84,7 @@ export function createOnboardingController() {
     app.settings = nextSettings;
   }
 
+  /** Load the backend-owned defaults and device state needed by the wizard. */
   async function mount() {
     const flags = readSetupFlags();
     recoveryOnly = flags.setupDone;
@@ -116,8 +119,9 @@ export function createOnboardingController() {
 
     try {
       const shortcuts = await getShortcuts();
-      toggleShortcut = shortcuts.toggle || "CommandOrControl+Shift+Space";
-      pushToTalk = shortcuts.push_to_talk;
+      const options = await getSettingsOptions();
+      toggleShortcut = shortcuts.toggle || options.default_shortcuts.toggle || "";
+      pushToTalk = shortcuts.push_to_talk || options.default_shortcuts.push_to_talk || "";
     } catch {
       // Keep the built-in default.
     }

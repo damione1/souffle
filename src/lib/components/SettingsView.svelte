@@ -279,29 +279,32 @@
         onMeetingTranscriptionLanguageChange={controller.onMeetingTranscriptionLanguageChange}
       />
     {:else if activeTab === "interface"}
-      <InterfaceSettingsSection
-        theme={controller.app.settings.theme}
-        locale={controller.app.settings.locale}
-        autoPaste={controller.app.settings.auto_paste}
-        pasteDelayMs={controller.app.settings.paste_delay_ms}
-        pasteMethod={controller.app.settings.paste_method}
-        toggleShortcut={controller.toggleShortcut}
-        pttShortcut={controller.pttShortcut}
-        recordingField={controller.recordingField}
-        shortcutError={controller.shortcutError}
-        modifierTapStatus={controller.app.modifierTapStatus}
-        nativeShortcuts={controller.app.nativeShortcuts}
-        onThemeChange={controller.onThemeChange}
-        onLocaleChange={controller.onLocaleChange}
-        onAutoPasteChange={controller.onAutoPasteChange}
-        onPasteDelayChange={controller.onPasteDelayChange}
-        onPasteMethodChange={controller.onPasteMethodChange}
-        onStartRecording={controller.startRecording}
-        onClearShortcut={controller.clearShortcut}
-        formatShortcut={controller.formatShortcut}
-        pillHidden={controller.app.settings.pill_hidden}
-        onPillHiddenChange={controller.onPillHiddenChange}
-      />
+      {#if controller.settingsOptions}
+        <InterfaceSettingsSection
+          settingsOptions={controller.settingsOptions}
+          theme={controller.app.settings.theme}
+          locale={controller.app.settings.locale}
+          autoPaste={controller.app.settings.auto_paste}
+          pasteDelayMs={controller.app.settings.paste_delay_ms}
+          pasteMethod={controller.app.settings.paste_method}
+          toggleShortcut={controller.toggleShortcut}
+          pttShortcut={controller.pttShortcut}
+          recordingField={controller.recordingField}
+          shortcutError={controller.shortcutError}
+          modifierTapStatus={controller.app.modifierTapStatus}
+          nativeShortcuts={controller.app.nativeShortcuts}
+          onThemeChange={controller.onThemeChange}
+          onLocaleChange={controller.onLocaleChange}
+          onAutoPasteChange={controller.onAutoPasteChange}
+          onPasteDelayChange={controller.onPasteDelayChange}
+          onPasteMethodChange={controller.onPasteMethodChange}
+          onStartRecording={controller.startRecording}
+          onClearShortcut={controller.clearShortcut}
+          formatShortcut={controller.formatShortcut}
+          pillHidden={controller.app.settings.pill_hidden}
+          onPillHiddenChange={controller.onPillHiddenChange}
+        />
+      {/if}
 
       <FeedbackSoundsSettingsSection
         enabled={controller.app.settings.feedback_sounds_enabled}

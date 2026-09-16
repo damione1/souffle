@@ -37,7 +37,7 @@
 
   onMount(() => {
     void getAppVersion().then((v) => {
-      appVersion = v;
+      appVersion = v.version;
     });
   });
 

@@ -32,6 +32,7 @@ const baseProps = {
   onPillHiddenChange: vi.fn(),
   // What `getNativeShortcuts` hands the store at startup.
   nativeShortcuts: ["ShiftLeft", "MetaRight", "F5", "F8"],
+  settingsOptions: { paste_delay_ms_min: 50, paste_delay_ms_max: 1000 },
 };
 
 describe("InterfaceSettingsSection native tap banner (SOU-116)", () => {

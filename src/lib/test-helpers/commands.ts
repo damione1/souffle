@@ -41,6 +41,7 @@ export const COMMAND = {
   getModelStatus: "get_model_status",
   getReleaseNotesForVersion: "get_release_notes_for_version",
   getSettings: "get_settings",
+  getSettingsOptions: "get_settings_options",
   getShortcuts: "get_shortcuts",
   getTranscriptionCatalog: "get_transcription_catalog",
   learnFromEdit: "learn_from_edit",
