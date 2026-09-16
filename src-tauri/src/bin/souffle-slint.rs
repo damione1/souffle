@@ -40,6 +40,26 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let ui = AppWindow::new()?;
 
+    let permissions = Rc::new(VecModel::from(vec![
+        PermissionStatus {
+            name: "Microphone".into(),
+            granted: false,
+        },
+        PermissionStatus {
+            name: "Accessibilité".into(),
+            granted: false,
+        },
+        PermissionStatus {
+            name: "Enregistrement Écran".into(),
+            granted: false,
+        },
+        PermissionStatus {
+            name: "Calendrier".into(),
+            granted: true,
+        },
+    ]));
+    ui.set_permissions(permissions.into());
+
     // State bindings
     let ui_handle = ui.as_weak();
 
@@ -203,6 +223,70 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.set_meeting_paragraphs(Rc::new(VecModel::from(paras)).into());
                 ui.set_summary_raw("Raw summary...".into());
                 ui.set_summary_structured("Structured summary...".into());
+            }
+        }
+    });
+
+    ui.on_request_permission({
+        move |name| {
+            let name_str = name.as_str();
+            println!("Requesting permission: {}", name_str);
+            #[cfg(target_os = "macos")]
+            {
+                let pref_pane = match name_str {
+                    "Microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+                    "Accessibilité" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                    "Enregistrement Écran" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+                    "Calendrier" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars",
+                    _ => "x-apple.systempreferences:com.apple.preference.security",
+                };
+                let _ = std::process::Command::new("open")
+                    .arg(pref_pane)
+                    .spawn();
+            }
+        }
+    });
+
+    ui.on_finish_onboarding({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_current_view("idle".into());
+            }
+        }
+    });
+
+    ui.on_close_whats_new({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_current_view("idle".into());
+            }
+        }
+    });
+
+    ui.on_start_update({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_update_downloading(true);
+                ui.set_update_progress(0.5);
+                ui.set_update_ready(true);
+            }
+        }
+    });
+
+    ui.on_install_and_restart({
+        move || {
+            println!("Install and restart requested");
+        }
+    });
+
+    ui.on_close_update({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_current_view("idle".into());
             }
         }
     });

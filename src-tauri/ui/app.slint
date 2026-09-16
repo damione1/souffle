@@ -2,8 +2,10 @@ import { Theme } from "theme.slint";
 import { Button, VerticalBox, HorizontalBox, LineEdit, ScrollView, TextEdit } from "std-widgets.slint";
 import { SettingsView } from "settings.slint";
 import { TimelineView, MeetingDetailView, MeetingInfo, Paragraph } from "timeline.slint";
+import { OnboardingView, WhatsNewDialog, UpdateAvailableDialog, PermissionStatus } from "onboarding.slint";
 
-export { Paragraph, MeetingInfo }
+export { Paragraph, MeetingInfo, PermissionStatus }
+
 component IdleView inherits VerticalBox {
     callback start-dictation();
     callback start-meeting();
@@ -116,6 +118,21 @@ export component AppWindow inherits Window {
     callback download-model();
     callback delete-model();
 
+    // Onboarding and updates
+    in-out property <int> onboarding-step: 0;
+    in property <[PermissionStatus]> permissions: [];
+    in property <string> changelog-text: "# What's New";
+    in property <float> update-progress: 0.0;
+    in property <bool> update-downloading: false;
+    in property <bool> update-ready: false;
+    
+    callback request-permission(string);
+    callback finish-onboarding();
+    callback close-whats-new();
+    callback start-update();
+    callback install-and-restart();
+    callback close-update();
+
     // Chrome drag area
     forward-focus: key-handler;
     key-handler := FocusScope {
@@ -183,6 +200,27 @@ export component AppWindow inherits Window {
                 summary-structured: root.summary-structured;
                 toggle-edit(idx) => { root.toggle-paragraph-edit(idx); }
                 back => { root.open-timeline(); }
+            }
+            
+            if current-view == "onboarding" : OnboardingView {
+                step: root.onboarding-step;
+                permissions: root.permissions;
+                request-permission(name) => { root.request-permission(name); }
+                finish-onboarding => { root.finish-onboarding(); }
+            }
+            
+            if current-view == "whats-new" : WhatsNewDialog {
+                changelog: root.changelog-text;
+                close => { root.close-whats-new(); }
+            }
+            
+            if current-view == "update-available" : UpdateAvailableDialog {
+                download-progress: root.update-progress;
+                downloading: root.update-downloading;
+                ready-to-install: root.update-ready;
+                start-update => { root.start-update(); }
+                install-and-restart => { root.install-and-restart(); }
+                close => { root.close-update(); }
             }
         }
     }

@@ -1,0 +1,114 @@
+import { Theme } from "theme.slint";
+import { Button, VerticalBox, HorizontalBox, ScrollView, ProgressIndicator } from "std-widgets.slint";
+
+export struct PermissionStatus {
+    name: string,
+    granted: bool,
+}
+
+export component PermissionRow inherits HorizontalBox {
+    in property <PermissionStatus> status;
+    callback request-permission();
+    alignment: space-between;
+    Text { text: status.name; color: Theme.text; vertical-alignment: center; }
+    HorizontalBox {
+        Text { text: status.granted ? "Granted" : "Denied"; color: status.granted ? green : red; vertical-alignment: center; }
+        if !status.granted : Button { text: "Grant"; clicked => { root.request-permission(); } }
+    }
+}
+
+export component PermissionsStep inherits VerticalBox {
+    in property <[PermissionStatus]> permissions;
+    callback request-permission(string);
+    
+    Text { text: "Permissions"; color: Theme.text; font-size: 20px; font-weight: 700; }
+    for p in permissions : PermissionRow {
+        status: p;
+        request-permission => { root.request-permission(p.name); }
+    }
+}
+
+export component WelcomeStep inherits VerticalBox {
+    Text { text: "Welcome to Soufflé!"; color: Theme.text; font-size: 24px; font-weight: 700; horizontal-alignment: center; }
+    Text { text: "Let's set up your environment."; color: Theme.text; horizontal-alignment: center; }
+}
+
+export component ModelSetupStep inherits VerticalBox {
+    Text { text: "Model Setup"; color: Theme.text; font-size: 20px; font-weight: 700; }
+    Text { text: "Download required AI models for offline functionality."; color: Theme.text; }
+}
+
+export component FinishStep inherits VerticalBox {
+    Text { text: "You're all set!"; color: Theme.text; font-size: 24px; font-weight: 700; horizontal-alignment: center; }
+}
+
+export component OnboardingView inherits Rectangle {
+    in-out property <int> step: 0;
+    in property <[PermissionStatus]> permissions;
+    callback request-permission(string);
+    callback finish-onboarding();
+    
+    background: Theme.background;
+    
+    VerticalBox {
+        alignment: space-between;
+        
+        if step == 0 : WelcomeStep {}
+        if step == 1 : PermissionsStep {
+            permissions: root.permissions;
+            request-permission(name) => { root.request-permission(name); }
+        }
+        if step == 2 : ModelSetupStep {}
+        if step == 3 : FinishStep {}
+        
+        HorizontalBox {
+            alignment: center;
+            if step > 0 : Button { text: "Back"; clicked => { step -= 1; } }
+            if step < 3 : Button { text: "Next"; clicked => { step += 1; } }
+            if step == 3 : Button { text: "Finish"; clicked => { root.finish-onboarding(); } }
+        }
+    }
+}
+
+export component WhatsNewDialog inherits Rectangle {
+    callback close();
+    in property <string> changelog: "# What's New\n\n- Feature 1\n- Feature 2\n- Bugfixes";
+    
+    background: Theme.background;
+    border-color: Theme.border;
+    border-width: 1px;
+    
+    VerticalBox {
+        Text { text: "What's New"; color: Theme.text; font-size: 20px; font-weight: 700; }
+        ScrollView {
+            Text { text: changelog; color: Theme.text; wrap: word-wrap; }
+        }
+        Button { text: "Close"; clicked => { root.close(); } }
+    }
+}
+
+export component UpdateAvailableDialog inherits Rectangle {
+    in property <float> download-progress: 0.0;
+    in property <bool> downloading: false;
+    in property <bool> ready-to-install: false;
+    callback start-update();
+    callback install-and-restart();
+    callback close();
+    
+    background: Theme.background;
+    border-color: Theme.border;
+    border-width: 1px;
+    
+    VerticalBox {
+        Text { text: "Update Available"; color: Theme.text; font-size: 20px; font-weight: 700; }
+        Text { text: "A new version of Soufflé is available."; color: Theme.text; }
+        
+        if downloading : ProgressIndicator { progress: download-progress; }
+        
+        HorizontalBox {
+            if !downloading && !ready-to-install : Button { text: "Download Update"; clicked => { root.start-update(); } }
+            if ready-to-install : Button { text: "Installer et Redémarrer"; clicked => { root.install-and-restart(); } }
+            Button { text: "Later"; clicked => { root.close(); } }
+        }
+    }
+}
