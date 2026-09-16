@@ -7,6 +7,8 @@ import { FeedbackSoundsSection } from "components/settings/feedback_sounds_secti
 import { CalendarSection, CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneSection, MicrophoneRow } from "components/settings/microphone_section.slint";
 import { AudioSection } from "components/settings/audio_section.slint";
+import { DataSection } from "components/settings/data_section.slint";
+import { AboutSection } from "components/settings/about_section.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -66,6 +68,24 @@ export component SettingsView inherits Rectangle {
     in property <bool> filler-removal;
     in property <bool> stutter-collapse;
     in property <bool> dictionary-correction;
+    in property <string> data-stats-line;
+    in property <string> data-recordings-line;
+    in property <string> meeting-audio-retention;
+    in property <bool> data-exporting;
+    in property <string> data-export-status;
+    in property <bool> data-export-status-is-error;
+    in property <string> mcp-binary-path;
+    in property <bool> mcp-exists;
+    in property <string> mcp-claude-desktop-snippet;
+    in property <string> mcp-claude-code-command;
+    in property <bool> testing-mcp;
+    in property <string> mcp-test-status;
+    in property <string> app-version;
+    in property <string> about-transcription-label;
+    in property <string> about-summary-label;
+    in property <bool> auto-update-check;
+    in property <bool> checking-updates;
+    in property <string> update-status;
 
     callback close-requested();
     callback autostart-changed(bool);
@@ -109,6 +129,14 @@ export component SettingsView inherits Rectangle {
     callback filler-removal-changed(bool);
     callback stutter-collapse-changed(bool);
     callback dictionary-correction-changed(bool);
+    callback meeting-audio-retention-changed(string);
+    callback data-export-requested();
+    callback data-reveal-requested();
+    callback mcp-copy-desktop-snippet-requested();
+    callback mcp-copy-code-command-requested();
+    callback mcp-test-requested();
+    callback check-updates-requested();
+    callback auto-update-check-changed(bool);
 
     // Opaque on purpose: this overlays IdleView/MeetingDetail rather than
     // replacing them (mirrors App.svelte hiding HomeView behind Settings
@@ -296,6 +324,38 @@ export component SettingsView inherits Rectangle {
                             debug-transcription-changed(value) => { root.debug-transcription-changed(value); }
                             log-level-changed(value) => { root.log-level-changed(value); }
                             copy-diagnostics-requested => { root.copy-diagnostics-requested(); }
+                        }
+
+                        DataSection {
+                            stats-line: root.data-stats-line;
+                            recordings-line: root.data-recordings-line;
+                            retention: root.meeting-audio-retention;
+                            exporting: root.data-exporting;
+                            export-status: root.data-export-status;
+                            export-status-is-error: root.data-export-status-is-error;
+                            mcp-binary-path: root.mcp-binary-path;
+                            mcp-exists: root.mcp-exists;
+                            mcp-claude-desktop-snippet: root.mcp-claude-desktop-snippet;
+                            mcp-claude-code-command: root.mcp-claude-code-command;
+                            testing-mcp: root.testing-mcp;
+                            mcp-test-status: root.mcp-test-status;
+                            retention-changed(value) => { root.meeting-audio-retention-changed(value); }
+                            export-requested => { root.data-export-requested(); }
+                            reveal-requested => { root.data-reveal-requested(); }
+                            copy-desktop-snippet-requested => { root.mcp-copy-desktop-snippet-requested(); }
+                            copy-code-command-requested => { root.mcp-copy-code-command-requested(); }
+                            test-mcp-requested => { root.mcp-test-requested(); }
+                        }
+
+                        AboutSection {
+                            app-version: root.app-version;
+                            transcription-label: root.about-transcription-label;
+                            summary-label: root.about-summary-label;
+                            auto-update-check: root.auto-update-check;
+                            checking-updates: root.checking-updates;
+                            update-status: root.update-status;
+                            check-updates-requested => { root.check-updates-requested(); }
+                            auto-update-check-changed(value) => { root.auto-update-check-changed(value); }
                         }
                     }
                 }

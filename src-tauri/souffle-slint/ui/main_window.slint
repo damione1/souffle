@@ -121,6 +121,24 @@ export component MainWindow inherits Window {
     in property <bool> settings-filler-removal;
     in property <bool> settings-stutter-collapse;
     in property <bool> settings-dictionary-correction;
+    in property <string> settings-data-stats-line;
+    in property <string> settings-data-recordings-line;
+    in property <string> settings-meeting-audio-retention;
+    in property <bool> settings-data-exporting;
+    in property <string> settings-data-export-status;
+    in property <bool> settings-data-export-status-is-error;
+    in property <string> settings-mcp-binary-path;
+    in property <bool> settings-mcp-exists;
+    in property <string> settings-mcp-claude-desktop-snippet;
+    in property <string> settings-mcp-claude-code-command;
+    in property <bool> settings-testing-mcp;
+    in property <string> settings-mcp-test-status;
+    in property <string> settings-app-version;
+    in property <string> settings-about-transcription-label;
+    in property <string> settings-about-summary-label;
+    in property <bool> settings-auto-update-check;
+    in property <bool> settings-checking-updates;
+    in property <string> settings-update-status;
 
     callback settings-requested();
     callback settings-closed();
@@ -165,6 +183,14 @@ export component MainWindow inherits Window {
     callback settings-filler-removal-changed(bool);
     callback settings-stutter-collapse-changed(bool);
     callback settings-dictionary-correction-changed(bool);
+    callback settings-meeting-audio-retention-changed(string);
+    callback settings-data-export-requested();
+    callback settings-data-reveal-requested();
+    callback settings-mcp-copy-desktop-snippet-requested();
+    callback settings-mcp-copy-code-command-requested();
+    callback settings-mcp-test-requested();
+    callback settings-check-updates-requested();
+    callback settings-auto-update-check-changed(bool);
 
     callback dictate-requested();
     callback meeting-requested();
@@ -310,6 +336,24 @@ export component MainWindow inherits Window {
         filler-removal: root.settings-filler-removal;
         stutter-collapse: root.settings-stutter-collapse;
         dictionary-correction: root.settings-dictionary-correction;
+        data-stats-line: root.settings-data-stats-line;
+        data-recordings-line: root.settings-data-recordings-line;
+        meeting-audio-retention: root.settings-meeting-audio-retention;
+        data-exporting: root.settings-data-exporting;
+        data-export-status: root.settings-data-export-status;
+        data-export-status-is-error: root.settings-data-export-status-is-error;
+        mcp-binary-path: root.settings-mcp-binary-path;
+        mcp-exists: root.settings-mcp-exists;
+        mcp-claude-desktop-snippet: root.settings-mcp-claude-desktop-snippet;
+        mcp-claude-code-command: root.settings-mcp-claude-code-command;
+        testing-mcp: root.settings-testing-mcp;
+        mcp-test-status: root.settings-mcp-test-status;
+        app-version: root.settings-app-version;
+        about-transcription-label: root.settings-about-transcription-label;
+        about-summary-label: root.settings-about-summary-label;
+        auto-update-check: root.settings-auto-update-check;
+        checking-updates: root.settings-checking-updates;
+        update-status: root.settings-update-status;
         close-requested => {
             root.settings-open = false;
             root.settings-closed();
@@ -355,5 +399,13 @@ export component MainWindow inherits Window {
         filler-removal-changed(value) => { root.settings-filler-removal-changed(value); }
         stutter-collapse-changed(value) => { root.settings-stutter-collapse-changed(value); }
         dictionary-correction-changed(value) => { root.settings-dictionary-correction-changed(value); }
+        meeting-audio-retention-changed(value) => { root.settings-meeting-audio-retention-changed(value); }
+        data-export-requested => { root.settings-data-export-requested(); }
+        data-reveal-requested => { root.settings-data-reveal-requested(); }
+        mcp-copy-desktop-snippet-requested => { root.settings-mcp-copy-desktop-snippet-requested(); }
+        mcp-copy-code-command-requested => { root.settings-mcp-copy-code-command-requested(); }
+        mcp-test-requested => { root.settings-mcp-test-requested(); }
+        check-updates-requested => { root.settings-check-updates-requested(); }
+        auto-update-check-changed(value) => { root.settings-auto-update-check-changed(value); }
     }
 }

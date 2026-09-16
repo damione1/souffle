@@ -7,6 +7,7 @@ slint::include_modules!();
 
 mod audio_player;
 mod audio_ui;
+mod data_ui;
 mod microphone_list;
 mod settings_ui;
 mod shortcut_capture;
@@ -70,6 +71,20 @@ fn format_shortcut_label(shortcut: &str) -> String {
         .replace("Shift", "\u{21e7}")
         .replace("Alt", "\u{2325}")
         .replace('+', " ")
+}
+
+/// Shared by the diagnostics and MCP snippet "Copy" buttons - no webview
+/// clipboard API to fall back on in this headless shell (see the `arboard`
+/// dependency comment in Cargo.toml).
+fn copy_to_clipboard(text: &str) {
+    match arboard::Clipboard::new() {
+        Ok(mut clipboard) => {
+            if let Err(e) = clipboard.set_text(text) {
+                eprintln!("Failed to write to clipboard: {e}");
+            }
+        }
+        Err(e) => eprintln!("Failed to open clipboard: {e}"),
+    }
 }
 
 /// Re-fetches dictations + meetings from the real database and rebuilds the
@@ -1016,6 +1031,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         match souffle_lib::commands::get_settings(state) {
             Ok(settings) => {
                 settings_ui::populate(&window, &settings);
+                data_ui::populate(&window, &settings);
                 *settings_state_for_open.borrow_mut() = Some(settings);
                 window.set_settings_open(true);
                 refresh_settings_log_tail(&window);
@@ -1023,6 +1039,14 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                     Some(start_settings_log_timer(weak.clone()));
             }
             Err(e) => eprintln!("Failed to load settings: {e}"),
+        }
+        match souffle_lib::commands::get_data_stats(handle.state::<AppState>()) {
+            Ok(stats) => data_ui::populate_stats(&window, &stats),
+            Err(e) => eprintln!("Failed to load data stats: {e}"),
+        }
+        match souffle_lib::commands::get_mcp_setup_info() {
+            Ok(info) => data_ui::populate_mcp(&window, &info),
+            Err(e) => eprintln!("Failed to load MCP setup info: {e}"),
         }
         let state = handle.state::<AppState>();
         match souffle_lib::commands::get_shortcuts(state) {
@@ -1642,6 +1666,127 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         .expect("slint event loop not running");
     });
 
+    let handle = tauri_handle.clone();
+    let settings_state_for_retention = settings_state.clone();
+    window.on_settings_meeting_audio_retention_changed(move |value| {
+        let retention = data_ui::meeting_audio_retention_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_retention, |settings| {
+            settings.meeting_audio_retention = retention;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_settings_data_export_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        // Native macOS folder picker, not the `@tauri-apps/plugin-dialog`
+        // the Svelte version uses - see `data_section.slint`'s doc comment.
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg("POSIX path of (choose folder with prompt \"Choisir un dossier d'export\")")
+            .output();
+        let dir = match output {
+            Ok(out) if out.status.success() => {
+                String::from_utf8_lossy(&out.stdout).trim().to_string()
+            }
+            _ => return, // cancelled or picker failed
+        };
+        window.set_settings_data_exporting(true);
+        window.set_settings_data_export_status("".into());
+        let state = handle.state::<AppState>();
+        let result = souffle_lib::commands::export_archive(handle.clone(), state, dir.clone());
+        window.set_settings_data_exporting(false);
+        match result {
+            Ok(()) => window.set_settings_data_export_status(
+                format!("Export démarré vers {dir}. Il continue en arrière-plan.").into(),
+            ),
+            Err(e) => {
+                window.set_settings_data_export_status(e.into());
+                window.set_settings_data_export_status_is_error(true);
+                return;
+            }
+        }
+        window.set_settings_data_export_status_is_error(false);
+    });
+
+    window.on_settings_data_reveal_requested(move || {
+        if let Err(e) = souffle_lib::commands::reveal_data_dir() {
+            eprintln!("Failed to reveal data directory: {e}");
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_mcp_copy_desktop_snippet_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        copy_to_clipboard(&window.get_settings_mcp_claude_desktop_snippet());
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_mcp_copy_code_command_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        copy_to_clipboard(&window.get_settings_mcp_claude_code_command());
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_mcp_test_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_testing_mcp(true);
+        window.set_settings_mcp_test_status("".into());
+        match souffle_lib::commands::test_mcp_connection() {
+            Ok(tools) => {
+                window.set_settings_mcp_test_status(format!("Connexion réussie ({tools}).").into())
+            }
+            Err(e) => window.set_settings_mcp_test_status(e.into()),
+        }
+        window.set_settings_testing_mcp(false);
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_auto_update = settings_state.clone();
+    window.on_settings_auto_update_check_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_auto_update, |settings| {
+            settings.auto_update_check_enabled = enabled;
+        });
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_check_updates_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_checking_updates(true);
+        window.set_settings_update_status("".into());
+        slint::spawn_local(async move {
+            let result = souffle_lib::commands::check_for_updates().await;
+            window.set_settings_checking_updates(false);
+            match result {
+                Ok(update) => {
+                    let status = if let Some(err) = update.check_error {
+                        err
+                    } else if update.update_available {
+                        format!(
+                            "Mise à jour disponible : v{}",
+                            update.latest_version.unwrap_or_default()
+                        )
+                    } else {
+                        "À jour.".to_string()
+                    };
+                    window.set_settings_update_status(status.into());
+                }
+                Err(e) => window.set_settings_update_status(e.into()),
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
     let weak = window.as_weak();
     window.on_settings_shortcut_record_requested(move |field| {
         if let Some(window) = weak.upgrade() {
@@ -1755,14 +1900,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let text = souffle_lib::commands::get_diagnostics_text(state);
         window.set_settings_copying_diagnostics(false);
         match text {
-            Ok(text) => match arboard::Clipboard::new() {
-                Ok(mut clipboard) => {
-                    if let Err(e) = clipboard.set_text(text) {
-                        eprintln!("Failed to write diagnostics to clipboard: {e}");
-                    }
-                }
-                Err(e) => eprintln!("Failed to open clipboard: {e}"),
-            },
+            Ok(text) => copy_to_clipboard(&text),
             Err(e) => eprintln!("Failed to build diagnostics text: {e}"),
         }
     });
@@ -1801,6 +1939,7 @@ fn main() {
         }
         Err(e) => eprintln!("Failed to load shortcuts: {e}"),
     }
+    window.set_settings_app_version(souffle_lib::commands::get_app_version().version.into());
 
     refresh_timeline(&window, &tauri_handle);
     wire_callbacks(&window, tauri_handle);
