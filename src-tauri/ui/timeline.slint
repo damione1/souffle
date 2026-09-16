@@ -6,6 +6,8 @@ export struct MeetingInfo {
     title: string,
     date: string,
     duration: string,
+    participants: string,
+    notes: string,
 }
 
 export struct Paragraph {
@@ -18,8 +20,9 @@ export component AudioPlayer inherits Rectangle {
     background: Theme.surface;
     height: 60px;
     HorizontalBox {
-        Button { text: "Play"; }
-        Text { text: "|||||||||||||||||||||||"; color: Theme.primary; vertical-alignment: center; }
+        padding: 5px;
+        Button { text: "Play / Pause"; }
+        Text { text: "||||||||||||||||||||||| Waveform Audio"; color: Theme.primary; vertical-alignment: center; }
     }
 }
 
@@ -32,7 +35,10 @@ export component DictionaryPopover inherits Rectangle {
     in property <bool> is-visible: false;
     background: Theme.surface;
     border-radius: 4px;
-    if is-visible: Text { text: "Alias Dictionnaire Popover"; color: Theme.text; padding: 5px; }
+    if is-visible: HorizontalBox {
+        padding: 5px;
+        Text { text: "Alias Dictionnaire Popover"; color: Theme.text; }
+    }
 }
 
 export component TranscriptView inherits VerticalBox {
@@ -42,8 +48,9 @@ export component TranscriptView inherits VerticalBox {
     ListView {
         for p[i] in paragraphs: Rectangle {
             background: Theme.background;
-            padding: 5px;
+            min-height: 60px;
             VerticalBox {
+                padding: 5px;
                 Text { text: p.speaker; color: Theme.primary; font-weight: 700; }
                 if !p.is-editing: TouchArea {
                     clicked => { root.toggle-edit(i); }
@@ -86,9 +93,14 @@ export component MeetingDetailView inherits VerticalBox {
         Button { text: "Retour"; clicked => { root.back(); } }
         Text { text: meeting.title; font-size: 24px; font-weight: 700; color: Theme.text; }
     }
-    Text { text: meeting.date + " | " + meeting.duration; color: Theme.text; }
+    Text { text: meeting.date + " | " + meeting.duration + " | Participants: " + meeting.participants; color: Theme.text; }
     
     AudioPlayer {}
+    
+    VerticalBox {
+        Text { text: "Notes de réunion:"; font-weight: 700; color: Theme.text; }
+        TextEdit { text: meeting.notes; height: 60px; }
+    }
     
     HorizontalBox {
         TranscriptView { paragraphs: paragraphs; toggle-edit(idx) => { root.toggle-edit(idx); } }
@@ -98,12 +110,19 @@ export component MeetingDetailView inherits VerticalBox {
 
 export component TimelineView inherits VerticalBox {
     in property <[MeetingInfo]> meetings;
+    in-out property <int> current-page: 1;
+    in-out property <int> total-pages: 5;
+    
     callback open-meeting(string);
+    callback next-page();
+    callback prev-page();
     
     Rectangle {
         background: Theme.primary;
-        padding: 10px;
-        Text { text: "Prochaines réunions: Point de sync - 10:00"; color: Theme.background; }
+        HorizontalBox {
+            padding: 10px;
+            Text { text: "Prochaines réunions: Point de sync - 10:00"; color: Theme.background; }
+        }
     }
     
     HorizontalBox {
@@ -117,9 +136,29 @@ export component TimelineView inherits VerticalBox {
             VerticalBox {
                 padding: 10px;
                 Text { text: m.title; font-weight: 700; color: Theme.text; }
-                Text { text: m.date + " - " + m.duration; color: Theme.text; }
+                Text { text: m.date + " - " + m.duration + " (" + m.participants + ")"; color: Theme.text; }
                 Button { text: "Ouvrir"; clicked => { root.open-meeting(m.id); } }
             }
+        }
+    }
+    
+    HorizontalBox {
+        alignment: center;
+        spacing: 10px;
+        Button {
+            text: "Précédent";
+            enabled: root.current-page > 1;
+            clicked => { root.prev-page(); }
+        }
+        Text {
+            text: "Page " + root.current-page + " / " + root.total-pages;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+        Button {
+            text: "Suivant";
+            enabled: root.current-page < root.total-pages;
+            clicked => { root.next-page(); }
         }
     }
 }

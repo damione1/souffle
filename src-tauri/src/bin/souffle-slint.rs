@@ -158,12 +158,16 @@ fn main() -> Result<(), slint::PlatformError> {
                         title: "Réunion 1".into(),
                         date: "2023-10-27".into(),
                         duration: "45 min".into(),
+                        participants: "Alice, Bob".into(),
+                        notes: "Notes préliminaires sur le projet...".into(),
                     },
                     MeetingInfo {
                         id: "m2".into(),
                         title: "Réunion 2".into(),
                         date: "2023-10-28".into(),
                         duration: "30 min".into(),
+                        participants: "Charlie, Damien".into(),
+                        notes: "Point d'avancement sprint.".into(),
                     },
                 ]));
                 ui.set_timeline_meetings(meetings.into());
@@ -182,6 +186,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     title: format!("Détail de {}", id).into(),
                     date: "2023-10-27".into(),
                     duration: "45 min".into(),
+                    participants: "Alice, Bob, Damien".into(),
+                    notes: "Notes de réunion enregistrées...".into(),
                 };
                 ui.set_current_meeting(meeting);
 
