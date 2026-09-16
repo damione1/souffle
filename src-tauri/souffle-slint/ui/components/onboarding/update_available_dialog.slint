@@ -1,0 +1,107 @@
+import { Button, ScrollView, Palette } from "std-widgets.slint";
+import { MarkdownBlock } from "markdown_block.slint";
+import { MarkdownView } from "markdown_view.slint";
+
+// Port of UpdateAvailableDialog.svelte + UpdateAction.svelte. `download_update`/
+// `install_update` are real commands (`commands/updater.rs`) already built on
+// `tauri-plugin-updater` - the ticket's own documented transition debt if this
+// lands before SOU-191 replaces that plugin. No live download progress here
+// (same simplification as the Data tab's archive export in SOU-188): the
+// button shows a busy state and the final result, `get_update_install_block`
+// is a real state-machine query for why "Install and restart" may be greyed
+// out (recording/downloading/loading/unloading), not a guess. Release notes
+// go through the same pre-parsed `MarkdownBlock` rendering as What's New -
+// see `markdown.rs`'s doc comment.
+export component UpdateAvailableDialog inherits Rectangle {
+    in property <string> latest-version;
+    in property <[MarkdownBlock]> release-notes-blocks;
+    in property <string> phase; // "idle" | "downloading" | "ready" | "failed"
+    in property <string> error-message;
+    in property <string> install-blocked-reason; // "" when installable
+
+    callback download-requested();
+    callback install-requested();
+    callback open-release-requested();
+    callback dismiss-requested();
+    callback link-clicked(string);
+
+    background: #000000aa;
+
+    Rectangle {
+        width: 440px;
+        height: 380px;
+        background: Palette.background;
+        border-width: 1px;
+        border-color: #3a3a3a;
+        border-radius: 8px;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 14px;
+
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: "Mise à jour disponible";
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: white;
+                }
+                Text {
+                    text: "Version " + root.latest-version;
+                    font-size: 11.5px;
+                    color: #999;
+                }
+            }
+
+            ScrollView {
+                MarkdownView {
+                    blocks: root.release-notes-blocks;
+                    link-clicked(url) => { root.link-clicked(url); }
+                }
+            }
+
+            if root.error-message != "": Text {
+                text: root.error-message;
+                color: #f08080;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            if root.install-blocked-reason != "": Text {
+                text: "Installation impossible pour l'instant : " + root.install-blocked-reason;
+                color: #f0c674;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            HorizontalLayout {
+                alignment: space-between;
+                spacing: 8px;
+
+                Button {
+                    text: "Voir sur GitHub";
+                    clicked => { root.open-release-requested(); }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button {
+                        text: "Plus tard";
+                        clicked => { root.dismiss-requested(); }
+                    }
+                    if root.phase == "ready": Button {
+                        text: "Installer et redémarrer";
+                        enabled: root.install-blocked-reason == "";
+                        clicked => { root.install-requested(); }
+                    }
+                    if root.phase != "ready": Button {
+                        text: root.phase == "downloading" ? "Téléchargement…" : "Télécharger";
+                        enabled: root.phase != "downloading";
+                        clicked => { root.download-requested(); }
+                    }
+                }
+            }
+        }
+    }
+}

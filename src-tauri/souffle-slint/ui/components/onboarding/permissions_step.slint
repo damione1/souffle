@@ -1,0 +1,132 @@
+import { Button } from "std-widgets.slint";
+
+// Port of PermissionsStep.svelte. Each row's status comes from a real,
+// repeatedly-polled `get_permission_status()` snapshot (main.rs polls every
+// 600ms while this is visible) - never a value fixed once at launch (AC7,
+// added after PR #248 shipped exactly that fake pattern).
+export struct PermissionRow {
+    kind: string, // "microphone" | "system_audio" | "accessibility"
+    label: string,
+    description: string,
+    state: string, // "granted" | "denied" | "unsupported" | "no_device" | "unknown"
+    busy: bool,
+    action-label: string,
+    hint: string,
+    hint-action-label: string,
+}
+
+export component PermissionsStep inherits VerticalLayout {
+    in property <[PermissionRow]> rows;
+    in property <string> error-message;
+    in property <bool> repair-busy;
+    in property <bool> repair-success;
+    in property <bool> repair-cooldown;
+
+    callback grant-requested(string);
+    callback hint-action-requested(string);
+    callback repair-requested();
+
+    spacing: 4px;
+
+    for row in root.rows: VerticalLayout {
+        spacing: 4px;
+
+        Rectangle {
+            height: 1px;
+            background: #3a3a3a;
+        }
+
+        HorizontalLayout {
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 10px;
+            alignment: space-between;
+
+            VerticalLayout {
+                spacing: 1px;
+                horizontal-stretch: 1;
+                Text {
+                    text: row.label;
+                    font-size: 12.5px;
+                    font-weight: 600;
+                    color: white;
+                }
+                Text {
+                    text: row.description;
+                    font-size: 11px;
+                    color: #999;
+                    wrap: word-wrap;
+                }
+            }
+
+            if row.state == "granted": Rectangle {
+                background: #1e3a24;
+                border-radius: 4px;
+                HorizontalLayout {
+                    padding: 4px;
+                    Text { text: "✓ Accordé"; color: #6fcf7a; font-size: 11px; }
+                }
+            }
+            if row.state == "unsupported": Text {
+                text: "Non pris en charge";
+                color: #777;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            if row.state != "granted" && row.state != "unsupported": Button {
+                text: row.busy ? "Vérification…" : row.action-label;
+                enabled: !row.busy;
+                clicked => { root.grant-requested(row.kind); }
+            }
+        }
+
+        if row.hint != "": HorizontalLayout {
+            spacing: 8px;
+            alignment: space-between;
+
+            Text {
+                text: row.hint;
+                font-size: 10.5px;
+                color: #999;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+            if row.hint-action-label != "": Button {
+                text: row.hint-action-label;
+                clicked => { root.hint-action-requested(row.kind); }
+            }
+        }
+    }
+
+    Rectangle {
+        height: 1px;
+        background: #3a3a3a;
+    }
+
+    HorizontalLayout {
+        padding-top: 8px;
+        spacing: 10px;
+        alignment: space-between;
+
+        Text {
+            text: root.repair-success
+                ? "Réparation effectuée, en attente de confirmation macOS."
+                : "Un problème persiste ? Réparez l'entrée Accessibilité.";
+            font-size: 10.5px;
+            color: #999;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+        Button {
+            text: root.repair-busy ? "Vérification…" : "Réparer";
+            enabled: !root.repair-busy && !root.repair-cooldown;
+            clicked => { root.repair-requested(); }
+        }
+    }
+
+    if root.error-message != "": Text {
+        text: root.error-message;
+        color: #f08080;
+        font-size: 11px;
+    }
+}
