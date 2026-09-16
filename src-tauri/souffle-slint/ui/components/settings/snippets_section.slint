@@ -1,0 +1,153 @@
+import { LineEdit, TextEdit, Button } from "std-widgets.slint";
+
+// Port of SnippetsSettingsSection.svelte. Which row is being edited is
+// tracked in Rust (`snippets_editing` in main.rs), not local `.slint`
+// state, so only one row edits at a time and the edit form always reads
+// the real backing entry.
+export struct SnippetRow {
+    id: int,
+    trigger: string,
+    expansion: string,
+    editing: bool,
+}
+
+export component SnippetsSection inherits VerticalLayout {
+    in property <[SnippetRow]> entries;
+    in-out property <string> new-trigger-draft: "";
+    in-out property <string> new-expansion-draft: "";
+    in property <string> add-error;
+    in-out property <string> edit-trigger-draft: "";
+    in-out property <string> edit-expansion-draft: "";
+    in property <string> update-error;
+
+    callback add-requested(string, string);
+    callback delete-requested(int);
+    callback edit-requested(int);
+    callback cancel-edit-requested();
+    callback save-edit-requested(int, string, string);
+
+    spacing: 10px;
+
+    Text {
+        text: "Formules vocales";
+        font-size: 13.5px;
+        font-weight: 700;
+        color: white;
+    }
+    Text {
+        text: "Dites le déclencheur pendant la dictée pour insérer le texte associé.";
+        font-size: 11.5px;
+        color: #999;
+        wrap: word-wrap;
+    }
+
+    VerticalLayout {
+        spacing: 4px;
+
+        Text { text: "Déclencheur"; font-size: 10.5px; color: #999; }
+        LineEdit { text <=> root.new-trigger-draft; }
+        Text { text: "Expansion"; font-size: 10.5px; color: #999; }
+        TextEdit {
+            text <=> root.new-expansion-draft;
+            height: 60px;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            Button {
+                text: "Ajouter";
+                enabled: root.new-trigger-draft != "" && root.new-expansion-draft != "";
+                clicked => {
+                    root.add-requested(root.new-trigger-draft, root.new-expansion-draft);
+                    root.new-trigger-draft = "";
+                    root.new-expansion-draft = "";
+                }
+            }
+        }
+    }
+
+    if root.add-error != "": Text {
+        text: root.add-error;
+        color: #f08080;
+        font-size: 11px;
+    }
+
+    if root.entries.length == 0: Text {
+        text: "Aucune formule.";
+        color: #999;
+        font-size: 11.5px;
+    }
+
+    for row in root.entries: Rectangle {
+        border-width: 1px;
+        border-color: #3a3a3a;
+
+        VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
+
+            if !row.editing: VerticalLayout {
+                spacing: 4px;
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: row.trigger;
+                        font-size: 12.5px;
+                        font-weight: 600;
+                        color: white;
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Button {
+                            text: "Modifier";
+                            clicked => { root.edit-requested(row.id); }
+                        }
+                        Button {
+                            text: "Supprimer";
+                            clicked => { root.delete-requested(row.id); }
+                        }
+                    }
+                }
+                Text {
+                    text: row.expansion;
+                    font-size: 11px;
+                    color: #999;
+                    wrap: word-wrap;
+                }
+            }
+
+            if row.editing: VerticalLayout {
+                spacing: 4px;
+
+                Text { text: "Déclencheur"; font-size: 10.5px; color: #999; }
+                LineEdit { text <=> root.edit-trigger-draft; }
+                Text { text: "Expansion"; font-size: 10.5px; color: #999; }
+                TextEdit {
+                    text <=> root.edit-expansion-draft;
+                    height: 60px;
+                    wrap: word-wrap;
+                }
+                if root.update-error != "": Text {
+                    text: root.update-error;
+                    color: #f08080;
+                    font-size: 11px;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 4px;
+                    Button {
+                        text: "Annuler";
+                        clicked => { root.cancel-edit-requested(); }
+                    }
+                    Button {
+                        text: "Enregistrer";
+                        enabled: root.edit-trigger-draft != "" && root.edit-expansion-draft != "";
+                        clicked => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
+                    }
+                }
+            }
+        }
+    }
+}

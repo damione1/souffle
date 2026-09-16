@@ -9,7 +9,9 @@ mod audio_player;
 mod audio_ui;
 mod data_ui;
 mod ia_ui;
+mod lists_ui;
 mod microphone_list;
+mod model_ui;
 mod settings_ui;
 mod shortcut_capture;
 mod summary;
@@ -460,6 +462,54 @@ fn refresh_summary_providers(
     .expect("slint event loop not running");
 }
 
+/// Pushes the model picker's option list + current status - AC2's own
+/// state (download/load) is read via `get_model_status`, never
+/// reimplemented; this only formats what it returns.
+fn load_transcription_model_state(
+    window: &MainWindow,
+    handle: &AppHandle,
+    settings_state: &Rc<RefCell<Option<AppSettings>>>,
+    model_options_state: &Rc<RefCell<Vec<model_ui::FlatModelOption>>>,
+) {
+    let state = handle.state::<AppState>();
+    let catalog = match souffle_lib::commands::get_transcription_catalog(state) {
+        Ok(catalog) => catalog,
+        Err(e) => {
+            eprintln!("Failed to load transcription catalog: {e}");
+            return;
+        }
+    };
+    let unload_timeout_minutes = settings_state
+        .borrow()
+        .as_ref()
+        .map(|s| s.model_unload_timeout_minutes)
+        .unwrap_or(0);
+    let unload_timeout_options =
+        souffle_lib::settings::SettingsOptions::current().model_unload_timeout_minutes;
+    model_ui::populate_options(
+        window,
+        &catalog,
+        unload_timeout_minutes,
+        &unload_timeout_options,
+    );
+    *model_options_state.borrow_mut() = model_ui::list_available_model_options(&catalog);
+
+    let selection = TranscriptionProfileSelection {
+        engine_id: catalog.selected_engine_id.clone(),
+        model_id: catalog.selected_model_id.clone(),
+        backend_id: catalog.selected_backend_id.clone(),
+    };
+    let state = handle.state::<AppState>();
+    match souffle_lib::commands::get_model_status(state, selection) {
+        Ok(status) => {
+            window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
+            window.set_settings_model_downloading(false);
+            window.set_settings_model_error_message("".into());
+        }
+        Err(e) => window.set_settings_model_error_message(e.into()),
+    }
+}
+
 fn load_audio_devices(
     window: &MainWindow,
     settings_state: &Rc<RefCell<Option<AppSettings>>>,
@@ -685,6 +735,132 @@ fn ollama_pull_channel(
             window.set_settings_ollama_pull_status(status.into());
             if let Some(error) = progress.error {
                 window.set_settings_ollama_pull_error(error.into());
+            }
+        });
+        Ok(())
+    })
+}
+
+/// Drives one model transition (AC2): reads the real `get_model_status`,
+/// then either does nothing (Ready), loads in the background (LoadRequired),
+/// or starts a real tracked download that itself triggers the load once
+/// `DownloadStatus::Complete` arrives (DownloadRequired) - mirrors
+/// `selectModelOption()`'s `refreshRuntimeStatus()` branch, using the same
+/// commands, never a client-side re-derivation of the state machine.
+fn start_model_transition(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    selection: TranscriptionProfileSelection,
+) {
+    let state = handle.state::<AppState>();
+    let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
+        Ok(status) => status,
+        Err(e) => {
+            if let Some(window) = weak.upgrade() {
+                window.set_settings_model_error_message(e.into());
+            }
+            return;
+        }
+    };
+    let Some(window) = weak.upgrade() else {
+        return;
+    };
+    window.set_settings_model_error_message("".into());
+    match status.phase {
+        TranscriptionRuntimePhase::Ready => {
+            window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
+        }
+        TranscriptionRuntimePhase::LoadRequired => {
+            window.set_settings_model_status_text("Chargement\u{2026}".into());
+            load_model_in_background(weak, handle, selection);
+        }
+        TranscriptionRuntimePhase::DownloadRequired => {
+            window.set_settings_model_downloading(true);
+            window.set_settings_model_download_progress_label("".into());
+            window.set_settings_model_download_progress_fraction(0.0);
+            let state = handle.state::<AppState>();
+            let channel = model_download_channel(weak.clone(), handle.clone(), selection.clone());
+            if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
+                window.set_settings_model_downloading(false);
+                window.set_settings_model_error_message(e.into());
+            }
+        }
+    }
+}
+
+/// Off the Slint event-loop thread (weights loading takes seconds) - same
+/// `spawn_blocking` + await pattern `ensure_model_ready` already uses for
+/// the recording flow's own load step.
+fn load_model_in_background(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    selection: TranscriptionProfileSelection,
+) {
+    slint::spawn_local(async move {
+        let handle_for_load = handle.clone();
+        let selection_for_load = selection.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let state = handle_for_load.state::<AppState>();
+            souffle_lib::commands::load_model(state, selection_for_load)
+        })
+        .await
+        .map_err(|e| format!("Join load_model task: {e}"))
+        .and_then(|r| r);
+        if let Some(window) = weak.upgrade() {
+            match result {
+                Ok(()) => window.set_settings_model_status_text("Pr\u{ea}t".into()),
+                Err(e) => window.set_settings_model_error_message(e.into()),
+            }
+        }
+    })
+    .expect("slint event loop not running");
+}
+
+/// Pushes `DownloadProgress` updates into the model tab's progress
+/// properties, and triggers the load step itself once the download
+/// reports `Complete` - same `Channel` + `invoke_from_event_loop` pattern
+/// as `live_segment_channel`/`ollama_pull_channel`.
+fn model_download_channel(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    selection: TranscriptionProfileSelection,
+) -> Channel<souffle_lib::models::DownloadProgress> {
+    Channel::new(move |body| {
+        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+            return Ok(());
+        };
+        let Ok(progress) = serde_json::from_str::<souffle_lib::models::DownloadProgress>(&json)
+        else {
+            return Ok(());
+        };
+        let weak = weak.clone();
+        let handle = handle.clone();
+        let selection = selection.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            match &progress.status {
+                souffle_lib::models::DownloadStatus::Starting
+                | souffle_lib::models::DownloadStatus::Downloading => {
+                    let fraction = progress
+                        .total_bytes
+                        .filter(|total| *total > 0)
+                        .map(|total| progress.downloaded_bytes as f32 / total as f32)
+                        .unwrap_or(0.0);
+                    window.set_settings_model_download_progress_fraction(fraction);
+                    window
+                        .set_settings_model_download_progress_label(progress.file.as_str().into());
+                }
+                souffle_lib::models::DownloadStatus::Complete => {
+                    window.set_settings_model_downloading(false);
+                    window.set_settings_model_status_text("Chargement\u{2026}".into());
+                    load_model_in_background(weak.clone(), handle.clone(), selection.clone());
+                }
+                souffle_lib::models::DownloadStatus::Error(e) => {
+                    window.set_settings_model_downloading(false);
+                    window.set_settings_model_error_message(e.as_str().into());
+                }
             }
         });
         Ok(())
@@ -1098,6 +1274,16 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     // mirrors `editingTemplateId` in controller.svelte.ts (local UI state,
     // not part of `AppSettings`).
     let summary_template_editing: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+    // Cached so a model switch resolves the clicked label without re-querying
+    // the catalog (a pure static list, but avoids an extra command round trip
+    // on every pick).
+    let model_options_state: Rc<RefCell<Vec<model_ui::FlatModelOption>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    let snippets_list_state: Rc<RefCell<Vec<souffle_lib::db::snippets::SnippetEntry>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    // Which snippet is shown as an inline edit form - mirrors `editingId` in
+    // SnippetsSettingsSection.svelte (local UI state, not persisted).
+    let snippet_editing: Rc<RefCell<Option<i64>>> = Rc::new(RefCell::new(None));
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
@@ -1106,6 +1292,9 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let audio_devices_state_for_open = audio_devices_state.clone();
     let summary_status_state_for_open = summary_status_state.clone();
     let summary_template_editing_for_open = summary_template_editing.clone();
+    let model_options_state_for_open = model_options_state.clone();
+    let snippets_list_state_for_open = snippets_list_state.clone();
+    let snippet_editing_for_open = snippet_editing.clone();
     let settings_log_timer_for_open = settings_log_timer.clone();
     window.on_settings_requested(move || {
         let Some(window) = weak.upgrade() else {
@@ -1156,6 +1345,24 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             summary_status_state_for_open.clone(),
             summary_template_editing_for_open.clone(),
         );
+        load_transcription_model_state(
+            &window,
+            &handle,
+            &settings_state_for_open,
+            &model_options_state_for_open,
+        );
+        match souffle_lib::commands::list_dictionary(handle.state::<AppState>()) {
+            Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+            Err(e) => eprintln!("Failed to load dictionary: {e}"),
+        }
+        *snippet_editing_for_open.borrow_mut() = None;
+        match souffle_lib::commands::list_snippets(handle.state::<AppState>()) {
+            Ok(entries) => {
+                lists_ui::populate_snippets(&window, &entries, None);
+                *snippets_list_state_for_open.borrow_mut() = entries;
+            }
+            Err(e) => eprintln!("Failed to load snippets: {e}"),
+        }
     });
 
     let weak = window.as_weak();
@@ -2208,6 +2415,216 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             if let Some(settings) = guard.as_ref() {
                 ia_ui::populate_summary_templates(&window, settings, &new_id_for_editing);
             }
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_model = settings_state.clone();
+    let model_options_state_for_model = model_options_state.clone();
+    window.on_settings_model_changed(move |label| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        if window.get_recording_mode() != RecordingMode::Idle {
+            window.set_settings_model_error_message(
+                "Impossible de changer de modèle pendant un enregistrement.".into(),
+            );
+            // Unlike the Svelte version's `finally { target.value =
+            // selectedKey; }`, the combobox's own displayed value is not
+            // forced back here: Slint's binding only reasserts on a real
+            // value change, and the rejected pick never became the real
+            // selection. Documented known gap - the error message above is
+            // the source of truth, the visible combobox label may lag it
+            // until the next real selection.
+            return;
+        }
+        let Some(option) = model_ui::find_option(&model_options_state_for_model.borrow(), &label)
+            .map(|o| {
+                (
+                    o.engine_id.clone(),
+                    o.model_id.clone(),
+                    o.backend_id.clone(),
+                    o.selection(),
+                )
+            })
+        else {
+            return;
+        };
+        let (engine_id, model_id, backend_id, selection) = option;
+        save_settings_field(&handle, &settings_state_for_model, |settings| {
+            settings.transcription_engine_id = engine_id;
+            settings.transcription_model_id = model_id;
+            settings.transcription_backend_id = backend_id;
+        });
+        window.set_settings_selected_model_label(label);
+        start_model_transition(weak.clone(), handle.clone(), selection);
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_unload_timeout = settings_state.clone();
+    window.on_settings_unload_timeout_changed(move |label| {
+        let Some(minutes) = model_ui::parse_unload_timeout_label(&label) else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_unload_timeout, |settings| {
+            settings.model_unload_timeout_minutes = minutes;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_learn = settings_state.clone();
+    window.on_settings_dictation_learn_from_edit_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_learn, |settings| {
+            settings.dictation_learn_from_edit = enabled;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_settings_dictionary_add_requested(move |term, pronunciation, category| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
+        let category = (!category.is_empty()).then(|| category.to_string());
+        if let Err(e) = souffle_lib::commands::add_dictionary_entry(
+            state,
+            term.to_string(),
+            pronunciation,
+            category,
+        ) {
+            window.set_settings_dictionary_add_error(e.into());
+            return;
+        }
+        window.set_settings_dictionary_add_error("".into());
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_dictionary(state) {
+            Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+            Err(e) => eprintln!("Failed to reload dictionary: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_settings_dictionary_delete_requested(move |id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) = souffle_lib::commands::delete_dictionary_entry(state, id as i64) {
+            eprintln!("Failed to delete dictionary entry: {e}");
+            return;
+        }
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_dictionary(state) {
+            Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+            Err(e) => eprintln!("Failed to reload dictionary: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let snippets_list_state_for_add = snippets_list_state.clone();
+    window.on_settings_snippet_add_requested(move |trigger, expansion| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) = souffle_lib::commands::add_snippet(state, &trigger, &expansion) {
+            window.set_settings_snippet_add_error(e.into());
+            return;
+        }
+        window.set_settings_snippet_add_error("".into());
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_snippets(state) {
+            Ok(entries) => {
+                lists_ui::populate_snippets(&window, &entries, None);
+                *snippets_list_state_for_add.borrow_mut() = entries;
+            }
+            Err(e) => eprintln!("Failed to reload snippets: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let snippets_list_state_for_delete = snippets_list_state.clone();
+    let snippet_editing_for_delete = snippet_editing.clone();
+    window.on_settings_snippet_delete_requested(move |id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) = souffle_lib::commands::delete_snippet(state, id as i64) {
+            eprintln!("Failed to delete snippet: {e}");
+            return;
+        }
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_snippets(state) {
+            Ok(entries) => {
+                let editing = *snippet_editing_for_delete.borrow();
+                lists_ui::populate_snippets(&window, &entries, editing);
+                *snippets_list_state_for_delete.borrow_mut() = entries;
+            }
+            Err(e) => eprintln!("Failed to reload snippets: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let snippets_list_state_for_edit = snippets_list_state.clone();
+    let snippet_editing_for_edit = snippet_editing.clone();
+    window.on_settings_snippet_edit_requested(move |id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let id = id as i64;
+        let entries = snippets_list_state_for_edit.borrow();
+        let Some(entry) = entries.iter().find(|e| e.id == id) else {
+            return;
+        };
+        window.set_settings_edit_snippet_trigger_draft(entry.trigger.as_str().into());
+        window.set_settings_edit_snippet_expansion_draft(entry.expansion.as_str().into());
+        window.set_settings_snippet_update_error("".into());
+        *snippet_editing_for_edit.borrow_mut() = Some(id);
+        lists_ui::populate_snippets(&window, &entries, Some(id));
+    });
+
+    let weak = window.as_weak();
+    let snippets_list_state_for_cancel = snippets_list_state.clone();
+    let snippet_editing_for_cancel = snippet_editing.clone();
+    window.on_settings_snippet_cancel_edit_requested(move || {
+        *snippet_editing_for_cancel.borrow_mut() = None;
+        if let Some(window) = weak.upgrade() {
+            let entries = snippets_list_state_for_cancel.borrow();
+            lists_ui::populate_snippets(&window, &entries, None);
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let snippets_list_state_for_save = snippets_list_state.clone();
+    let snippet_editing_for_save = snippet_editing.clone();
+    window.on_settings_snippet_save_edit_requested(move |id, trigger, expansion| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::update_snippet(state, id as i64, &trigger, &expansion)
+        {
+            window.set_settings_snippet_update_error(e.into());
+            return;
+        }
+        window.set_settings_snippet_update_error("".into());
+        *snippet_editing_for_save.borrow_mut() = None;
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_snippets(state) {
+            Ok(entries) => {
+                lists_ui::populate_snippets(&window, &entries, None);
+                *snippets_list_state_for_save.borrow_mut() = entries;
+            }
+            Err(e) => eprintln!("Failed to reload snippets: {e}"),
         }
     });
 

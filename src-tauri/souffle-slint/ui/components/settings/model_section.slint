@@ -1,0 +1,86 @@
+import { ComboBox, ProgressIndicator } from "std-widgets.slint";
+import { SettingsField } from "settings_field.slint";
+
+// Port of ModelSettingsSection.svelte. The download/switch state machine
+// itself is not reimplemented here (AC2): it stays entirely in Rust
+// (`model_ui.rs`, calling the same `get_model_status`/`download_model`/
+// `load_model` commands the Svelte controller calls), this component only
+// displays whatever state Rust pushes and forwards the chosen label back.
+export component ModelSection inherits VerticalLayout {
+    in property <string> status-text;
+    in property <[string]> model-labels;
+    in property <string> selected-model-label;
+    in property <bool> busy;
+    in property <bool> downloading;
+    in property <string> download-progress-label;
+    in property <float> download-progress-fraction;
+    in property <[string]> unload-timeout-labels;
+    in property <string> unload-timeout-label;
+    in property <string> error-message;
+
+    callback model-changed(string);
+    callback unload-timeout-changed(string);
+
+    spacing: 10px;
+
+    HorizontalLayout {
+        alignment: space-between;
+        Text {
+            text: "Modèle de transcription";
+            font-size: 13.5px;
+            font-weight: 700;
+            color: white;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.status-text;
+            font-size: 11px;
+            color: #999;
+            vertical-alignment: center;
+        }
+    }
+    Text {
+        text: "Modèle utilisé pour la reconnaissance vocale, exécuté entièrement sur cet appareil.";
+        font-size: 11.5px;
+        color: #999;
+        wrap: word-wrap;
+    }
+
+    ComboBox {
+        model: root.model-labels;
+        current-value: root.selected-model-label;
+        enabled: !root.busy;
+        selected(value) => { root.model-changed(value); }
+    }
+
+    if root.downloading: VerticalLayout {
+        spacing: 4px;
+        Text {
+            text: root.download-progress-label;
+            font-size: 11px;
+            color: #999;
+        }
+        ProgressIndicator {
+            progress: root.download-progress-fraction;
+            indeterminate: root.download-progress-fraction <= 0;
+        }
+    }
+
+    if root.error-message != "": Text {
+        text: root.error-message;
+        color: #f08080;
+        font-size: 11.5px;
+        wrap: word-wrap;
+    }
+
+    SettingsField {
+        label: "Délai avant déchargement";
+        description: "Décharger le modèle de la mémoire après une période d'inactivité.";
+
+        ComboBox {
+            model: root.unload-timeout-labels;
+            current-value: root.unload-timeout-label;
+            selected(value) => { root.unload-timeout-changed(value); }
+        }
+    }
+}

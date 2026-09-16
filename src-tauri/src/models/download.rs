@@ -6,7 +6,12 @@ use tracing::info;
 use crate::engine::ModelArtifactDescriptor;
 
 /// Download status reported to the frontend
-#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+// `Deserialize` is for the Slint shell's `Channel<DownloadProgress>`
+// consumer (SOU-188): `Channel::send` always serializes to JSON regardless
+// of a webview being attached, so the Slint side reads the same wire format
+// back out with `serde_json::from_str` (see `live_segment_channel` for the
+// established pattern).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct DownloadProgress {
     pub file: String,
     pub downloaded_bytes: u64,
@@ -16,7 +21,7 @@ pub struct DownloadProgress {
     pub status: DownloadStatus,
 }
 
-#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DownloadStatus {
     Starting,

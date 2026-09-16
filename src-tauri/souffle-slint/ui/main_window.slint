@@ -4,6 +4,8 @@ import { MeetingDetail } from "meeting_detail.slint";
 import { SettingsView } from "settings_view.slint";
 import { CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneRow } from "components/settings/microphone_section.slint";
+import { DictionaryRow } from "components/settings/dictionary_section.slint";
+import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
@@ -166,6 +168,24 @@ export component MainWindow inherits Window {
     in property <bool> settings-editing-summary-template-is-builtin;
     in property <string> settings-editing-summary-template-name;
     in property <string> settings-editing-summary-template-prompt;
+    in property <string> settings-model-status-text;
+    in property <[string]> settings-model-labels;
+    in property <string> settings-selected-model-label;
+    in property <bool> settings-model-busy;
+    in property <bool> settings-model-downloading;
+    in property <string> settings-model-download-progress-label;
+    in property <float> settings-model-download-progress-fraction;
+    in property <[string]> settings-unload-timeout-labels;
+    in property <string> settings-unload-timeout-label;
+    in property <string> settings-model-error-message;
+    in property <bool> settings-dictation-learn-from-edit;
+    in property <[DictionaryRow]> settings-dictionary-entries;
+    in property <string> settings-dictionary-add-error;
+    in property <[SnippetRow]> settings-snippets;
+    in property <string> settings-snippet-add-error;
+    in property <string> settings-snippet-update-error;
+    in-out property <string> settings-edit-snippet-trigger-draft: "";
+    in-out property <string> settings-edit-snippet-expansion-draft: "";
 
     callback settings-requested();
     callback settings-closed();
@@ -233,6 +253,16 @@ export component MainWindow inherits Window {
     callback settings-summary-template-name-changed(string);
     callback settings-summary-template-prompt-changed(string);
     callback settings-summary-template-add-requested(string);
+    callback settings-model-changed(string);
+    callback settings-unload-timeout-changed(string);
+    callback settings-dictation-learn-from-edit-changed(bool);
+    callback settings-dictionary-add-requested(string, string, string);
+    callback settings-dictionary-delete-requested(int);
+    callback settings-snippet-add-requested(string, string);
+    callback settings-snippet-delete-requested(int);
+    callback settings-snippet-edit-requested(int);
+    callback settings-snippet-cancel-edit-requested();
+    callback settings-snippet-save-edit-requested(int, string, string);
 
     callback dictate-requested();
     callback meeting-requested();
@@ -423,6 +453,24 @@ export component MainWindow inherits Window {
         editing-summary-template-is-builtin: root.settings-editing-summary-template-is-builtin;
         editing-summary-template-name: root.settings-editing-summary-template-name;
         editing-summary-template-prompt: root.settings-editing-summary-template-prompt;
+        model-status-text: root.settings-model-status-text;
+        model-labels: root.settings-model-labels;
+        selected-model-label: root.settings-selected-model-label;
+        model-busy: root.settings-model-busy;
+        model-downloading: root.settings-model-downloading;
+        model-download-progress-label: root.settings-model-download-progress-label;
+        model-download-progress-fraction: root.settings-model-download-progress-fraction;
+        unload-timeout-labels: root.settings-unload-timeout-labels;
+        unload-timeout-label: root.settings-unload-timeout-label;
+        model-error-message: root.settings-model-error-message;
+        dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
+        dictionary-entries: root.settings-dictionary-entries;
+        dictionary-add-error: root.settings-dictionary-add-error;
+        snippets: root.settings-snippets;
+        snippet-add-error: root.settings-snippet-add-error;
+        snippet-update-error: root.settings-snippet-update-error;
+        edit-snippet-trigger-draft <=> root.settings-edit-snippet-trigger-draft;
+        edit-snippet-expansion-draft <=> root.settings-edit-snippet-expansion-draft;
         close-requested => {
             root.settings-open = false;
             root.settings-closed();
@@ -491,5 +539,15 @@ export component MainWindow inherits Window {
         summary-template-name-changed(value) => { root.settings-summary-template-name-changed(value); }
         summary-template-prompt-changed(value) => { root.settings-summary-template-prompt-changed(value); }
         summary-template-add-requested(name) => { root.settings-summary-template-add-requested(name); }
+        model-changed(value) => { root.settings-model-changed(value); }
+        unload-timeout-changed(value) => { root.settings-unload-timeout-changed(value); }
+        dictation-learn-from-edit-changed(value) => { root.settings-dictation-learn-from-edit-changed(value); }
+        dictionary-add-requested(term, pronunciation, category) => { root.settings-dictionary-add-requested(term, pronunciation, category); }
+        dictionary-delete-requested(id) => { root.settings-dictionary-delete-requested(id); }
+        snippet-add-requested(trigger, expansion) => { root.settings-snippet-add-requested(trigger, expansion); }
+        snippet-delete-requested(id) => { root.settings-snippet-delete-requested(id); }
+        snippet-edit-requested(id) => { root.settings-snippet-edit-requested(id); }
+        snippet-cancel-edit-requested => { root.settings-snippet-cancel-edit-requested(); }
+        snippet-save-edit-requested(id, trigger, expansion) => { root.settings-snippet-save-edit-requested(id, trigger, expansion); }
     }
 }

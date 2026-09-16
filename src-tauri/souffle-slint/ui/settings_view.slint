@@ -12,6 +12,9 @@ import { AboutSection } from "components/settings/about_section.slint";
 import { IntelligenceSection } from "components/settings/intelligence_section.slint";
 import { DictationPolishSection } from "components/settings/dictation_polish_section.slint";
 import { SummaryTemplatesSection } from "components/settings/summary_templates_section.slint";
+import { ModelSection } from "components/settings/model_section.slint";
+import { DictionarySection, DictionaryRow } from "components/settings/dictionary_section.slint";
+import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -116,6 +119,29 @@ export component SettingsView inherits Rectangle {
     in property <bool> editing-summary-template-is-builtin;
     in property <string> editing-summary-template-name;
     in property <string> editing-summary-template-prompt;
+    in property <string> model-status-text;
+    in property <[string]> model-labels;
+    in property <string> selected-model-label;
+    in property <bool> model-busy;
+    in property <bool> model-downloading;
+    in property <string> model-download-progress-label;
+    in property <float> model-download-progress-fraction;
+    in property <[string]> unload-timeout-labels;
+    in property <string> unload-timeout-label;
+    in property <string> model-error-message;
+    in property <bool> dictation-learn-from-edit;
+    in property <[DictionaryRow]> dictionary-entries;
+    in property <string> dictionary-add-error;
+    in property <[SnippetRow]> snippets;
+    in property <string> snippet-add-error;
+    in property <string> snippet-update-error;
+    in-out property <string> new-dictionary-term-draft: "";
+    in-out property <string> new-dictionary-pronunciation-draft: "";
+    in-out property <string> new-dictionary-category-draft: "";
+    in-out property <string> new-snippet-trigger-draft: "";
+    in-out property <string> new-snippet-expansion-draft: "";
+    in-out property <string> edit-snippet-trigger-draft: "";
+    in-out property <string> edit-snippet-expansion-draft: "";
 
     callback close-requested();
     callback autostart-changed(bool);
@@ -182,6 +208,16 @@ export component SettingsView inherits Rectangle {
     callback summary-template-name-changed(string);
     callback summary-template-prompt-changed(string);
     callback summary-template-add-requested(string);
+    callback model-changed(string);
+    callback unload-timeout-changed(string);
+    callback dictation-learn-from-edit-changed(bool);
+    callback dictionary-add-requested(string, string, string);
+    callback dictionary-delete-requested(int);
+    callback snippet-add-requested(string, string);
+    callback snippet-delete-requested(int);
+    callback snippet-edit-requested(int);
+    callback snippet-cancel-edit-requested();
+    callback snippet-save-edit-requested(int, string, string);
 
     // Opaque on purpose: this overlays IdleView/MeetingDetail rather than
     // replacing them (mirrors App.svelte hiding HomeView behind Settings
@@ -402,6 +438,60 @@ export component SettingsView inherits Rectangle {
                             name-changed(value) => { root.summary-template-name-changed(value); }
                             prompt-changed(value) => { root.summary-template-prompt-changed(value); }
                             add-requested(name) => { root.summary-template-add-requested(name); }
+                        }
+                    }
+                }
+            }
+
+            Tab {
+                title: "Transcription";
+
+                ScrollView {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 22px;
+                        alignment: start;
+
+                        ModelSection {
+                            status-text: root.model-status-text;
+                            model-labels: root.model-labels;
+                            selected-model-label: root.selected-model-label;
+                            busy: root.model-busy;
+                            downloading: root.model-downloading;
+                            download-progress-label: root.model-download-progress-label;
+                            download-progress-fraction: root.model-download-progress-fraction;
+                            unload-timeout-labels: root.unload-timeout-labels;
+                            unload-timeout-label: root.unload-timeout-label;
+                            error-message: root.model-error-message;
+                            model-changed(value) => { root.model-changed(value); }
+                            unload-timeout-changed(value) => { root.unload-timeout-changed(value); }
+                        }
+
+                        DictionarySection {
+                            learn-from-edit: root.dictation-learn-from-edit;
+                            entries: root.dictionary-entries;
+                            new-term-draft <=> root.new-dictionary-term-draft;
+                            new-pronunciation-draft <=> root.new-dictionary-pronunciation-draft;
+                            new-category-draft <=> root.new-dictionary-category-draft;
+                            add-error: root.dictionary-add-error;
+                            learn-from-edit-changed(value) => { root.dictation-learn-from-edit-changed(value); }
+                            add-requested(term, pronunciation, category) => { root.dictionary-add-requested(term, pronunciation, category); }
+                            delete-requested(id) => { root.dictionary-delete-requested(id); }
+                        }
+
+                        SnippetsSection {
+                            entries: root.snippets;
+                            new-trigger-draft <=> root.new-snippet-trigger-draft;
+                            new-expansion-draft <=> root.new-snippet-expansion-draft;
+                            add-error: root.snippet-add-error;
+                            edit-trigger-draft <=> root.edit-snippet-trigger-draft;
+                            edit-expansion-draft <=> root.edit-snippet-expansion-draft;
+                            update-error: root.snippet-update-error;
+                            add-requested(trigger, expansion) => { root.snippet-add-requested(trigger, expansion); }
+                            delete-requested(id) => { root.snippet-delete-requested(id); }
+                            edit-requested(id) => { root.snippet-edit-requested(id); }
+                            cancel-edit-requested => { root.snippet-cancel-edit-requested(); }
+                            save-edit-requested(id, trigger, expansion) => { root.snippet-save-edit-requested(id, trigger, expansion); }
                         }
                     }
                 }
