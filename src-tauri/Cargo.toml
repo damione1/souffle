@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "souffle-mcp", "souffle-schema", "tts-fixtures"]
+members = [".", "souffle-mcp", "souffle-schema", "souffle-slint", "tts-fixtures"]
 
 # The contract rule from AGENTS.md, made mechanical: a `_ =>` arm that covers
 # enum variants is exactly the pattern the rule forbids, and clippy already
