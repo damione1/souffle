@@ -1,0 +1,79 @@
+import { LineEdit, Button } from "std-widgets.slint";
+import { ActionHero } from "components/action_hero.slint";
+import { StatusBanner } from "components/status_banner.slint";
+import { EmptyState } from "components/empty_state.slint";
+
+// Port of components/HomeView.svelte's idle branch (search + filters +
+// Timeline). SOU-187 milestone 2: structure and state wiring only - the
+// Timeline list itself is milestone 3 (see EmptyState placeholder below,
+// which says so honestly instead of showing fabricated rows).
+export component IdleView inherits VerticalLayout {
+    in property <string> dictation-shortcut;
+    in property <bool> model-ready: true;
+    in-out property <string> search-query;
+    in property <string> kind-filter: "all";
+    in property <string> transcription-status-message;
+    in property <string> meeting-status-message;
+    in property <bool> timeline-is-empty: true;
+
+    callback dictate-requested();
+    callback meeting-requested();
+    callback filter-changed(string);
+    callback search-changed(string);
+    callback dismiss-transcription-status();
+    callback dismiss-meeting-status();
+
+    padding: 24px;
+    spacing: 18px;
+
+    if root.transcription-status-message != "": StatusBanner {
+        message: root.transcription-status-message;
+        dismissed => { root.dismiss-transcription-status(); }
+    }
+    if root.meeting-status-message != "": StatusBanner {
+        message: root.meeting-status-message;
+        dismissed => { root.dismiss-meeting-status(); }
+    }
+
+    ActionHero {
+        dictation-shortcut: root.dictation-shortcut;
+        model-ready: root.model-ready;
+        dictate-requested => { root.dictate-requested(); }
+        meeting-requested => { root.meeting-requested(); }
+    }
+
+    search-field := LineEdit {
+        placeholder-text: "Rechercher…";
+        text <=> root.search-query;
+        edited(text) => { root.search-changed(text); }
+    }
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+
+        Button {
+            text: "Tout";
+            checkable: true;
+            checked: root.kind-filter == "all";
+            clicked => { root.filter-changed("all"); }
+        }
+        Button {
+            text: "Réunions";
+            checkable: true;
+            checked: root.kind-filter == "meeting";
+            clicked => { root.filter-changed("meeting"); }
+        }
+        Button {
+            text: "Dictées";
+            checkable: true;
+            checked: root.kind-filter == "dictation";
+            clicked => { root.filter-changed("dictation"); }
+        }
+    }
+
+    if root.timeline-is-empty: EmptyState {
+        title: "Aucun historique";
+        message: "Jalon 3 (SOU-187) : liste Timeline réelle pas encore branchée ici.";
+    }
+}

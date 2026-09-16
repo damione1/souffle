@@ -1,0 +1,82 @@
+// Port of features/home/ActionHero.svelte: two equal-width CTAs (dictate,
+// start a meeting), each disabled while the transcription model isn't ready.
+export component ActionHero inherits HorizontalLayout {
+    in property <string> dictation-shortcut;
+    in property <bool> model-ready: true;
+
+    callback dictate-requested();
+    callback meeting-requested();
+
+    spacing: 1px;
+
+    Rectangle {
+        horizontal-stretch: 1;
+        border-width: 1px;
+        border-color: #3a3a3a;
+        background: dictate-area.has-hover ? #2a2a2a : transparent;
+
+        // TouchArea alone has no accessible role (SOU-186's LineEdit-vs-bare-
+        // TextInput lesson applies here too): without these, this control is
+        // invisible to assistive tech and AppleScript UI scripting alike.
+        accessible-role: button;
+        accessible-label: "Dicter";
+        accessible-enabled: root.model-ready;
+        accessible-action-default => { root.dictate-requested(); }
+
+        dictate-area := TouchArea {
+            enabled: root.model-ready;
+            clicked => { root.dictate-requested(); }
+        }
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 4px;
+            alignment: start;
+
+            Text {
+                text: "Dicter";
+                font-weight: 600;
+                font-size: 15px;
+            }
+            Text {
+                text: root.dictation-shortcut == "" ? "Aucun raccourci configuré" : "Appuyez sur " + root.dictation-shortcut;
+                font-size: 12px;
+                color: #888888;
+            }
+        }
+    }
+
+    Rectangle {
+        horizontal-stretch: 1;
+        border-width: 1px;
+        border-color: #3a3a3a;
+        background: meeting-area.has-hover ? #2a2a2a : transparent;
+
+        accessible-role: button;
+        accessible-label: "Réunion";
+        accessible-enabled: root.model-ready;
+        accessible-action-default => { root.meeting-requested(); }
+
+        meeting-area := TouchArea {
+            enabled: root.model-ready;
+            clicked => { root.meeting-requested(); }
+        }
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 4px;
+            alignment: start;
+
+            Text {
+                text: "Réunion";
+                font-weight: 600;
+                font-size: 15px;
+            }
+            Text {
+                text: "Enregistrer une réunion";
+                font-size: 12px;
+                color: #888888;
+            }
+        }
+    }
+}

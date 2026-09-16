@@ -1,66 +1,38 @@
-import { LineEdit, Button } from "std-widgets.slint";
+import { IdleView } from "idle_view.slint";
 
 export component MainWindow inherits Window {
     title: "Soufflé";
-    preferred-width: 480px;
-    preferred-height: 320px;
+    preferred-width: 720px;
+    preferred-height: 780px;
 
-    // AC5: state Rust pushes into the UI is a plain property, no IPC/serialization.
-    in-out property <string> status-text: "idle";
-    // AC5: an action the UI asks Rust to perform is a plain callback.
-    callback ping-requested();
+    in property <string> dictation-shortcut;
+    in property <bool> model-ready: true;
+    in-out property <string> search-query;
+    in-out property <string> kind-filter: "all";
+    in property <string> transcription-status-message;
+    in property <string> meeting-status-message;
+    in property <bool> timeline-is-empty: true;
 
-    MenuBar {
-        Menu {
-            title: "Edit";
-            MenuItem {
-                title: "Cut";
-                shortcut: @keys(Control + X);
-                activated => { field.cut(); }
-            }
-            MenuItem {
-                title: "Copy";
-                shortcut: @keys(Control + C);
-                activated => { field.copy(); }
-            }
-            MenuItem {
-                title: "Paste";
-                shortcut: @keys(Control + V);
-                activated => { field.paste(); }
-            }
-            MenuSeparator { }
-            MenuItem {
-                title: "Select All";
-                shortcut: @keys(Control + A);
-                activated => { field.select-all(); }
-            }
-        }
-    }
+    callback dictate-requested();
+    callback meeting-requested();
+    callback filter-changed(string);
+    callback search-changed(string);
+    callback dismiss-transcription-status();
+    callback dismiss-meeting-status();
 
-    VerticalLayout {
-        padding: 24px;
-        spacing: 12px;
-        alignment: start;
-
-        Text {
-            text: "Soufflé — Slint shell (SOU-186 spike)";
-            font-size: 16px;
-        }
-
-        // LineEdit (not bare TextInput) so this field is exposed to
-        // accessibility: it sets accessible-role: text-input internally,
-        // where the bare TextInput primitive sets none by default (AC7).
-        field := LineEdit {
-            text: "Type here to test Cut/Copy/Paste";
-        }
-
-        Button {
-            text: "Ping backend";
-            clicked => { root.ping-requested(); }
-        }
-
-        Text {
-            text: "status: " + root.status-text;
-        }
+    IdleView {
+        dictation-shortcut: root.dictation-shortcut;
+        model-ready: root.model-ready;
+        search-query <=> root.search-query;
+        kind-filter: root.kind-filter;
+        transcription-status-message: root.transcription-status-message;
+        meeting-status-message: root.meeting-status-message;
+        timeline-is-empty: root.timeline-is-empty;
+        dictate-requested => { root.dictate-requested(); }
+        meeting-requested => { root.meeting-requested(); }
+        filter-changed(kind) => { root.filter-changed(kind); }
+        search-changed(query) => { root.search-changed(query); }
+        dismiss-transcription-status => { root.dismiss-transcription-status(); }
+        dismiss-meeting-status => { root.dismiss-meeting-status(); }
     }
 }

@@ -31,7 +31,10 @@ use crate::{commands, constants, db, debug, engine, logging, pipeline, power, se
 /// (e.g. `std::mem::forget`, or hold it for the process lifetime) for its
 /// `AppHandle` to keep working.
 pub fn build() -> tauri::App<tauri::Wry> {
+    // Must run before logging or the database open the data dir - same
+    // ordering constraint as lib.rs::run().
     constants::migrate_legacy_data_dir();
+    logging::init(logging::LogLevel::Info);
 
     let audio_rms = Arc::new(AtomicU32::new(0f32.to_bits()));
     let dropped_counter = Arc::new(AtomicU64::new(0));
