@@ -9063,6 +9063,7 @@ dependencies = [
 name = "souffle-slint"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "slint",
  "slint-build",
  "souffle",

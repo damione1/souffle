@@ -5,6 +5,8 @@
 // in-process function calls, no IPC, no serialization.
 slint::include_modules!();
 
+mod timeline;
+
 use tauri::{AppHandle, Manager};
 
 // Port of src/lib/utils/format.ts::formatShortcutLabel.
@@ -19,10 +21,42 @@ fn format_shortcut_label(shortcut: &str) -> String {
         .replace('+', " ")
 }
 
-/// Milestone 2: shell + real state on load (shortcuts, whether the DB has
-/// any history). Milestone 3 wires the actual Timeline list; milestones 4-5
-/// wire dictate/meeting start. Until then these callbacks only log - no
-/// fabricated state change on click.
+/// Re-fetches dictations + meetings from the real database and rebuilds the
+/// Timeline model - mirrors features/timeline/controller.svelte.ts's
+/// `refresh()`. Reads the current filter/search straight off the window
+/// (already the source of truth via its in-out properties) rather than
+/// threading them through as parameters.
+fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
+    let kind_filter = window.get_kind_filter().to_string();
+    let search_query = window.get_search_query().to_string();
+
+    let state = tauri_handle.state::<souffle_lib::state::AppState>();
+    let dictations = match souffle_lib::commands::list_dictation_entries(state, Some(200)) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!("Failed to list dictation entries: {e}");
+            Vec::new()
+        }
+    };
+    let state = tauri_handle.state::<souffle_lib::state::AppState>();
+    let meetings = match souffle_lib::commands::list_meetings(state) {
+        Ok(meetings) => meetings,
+        Err(e) => {
+            eprintln!("Failed to list meetings: {e}");
+            Vec::new()
+        }
+    };
+
+    let is_empty = dictations.is_empty() && meetings.is_empty();
+    let groups = timeline::build_groups(&dictations, &meetings, &kind_filter, &search_query);
+    window.set_timeline_has_matches(!groups.is_empty());
+    window.set_timeline_groups(std::rc::Rc::new(slint::VecModel::from(groups)).into());
+    window.set_timeline_is_empty(is_empty);
+}
+
+/// Milestone 3 wires the real Timeline (this function); milestones 4-6 wire
+/// dictate/meeting start and opening a meeting's detail. Until then those
+/// two callbacks only log - no fabricated state change on click.
 ///
 /// Plain `eprintln!`, not `tracing`: this dev shell's own diagnostics are
 /// unrelated to the production log file/filter (`SOUFFLE_LOG`, scoped to the
@@ -35,15 +69,47 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     window.on_meeting_requested(|| {
         eprintln!("meeting-requested (start flow not wired yet, see SOU-187 milestone 4)");
     });
+
     let weak = window.as_weak();
+    let handle = tauri_handle.clone();
     window.on_filter_changed(move |kind| {
-        eprintln!("filter-changed: {kind} (Timeline not wired yet, see SOU-187 milestone 3)");
         if let Some(window) = weak.upgrade() {
             window.set_kind_filter(kind);
+            refresh_timeline(&window, &handle);
         }
     });
-    window.on_search_changed(|query| {
-        eprintln!("search-changed: {query} (Timeline not wired yet, see SOU-187 milestone 3)");
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_search_changed(move |_query| {
+        if let Some(window) = weak.upgrade() {
+            refresh_timeline(&window, &handle);
+        }
+    });
+
+    window.on_timeline_item_opened(|kind, id| {
+        // MeetingDetail is milestone 6; dictation inline-expand is not
+        // ported yet either - both real actions, neither wired yet.
+        eprintln!(
+            "timeline-item-opened: {kind} {id} (open flow not wired yet, see SOU-187 milestone 6)"
+        );
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_timeline_item_removed(move |kind, id| {
+        let state = handle.state::<souffle_lib::state::AppState>();
+        let result = if kind == "dictation" {
+            souffle_lib::commands::delete_dictation_entry(state, id.to_string())
+        } else {
+            souffle_lib::commands::delete_meeting(state, id.to_string())
+        };
+        if let Err(e) = result {
+            eprintln!("Failed to delete {kind} {id}: {e}");
+        }
+        if let Some(window) = weak.upgrade() {
+            refresh_timeline(&window, &handle);
+        }
     });
 
     let weak = window.as_weak();
@@ -58,8 +124,6 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             window.set_meeting_status_message("".into());
         }
     });
-
-    let _ = tauri_handle;
 }
 
 fn main() {
@@ -83,15 +147,7 @@ fn main() {
         Err(e) => eprintln!("Failed to load shortcuts: {e}"),
     }
 
-    // Real DB query, not a hardcoded true - mirrors HomeView.svelte's
-    // onMount timeline.refresh() as far as milestone 2 goes (empty state
-    // only; the actual list is milestone 3).
-    let state = tauri_handle.state::<souffle_lib::state::AppState>();
-    match souffle_lib::commands::list_meetings(state) {
-        Ok(meetings) => window.set_timeline_is_empty(meetings.is_empty()),
-        Err(e) => eprintln!("Failed to list meetings: {e}"),
-    }
-
+    refresh_timeline(&window, &tauri_handle);
     wire_callbacks(&window, tauri_handle);
 
     window.run().expect("event loop failed");

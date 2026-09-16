@@ -1,12 +1,10 @@
 import { LineEdit, Button } from "std-widgets.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { StatusBanner } from "components/status_banner.slint";
-import { EmptyState } from "components/empty_state.slint";
+import { TimelineSection, TimelineDayGroup } from "components/timeline_section.slint";
 
 // Port of components/HomeView.svelte's idle branch (search + filters +
-// Timeline). SOU-187 milestone 2: structure and state wiring only - the
-// Timeline list itself is milestone 3 (see EmptyState placeholder below,
-// which says so honestly instead of showing fabricated rows).
+// Timeline).
 export component IdleView inherits VerticalLayout {
     in property <string> dictation-shortcut;
     in property <bool> model-ready: true;
@@ -14,7 +12,10 @@ export component IdleView inherits VerticalLayout {
     in property <string> kind-filter: "all";
     in property <string> transcription-status-message;
     in property <string> meeting-status-message;
+    in property <[TimelineDayGroup]> timeline-groups;
     in property <bool> timeline-is-empty: true;
+    in property <bool> timeline-has-matches: true;
+    in property <string> live-meeting-id;
 
     callback dictate-requested();
     callback meeting-requested();
@@ -22,6 +23,8 @@ export component IdleView inherits VerticalLayout {
     callback search-changed(string);
     callback dismiss-transcription-status();
     callback dismiss-meeting-status();
+    callback timeline-item-opened(string, string);
+    callback timeline-item-removed(string, string);
 
     padding: 24px;
     spacing: 18px;
@@ -72,8 +75,12 @@ export component IdleView inherits VerticalLayout {
         }
     }
 
-    if root.timeline-is-empty: EmptyState {
-        title: "Aucun historique";
-        message: "Jalon 3 (SOU-187) : liste Timeline réelle pas encore branchée ici.";
+    TimelineSection {
+        groups: root.timeline-groups;
+        is-empty: root.timeline-is-empty;
+        has-matches: root.timeline-has-matches;
+        live-meeting-id: root.live-meeting-id;
+        item-opened(kind, id) => { root.timeline-item-opened(kind, id); }
+        item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
     }
 }

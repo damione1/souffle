@@ -1,0 +1,52 @@
+import { TimelineEntry, TimelineItemRow } from "timeline_item.slint";
+import { EmptyState } from "empty_state.slint";
+
+export struct TimelineDayGroup {
+    day-label: string,
+    entries: [TimelineEntry],
+}
+
+// Port of features/timeline/components/TimelineSection.svelte (day grouping
+// only; the "upcoming today" calendar section is not part of this - the
+// calendar banner above IdleView already covers the single-next-event case,
+// see SOU-187 milestone 3 notes for the today-list gap).
+export component TimelineSection inherits VerticalLayout {
+    in property <[TimelineDayGroup]> groups;
+    in property <bool> is-empty;
+    in property <bool> has-matches: true;
+    in property <string> live-meeting-id;
+
+    callback item-opened(string /* kind */, string /* id */);
+    callback item-removed(string /* kind */, string /* id */);
+
+    spacing: 18px;
+
+    if root.is-empty: EmptyState {
+        title: "Aucun historique";
+        message: "Dictez ou enregistrez une réunion pour la voir apparaître ici.";
+    }
+    if !root.is-empty && !root.has-matches: EmptyState {
+        title: "Aucun résultat";
+        message: "Essayez un autre terme de recherche.";
+    }
+    if !root.is-empty && root.has-matches: VerticalLayout {
+        spacing: 18px;
+
+        for group in root.groups: VerticalLayout {
+            spacing: 4px;
+
+            Text {
+                text: group.day-label;
+                font-size: 11px;
+                color: #888888;
+            }
+
+            for entry in group.entries: TimelineItemRow {
+                entry: entry;
+                is-live: entry.kind == "meeting" && entry.id == root.live-meeting-id;
+                opened => { root.item-opened(entry.kind, entry.id); }
+                removed => { root.item-removed(entry.kind, entry.id); }
+            }
+        }
+    }
+}

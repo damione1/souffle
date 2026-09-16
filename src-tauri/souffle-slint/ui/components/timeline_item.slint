@@ -1,0 +1,104 @@
+// Port of features/timeline/components/TimelineItem.svelte. Struct name
+// avoids "TimelineItem" itself: Slint generates a Rust type of the same
+// name, and that name is also the Svelte component's - kept distinct to
+// avoid confusing the two in Rust.
+export struct TimelineEntry {
+    kind: string, // "meeting" | "dictation"
+    id: string,
+    title: string,
+    time-label: string,
+    duration-label: string,
+    has-summary: bool,
+    summary-is-stale: bool,
+}
+
+export component TimelineItemRow inherits Rectangle {
+    in property <TimelineEntry> entry;
+    in property <bool> is-live: false;
+
+    callback opened();
+    callback removed();
+
+    property <bool> confirming-delete: false;
+
+    HorizontalLayout {
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 10px;
+
+        row-area := TouchArea {
+            accessible-role: button;
+            accessible-label: root.entry.title;
+            accessible-action-default => { root.opened(); }
+            clicked => { root.opened(); }
+
+            HorizontalLayout {
+                spacing: 10px;
+
+                Text {
+                    text: root.entry.kind == "meeting" ? "\u{1F465}" : "\u{1F4DD}";
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.entry.title;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+
+                if root.entry.has-summary: Text {
+                    text: "\u{2605}";
+                    color: root.entry.summary-is-stale ? #cc8800 : #4a9eff;
+                    vertical-alignment: center;
+                }
+
+                if root.entry.duration-label != "": Text {
+                    text: root.entry.duration-label;
+                    color: #888888;
+                    font-family: "monospace";
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.entry.time-label;
+                    color: #888888;
+                    font-family: "monospace";
+                    vertical-alignment: center;
+                }
+
+                if root.entry.kind == "meeting": Text {
+                    text: "\u{203A}";
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if !root.is-live: Rectangle {
+            width: 70px;
+            if !root.confirming-delete: TouchArea {
+                accessible-role: button;
+                accessible-label: "Supprimer";
+                accessible-action-default => { root.confirming-delete = true; }
+                clicked => { root.confirming-delete = true; }
+                Text {
+                    text: "Supprimer";
+                    color: #cc4444;
+                    horizontal-alignment: right;
+                }
+            }
+            if root.confirming-delete: TouchArea {
+                accessible-role: button;
+                accessible-label: "Confirmer la suppression";
+                accessible-action-default => { root.confirming-delete = false; root.removed(); }
+                clicked => { root.confirming-delete = false; root.removed(); }
+                Text {
+                    text: "Confirmer";
+                    color: #cc4444;
+                    font-weight: 600;
+                    horizontal-alignment: right;
+                }
+            }
+        }
+    }
+}

@@ -1,4 +1,5 @@
 import { IdleView } from "idle_view.slint";
+import { TimelineDayGroup } from "components/timeline_section.slint";
 
 export component MainWindow inherits Window {
     title: "Soufflé";
@@ -11,7 +12,10 @@ export component MainWindow inherits Window {
     in-out property <string> kind-filter: "all";
     in property <string> transcription-status-message;
     in property <string> meeting-status-message;
+    in property <[TimelineDayGroup]> timeline-groups;
     in property <bool> timeline-is-empty: true;
+    in property <bool> timeline-has-matches: true;
+    in property <string> live-meeting-id;
 
     callback dictate-requested();
     callback meeting-requested();
@@ -19,6 +23,8 @@ export component MainWindow inherits Window {
     callback search-changed(string);
     callback dismiss-transcription-status();
     callback dismiss-meeting-status();
+    callback timeline-item-opened(string, string);
+    callback timeline-item-removed(string, string);
 
     IdleView {
         dictation-shortcut: root.dictation-shortcut;
@@ -27,12 +33,17 @@ export component MainWindow inherits Window {
         kind-filter: root.kind-filter;
         transcription-status-message: root.transcription-status-message;
         meeting-status-message: root.meeting-status-message;
+        timeline-groups: root.timeline-groups;
         timeline-is-empty: root.timeline-is-empty;
+        timeline-has-matches: root.timeline-has-matches;
+        live-meeting-id: root.live-meeting-id;
         dictate-requested => { root.dictate-requested(); }
         meeting-requested => { root.meeting-requested(); }
         filter-changed(kind) => { root.filter-changed(kind); }
         search-changed(query) => { root.search-changed(query); }
         dismiss-transcription-status => { root.dismiss-transcription-status(); }
         dismiss-meeting-status => { root.dismiss-meeting-status(); }
+        timeline-item-opened(kind, id) => { root.timeline-item-opened(kind, id); }
+        timeline-item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
     }
 }
