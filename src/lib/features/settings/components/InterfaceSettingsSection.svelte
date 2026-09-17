@@ -27,6 +27,7 @@
     shortcutError,
     modifierTapStatus = null,
     nativeShortcuts,
+    settingsOptions,
     onThemeChange,
     onLocaleChange,
     onAutoPasteChange,
@@ -49,6 +50,7 @@
     shortcutError: string;
     modifierTapStatus?: ModifierTapStatus | null;
     nativeShortcuts: readonly string[];
+    settingsOptions: { paste_delay_ms_min: number; paste_delay_ms_max: number };
     onThemeChange: (theme: Theme) => void;
     onLocaleChange: (locale: string) => void;
     onAutoPasteChange: (event: Event) => void;
@@ -152,8 +154,8 @@
           type="number"
           value={pasteDelayMs}
           onchange={onPasteDelayChange}
-          min="50"
-          max="1000"
+          min={settingsOptions.paste_delay_ms_min}
+          max={settingsOptions.paste_delay_ms_max}
           step="50"
           class="field-number"
         />

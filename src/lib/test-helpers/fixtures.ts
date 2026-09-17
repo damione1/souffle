@@ -250,6 +250,7 @@ export const mockSummaryProvidersStatus: SummaryProvidersStatus = {
   apple_intelligence_available: false,
   apple_intelligence_is_stub: true,
   apple_intelligence_unavailable_reason: "stub",
+  recommended_ollama_model: "qwen2.5:7b",
   models: [
     { id: "llama3.2:latest", label: "Llama 3.2", provider: "ollama", can_summarize: true },
     { id: "mistral:latest", label: "Mistral", provider: "ollama", can_summarize: true },

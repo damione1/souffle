@@ -174,6 +174,7 @@ function makeMeeting(overrides: Partial<MeetingTranscript> = {}): MeetingTranscr
   };
 }
 
+/** Build provider status fixtures with optional per-test overrides. */
 function makeSummaryProvidersStatus(
   overrides: Partial<SummaryProvidersStatus> = {},
 ): SummaryProvidersStatus {
@@ -183,6 +184,7 @@ function makeSummaryProvidersStatus(
     apple_intelligence_available: false,
     apple_intelligence_is_stub: true,
     apple_intelligence_unavailable_reason: "stub",
+    recommended_ollama_model: "qwen2.5:7b",
     models: [
       { id: "llama3", label: "Llama 3", provider: "ollama", can_summarize: true },
       { id: "codellama", label: "Code Llama", provider: "ollama", can_summarize: false },

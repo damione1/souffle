@@ -50,7 +50,7 @@ vi.mock("./utils/theme", () => ({
   applyTheme: vi.fn(),
 }));
 
-import { LOCAL_BUILD, bootstrapAppState, primeSettingsDefaults } from "./bootstrap";
+import { bootstrapAppState, primeSettingsDefaults } from "./bootstrap";
 import { getAppState } from "./stores/app.svelte";
 import { mockRuntimeStatus, mockSettings } from "./test-helpers/fixtures";
 import { SETUP_STORAGE_KEY } from "./features/onboarding/setup";
@@ -66,7 +66,7 @@ describe("bootstrapAppState what's new", () => {
     getSettings.mockResolvedValue({ ...mockSettings });
     getDefaultSettings.mockResolvedValue({ ...mockSettings });
     saveSettings.mockResolvedValue(undefined);
-    getAppVersion.mockResolvedValue("0.4.0");
+    getAppVersion.mockResolvedValue({ version: "0.4.0", is_local_build: false });
     runStartupModelFlow.mockResolvedValue(undefined);
   });
 
@@ -80,7 +80,7 @@ describe("bootstrapAppState what's new", () => {
 
   it("never shows the changelog while setup is unfinished, even after a version bump", async () => {
     getSettings.mockResolvedValue({ ...mockSettings, last_seen_version: "0.3.0" });
-    getAppVersion.mockResolvedValue("0.4.0");
+    getAppVersion.mockResolvedValue({ version: "0.4.0", is_local_build: false });
 
     const result = await bootstrapAppState(app);
     expect(result.whatsNew).toBeNull();
@@ -92,7 +92,7 @@ describe("bootstrapAppState what's new", () => {
   it("shows the changelog after setup when the version changed", async () => {
     localStorage.setItem(SETUP_STORAGE_KEY, "1");
     getSettings.mockResolvedValue({ ...mockSettings, last_seen_version: "0.3.0" });
-    getAppVersion.mockResolvedValue("0.4.0");
+    getAppVersion.mockResolvedValue({ version: "0.4.0", is_local_build: false });
 
     const result = await bootstrapAppState(app);
     expect(result.whatsNew).toEqual({
@@ -112,7 +112,7 @@ describe("bootstrapAppState what's new", () => {
   it("shows no changelog for a local build, and leaves last_seen_version alone", async () => {
     localStorage.setItem(SETUP_STORAGE_KEY, "1");
     getSettings.mockResolvedValue({ ...mockSettings, last_seen_version: "0.10.0" });
-    getAppVersion.mockResolvedValue(LOCAL_BUILD);
+    getAppVersion.mockResolvedValue({ version: "", is_local_build: true });
 
     const result = await bootstrapAppState(app);
 
@@ -120,7 +120,7 @@ describe("bootstrapAppState what's new", () => {
     // Stamping "local build" here would swallow the next real release's
     // changelog, since that release would then differ from what was stored.
     expect(saveSettings).not.toHaveBeenCalledWith(
-      expect.objectContaining({ last_seen_version: LOCAL_BUILD }),
+      expect.objectContaining({ last_seen_version: expect.anything() }),
     );
   });
 });
@@ -152,7 +152,7 @@ describe("bootstrapAppState webview reload resync (SOU-073)", () => {
     getSettings.mockResolvedValue({ ...mockSettings });
     getDefaultSettings.mockResolvedValue({ ...mockSettings });
     saveSettings.mockResolvedValue(undefined);
-    getAppVersion.mockResolvedValue("0.4.0");
+    getAppVersion.mockResolvedValue({ version: "0.4.0", is_local_build: false });
     runStartupModelFlow.mockResolvedValue(undefined);
   });
 
