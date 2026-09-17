@@ -34,7 +34,7 @@ export component AppHeader inherits Rectangle {
     property <string> status-label: root.recording-mode != RecordingMode.idle ? "Enregistrement"
         : root.model-ready ? "Pr\u{ea}t" : "Mod\u{e8}le non t\u{e9}l\u{e9}charg\u{e9}";
     property <color> status-color: root.recording-mode != RecordingMode.idle ? Theme.danger
-        : root.model-ready ? Theme.success : Theme.warning;
+        : root.model-ready ? Theme.accent : Theme.warning;
     property <bool> show-model-label: root.recording-mode == RecordingMode.idle && root.model-ready && root.model-label != "";
 
     height: 52px;

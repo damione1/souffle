@@ -2461,6 +2461,15 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         mutate: impl FnOnce(&mut AppSettings),
     ) {
         let mut guard = settings_state.borrow_mut();
+        if guard.is_none() {
+            match souffle_lib::commands::get_settings(Arc::clone(handle)) {
+                Ok(loaded) => *guard = Some(loaded),
+                Err(e) => {
+                    eprintln!("Failed to load settings: {e}");
+                    return;
+                }
+            }
+        }
         let Some(settings) = guard.as_mut() else {
             return;
         };
@@ -2546,9 +2555,9 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             settings.theme = theme;
         });
         if let Some(window) = weak.upgrade() {
-            window
-                .global::<Theme>()
-                .set_dark(settings_ui::resolve_dark(theme));
+            let dark = settings_ui::resolve_dark(theme);
+            window.global::<Theme>().set_dark(dark);
+            souffle_lib::native::appearance::apply_resolved(dark);
         }
     });
 
@@ -2571,6 +2580,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             souffle_lib::settings::Theme::Light
         };
         window.global::<Theme>().set_dark(next_dark);
+        souffle_lib::native::appearance::apply_resolved(next_dark);
         save_settings_field(&handle, &settings_state_for_toggle, |settings| {
             settings.theme = next_theme;
         });
@@ -4032,9 +4042,9 @@ fn main() {
     // `System` resolves against the actual macOS appearance
     // (`native::appearance::is_system_dark`), not a browser media query.
     if let Ok(settings) = souffle_lib::commands::get_settings(handle.clone()) {
-        window
-            .global::<Theme>()
-            .set_dark(settings_ui::resolve_dark(settings.theme));
+        let dark = settings_ui::resolve_dark(settings.theme);
+        window.global::<Theme>().set_dark(dark);
+        souffle_lib::native::appearance::apply_resolved(dark);
     }
 
     // AppHeader's status pill shows the model label ("STT 1B FR/EN") next

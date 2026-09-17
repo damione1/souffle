@@ -11,7 +11,7 @@
 //! (SOU-195's theme toggle), not a live OS-appearance listener.
 
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication};
+use objc2_app_kit::{NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication};
 use objc2_foundation::NSArray;
 
 /// `true` if the effective system appearance is Dark Aqua (or a variant of
@@ -35,4 +35,23 @@ pub fn is_system_dark() -> bool {
     let candidates = NSArray::from_slice(&[aqua, dark_aqua]);
     let best_match = appearance.bestMatchFromAppearancesWithNames(&candidates);
     best_match.is_some_and(|name| unsafe { &*name == NSAppearanceNameDarkAqua })
+}
+
+/// Pin NSApp to Aqua or Dark Aqua so native chrome (menus, scrollbars,
+/// traffic-light contrast) follows the in-app palette, not the OS while
+/// the user has picked Light or Dark explicitly.
+pub fn apply_resolved(dark: bool) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    let name = unsafe {
+        if dark {
+            NSAppearanceNameDarkAqua
+        } else {
+            NSAppearanceNameAqua
+        }
+    };
+    let appearance = NSAppearance::appearanceNamed(&*name);
+    app.setAppearance(appearance.as_deref());
 }

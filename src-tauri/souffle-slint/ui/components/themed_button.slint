@@ -19,10 +19,10 @@ export component ThemedButton inherits Rectangle {
     vertical-stretch: 0;
     border-radius: 4px;
     border-width: 1px;
-    border-color: root.kind == ThemedButtonKind.primary ? rgba(233, 174, 85, 0.25)
+    border-color: root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(0.25)
         : root.kind == ThemedButtonKind.ghost || root.kind == ThemedButtonKind.active ? transparent
         : Theme.ghost-border;
-    background: root.kind == ThemedButtonKind.primary ? rgba(233, 174, 85, area.has-hover ? 0.20 : 0.12)
+    background: root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(area.has-hover ? 0.20 : 0.12)
         : root.kind == ThemedButtonKind.active ? Theme.text-primary
         : root.kind == ThemedButtonKind.ghost ? (area.has-hover ? Theme.surface-2 : transparent)
         : (area.has-hover ? Theme.surface-4 : Theme.surface-3);
