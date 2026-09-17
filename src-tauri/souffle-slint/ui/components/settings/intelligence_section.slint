@@ -145,6 +145,7 @@ export component IntelligenceSection inherits VerticalLayout {
         description: "Adresse du serveur Ollama local ou distant.";
 
         ThemedLineEdit {
+            width: 220px;
             text: root.ollama-url;
             edited(value) => { root.ollama-url-changed(value); }
         }
@@ -155,19 +156,24 @@ export component IntelligenceSection inherits VerticalLayout {
         description: root.summary-model-count + " modèle(s) trouvé(s).";
 
         HorizontalLayout {
-            spacing: 6px;
-            Rectangle {
-                width: 8px;
-                height: 8px;
-                border-radius: 4px;
-                background: root.ollama-available ? Theme.success : Theme.text-faint;
-                y: 4px;
-            }
-            Text {
-                text: root.ollama-available ? "Connecté" : "Non disponible";
-                font-size: 12px;
-                color: Theme.text-secondary;
-                vertical-alignment: center;
+            spacing: 12px;
+            alignment: end;
+            HorizontalLayout {
+                spacing: 6px;
+                vertical-stretch: 0;
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: root.ollama-available ? Theme.success : Theme.text-faint;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    text: root.ollama-available ? "Connecté" : "Non disponible";
+                    font-size: 12px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
             }
             ThemedButton {
                 text: "Réessayer";

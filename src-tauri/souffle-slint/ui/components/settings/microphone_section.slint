@@ -71,8 +71,8 @@ export component MicrophoneSection inherits VerticalLayout {
                 selected(value) => { root.device-changed(value); }
             }
             refresh := Rectangle {
-                width: 32px;
-                height: 32px;
+                width: 24px;
+                height: 24px;
                 border-radius: 4px;
                 border-width: 1px;
                 border-color: Theme.ghost-border;
@@ -90,7 +90,7 @@ export component MicrophoneSection inherits VerticalLayout {
             }
             if root.has-disconnected: ThemedButton {
                 text: "Réinitialiser la liste";
-                kind: ThemedButtonKind.ghost;
+                kind: ThemedButtonKind.primary;
                 clicked => { root.reset-devices-requested(); }
             }
         }
@@ -193,7 +193,8 @@ export component MicrophoneSection inherits VerticalLayout {
                 }
 
                 HorizontalLayout {
-                    spacing: 4px;
+                    spacing: 8px;
+                    alignment: end;
 
                     ThemedButton {
                         text: "▲";
@@ -205,22 +206,26 @@ export component MicrophoneSection inherits VerticalLayout {
                         enabled: !row.is-last;
                         clicked => { root.move-device-requested(row.uid, 1); }
                     }
-                    ThemedSwitch {
-                        checked: row.hidden;
-                        toggled(new) => { root.toggle-hidden-requested(row.uid, new); }
-                    }
-                    Text {
-                        text: "Masquer";
-                        font-size: 10.5px;
-                        color: Theme.text-muted;
-                        vertical-alignment: center;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        ThemedSwitch {
+                            checked: row.hidden;
+                            toggled(new) => { root.toggle-hidden-requested(row.uid, new); }
+                        }
+                        Text {
+                            text: "Masquer";
+                            font-size: 10.5px;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
+                        }
                     }
                     if !row.connected: Rectangle {
-                        width: 28px;
-                        height: 28px;
+                        width: 24px;
+                        height: 24px;
                         border-radius: 4px;
                         border-width: 1px;
-                        border-color: Theme.ghost-border;
+                        border-color: Theme.danger.with-alpha(0.3);
+                        background: delete-area.has-hover ? Theme.danger.with-alpha(0.1) : transparent;
                         LucideIcon {
                             icon: IconSet.Trash2;
                             icon-color: Theme.danger;
@@ -228,7 +233,7 @@ export component MicrophoneSection inherits VerticalLayout {
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                         }
-                        TouchArea {
+                        delete-area := TouchArea {
                             clicked => { root.remove-device-requested(row.uid); }
                         }
                     }

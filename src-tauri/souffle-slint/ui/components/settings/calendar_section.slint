@@ -118,13 +118,16 @@ export component CalendarSection inherits VerticalLayout {
                 alignment: start;
                 spacing: 4px;
 
-                if row.show-header && row.source-title != "": Text {
-                    text: row.source-title;
-                    font-size: 11px;
-                    font-weight: 600;
-                    letter-spacing: 1.65px;
-                    color: Theme.text-muted;
-                    padding-top: 8px;
+                if row.show-header && row.source-title != "": VerticalLayout {
+                    padding-top: 12px;
+                    padding-bottom: 4px;
+                    Text {
+                        text: row.source-title;
+                        font-size: 10.5px;
+                        font-family: "Archivo Bold";
+                        letter-spacing: 1px;
+                        color: Theme.text-tertiary;
+                    }
                 }
 
                 HorizontalLayout {

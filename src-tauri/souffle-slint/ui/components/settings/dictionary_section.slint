@@ -96,10 +96,13 @@ export component DictionarySection inherits VerticalLayout {
         font-size: 11px;
     }
 
-    if root.entries.length == 0: Text {
-        text: "Aucune entrée.";
-        color: Theme.text-muted;
-        font-size: 11.5px;
+    if root.entries.length == 0: VerticalLayout {
+        padding-top: 4px;
+        Text {
+            text: "Aucune entrée.";
+            font-size: 13px;
+            color: Theme.text-muted;
+        }
     }
 
     for row in root.entries: Rectangle {

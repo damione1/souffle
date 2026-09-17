@@ -20,23 +20,26 @@ export component PermissionsSection inherits VerticalLayout {
 
             review := Rectangle {
                 height: 32px;
-                width: 16px + 6px + btn-label.width + 8px;
-                background: area.has-hover ? Theme.surface-2 : transparent;
+                width: 16px + 6px + btn-label.width + 12px;
+                background: area.has-hover ? Theme.surface-4 : Theme.surface-3;
                 border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.ghost-border;
 
                 LucideIcon {
                     icon: IconSet.Shield;
-                    icon-color: area.has-hover ? Theme.text-primary : Theme.text-muted;
-                    size: 16px;
-                    x: 4px;
+                    icon-color: Theme.text-primary;
+                    size: 14px;
+                    x: 8px;
                     y: (parent.height - self.height) / 2;
                 }
                 btn-label := Text {
-                    x: 26px;
+                    x: 28px;
                     height: parent.height;
                     text: "Vérifier les permissions";
                     font-size: 13px;
-                    color: area.has-hover ? Theme.text-primary : Theme.text-muted;
+                    font-weight: 500;
+                    color: Theme.text-primary;
                     vertical-alignment: center;
                 }
                 area := TouchArea {
