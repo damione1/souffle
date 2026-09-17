@@ -4003,6 +4003,7 @@ fn main() {
     // the window attributes winit uses to create the NSWindow.
     #[cfg(target_os = "macos")]
     slint::BackendSelector::new()
+        .renderer_name("skia".into())
         .with_winit_window_attributes_hook(|attrs| {
             use slint::winit_030::winit::platform::macos::WindowAttributesExtMacOS;
             attrs

@@ -52,6 +52,6 @@ pub fn apply_resolved(dark: bool) {
             NSAppearanceNameAqua
         }
     };
-    let appearance = NSAppearance::appearanceNamed(&*name);
+    let appearance = NSAppearance::appearanceNamed(name);
     app.setAppearance(appearance.as_deref());
 }

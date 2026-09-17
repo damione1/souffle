@@ -16,7 +16,7 @@ import { DictionarySection, DictionaryRow } from "components/settings/dictionary
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
-import { SettingsTabBar } from "components/settings/settings_tabs.slint";
+import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
 import { AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, SettingsTab } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
@@ -283,9 +283,8 @@ export component SettingsView inherits Rectangle {
                 spacing: 22px;
                 alignment: start;
 
-                if root.tab == SettingsTab.transcription: VerticalLayout {
-                    spacing: 22px;
-                    alignment: start;
+                SettingsTabPage {
+                    active: root.tab == SettingsTab.transcription;
 
                         ModelSection {
                             status-text: root.model-status-text;
@@ -330,9 +329,8 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                if root.tab == SettingsTab.ai: VerticalLayout {
-                    spacing: 22px;
-                    alignment: start;
+                SettingsTabPage {
+                    active: root.tab == SettingsTab.ai;
 
                         IntelligenceSection {
                             summary-provider: root.summary-provider;
@@ -387,9 +385,8 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                if root.tab == SettingsTab.audio: VerticalLayout {
-                    spacing: 22px;
-                    alignment: start;
+                SettingsTabPage {
+                    active: root.tab == SettingsTab.audio;
 
                         MicrophoneSection {
                             device-labels: root.audio-device-labels;
@@ -440,9 +437,8 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                if root.tab == SettingsTab.interface: VerticalLayout {
-                    spacing: 22px;
-                    alignment: start;
+                SettingsTabPage {
+                    active: root.tab == SettingsTab.interface;
 
                         InterfaceSection {
                             theme: root.theme;
@@ -480,9 +476,8 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                if root.tab == SettingsTab.meetings: VerticalLayout {
-                    spacing: 22px;
-                    alignment: start;
+                SettingsTabPage {
+                    active: root.tab == SettingsTab.meetings;
 
                         CalendarSection {
                             enabled: root.calendar-enabled;
@@ -498,9 +493,8 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                if root.tab == SettingsTab.system: VerticalLayout {
-                    spacing: 22px;
-                    alignment: start;
+                SettingsTabPage {
+                    active: root.tab == SettingsTab.system;
 
                         AutostartSection {
                             autostart-enabled: root.autostart-enabled;

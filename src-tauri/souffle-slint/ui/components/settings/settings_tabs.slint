@@ -98,3 +98,24 @@ export component SettingsTabBar inherits Rectangle {
         }
     }
 }
+
+// Keeps a tab's item tree alive when inactive. `if tab ==` tears the
+// whole section down and rebuilds it on every click (hundreds of ms with
+// FemtoVG, still a hitch with Skia). `visible: false` still occupies
+// layout space, so height collapses to 0 when inactive.
+export component SettingsTabPage inherits Rectangle {
+    in property <bool> active;
+
+    visible: root.active;
+    height: root.active ? content.preferred-height : 0px;
+    clip: true;
+    vertical-stretch: 0;
+
+    content := VerticalLayout {
+        width: parent.width;
+        spacing: 22px;
+        alignment: start;
+
+        @children
+    }
+}
