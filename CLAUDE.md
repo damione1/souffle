@@ -1,8 +1,10 @@
 # Soufflé
 
-Private, on-device speech-to-text for macOS (Apple Silicon only). Rust backend + native Slint UI in `src-tauri/` (binary crate `souffle-slint`) — no Tauri, no webview, no npm frontend in the shipped app.
+Private, on-device speech-to-text for macOS (Apple Silicon only). Rust backend + native Slint UI in `src-tauri/` (binary crate `souffle-slint`). No Tauri, no webview, no npm frontend in the shipped app.
 
-`src/` (Svelte 5) and `package.json` are the retired Tauri-era frontend, kept only until the whole SOU-185 epic (Slint migration) is verified end to end on a real machine; nothing in the shipped app reads them anymore. Removing them is tracked in SOU-192 (AC8) and is a separate, deliberate step — don't delete them as a drive-by cleanup.
+Slint conventions (closed-set enums, house widgets, Metal/Skia, keep-alive tabs, memory, threads, PR checklist): [`docs/engineering/slint.md`](./docs/engineering/slint.md). Agent notes: [`AGENTS.md`](./AGENTS.md).
+
+`src/` (Svelte 5) and `package.json` are the retired Tauri-era frontend, kept only until the whole SOU-185 epic (Slint migration) is verified end to end on a real machine; nothing in the shipped app reads them anymore. Removing them is tracked in SOU-192 (AC8) and is a separate, deliberate step. Don't delete them as a drive-by cleanup.
 
 ## Commands
 

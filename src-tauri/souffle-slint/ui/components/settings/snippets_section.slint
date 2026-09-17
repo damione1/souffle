@@ -49,9 +49,9 @@ export component SnippetsSection inherits VerticalLayout {
     VerticalLayout {
         spacing: 4px;
 
-        Text { text: "Déclencheur"; font-size: 10.5px; color: Theme.text-muted; }
+        Text { text: "DÉCLENCHEUR"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
         ThemedLineEdit { text <=> root.new-trigger-draft; }
-        Text { text: "Expansion"; font-size: 10.5px; color: Theme.text-muted; }
+        Text { text: "EXPANSION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
         TextEdit {
             text <=> root.new-expansion-draft;
             height: 60px;
@@ -126,9 +126,9 @@ export component SnippetsSection inherits VerticalLayout {
             if row.editing: VerticalLayout {
                 spacing: 4px;
 
-                Text { text: "Déclencheur"; font-size: 10.5px; color: Theme.text-muted; }
+                Text { text: "DÉCLENCHEUR"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
                 ThemedLineEdit { text <=> root.edit-trigger-draft; }
-                Text { text: "Expansion"; font-size: 10.5px; color: Theme.text-muted; }
+                Text { text: "EXPANSION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
                 TextEdit {
                     text <=> root.edit-expansion-draft;
                     height: 60px;

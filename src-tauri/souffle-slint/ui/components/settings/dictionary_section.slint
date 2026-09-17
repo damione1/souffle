@@ -58,29 +58,34 @@ export component DictionarySection inherits VerticalLayout {
         spacing: 6px;
 
         VerticalLayout {
-            spacing: 2px;
+            spacing: 8px;
             horizontal-stretch: 1;
-            Text { text: "Terme"; font-size: 10.5px; color: Theme.text-muted; }
+            Text { text: "TERME"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
             ThemedLineEdit { text <=> root.new-term-draft; placeholder: "ex. Kubernetes"; }
         }
         VerticalLayout {
-            spacing: 2px;
-            Text { text: "Prononciation"; font-size: 10.5px; color: Theme.text-muted; }
+            spacing: 8px;
+            Text { text: "PRONONCIATION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
             ThemedLineEdit { text <=> root.new-pronunciation-draft; placeholder: "ex. vaysix"; width: 110px; }
         }
         VerticalLayout {
-            spacing: 2px;
-            Text { text: "Catégorie"; font-size: 10.5px; color: Theme.text-muted; }
+            spacing: 8px;
+            Text { text: "CATÉGORIE"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
             ThemedLineEdit { text <=> root.new-category-draft; placeholder: "ex. tech"; width: 100px; }
         }
-        ThemedButton {
-            text: "+";
-            enabled: root.new-term-draft != "";
-            clicked => {
-                root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
-                root.new-term-draft = "";
-                root.new-pronunciation-draft = "";
-                root.new-category-draft = "";
+        VerticalLayout {
+            spacing: 8px;
+            alignment: end;
+            Rectangle { height: 12px; }
+            ThemedButton {
+                text: "+";
+                enabled: root.new-term-draft != "";
+                clicked => {
+                    root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
+                    root.new-term-draft = "";
+                    root.new-pronunciation-draft = "";
+                    root.new-category-draft = "";
+                }
             }
         }
     }
