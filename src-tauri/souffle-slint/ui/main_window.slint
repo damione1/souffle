@@ -14,7 +14,8 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, UpcomingPhase } from "types.slint";
+import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider } from "types.slint";
+export { SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
 // accessor for it (`window.global::<Theme>()`) - main.rs sets `Theme.dark`
@@ -109,18 +110,17 @@ export component MainWindow inherits Window {
     // must first load the real settings from disk (see main.rs) - closing
     // needs no such round trip, so `settings-open` alone is enough there.
     in-out property <bool> settings-open: false;
-    // 0 Transcription, 1 IA, 2 Audio, 3 Interface, 4 Réunions, 5 Système.
-    // The gear opens tab 0; the homepage calendar CTA opens tab 4.
-    in-out property <int> settings-tab-index: 0;
+    // The gear opens Transcription; the homepage calendar CTA opens Meetings.
+    in-out property <SettingsTab> settings-tab: SettingsTab.transcription;
     in property <bool> settings-autostart-enabled;
     in property <bool> settings-debug-transcription;
-    in property <string> settings-log-level;
+    in property <LogLevel> settings-log-level;
     in property <string> settings-log-tail;
     in property <bool> settings-copying-diagnostics;
-    in property <string> settings-theme;
-    in property <string> settings-locale;
+    in property <AppTheme> settings-theme;
+    in property <AppLocale> settings-locale;
     in property <bool> settings-auto-paste;
-    in property <string> settings-paste-method;
+    in property <PasteMethod> settings-paste-method;
     in property <int> settings-paste-delay-ms;
     in property <int> settings-paste-delay-min;
     in property <int> settings-paste-delay-max;
@@ -130,10 +130,10 @@ export component MainWindow inherits Window {
     in property <string> settings-toggle-shortcut-label;
     in property <string> settings-ptt-shortcut-label;
     in property <bool> settings-native-tap-warning-visible;
-    in-out property <string> settings-recording-field: "";
+    in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
     in property <bool> settings-calendar-enabled;
-    in property <string> settings-calendar-permission;
+    in property <AccessState> settings-calendar-permission;
     in property <bool> settings-calendar-autostart-enabled;
     in property <int> settings-calendar-reminder-minutes;
     in property <[CalendarRow]> settings-calendars;
@@ -151,7 +151,7 @@ export component MainWindow inherits Window {
     in property <string> settings-clamshell-device-label;
     in property <bool> settings-system-audio-supported;
     in property <bool> settings-capture-system-audio;
-    in property <string> settings-meeting-transcription-language;
+    in property <MeetingLanguage> settings-meeting-transcription-language;
     in property <bool> settings-meeting-autostop-enabled;
     in property <[string]> settings-meeting-autostop-labels;
     in property <string> settings-meeting-autostop-label;
@@ -163,7 +163,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-dictionary-correction;
     in property <string> settings-data-stats-line;
     in property <string> settings-data-recordings-line;
-    in property <string> settings-meeting-audio-retention;
+    in property <AudioRetention> settings-meeting-audio-retention;
     in property <bool> settings-data-exporting;
     in property <string> settings-data-export-status;
     in property <bool> settings-data-export-status-is-error;
@@ -179,7 +179,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-auto-update-check;
     in property <bool> settings-checking-updates;
     in property <string> settings-update-status;
-    in property <string> settings-summary-provider;
+    in property <SummaryProvider> settings-summary-provider;
     in property <bool> settings-apple-intelligence-available;
     in property <string> settings-apple-intelligence-reason;
     in property <string> settings-ollama-url;
@@ -238,20 +238,20 @@ export component MainWindow inherits Window {
     callback settings-autostart-changed(bool);
     callback settings-permissions-review-requested();
     callback settings-debug-transcription-changed(bool);
-    callback settings-log-level-changed(string);
+    callback settings-log-level-changed(LogLevel);
     callback settings-copy-diagnostics-requested();
-    callback settings-theme-changed(string);
-    callback settings-locale-changed(string);
+    callback settings-theme-changed(AppTheme);
+    callback settings-locale-changed(AppLocale);
     callback settings-auto-paste-changed(bool);
-    callback settings-paste-method-changed(string);
+    callback settings-paste-method-changed(PasteMethod);
     callback settings-paste-delay-changed(int);
     callback settings-pill-hidden-changed(bool);
     callback settings-feedback-sounds-enabled-changed(bool);
     callback settings-feedback-sounds-volume-changed(int);
-    callback settings-shortcut-record-requested(string);
-    callback settings-shortcut-captured(string, string, bool, bool, bool, bool);
-    callback settings-shortcut-released(string, string, bool, bool, bool, bool);
-    callback settings-shortcut-cleared(string);
+    callback settings-shortcut-record-requested(ShortcutField);
+    callback settings-shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
+    callback settings-shortcut-released(ShortcutField, string, bool, bool, bool, bool);
+    callback settings-shortcut-cleared(ShortcutField);
     callback settings-shortcut-cancelled();
     callback settings-calendar-enabled-changed(bool);
     callback settings-calendar-autostart-enabled-changed(bool);
@@ -268,7 +268,7 @@ export component MainWindow inherits Window {
     callback settings-remove-device-requested(string);
     callback settings-clamshell-device-changed(string);
     callback settings-capture-system-audio-changed(bool);
-    callback settings-meeting-transcription-language-changed(string);
+    callback settings-meeting-transcription-language-changed(MeetingLanguage);
     callback settings-meeting-autostop-enabled-changed(bool);
     callback settings-meeting-autostop-changed(string);
     callback settings-meeting-max-duration-changed(string);
@@ -276,7 +276,7 @@ export component MainWindow inherits Window {
     callback settings-filler-removal-changed(bool);
     callback settings-stutter-collapse-changed(bool);
     callback settings-dictionary-correction-changed(bool);
-    callback settings-meeting-audio-retention-changed(string);
+    callback settings-meeting-audio-retention-changed(AudioRetention);
     callback settings-data-export-requested();
     callback settings-data-reveal-requested();
     callback settings-mcp-copy-desktop-snippet-requested();
@@ -284,7 +284,7 @@ export component MainWindow inherits Window {
     callback settings-mcp-test-requested();
     callback settings-check-updates-requested();
     callback settings-auto-update-check-changed(bool);
-    callback settings-summary-provider-changed(string);
+    callback settings-summary-provider-changed(SummaryProvider);
     callback settings-ollama-url-changed(string);
     callback settings-ollama-model-changed(string);
     callback settings-summary-providers-retry-requested();
@@ -423,7 +423,7 @@ export component MainWindow inherits Window {
                     root.settings-open = false;
                     root.settings-closed();
                 } else {
-                    root.settings-tab-index = 0;
+                    root.settings-tab = SettingsTab.transcription;
                     root.settings-requested();
                 }
             }
@@ -458,7 +458,7 @@ export component MainWindow inherits Window {
         timeline-item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
         timeline-item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
         calendar-setup-requested => {
-            root.settings-tab-index = 4;
+            root.settings-tab = SettingsTab.meetings;
             root.settings-requested();
         }
         calendar-event-start-requested(id) => { root.calendar-event-start-requested(id); }
@@ -514,7 +514,7 @@ export component MainWindow inherits Window {
     if root.settings-open: SettingsView {
         width: 100%;
         height: 100%;
-        tab-index <=> root.settings-tab-index;
+        tab <=> root.settings-tab;
         autostart-enabled: root.settings-autostart-enabled;
         debug-transcription: root.settings-debug-transcription;
         log-level: root.settings-log-level;

@@ -1,21 +1,21 @@
-import { ComboBox } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { MeetingLanguage } from "../../types.slint";
 
-// Port of AudioSettingsSection.svelte. The autostop/max-duration minute
-// lists and the clamshell device names are precomputed to `[string]` labels
-// by Rust (from `SettingsOptions::current()` and `list_audio_devices()`
-// respectively, per AC3 - no bounds/options are redeclared here), and the
-// chosen label is forwarded back rather than resolved in `.slint` - see
-// `microphone_section.slint`'s doc comment for why.
+// Port of AudioSettingsSection.svelte. Autostop/max-duration minute lists
+// and clamshell device names are precomputed to `[string]` labels by Rust
+// from `SettingsOptions::current()` / `list_audio_devices()`. Meeting
+// language is the closed `MeetingLanguage` enum, not a string.
 export component AudioSection inherits VerticalLayout {
     in property <bool> is-laptop;
     in property <[string]> clamshell-device-labels;
     in property <string> clamshell-device-label;
     in property <bool> system-audio-supported;
     in property <bool> capture-system-audio;
-    in property <string> meeting-transcription-language; // "auto" | "en" | "fr"
+    in property <MeetingLanguage> meeting-transcription-language;
     in property <bool> meeting-autostop-enabled;
     in property <[string]> meeting-autostop-labels;
     in property <string> meeting-autostop-label;
@@ -28,7 +28,7 @@ export component AudioSection inherits VerticalLayout {
 
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
-    callback meeting-transcription-language-changed(string);
+    callback meeting-transcription-language-changed(MeetingLanguage);
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
     callback meeting-max-duration-changed(string);
@@ -37,124 +37,140 @@ export component AudioSection inherits VerticalLayout {
     callback stutter-collapse-changed(bool);
     callback dictionary-correction-changed(bool);
 
-    pure function meeting-language-label(value: string) -> string {
-        if value == "en" { return "Anglais"; }
-        if value == "fr" { return "Français"; }
-        return "Automatique";
-    }
-    pure function meeting-language-value(label: string) -> string {
-        if label == "Anglais" { return "en"; }
-        if label == "Français" { return "fr"; }
-        return "auto";
+    pure function meeting-language-label(value: MeetingLanguage) -> string {
+        if value == MeetingLanguage.en { return "Anglais"; }
+        if value == MeetingLanguage.fr { return "Français"; }
+        if value == MeetingLanguage.auto { return "Automatique"; }
+        return "";
     }
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Audio";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
+    SettingsGroup {
+        title: "AUDIO";
 
-    if root.is-laptop: SettingsField {
-        label: "Micro en mode clapet fermé";
-        description: "Périphérique préféré quand le MacBook est utilisé clapet fermé.";
+        if root.is-laptop: SettingsField {
+            show-divider: false;
+            label: "Microphone quand le capot est fermé";
+            description: "Utiliser ce microphone à la place quand le capot est fermé avec un écran externe connecté.";
 
-        ComboBox {
-            model: root.clamshell-device-labels;
-            current-value: root.clamshell-device-label;
-            selected(value) => { root.clamshell-device-changed(value); }
+            ThemedComboBox {
+                combo-width: 220px;
+                model: root.clamshell-device-labels;
+                current-value: root.clamshell-device-label;
+                selected(value) => { root.clamshell-device-changed(value); }
+            }
         }
-    }
 
-    if root.system-audio-supported: SettingsField {
-        label: "Capturer l'audio système";
-        description: "Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions.";
+        if root.system-audio-supported: SettingsField {
+            show-divider: !root.is-laptop;
+            label: "Capturer l'audio système";
+            description: "Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions.";
 
-        ThemedSwitch {
-            checked: root.capture-system-audio;
-            toggled(new) => { root.capture-system-audio-changed(new); }
+            ThemedSwitch {
+                checked: root.capture-system-audio;
+                toggled(new) => { root.capture-system-audio-changed(new); }
+            }
         }
-    }
 
-    SettingsField {
-        label: "Langue de transcription (réunions)";
+        SettingsField {
+            show-divider: root.is-laptop || root.system-audio-supported;
+            label: "Langue de transcription (réunions)";
+            description: "Indice pour la détection de langue, jamais forcé sur le moteur.";
 
-        ComboBox {
-            model: ["Automatique", "Anglais", "Français"];
-            current-value: root.meeting-language-label(root.meeting-transcription-language);
-            selected(value) => { root.meeting-transcription-language-changed(root.meeting-language-value(value)); }
+            ThemedComboBox {
+                combo-width: 192px;
+                model: [
+                    root.meeting-language-label(MeetingLanguage.auto),
+                    root.meeting-language-label(MeetingLanguage.en),
+                    root.meeting-language-label(MeetingLanguage.fr),
+                ];
+                current-value: root.meeting-language-label(root.meeting-transcription-language);
+                selected(value) => {
+                    if value == root.meeting-language-label(MeetingLanguage.en) {
+                        root.meeting-transcription-language-changed(MeetingLanguage.en);
+                    }
+                    if value == root.meeting-language-label(MeetingLanguage.fr) {
+                        root.meeting-transcription-language-changed(MeetingLanguage.fr);
+                    }
+                    if value == root.meeting-language-label(MeetingLanguage.auto) {
+                        root.meeting-transcription-language-changed(MeetingLanguage.auto);
+                    }
+                }
+            }
         }
-    }
 
-    SettingsField {
-        label: "Arrêt automatique des réunions";
-        description: "Arrêter l'enregistrement quand plus personne ne parle depuis longtemps.";
+        SettingsField {
+            label: "Arrêt automatique des réunions";
+            description: "Arrêter l'enregistrement quand plus personne ne parle depuis longtemps.";
 
-        ThemedSwitch {
-            checked: root.meeting-autostop-enabled;
-            toggled(new) => { root.meeting-autostop-enabled-changed(new); }
+            ThemedSwitch {
+                checked: root.meeting-autostop-enabled;
+                toggled(new) => { root.meeting-autostop-enabled-changed(new); }
+            }
         }
-    }
 
-    if root.meeting-autostop-enabled: SettingsField {
-        label: "Délai avant arrêt";
+        if root.meeting-autostop-enabled: SettingsField {
+            label: "Délai avant arrêt";
 
-        ComboBox {
-            model: root.meeting-autostop-labels;
-            current-value: root.meeting-autostop-label;
-            selected(value) => { root.meeting-autostop-changed(value); }
+            ThemedComboBox {
+                combo-width: 160px;
+                model: root.meeting-autostop-labels;
+                current-value: root.meeting-autostop-label;
+                selected(value) => { root.meeting-autostop-changed(value); }
+            }
         }
-    }
 
-    if root.meeting-autostop-enabled: SettingsField {
-        label: "Durée maximale d'une réunion";
+        if root.meeting-autostop-enabled: SettingsField {
+            label: "Durée maximale d'une réunion";
 
-        ComboBox {
-            model: root.meeting-max-duration-labels;
-            current-value: root.meeting-max-duration-label;
-            selected(value) => { root.meeting-max-duration-changed(value); }
+            ThemedComboBox {
+                combo-width: 160px;
+                model: root.meeting-max-duration-labels;
+                current-value: root.meeting-max-duration-label;
+                selected(value) => { root.meeting-max-duration-changed(value); }
+            }
         }
-    }
 
-    SettingsField {
-        label: "Détection de voix (VAD)";
-        description: "Ignorer les silences pour une transcription plus rapide et plus propre.";
+        SettingsField {
+            label: "Détection de voix (VAD)";
+            description: "Ignorer les silences pour une transcription plus rapide et plus propre.";
 
-        ThemedSwitch {
-            checked: root.vad-enabled;
-            toggled(new) => { root.vad-enabled-changed(new); }
+            ThemedSwitch {
+                checked: root.vad-enabled;
+                toggled(new) => { root.vad-enabled-changed(new); }
+            }
         }
-    }
 
-    SettingsField {
-        label: "Suppression des hésitations";
-        description: "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation.";
+        SettingsField {
+            label: "Suppression des hésitations";
+            description: "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation.";
 
-        ThemedSwitch {
-            checked: root.filler-removal;
-            toggled(new) => { root.filler-removal-changed(new); }
+            ThemedSwitch {
+                checked: root.filler-removal;
+                toggled(new) => { root.filler-removal-changed(new); }
+            }
         }
-    }
 
-    SettingsField {
-        label: "Réduction des bégaiements";
-        description: "Fusionner les répétitions et faux départs.";
+        SettingsField {
+            label: "Réduction des bégaiements";
+            description: "Fusionner les répétitions et faux départs.";
 
-        ThemedSwitch {
-            checked: root.stutter-collapse;
-            toggled(new) => { root.stutter-collapse-changed(new); }
+            ThemedSwitch {
+                checked: root.stutter-collapse;
+                toggled(new) => { root.stutter-collapse-changed(new); }
+            }
         }
-    }
 
-    SettingsField {
-        label: "Correction par dictionnaire";
-        description: "Appliquer automatiquement les corrections du dictionnaire personnel.";
+        SettingsField {
+            label: "Correction par dictionnaire";
+            description: "Appliquer automatiquement les corrections du dictionnaire personnel.";
 
-        ThemedSwitch {
-            checked: root.dictionary-correction;
-            toggled(new) => { root.dictionary-correction-changed(new); }
+            ThemedSwitch {
+                checked: root.dictionary-correction;
+                toggled(new) => { root.dictionary-correction-changed(new); }
+            }
         }
     }
 }

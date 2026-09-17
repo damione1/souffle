@@ -1,31 +1,48 @@
-import { Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
+import { LucideIcon, IconSet } from "../lucide_icon.slint";
 
-// Port of PermissionsSettingsSection.svelte. The Svelte button opens an
-// in-app repair flow that lives in the onboarding surface (SOU-190, not
-// built yet on this shell) - until then this opens the real macOS Privacy &
-// Security pane directly, which is genuine working behavior (not a stub),
-// just not textually identical to the future in-app flow.
+// Port of PermissionsSettingsSection.svelte.
 export component PermissionsSection inherits VerticalLayout {
     callback review-requested();
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Permissions";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
+    SettingsGroup {
+        title: "PERMISSIONS";
 
-    SettingsField {
-        label: "Permissions";
-        description: "Revérifier ou réparer les permissions macOS si le collage ou l'enregistrement cesse de fonctionner après une mise à jour.";
+        SettingsField {
+            show-divider: false;
+            label: "Permissions";
+            description: "Revérifier ou réparer les permissions macOS si le collage ou l'enregistrement cesse de fonctionner après une mise à jour.";
 
-        Button {
-            text: "Vérifier les permissions";
-            clicked => { root.review-requested(); }
+            review := Rectangle {
+                height: 32px;
+                width: 16px + 6px + btn-label.width + 8px;
+                background: area.has-hover ? Theme.surface-2 : transparent;
+                border-radius: 4px;
+
+                LucideIcon {
+                    icon: IconSet.Shield;
+                    icon-color: area.has-hover ? Theme.text-primary : Theme.text-muted;
+                    size: 16px;
+                    x: 4px;
+                    y: (parent.height - self.height) / 2;
+                }
+                btn-label := Text {
+                    x: 26px;
+                    height: parent.height;
+                    text: "Vérifier les permissions";
+                    font-size: 13px;
+                    color: area.has-hover ? Theme.text-primary : Theme.text-muted;
+                    vertical-alignment: center;
+                }
+                area := TouchArea {
+                    clicked => { root.review-requested(); }
+                }
+            }
         }
     }
 }

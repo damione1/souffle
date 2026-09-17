@@ -1,5 +1,8 @@
-import { LineEdit, TextEdit, Button } from "std-widgets.slint";
+import { TextEdit } from "std-widgets.slint";
 import { Theme } from "../../theme.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedLineEdit } from "../themed_line_edit.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
 // tracked in Rust (`snippets_editing` in main.rs), not local `.slint`
@@ -27,17 +30,18 @@ export component SnippetsSection inherits VerticalLayout {
     callback cancel-edit-requested();
     callback save-edit-requested(int, string, string);
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: "SNIPPETS VOCAUX";
 
     Text {
-        text: "Formules vocales";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
-    Text {
-        text: "Dites le déclencheur pendant la dictée pour insérer le texte associé.";
-        font-size: 11.5px;
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 15px;
+        text: "Dites une phrase déclencheur au début d'une dictée pour coller un bloc de texte à la place. La comparaison ignore casse et accents ; aucun polish IA ne tourne quand un snippet correspond.";
+        font-size: 12px;
         color: Theme.text-muted;
         wrap: word-wrap;
     }
@@ -46,7 +50,7 @@ export component SnippetsSection inherits VerticalLayout {
         spacing: 4px;
 
         Text { text: "Déclencheur"; font-size: 10.5px; color: Theme.text-muted; }
-        LineEdit { text <=> root.new-trigger-draft; }
+        ThemedLineEdit { text <=> root.new-trigger-draft; }
         Text { text: "Expansion"; font-size: 10.5px; color: Theme.text-muted; }
         TextEdit {
             text <=> root.new-expansion-draft;
@@ -56,8 +60,8 @@ export component SnippetsSection inherits VerticalLayout {
 
         HorizontalLayout {
             alignment: end;
-            Button {
-                text: "Ajouter";
+            ThemedButton {
+                text: "Ajouter un snippet";
                 enabled: root.new-trigger-draft != "" && root.new-expansion-draft != "";
                 clicked => {
                     root.add-requested(root.new-trigger-draft, root.new-expansion-draft);
@@ -101,11 +105,11 @@ export component SnippetsSection inherits VerticalLayout {
                     }
                     HorizontalLayout {
                         spacing: 4px;
-                        Button {
+                        ThemedButton {
                             text: "Modifier";
                             clicked => { root.edit-requested(row.id); }
                         }
-                        Button {
+                        ThemedButton {
                             text: "Supprimer";
                             clicked => { root.delete-requested(row.id); }
                         }
@@ -123,7 +127,7 @@ export component SnippetsSection inherits VerticalLayout {
                 spacing: 4px;
 
                 Text { text: "Déclencheur"; font-size: 10.5px; color: Theme.text-muted; }
-                LineEdit { text <=> root.edit-trigger-draft; }
+                ThemedLineEdit { text <=> root.edit-trigger-draft; }
                 Text { text: "Expansion"; font-size: 10.5px; color: Theme.text-muted; }
                 TextEdit {
                     text <=> root.edit-expansion-draft;
@@ -138,11 +142,11 @@ export component SnippetsSection inherits VerticalLayout {
                 HorizontalLayout {
                     alignment: end;
                     spacing: 4px;
-                    Button {
+                    ThemedButton {
                         text: "Annuler";
                         clicked => { root.cancel-edit-requested(); }
                     }
-                    Button {
+                    ThemedButton {
                         text: "Enregistrer";
                         enabled: root.edit-trigger-draft != "" && root.edit-expansion-draft != "";
                         clicked => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
@@ -150,5 +154,6 @@ export component SnippetsSection inherits VerticalLayout {
                 }
             }
         }
+    }
     }
 }

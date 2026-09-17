@@ -1,6 +1,10 @@
-import { ComboBox, LineEdit, TextEdit, Button } from "std-widgets.slint";
+import { TextEdit } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedLineEdit } from "../themed_line_edit.slint";
 
 // Port of SummaryTemplatesSettingsSection.svelte. Which template is being
 // edited is tracked in Rust (`summary_templates_state` in main.rs), not as
@@ -23,25 +27,28 @@ export component SummaryTemplatesSection inherits VerticalLayout {
     callback prompt-changed(string);
     callback add-requested(string);
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: "MODÈLES DE RÉSUMÉ";
 
     Text {
-        text: "Modèles de résumé";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
-    Text {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 15px;
         text: "Le modèle par défaut est utilisé pour résumer automatiquement une réunion terminée.";
-        font-size: 11.5px;
+        font-size: 12px;
         color: Theme.text-muted;
         wrap: word-wrap;
     }
 
     SettingsField {
+        show-divider: false;
         label: "Modèle par défaut";
 
-        ComboBox {
+        ThemedComboBox {
+            combo-width: 220px;
             model: root.template-labels;
             current-value: root.default-template-label;
             selected(value) => { root.default-changed(value); }
@@ -53,13 +60,16 @@ export component SummaryTemplatesSection inherits VerticalLayout {
 
         HorizontalLayout {
             spacing: 6px;
+            alignment: center;
+            horizontal-stretch: 0;
 
-            ComboBox {
+            ThemedComboBox {
+                combo-width: 220px;
                 model: root.template-labels;
                 current-value: root.editing-template-label;
                 selected(value) => { root.edit-target-changed(value); }
             }
-            if !root.editing-is-builtin: Button {
+            if !root.editing-is-builtin: ThemedButton {
                 text: "Supprimer";
                 clicked => { root.delete-requested(); }
             }
@@ -69,7 +79,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
     if !root.editing-is-builtin: SettingsField {
         label: "Nom";
 
-        LineEdit {
+        ThemedLineEdit {
             text: root.editing-name;
             edited(value) => { root.name-changed(value); }
         }
@@ -92,11 +102,12 @@ export component SummaryTemplatesSection inherits VerticalLayout {
     HorizontalLayout {
         spacing: 6px;
 
-        LineEdit {
+        ThemedLineEdit {
             text <=> root.new-template-draft;
-            placeholder-text: "Nom du nouveau modèle";
+            placeholder: "Nom du nouveau modèle";
+            horizontal-stretch: 1;
         }
-        Button {
+        ThemedButton {
             text: "Ajouter";
             enabled: root.new-template-draft != "";
             clicked => {
@@ -104,5 +115,6 @@ export component SummaryTemplatesSection inherits VerticalLayout {
                 root.new-template-draft = "";
             }
         }
+    }
     }
 }

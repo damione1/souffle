@@ -1,4 +1,3 @@
-import { TabWidget, ScrollView } from "std-widgets.slint";
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
 import { DiagnosticsSection } from "components/settings/diagnostics_section.slint";
@@ -16,6 +15,9 @@ import { ModelSection } from "components/settings/model_section.slint";
 import { DictionarySection, DictionaryRow } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
+import { LucideIcon, IconSet } from "components/lucide_icon.slint";
+import { SettingsTabBar } from "components/settings/settings_tabs.slint";
+import { AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, SettingsTab } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -26,16 +28,16 @@ import { Theme } from "theme.slint";
 // (`if`/`for`) tabs (a compiler-enforced restriction), so tabs are added
 // directly in this source as each is implemented, not hidden behind a flag.
 export component SettingsView inherits Rectangle {
-    in-out property <int> tab-index: 0;
+    in-out property <SettingsTab> tab: SettingsTab.transcription;
     in property <bool> autostart-enabled;
     in property <bool> debug-transcription;
-    in property <string> log-level;
+    in property <LogLevel> log-level;
     in property <string> log-tail;
     in property <bool> copying-diagnostics: false;
-    in property <string> theme;
-    in property <string> locale;
+    in property <AppTheme> theme;
+    in property <AppLocale> locale;
     in property <bool> auto-paste;
-    in property <string> paste-method;
+    in property <PasteMethod> paste-method;
     in property <int> paste-delay-ms;
     in property <int> paste-delay-min;
     in property <int> paste-delay-max;
@@ -45,10 +47,10 @@ export component SettingsView inherits Rectangle {
     in property <string> toggle-shortcut-label;
     in property <string> ptt-shortcut-label;
     in property <bool> native-tap-warning-visible;
-    in-out property <string> recording-field: "";
+    in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
     in property <bool> calendar-enabled;
-    in property <string> calendar-permission;
+    in property <AccessState> calendar-permission;
     in property <bool> calendar-autostart-enabled;
     in property <int> calendar-reminder-minutes;
     in property <[CalendarRow]> calendars;
@@ -66,7 +68,7 @@ export component SettingsView inherits Rectangle {
     in property <string> clamshell-device-label;
     in property <bool> system-audio-supported;
     in property <bool> capture-system-audio;
-    in property <string> meeting-transcription-language;
+    in property <MeetingLanguage> meeting-transcription-language;
     in property <bool> meeting-autostop-enabled;
     in property <[string]> meeting-autostop-labels;
     in property <string> meeting-autostop-label;
@@ -78,7 +80,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> dictionary-correction;
     in property <string> data-stats-line;
     in property <string> data-recordings-line;
-    in property <string> meeting-audio-retention;
+    in property <AudioRetention> meeting-audio-retention;
     in property <bool> data-exporting;
     in property <string> data-export-status;
     in property <bool> data-export-status-is-error;
@@ -94,7 +96,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> auto-update-check;
     in property <bool> checking-updates;
     in property <string> update-status;
-    in property <string> summary-provider;
+    in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
     in property <string> apple-intelligence-reason;
     in property <string> ollama-url;
@@ -149,20 +151,20 @@ export component SettingsView inherits Rectangle {
     callback autostart-changed(bool);
     callback permissions-review-requested();
     callback debug-transcription-changed(bool);
-    callback log-level-changed(string);
+    callback log-level-changed(LogLevel);
     callback copy-diagnostics-requested();
-    callback theme-changed(string);
-    callback locale-changed(string);
+    callback theme-changed(AppTheme);
+    callback locale-changed(AppLocale);
     callback auto-paste-changed(bool);
-    callback paste-method-changed(string);
+    callback paste-method-changed(PasteMethod);
     callback paste-delay-changed(int);
     callback pill-hidden-changed(bool);
     callback feedback-sounds-enabled-changed(bool);
     callback feedback-sounds-volume-changed(int);
-    callback shortcut-record-requested(string);
-    callback shortcut-captured(string, string, bool, bool, bool, bool);
-    callback shortcut-released(string, string, bool, bool, bool, bool);
-    callback shortcut-cleared(string);
+    callback shortcut-record-requested(ShortcutField);
+    callback shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
+    callback shortcut-released(ShortcutField, string, bool, bool, bool, bool);
+    callback shortcut-cleared(ShortcutField);
     callback shortcut-cancelled();
     callback calendar-enabled-changed(bool);
     callback calendar-autostart-enabled-changed(bool);
@@ -179,7 +181,7 @@ export component SettingsView inherits Rectangle {
     callback remove-device-requested(string);
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
-    callback meeting-transcription-language-changed(string);
+    callback meeting-transcription-language-changed(MeetingLanguage);
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
     callback meeting-max-duration-changed(string);
@@ -187,7 +189,7 @@ export component SettingsView inherits Rectangle {
     callback filler-removal-changed(bool);
     callback stutter-collapse-changed(bool);
     callback dictionary-correction-changed(bool);
-    callback meeting-audio-retention-changed(string);
+    callback meeting-audio-retention-changed(AudioRetention);
     callback data-export-requested();
     callback data-reveal-requested();
     callback mcp-copy-desktop-snippet-requested();
@@ -195,7 +197,7 @@ export component SettingsView inherits Rectangle {
     callback mcp-test-requested();
     callback check-updates-requested();
     callback auto-update-check-changed(bool);
-    callback summary-provider-changed(string);
+    callback summary-provider-changed(SummaryProvider);
     callback ollama-url-changed(string);
     callback ollama-model-changed(string);
     callback summary-providers-retry-requested();
@@ -228,27 +230,62 @@ export component SettingsView inherits Rectangle {
     background: Theme.canvas;
 
     VerticalLayout {
-        padding: 24px;
-        spacing: 16px;
+        padding-left: 26px;
+        padding-right: 26px;
+        padding-top: 26px;
+        padding-bottom: 34px;
+        spacing: 22px;
 
-        // No in-page title or close button here on purpose: the reference
-        // (SettingsView.svelte) has neither - closing happens by clicking
-        // the same header gear that opened it (see `AppHeader`,
-        // `main_window.slint`). `close-requested` stays wired below for
-        // whatever future trigger needs it (e.g. an Escape-key handler,
-        // not yet implemented on either side of this port).
+        done := Rectangle {
+            height: 32px;
+            width: 16px + 6px + done-label.width + 20px;
+            border-radius: 4px;
+            background: done-area.has-hover ? Theme.surface-2 : transparent;
+            vertical-stretch: 0;
 
-        TabWidget {
-            current-index <=> root.tab-index;
+            LucideIcon {
+                icon: IconSet.ArrowLeft;
+                icon-color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                size: 16px;
+                x: 10px;
+                y: (parent.height - self.height) / 2;
+            }
+            done-label := Text {
+                x: 32px;
+                height: parent.height;
+                text: "Terminé";
+                font-size: 13px;
+                color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                vertical-alignment: center;
+            }
+            done-area := TouchArea {
+                clicked => { root.close-requested(); }
+            }
+        }
 
-            Tab {
-                title: "Transcription";
+        Text {
+            text: "Paramètres";
+            font-size: 23px;
+            font-family: "Archivo Bold";
+            color: Theme.text-primary;
+            vertical-stretch: 0;
+        }
 
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+        SettingsTabBar {
+            current <=> root.tab;
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: 22px;
+                alignment: start;
+
+                if root.tab == SettingsTab.transcription: VerticalLayout {
+                    spacing: 22px;
+                    alignment: start;
 
                         ModelSection {
                             status-text: root.model-status-text;
@@ -291,18 +328,11 @@ export component SettingsView inherits Rectangle {
                             cancel-edit-requested => { root.snippet-cancel-edit-requested(); }
                             save-edit-requested(id, trigger, expansion) => { root.snippet-save-edit-requested(id, trigger, expansion); }
                         }
-                    }
                 }
-            }
 
-            Tab {
-                title: "IA";
-
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+                if root.tab == SettingsTab.ai: VerticalLayout {
+                    spacing: 22px;
+                    alignment: start;
 
                         IntelligenceSection {
                             summary-provider: root.summary-provider;
@@ -355,18 +385,11 @@ export component SettingsView inherits Rectangle {
                             prompt-changed(value) => { root.summary-template-prompt-changed(value); }
                             add-requested(name) => { root.summary-template-add-requested(name); }
                         }
-                    }
                 }
-            }
 
-            Tab {
-                title: "Audio";
-
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+                if root.tab == SettingsTab.audio: VerticalLayout {
+                    spacing: 22px;
+                    alignment: start;
 
                         MicrophoneSection {
                             device-labels: root.audio-device-labels;
@@ -415,18 +438,11 @@ export component SettingsView inherits Rectangle {
                             stutter-collapse-changed(value) => { root.stutter-collapse-changed(value); }
                             dictionary-correction-changed(value) => { root.dictionary-correction-changed(value); }
                         }
-                    }
                 }
-            }
 
-            Tab {
-                title: "Interface";
-
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+                if root.tab == SettingsTab.interface: VerticalLayout {
+                    spacing: 22px;
+                    alignment: start;
 
                         InterfaceSection {
                             theme: root.theme;
@@ -462,18 +478,11 @@ export component SettingsView inherits Rectangle {
                             enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
                             volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
                         }
-                    }
                 }
-            }
 
-            Tab {
-                title: "Réunions";
-
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+                if root.tab == SettingsTab.meetings: VerticalLayout {
+                    spacing: 22px;
+                    alignment: start;
 
                         CalendarSection {
                             enabled: root.calendar-enabled;
@@ -487,18 +496,11 @@ export component SettingsView inherits Rectangle {
                             calendar-toggled(id) => { root.calendar-toggled(id); }
                             open-system-settings-requested => { root.calendar-open-system-settings-requested(); }
                         }
-                    }
                 }
-            }
 
-            Tab {
-                title: "Système";
-
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+                if root.tab == SettingsTab.system: VerticalLayout {
+                    spacing: 22px;
+                    alignment: start;
 
                         AutostartSection {
                             autostart-enabled: root.autostart-enabled;
@@ -550,7 +552,6 @@ export component SettingsView inherits Rectangle {
                             check-updates-requested => { root.check-updates-requested(); }
                             auto-update-check-changed(value) => { root.auto-update-check-changed(value); }
                         }
-                    }
                 }
             }
         }

@@ -5,13 +5,13 @@
 use crate::MainWindow;
 use souffle_lib::archive::DataStats;
 use souffle_lib::commands::McpSetupInfo;
-use souffle_lib::settings::{AppSettings, MeetingAudioRetention};
+use souffle_lib::settings::AppSettings;
 use souffle_lib::summary::SummaryProviderChoice;
 
 pub fn populate(window: &MainWindow, settings: &AppSettings) {
-    window.set_settings_meeting_audio_retention(
-        meeting_audio_retention_to_str(&settings.meeting_audio_retention).into(),
-    );
+    window.set_settings_meeting_audio_retention(crate::settings_ui::audio_retention_to_slint(
+        settings.meeting_audio_retention,
+    ));
     window.set_settings_auto_update_check(settings.auto_update_check_enabled);
     window.set_settings_about_transcription_label(settings.transcription_model_id.as_str().into());
     window.set_settings_about_summary_label(summary_label(settings).into());
@@ -28,24 +28,6 @@ fn summary_label(settings: &AppSettings) -> String {
             }
         }
         SummaryProviderChoice::Auto => "Automatique".to_string(),
-    }
-}
-
-fn meeting_audio_retention_to_str(value: &MeetingAudioRetention) -> &'static str {
-    match value {
-        MeetingAudioRetention::Off => "off",
-        MeetingAudioRetention::Keep7d => "keep_7d",
-        MeetingAudioRetention::Keep30d => "keep_30d",
-        MeetingAudioRetention::KeepForever => "keep_forever",
-    }
-}
-
-pub fn meeting_audio_retention_from_str(value: &str) -> MeetingAudioRetention {
-    match value {
-        "keep_7d" => MeetingAudioRetention::Keep7d,
-        "keep_30d" => MeetingAudioRetention::Keep30d,
-        "keep_forever" => MeetingAudioRetention::KeepForever,
-        _ => MeetingAudioRetention::Off,
     }
 }
 

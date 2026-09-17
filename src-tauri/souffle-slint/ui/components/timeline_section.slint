@@ -1,6 +1,6 @@
 import { TimelineEntry, TimelineItemRow } from "timeline_item.slint";
 import { EmptyState } from "empty_state.slint";
-import { TimelineKind, UpcomingPhase } from "../types.slint";
+import { TimelineKind, UpcomingPhase, AccessState } from "../types.slint";
 import { Theme } from "../theme.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
@@ -30,7 +30,7 @@ export component TimelineSection inherits VerticalLayout {
     in property <string> live-meeting-id;
     in property <string> expanded-dictation-id;
     in property <bool> calendar-enabled: false;
-    in property <string> calendar-permission;
+    in property <AccessState> calendar-permission;
     in property <[UpcomingEvent]> upcoming;
     in property <bool> can-start-event: true;
 
@@ -41,7 +41,7 @@ export component TimelineSection inherits VerticalLayout {
     callback event-start-requested(string /* occurrence id */);
 
     // Same predicate as TimelineSection.svelte's `showCalendarSetupCta`.
-    property <bool> show-calendar-setup: root.upcoming.length == 0 && (!root.calendar-enabled || root.calendar-permission == "denied");
+    property <bool> show-calendar-setup: root.upcoming.length == 0 && (!root.calendar-enabled || root.calendar-permission == AccessState.denied);
 
     // `alignment: start` everywhere below: without it, a `VerticalLayout`
     // defaults to "stretch pool" sizing, and `TimelineItemRow` (a `Rectangle`

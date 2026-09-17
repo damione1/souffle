@@ -1,7 +1,10 @@
-import { ComboBox, TextEdit, Button } from "std-widgets.slint";
+import { TextEdit } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
 
 // Port of DictationPolishSettingsSection.svelte. The active template's
 // prompt is forwarded as a plain property (`active-prompt`) rather than
@@ -19,23 +22,26 @@ export component DictationPolishSection inherits VerticalLayout {
     callback prompt-changed(string);
     callback open-provider-settings-requested();
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: "POLISH DE LA DICTÉE";
 
     Text {
-        text: "Retouche de dictée";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
-    Text {
-        text: "Reformule le texte transcrit avec l'IA avant de le coller.";
-        font-size: 11.5px;
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 15px;
+        text: "Nettoie la dictée avec le même fournisseur de résumés (Ollama ou Apple Intelligence) avant le collage.";
+        font-size: 12px;
         color: Theme.text-muted;
         wrap: word-wrap;
     }
 
     SettingsField {
-        label: "Activer la retouche";
+        show-divider: false;
+        label: "Nettoyer la dictée avec l'IA";
+        description: "Passe LLM locale après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.";
 
         ThemedSwitch {
             checked: root.enabled;
@@ -61,8 +67,8 @@ export component DictationPolishSection inherits VerticalLayout {
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
-            Button {
-                text: "Réglages IA";
+            ThemedButton {
+                text: "Choisir un fournisseur";
                 clicked => { root.open-provider-settings-requested(); }
             }
         }
@@ -71,7 +77,8 @@ export component DictationPolishSection inherits VerticalLayout {
     if root.enabled && root.template-labels.length > 0: SettingsField {
         label: "Modèle de retouche";
 
-        ComboBox {
+        ThemedComboBox {
+            combo-width: 220px;
             model: root.template-labels;
             current-value: root.active-template-label;
             selected(value) => { root.template-changed(value); }
@@ -88,5 +95,6 @@ export component DictationPolishSection inherits VerticalLayout {
             wrap: word-wrap;
             edited(value) => { root.prompt-changed(value); }
         }
+    }
     }
 }

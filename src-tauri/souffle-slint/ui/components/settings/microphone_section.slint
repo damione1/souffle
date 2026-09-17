@@ -1,7 +1,10 @@
-import { ComboBox, Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { LucideIcon, IconSet } from "../lucide_icon.slint";
 
 // One row of the priority list. Fully precomputed by Rust
 // (`microphone_list.rs`, a port of `microphone-list.ts`'s pure functions) so
@@ -45,33 +48,49 @@ export component MicrophoneSection inherits VerticalLayout {
     callback toggle-hidden-requested(string, bool);
     callback remove-device-requested(string);
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Microphone";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
+    SettingsGroup {
+        title: "MICROPHONE";
 
     SettingsField {
+        show-divider: false;
         label: "Périphérique d'entrée";
-        description: "Micro utilisé pour la dictée et les réunions.";
+        description: "Choisissez le microphone que Souffle écoute et configurez le traitement audio.";
 
         HorizontalLayout {
             spacing: 6px;
+            alignment: center;
+            horizontal-stretch: 0;
 
-            ComboBox {
+            ThemedComboBox {
+                combo-width: 200px;
                 model: root.device-labels;
                 current-value: root.selected-device-label;
                 selected(value) => { root.device-changed(value); }
             }
-            Button {
-                text: "Actualiser";
-                clicked => { root.refresh-requested(); }
+            refresh := Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.ghost-border;
+                background: refresh-area.has-hover ? Theme.surface-4 : Theme.surface-3;
+                LucideIcon {
+                    icon: IconSet.RefreshCw;
+                    icon-color: Theme.text-primary;
+                    size: 14px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+                refresh-area := TouchArea {
+                    clicked => { root.refresh-requested(); }
+                }
             }
-            if root.has-disconnected: Button {
-                text: "Réinitialiser";
+            if root.has-disconnected: ThemedButton {
+                text: "Réinitialiser la liste";
+                kind: ThemedButtonKind.ghost;
                 clicked => { root.reset-devices-requested(); }
             }
         }
@@ -109,8 +128,8 @@ export component MicrophoneSection inherits VerticalLayout {
         HorizontalLayout {
             alignment: end;
 
-            Button {
-                text: root.resetting-sample-rate ? "Réinitialisation…" : "Réinitialiser la fréquence";
+            ThemedButton {
+                text: root.resetting-sample-rate ? "Réinitialisation…" : "Réinitialiser à 48 kHz";
                 enabled: !root.resetting-sample-rate;
                 clicked => { root.reset-sample-rate-requested(); }
             }
@@ -176,12 +195,12 @@ export component MicrophoneSection inherits VerticalLayout {
                 HorizontalLayout {
                     spacing: 4px;
 
-                    Button {
+                    ThemedButton {
                         text: "▲";
                         enabled: !row.is-first;
                         clicked => { root.move-device-requested(row.uid, -1); }
                     }
-                    Button {
+                    ThemedButton {
                         text: "▼";
                         enabled: !row.is-last;
                         clicked => { root.move-device-requested(row.uid, 1); }
@@ -196,9 +215,22 @@ export component MicrophoneSection inherits VerticalLayout {
                         color: Theme.text-muted;
                         vertical-alignment: center;
                     }
-                    if !row.connected: Button {
-                        text: "Oublier";
-                        clicked => { root.remove-device-requested(row.uid); }
+                    if !row.connected: Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.ghost-border;
+                        LucideIcon {
+                            icon: IconSet.Trash2;
+                            icon-color: Theme.danger;
+                            size: 14px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        TouchArea {
+                            clicked => { root.remove-device-requested(row.uid); }
+                        }
                     }
                 }
             }
@@ -213,5 +245,6 @@ export component MicrophoneSection inherits VerticalLayout {
             checked: root.allow-bluetooth-mic;
             toggled(new) => { root.allow-bluetooth-mic-changed(new); }
         }
+    }
     }
 }

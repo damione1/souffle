@@ -15,6 +15,8 @@ export component ThemedButton inherits Rectangle {
     callback clicked();
 
     height: 34px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
     border-radius: 4px;
     border-width: 1px;
     border-color: root.kind == ThemedButtonKind.primary ? rgba(233, 174, 85, 0.25)

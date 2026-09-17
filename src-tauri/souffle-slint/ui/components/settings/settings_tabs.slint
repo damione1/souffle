@@ -1,0 +1,100 @@
+import { Theme } from "../../theme.slint";
+import { SettingsTab } from "../../types.slint";
+
+component SettingsTabChip inherits Rectangle {
+    in property <string> title;
+    in property <bool> active;
+    callback clicked();
+
+    height: 28px;
+    width: label.width + 24px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    border-radius: 0px;
+    background: root.active ? Theme.surface-2 : (area.has-hover ? Theme.surface-2.with-alpha(0.7) : transparent);
+
+    label := Text {
+        x: 12px;
+        height: parent.height;
+        text: root.title;
+        font-size: 13px;
+        font-weight: 500;
+        color: root.active ? Theme.text-primary : (area.has-hover ? Theme.text-secondary : Theme.text-muted);
+        vertical-alignment: center;
+    }
+
+    area := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Port of app.css `.settings-tabs` / `.settings-tab`. Replaces stock
+// TabWidget, whose Fluent skin ignores Theme and stretches each tab.
+export component SettingsTabBar inherits Rectangle {
+    in-out property <SettingsTab> current: SettingsTab.transcription;
+    callback changed(SettingsTab);
+
+    height: 36px;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Theme.border-soft;
+    background: transparent;
+
+    accessible-role: none;
+
+    HorizontalLayout {
+        padding: 4px;
+        spacing: 4px;
+        alignment: start;
+
+        SettingsTabChip {
+            title: "Transcription";
+            active: root.current == SettingsTab.transcription;
+            clicked => {
+                root.current = SettingsTab.transcription;
+                root.changed(SettingsTab.transcription);
+            }
+        }
+        SettingsTabChip {
+            title: "IA";
+            active: root.current == SettingsTab.ai;
+            clicked => {
+                root.current = SettingsTab.ai;
+                root.changed(SettingsTab.ai);
+            }
+        }
+        SettingsTabChip {
+            title: "Audio";
+            active: root.current == SettingsTab.audio;
+            clicked => {
+                root.current = SettingsTab.audio;
+                root.changed(SettingsTab.audio);
+            }
+        }
+        SettingsTabChip {
+            title: "Interface";
+            active: root.current == SettingsTab.interface;
+            clicked => {
+                root.current = SettingsTab.interface;
+                root.changed(SettingsTab.interface);
+            }
+        }
+        SettingsTabChip {
+            title: "Réunions";
+            active: root.current == SettingsTab.meetings;
+            clicked => {
+                root.current = SettingsTab.meetings;
+                root.changed(SettingsTab.meetings);
+            }
+        }
+        SettingsTabChip {
+            title: "Système";
+            active: root.current == SettingsTab.system;
+            clicked => {
+                root.current = SettingsTab.system;
+                root.changed(SettingsTab.system);
+            }
+        }
+    }
+}

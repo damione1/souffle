@@ -1,7 +1,10 @@
-import { LineEdit, Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedLineEdit } from "../themed_line_edit.slint";
+
 
 // Port of DictionarySettingsSection.svelte. Simplified: aliases (comma-
 // separated pronunciations) show as plain text per entry rather than
@@ -27,18 +30,16 @@ export component DictionarySection inherits VerticalLayout {
     callback add-requested(string, string, string);
     callback delete-requested(int);
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Dictionnaire";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
+    SettingsGroup {
+        title: "DICTIONNAIRE PERSONNALISÉ";
 
     SettingsField {
-        label: "Apprentissage depuis les corrections";
-        description: "Ajouter automatiquement une correction faite dans une transcription au dictionnaire.";
+        show-divider: false;
+        label: "Apprendre depuis les corrections après collage";
+        description: "Quand le collage auto est actif, retenir les corrections mot à mot faites dans l'app cible pour les dictées suivantes.";
 
         ThemedSwitch {
             checked: root.learn-from-edit;
@@ -60,20 +61,20 @@ export component DictionarySection inherits VerticalLayout {
             spacing: 2px;
             horizontal-stretch: 1;
             Text { text: "Terme"; font-size: 10.5px; color: Theme.text-muted; }
-            LineEdit { text <=> root.new-term-draft; }
+            ThemedLineEdit { text <=> root.new-term-draft; placeholder: "ex. Kubernetes"; }
         }
         VerticalLayout {
             spacing: 2px;
             Text { text: "Prononciation"; font-size: 10.5px; color: Theme.text-muted; }
-            LineEdit { text <=> root.new-pronunciation-draft; width: 110px; }
+            ThemedLineEdit { text <=> root.new-pronunciation-draft; placeholder: "ex. vaysix"; width: 110px; }
         }
         VerticalLayout {
             spacing: 2px;
             Text { text: "Catégorie"; font-size: 10.5px; color: Theme.text-muted; }
-            LineEdit { text <=> root.new-category-draft; width: 100px; }
+            ThemedLineEdit { text <=> root.new-category-draft; placeholder: "ex. tech"; width: 100px; }
         }
-        Button {
-            text: "Ajouter";
+        ThemedButton {
+            text: "+";
             enabled: root.new-term-draft != "";
             clicked => {
                 root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
@@ -120,10 +121,11 @@ export component DictionarySection inherits VerticalLayout {
                     color: Theme.text-muted;
                 }
             }
-            Button {
+            ThemedButton {
                 text: "Supprimer";
                 clicked => { root.delete-requested(row.id); }
             }
         }
+    }
     }
 }

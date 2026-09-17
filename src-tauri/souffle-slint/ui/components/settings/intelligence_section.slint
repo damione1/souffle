@@ -1,6 +1,10 @@
-import { ComboBox, LineEdit, Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedLineEdit } from "../themed_line_edit.slint";
+import { SummaryProvider } from "../../types.slint";
 
 // Port of IntelligenceSettingsSection.svelte. The exact per-reason-code
 // wording (`KNOWN_REASON_KEYS`) and the fine-grained model-picker
@@ -10,7 +14,7 @@ import { Theme } from "../../theme.slint";
 // follow-up pass. Model pickers forward their chosen *label* back to Rust
 // for id resolution, same reasoning as the audio device pickers.
 export component IntelligenceSection inherits VerticalLayout {
-    in property <string> summary-provider; // "auto" | "apple_intelligence" | "ollama"
+    in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
     in property <string> apple-intelligence-reason; // "" when available
     in property <string> ollama-url;
@@ -27,41 +31,50 @@ export component IntelligenceSection inherits VerticalLayout {
     in property <string> recommended-model;
     in property <string> unusable-message; // "" when the chosen provider can run
 
-    callback summary-provider-changed(string);
+    callback summary-provider-changed(SummaryProvider);
     callback ollama-url-changed(string);
     callback ollama-model-changed(string);
     callback retry-requested();
     callback download-recommended-requested();
     callback open-apple-intelligence-settings-requested();
 
-    pure function provider-label(value: string) -> string {
-        if value == "apple_intelligence" { return "Apple Intelligence"; }
-        if value == "ollama" { return "Ollama"; }
-        return "Automatique";
-    }
-    pure function provider-value(label: string) -> string {
-        if label == "Apple Intelligence" { return "apple_intelligence"; }
-        if label == "Ollama" { return "ollama"; }
-        return "auto";
+    pure function provider-label(value: SummaryProvider) -> string {
+        if value == SummaryProvider.apple-intelligence { return "Apple Intelligence"; }
+        if value == SummaryProvider.ollama { return "Ollama"; }
+        if value == SummaryProvider.auto { return "Automatique"; }
+        return "";
     }
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Intelligence artificielle";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
+    SettingsGroup {
+        title: "RÉSUMÉS";
 
     SettingsField {
-        label: "Fournisseur de résumés";
-        description: "Modèle utilisé pour résumer les réunions et retoucher les dictées.";
+        show-divider: false;
+        label: "Moteur";
+        description: "Le moteur qui rédige les résumés et nettoie la dictée.";
 
-        ComboBox {
-            model: ["Automatique", "Apple Intelligence", "Ollama"];
+        ThemedComboBox {
+            combo-width: 220px;
+            model: [
+                root.provider-label(SummaryProvider.auto),
+                root.provider-label(SummaryProvider.apple-intelligence),
+                root.provider-label(SummaryProvider.ollama),
+            ];
             current-value: root.provider-label(root.summary-provider);
-            selected(value) => { root.summary-provider-changed(root.provider-value(value)); }
+            selected(value) => {
+                if value == root.provider-label(SummaryProvider.apple-intelligence) {
+                    root.summary-provider-changed(SummaryProvider.apple-intelligence);
+                }
+                if value == root.provider-label(SummaryProvider.ollama) {
+                    root.summary-provider-changed(SummaryProvider.ollama);
+                }
+                if value == root.provider-label(SummaryProvider.auto) {
+                    root.summary-provider-changed(SummaryProvider.auto);
+                }
+            }
         }
     }
 
@@ -120,7 +133,7 @@ export component IntelligenceSection inherits VerticalLayout {
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
-            if root.apple-intelligence-reason == "apple_intelligence_not_enabled": Button {
+            if root.apple-intelligence-reason == "apple_intelligence_not_enabled": ThemedButton {
                 text: "Réglages Système";
                 clicked => { root.open-apple-intelligence-settings-requested(); }
             }
@@ -131,7 +144,7 @@ export component IntelligenceSection inherits VerticalLayout {
         label: "URL Ollama";
         description: "Adresse du serveur Ollama local ou distant.";
 
-        LineEdit {
+        ThemedLineEdit {
             text: root.ollama-url;
             edited(value) => { root.ollama-url-changed(value); }
         }
@@ -156,7 +169,7 @@ export component IntelligenceSection inherits VerticalLayout {
                 color: Theme.text-secondary;
                 vertical-alignment: center;
             }
-            Button {
+            ThemedButton {
                 text: "Réessayer";
                 enabled: !root.ollama-checking && !root.ollama-pulling;
                 clicked => { root.retry-requested(); }
@@ -167,7 +180,8 @@ export component IntelligenceSection inherits VerticalLayout {
     if root.model-picker-visible: SettingsField {
         label: "Modèle de résumé";
 
-        ComboBox {
+        ThemedComboBox {
+            combo-width: 220px;
             model: root.model-labels;
             current-value: root.selected-model-label;
             selected(value) => { root.ollama-model-changed(value); }
@@ -198,10 +212,11 @@ export component IntelligenceSection inherits VerticalLayout {
 
         if !root.ollama-pulling: HorizontalLayout {
             alignment: end;
-            Button {
+            ThemedButton {
                 text: "Télécharger " + root.recommended-model;
                 clicked => { root.download-recommended-requested(); }
             }
         }
+    }
     }
 }

@@ -1,7 +1,8 @@
-import { Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton } from "../themed_button.slint";
 
 // Port of AboutSettingsSection.svelte. `UpdateAction` (the download-progress
 // + install button shown once an update is found) is not built here - a
@@ -20,14 +21,11 @@ export component AboutSection inherits VerticalLayout {
     callback check-updates-requested();
     callback auto-update-check-changed(bool);
 
-    spacing: 8px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "À propos";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: Theme.text-primary;
-    }
+    SettingsGroup {
+        title: "À PROPOS";
 
     HorizontalLayout {
         alignment: space-between;
@@ -58,7 +56,7 @@ export component AboutSection inherits VerticalLayout {
             color: Theme.text-muted;
             vertical-alignment: center;
         }
-        Button {
+        ThemedButton {
             text: root.checking-updates ? "Vérification…" : "Vérifier les mises à jour";
             enabled: !root.checking-updates;
             clicked => { root.check-updates-requested(); }
@@ -80,5 +78,6 @@ export component AboutSection inherits VerticalLayout {
             checked: root.auto-update-check;
             toggled(new) => { root.auto-update-check-changed(new); }
         }
+    }
     }
 }

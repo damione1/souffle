@@ -464,9 +464,9 @@ fn refresh_upcoming(
         match souffle_lib::commands::list_todays_calendar_events(handle).await {
             Ok(today) => {
                 if let Some(window) = weak.upgrade() {
-                    window.set_settings_calendar_permission(
-                        settings_ui::perm_state_to_str(today.permission).into(),
-                    );
+                    window.set_settings_calendar_permission(settings_ui::perm_state_to_slint(
+                        today.permission,
+                    ));
                     apply_upcoming(&window, &today.events, &cache);
                 }
             }
@@ -2442,7 +2442,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         *settings_log_timer_for_close.borrow_mut() = None;
         *pending_modifier_for_close.borrow_mut() = None;
         if let Some(window) = weak.upgrade() {
-            window.set_settings_recording_field("".into());
+            window.set_settings_recording_field(ShortcutField::None);
             window.set_settings_shortcut_error("".into());
             refresh_upcoming(&window, &handle_for_close, upcoming_for_close.clone());
         }
@@ -2482,18 +2482,18 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         handle: &AppHandle,
         shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
         window: &MainWindow,
-        field: &str,
+        field: ShortcutField,
         value: String,
     ) {
-        window.set_settings_recording_field("".into());
+        window.set_settings_recording_field(ShortcutField::None);
         let mut guard = shortcuts_state.borrow_mut();
         let Some(shortcuts) = guard.as_mut() else {
             return;
         };
         match field {
-            "toggle" => shortcuts.toggle = value,
-            "ptt" => shortcuts.push_to_talk = value,
-            _ => return,
+            ShortcutField::Toggle => shortcuts.toggle = value,
+            ShortcutField::Ptt => shortcuts.push_to_talk = value,
+            ShortcutField::None => return,
         }
         let state = Arc::clone(handle);
         match souffle_lib::commands::save_shortcuts(state, shortcuts.clone()) {
@@ -2528,12 +2528,12 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let handle = tauri_handle.clone();
     let settings_state_for_log_level = settings_state.clone();
     window.on_settings_log_level_changed(move |value| {
-        let level = settings_ui::log_level_from_str(&value);
+        let level = settings_ui::log_level_from_slint(value);
         save_settings_field(&handle, &settings_state_for_log_level, |settings| {
             settings.log_level = level;
         });
         if let Some(window) = weak.upgrade() {
-            window.set_settings_log_level(value);
+            window.set_settings_log_level(settings_ui::log_level_to_slint(level));
         }
     });
 
@@ -2541,7 +2541,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let handle = tauri_handle.clone();
     let settings_state_for_theme = settings_state.clone();
     window.on_settings_theme_changed(move |value| {
-        let theme = settings_ui::theme_from_str(&value);
+        let theme = settings_ui::theme_from_slint(value);
         save_settings_field(&handle, &settings_state_for_theme, |settings| {
             settings.theme = theme;
         });
@@ -2574,14 +2574,14 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         save_settings_field(&handle, &settings_state_for_toggle, |settings| {
             settings.theme = next_theme;
         });
-        window.set_settings_theme(settings_ui::theme_to_str(&next_theme).into());
+        window.set_settings_theme(settings_ui::theme_to_slint(next_theme));
     });
 
     let handle = tauri_handle.clone();
     let settings_state_for_locale = settings_state.clone();
     window.on_settings_locale_changed(move |value| {
         save_settings_field(&handle, &settings_state_for_locale, |settings| {
-            settings.locale = value.to_string();
+            settings.locale = settings_ui::locale_from_slint(value).to_string();
         });
     });
 
@@ -2596,7 +2596,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let handle = tauri_handle.clone();
     let settings_state_for_paste_method = settings_state.clone();
     window.on_settings_paste_method_changed(move |value| {
-        let method = settings_ui::paste_method_from_str(&value);
+        let method = settings_ui::paste_method_from_slint(value);
         save_settings_field(&handle, &settings_state_for_paste_method, |settings| {
             settings.paste_method = method;
         });
@@ -2843,7 +2843,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let handle = tauri_handle.clone();
     let settings_state_for_meeting_lang = settings_state.clone();
     window.on_settings_meeting_transcription_language_changed(move |value| {
-        let language = settings_ui::meeting_transcription_language_from_str(&value);
+        let language = settings_ui::meeting_language_from_slint(value);
         save_settings_field(&handle, &settings_state_for_meeting_lang, |settings| {
             settings.meeting_transcription_language = language;
         });
@@ -3069,7 +3069,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let handle = tauri_handle.clone();
     let settings_state_for_retention = settings_state.clone();
     window.on_settings_meeting_audio_retention_changed(move |value| {
-        let retention = data_ui::meeting_audio_retention_from_str(&value);
+        let retention = settings_ui::audio_retention_from_slint(value);
         save_settings_field(&handle, &settings_state_for_retention, |settings| {
             settings.meeting_audio_retention = retention;
         });
@@ -3192,7 +3192,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let settings_state_for_provider = settings_state.clone();
     let summary_status_state_for_provider = summary_status_state.clone();
     window.on_settings_summary_provider_changed(move |value| {
-        let provider = ia_ui::summary_provider_from_str(&value);
+        let provider = ia_ui::summary_provider_from_slint(value);
         save_settings_field(&handle, &settings_state_for_provider, |settings| {
             settings.summary_provider = provider;
         });
@@ -3781,7 +3781,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
             return;
         };
-        apply_shortcut(&handle, &shortcuts_state_for_capture, &window, &field, value);
+        apply_shortcut(&handle, &shortcuts_state_for_capture, &window, field, value);
     });
 
     let weak = window.as_weak();
@@ -3805,7 +3805,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             &handle,
             &shortcuts_state_for_release,
             &window,
-            &field,
+            field,
             name.to_string(),
         );
     });
@@ -3823,7 +3823,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             &handle,
             &shortcuts_state_for_clear,
             &window,
-            &field,
+            field,
             String::new(),
         );
     });
@@ -3833,7 +3833,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     window.on_settings_shortcut_cancelled(move || {
         *pending_modifier_for_cancel.borrow_mut() = None;
         if let Some(window) = weak.upgrade() {
-            window.set_settings_recording_field("".into());
+            window.set_settings_recording_field(ShortcutField::None);
             window.set_settings_shortcut_error("".into());
         }
     });

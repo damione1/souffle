@@ -3,7 +3,7 @@ import { SearchField } from "components/search_field.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { TimelineSection, TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { FilterChip } from "components/filter_chip.slint";
-import { TimelineFilter, TimelineKind } from "types.slint";
+import { TimelineFilter, TimelineKind, AccessState } from "types.slint";
 
 // Port of components/HomeView.svelte's idle branch. The hero, search, and
 // filter chips stay put; only the calendar + timeline list scrolls.
@@ -20,7 +20,7 @@ export component IdleView inherits Rectangle {
     in property <string> live-meeting-id;
     in-out property <string> expanded-dictation-id;
     in property <bool> calendar-enabled: false;
-    in property <string> calendar-permission;
+    in property <AccessState> calendar-permission;
     in property <[UpcomingEvent]> upcoming;
 
     callback dictate-requested();
