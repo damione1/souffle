@@ -8,6 +8,7 @@
 //! `tauri-plugin-fs` and `tauri-plugin-log` had no Rust-side caller (grepped,
 //! not assumed) and are dropped with no replacement.
 
+pub mod appearance;
 pub mod bridge;
 pub mod dialog;
 pub mod notifications;

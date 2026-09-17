@@ -23,6 +23,7 @@ mod transcript;
 
 use slint::Model;
 use souffle_lib::audio::AudioInputDevice;
+use souffle_lib::calendar::CalendarEvent;
 use souffle_lib::engine::{
     TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
@@ -31,7 +32,7 @@ use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::progress::ProgressChannel;
 use souffle_lib::settings::{AppSettings, ShortcutSettings};
 use souffle_lib::state::AppState;
-use souffle_lib::transcript::{MeetingParticipant, MeetingTranscript};
+use souffle_lib::transcript::{MeetingCalendarContext, MeetingParticipant, MeetingTranscript};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -420,7 +421,12 @@ fn load_calendars_if_enabled(
         }
     };
     if !enabled {
-        settings_ui::populate_calendars(window, &[], &[], PermState::Unknown);
+        settings_ui::populate_calendars(
+            window,
+            &[],
+            &[],
+            souffle_lib::calendar::authorization_state(),
+        );
         return;
     }
     match souffle_lib::calendar::list_calendars() {
@@ -429,6 +435,72 @@ fn load_calendars_if_enabled(
         }
         Err(_) => settings_ui::populate_calendars(window, &[], &selected_ids, PermState::Denied),
     }
+}
+
+fn apply_upcoming(
+    window: &MainWindow,
+    events: &[CalendarEvent],
+    cache: &Rc<RefCell<Vec<CalendarEvent>>>,
+) {
+    *cache.borrow_mut() = events.to_vec();
+    let rows = timeline::upcoming_rows(events, chrono::Utc::now());
+    window.set_upcoming_events(std::rc::Rc::new(slint::VecModel::from(rows)).into());
+}
+
+/// Port of calendar/controller.svelte.ts `refresh()`. EventKit stays off
+/// the UI thread (`list_todays_calendar_events` is spawn_blocking inside).
+fn refresh_upcoming(
+    window: &MainWindow,
+    handle: &AppHandle,
+    cache: Rc<RefCell<Vec<CalendarEvent>>>,
+) {
+    if !window.get_settings_calendar_enabled() {
+        apply_upcoming(window, &[], &cache);
+        return;
+    }
+    let handle = handle.clone();
+    let weak = window.as_weak();
+    slint::spawn_local(async move {
+        match souffle_lib::commands::list_todays_calendar_events(handle).await {
+            Ok(today) => {
+                if let Some(window) = weak.upgrade() {
+                    window.set_settings_calendar_permission(
+                        settings_ui::perm_state_to_str(today.permission).into(),
+                    );
+                    apply_upcoming(&window, &today.events, &cache);
+                }
+            }
+            Err(e) => eprintln!("Failed to load today's calendar: {e}"),
+        }
+    })
+    .expect("slint event loop not running");
+}
+
+async fn start_meeting_from_event(
+    handle: AppHandle,
+    weak: slint::Weak<MainWindow>,
+    event: CalendarEvent,
+) -> Result<(), String> {
+    ensure_model_ready(&handle).await?;
+    let title = event.title.clone();
+    let context = MeetingCalendarContext {
+        event_id: event.id.clone(),
+        participants: event.participants.clone(),
+        description: event.description.clone(),
+    };
+    run_on_main_thread(move || {
+        souffle_lib::async_runtime::block_on(async move {
+            let state = Arc::clone(&handle);
+            souffle_lib::commands::start_meeting_recording(
+                state,
+                title,
+                Some(context),
+                live_segment_channel(weak),
+            )
+            .await
+        })
+    })
+    .await
 }
 
 /// Refreshes the audio device list, both device pickers, and the
@@ -514,6 +586,7 @@ fn load_transcription_model_state(
         unload_timeout_minutes,
         &unload_timeout_options,
     );
+    window.set_header_model_label(model_ui::selected_model_short_label(&catalog).into());
     *model_options_state.borrow_mut() = model_ui::list_available_model_options(&catalog);
 
     let selection = TranscriptionProfileSelection {
@@ -1747,10 +1820,11 @@ fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_
             // ambient Tokio reactor that `slint::spawn_local`'s own executor
             // doesn't provide - route it through the global Tokio runtime
             // (see `refresh_summary_providers`'s identical fix).
-            let result = souffle_lib::async_runtime::spawn(souffle_lib::commands::download_update())
-                .await
-                .map_err(|e| format!("Join download_update task: {e}"))
-                .and_then(|r| r);
+            let result =
+                souffle_lib::async_runtime::spawn(souffle_lib::commands::download_update())
+                    .await
+                    .map_err(|e| format!("Join download_update task: {e}"))
+                    .and_then(|r| r);
             let Some(window) = weak.upgrade() else {
                 return;
             };
@@ -1897,6 +1971,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     // Same sharing pattern, for the virtualized transcript list (AC15).
     let transcript_state: Rc<RefCell<Option<TranscriptState>>> = Rc::new(RefCell::new(None));
     let transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    let upcoming_cache: Rc<RefCell<Vec<CalendarEvent>>> = Rc::new(RefCell::new(Vec::new()));
+    let upcoming_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
@@ -2022,9 +2098,6 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let transcript_timer_for_open = transcript_timer.clone();
     window.on_timeline_item_opened(move |kind, id| {
         if kind != TimelineKind::Meeting {
-            // Dictation inline-expand has no Slint equivalent yet - real
-            // action, just not ported.
-            eprintln!("timeline-item-opened: dictation {id} (inline-expand not wired yet)");
             return;
         }
         let Some(window) = weak.upgrade() else {
@@ -2043,6 +2116,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     });
 
     let weak = window.as_weak();
+    let handle = tauri_handle.clone();
     let player_for_back = player.clone();
     let progress_timer_for_back = progress_timer.clone();
     let transcript_state_for_back = transcript_state.clone();
@@ -2050,6 +2124,14 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     window.on_meeting_detail_back(move || {
         if let Some(window) = weak.upgrade() {
             window.set_active_meeting_id("".into());
+            // Port of HomeView.svelte's `$effect` that refreshes whenever
+            // `showMeetingDetail` goes false - stopping a meeting lands the
+            // user on its detail view without a refresh (deliberately, see
+            // that stop-meeting handler's comment), so the Timeline is
+            // stale until whatever closes the detail view refreshes it.
+            // Without this, a just-finished meeting doesn't appear until
+            // the next unrelated refresh (filter change, search, restart).
+            refresh_timeline(&window, &handle);
         }
         stop_audio_player(&player_for_back, &progress_timer_for_back);
         stop_transcript_window(&transcript_state_for_back, &transcript_timer_for_back);
@@ -2169,9 +2251,71 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             eprintln!("Failed to delete {kind:?} {id}: {e}");
         }
         if let Some(window) = weak.upgrade() {
+            if kind == TimelineKind::Dictation && window.get_expanded_dictation_id() == id {
+                window.set_expanded_dictation_id("".into());
+            }
             refresh_timeline(&window, &handle);
         }
     });
+
+    window.on_timeline_item_copy_requested(move |text| {
+        if let Err(e) = souffle_lib::commands::copy_text(text.to_string()) {
+            eprintln!("Failed to copy dictation: {e}");
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let upcoming_for_start = upcoming_cache.clone();
+    window.on_calendar_event_start_requested(move |occurrence_id| {
+        let event = upcoming_for_start
+            .borrow()
+            .iter()
+            .find(|event| timeline::occurrence_key(event) == occurrence_id.as_str())
+            .cloned();
+        let Some(event) = event else {
+            eprintln!("calendar start: no cached event for {occurrence_id}");
+            return;
+        };
+        let weak = weak.clone();
+        let handle = handle.clone();
+        souffle_lib::async_runtime::spawn(async move {
+            let result = start_meeting_from_event(handle, weak.clone(), event).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
+                Ok(()) => {
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    window.set_recording_mode(RecordingMode::Meeting);
+                }
+                Err(e) => window.set_meeting_status_message(e.into()),
+            }) {
+                eprintln!("upgrade_in_event_loop failed (calendar start): {e}");
+            }
+        });
+    });
+
+    refresh_upcoming(window, &tauri_handle, upcoming_cache.clone());
+    {
+        let weak = window.as_weak();
+        let cache = upcoming_cache.clone();
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_secs(30),
+            move || {
+                let Some(window) = weak.upgrade() else {
+                    return;
+                };
+                let events = cache.borrow().clone();
+                if events.is_empty() {
+                    return;
+                }
+                let rows = timeline::upcoming_rows(&events, chrono::Utc::now());
+                window.set_upcoming_events(std::rc::Rc::new(slint::VecModel::from(rows)).into());
+            },
+        );
+        *upcoming_timer.borrow_mut() = Some(timer);
+    }
 
     // SOU-188: Settings shell. `settings_state` caches the full `AppSettings`
     // struct while the sheet is open, since `save_settings` always writes
@@ -2292,12 +2436,15 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let weak = window.as_weak();
     let settings_log_timer_for_close = settings_log_timer.clone();
     let pending_modifier_for_close = pending_modifier.clone();
+    let upcoming_for_close = upcoming_cache.clone();
+    let handle_for_close = tauri_handle.clone();
     window.on_settings_closed(move || {
         *settings_log_timer_for_close.borrow_mut() = None;
         *pending_modifier_for_close.borrow_mut() = None;
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field("".into());
             window.set_settings_shortcut_error("".into());
+            refresh_upcoming(&window, &handle_for_close, upcoming_for_close.clone());
         }
     });
 
@@ -2390,6 +2537,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_theme = settings_state.clone();
     window.on_settings_theme_changed(move |value| {
@@ -2397,6 +2545,36 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         save_settings_field(&handle, &settings_state_for_theme, |settings| {
             settings.theme = theme;
         });
+        if let Some(window) = weak.upgrade() {
+            window
+                .global::<Theme>()
+                .set_dark(settings_ui::resolve_dark(theme));
+        }
+    });
+
+    // Header sun/moon click: mirrors App.svelte's `toggleTheme()` - always
+    // resolves to an explicit dark/light choice (never back to "system"),
+    // applied immediately and persisted the same way the settings picker's
+    // handler above does.
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_toggle = settings_state.clone();
+    window.on_theme_toggle_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let now_dark = window.global::<Theme>().get_dark();
+        let next_dark = !now_dark;
+        let next_theme = if next_dark {
+            souffle_lib::settings::Theme::Dark
+        } else {
+            souffle_lib::settings::Theme::Light
+        };
+        window.global::<Theme>().set_dark(next_dark);
+        save_settings_field(&handle, &settings_state_for_toggle, |settings| {
+            settings.theme = next_theme;
+        });
+        window.set_settings_theme(settings_ui::theme_to_str(&next_theme).into());
     });
 
     let handle = tauri_handle.clone();
@@ -2459,13 +2637,21 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_calendar_enabled = settings_state.clone();
+    let upcoming_for_enable = upcoming_cache.clone();
     window.on_settings_calendar_enabled_changed(move |enabled| {
         if !enabled {
             save_settings_field(&handle, &settings_state_for_calendar_enabled, |settings| {
                 settings.calendar_integration_enabled = false;
             });
             if let Some(window) = weak.upgrade() {
-                settings_ui::populate_calendars(&window, &[], &[], PermState::Unknown);
+                window.set_settings_calendar_enabled(false);
+                settings_ui::populate_calendars(
+                    &window,
+                    &[],
+                    &[],
+                    souffle_lib::calendar::authorization_state(),
+                );
+                apply_upcoming(&window, &[], &upcoming_for_enable);
             }
             return;
         }
@@ -2474,6 +2660,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         };
         let handle = handle.clone();
         let settings_state = settings_state_for_calendar_enabled.clone();
+        let upcoming_for_enable = upcoming_for_enable.clone();
         // Not `souffle_lib::async_runtime::spawn`: this closes over an
         // `Rc<RefCell<..>>`, which is not `Send`. `request_permission`
         // blocks on the native TCC prompt internally (off its own thread via
@@ -2506,6 +2693,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                 ),
                 Err(_) => settings_ui::populate_calendars(&window, &[], &[], PermState::Denied),
             }
+            refresh_upcoming(&window, &handle, upcoming_for_enable);
         })
         .expect("slint event loop not running");
     });
@@ -3373,6 +3561,11 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             return;
         };
         let (engine_id, model_id, backend_id, selection) = option;
+        if let Ok(catalog) = souffle_lib::commands::get_transcription_catalog(handle.clone()) {
+            window.set_header_model_label(
+                model_ui::model_short_label(&catalog, &engine_id, &model_id).into(),
+            );
+        }
         save_settings_field(&handle, &settings_state_for_model, |settings| {
             settings.transcription_engine_id = engine_id;
             settings.transcription_model_id = model_id;
@@ -3792,6 +3985,25 @@ fn main() {
     // every command below takes.
     let handle: AppHandle = souffle_lib::bootstrap::bootstrap();
 
+    // Native equivalent of Tauri's `titleBarStyle: "overlay"` + `hiddenTitle:
+    // true`: keep the traffic lights but remove the native title bar strip
+    // and let AppHeader (main_window.slint) draw one continuous dark header
+    // with the lights inline, instead of stacking a second "Soufflé" title
+    // bar on top of it. Must run before `MainWindow::new()` - it configures
+    // the window attributes winit uses to create the NSWindow.
+    #[cfg(target_os = "macos")]
+    slint::BackendSelector::new()
+        .with_winit_window_attributes_hook(|attrs| {
+            use slint::winit_030::winit::platform::macos::WindowAttributesExtMacOS;
+            attrs
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true)
+                .with_fullsize_content_view(true)
+                .with_movable_by_window_background(true)
+        })
+        .select()
+        .expect("failed to select winit backend");
+
     let window = MainWindow::new().expect("failed to create Slint window");
 
     // Close hides; it must not destroy. The pill + tray keep the process
@@ -3814,7 +4026,43 @@ fn main() {
     }
     window.set_settings_app_version(souffle_lib::commands::get_app_version().version.into());
 
+    // Resolve the persisted theme (dark/light/system) against the real
+    // palette at launch - `Theme.dark` (theme.slint) defaults to `true`
+    // otherwise, which would always render dark regardless of what's saved.
+    // `System` resolves against the actual macOS appearance
+    // (`native::appearance::is_system_dark`), not a browser media query.
+    if let Ok(settings) = souffle_lib::commands::get_settings(handle.clone()) {
+        window
+            .global::<Theme>()
+            .set_dark(settings_ui::resolve_dark(settings.theme));
+    }
+
+    // AppHeader's status pill shows the model label ("STT 1B FR/EN") next
+    // to "Prêt", matching StatusChip.svelte - needs `settings-selected-
+    // model-label` populated from app launch, not just from Settings'
+    // on_settings_requested handler (the only other place that calls
+    // `populate_options`), or the header pill looks empty/sparse until the
+    // user opens Settings once. `model_unload_timeout_minutes: 0` here is a
+    // placeholder Settings itself corrects the moment it actually opens
+    // (`load_transcription_model_state` re-populates it from real saved
+    // settings) - this call's only job is the label.
+    if let Ok(catalog) = souffle_lib::commands::get_transcription_catalog(handle.clone()) {
+        let unload_timeout_options =
+            souffle_lib::settings::SettingsOptions::current().model_unload_timeout_minutes;
+        model_ui::populate_options(&window, &catalog, 0, &unload_timeout_options);
+        window.set_header_model_label(model_ui::selected_model_short_label(&catalog).into());
+    }
+
     refresh_timeline(&window, &handle);
+    if let Ok(settings) = souffle_lib::commands::get_settings(handle.clone()) {
+        window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
+        settings_ui::populate_calendars(
+            &window,
+            &[],
+            &[],
+            souffle_lib::calendar::authorization_state(),
+        );
+    }
     let onboarding_open = wire_onboarding_callbacks(&window, handle.clone());
     wire_update_dialogs(&window, handle.clone(), onboarding_open);
     wire_callbacks(&window, handle);

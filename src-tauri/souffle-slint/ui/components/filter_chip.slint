@@ -39,6 +39,7 @@ export component FilterChip inherits Rectangle {
 
         Text {
             text: root.text;
+            font-family: "Archivo Medium";
             font-size: 12px;
             color: root.selected ? Theme.canvas : (area.has-hover ? Theme.text-primary : Theme.text-muted);
             vertical-alignment: center;

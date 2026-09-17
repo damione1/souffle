@@ -4,10 +4,13 @@
 //! see the "not wired yet" comments in main.rs.
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
+use souffle_lib::calendar::CalendarEvent;
 use souffle_lib::db::dictation::DictationEntry;
 use souffle_lib::transcript::MeetingListItem;
 
-use crate::{TimelineDayGroup, TimelineEntry, TimelineFilter, TimelineKind};
+use crate::{
+    TimelineDayGroup, TimelineEntry, TimelineFilter, TimelineKind, UpcomingEvent, UpcomingPhase,
+};
 
 const WEEKDAYS: [&str; 7] = [
     "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
@@ -147,6 +150,42 @@ pub fn build_groups(
         .map(|(day, entries)| TimelineDayGroup {
             day_label: day_label(day).into(),
             entries: std::rc::Rc::new(slint::VecModel::from(entries)).into(),
+        })
+        .collect()
+}
+
+pub fn occurrence_key(event: &CalendarEvent) -> String {
+    format!("{}-{}", event.id, event.start.to_rfc3339())
+}
+
+/// Port of TimelineSection.svelte's `eventPhase` / `timeLabel`. `now` is
+/// injected so a 30s poll can refresh "en cours" / "suivant" without the
+/// UI parsing timestamps.
+pub fn upcoming_rows(events: &[CalendarEvent], now: DateTime<Utc>) -> Vec<UpcomingEvent> {
+    let first_upcoming = events
+        .iter()
+        .find(|event| event.start > now)
+        .map(occurrence_key);
+
+    events
+        .iter()
+        .map(|event| {
+            let phase = if now >= event.end {
+                UpcomingPhase::Past
+            } else if now >= event.start {
+                UpcomingPhase::Now
+            } else if first_upcoming.as_deref() == Some(occurrence_key(event).as_str()) {
+                UpcomingPhase::Next
+            } else {
+                UpcomingPhase::Later
+            };
+            UpcomingEvent {
+                id: occurrence_key(event).into(),
+                title: event.title.as_str().into(),
+                time_range: format!("{}–{}", time_label(event.start), time_label(event.end)).into(),
+                participant_count: i32::try_from(event.participants.len()).unwrap_or(i32::MAX),
+                phase,
+            }
         })
         .collect()
 }

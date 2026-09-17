@@ -11,17 +11,42 @@ import { CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneRow } from "components/settings/microphone_section.slint";
 import { DictionaryRow } from "components/settings/dictionary_section.slint";
 import { SnippetRow } from "components/settings/snippets_section.slint";
-import { TimelineDayGroup } from "components/timeline_section.slint";
+import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase } from "types.slint";
+import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, UpcomingPhase } from "types.slint";
 import { Theme } from "theme.slint";
+// Re-exported (not just imported) so Slint's codegen generates a Rust
+// accessor for it (`window.global::<Theme>()`) - main.rs sets `Theme.dark`
+// at launch and on every theme toggle. A plain `import` alone is enough for
+// every other `.slint` file to read `Theme.canvas` etc., but not for Rust
+// to reach the global at all.
+export { Theme }
 import { AppHeader } from "components/app_header.slint";
+
+// Self-hosted variable fonts from src/app.css, instantiated to static
+// per-weight TTFs (scripts/... none checked in - see the ticket notes: Slint
+// 1.17's renderer wants static instances, not a single variable font) so
+// `font-family: "Archivo SemiBold"` etc. resolve to the right weight instead
+// of the variable font's own default instance (600, SemiBold - which is
+// what every unweighted Text would render as if only one file were embedded).
+import "assets/fonts/archivo-regular.ttf";
+import "assets/fonts/archivo-medium.ttf";
+import "assets/fonts/archivo-semibold.ttf";
+import "assets/fonts/archivo-bold.ttf";
+import "assets/fonts/jetbrains-mono.ttf";
 
 export component MainWindow inherits Window {
     title: "Soufflé";
-    preferred-width: 720px;
+    // Matches tauri.conf.json's window (860x780, min 680x560) - the home
+    // page content is centered in a 720px column with side margins at this
+    // width, same as the reference.
+    preferred-width: 860px;
     preferred-height: 780px;
+    min-width: 680px;
+    min-height: 560px;
+    default-font-family: "Archivo";
+    default-font-size: 14px;
     background: Theme.canvas;
 
     in property <string> dictation-shortcut;
@@ -34,6 +59,8 @@ export component MainWindow inherits Window {
     in property <bool> timeline-is-empty: true;
     in property <bool> timeline-has-matches: true;
     in property <string> live-meeting-id;
+    in-out property <string> expanded-dictation-id;
+    in property <[UpcomingEvent]> upcoming-events;
     // Rust-driven, set after a real start/stop command succeeds, never
     // optimistically from the UI alone.
     in-out property <RecordingMode> recording-mode: RecordingMode.idle;
@@ -82,6 +109,9 @@ export component MainWindow inherits Window {
     // must first load the real settings from disk (see main.rs) - closing
     // needs no such round trip, so `settings-open` alone is enough there.
     in-out property <bool> settings-open: false;
+    // 0 Transcription, 1 IA, 2 Audio, 3 Interface, 4 Réunions, 5 Système.
+    // The gear opens tab 0; the homepage calendar CTA opens tab 4.
+    in-out property <int> settings-tab-index: 0;
     in property <bool> settings-autostart-enabled;
     in property <bool> settings-debug-transcription;
     in property <string> settings-log-level;
@@ -179,6 +209,13 @@ export component MainWindow inherits Window {
     in property <string> settings-model-status-text;
     in property <[string]> settings-model-labels;
     in property <string> settings-selected-model-label;
+    // Bare model label ("STT 1B FR/EN") for AppHeader's status pill - kept
+    // separate from `settings-selected-model-label` above, which is the
+    // combined "Engine — Model" form the settings picker needs to
+    // disambiguate engines (matches App.svelte's StatusChip reading
+    // `findTranscriptionModel(...)?.label` instead of
+    // `listAvailableModelOptions()`'s flat label).
+    in property <string> header-model-label;
     in property <bool> settings-model-busy;
     in property <bool> settings-model-downloading;
     in property <string> settings-model-download-progress-label;
@@ -197,6 +234,7 @@ export component MainWindow inherits Window {
 
     callback settings-requested();
     callback settings-closed();
+    callback theme-toggle-requested();
     callback settings-autostart-changed(bool);
     callback settings-permissions-review-requested();
     callback settings-debug-transcription-changed(bool);
@@ -280,6 +318,8 @@ export component MainWindow inherits Window {
     callback dismiss-meeting-status();
     callback timeline-item-opened(TimelineKind, string);
     callback timeline-item-removed(TimelineKind, string);
+    callback timeline-item-copy-requested(string);
+    callback calendar-event-start-requested(string);
     callback stop-requested();
     callback meeting-detail-back();
     callback meeting-detail-rename(string);
@@ -377,14 +417,17 @@ export component MainWindow inherits Window {
             settings-open: root.settings-open;
             model-ready: root.model-ready;
             recording-mode: root.recording-mode;
+            model-label: root.header-model-label;
             settings-toggled => {
                 if root.settings-open {
                     root.settings-open = false;
                     root.settings-closed();
                 } else {
+                    root.settings-tab-index = 0;
                     root.settings-requested();
                 }
             }
+            theme-toggle-requested => { root.theme-toggle-requested(); }
         }
 
         Rectangle {
@@ -401,6 +444,10 @@ export component MainWindow inherits Window {
         timeline-is-empty: root.timeline-is-empty;
         timeline-has-matches: root.timeline-has-matches;
         live-meeting-id: root.live-meeting-id;
+        expanded-dictation-id <=> root.expanded-dictation-id;
+        calendar-enabled: root.settings-calendar-enabled;
+        calendar-permission: root.settings-calendar-permission;
+        upcoming: root.upcoming-events;
         dictate-requested => { root.dictate-requested(); }
         meeting-requested => { root.meeting-requested(); }
         filter-changed(kind) => { root.filter-changed(kind); }
@@ -409,6 +456,12 @@ export component MainWindow inherits Window {
         dismiss-meeting-status => { root.dismiss-meeting-status(); }
         timeline-item-opened(kind, id) => { root.timeline-item-opened(kind, id); }
         timeline-item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
+        timeline-item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
+        calendar-setup-requested => {
+            root.settings-tab-index = 4;
+            root.settings-requested();
+        }
+        calendar-event-start-requested(id) => { root.calendar-event-start-requested(id); }
     }
 
     if root.recording-mode == RecordingMode.idle && root.active-meeting-id != "": MeetingDetail {
@@ -461,6 +514,7 @@ export component MainWindow inherits Window {
     if root.settings-open: SettingsView {
         width: 100%;
         height: 100%;
+        tab-index <=> root.settings-tab-index;
         autostart-enabled: root.settings-autostart-enabled;
         debug-transcription: root.settings-debug-transcription;
         log-level: root.settings-log-level;

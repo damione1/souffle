@@ -132,35 +132,43 @@ mod macos {
         }
 
         let (tx, rx) = std::sync::mpsc::channel::<bool>();
-        crate::platform::with_autorelease_pool(|| {
-            let store = unsafe { EKEventStore::new() };
-            let block = block2::RcBlock::new(move |granted: Bool, _error: *mut NSError| {
-                let _ = tx.send(granted.as_bool());
-            });
-            let handler = &*block as *const block2::DynBlock<dyn Fn(Bool, *mut NSError)>
-                as *mut block2::DynBlock<dyn Fn(Bool, *mut NSError)>;
-            let macos14 = objc2_foundation::NSProcessInfo::processInfo()
-                .isOperatingSystemAtLeastVersion(objc2_foundation::NSOperatingSystemVersion {
-                    majorVersion: 14,
-                    minorVersion: 0,
-                    patchVersion: 0,
+        // Same hop as microphone (SOU-122): a TCC prompt only registers this
+        // process with System Settings when the request is raised from the
+        // main thread. `request_permission` runs on a blocking pool thread,
+        // so only the EventKit call hops; the wait stays here so the UI
+        // run loop can keep pumping the dialog.
+        crate::main_thread::on_main(move || {
+            crate::platform::with_autorelease_pool(|| {
+                let store = unsafe { EKEventStore::new() };
+                let block = block2::RcBlock::new(move |granted: Bool, _error: *mut NSError| {
+                    let _ = tx.send(granted.as_bool());
                 });
-            unsafe {
-                if macos14 {
-                    store.requestFullAccessToEventsWithCompletion(handler);
-                } else {
-                    #[allow(deprecated)] // the only API available on macOS 13
-                    store.requestAccessToEntityType_completion(EKEntityType::Event, handler);
+                let handler = &*block as *const block2::DynBlock<dyn Fn(Bool, *mut NSError)>
+                    as *mut block2::DynBlock<dyn Fn(Bool, *mut NSError)>;
+                let macos14 = objc2_foundation::NSProcessInfo::processInfo()
+                    .isOperatingSystemAtLeastVersion(objc2_foundation::NSOperatingSystemVersion {
+                        majorVersion: 14,
+                        minorVersion: 0,
+                        patchVersion: 0,
+                    });
+                unsafe {
+                    if macos14 {
+                        store.requestFullAccessToEventsWithCompletion(handler);
+                    } else {
+                        #[allow(deprecated)] // the only API available on macOS 13
+                        store.requestAccessToEntityType_completion(EKEntityType::Event, handler);
+                    }
                 }
-            }
-            // The completion fires on an arbitrary queue after the user answers
-            // the dialog; only the bool crosses back. Generous timeout: the
-            // user may leave the dialog on screen.
-            match rx.recv_timeout(std::time::Duration::from_secs(300)) {
-                Ok(true) => PermState::Granted,
-                _ => PermState::Denied,
-            }
-        })
+                // EKEventStore is !Send, so it cannot travel with the wait on
+                // the blocking thread. Leaking it until process exit keeps the
+                // request alive for one permission prompt.
+                std::mem::forget(store);
+            });
+        });
+        match rx.recv_timeout(std::time::Duration::from_secs(300)) {
+            Ok(true) => PermState::Granted,
+            _ => PermState::Denied,
+        }
     }
 
     pub fn list_calendars() -> Result<Vec<CalendarInfo>, String> {

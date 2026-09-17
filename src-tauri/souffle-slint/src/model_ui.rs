@@ -73,6 +73,32 @@ pub fn find_option<'a>(options: &'a [FlatModelOption], label: &str) -> Option<&'
     options.iter().find(|o| o.label == label)
 }
 
+/// Port of `findTranscriptionModel(...)?.label` - the bare model label
+/// ("STT 1B FR/EN"), not `list_available_model_options`'s "Engine — Model"
+/// (that combined form is for the settings picker, which needs to
+/// disambiguate engines; `App.svelte`'s `StatusChip` reads this instead).
+pub fn model_short_label(
+    catalog: &TranscriptionCatalog,
+    engine_id: &str,
+    model_id: &str,
+) -> String {
+    catalog
+        .engines
+        .iter()
+        .find(|engine| engine.id == engine_id)
+        .and_then(|engine| engine.models.iter().find(|m| m.id == model_id))
+        .map(|m| m.label.clone())
+        .unwrap_or_default()
+}
+
+pub fn selected_model_short_label(catalog: &TranscriptionCatalog) -> String {
+    model_short_label(
+        catalog,
+        &catalog.selected_engine_id,
+        &catalog.selected_model_id,
+    )
+}
+
 pub fn phase_label(phase: TranscriptionRuntimePhase) -> &'static str {
     match phase {
         TranscriptionRuntimePhase::DownloadRequired => "Téléchargement requis",

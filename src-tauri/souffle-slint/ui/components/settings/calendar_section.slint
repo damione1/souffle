@@ -1,7 +1,8 @@
-import { SpinBox, CheckBox, Button } from "std-widgets.slint";
+import { SpinBox, CheckBox } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 
 // One calendar in the picker list. Pre-grouped and pre-sorted by Rust
 // (`calendar_ui.rs`) so this stays a single flat `for` loop instead of the
@@ -50,25 +51,27 @@ export component CalendarSection inherits VerticalLayout {
 
     if root.permission == "denied": Rectangle {
         border-width: 1px;
-        border-color: Theme.danger;
+        border-color: Theme.danger.with-alpha(0.3);
         border-radius: 6px;
-        background: Theme.surface-2;
 
         HorizontalLayout {
-            padding: 10px;
-            spacing: 10px;
+            padding: 12px;
+            spacing: 16px;
             alignment: space-between;
 
             Text {
                 text: "L'accès au calendrier a été refusé.";
-                color: Theme.danger;
-                font-size: 11.5px;
+                color: Theme.text-primary;
+                font-size: 14px;
                 wrap: word-wrap;
+                vertical-alignment: center;
                 horizontal-stretch: 1;
             }
 
-            Button {
-                text: "Ouvrir Réglages Système";
+            ThemedButton {
+                horizontal-stretch: 0;
+                text: "Ouvrir les Réglages Système";
+                kind: ThemedButtonKind.primary;
                 clicked => { root.open-system-settings-requested(); }
             }
         }

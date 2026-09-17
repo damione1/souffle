@@ -1,0 +1,51 @@
+import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Port of HomeView.svelte's search `<label>` - a bare `TextInput` inside a
+// hand-styled Rectangle rather than `std-widgets`' `LineEdit`, whose default
+// widget style (SOU-187 session, comparing against the reference) renders
+// with far taller min-height/padding than the compact single-line bar here.
+export component SearchField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "";
+
+    callback edited(string);
+
+    height: 42px;
+    background: Theme.input;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent.with-alpha(0.5) : Theme.ghost-border;
+    animate border-color { duration: 100ms; }
+
+    LucideIcon {
+        icon: IconSet.Search;
+        icon-color: Theme.text-muted;
+        size: 16px;
+        x: 15px;
+        y: (parent.height - self.height) / 2;
+    }
+
+    input := TextInput {
+        x: 42px;
+        width: parent.width - 42px - 15px;
+        height: parent.height;
+        text <=> root.text;
+        font-size: 13.5px;
+        font-family: "Archivo";
+        color: Theme.text-secondary;
+        vertical-alignment: center;
+        single-line: true;
+        edited => { root.edited(self.text); }
+    }
+
+    if root.text == "" && !input.has-focus: Text {
+        x: 42px;
+        width: input.width;
+        height: parent.height;
+        text: root.placeholder;
+        font-size: 13.5px;
+        color: Theme.text-muted;
+        vertical-alignment: center;
+    }
+}

@@ -1,4 +1,5 @@
 import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Port of features/home/ActionHero.svelte: two equal-width CTAs (dictate,
 // start a meeting), each disabled while the transcription model isn't ready.
@@ -16,6 +17,7 @@ export component ActionHero inherits HorizontalLayout {
         border-width: 1px;
         border-color: Theme.border-soft;
         background: dictate-area.has-hover ? Theme.surface-2 : transparent;
+        opacity: root.model-ready ? 1.0 : 0.5;
 
         // TouchArea alone has no accessible role (SOU-186's LineEdit-vs-bare-
         // TextInput lesson applies here too): without these, this control is
@@ -30,21 +32,65 @@ export component ActionHero inherits HorizontalLayout {
             clicked => { root.dictate-requested(); }
         }
 
-        VerticalLayout {
+        HorizontalLayout {
             padding: 18px;
-            spacing: 4px;
+            spacing: 15px;
             alignment: start;
 
-            Text {
-                text: "Dicter";
-                font-weight: 600;
-                font-size: 15px;
-                color: Theme.text-primary;
+            LucideIcon {
+                icon: IconSet.Mic;
+                icon-color: Theme.accent;
+                size: 22px;
+                y: 2px;
             }
-            Text {
-                text: root.dictation-shortcut == "" ? "Aucun raccourci configuré" : "Appuyez sur " + root.dictation-shortcut;
-                font-size: 12px;
-                color: Theme.text-muted;
+
+            VerticalLayout {
+                spacing: 4px;
+                alignment: start;
+
+                Text {
+                    text: "Dicter";
+                    font-family: "Archivo SemiBold";
+                    font-size: 15px;
+                    color: Theme.text-primary;
+                }
+
+                if root.dictation-shortcut == "": Text {
+                    text: "Définissez un raccourci";
+                    font-size: 12.5px;
+                    color: Theme.text-muted;
+                }
+                if root.dictation-shortcut != "": HorizontalLayout {
+                    spacing: 5px;
+                    alignment: start;
+
+                    Text {
+                        text: "Appuyez sur";
+                        font-size: 12.5px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        background: Theme.surface-2;
+                        border-radius: 3px;
+
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            padding-top: 1.5px;
+                            padding-bottom: 1.5px;
+
+                            Text {
+                                text: root.dictation-shortcut;
+                                font-family: "JetBrains Mono";
+                                font-size: 11px;
+                                color: Theme.text-tertiary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -54,9 +100,10 @@ export component ActionHero inherits HorizontalLayout {
         border-width: 1px;
         border-color: Theme.border-soft;
         background: meeting-area.has-hover ? Theme.surface-2 : transparent;
+        opacity: root.model-ready ? 1.0 : 0.5;
 
         accessible-role: button;
-        accessible-label: "Réunion";
+        accessible-label: "Meeting";
         accessible-enabled: root.model-ready;
         accessible-action-default => { root.meeting-requested(); }
 
@@ -65,21 +112,34 @@ export component ActionHero inherits HorizontalLayout {
             clicked => { root.meeting-requested(); }
         }
 
-        VerticalLayout {
+        HorizontalLayout {
             padding: 18px;
-            spacing: 4px;
+            spacing: 15px;
             alignment: start;
 
-            Text {
-                text: "Réunion";
-                font-weight: 600;
-                font-size: 15px;
-                color: Theme.text-primary;
+            LucideIcon {
+                icon: IconSet.Users;
+                icon-color: Theme.secondary;
+                size: 22px;
+                y: 2px;
             }
-            Text {
-                text: "Enregistrer une réunion";
-                font-size: 12px;
-                color: Theme.text-muted;
+
+            VerticalLayout {
+                spacing: 4px;
+                alignment: start;
+
+                Text {
+                    text: "Meeting";
+                    font-family: "Archivo SemiBold";
+                    font-size: 15px;
+                    color: Theme.text-primary;
+                }
+                Text {
+                    text: "Transcription en direct · capture l’audio système";
+                    font-size: 12.5px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
             }
         }
     }

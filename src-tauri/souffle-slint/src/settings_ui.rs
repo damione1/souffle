@@ -129,7 +129,7 @@ pub fn populate_calendars(
     window.set_settings_calendars(std::rc::Rc::new(slint::VecModel::from(rows)).into());
 }
 
-fn perm_state_to_str(state: PermState) -> &'static str {
+pub(crate) fn perm_state_to_str(state: PermState) -> &'static str {
     match state {
         PermState::Granted => "granted",
         PermState::Denied => "denied",
@@ -174,7 +174,7 @@ pub fn log_level_from_str(value: &str) -> LogLevel {
     }
 }
 
-fn theme_to_str(theme: &Theme) -> &'static str {
+pub fn theme_to_str(theme: &Theme) -> &'static str {
     match theme {
         Theme::Dark => "dark",
         Theme::Light => "light",
@@ -187,6 +187,20 @@ pub fn theme_from_str(value: &str) -> Theme {
         "light" => Theme::Light,
         "system" => Theme::System,
         _ => Theme::Dark,
+    }
+}
+
+/// Port of App.svelte's `isLightTheme` (`theme === "light" || (theme ===
+/// "system" && !prefersDark)`), inverted to match `Theme.slint`'s `dark`
+/// flag. `"system"` resolves against the real macOS appearance
+/// (`native::appearance::is_system_dark`) rather than the browser's
+/// `matchMedia` - see that function's doc comment for what "resolves"
+/// means (a one-shot query, not a live OS-appearance subscription).
+pub fn resolve_dark(theme: Theme) -> bool {
+    match theme {
+        Theme::Dark => true,
+        Theme::Light => false,
+        Theme::System => souffle_lib::native::appearance::is_system_dark(),
     }
 }
 

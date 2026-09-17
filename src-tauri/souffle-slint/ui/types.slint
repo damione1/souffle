@@ -16,3 +16,7 @@ export enum NotesSaveState { idle, pending, saved }
 // Onboarding's model step - missed the string->enum cleanup above when it
 // was added later.
 export enum ModelPhase { pick, downloading, loading, ready }
+
+// Today's calendar row: computed in Rust from start/end vs now, never a
+// free-form string. Adding a variant must break every `if phase ==` site.
+export enum UpcomingPhase { past, now, next, later }

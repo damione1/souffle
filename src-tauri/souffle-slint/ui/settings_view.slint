@@ -26,6 +26,7 @@ import { Theme } from "theme.slint";
 // (`if`/`for`) tabs (a compiler-enforced restriction), so tabs are added
 // directly in this source as each is implemented, not hidden behind a flag.
 export component SettingsView inherits Rectangle {
+    in-out property <int> tab-index: 0;
     in property <bool> autostart-enabled;
     in property <bool> debug-transcription;
     in property <string> log-level;
@@ -238,6 +239,7 @@ export component SettingsView inherits Rectangle {
         // not yet implemented on either side of this port).
 
         TabWidget {
+            current-index <=> root.tab-index;
 
             Tab {
                 title: "Transcription";
