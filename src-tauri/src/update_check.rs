@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 const GITHUB_REPO: &str = "damione1/souffle";
 const CHECK_TIMEOUT_SECS: u64 = 10;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpdateCheckResult {
     pub current_version: String,
     pub latest_version: Option<String>,
@@ -182,13 +182,12 @@ mod tests {
 /// latest release, compare versions, show a dialog when ours is older. It
 /// never downloads or installs anything.
 pub mod scheduler {
+    use std::sync::Arc;
     use std::time::Duration;
 
-    use tauri::Manager;
-    use tauri_specta::Event;
     use tracing::{info, warn};
 
-    use crate::app_events::UpdateAvailable;
+    use crate::native::bridge::{self, NativeAction};
     use crate::settings::{AppSettings, LAST_UPDATE_CHECK_AT_KEY};
     use crate::state::AppState;
 
@@ -202,8 +201,8 @@ pub mod scheduler {
     /// Grace period after launch, so the check never competes with startup.
     const STARTUP_DELAY: Duration = Duration::from_secs(90);
 
-    pub fn spawn(app: tauri::AppHandle) {
-        tauri::async_runtime::spawn(run(app));
+    pub fn spawn(state: Arc<AppState>) {
+        crate::async_runtime::spawn(run(state));
     }
 
     /// Whether a check is due, given the last recorded time. `None` means
@@ -217,7 +216,7 @@ pub mod scheduler {
         }
     }
 
-    async fn run(app: tauri::AppHandle) {
+    async fn run(state: Arc<AppState>) {
         tokio::time::sleep(STARTUP_DELAY).await;
         let mut interval = tokio::time::interval(TICK);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -228,7 +227,7 @@ pub mod scheduler {
         loop {
             interval.tick().await;
 
-            let db = app.state::<AppState>().db.clone();
+            let db = state.db.clone();
             let settings = match AppSettings::load(&db) {
                 Ok(settings) => settings,
                 Err(e) => {
@@ -250,7 +249,7 @@ pub mod scheduler {
                 continue;
             }
 
-            let result = match tauri::async_runtime::spawn_blocking(super::check_for_updates).await
+            let result = match crate::async_runtime::spawn_blocking(super::check_for_updates).await
             {
                 Ok(result) => result,
                 Err(e) => {
@@ -276,15 +275,11 @@ pub mod scheduler {
 
             info!(latest = %latest, "Update check: newer release available");
             announced = Some(latest.clone());
-            if let Err(e) = (UpdateAvailable {
+            bridge::dispatch(NativeAction::UpdateAvailable {
                 latest_version: latest,
                 release_notes: result.release_notes,
                 release_url: result.release_url,
-            })
-            .emit(&app)
-            {
-                warn!("Update check: emit failed: {e}");
-            }
+            });
         }
     }
 

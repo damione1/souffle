@@ -25,7 +25,12 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     }
 
-    tauri_build::build();
+    // SOU-191: `tauri_build::build()` used to run here. It hard-requires a
+    // `tauri` runtime dependency in this same crate (panics with "missing
+    // `cargo:dev` instruction" otherwise) — coupling that made it impossible
+    // to keep half of, so it is gone along with `tauri` itself rather than
+    // left permanently broken. It provided Info.plist/icon generation from
+    // `tauri.conf.json`; SOU-192 (packaging without Tauri) replaces that.
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

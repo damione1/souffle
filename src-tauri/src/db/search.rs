@@ -11,7 +11,7 @@ use super::Database;
 /// column, written by every version of the app, so they cannot change without
 /// a migration. Declaring them here is what stops the thirteen SQL sites from
 /// spelling them themselves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchSource {
     Meeting,
@@ -44,7 +44,7 @@ impl rusqlite::ToSql for SearchSource {
 }
 
 /// Search result from FTS5 full-text search
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub source_type: SearchSource,
     pub source_id: String,

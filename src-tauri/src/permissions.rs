@@ -21,7 +21,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 /// Pause between the TCC insert call and `open` of System Settings. The
 /// insert is asynchronous; opening the pane in the same turn shows a stale
@@ -46,7 +45,7 @@ static MICROPHONE_GRANT_OBSERVED: AtomicBool = AtomicBool::new(false);
 /// given, which is the defect SOU-120 opened. In this process only.
 static SYSTEM_AUDIO_GRANT_OBSERVED: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PermState {
     Granted,
@@ -62,7 +61,7 @@ pub enum PermState {
     NoDevice,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionStatus {
     pub microphone: PermState,
     pub system_audio: PermState,
@@ -71,7 +70,7 @@ pub struct PermissionStatus {
 }
 
 /// Which capability to probe or prompt for via `request`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionKind {
     Microphone,
@@ -84,7 +83,7 @@ pub enum PermissionKind {
 /// successful `tccutil reset` plus prompt cannot observe the user's grant:
 /// `AXIsProcessTrustedWithOptions` returns the *current* trust, which is
 /// necessarily false a few milliseconds after the TCC entry was deleted.
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RepairAccessibilityResult {
     pub reset_performed: bool,
     pub prompt_shown: bool,

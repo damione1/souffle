@@ -1,4 +1,4 @@
-use tauri::State;
+use std::sync::Arc;
 
 use crate::db::Database;
 use crate::filter::learned_pair::{MAX_LEARNED_PAIRS, is_learned_pair_acceptable};
@@ -7,17 +7,13 @@ use crate::filter::{DictionaryEntry, pronunciation_aliases};
 use crate::state::AppState;
 
 /// Lists all current user dictionary entries from the database.
-#[tauri::command]
-#[specta::specta]
-pub fn list_dictionary(state: State<'_, AppState>) -> Result<Vec<DictionaryEntry>, String> {
+pub fn list_dictionary(state: Arc<AppState>) -> Result<Vec<DictionaryEntry>, String> {
     state.db.list_dictionary_entries()
 }
 
 /// Adds a new dictionary entry for text replacement.
-#[tauri::command]
-#[specta::specta]
 pub fn add_dictionary_entry(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     term: String,
     pronunciation: Option<String>,
     category: Option<String>,
@@ -32,10 +28,8 @@ pub fn add_dictionary_entry(
 }
 
 /// Updates an existing dictionary entry, including its term, pronunciation, and category.
-#[tauri::command]
-#[specta::specta]
 pub fn update_dictionary_entry(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: i64,
     term: String,
     pronunciation: Option<String>,
@@ -51,24 +45,18 @@ pub fn update_dictionary_entry(
 }
 
 /// Deletes a specific dictionary entry by ID.
-#[tauri::command]
-#[specta::specta]
-pub fn delete_dictionary_entry(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+pub fn delete_dictionary_entry(state: Arc<AppState>, id: i64) -> Result<(), String> {
     state.db.delete_dictionary_entry(id)
 }
 
 /// Clears all entries in the user dictionary.
-#[tauri::command]
-#[specta::specta]
-pub fn clear_dictionary(state: State<'_, AppState>) -> Result<(), String> {
+pub fn clear_dictionary(state: Arc<AppState>) -> Result<(), String> {
     state.db.clear_dictionary()
 }
 
 /// Persist word-level misspelling→term pairs from a post-paste edit.
-#[tauri::command]
-#[specta::specta]
 pub fn learn_from_edit(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     original: String,
     corrected: String,
 ) -> Result<u32, String> {

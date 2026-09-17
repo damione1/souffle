@@ -1,9 +1,8 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use tauri::Manager;
-use tauri::State;
-use tauri::ipc::Channel;
 use tracing::info;
+
+use crate::progress::ProgressChannel;
 
 use crate::engine::{
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
@@ -40,11 +39,7 @@ fn selected_profile(state: &AppState) -> Result<TranscriptionProfile, String> {
 }
 
 /// Catalog of supported transcription engines and models.
-#[tauri::command]
-#[specta::specta]
-pub fn get_transcription_catalog(
-    state: State<'_, AppState>,
-) -> Result<TranscriptionCatalog, String> {
+pub fn get_transcription_catalog(state: Arc<AppState>) -> Result<TranscriptionCatalog, String> {
     let profile = selected_profile(&state)?;
     Ok(TranscriptionCatalog {
         engines: transcription_engine_catalog(),
@@ -55,10 +50,8 @@ pub fn get_transcription_catalog(
 }
 
 /// Check whether the selected transcription model is downloaded and loaded.
-#[tauri::command]
-#[specta::specta]
 pub fn get_model_status(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     selection: TranscriptionProfileSelection,
 ) -> Result<TranscriptionRuntimeStatus, String> {
     let profile = resolve_transcription_selection(&selection)?;
@@ -82,16 +75,12 @@ pub fn get_model_status(
 }
 
 /// Return the current state machine state.
-#[tauri::command]
-#[specta::specta]
-pub fn get_machine_state(state: State<'_, AppState>) -> Result<AppStateMachine, String> {
+pub fn get_machine_state(state: Arc<AppState>) -> Result<AppStateMachine, String> {
     state.current_machine_state()
 }
 
 /// Recover from an error state.
-#[tauri::command]
-#[specta::specta]
-pub fn recover_state(state: State<'_, AppState>) -> Result<AppStateMachine, String> {
+pub fn recover_state(state: Arc<AppState>) -> Result<AppStateMachine, String> {
     state.apply_transition(StateAction::Recover)
 }
 
@@ -111,8 +100,6 @@ fn record_download_progress(progress: Option<&models::DownloadProgress>) {
 /// Snapshot of the in-flight model download, for a webview that reloaded
 /// while the machine was `Downloading` and lost its progress Channel.
 /// `None` until the first download of the process starts.
-#[tauri::command]
-#[specta::specta]
 pub fn get_download_progress() -> Option<models::DownloadProgress> {
     LAST_DOWNLOAD_PROGRESS
         .lock()
@@ -122,12 +109,10 @@ pub fn get_download_progress() -> Option<models::DownloadProgress> {
 
 /// Download the selected transcription model.
 /// Progress is streamed back via the Channel API.
-#[tauri::command]
-#[specta::specta]
 pub fn download_model(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     selection: TranscriptionProfileSelection,
-    channel: Channel<models::DownloadProgress>,
+    channel: ProgressChannel<models::DownloadProgress>,
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
 
@@ -150,16 +135,14 @@ pub fn download_model(
             let _ = state.apply_transition(StateAction::DownloadComplete);
         }
 
-        channel
-            .send(models::DownloadProgress {
-                file: "all".into(),
-                downloaded_bytes: 0,
-                total_bytes: None,
-                completed_files: 1,
-                total_files: 1,
-                status: models::DownloadStatus::Complete,
-            })
-            .map_err(|e| format!("Channel send: {e}"))?;
+        channel.send(models::DownloadProgress {
+            file: "all".into(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+            completed_files: 1,
+            total_files: 1,
+            status: models::DownloadStatus::Complete,
+        });
         return Ok(());
     }
 
@@ -173,7 +156,7 @@ pub fn download_model(
     // Ready (it tracks a single profile through download → load → ready).
     let machine = state.current_machine_state()?;
     if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
-        unload_loaded_model(state.inner(), None)?;
+        unload_loaded_model(&state, None)?;
         // Machine is now Downloaded { current } — different from `profile`.
     }
 
@@ -185,23 +168,18 @@ pub fn download_model(
 
     // Clone what we need for the thread
     let channel_clone = channel.clone();
-    let app_handle_for_state: Option<tauri::AppHandle> =
-        state.app_handle.lock().ok().and_then(|guard| guard.clone());
+    let state_for_thread = Arc::clone(&state);
 
     std::thread::Builder::new()
         .name("model-download".into())
         .spawn(move || {
             let result = models::download_model(&profile, |progress| {
                 record_download_progress(Some(&progress));
-                let _ = channel_clone.send(progress);
+                channel_clone.send(progress);
             });
 
-            // Helper to apply transition from the thread via AppHandle
             let apply = |action: StateAction| {
-                if let Some(ref handle) = app_handle_for_state {
-                    let state: tauri::State<'_, AppState> = handle.state();
-                    let _ = state.apply_transition(action);
-                }
+                let _ = state_for_thread.apply_transition(action);
             };
 
             match result {
@@ -216,7 +194,7 @@ pub fn download_model(
                         status: models::DownloadStatus::Complete,
                     };
                     record_download_progress(Some(&progress));
-                    let _ = channel_clone.send(progress);
+                    channel_clone.send(progress);
                 }
                 Err(e) => {
                     apply(StateAction::Fail { message: e.clone() });
@@ -229,7 +207,7 @@ pub fn download_model(
                         status: models::DownloadStatus::Error(e),
                     };
                     record_download_progress(Some(&progress));
-                    let _ = channel_clone.send(progress);
+                    channel_clone.send(progress);
                 }
             }
         })
@@ -241,10 +219,8 @@ pub fn download_model(
 /// Load the model into memory (GPU/CPU). Must be called after download.
 /// The engine actor creates the engine, swaps out any previous one, and
 /// loads the weights — all on its own thread.
-#[tauri::command]
-#[specta::specta]
 pub fn load_model(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     selection: TranscriptionProfileSelection,
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
@@ -273,7 +249,7 @@ pub fn load_model(
 
     // If model is ready with a different profile, unload first
     if machine.is_model_ready() && machine.active_profile() != Some(&profile) {
-        unload_loaded_model(state.inner(), Some(profile.clone()))?;
+        unload_loaded_model(&state, Some(profile.clone()))?;
         // Machine is now in Loading { next_profile }
     } else {
         // Ensure machine is in Downloaded state before loading
@@ -304,10 +280,8 @@ pub fn load_model(
 }
 
 /// Delete a downloaded model from disk.
-#[tauri::command]
-#[specta::specta]
 pub fn delete_model(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     selection: TranscriptionProfileSelection,
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
@@ -352,9 +326,7 @@ fn model_delete_blocked_by_transition(machine: &AppStateMachine) -> bool {
 }
 
 /// Debug: feed the debug WAV through the engine to test model in isolation.
-#[tauri::command]
-#[specta::specta]
-pub fn test_transcribe_wav(state: State<'_, AppState>) -> Result<String, String> {
+pub fn test_transcribe_wav(state: Arc<AppState>) -> Result<String, String> {
     use crate::constants::{SAMPLE_RATE_F64, SILENCE_SUFFIX_SAMPLES};
 
     let wav_path = crate::constants::app_data_dir().join("debug_engine_input.wav");

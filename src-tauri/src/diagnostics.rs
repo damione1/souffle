@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::logging::log_dir;
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiagnosticsBundle {
     pub app_version: String,
     pub data_dir: String,

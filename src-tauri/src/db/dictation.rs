@@ -7,7 +7,7 @@ use super::Database;
 use super::search::SearchSource;
 
 /// A dictation history entry
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DictationEntry {
     pub id: String,
     pub text: String,

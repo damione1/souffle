@@ -23,7 +23,7 @@ const MIN_CUE_DURATION_SECONDS: f64 = 0.5;
 /// `groupIntoParagraphs` (src/lib/utils/paragraphs.ts).
 pub(crate) const PARAGRAPH_PAUSE_THRESHOLD_SECONDS: f64 = 1.5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportFormat {
     Markdown,

@@ -1,40 +1,56 @@
-use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Wry};
-use tauri_plugin_notification::NotificationExt;
-use tauri_specta::Event;
+//! Native replacement for Tauri's `tray-icon` feature (SOU-191).
+//!
+//! `tray-icon` + `muda` are the same crates Tauri's tray feature wraps
+//! internally (`tauri::tray::TrayIconBuilder` / `tauri::menu::Menu` are thin
+//! forwarders over these), used directly instead of through Tauri's wrapper.
+
+use std::sync::{Arc, OnceLock};
+
 use tracing::{info, warn};
 
-use crate::app_events::{AppView, MeetingStopRequested, Navigate, ShortcutToggle};
 use crate::db::dictation::DictationEntry;
+use crate::native::bridge::{self, AppView, NativeAction};
 use crate::state::AppState;
 use crate::state_machine::AppStateMachine;
-
-const TRAY_ID: &str = "tray";
+use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 /// Menu items whose labels change with the recording state and locale.
 struct TrayHandles {
-    dictation: MenuItem<Wry>,
-    meeting: MenuItem<Wry>,
-    copy_last_transcription: MenuItem<Wry>,
-    pause_ptt: MenuItem<Wry>,
+    tray: TrayIcon,
+    dictation: MenuItem,
+    meeting: MenuItem,
+    copy_last_transcription: MenuItem,
+    pause_ptt: MenuItem,
+}
+
+// SAFETY: only ever touched from the main thread (setup, and the tray/menu
+// event loop threads which immediately hop back via a plain function call —
+// no cross-thread mutation of the AppKit objects themselves happens here).
+unsafe impl Send for TrayHandles {}
+unsafe impl Sync for TrayHandles {}
+
+static TRAY: OnceLock<TrayHandles> = OnceLock::new();
+
+fn decode_icon(bytes: &[u8]) -> Icon {
+    let img = image::load_from_memory(bytes)
+        .expect("embedded tray icon is valid PNG")
+        .into_rgba8();
+    let (width, height) = img.dimensions();
+    Icon::from_rgba(img.into_raw(), width, height).expect("valid RGBA icon buffer")
 }
 
 /// Monochrome template icon (black + alpha — macOS recolors it).
-fn idle_icon() -> Image<'static> {
-    Image::from_bytes(include_bytes!("../icons/tray/trayTemplate.png"))
-        .expect("embedded tray icon is valid PNG")
+fn idle_icon() -> Icon {
+    decode_icon(include_bytes!("../icons/tray/trayTemplate.png"))
 }
 
 /// Colored recording variant (red dot) — rendered as-is, not as template.
-fn recording_icon() -> Image<'static> {
-    Image::from_bytes(include_bytes!("../icons/tray/tray-recording.png"))
-        .expect("embedded tray icon is valid PNG")
+fn recording_icon() -> Icon {
+    decode_icon(include_bytes!("../icons/tray/tray-recording.png"))
 }
 
-fn is_french(app: &AppHandle) -> bool {
-    let state = app.state::<AppState>();
+fn is_french(state: &AppState) -> bool {
     crate::settings::AppSettings::load(&state.db)
         .map(|settings| settings.locale.starts_with("fr"))
         .unwrap_or(false)
@@ -43,8 +59,8 @@ fn is_french(app: &AppHandle) -> bool {
 /// Whether "Copy Last Transcription" has anything to act on. Re-checked in
 /// `sync` too, since a dictation completing does not by itself flip this
 /// (see the doc comment on `sync`).
-fn has_dictation_history(app: &AppHandle) -> bool {
-    app.state::<AppState>()
+fn has_dictation_history(state: &AppState) -> bool {
+    state
         .db
         .count_dictation_entries()
         .map(|count| count > 0)
@@ -89,7 +105,7 @@ enum CopyOutcome {
 
 /// Pure decision: which entry (if any) a copy attempt acts on. Split out from
 /// `copy_last_transcription_to_clipboard` so the "no history" / "db error" /
-/// "found an entry" branching is testable without a live AppHandle.
+/// "found an entry" branching is testable without a live tray.
 fn select_dictation_to_copy(
     entries: Result<Vec<DictationEntry>, String>,
 ) -> Result<DictationEntry, CopyOutcome> {
@@ -161,11 +177,9 @@ fn copy_notification_text(
     }
 }
 
-fn notify_copy_result(app: &AppHandle, fr: bool, result: &Result<(), CopyOutcome>) {
+fn notify_copy_result(fr: bool, result: &Result<(), CopyOutcome>) {
     let (title, body) = copy_notification_text(result, fr);
-    if let Err(e) = app.notification().builder().title(title).body(body).show() {
-        warn!("Copy last transcription notification failed: {e}");
-    }
+    crate::native::notifications::notify(title, body);
 }
 
 /// Copy the newest dictation to the clipboard (tray "Copy Last
@@ -174,9 +188,9 @@ fn notify_copy_result(app: &AppHandle, fr: bool, result: &Result<(), CopyOutcome
 /// confusing, and staying silent on failure defeats the point of a feature
 /// whose whole purpose is to recover from a bad paste (SOU-010) without
 /// opening the app.
-fn copy_last_transcription_to_clipboard(app: &AppHandle) {
-    let fr = is_french(app);
-    let entries = app.state::<AppState>().db.list_dictation_entries(1);
+fn copy_last_transcription_to_clipboard(state: &AppState) {
+    let fr = is_french(state);
+    let entries = state.db.list_dictation_entries(1);
     if let Err(e) = &entries {
         warn!("Copy last transcription: dictation history read failed: {e}");
     }
@@ -191,36 +205,15 @@ fn copy_last_transcription_to_clipboard(app: &AppHandle) {
     if result.is_ok() {
         info!("Copied last dictation to clipboard via tray");
     }
-    notify_copy_result(app, fr, &result);
+    notify_copy_result(fr, &result);
 }
 
-/// Bring the main window to the front. The recording pill is a visible
-/// NSPanel on every Space while dictating (and AppKit can keep counting it
-/// after `orderOut`), so a dock click's `has_visible_windows` is not a
-/// reliable stand-in for "the user can see Soufflé". Always restore `main`.
-pub fn show_main_window(app: &AppHandle) {
-    let Some(window) = app.get_webview_window("main") else {
-        warn!("Main window is gone; cannot bring Soufflé to the front");
-        return;
-    };
-    // Unhide the app first (⌘H / close-to-hide), then the window. `set_focus`
-    // alone will not switch Spaces onto a hidden/miniaturized window, and
-    // it will not win against a non-activating overlay panel.
+/// Bring the main window to the front: activate the app locally, then ask
+/// `souffle-slint` (which owns the actual Slint window) to show it.
+pub fn show_main_window() {
     #[cfg(target_os = "macos")]
-    {
-        let _ = app.show();
-        activate_app();
-    }
-    let _ = window.unminimize();
-    let _ = window.show();
-    let _ = window.set_focus();
-}
-
-/// Dock reopen must restore `main` even when AppKit reports other visible
-/// windows — the native pill NSPanel is one. Pure so a regression that gates
-/// on `has_visible_windows` fails a unit test instead of a dock click.
-pub fn should_restore_main_on_reopen(_has_visible_windows: bool) -> bool {
-    true
+    activate_app();
+    bridge::dispatch(NativeAction::ShowMainWindow);
 }
 
 #[cfg(target_os = "macos")]
@@ -240,131 +233,134 @@ pub(crate) fn activate_app() {
     app.activateIgnoringOtherApps(true);
 }
 
-/// Set up the system tray with menu items
-pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let fr = is_french(app);
+/// Set up the system tray with menu items.
+pub fn setup_tray(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
+    let fr = is_french(state);
 
-    let toggle_dictation = MenuItem::with_id(
-        app,
-        "toggle_dictation",
-        label("start_dictation", fr),
-        true,
-        None::<&str>,
-    )?;
-    let toggle_meeting = MenuItem::with_id(
-        app,
-        "toggle_meeting",
-        label("start_meeting", fr),
-        true,
-        None::<&str>,
-    )?;
+    let toggle_dictation =
+        MenuItem::with_id("toggle_dictation", label("start_dictation", fr), true, None);
+    let toggle_meeting =
+        MenuItem::with_id("toggle_meeting", label("start_meeting", fr), true, None);
     let copy_last_transcription = MenuItem::with_id(
-        app,
         "copy_last_transcription",
         label("copy_last_transcription", fr),
-        has_dictation_history(app),
-        None::<&str>,
-    )?;
-    let is_paused = app.state::<AppState>().ptt_is_paused();
+        has_dictation_history(state),
+        None,
+    );
+    let is_paused = state.ptt_is_paused();
     let pause_ptt = MenuItem::with_id(
-        app,
         "pause_ptt",
         label(if is_paused { "resume_ptt" } else { "pause_1h" }, fr),
         true,
-        None::<&str>,
-    )?;
-    let separator = MenuItem::with_id(app, "sep", "─────────", false, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", label("settings", fr), true, None::<&str>)?;
-    let show = MenuItem::with_id(app, "show", label("show", fr), true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", label("quit", fr), true, None::<&str>)?;
+        None,
+    );
+    let settings = MenuItem::with_id("settings", label("settings", fr), true, None);
+    let show = MenuItem::with_id("show", label("show", fr), true, None);
+    let quit = MenuItem::with_id("quit", label("quit", fr), true, None);
 
-    let menu = Menu::with_items(
-        app,
-        &[
-            &toggle_dictation,
-            &toggle_meeting,
-            &copy_last_transcription,
-            &pause_ptt,
-            &separator,
-            &settings,
-            &show,
-            &quit,
-        ],
-    )?;
+    let menu = Menu::new();
+    menu.append(&toggle_dictation)?;
+    menu.append(&toggle_meeting)?;
+    menu.append(&copy_last_transcription)?;
+    menu.append(&pause_ptt)?;
+    menu.append(&tray_icon::menu::PredefinedMenuItem::separator())?;
+    menu.append(&settings)?;
+    menu.append(&show)?;
+    menu.append(&quit)?;
 
-    app.manage(TrayHandles {
+    let tray = TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_tooltip("Soufflé")
+        .with_icon(idle_icon())
+        .with_icon_as_template(true)
+        .build()?;
+
+    TRAY.set(TrayHandles {
+        tray,
         dictation: toggle_dictation,
         meeting: toggle_meeting,
         copy_last_transcription,
         pause_ptt,
-    });
+    })
+    .ok();
 
-    TrayIconBuilder::with_id(TRAY_ID)
-        .menu(&menu)
-        .tooltip("Soufflé")
-        .icon(idle_icon())
-        .icon_as_template(true)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "toggle_dictation" => {
-                // Emit same event as keyboard shortcut — frontend handles full pipeline
-                let _ = ShortcutToggle.emit(app);
-                info!("Dictation toggle via tray");
-            }
-            "toggle_meeting" => {
-                let recording_meeting = app
-                    .state::<AppState>()
-                    .current_machine_state()
-                    .map(|machine| matches!(machine, AppStateMachine::RecordingMeeting { .. }))
-                    .unwrap_or(false);
-                if recording_meeting {
-                    let _ = MeetingStopRequested.emit(app);
-                    info!("Meeting stop via tray");
-                } else {
-                    // Starting needs the main window; show the home screen.
-                    show_main_window(app);
-                    let _ = Navigate(AppView::Home).emit(app);
-                }
-            }
-            "copy_last_transcription" => {
-                copy_last_transcription_to_clipboard(app);
-            }
-            "pause_ptt" => {
-                let state = app.state::<AppState>();
-                // Drop the pause mutex before current_machine_state/sync:
-                // sync() re-locks ptt_paused_until, and std::sync::Mutex is
-                // not reentrant.
-                state.toggle_ptt_pause();
-                if let Ok(machine) = state.current_machine_state() {
-                    sync(app, &machine);
-                }
-            }
-            "settings" => {
-                show_main_window(app);
-                let _ = Navigate(AppView::Settings).emit(app);
-            }
-            "show" => {
-                show_main_window(app);
-            }
-            "quit" => {
-                info!("Quit requested from tray");
-                app.exit(0);
-            }
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                show_main_window(tray.app_handle());
-            }
-        })
-        .build(app)?;
+    spawn_event_loops(Arc::clone(state));
 
     info!("System tray initialized");
     Ok(())
+}
+
+fn spawn_event_loops(state: Arc<AppState>) {
+    let menu_state = Arc::clone(&state);
+    std::thread::Builder::new()
+        .name("tray-menu-events".into())
+        .spawn(move || {
+            for event in MenuEvent::receiver() {
+                handle_menu_event(&menu_state, event.id.as_ref());
+            }
+        })
+        .expect("failed to spawn tray menu event loop");
+
+    std::thread::Builder::new()
+        .name("tray-icon-events".into())
+        .spawn(move || {
+            for event in TrayIconEvent::receiver() {
+                if let TrayIconEvent::Click {
+                    button: tray_icon::MouseButton::Left,
+                    button_state: tray_icon::MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    show_main_window();
+                }
+            }
+        })
+        .expect("failed to spawn tray icon event loop");
+}
+
+fn handle_menu_event(state: &Arc<AppState>, id: &str) {
+    match id {
+        "toggle_dictation" => {
+            bridge::dispatch(NativeAction::ToggleDictation);
+            info!("Dictation toggle via tray");
+        }
+        "toggle_meeting" => {
+            let recording_meeting = state
+                .current_machine_state()
+                .map(|machine| matches!(machine, AppStateMachine::RecordingMeeting { .. }))
+                .unwrap_or(false);
+            if recording_meeting {
+                bridge::dispatch(NativeAction::StopMeeting);
+                info!("Meeting stop via tray");
+            } else {
+                show_main_window();
+                bridge::dispatch(NativeAction::Navigate(AppView::Home));
+            }
+        }
+        "copy_last_transcription" => {
+            copy_last_transcription_to_clipboard(state);
+        }
+        "pause_ptt" => {
+            // Drop the pause mutex before current_machine_state/sync: sync()
+            // re-locks ptt_paused_until, and std::sync::Mutex is not reentrant.
+            state.toggle_ptt_pause();
+            if let Ok(machine) = state.current_machine_state() {
+                sync(state, &machine);
+            }
+        }
+        "settings" => {
+            show_main_window();
+            bridge::dispatch(NativeAction::Navigate(AppView::Settings));
+        }
+        "show" => {
+            show_main_window();
+        }
+        "quit" => {
+            info!("Quit requested from tray");
+            std::process::exit(0);
+        }
+        _ => {}
+    }
 }
 
 /// Reflect the machine state in the menu bar: recording shows the red-dot
@@ -372,78 +368,63 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 /// relabels the menu, and after `add_dictation_entry` so "Copy Last
 /// Transcription" enables itself as soon as the entry is actually in the
 /// database. The state-machine transition back to Idle fires before that
-/// write happens (the frontend saves history only after the stop command
-/// resolves), so relying on it alone would leave the item disabled until
-/// some unrelated later sync. Never re-acquires the machine lock (the caller
-/// may hold it) — the state is passed in.
-pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+/// write happens, so relying on it alone would leave the item disabled until
+/// some unrelated later sync.
+pub fn sync(state: &AppState, machine: &AppStateMachine) {
+    let Some(handles) = TRAY.get() else {
         return;
     };
-    let fr = is_french(app);
+    let fr = is_french(state);
 
     let dictating = matches!(machine, AppStateMachine::RecordingDictation { .. });
     let meeting = matches!(machine, AppStateMachine::RecordingMeeting { .. });
 
-    let result = if dictating || meeting {
-        tray.set_icon(Some(recording_icon()))
-            .and_then(|()| tray.set_icon_as_template(false))
+    let icon_result = if dictating || meeting {
+        handles.tray.set_icon(Some(recording_icon()))
     } else {
-        tray.set_icon(Some(idle_icon()))
-            .and_then(|()| tray.set_icon_as_template(true))
+        handles.tray.set_icon(Some(idle_icon()))
     };
-    if let Err(e) = result {
+    if let Err(e) = icon_result {
         warn!("Tray icon sync failed: {e}");
     }
+    handles.tray.set_icon_as_template(!(dictating || meeting));
 
-    if let Some(handles) = app.try_state::<TrayHandles>() {
-        let _ = handles.dictation.set_text(label(
-            if dictating {
-                "stop_dictation"
-            } else {
-                "start_dictation"
-            },
-            fr,
-        ));
-        // A meeting owns the recording session; this item must not offer to
-        // start dictation on top of it (SOU-044).
-        let _ = handles.dictation.set_enabled(!meeting);
-        let _ = handles.meeting.set_text(label(
-            if meeting {
-                "stop_meeting"
-            } else {
-                "start_meeting"
-            },
-            fr,
-        ));
-        let _ = handles
-            .copy_last_transcription
-            .set_text(label("copy_last_transcription", fr));
-        let _ = handles
-            .copy_last_transcription
-            .set_enabled(has_dictation_history(app));
-        let is_paused = app.state::<AppState>().ptt_is_paused();
-        let _ = handles
-            .pause_ptt
-            .set_text(label(if is_paused { "resume_ptt" } else { "pause_1h" }, fr));
-    }
+    handles.dictation.set_text(label(
+        if dictating {
+            "stop_dictation"
+        } else {
+            "start_dictation"
+        },
+        fr,
+    ));
+    // A meeting owns the recording session; this item must not offer to
+    // start dictation on top of it (SOU-044).
+    handles.dictation.set_enabled(!meeting);
+    handles.meeting.set_text(label(
+        if meeting {
+            "stop_meeting"
+        } else {
+            "start_meeting"
+        },
+        fr,
+    ));
+    handles
+        .copy_last_transcription
+        .set_text(label("copy_last_transcription", fr));
+    handles
+        .copy_last_transcription
+        .set_enabled(has_dictation_history(state));
+    let is_paused = state.ptt_is_paused();
+    handles
+        .pause_ptt
+        .set_text(label(if is_paused { "resume_ptt" } else { "pause_1h" }, fr));
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         CopyOutcome, DictationEntry, copy_notification_text, label, select_dictation_to_copy,
-        should_restore_main_on_reopen,
     };
-
-    #[test]
-    fn dock_reopen_restores_main_even_when_the_pill_counts_as_visible() {
-        assert!(
-            should_restore_main_on_reopen(true),
-            "the overlay panel is a visible NSWindow; gating on has_visible_windows leaves the main UI stuck behind"
-        );
-        assert!(should_restore_main_on_reopen(false));
-    }
 
     fn entry(text: &str) -> DictationEntry {
         DictationEntry {

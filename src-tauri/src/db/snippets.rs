@@ -1,6 +1,5 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
@@ -19,7 +18,7 @@ pub fn fold_trigger(trigger: &str) -> String {
         .to_lowercase()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnippetEntry {
     pub id: i64,
     pub trigger: String,

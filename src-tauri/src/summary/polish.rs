@@ -13,7 +13,7 @@ pub const TEMPLATE_EMAIL: &str = "email";
 pub const TEMPLATE_BULLETS: &str = "bullets";
 pub const TEMPLATE_NO_FILLERS: &str = "no_fillers";
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DictationPolishResult {
     pub text: String,
     /// True when polish was skipped (disabled, blank input, or no provider).

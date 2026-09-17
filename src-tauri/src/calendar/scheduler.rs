@@ -1,29 +1,32 @@
 //! Calendar reminder scheduler: a background task that watches today's
-//! events and, shortly before one starts, sends a system notification and
-//! emits [`UpcomingMeeting`] so the frontend can offer a one-click start.
+//! events and, shortly before one starts, sends a system notification.
 //!
 //! When an event is in progress and system audio is active but no recording
-//! runs, a second at-event-time nudge is emitted (see
+//! runs, a second at-event-time nudge fires (see
 //! [`CalendarMeetingNudgeKind::Autostart`]).
 //!
 //! The fired-reminder set lives in memory only; restarting the app inside
 //! the reminder window can re-fire one reminder for the same occurrence.
 //! That rare duplicate is accepted over persisting scheduler state.
 //!
-//! Each tick also diffs today's events and emits [`crate::app_events::TodayCalendarUpdated`]
-//! so the home list stays current without depending on a webview timer.
+//! SOU-191 note: before this ticket, each tick also emitted
+//! [`crate::app_events::UpcomingMeeting`]/`TodayCalendarUpdated` for an
+//! in-app one-click-start banner and a live-updating home list. Nothing in
+//! the Slint shell ever listened for either (grepped project-wide, no
+//! `.listen(` anywhere), so both were already inert; the system notification
+//! below is the one part of this that was ever actually reaching the user,
+//! and it still does. The banner/live-list UI itself is a pre-existing gap,
+//! not something this ticket removed.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use tauri::Manager;
-use tauri_plugin_notification::NotificationExt;
-use tauri_specta::Event;
 use tokio::time::MissedTickBehavior;
 use tracing::warn;
 
-use crate::app_events::{CalendarMeetingNudgeKind, TodayCalendarUpdated, UpcomingMeeting};
+use crate::app_events::CalendarMeetingNudgeKind;
 use crate::audio::mic_capture_probe;
 use crate::calendar::{self, CalendarEvent};
 use crate::permissions::PermState;
@@ -37,53 +40,43 @@ type OccurrenceKey = (String, i64);
 /// How long after an event starts the auto-start nudge remains eligible.
 const AUTOSTART_WINDOW_MINUTES: u32 = 10;
 
-type TodayFingerprint = (PermState, Vec<(String, i64, i64, String)>);
-
-pub fn spawn(app: tauri::AppHandle) {
-    tauri::async_runtime::spawn(run(app));
+pub fn spawn(state: Arc<AppState>) {
+    crate::async_runtime::spawn(run(state));
 }
 
-async fn run(app: tauri::AppHandle) {
+async fn run(state: Arc<AppState>) {
     let mut interval = tokio::time::interval(Duration::from_secs(60));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut fired_reminders: HashSet<OccurrenceKey> = HashSet::new();
     let mut fired_autostart: HashSet<OccurrenceKey> = HashSet::new();
-    let mut last_today: Option<TodayFingerprint> = None;
 
     loop {
         interval.tick().await;
 
         // Settings are re-read every tick so toggling the integration (or
         // changing the lead time) needs no scheduler restart.
-        let settings = {
-            let state = app.state::<AppState>();
-            match AppSettings::load(&state.db) {
-                Ok(settings) => settings,
-                Err(e) => {
-                    warn!("Calendar scheduler: settings load failed: {e}");
-                    continue;
-                }
+        let settings = match AppSettings::load(&state.db) {
+            Ok(settings) => settings,
+            Err(e) => {
+                warn!("Calendar scheduler: settings load failed: {e}");
+                continue;
             }
         };
         if !settings.calendar_integration_enabled {
-            emit_today_if_changed(&app, &mut last_today, PermState::Unknown, &[]);
             continue;
         }
         // Revoked mid-session: go quiet instead of erroring every minute.
-        let permission = calendar::authorization_state();
-        if permission != PermState::Granted {
-            emit_today_if_changed(&app, &mut last_today, permission, &[]);
+        if calendar::authorization_state() != PermState::Granted {
             continue;
         }
 
-        let recording = app
-            .state::<AppState>()
+        let recording = state
             .current_machine_state()
             .map(|machine| machine.is_recording())
             .unwrap_or(false);
 
         let selected = settings.calendar_selected_ids.clone();
-        let events = match tauri::async_runtime::spawn_blocking(move || {
+        let events = match crate::async_runtime::spawn_blocking(move || {
             calendar::fetch_todays_events(&selected)
         })
         .await
@@ -99,8 +92,6 @@ async fn run(app: tauri::AppHandle) {
             }
         };
 
-        emit_today_if_changed(&app, &mut last_today, PermState::Granted, &events);
-
         let now = Utc::now();
         prune_fired(&mut fired_reminders, now);
         prune_fired(&mut fired_autostart, now);
@@ -114,21 +105,11 @@ async fn run(app: tauri::AppHandle) {
             fired_reminders.insert((event.id.clone(), event.start.timestamp()));
             let starts_in_seconds = (event.start - now).num_seconds().max(0) as u32;
             notify(
-                &app,
                 &event,
                 &settings.locale,
                 CalendarMeetingNudgeKind::Reminder,
                 starts_in_seconds,
             );
-            if let Err(e) = (UpcomingMeeting {
-                event,
-                starts_in_seconds,
-                kind: CalendarMeetingNudgeKind::Reminder,
-            })
-            .emit(&app)
-            {
-                warn!("Calendar scheduler: emit failed: {e}");
-            }
         }
 
         let due_autostart = if recording || !settings.calendar_autostart_enabled {
@@ -142,21 +123,11 @@ async fn run(app: tauri::AppHandle) {
             for event in due_autostart {
                 fired_autostart.insert((event.id.clone(), event.start.timestamp()));
                 notify(
-                    &app,
                     &event,
                     &settings.locale,
                     CalendarMeetingNudgeKind::Autostart,
                     0,
                 );
-                if let Err(e) = (UpcomingMeeting {
-                    event,
-                    starts_in_seconds: 0,
-                    kind: CalendarMeetingNudgeKind::Autostart,
-                })
-                .emit(&app)
-                {
-                    warn!("Calendar scheduler: autostart emit failed: {e}");
-                }
             }
         }
     }
@@ -166,7 +137,7 @@ async fn run(app: tauri::AppHandle) {
 /// a blocking worker: the CoreAudio property reads are cheap but they talk to
 /// coreaudiod, which can stall.
 async fn meeting_app_is_capturing_mic() -> bool {
-    match tauri::async_runtime::spawn_blocking(mic_capture_probe::mic_capture_in_progress).await {
+    match crate::async_runtime::spawn_blocking(mic_capture_probe::mic_capture_in_progress).await {
         Ok(Some(capture)) => {
             tracing::debug!(?capture, "Calendar autostart: the mic is in use");
             true
@@ -226,52 +197,11 @@ fn prune_fired(fired: &mut HashSet<OccurrenceKey>, now: DateTime<Utc>) {
     fired.retain(|(_, start)| *start >= cutoff);
 }
 
-fn today_fingerprint(permission: PermState, events: &[CalendarEvent]) -> TodayFingerprint {
-    (
-        permission,
-        events
-            .iter()
-            .map(|event| {
-                (
-                    event.id.clone(),
-                    event.start.timestamp(),
-                    event.end.timestamp(),
-                    event.title.clone(),
-                )
-            })
-            .collect(),
-    )
-}
-
-/// Push today's events to the frontend when the snapshot actually changed
-/// (new invite, reschedule, midnight rollover). The home view cannot rely
-/// on a webview timer surviving overnight in the background.
-fn emit_today_if_changed(
-    app: &tauri::AppHandle,
-    last: &mut Option<TodayFingerprint>,
-    permission: PermState,
-    events: &[CalendarEvent],
-) {
-    let fingerprint = today_fingerprint(permission, events);
-    if last.as_ref() == Some(&fingerprint) {
-        return;
-    }
-    *last = Some(fingerprint);
-    if let Err(e) = (TodayCalendarUpdated {
-        permission,
-        events: events.to_vec(),
-    })
-    .emit(app)
-    {
-        warn!("Calendar scheduler: today emit failed: {e}");
-    }
-}
-
 /// System notification: informational only. Action buttons and click
-/// callbacks are unreliable on macOS with the notification plugin, so the
-/// actionable path is the in-app banner driven by [`UpcomingMeeting`].
+/// callbacks are unreliable on macOS notifications either way, so this was
+/// always the one reliable path (see the module doc for the in-app banner
+/// this used to pair with).
 fn notify(
-    app: &tauri::AppHandle,
     event: &CalendarEvent,
     locale: &str,
     kind: CalendarMeetingNudgeKind,
@@ -295,15 +225,7 @@ fn notify(
             }
         }
     };
-    if let Err(e) = app
-        .notification()
-        .builder()
-        .title(&event.title)
-        .body(&body)
-        .show()
-    {
-        warn!("Calendar scheduler: notification failed: {e}");
-    }
+    crate::native::notifications::notify(&event.title, &body);
 }
 
 #[cfg(test)]
@@ -398,28 +320,5 @@ mod tests {
         prune_fired(&mut fired, now);
         assert_eq!(fired.len(), 1);
         assert!(fired.iter().any(|(id, _)| id == "recent"));
-    }
-
-    #[test]
-    fn today_fingerprint_changes_on_new_or_retitled_event() {
-        let now = Utc::now();
-        let first = event("a", now);
-        let retitled = CalendarEvent {
-            title: "Renamed".to_string(),
-            ..first.clone()
-        };
-        let granted = PermState::Granted;
-        assert_eq!(
-            today_fingerprint(granted, std::slice::from_ref(&first)),
-            today_fingerprint(granted, std::slice::from_ref(&first))
-        );
-        assert_ne!(
-            today_fingerprint(granted, std::slice::from_ref(&first)),
-            today_fingerprint(granted, &[retitled])
-        );
-        assert_ne!(
-            today_fingerprint(granted, &[first]),
-            today_fingerprint(granted, &[])
-        );
     }
 }

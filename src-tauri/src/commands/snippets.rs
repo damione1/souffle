@@ -1,20 +1,16 @@
-use tauri::State;
+use std::sync::Arc;
 
 use crate::db::snippets::SnippetEntry;
 use crate::state::AppState;
 
 /// Lists all voice snippets from the database.
-#[tauri::command]
-#[specta::specta]
-pub fn list_snippets(state: State<'_, AppState>) -> Result<Vec<SnippetEntry>, String> {
+pub fn list_snippets(state: Arc<AppState>) -> Result<Vec<SnippetEntry>, String> {
     state.db.list_snippets()
 }
 
 /// Adds a new voice snippet (spoken trigger → pasted expansion).
-#[tauri::command]
-#[specta::specta]
 pub fn add_snippet(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     trigger: &str,
     expansion: &str,
 ) -> Result<SnippetEntry, String> {
@@ -29,10 +25,8 @@ pub fn add_snippet(
 }
 
 /// Updates an existing voice snippet's trigger and expansion.
-#[tauri::command]
-#[specta::specta]
 pub fn update_snippet(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: i64,
     trigger: &str,
     expansion: &str,
@@ -48,8 +42,6 @@ pub fn update_snippet(
 }
 
 /// Deletes a specific voice snippet by ID.
-#[tauri::command]
-#[specta::specta]
-pub fn delete_snippet(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+pub fn delete_snippet(state: Arc<AppState>, id: i64) -> Result<(), String> {
     state.db.delete_snippet(id)
 }

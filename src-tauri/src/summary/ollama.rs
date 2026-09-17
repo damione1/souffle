@@ -67,7 +67,7 @@ pub fn polish_budget(input_tokens: usize) -> GenerationBudget {
 /// [`sorted_summary_capable_models`].
 pub const RECOMMENDED_MODEL: &str = "qwen2.5:7b";
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaPullProgress {
     pub model: String,
     pub status: String,

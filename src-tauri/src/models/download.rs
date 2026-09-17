@@ -11,7 +11,7 @@ use crate::engine::ModelArtifactDescriptor;
 // of a webview being attached, so the Slint side reads the same wire format
 // back out with `serde_json::from_str` (see `live_segment_channel` for the
 // established pattern).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DownloadProgress {
     pub file: String,
     pub downloaded_bytes: u64,
@@ -21,7 +21,7 @@ pub struct DownloadProgress {
     pub status: DownloadStatus,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DownloadStatus {
     Starting,
