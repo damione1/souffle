@@ -14,7 +14,8 @@ name: Release
 #
 # Signing + notarization are optional: the six APPLE_* secrets listed below
 # already exist in this repo. Without them the build still works, it just
-# ships unsigned.
+# ships unsigned. SOU-192: bundling, signing, notarization, and DMG creation
+# are scripts/bundle-macos.sh (no tauri-bundler/tauri-action).
 
 on:
   push:
@@ -95,20 +96,14 @@ jobs:
             return data.id;
 
   # ---------------------------------------------------------------------------
-  # macOS (Apple Silicon): builds the signed/notarized .dmg and uploads it
-  # into the draft release created above.
+  # macOS (Apple Silicon): builds the signed/notarized .dmg and uploads it,
+  # plus the signed update artifact, into the draft release created above.
   # ---------------------------------------------------------------------------
   desktop:
     needs: create-release
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-
-      - name: Setup Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -123,18 +118,14 @@ jobs:
       # unreachable to every later release while still counting against the
       # 10 GB repo budget. Restoring is kept because a hit on the default
       # branch's entry is still possible and costs nothing when it misses.
-      # A cache that actually hits here would need a release-profile
-      # `--target aarch64-apple-darwin` warm-up build on develop; the Contracts
-      # entry cannot serve it, since `--target` writes to a different target
-      # subdirectory than the host builds Contracts caches.
       - name: Rust cache
         uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: "./src-tauri -> target"
           save-if: false
 
-      - name: Install frontend dependencies
-        run: npm ci
+      - name: Install minisign
+        run: brew install minisign
 
       - name: Set app version from tag
         shell: bash
@@ -148,20 +139,44 @@ jobs:
         # We patch it from the tag here so the tag is the single source of truth
         # for the release. The build reads this via env!("CARGO_PKG_VERSION").
 
-      - name: Build and release
-        uses: tauri-apps/tauri-action@v0
+      - name: Import signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing + notarization (optional, leave unset to ship unsigned)
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="build.keychain"
+          security create-keychain -p "" "$keychain"
+          security default-keychain -s "$keychain"
+          security unlock-keychain -p "" "$keychain"
+          security set-keychain-settings -t 3600 -u "$keychain"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > /tmp/cert.p12
+          security import /tmp/cert.p12 -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$keychain"
+          rm -f /tmp/cert.p12
+
+      - name: Build, sign, notarize, and package
+        env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Updater artifact signing (minisign). Distinct from Apple codesign.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: --target aarch64-apple-darwin
+        run: |
+          notarize_flag=()
+          if [[ -n "${APPLE_ID:-}" ]]; then
+            notarize_flag=(--notarize)
+          fi
+          ./scripts/bundle-macos.sh --dmg --sign-updater "${notarize_flag[@]}"
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            "src-tauri/target/release/bundle/dmg/Soufflé.dmg" \
+            "src-tauri/target/release/bundle/updater/"*.tar.gz \
+            "src-tauri/target/release/bundle/updater/"*.tar.gz.sig \
+            "src-tauri/target/release/bundle/updater/latest.json" \
+            --clobber
