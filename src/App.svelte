@@ -49,6 +49,7 @@
   let unlistenState: (() => void) | null = null;
   let unlistenHealth: (() => void) | null = null;
   let unlistenPipelineError: (() => void) | null = null;
+  let unlistenPipelineErrorCleared: (() => void) | null = null;
 
   let unlistenSystemAudio: (() => void) | null = null;
   let unlistenModifierTap: (() => void) | null = null;
@@ -236,6 +237,14 @@
       unlistenPipelineError = fn;
     });
 
+    events.pipelineErrorCleared.listen((event) => {
+      if (app.pipelineError?.message === event.payload.message) {
+        app.pipelineError = null;
+      }
+    }).then((fn) => {
+      unlistenPipelineErrorCleared = fn;
+    });
+
     events.systemAudioStatus.listen((event) => {
       app.systemAudioStatus = event.payload;
     }).then((fn) => {
@@ -314,6 +323,7 @@
       unlistenState?.();
       unlistenHealth?.();
       unlistenPipelineError?.();
+      unlistenPipelineErrorCleared?.();
       unlistenSystemAudio?.();
       unlistenModifierTap?.();
       unlistenMeetingStop?.();

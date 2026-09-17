@@ -113,7 +113,7 @@ impl SouffleMcpServer {
     }
 
     #[tool(
-        description = "List meetings, newest first, with an optional full-text query and date range filter."
+        description = "List meetings, newest first, with an optional full-text query and date range filter. Ongoing meetings are readable live (ended_at: null, is_ongoing: true), with partial limits (up to ~15 recent un-flushed segments buffered in RAM, un-indexed FTS until session end)."
     )]
     async fn list_meetings(
         &self,
@@ -131,7 +131,9 @@ impl SouffleMcpServer {
             .map_err(|e| e.to_string())
     }
 
-    #[tool(description = "Get a single meeting's transcript, summary, notes, and metadata by id.")]
+    #[tool(
+        description = "Get a single meeting's transcript, summary, notes, and metadata by id. Ongoing meetings are readable live (ended_at: null, is_ongoing: true), with partial limits (up to ~15 recent un-flushed segments buffered in RAM)."
+    )]
     async fn get_meeting(
         &self,
         Parameters(args): Parameters<GetMeetingArgs>,
@@ -143,7 +145,9 @@ impl SouffleMcpServer {
             .map_err(|e| e.to_string())
     }
 
-    #[tool(description = "Full-text search across all meetings, returning matched snippets.")]
+    #[tool(
+        description = "Full-text search across all meetings, returning matched snippets. Ongoing meetings are un-indexed FTS until session end."
+    )]
     async fn search_meetings(
         &self,
         Parameters(args): Parameters<SearchMeetingsArgs>,
@@ -156,7 +160,7 @@ impl SouffleMcpServer {
     }
 
     #[tool(
-        description = "Get the most recently recorded meeting (transcript, summary, notes, metadata)."
+        description = "Get the most recently recorded meeting (transcript, summary, notes, metadata). Ongoing meetings are readable live (ended_at: null, is_ongoing: true), with partial limits (up to ~15 recent un-flushed segments buffered in RAM)."
     )]
     async fn get_latest_meeting(&self) -> Result<Json<MeetingDetail>, String> {
         self.db
@@ -190,10 +194,12 @@ impl ServerHandler for SouffleMcpServer {
         .with_server_info(Implementation::from_build_env())
         .with_instructions(
             "Read-only access to Souffle meeting transcripts, summaries, notes, and dictation \
-             history, stored locally in the user's Souffle app. Tools: list_meetings (browse/filter), \
-             get_meeting (fetch one meeting by id), search_meetings (full-text search), \
-             get_latest_meeting (most recent), list_dictations (dictation history). Also exposes \
-             each meeting as a souffle://meeting/{id} resource returning its transcript."
+             history, stored locally in the user's Souffle app. Ongoing meetings are readable live \
+             (with ended_at: null / is_ongoing: true), with partial limits (up to ~15 recent \
+             un-flushed segments buffered in RAM, un-indexed FTS until session end). Tools: \
+             list_meetings (browse/filter), get_meeting (fetch one meeting by id), search_meetings \
+             (full-text search), get_latest_meeting (most recent), list_dictations (dictation history). \
+             Also exposes each meeting as a souffle://meeting/{id} resource returning its transcript."
                 .to_string(),
         )
     }

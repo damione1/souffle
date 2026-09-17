@@ -230,6 +230,8 @@ describe("settings controller", () => {
         return Promise.resolve(48_000);
       case COMMAND.resetInputSampleRate:
         return Promise.resolve(48_000);
+      case COMMAND.getSettingsOptions:
+        return Promise.resolve({ default_shortcuts: { toggle: "CommandOrControl+Shift+Space", push_to_talk: "" } });
       case COMMAND.checkSummaryProviders:
         return Promise.resolve({
           ollama_url: "http://localhost:11434",

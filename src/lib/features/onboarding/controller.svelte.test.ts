@@ -11,6 +11,7 @@ const { transcriptionApi, settingsApi, permissionsApi, startDownload } = vi.hois
     saveShortcuts: vi.fn(),
     listAudioDevices: vi.fn(),
     selectAudioDevice: vi.fn(),
+    getSettingsOptions: vi.fn(),
   },
   permissionsApi: {
     getPermissionStatus: vi.fn(),
@@ -56,6 +57,7 @@ describe("createOnboardingController", () => {
     settingsApi.saveShortcuts.mockResolvedValue(undefined);
     settingsApi.listAudioDevices.mockResolvedValue(fakeDevices);
     settingsApi.selectAudioDevice.mockResolvedValue(undefined);
+    settingsApi.getSettingsOptions.mockResolvedValue({ default_shortcuts: { toggle: "CommandOrControl+Shift+Space", push_to_talk: "" } });
     permissionsApi.getPermissionStatus.mockResolvedValue({
       microphone: "unknown",
       system_audio: "unknown",

@@ -181,6 +181,8 @@ pub struct SummaryProvidersStatus {
     pub apple_intelligence_is_stub: bool,
     /// Machine-readable reason Apple Intelligence is unavailable, `None` when available.
     pub apple_intelligence_unavailable_reason: Option<String>,
+    /// Ollama model recommended by the backend for one-click installation.
+    pub recommended_ollama_model: String,
     pub models: Vec<SummaryModelDescriptor>,
 }
 
@@ -291,6 +293,7 @@ pub async fn check_providers(ollama_url: &str) -> SummaryProvidersStatus {
         apple_intelligence_available,
         apple_intelligence_is_stub,
         apple_intelligence_unavailable_reason,
+        recommended_ollama_model: ollama::RECOMMENDED_MODEL.to_string(),
         models,
     }
 }
