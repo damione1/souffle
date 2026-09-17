@@ -1,5 +1,6 @@
 import { ComboBox, ProgressIndicator } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { Theme } from "../../theme.slint";
 
 // Port of ModelSettingsSection.svelte. The download/switch state machine
 // itself is not reimplemented here (AC2): it stays entirely in Rust
@@ -29,20 +30,20 @@ export component ModelSection inherits VerticalLayout {
             text: "Modèle de transcription";
             font-size: 13.5px;
             font-weight: 700;
-            color: white;
+            color: Theme.text-primary;
             vertical-alignment: center;
         }
         Text {
             text: root.status-text;
             font-size: 11px;
-            color: #999;
+            color: Theme.text-muted;
             vertical-alignment: center;
         }
     }
     Text {
         text: "Modèle utilisé pour la reconnaissance vocale, exécuté entièrement sur cet appareil.";
         font-size: 11.5px;
-        color: #999;
+        color: Theme.text-muted;
         wrap: word-wrap;
     }
 
@@ -58,7 +59,7 @@ export component ModelSection inherits VerticalLayout {
         Text {
             text: root.download-progress-label;
             font-size: 11px;
-            color: #999;
+            color: Theme.text-muted;
         }
         ProgressIndicator {
             progress: root.download-progress-fraction;
@@ -68,7 +69,7 @@ export component ModelSection inherits VerticalLayout {
 
     if root.error-message != "": Text {
         text: root.error-message;
-        color: #f08080;
+        color: Theme.danger;
         font-size: 11.5px;
         wrap: word-wrap;
     }

@@ -1,5 +1,7 @@
-import { Switch, Button } from "std-widgets.slint";
+import { Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
 
 // Port of AboutSettingsSection.svelte. `UpdateAction` (the download-progress
 // + install button shown once an update is found) is not built here - a
@@ -24,28 +26,28 @@ export component AboutSection inherits VerticalLayout {
         text: "À propos";
         font-size: 13.5px;
         font-weight: 700;
-        color: white;
+        color: Theme.text-primary;
     }
 
     HorizontalLayout {
         alignment: space-between;
-        Text { text: "Version"; font-size: 12.5px; color: #999; }
-        Text { text: "v" + root.app-version; font-size: 12.5px; color: #ddd; }
+        Text { text: "Version"; font-size: 12.5px; color: Theme.text-muted; }
+        Text { text: "v" + root.app-version; font-size: 12.5px; color: Theme.text-secondary; }
     }
     HorizontalLayout {
         alignment: space-between;
-        Text { text: "Transcription"; font-size: 12.5px; color: #999; }
-        Text { text: root.transcription-label; font-size: 12.5px; color: #ddd; }
+        Text { text: "Transcription"; font-size: 12.5px; color: Theme.text-muted; }
+        Text { text: root.transcription-label; font-size: 12.5px; color: Theme.text-secondary; }
     }
     HorizontalLayout {
         alignment: space-between;
-        Text { text: "Résumés"; font-size: 12.5px; color: #999; }
-        Text { text: root.summary-label; font-size: 12.5px; color: #ddd; }
+        Text { text: "Résumés"; font-size: 12.5px; color: Theme.text-muted; }
+        Text { text: root.summary-label; font-size: 12.5px; color: Theme.text-secondary; }
     }
     HorizontalLayout {
         alignment: space-between;
-        Text { text: "Confidentialité"; font-size: 12.5px; color: #999; }
-        Text { text: "100% local"; font-size: 12.5px; color: #ddd; }
+        Text { text: "Confidentialité"; font-size: 12.5px; color: Theme.text-muted; }
+        Text { text: "100% local"; font-size: 12.5px; color: Theme.text-secondary; }
     }
 
     HorizontalLayout {
@@ -53,7 +55,7 @@ export component AboutSection inherits VerticalLayout {
         Text {
             text: "Mises à jour";
             font-size: 12.5px;
-            color: #999;
+            color: Theme.text-muted;
             vertical-alignment: center;
         }
         Button {
@@ -66,7 +68,7 @@ export component AboutSection inherits VerticalLayout {
     if root.update-status != "": Text {
         text: root.update-status;
         font-size: 11.5px;
-        color: #999;
+        color: Theme.text-muted;
         wrap: word-wrap;
     }
 
@@ -74,9 +76,9 @@ export component AboutSection inherits VerticalLayout {
         label: "Vérification automatique";
         description: "Vérifier les mises à jour au démarrage.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.auto-update-check;
-            toggled => { root.auto-update-check-changed(self.checked); }
+            toggled(new) => { root.auto-update-check-changed(new); }
         }
     }
 }

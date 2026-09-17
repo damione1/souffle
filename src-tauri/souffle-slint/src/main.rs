@@ -449,8 +449,20 @@ fn refresh_summary_providers(
     summary_template_editing: Rc<RefCell<String>>,
 ) {
     slint::spawn_local(async move {
-        let state = Arc::clone(&handle);
-        let status = souffle_lib::commands::check_summary_providers(state).await;
+        let handle_for_check = handle.clone();
+        // `check_summary_providers` awaits a reqwest call, which needs an
+        // ambient Tokio reactor; `slint::spawn_local`'s own executor (the
+        // Slint event loop) isn't one, so awaiting it directly here panics
+        // with "there is no reactor running" the first time Settings opens.
+        // Route it through the global Tokio runtime instead, same as
+        // `load_model_in_background` does for its own blocking work.
+        let status = souffle_lib::async_runtime::spawn(async move {
+            let state = Arc::clone(&handle_for_check);
+            souffle_lib::commands::check_summary_providers(state).await
+        })
+        .await
+        .map_err(|e| format!("Join check_summary_providers task: {e}"))
+        .and_then(|r| r);
         let Some(window) = weak.upgrade() else {
             return;
         };
@@ -1015,6 +1027,9 @@ fn show_onboarding_step(
     window.set_onboarding_busy(false);
     window.set_onboarding_continue_enabled(true);
     window.set_onboarding_continue_label("Continuer".into());
+    // Otherwise an error from a previous step (e.g. a failed download)
+    // stays pinned to the banner forever, since nothing else clears it.
+    window.set_onboarding_status_message("".into());
 
     match step {
         "permissions" => {
@@ -1064,17 +1079,15 @@ fn show_onboarding_step(
             let phase = selection.and_then(|selection| {
                 souffle_lib::commands::get_model_status(Arc::clone(handle), selection).ok()
             });
-            let phase_str = match phase.map(|s| s.phase) {
-                Some(TranscriptionRuntimePhase::Ready) => "ready",
-                Some(TranscriptionRuntimePhase::LoadRequired) => "load_required",
-                _ => "pick",
+            // LoadRequired collapses to Pick here (not Loading): re-entering this
+            // step only shows a spinner once the user has actually clicked
+            // "Continuer" to kick off the load, matching prior behavior.
+            let model_phase = match phase.map(|s| s.phase) {
+                Some(TranscriptionRuntimePhase::Ready) => ModelPhase::Ready,
+                _ => ModelPhase::Pick,
             };
-            window.set_onboarding_model_phase(if phase_str == "load_required" {
-                "pick".into()
-            } else {
-                phase_str.into()
-            });
-            if phase_str == "ready" {
+            window.set_onboarding_model_phase(model_phase);
+            if model_phase == ModelPhase::Ready {
                 window.set_onboarding_continue_label("Continuer".into());
             } else {
                 window.set_onboarding_continue_label("Télécharger et continuer".into());
@@ -1408,9 +1421,13 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
         }
     });
 
+    let weak_for_auto_paste = window.as_weak();
     let ob_for_auto_paste = ob.clone();
     window.on_onboarding_auto_paste_changed(move |enabled| {
         ob_for_auto_paste.borrow_mut().auto_paste = enabled;
+        if let Some(window) = weak_for_auto_paste.upgrade() {
+            window.set_onboarding_auto_paste(enabled);
+        }
     });
 
     window.on_onboarding_review_accessibility_requested(move || {
@@ -1471,7 +1488,7 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
             }
             "model" => {
                 let phase = window.get_onboarding_model_phase();
-                if phase == "ready" {
+                if phase == ModelPhase::Ready {
                     advance_onboarding_step(
                         &window,
                         &handle,
@@ -1610,14 +1627,17 @@ fn start_onboarding_model_transition(
     let Some(window) = weak.upgrade() else {
         return;
     };
+    // Clear any error left over from a previous attempt in this same step
+    // (e.g. a retried download) before reporting on the new one.
+    window.set_onboarding_status_message("".into());
     match status.phase {
         TranscriptionRuntimePhase::Ready => {
-            window.set_onboarding_model_phase("ready".into());
+            window.set_onboarding_model_phase(ModelPhase::Ready);
             window.set_onboarding_busy(false);
             window.set_onboarding_continue_enabled(true);
         }
         TranscriptionRuntimePhase::LoadRequired => {
-            window.set_onboarding_model_phase("loading".into());
+            window.set_onboarding_model_phase(ModelPhase::Loading);
             let weak2 = weak.clone();
             let handle2 = handle.clone();
             let selection2 = selection.clone();
@@ -1633,7 +1653,7 @@ fn start_onboarding_model_transition(
                     window.set_onboarding_busy(false);
                     window.set_onboarding_continue_enabled(true);
                     match result {
-                        Ok(()) => window.set_onboarding_model_phase("ready".into()),
+                        Ok(()) => window.set_onboarding_model_phase(ModelPhase::Ready),
                         Err(e) => window.set_onboarding_status_message(e.into()),
                     }
                 }
@@ -1641,7 +1661,7 @@ fn start_onboarding_model_transition(
             .expect("slint event loop not running");
         }
         TranscriptionRuntimePhase::DownloadRequired => {
-            window.set_onboarding_model_phase("downloading".into());
+            window.set_onboarding_model_phase(ModelPhase::Downloading);
             window.set_onboarding_download_progress_label("".into());
             window.set_onboarding_download_progress_fraction(0.0);
             let state = Arc::clone(&handle);
@@ -1681,7 +1701,7 @@ fn onboarding_model_download_channel(
                     window.set_onboarding_download_progress_label(progress.file.as_str().into());
                 }
                 souffle_lib::models::DownloadStatus::Complete => {
-                    window.set_onboarding_model_phase("loading".into());
+                    window.set_onboarding_model_phase(ModelPhase::Loading);
                     start_onboarding_model_transition(
                         weak.clone(),
                         handle.clone(),
@@ -1723,7 +1743,14 @@ fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_
         window.set_update_error_message("".into());
         let weak = weak.clone();
         slint::spawn_local(async move {
-            let result = souffle_lib::commands::download_update().await;
+            // `download_update` awaits a `reqwest` fetch, which needs an
+            // ambient Tokio reactor that `slint::spawn_local`'s own executor
+            // doesn't provide - route it through the global Tokio runtime
+            // (see `refresh_summary_providers`'s identical fix).
+            let result = souffle_lib::async_runtime::spawn(souffle_lib::commands::download_update())
+                .await
+                .map_err(|e| format!("Join download_update task: {e}"))
+                .and_then(|r| r);
             let Some(window) = weak.upgrade() else {
                 return;
             };
@@ -3051,7 +3078,14 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let summary_template_editing_for_pull = summary_template_editing_for_pull.clone();
         slint::spawn_local(async move {
             let state = Arc::clone(&handle);
-            let result = souffle_lib::commands::pull_recommended_ollama_model(state, channel).await;
+            // Same reactor requirement as `refresh_summary_providers`/
+            // `download_update`: the pull streams over `reqwest`.
+            let result = souffle_lib::async_runtime::spawn(
+                souffle_lib::commands::pull_recommended_ollama_model(state, channel),
+            )
+            .await
+            .map_err(|e| format!("Join pull_recommended_ollama_model task: {e}"))
+            .and_then(|r| r);
             let Some(window) = weak.upgrade() else {
                 return;
             };

@@ -3,6 +3,7 @@ import { NotesSaveState } from "types.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
 import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
+import { Theme } from "theme.slint";
 
 // Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
 // completed-meeting variant only. The live-recording variant of
@@ -117,14 +118,14 @@ export component MeetingDetail inherits VerticalLayout {
 
         Text {
             text: root.meta-line;
-            color: #888888;
+            color: Theme.text-muted;
             font-size: 12px;
             vertical-alignment: center;
         }
 
         if root.model-label != "": Text {
             text: "[" + root.model-label + "]";
-            color: #4a9eff;
+            color: Theme.accent;
             font-family: "monospace";
             font-size: 11px;
             vertical-alignment: center;
@@ -137,7 +138,7 @@ export component MeetingDetail inherits VerticalLayout {
 
         for label in root.participant-labels: Text {
             text: label;
-            color: #aaaaaa;
+            color: Theme.text-secondary;
             font-size: 11px;
         }
     }
@@ -184,7 +185,7 @@ export component MeetingDetail inherits VerticalLayout {
                 Rectangle {
                     height: 220px;
                     border-width: 1px;
-                    border-color: #3a3a3a;
+                    border-color: Theme.surface-4;
 
                     VerticalLayout {
                         padding: 16px;
@@ -197,19 +198,19 @@ export component MeetingDetail inherits VerticalLayout {
                                 text: "NOTES";
                                 font-size: 11px;
                                 font-weight: 600;
-                                color: #888888;
+                                color: Theme.text-muted;
                                 vertical-alignment: center;
                             }
 
                             if root.notes-save-state == NotesSaveState.saved: Text {
                                 text: "Enregistr\u{e9}";
                                 font-size: 11px;
-                                color: #888888;
+                                color: Theme.text-muted;
                             }
                             if root.notes-save-state == NotesSaveState.pending: Text {
                                 text: "Enregistrement\u{2026}";
                                 font-size: 11px;
-                                color: #888888;
+                                color: Theme.text-muted;
                             }
                         }
 

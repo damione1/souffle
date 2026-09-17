@@ -1,4 +1,5 @@
 import { LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 
 // Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
 // labels and session-break dividers, click-to-seek on a paragraph's
@@ -102,9 +103,9 @@ export component TranscriptSection inherits VerticalLayout {
             }
 
             Rectangle {
-                background: #2a2a2a;
+                background: Theme.surface-2;
                 border-width: 1px;
-                border-color: #4a9eff;
+                border-color: Theme.accent;
 
                 VerticalLayout {
                     padding: 12px;
@@ -117,7 +118,7 @@ export component TranscriptSection inherits VerticalLayout {
                             text: "Alias de dictionnaire";
                             font-size: 11px;
                             font-weight: 600;
-                            color: #cccccc;
+                            color: Theme.text-secondary;
                             vertical-alignment: center;
                         }
 
@@ -136,7 +137,7 @@ export component TranscriptSection inherits VerticalLayout {
                             Text {
                                 text: "\u{2715}";
                                 font-size: 11px;
-                                color: #888888;
+                                color: Theme.text-muted;
                             }
                         }
                     }
@@ -155,7 +156,7 @@ export component TranscriptSection inherits VerticalLayout {
 
                     save-btn := Rectangle {
                         height: 26px;
-                        background: root.alias-term-draft == "" ? #3a3a3a : (save-area.has-hover ? #3a7bc8 : #4a9eff);
+                        background: root.alias-term-draft == "" ? Theme.surface-4 : (save-area.has-hover ? Theme.accent-hover : Theme.accent);
 
                         accessible-role: button;
                         accessible-label: "Enregistrer l'alias";
@@ -168,7 +169,7 @@ export component TranscriptSection inherits VerticalLayout {
 
                         Text {
                             text: "Enregistrer";
-                            color: white;
+                            color: Theme.text-primary;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -195,19 +196,19 @@ export component TranscriptSection inherits VerticalLayout {
         text: "Transcript \u{b7} " + root.segment-count + " segments";
         font-size: 11px;
         font-weight: 600;
-        color: #888888;
+        color: Theme.text-muted;
     }
 
     if root.segment-count == 0: Text {
         text: "Pas de transcript pour cette r\u{e9}union.";
-        color: #888888;
+        color: Theme.text-muted;
         font-size: 12px;
     }
 
     if root.segment-count > 0: Rectangle {
         height: 260px;
         border-width: 1px;
-        border-color: #3a3a3a;
+        border-color: Theme.surface-4;
         clip: true;
 
         flick := Flickable {
@@ -234,7 +235,7 @@ export component TranscriptSection inherits VerticalLayout {
                                 text: block.speaker-label;
                                 font-size: 11px;
                                 font-weight: 600;
-                                color: #4a9eff;
+                                color: Theme.accent;
                                 vertical-alignment: center;
                             }
 
@@ -258,7 +259,7 @@ export component TranscriptSection inherits VerticalLayout {
                                     text: block.timestamp;
                                     font-family: "monospace";
                                     font-size: 10.5px;
-                                    color: #777777;
+                                    color: Theme.text-faint;
                                     vertical-alignment: center;
                                 }
                             }
@@ -266,9 +267,25 @@ export component TranscriptSection inherits VerticalLayout {
 
                         StyledText {
                             text: block.markdown-text;
-                            default-color: white;
+                            default-color: Theme.text-primary;
                             default-font-size: 13px;
-                            link-color: #4a9eff;
+                            // `TranscriptWordLine.svelte` keeps clickable
+                            // words visually identical to plain text by
+                            // default (`text-inherit`, no underline - only
+                            // a hover highlight) since alias-correction is
+                            // a secondary action, not a "this is a link"
+                            // affordance. `StyledText`'s CommonMark links
+                            // always render underlined with no property to
+                            // turn that off (confirmed against
+                            // `i-slint-compiler-1.17.1/builtins.slint`), so
+                            // the underline itself can't be matched without
+                            // replacing this whole per-word-links technique
+                            // (SOU-195 - tracked as a known gap, not fixed
+                            // here). Matching `link-color` to `default-color`
+                            // at least stops every word reading as an
+                            // obviously-different-colored hyperlink, which
+                            // was the more jarring half of the mismatch.
+                            link-color: Theme.text-primary;
                             // Not positioned under the exact clicked word:
                             // `PopupWindow`'s `x`/`y` are relative to this
                             // component and `StyledText` doesn't expose a
@@ -286,17 +303,17 @@ export component TranscriptSection inherits VerticalLayout {
 
                         Rectangle {
                             height: 1px;
-                            background: #3a3a3a;
+                            background: Theme.surface-4;
                             vertical-stretch: 1;
                         }
                         Text {
                             text: block.end-label + " / " + block.start-label;
                             font-size: 10px;
-                            color: #777777;
+                            color: Theme.text-faint;
                         }
                         Rectangle {
                             height: 1px;
-                            background: #3a3a3a;
+                            background: Theme.surface-4;
                             vertical-stretch: 1;
                         }
                     }

@@ -1,6 +1,10 @@
-import { Button, ComboBox, Switch, Palette } from "std-widgets.slint";
+import { ComboBox } from "std-widgets.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
 import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
+import { ModelPhase } from "types.slint";
+import { Theme } from "theme.slint";
+import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
+import { ThemedSwitch } from "components/themed_switch.slint";
 
 // Port of OnboardingView.svelte (+ PermissionsStep.svelte inlined as the
 // first step). Model download and shortcut capture reuse the same Rust
@@ -26,7 +30,7 @@ export component OnboardingView inherits Rectangle {
     in property <[string]> device-labels;
     in property <string> selected-device-label;
 
-    in property <string> model-phase; // "pick" | "downloading" | "loading" | "ready"
+    in property <ModelPhase> model-phase: ModelPhase.pick;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
     in property <string> download-progress-label;
@@ -59,7 +63,7 @@ export component OnboardingView inherits Rectangle {
     callback back-requested();
     callback continue-requested();
 
-    background: Palette.background;
+    background: Theme.canvas;
 
     VerticalLayout {
         alignment: center;
@@ -77,29 +81,27 @@ export component OnboardingView inherits Rectangle {
                     text: "Soufflé";
                     font-size: 22px;
                     font-weight: 700;
-                    color: white;
+                    color: Theme.text-primary;
                     horizontal-alignment: center;
                 }
                 Text {
                     text: "Dictée et transcription de réunion, 100% locale.";
                     font-size: 12px;
-                    color: #999;
+                    color: Theme.text-muted;
                     horizontal-alignment: center;
                 }
 
                 HorizontalLayout {
                     alignment: center;
                     spacing: 4px;
-                    Button {
+                    ThemedButton {
                         text: "English";
-                        checkable: true;
-                        checked: root.locale == "en";
+                        kind: root.locale == "en" ? ThemedButtonKind.active : ThemedButtonKind.default;
                         clicked => { root.locale-changed("en"); }
                     }
-                    Button {
+                    ThemedButton {
                         text: "Français";
-                        checkable: true;
-                        checked: root.locale == "fr";
+                        kind: root.locale == "fr" ? ThemedButtonKind.active : ThemedButtonKind.default;
                         clicked => { root.locale-changed("fr"); }
                     }
                 }
@@ -111,7 +113,7 @@ export component OnboardingView inherits Rectangle {
                 for i in root.step-count: Rectangle {
                     width: 24px;
                     height: 6px;
-                    background: i == root.step-index ? #5b9dfa : #3a3a3a;
+                    background: i == root.step-index ? Theme.accent : Theme.surface-4;
                 }
             }
 
@@ -121,26 +123,26 @@ export component OnboardingView inherits Rectangle {
                     text: root.title;
                     font-size: 16px;
                     font-weight: 700;
-                    color: white;
+                    color: Theme.text-primary;
                 }
                 Text {
                     text: root.subtitle;
                     font-size: 12px;
-                    color: #999;
+                    color: Theme.text-muted;
                     wrap: word-wrap;
                 }
             }
 
             if root.status-message != "": Rectangle {
                 border-width: 1px;
-                border-color: #a06a1a;
+                border-color: Theme.warning;
                 border-radius: 6px;
-                background: #3a2c14;
+                background: Theme.surface-2;
                 VerticalLayout {
                     padding: 8px;
                     Text {
                         text: root.status-message;
-                        color: #f0c674;
+                        color: Theme.warning;
                         font-size: 11.5px;
                         wrap: word-wrap;
                     }
@@ -167,7 +169,7 @@ export component OnboardingView inherits Rectangle {
                         current-value: root.selected-device-label;
                         selected(value) => { root.device-changed(value); }
                     }
-                    Button {
+                    ThemedButton {
                         text: "Actualiser";
                         clicked => { root.refresh-devices-requested(); }
                     }
@@ -175,7 +177,7 @@ export component OnboardingView inherits Rectangle {
                 Text {
                     text: "Le microphone peut être changé plus tard dans les Réglages.";
                     font-size: 11px;
-                    color: #999;
+                    color: Theme.text-muted;
                     wrap: word-wrap;
                 }
             }
@@ -183,34 +185,34 @@ export component OnboardingView inherits Rectangle {
             if root.step == "model": VerticalLayout {
                 spacing: 8px;
 
-                if root.model-phase == "downloading": VerticalLayout {
+                if root.model-phase == ModelPhase.downloading: VerticalLayout {
                     spacing: 4px;
-                    Text { text: "Téléchargement du modèle…"; font-size: 12px; color: #ccc; }
-                    Text { text: root.download-progress-label; font-size: 10.5px; color: #999; }
+                    Text { text: "Téléchargement du modèle…"; font-size: 12px; color: Theme.text-secondary; }
+                    Text { text: root.download-progress-label; font-size: 10.5px; color: Theme.text-muted; }
                     Rectangle {
                         height: 6px;
                         border-radius: 3px;
-                        background: #3a3a3a;
+                        background: Theme.surface-4;
                         Rectangle {
                             x: 0;
                             width: parent.width * max(0.02, root.download-progress-fraction);
                             height: 100%;
                             border-radius: 3px;
-                            background: #5b9dfa;
+                            background: Theme.accent;
                         }
                     }
                 }
-                if root.model-phase == "loading": Text {
+                if root.model-phase == ModelPhase.loading: Text {
                     text: "Chargement du modèle…";
                     font-size: 12px;
-                    color: #ccc;
+                    color: Theme.text-secondary;
                 }
-                if root.model-phase == "ready": Text {
+                if root.model-phase == ModelPhase.ready: Text {
                     text: "Modèle prêt.";
                     font-size: 12px;
-                    color: #6fcf7a;
+                    color: Theme.success;
                 }
-                if root.model-phase == "pick": ComboBox {
+                if root.model-phase == ModelPhase.pick: ComboBox {
                     model: root.model-labels;
                     current-value: root.selected-model-label;
                     selected(value) => { root.model-picked(value); }
@@ -232,7 +234,7 @@ export component OnboardingView inherits Rectangle {
 
                 if root.shortcut-error != "": Text {
                     text: root.shortcut-error;
-                    color: #f08080;
+                    color: Theme.danger;
                     font-size: 11px;
                 }
 
@@ -241,12 +243,12 @@ export component OnboardingView inherits Rectangle {
                     Text {
                         text: "Coller automatiquement le texte transcrit";
                         font-size: 12px;
-                        color: #ccc;
+                        color: Theme.text-secondary;
                         vertical-alignment: center;
                     }
-                    Switch {
+                    ThemedSwitch {
                         checked: root.auto-paste;
-                        toggled => { root.auto-paste-changed(self.checked); }
+                        toggled(new) => { root.auto-paste-changed(new); }
                     }
                 }
 
@@ -255,12 +257,12 @@ export component OnboardingView inherits Rectangle {
                     spacing: 8px;
                     Text {
                         text: "Le collage automatique nécessite la permission Accessibilité.";
-                        color: #f0c674;
+                        color: Theme.warning;
                         font-size: 11px;
                         wrap: word-wrap;
                         horizontal-stretch: 1;
                     }
-                    Button {
+                    ThemedButton {
                         text: "Vérifier";
                         clicked => { root.review-accessibility-requested(); }
                     }
@@ -270,22 +272,24 @@ export component OnboardingView inherits Rectangle {
             HorizontalLayout {
                 spacing: 10px;
 
-                if root.step-index > 0: Button {
+                if root.step-index > 0: ThemedButton {
                     text: "Retour";
+                    kind: ThemedButtonKind.ghost;
                     enabled: !root.busy;
                     clicked => { root.back-requested(); }
                 }
                 if root.step-index == 0 && root.step == "permissions": Text {
                     text: "Les permissions peuvent être accordées plus tard.";
                     font-size: 10.5px;
-                    color: #777;
+                    color: Theme.text-faint;
                     vertical-alignment: center;
                 }
 
                 Rectangle { horizontal-stretch: 1; }
 
-                Button {
+                ThemedButton {
                     text: root.continue-label;
+                    kind: ThemedButtonKind.primary;
                     enabled: !root.busy && root.continue-enabled;
                     clicked => { root.continue-requested(); }
                 }

@@ -1,0 +1,55 @@
+import { Theme } from "../theme.slint";
+
+// Port of app.css's `.btn`/`.btn-primary`/`.btn-ghost`/`.btn-active` (see
+// that file for the exact color recipe). `std-widgets.slint`'s `Button`
+// can't be recolored to match: its Fluent-style skin ignores `Theme`
+// entirely, which is why every onboarding screen looked like generic
+// system-gray buttons instead of the app's actual amber design.
+export enum ThemedButtonKind { default, primary, ghost, active }
+
+export component ThemedButton inherits Rectangle {
+    in property <string> text;
+    in property <ThemedButtonKind> kind: ThemedButtonKind.default;
+    in property <bool> enabled: true;
+
+    callback clicked();
+
+    height: 34px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.kind == ThemedButtonKind.primary ? rgba(233, 174, 85, 0.25)
+        : root.kind == ThemedButtonKind.ghost || root.kind == ThemedButtonKind.active ? transparent
+        : Theme.ghost-border;
+    background: root.kind == ThemedButtonKind.primary ? rgba(233, 174, 85, area.has-hover ? 0.20 : 0.12)
+        : root.kind == ThemedButtonKind.active ? Theme.text-primary
+        : root.kind == ThemedButtonKind.ghost ? (area.has-hover ? Theme.surface-2 : transparent)
+        : (area.has-hover ? Theme.surface-4 : Theme.surface-3);
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.clicked(); }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        alignment: center;
+
+        Text {
+            text: root.text;
+            font-size: 13px;
+            font-weight: root.kind == ThemedButtonKind.default ? 500 : 600;
+            color: root.kind == ThemedButtonKind.primary ? Theme.accent
+                : root.kind == ThemedButtonKind.active ? Theme.canvas
+                : root.kind == ThemedButtonKind.ghost ? (area.has-hover ? Theme.text-primary : Theme.text-muted)
+                : Theme.text-primary;
+            vertical-alignment: center;
+        }
+    }
+}

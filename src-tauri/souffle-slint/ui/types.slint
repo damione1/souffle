@@ -12,3 +12,7 @@ export enum TimelineKind { meeting, dictation }
 export enum TimelineFilter { all, meeting, dictation }
 
 export enum NotesSaveState { idle, pending, saved }
+
+// Onboarding's model step - missed the string->enum cleanup above when it
+// was added later.
+export enum ModelPhase { pick, downloading, loading, ready }

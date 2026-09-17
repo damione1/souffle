@@ -1,11 +1,15 @@
 import { ScrollView } from "std-widgets.slint";
 import { RecordingMode } from "types.slint";
+import { Theme } from "theme.slint";
 
 // Live-recording view for SOU-187. Milestone 4 proved the real start/stop
 // round-trip; milestone 5 adds the real live transcript (single running
 // text block, both modes). Still deliberately not LiveSessionCard.svelte
 // parity - no paragraph/speaker-lane grouping, no inline word edit, no
-// waveform, no notes autosave. Said here honestly, not hidden.
+// waveform, no elapsed timer, no notes autosave. Said here honestly, not
+// hidden (and no longer literally printed on screen either - SOU-195 found
+// that dev note was leaking into the real UI, which the reference never
+// has at all).
 export component RecordingView inherits VerticalLayout {
     in property <RecordingMode> mode; // never RecordingMode.idle - see main_window.slint
     in property <string> live-text;
@@ -13,73 +17,114 @@ export component RecordingView inherits VerticalLayout {
 
     callback stop-requested();
 
+    // `LiveSessionCard.svelte` renders committed + tentative text as one
+    // inline paragraph (`{liveText}<span class="opacity-50">{tentative}</span>`)
+    // so it wraps as a single flow. Slint's `Text` has no inline multi-color
+    // spans, so this joins them into one plain-colored string instead of the
+    // two stacked `Text` elements the previous version used - that stacking
+    // is exactly what caused the reported bug (the tentative tail always
+    // dropping to its own line, sometimes clipping words). Losing the dimmed
+    // tint on the tentative tail is a real, deliberate simplification, not
+    // an oversight.
+    property <string> combined-text: root.live-tentative == "" ? root.live-text
+        : root.live-text == "" ? root.live-tentative
+        : root.live-text + " " + root.live-tentative;
+
     padding: 24px;
-    spacing: 18px;
 
-    HorizontalLayout {
-        spacing: 12px;
-        alignment: space-between;
-
-        Text {
-            text: root.mode == RecordingMode.meeting ? "R\u{e9}union en cours\u{2026}" : "Dict\u{e9}e en cours\u{2026}";
-            font-size: 18px;
-            font-weight: 600;
-            vertical-alignment: center;
-        }
-
-        Rectangle {
-            height: 40px;
-            width: 120px;
-            border-radius: 20px;
-            background: #cc4444;
-
-            accessible-role: button;
-            accessible-label: "Arr\u{ea}ter";
-            accessible-action-default => { root.stop-requested(); }
-
-            TouchArea {
-                clicked => { root.stop-requested(); }
-            }
-
-            Text {
-                text: "Arr\u{ea}ter";
-                color: white;
-                font-weight: 600;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-    }
-
-    Text {
-        text: "Jalon 5 : transcript live seulement - pas de regroupement par paragraphe/locuteur, pas d'\u{e9}dition inline, pas de waveform ici.";
-        color: #888888;
-        font-size: 11px;
-        wrap: word-wrap;
-    }
-
+    // One unified card (pill + Stop control at its top, transcript filling
+    // the rest) - matches the reference's actual rendered layout (checked
+    // live against the real Tauri build during SOU-195, not the
+    // `LiveSessionCard.svelte` markup read earlier, which turned out to
+    // describe a different/older arrangement than what's actually
+    // shipped). The previous version put the pill+Stop row *outside* the
+    // bordered box as its own sibling; the reference nests both inside one
+    // card.
     Rectangle {
         vertical-stretch: 1;
+        min-height: 340px;
+        border-radius: 4px;
         border-width: 1px;
-        border-color: #3a3a3a;
+        border-color: Theme.border-soft;
 
-        ScrollView {
-            VerticalLayout {
-                padding: 16px;
+        VerticalLayout {
+            padding-left: 22px;
+            padding-right: 22px;
+            padding-top: 20px;
+            padding-bottom: 20px;
+            spacing: 18px;
+
+            HorizontalLayout {
+                spacing: 14px;
                 alignment: start;
 
-                Text {
-                    text: root.live-text == "" && root.live-tentative == "" ? "En \u{e9}coute\u{2026}" : root.live-text;
-                    font-size: 16px;
-                    color: root.live-text == "" ? #888888 : white;
-                    wrap: word-wrap;
+                Rectangle {
+                    height: 26px;
+                    border-radius: 4px;
+                    background: Theme.danger;
+
+                    HorizontalLayout {
+                        padding-left: 11px;
+                        padding-right: 11px;
+                        spacing: 7px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
+                            background: Theme.on-danger;
+                        }
+                        Text {
+                            text: root.mode == RecordingMode.meeting ? "R\u{e9}union en cours" : "Dict\u{e9}e en cours";
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            color: Theme.on-danger;
+                            vertical-alignment: center;
+                        }
+                    }
                 }
 
-                if root.live-tentative != "": Text {
-                    text: root.live-tentative;
-                    font-size: 16px;
-                    color: #888888;
-                    wrap: word-wrap;
+                // No waveform/elapsed-timer here yet: both need new
+                // wiring (a real audio-level feed, a start timestamp) that
+                // a pure styling pass shouldn't fabricate - tracked in
+                // SOU-195 rather than faked with a static placeholder.
+                Rectangle { horizontal-stretch: 1; }
+
+                stop-area := TouchArea {
+                    width: stop-text.preferred-width + 32px;
+                    height: 32px;
+                    accessible-role: button;
+                    accessible-label: "Arr\u{ea}ter";
+                    accessible-action-default => { root.stop-requested(); }
+                    clicked => { root.stop-requested(); }
+
+                    Rectangle {
+                        border-radius: 4px;
+                        background: stop-area.has-hover ? rgba(242, 104, 90, 0.9) : Theme.danger;
+
+                        stop-text := Text {
+                            text: "Arr\u{ea}ter";
+                            font-size: 13.5px;
+                            font-weight: 600;
+                            color: Theme.on-danger;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            ScrollView {
+                VerticalLayout {
+                    alignment: start;
+
+                    Text {
+                        text: root.combined-text == "" ? "En \u{e9}coute\u{2026}" : root.combined-text;
+                        font-size: 19px;
+                        color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
+                        wrap: word-wrap;
+                    }
                 }
             }
         }

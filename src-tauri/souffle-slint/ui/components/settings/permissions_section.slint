@@ -1,5 +1,6 @@
 import { Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { Theme } from "../../theme.slint";
 
 // Port of PermissionsSettingsSection.svelte. The Svelte button opens an
 // in-app repair flow that lives in the onboarding surface (SOU-190, not
@@ -15,7 +16,7 @@ export component PermissionsSection inherits VerticalLayout {
         text: "Permissions";
         font-size: 13.5px;
         font-weight: 700;
-        color: white;
+        color: Theme.text-primary;
     }
 
     SettingsField {

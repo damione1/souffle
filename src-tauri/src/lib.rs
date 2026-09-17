@@ -23,6 +23,7 @@ pub mod frontmost;
 pub mod lid;
 pub mod lock_ext;
 pub mod logging;
+mod main_thread;
 pub mod models;
 mod modifier_shortcut;
 pub mod native;

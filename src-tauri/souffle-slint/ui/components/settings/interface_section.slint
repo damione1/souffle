@@ -1,5 +1,8 @@
-import { Switch, ComboBox, SpinBox, Button } from "std-widgets.slint";
+import { ComboBox, SpinBox } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 
 // Captures the next key press as a shortcut accelerator. Slint's `KeyEvent`
 // only hands over a produced character (or one of i-slint-common's
@@ -24,13 +27,13 @@ export component ShortcutRecorderButton inherits FocusScope {
 
     Rectangle {
         border-width: 1px;
-        border-color: root.recording ? #5b9dfa : #3a3a3a;
+        border-color: root.recording ? Theme.accent : Theme.surface-4;
         border-radius: 6px;
-        background: #262626;
+        background: Theme.surface-2;
 
         Text {
             text: root.recording ? "Appuyez sur une touche…" : (root.shortcut-label == "" ? "Non défini" : root.shortcut-label);
-            color: root.recording ? #5b9dfa : white;
+            color: root.recording ? Theme.accent : Theme.text-primary;
             font-size: 12px;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -128,7 +131,7 @@ export component InterfaceSection inherits VerticalLayout {
         text: "Interface";
         font-size: 13.5px;
         font-weight: 700;
-        color: white;
+        color: Theme.text-primary;
     }
 
     SettingsField {
@@ -148,22 +151,19 @@ export component InterfaceSection inherits VerticalLayout {
         HorizontalLayout {
             spacing: 4px;
 
-            Button {
+            ThemedButton {
                 text: "Sombre";
-                checkable: true;
-                checked: root.theme == "dark";
+                kind: root.theme == "dark" ? ThemedButtonKind.active : ThemedButtonKind.default;
                 clicked => { root.theme-changed("dark"); }
             }
-            Button {
+            ThemedButton {
                 text: "Clair";
-                checkable: true;
-                checked: root.theme == "light";
+                kind: root.theme == "light" ? ThemedButtonKind.active : ThemedButtonKind.default;
                 clicked => { root.theme-changed("light"); }
             }
-            Button {
+            ThemedButton {
                 text: "Système";
-                checkable: true;
-                checked: root.theme == "system";
+                kind: root.theme == "system" ? ThemedButtonKind.active : ThemedButtonKind.default;
                 clicked => { root.theme-changed("system"); }
             }
         }
@@ -173,9 +173,9 @@ export component InterfaceSection inherits VerticalLayout {
         label: "Collage automatique";
         description: "Coller automatiquement le texte transcrit dans l'application active.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.auto-paste;
-            toggled => { root.auto-paste-changed(self.checked); }
+            toggled(new) => { root.auto-paste-changed(new); }
         }
     }
 
@@ -236,17 +236,17 @@ export component InterfaceSection inherits VerticalLayout {
         label: "Masquer la pastille";
         description: "Ne pas afficher la pastille flottante pendant l'enregistrement.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.pill-hidden;
-            toggled => { root.pill-hidden-changed(self.checked); }
+            toggled(new) => { root.pill-hidden-changed(new); }
         }
     }
 
     if root.native-tap-warning-visible: Rectangle {
         border-width: 1px;
-        border-color: #a06a1a;
+        border-color: Theme.warning;
         border-radius: 6px;
-        background: #3a2c14;
+        background: Theme.surface-2;
 
         HorizontalLayout {
             padding: 10px;
@@ -255,13 +255,13 @@ export component InterfaceSection inherits VerticalLayout {
 
             Text {
                 text: "Ce raccourci nécessite la permission Accessibilité, qui n'est pas accordée.";
-                color: #f0c674;
+                color: Theme.warning;
                 font-size: 11.5px;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
 
-            Button {
+            ThemedButton {
                 text: "Vérifier les permissions";
                 clicked => { root.permissions-review-requested(); }
             }
@@ -270,16 +270,16 @@ export component InterfaceSection inherits VerticalLayout {
 
     if root.shortcut-error != "": Rectangle {
         border-width: 1px;
-        border-color: #a02a2a;
+        border-color: Theme.danger;
         border-radius: 6px;
-        background: #3a1414;
+        background: Theme.surface-2;
 
         VerticalLayout {
             padding: 10px;
 
             Text {
                 text: root.shortcut-error;
-                color: #f08080;
+                color: Theme.danger;
                 font-size: 11.5px;
                 wrap: word-wrap;
             }

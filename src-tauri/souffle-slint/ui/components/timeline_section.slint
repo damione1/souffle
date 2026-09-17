@@ -1,6 +1,7 @@
 import { TimelineEntry, TimelineItemRow } from "timeline_item.slint";
 import { EmptyState } from "empty_state.slint";
 import { TimelineKind } from "../types.slint";
+import { Theme } from "../theme.slint";
 
 export struct TimelineDayGroup {
     day-label: string,
@@ -39,7 +40,7 @@ export component TimelineSection inherits VerticalLayout {
             Text {
                 text: group.day-label;
                 font-size: 11px;
-                color: #888888;
+                color: Theme.text-muted;
             }
 
             for entry in group.entries: TimelineItemRow {

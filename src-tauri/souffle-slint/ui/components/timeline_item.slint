@@ -1,4 +1,5 @@
 import { TimelineKind } from "../types.slint";
+import { Theme } from "../theme.slint";
 
 // Port of features/timeline/components/TimelineItem.svelte. Struct name
 // avoids "TimelineItem" itself: Slint generates a Rust type of the same
@@ -47,24 +48,25 @@ export component TimelineItemRow inherits Rectangle {
                     overflow: elide;
                     horizontal-stretch: 1;
                     vertical-alignment: center;
+                    color: Theme.text-primary;
                 }
 
                 if root.entry.has-summary: Text {
                     text: "\u{2605}";
-                    color: root.entry.summary-is-stale ? #cc8800 : #4a9eff;
+                    color: root.entry.summary-is-stale ? Theme.warning : Theme.accent;
                     vertical-alignment: center;
                 }
 
                 if root.entry.duration-label != "": Text {
                     text: root.entry.duration-label;
-                    color: #888888;
+                    color: Theme.text-muted;
                     font-family: "monospace";
                     vertical-alignment: center;
                 }
 
                 Text {
                     text: root.entry.time-label;
-                    color: #888888;
+                    color: Theme.text-muted;
                     font-family: "monospace";
                     vertical-alignment: center;
                 }
@@ -76,27 +78,43 @@ export component TimelineItemRow inherits Rectangle {
             }
         }
 
+        // Hover-reveal, not permanently visible - matches TimelineItem.svelte's
+        // `opacity-0 group-hover:opacity-100` (a bare `Trash2` icon behind a
+        // "confirm" text swap, not an always-on "Supprimer" label; found while
+        // comparing against the reference during SOU-195).
         if !root.is-live: Rectangle {
             width: 70px;
-            if !root.confirming-delete: TouchArea {
+            opacity: row-area.has-hover || delete-area.has-hover ? 1.0 : 0.0;
+            animate opacity { duration: 100ms; }
+
+            delete-area := TouchArea {
                 accessible-role: button;
-                accessible-label: "Supprimer";
-                accessible-action-default => { root.confirming-delete = true; }
-                clicked => { root.confirming-delete = true; }
-                Text {
-                    text: "Supprimer";
-                    color: #cc4444;
+                accessible-label: root.confirming-delete ? "Confirmer la suppression" : "Supprimer";
+                accessible-action-default => {
+                    if root.confirming-delete {
+                        root.confirming-delete = false;
+                        root.removed();
+                    } else {
+                        root.confirming-delete = true;
+                    }
+                }
+                clicked => {
+                    if root.confirming-delete {
+                        root.confirming-delete = false;
+                        root.removed();
+                    } else {
+                        root.confirming-delete = true;
+                    }
+                }
+
+                if !root.confirming-delete: Text {
+                    text: "\u{1F5D1}";
+                    color: Theme.text-muted;
                     horizontal-alignment: right;
                 }
-            }
-            if root.confirming-delete: TouchArea {
-                accessible-role: button;
-                accessible-label: "Confirmer la suppression";
-                accessible-action-default => { root.confirming-delete = false; root.removed(); }
-                clicked => { root.confirming-delete = false; root.removed(); }
-                Text {
+                if root.confirming-delete: Text {
                     text: "Confirmer";
-                    color: #cc4444;
+                    color: Theme.danger;
                     font-weight: 600;
                     horizontal-alignment: right;
                 }

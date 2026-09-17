@@ -1,5 +1,7 @@
-import { Switch, ComboBox, Button, ScrollView } from "std-widgets.slint";
+import { ComboBox, Button, ScrollView } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
 
 // Port of DiagnosticsSettingsSection.svelte. `log-tail` is refreshed by
 // main.rs on a timer while the Diagnostics tab is visible (same poll idea as
@@ -37,7 +39,7 @@ export component DiagnosticsSection inherits VerticalLayout {
         text: "Diagnostics";
         font-size: 13.5px;
         font-weight: 700;
-        color: white;
+        color: Theme.text-primary;
     }
 
     SettingsField {
@@ -55,9 +57,9 @@ export component DiagnosticsSection inherits VerticalLayout {
         label: "Journaux détaillés de transcription";
         description: "Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.";
 
-        Switch {
-            checked <=> root.debug-transcription;
-            toggled => { root.debug-transcription-changed(root.debug-transcription); }
+        ThemedSwitch {
+            checked: root.debug-transcription;
+            toggled(new) => { root.debug-transcription-changed(new); }
         }
     }
 
@@ -68,19 +70,19 @@ export component DiagnosticsSection inherits VerticalLayout {
             text: "Journal en direct";
             font-size: 13px;
             font-weight: 600;
-            color: white;
+            color: Theme.text-primary;
         }
         Text {
             text: "Fin du fichier journal actuel, actualisé toutes les quelques secondes.";
             font-size: 11.5px;
-            color: #999;
+            color: Theme.text-muted;
             wrap: word-wrap;
         }
 
         Rectangle {
             height: 140px;
             border-width: 1px;
-            border-color: #3a3a3a;
+            border-color: Theme.surface-4;
 
             ScrollView {
                 VerticalLayout {
@@ -91,7 +93,7 @@ export component DiagnosticsSection inherits VerticalLayout {
                         text: root.log-tail == "" ? "Aucune entrée de journal pour l'instant." : root.log-tail;
                         font-family: "monospace";
                         font-size: 10.5px;
-                        color: #cccccc;
+                        color: Theme.text-secondary;
                         wrap: word-wrap;
                     }
                 }

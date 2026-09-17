@@ -14,12 +14,15 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState } from "types.slint";
+import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase } from "types.slint";
+import { Theme } from "theme.slint";
+import { AppHeader } from "components/app_header.slint";
 
 export component MainWindow inherits Window {
     title: "Soufflé";
     preferred-width: 720px;
     preferred-height: 780px;
+    background: Theme.canvas;
 
     in property <string> dictation-shortcut;
     in property <bool> model-ready: true;
@@ -313,7 +316,7 @@ export component MainWindow inherits Window {
     in property <bool> onboarding-repair-cooldown;
     in property <[string]> onboarding-device-labels;
     in property <string> onboarding-selected-device-label;
-    in property <string> onboarding-model-phase;
+    in property <ModelPhase> onboarding-model-phase: ModelPhase.pick;
     in property <[string]> onboarding-model-labels;
     in property <string> onboarding-selected-model-label;
     in property <string> onboarding-download-progress-label;
@@ -363,7 +366,31 @@ export component MainWindow inherits Window {
     callback update-dismiss-requested();
     callback update-link-clicked(string);
 
+    // Header + content wrapped together so the gear icon (in `AppHeader`)
+    // stays visible and clickable while Settings is open, matching
+    // App.svelte's `<header>` staying mounted above `<HomeView>`/
+    // `<SettingsView>` alike (see `AppHeader`'s doc comment). Onboarding
+    // replaces this whole shell instead of living inside it - same as
+    // App.svelte's `{#if showOnboarding} <OnboardingView /> {:else} ...`.
+    if !root.onboarding-open: VerticalLayout {
+        AppHeader {
+            settings-open: root.settings-open;
+            model-ready: root.model-ready;
+            recording-mode: root.recording-mode;
+            settings-toggled => {
+                if root.settings-open {
+                    root.settings-open = false;
+                    root.settings-closed();
+                } else {
+                    root.settings-requested();
+                }
+            }
+        }
+
+        Rectangle {
     if root.recording-mode == RecordingMode.idle && root.active-meeting-id == "": IdleView {
+        width: 100%;
+        height: 100%;
         dictation-shortcut: root.dictation-shortcut;
         model-ready: root.model-ready;
         search-query <=> root.search-query;
@@ -382,10 +409,11 @@ export component MainWindow inherits Window {
         dismiss-meeting-status => { root.dismiss-meeting-status(); }
         timeline-item-opened(kind, id) => { root.timeline-item-opened(kind, id); }
         timeline-item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
-        settings-requested => { root.settings-requested(); }
     }
 
     if root.recording-mode == RecordingMode.idle && root.active-meeting-id != "": MeetingDetail {
+        width: 100%;
+        height: 100%;
         title: root.meeting-detail-title;
         meta-line: root.meeting-detail-meta;
         model-label: root.meeting-detail-model-label;
@@ -420,6 +448,8 @@ export component MainWindow inherits Window {
     }
 
     if root.recording-mode != RecordingMode.idle: RecordingView {
+        width: 100%;
+        height: 100%;
         mode: root.recording-mode;
         live-text: root.live-text;
         live-tentative: root.live-tentative;
@@ -621,6 +651,8 @@ export component MainWindow inherits Window {
         snippet-edit-requested(id) => { root.settings-snippet-edit-requested(id); }
         snippet-cancel-edit-requested => { root.settings-snippet-cancel-edit-requested(); }
         snippet-save-edit-requested(id, trigger, expansion) => { root.settings-snippet-save-edit-requested(id, trigger, expansion); }
+    }
+        }
     }
 
     // Drawn last of all: the first-run wizard takes over the whole window

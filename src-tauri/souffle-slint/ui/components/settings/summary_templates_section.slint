@@ -1,5 +1,6 @@
 import { ComboBox, LineEdit, TextEdit, Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { Theme } from "../../theme.slint";
 
 // Port of SummaryTemplatesSettingsSection.svelte. Which template is being
 // edited is tracked in Rust (`summary_templates_state` in main.rs), not as
@@ -28,12 +29,12 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         text: "Modèles de résumé";
         font-size: 13.5px;
         font-weight: 700;
-        color: white;
+        color: Theme.text-primary;
     }
     Text {
         text: "Le modèle par défaut est utilisé pour résumer automatiquement une réunion terminée.";
         font-size: 11.5px;
-        color: #999;
+        color: Theme.text-muted;
         wrap: word-wrap;
     }
 

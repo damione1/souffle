@@ -1,5 +1,7 @@
-import { Switch, ComboBox } from "std-widgets.slint";
+import { ComboBox } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
 
 // Port of AudioSettingsSection.svelte. The autostop/max-duration minute
 // lists and the clamshell device names are precomputed to `[string]` labels
@@ -52,7 +54,7 @@ export component AudioSection inherits VerticalLayout {
         text: "Audio";
         font-size: 13.5px;
         font-weight: 700;
-        color: white;
+        color: Theme.text-primary;
     }
 
     if root.is-laptop: SettingsField {
@@ -70,9 +72,9 @@ export component AudioSection inherits VerticalLayout {
         label: "Capturer l'audio système";
         description: "Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.capture-system-audio;
-            toggled => { root.capture-system-audio-changed(self.checked); }
+            toggled(new) => { root.capture-system-audio-changed(new); }
         }
     }
 
@@ -90,9 +92,9 @@ export component AudioSection inherits VerticalLayout {
         label: "Arrêt automatique des réunions";
         description: "Arrêter l'enregistrement quand plus personne ne parle depuis longtemps.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.meeting-autostop-enabled;
-            toggled => { root.meeting-autostop-enabled-changed(self.checked); }
+            toggled(new) => { root.meeting-autostop-enabled-changed(new); }
         }
     }
 
@@ -120,9 +122,9 @@ export component AudioSection inherits VerticalLayout {
         label: "Détection de voix (VAD)";
         description: "Ignorer les silences pour une transcription plus rapide et plus propre.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.vad-enabled;
-            toggled => { root.vad-enabled-changed(self.checked); }
+            toggled(new) => { root.vad-enabled-changed(new); }
         }
     }
 
@@ -130,9 +132,9 @@ export component AudioSection inherits VerticalLayout {
         label: "Suppression des hésitations";
         description: "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.filler-removal;
-            toggled => { root.filler-removal-changed(self.checked); }
+            toggled(new) => { root.filler-removal-changed(new); }
         }
     }
 
@@ -140,9 +142,9 @@ export component AudioSection inherits VerticalLayout {
         label: "Réduction des bégaiements";
         description: "Fusionner les répétitions et faux départs.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.stutter-collapse;
-            toggled => { root.stutter-collapse-changed(self.checked); }
+            toggled(new) => { root.stutter-collapse-changed(new); }
         }
     }
 
@@ -150,9 +152,9 @@ export component AudioSection inherits VerticalLayout {
         label: "Correction par dictionnaire";
         description: "Appliquer automatiquement les corrections du dictionnaire personnel.";
 
-        Switch {
+        ThemedSwitch {
             checked: root.dictionary-correction;
-            toggled => { root.dictionary-correction-changed(self.checked); }
+            toggled(new) => { root.dictionary-correction-changed(new); }
         }
     }
 }

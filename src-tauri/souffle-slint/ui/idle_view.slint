@@ -1,4 +1,4 @@
-import { LineEdit, Button } from "std-widgets.slint";
+import { LineEdit } from "std-widgets.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { TimelineSection, TimelineDayGroup } from "components/timeline_section.slint";
@@ -27,19 +27,17 @@ export component IdleView inherits VerticalLayout {
     callback dismiss-meeting-status();
     callback timeline-item-opened(TimelineKind, string);
     callback timeline-item-removed(TimelineKind, string);
-    callback settings-requested();
 
-    padding: 24px;
-    spacing: 18px;
-
-    HorizontalLayout {
-        alignment: end;
-
-        Button {
-            text: "⚙ Paramètres";
-            clicked => { root.settings-requested(); }
-        }
-    }
+    // No settings button here: `AppHeader` (mounted once in
+    // `main_window.slint`, above every view) owns that control now - this
+    // view used to draw its own, which both duplicated it and didn't match
+    // the reference (an icon-only gear in the header, not a text button
+    // in the page body).
+    padding-left: 26px;
+    padding-right: 26px;
+    padding-top: 26px;
+    padding-bottom: 34px;
+    spacing: 26px;
 
     if root.transcription-status-message != "": StatusBanner {
         message: root.transcription-status-message;

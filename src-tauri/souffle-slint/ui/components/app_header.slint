@@ -1,0 +1,111 @@
+import { Theme } from "../theme.slint";
+import { RecordingMode } from "../types.slint";
+
+// Port of App.svelte's `<header>` - persistent across every view except
+// Onboarding (which replaces the whole app shell, header included). Tauri
+// draws this same bar over Home *and* Settings so the gear icon can close
+// Settings by toggling the same control that opened it; `main_window.slint`
+// keeps this component mounted once instead of duplicating a "Paramètres"
+// button per view (SOU-195: that duplication, plus Settings' own invented
+// "Terminé" button, were both drift from the reference).
+//
+// `data-tauri-drag-region`'s window-drag behavior has no Slint equivalent
+// wired up yet (that's a native-window-chrome change, out of scope for a
+// pure styling pass) - this bar looks the part but isn't itself draggable.
+export component AppHeader inherits Rectangle {
+    in property <bool> settings-open: false;
+    in property <bool> model-ready: true;
+    in property <RecordingMode> recording-mode: RecordingMode.idle;
+
+    callback settings-toggled();
+
+    // Port of App.svelte's `<StatusChip>` slot - simplified to what's
+    // already wired elsewhere (`model-ready`, `recording-mode`) rather than
+    // the reference's fuller "STT 1B FR/EN" label, which needs new status
+    // formatting this pass doesn't add (see SOU-195's open questions).
+    property <string> status-label: root.recording-mode != RecordingMode.idle ? "Enregistrement"
+        : root.model-ready ? "Pr\u{ea}t" : "Mod\u{e8}le non t\u{e9}l\u{e9}charg\u{e9}";
+    property <color> status-color: root.recording-mode != RecordingMode.idle ? Theme.danger
+        : root.model-ready ? Theme.success : Theme.warning;
+
+    height: 52px;
+    background: Theme.canvas;
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.rule;
+    }
+
+    HorizontalLayout {
+        padding-left: 26px;
+        padding-right: 16px;
+        spacing: 9px;
+        alignment: start;
+
+        Image {
+            source: @image-url("../assets/icon.png");
+            width: 25px;
+            height: 25px;
+        }
+
+        Text {
+            text: "Soufflé";
+            font-size: 14.5px;
+            font-weight: 600;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        Rectangle {
+            height: 24px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: root.status-color;
+
+            HorizontalLayout {
+                padding-left: 9px;
+                padding-right: 9px;
+                spacing: 6px;
+                alignment: center;
+
+                Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: root.status-color;
+                }
+                Text {
+                    text: root.status-label;
+                    font-size: 11.5px;
+                    color: root.status-color;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        settings-area := TouchArea {
+            width: 32px;
+            height: 32px;
+            accessible-role: button;
+            accessible-label: "Réglages";
+            accessible-action-default => { root.settings-toggled(); }
+            clicked => { root.settings-toggled(); }
+
+            Rectangle {
+                border-radius: 6px;
+                background: root.settings-open || settings-area.has-hover ? Theme.surface-2 : transparent;
+
+                Text {
+                    text: "\u{2699}";
+                    font-size: 16px;
+                    color: root.settings-open || settings-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

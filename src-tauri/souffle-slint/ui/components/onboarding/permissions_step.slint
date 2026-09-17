@@ -1,4 +1,5 @@
-import { Button } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedButton } from "../themed_button.slint";
 
 // Port of PermissionsStep.svelte. Each row's status comes from a real,
 // repeatedly-polled `get_permission_status()` snapshot (main.rs polls every
@@ -33,7 +34,7 @@ export component PermissionsStep inherits VerticalLayout {
 
         Rectangle {
             height: 1px;
-            background: #3a3a3a;
+            background: Theme.rule;
         }
 
         HorizontalLayout {
@@ -49,31 +50,31 @@ export component PermissionsStep inherits VerticalLayout {
                     text: row.label;
                     font-size: 12.5px;
                     font-weight: 600;
-                    color: white;
+                    color: Theme.text-primary;
                 }
                 Text {
                     text: row.description;
                     font-size: 11px;
-                    color: #999;
+                    color: Theme.text-muted;
                     wrap: word-wrap;
                 }
             }
 
             if row.state == "granted": Rectangle {
-                background: #1e3a24;
+                background: Theme.surface-2;
                 border-radius: 4px;
                 HorizontalLayout {
                     padding: 4px;
-                    Text { text: "✓ Accordé"; color: #6fcf7a; font-size: 11px; }
+                    Text { text: "✓ Accordé"; color: Theme.success; font-size: 11px; }
                 }
             }
             if row.state == "unsupported": Text {
                 text: "Non pris en charge";
-                color: #777;
+                color: Theme.text-faint;
                 font-size: 11px;
                 vertical-alignment: center;
             }
-            if row.state != "granted" && row.state != "unsupported": Button {
+            if row.state != "granted" && row.state != "unsupported": ThemedButton {
                 text: row.busy ? "Vérification…" : row.action-label;
                 enabled: !row.busy;
                 clicked => { root.grant-requested(row.kind); }
@@ -87,11 +88,11 @@ export component PermissionsStep inherits VerticalLayout {
             Text {
                 text: row.hint;
                 font-size: 10.5px;
-                color: #999;
+                color: Theme.text-muted;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
-            if row.hint-action-label != "": Button {
+            if row.hint-action-label != "": ThemedButton {
                 text: row.hint-action-label;
                 clicked => { root.hint-action-requested(row.kind); }
             }
@@ -100,7 +101,7 @@ export component PermissionsStep inherits VerticalLayout {
 
     Rectangle {
         height: 1px;
-        background: #3a3a3a;
+        background: Theme.rule;
     }
 
     HorizontalLayout {
@@ -113,11 +114,11 @@ export component PermissionsStep inherits VerticalLayout {
                 ? "Réparation effectuée, en attente de confirmation macOS."
                 : "Un problème persiste ? Réparez l'entrée Accessibilité.";
             font-size: 10.5px;
-            color: #999;
+            color: Theme.text-muted;
             wrap: word-wrap;
             horizontal-stretch: 1;
         }
-        Button {
+        ThemedButton {
             text: root.repair-busy ? "Vérification…" : "Réparer";
             enabled: !root.repair-busy && !root.repair-cooldown;
             clicked => { root.repair-requested(); }
@@ -126,7 +127,7 @@ export component PermissionsStep inherits VerticalLayout {
 
     if root.error-message != "": Text {
         text: root.error-message;
-        color: #f08080;
+        color: Theme.danger;
         font-size: 11px;
     }
 }

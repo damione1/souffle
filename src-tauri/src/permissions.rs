@@ -179,29 +179,9 @@ fn system_audio_supported() -> bool {
 /// Launch Services must point at *this* binary, and System Settings must
 /// not open before TCC has committed the new row.
 #[cfg(target_os = "macos")]
-fn on_main<R: Send>(f: impl FnOnce() -> R + Send) -> R {
-    on_main_with(is_main_thread(), f)
-}
-
-#[cfg(target_os = "macos")]
-fn on_main_with<R: Send>(already_main: bool, f: impl FnOnce() -> R + Send) -> R {
-    if already_main {
-        return f();
-    }
-    let (tx, rx) = std::sync::mpsc::sync_channel(1);
-    dispatch2::DispatchQueue::main().exec_sync(move || {
-        let _ = tx.send(f());
-    });
-    rx.recv().expect("main queue dropped a TCC hop")
-}
-
-#[cfg(target_os = "macos")]
-fn is_main_thread() -> bool {
-    unsafe extern "C" {
-        fn pthread_main_np() -> i32;
-    }
-    unsafe { pthread_main_np() != 0 }
-}
+use crate::main_thread::on_main;
+#[cfg(all(target_os = "macos", test))]
+use crate::main_thread::on_main_with;
 
 /// Walk `.../Name.app/Contents/MacOS/<exe>` up to the `.app` bundle.
 /// A bare debug binary (`target/debug/souffle`) has no bundle to register.

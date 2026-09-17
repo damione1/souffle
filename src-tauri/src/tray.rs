@@ -370,6 +370,11 @@ fn handle_menu_event(state: &Arc<AppState>, id: &str) {
 /// database. The state-machine transition back to Idle fires before that
 /// write happens, so relying on it alone would leave the item disabled until
 /// some unrelated later sync.
+/// `TrayHandles`'s AppKit objects are main-thread-only; the caller isn't
+/// always on it (model download/load run in background threads), so the
+/// actual work hops via `main_thread::on_main`. Safe from a `cargo test`
+/// binary too: `TRAY` is only populated by the real bootstrapped app, so
+/// the early return below fires before the hop ever would.
 pub fn sync(state: &AppState, machine: &AppStateMachine) {
     let Some(handles) = TRAY.get() else {
         return;
@@ -378,46 +383,47 @@ pub fn sync(state: &AppState, machine: &AppStateMachine) {
 
     let dictating = matches!(machine, AppStateMachine::RecordingDictation { .. });
     let meeting = matches!(machine, AppStateMachine::RecordingMeeting { .. });
-
-    let icon_result = if dictating || meeting {
-        handles.tray.set_icon(Some(recording_icon()))
-    } else {
-        handles.tray.set_icon(Some(idle_icon()))
-    };
-    if let Err(e) = icon_result {
-        warn!("Tray icon sync failed: {e}");
-    }
-    handles.tray.set_icon_as_template(!(dictating || meeting));
-
-    handles.dictation.set_text(label(
-        if dictating {
-            "stop_dictation"
-        } else {
-            "start_dictation"
-        },
-        fr,
-    ));
-    // A meeting owns the recording session; this item must not offer to
-    // start dictation on top of it (SOU-044).
-    handles.dictation.set_enabled(!meeting);
-    handles.meeting.set_text(label(
-        if meeting {
-            "stop_meeting"
-        } else {
-            "start_meeting"
-        },
-        fr,
-    ));
-    handles
-        .copy_last_transcription
-        .set_text(label("copy_last_transcription", fr));
-    handles
-        .copy_last_transcription
-        .set_enabled(has_dictation_history(state));
+    let has_history = has_dictation_history(state);
     let is_paused = state.ptt_is_paused();
-    handles
-        .pause_ptt
-        .set_text(label(if is_paused { "resume_ptt" } else { "pause_1h" }, fr));
+
+    crate::main_thread::on_main(move || {
+        let icon_result = if dictating || meeting {
+            handles.tray.set_icon(Some(recording_icon()))
+        } else {
+            handles.tray.set_icon(Some(idle_icon()))
+        };
+        if let Err(e) = icon_result {
+            warn!("Tray icon sync failed: {e}");
+        }
+        handles.tray.set_icon_as_template(!(dictating || meeting));
+
+        handles.dictation.set_text(label(
+            if dictating {
+                "stop_dictation"
+            } else {
+                "start_dictation"
+            },
+            fr,
+        ));
+        // A meeting owns the recording session; this item must not offer to
+        // start dictation on top of it (SOU-044).
+        handles.dictation.set_enabled(!meeting);
+        handles.meeting.set_text(label(
+            if meeting {
+                "stop_meeting"
+            } else {
+                "start_meeting"
+            },
+            fr,
+        ));
+        handles
+            .copy_last_transcription
+            .set_text(label("copy_last_transcription", fr));
+        handles.copy_last_transcription.set_enabled(has_history);
+        handles
+            .pause_ptt
+            .set_text(label(if is_paused { "resume_ptt" } else { "pause_1h" }, fr));
+    });
 }
 
 #[cfg(test)]

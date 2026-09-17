@@ -1,0 +1,34 @@
+// Color tokens ported from `src/app.css`'s dark theme (the app's default).
+// Light theme + the actual dark/light toggle are still open (SOU-187 AC4) -
+// this only fixes color parity for the current single (dark) theme, which
+// is the more visible gap: every .slint view was styled with ad hoc grays
+// instead of these tokens.
+export global Theme {
+    out property <color> canvas: #16110c;
+    out property <color> surface-1: #1e1811;
+    out property <color> surface-2: #261e15;
+    out property <color> surface-3: #33291d;
+    out property <color> surface-4: #423525;
+    out property <color> input: #150f09;
+
+    out property <color> accent: #e9ae55;
+    out property <color> accent-hover: #f2be6e;
+    out property <color> secondary: #d98c6a;
+
+    out property <color> text-primary: #f1e9dd;
+    out property <color> text-secondary: #e6dccb;
+    out property <color> text-tertiary: #c2b39a;
+    out property <color> text-muted: #b3a284;
+    out property <color> text-faint: #9c8c70;
+
+    out property <color> success: #e9ae55;
+    out property <color> warning: #e0a458;
+    out property <color> danger: #f2685a;
+    out property <color> danger-soft: #f28a78;
+    out property <color> danger-strong: #8a5148;
+    out property <color> on-danger: #2a0e09;
+
+    out property <color> ghost-border: rgba(235, 210, 170, 0.42);
+    out property <color> border-soft: rgba(235, 210, 170, 0.16);
+    out property <color> rule: rgba(235, 210, 170, 0.22);
+}
