@@ -252,11 +252,10 @@ export component SettingsView inherits Rectangle {
             }
             done-label := Text {
                 x: 32px;
-                height: parent.height;
+                y: (parent.height - self.height) / 2;
                 text: "Terminé";
                 font-size: 13px;
                 color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
-                vertical-alignment: center;
             }
             done-area := TouchArea {
                 clicked => { root.close-requested(); }
@@ -265,8 +264,8 @@ export component SettingsView inherits Rectangle {
 
         Text {
             text: "Paramètres";
-            font-size: 23px;
-            font-family: "Archivo Bold";
+            font-size: 20px;
+            font-weight: 700;
             color: Theme.text-primary;
             vertical-stretch: 0;
         }

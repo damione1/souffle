@@ -171,6 +171,9 @@ export component MicrophoneSection inherits VerticalLayout {
                             text: row.name;
                             font-size: 12.5px;
                             color: Theme.text-primary;
+                            overflow: elide;
+                            wrap: no-wrap;
+                            horizontal-stretch: 1;
                         }
                         Text {
                             text: "[" + row.transport-label + "]";
@@ -188,7 +191,7 @@ export component MicrophoneSection inherits VerticalLayout {
                     if !row.connected && row.last-seen-label != "": Text {
                         text: row.last-seen-label;
                         font-size: 10.5px;
-                        color: Theme.text-faint;
+                        color: Theme.text-muted;
                     }
                 }
 

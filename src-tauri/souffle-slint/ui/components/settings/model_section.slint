@@ -38,12 +38,17 @@ export component ModelSection inherits VerticalLayout {
             spacing: 6px;
             alignment: center;
             horizontal-stretch: 0;
-            Rectangle {
-                width: 7px;
-                height: 7px;
-                border-radius: 3.5px;
-                background: root.status-text == "Prêt" ? Theme.accent : Theme.warning;
+            HorizontalLayout {
+                spacing: 0;
                 vertical-stretch: 0;
+                alignment: center;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: root.status-text == "Prêt" ? Theme.accent : Theme.warning;
+                    y: (parent.height - self.height) / 2;
+                }
             }
             Text {
                 text: root.status-text;
