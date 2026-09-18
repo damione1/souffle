@@ -140,34 +140,25 @@ pub fn discard_system_audio_status() {
     store_system_audio_status(None);
 }
 
-/// Tell the frontend whether the system-audio leg of a meeting is live, and
-/// remember it for a webview that reloads afterwards. Every path that gives
+/// Record whether the system-audio leg of a meeting is live, for a UI that
+/// queries after the fact (`get_system_audio_status`). Every path that gives
 /// up on system audio goes through here, including the ones that decide it
 /// before the capture thread is even asked to start (SOU-119).
 pub fn emit_system_audio_status(
-    app: Option<&tauri::AppHandle>,
     active: bool,
     reason_code: Option<crate::app_events::SystemAudioReason>,
     reason: Option<String>,
 ) {
-    use tauri_specta::Event;
-    let status = {
-        let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() else {
-            return;
-        };
-        let status = crate::app_events::SystemAudioStatus {
-            active,
-            reason,
-            reason_code,
-            samples: SYSTEM_AUDIO_SAMPLES.load(Ordering::Relaxed),
-            signal_samples: SYSTEM_AUDIO_SIGNAL.load(Ordering::Relaxed),
-        };
-        *guard = Some(status.clone());
-        status
+    let Ok(mut guard) = SYSTEM_AUDIO_STATUS.lock() else {
+        return;
     };
-    if let Some(app) = app {
-        let _ = status.emit(app);
-    }
+    *guard = Some(crate::app_events::SystemAudioStatus {
+        active,
+        reason,
+        reason_code,
+        samples: SYSTEM_AUDIO_SAMPLES.load(Ordering::Relaxed),
+        signal_samples: SYSTEM_AUDIO_SIGNAL.load(Ordering::Relaxed),
+    });
 }
 
 /// Test-only access to the process-wide session statics above. Every test
@@ -1403,7 +1394,7 @@ mod system_audio_status_tests {
         let _guard = LOCK.lock().unwrap();
         reset();
 
-        emit_system_audio_status(None, true, None, None);
+        emit_system_audio_status(true, None, None);
         let stored = system_audio_status().unwrap();
         assert_eq!((stored.samples, stored.signal_samples), (0, 0));
 
@@ -1419,7 +1410,7 @@ mod system_audio_status_tests {
         let _guard = LOCK.lock().unwrap();
         reset();
 
-        emit_system_audio_status(None, true, None, None);
+        emit_system_audio_status(true, None, None);
         set_counts(48_000 * 3_600, 0);
 
         let audio = session_system_audio().expect("verdict must exist");
@@ -1435,7 +1426,7 @@ mod system_audio_status_tests {
         let _guard = LOCK.lock().unwrap();
         reset();
 
-        emit_system_audio_status(None, true, None, None);
+        emit_system_audio_status(true, None, None);
 
         let audio = session_system_audio().expect("verdict must exist");
         assert_eq!(audio.samples, 0);
@@ -1449,7 +1440,7 @@ mod system_audio_status_tests {
         let _guard = LOCK.lock().unwrap();
         reset();
 
-        emit_system_audio_status(None, true, None, None);
+        emit_system_audio_status(true, None, None);
         set_counts(96_000, 96_000);
 
         let audio = session_system_audio().expect("verdict must exist");
@@ -1465,7 +1456,6 @@ mod system_audio_status_tests {
         reset();
 
         emit_system_audio_status(
-            None,
             false,
             Some(SystemAudioReason::TapLost),
             Some("aggregate device vanished".into()),
@@ -1530,9 +1520,9 @@ mod system_audio_status_tests {
         reset();
 
         begin_system_audio_session(7);
-        emit_system_audio_status(None, false, Some(SystemAudioReason::Disabled), None);
+        emit_system_audio_status(false, Some(SystemAudioReason::Disabled), None);
         begin_system_audio_session(8);
-        emit_system_audio_status(None, true, None, None);
+        emit_system_audio_status(true, None, None);
 
         clear_system_audio_status_if_current_session(7);
         let stored = system_audio_status().expect("session 8 snapshot must survive");
@@ -1550,7 +1540,7 @@ mod system_audio_status_tests {
         reset();
 
         begin_system_audio_session(7);
-        emit_system_audio_status(None, false, Some(SystemAudioReason::Disabled), None);
+        emit_system_audio_status(false, Some(SystemAudioReason::Disabled), None);
         assert!(system_audio_status().is_some());
 
         begin_system_audio_session(8);
@@ -1645,7 +1635,7 @@ impl MeetingState {
     /// Bluetooth), and muted versus audible. Far-end silence is not a
     /// route change — the mixer keeps the instance and bypasses output.
     #[cfg(target_os = "macos")]
-    fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {
+    fn check_output_route(&mut self) {
         use super::{aec, mixer, output_route};
 
         // HAL route only (speakers vs headphones / mute / volume). Tap
@@ -1667,7 +1657,7 @@ impl MeetingState {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn check_output_route(&mut self, _app: Option<&tauri::AppHandle>) {}
+    fn check_output_route(&mut self) {}
 }
 
 #[derive(Debug, Clone)]
@@ -1823,8 +1813,6 @@ pub struct AudioCapture {
     /// a mic rebuild mid-session must keep recording to the same file —
     /// only a genuinely new `session_id` (or no `record_path`) replaces it.
     recorder: Option<MeetingRecorder>,
-    /// For emitting SystemAudioStatus events (set during app setup).
-    app: Option<tauri::AppHandle>,
     /// Parameters of the running session, kept for mid-session rebuilds.
     active_params: Option<StartParams>,
     /// Name of the input device the current stream was built on.
@@ -1920,7 +1908,6 @@ impl AudioCapture {
                     retired_tap_samples: 0,
                     retired_tap_signal: 0,
                     recorder: None,
-                    app: None,
                     active_params: None,
                     mic_device_name: None,
                     mic_device_uid: None,
@@ -2065,9 +2052,6 @@ impl AudioCapture {
                             if capture.refresh_input_route() {
                                 break;
                             }
-                        }
-                        AudioCommand::AttachApp(app) => {
-                            capture.app = Some(app);
                         }
                         AudioCommand::RefreshInputRoute => {
                             if capture.refresh_input_route() {
@@ -2677,7 +2661,7 @@ impl AudioCapture {
         #[cfg(target_os = "macos")]
         let (tap, tap_rate, tap_cons) = if let Some(tap) = pre_spawned_tap {
             let rate = tap.sample_rate;
-            emit_system_audio_status(self.app.as_ref(), true, None, None);
+            emit_system_audio_status(true, None, None);
             (Some(tap), rate, pre_spawned_tap_cons.unwrap())
         } else {
             let (tap_prod, tap_cons) =
@@ -2685,17 +2669,12 @@ impl AudioCapture {
             match super::system_tap::spawn_tap(tap_prod, Duration::from_secs(5)) {
                 Ok(tap) => {
                     let rate = tap.sample_rate;
-                    emit_system_audio_status(self.app.as_ref(), true, None, None);
+                    emit_system_audio_status(true, None, None);
                     (Some(tap), rate, tap_cons)
                 }
                 Err(e) => {
                     warn!("System audio capture unavailable, recording mic only: {e}");
-                    emit_system_audio_status(
-                        self.app.as_ref(),
-                        false,
-                        Some(mid_session_tap_reason(&e)),
-                        Some(e),
-                    );
+                    emit_system_audio_status(false, Some(mid_session_tap_reason(&e)), Some(e));
                     (None, super::mixer::MIX_RATE, tap_cons)
                 }
             }
@@ -2986,7 +2965,6 @@ impl AudioCapture {
             return;
         }
         emit_system_audio_status(
-            self.app.as_ref(),
             false,
             Some(crate::app_events::SystemAudioReason::StartFailed),
             Some(error.to_string()),
@@ -3034,7 +3012,7 @@ impl AudioCapture {
             };
             meeting.ticks += 1;
             if meeting.ticks.is_multiple_of(ROUTE_CHECK_TICKS) {
-                meeting.check_output_route(self.app.as_ref());
+                meeting.check_output_route();
             }
             // Session totals: this mixer's tallies on top of the ones any
             // mixer retired mid-session left behind (SOU-119).
@@ -3084,38 +3062,23 @@ impl AudioCapture {
         self.emit_audio_level(level);
     }
 
-    /// Emit an AudioLevel event unconditionally (bypassing the throttle) —
-    /// used for the final zero-level emit when a session ends, so the
-    /// waveform decays instead of freezing on its last value.
+    /// Push the level unconditionally (bypassing the throttle) — used for the
+    /// final zero-level emit when a session ends, so the waveform decays
+    /// instead of freezing on its last value. Drives the native pill
+    /// waveform bars directly, no IPC round-trip.
     fn emit_audio_level(&self, level: f32) {
-        use tauri_specta::Event;
-        // Drive the native pill waveform bars directly (no IPC round-trip).
         crate::pill::push_rms(level);
-        if let Some(app) = &self.app {
-            let _ = crate::app_events::AudioLevel { level }.emit(app);
-        }
     }
 
-    /// Surface a non-fatal pipeline problem: the session keeps running.
-    /// Reuses the `Frame` scope (a transient, non-fatal problem the user
-    /// should see) rather than adding a dedicated warning scope — the
-    /// frontend only ever displays `message` and doesn't branch on `scope`.
+    /// Surface a non-fatal pipeline problem: the session keeps running. Logs
+    /// only — the Svelte-era in-app banner this used to also drive had no
+    /// Slint equivalent built for it (pre-existing gap, not introduced here).
     fn emit_pipeline_warning(&self, message: String) {
-        use tauri_specta::Event;
-        if let Some(app) = &self.app {
-            let _ = crate::app_events::PipelineError {
-                scope: crate::app_events::PipelineErrorScope::Frame,
-                message,
-            }
-            .emit(app);
-        }
+        warn!("Pipeline warning: {message}");
     }
 
     fn emit_pipeline_warning_cleared(&self, message: String) {
-        use tauri_specta::Event;
-        if let Some(app) = &self.app {
-            let _ = crate::app_events::PipelineErrorCleared { message }.emit(app);
-        }
+        info!("Pipeline warning cleared: {message}");
     }
 
     /// Update the shared RMS level (waveform) from one or two legs combined.

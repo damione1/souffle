@@ -11,7 +11,7 @@ use crate::engine::{
 /// A calendar attendee captured when a meeting is started from a calendar
 /// event. Persisted with the meeting and fed into the summary prompt so the
 /// model can attribute statements to real names.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MeetingParticipant {
     pub name: String,
     pub email: Option<String>,
@@ -23,7 +23,7 @@ pub struct MeetingParticipant {
 /// used to restate both shapes on its side.
 pub use souffle_schema::{StructuredActionItem, StructuredSummary};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MeetingRecordingSession {
     pub id: String,
     pub started_at: DateTime<Utc>,
@@ -56,7 +56,7 @@ impl MeetingRecordingSession {
 /// itself, `get_meeting_audio` derives this by listing the meeting's
 /// recordings directory. `session_index` matches the corresponding
 /// `MeetingRecordingSession`'s position in `recording_sessions`.
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MeetingAudioSession {
     pub session_index: usize,
     /// Absolute filesystem path; the frontend turns this into a playable URL
@@ -68,7 +68,7 @@ pub struct MeetingAudioSession {
 }
 
 /// Full meeting transcript stored as JSON
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MeetingTranscript {
     pub id: String,
     pub title: String,
@@ -99,7 +99,7 @@ pub struct MeetingTranscript {
 
 /// Calendar context passed by the frontend when starting a meeting from a
 /// calendar event.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingCalendarContext {
     pub event_id: String,
     pub participants: Vec<MeetingParticipant>,
@@ -243,7 +243,7 @@ pub fn resolve_legacy_recording_sessions(
 }
 
 /// Lightweight item for listing meetings
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingListItem {
     pub id: String,
     pub title: String,

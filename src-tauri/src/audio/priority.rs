@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::device::{AudioInputDevice, TransportType};
 
 /// A device remembered across disconnects for display and preference ordering.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct KnownDevice {
     pub uid: String,
     pub name: String,
@@ -14,9 +14,7 @@ pub struct KnownDevice {
 }
 
 /// User-declared input routing preferences (UID-based).
-#[derive(
-    Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, specta::Type,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct InputPriority {
     /// Preferred device UIDs, highest priority first.
     pub priorities: Vec<String>,

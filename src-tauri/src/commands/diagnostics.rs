@@ -1,4 +1,4 @@
-use tauri::State;
+use std::sync::Arc;
 
 use crate::diagnostics::{DiagnosticsBundle, collect_bundle, format_bundle_text, tail_log_file};
 use crate::settings::AppSettings;
@@ -6,8 +6,6 @@ use crate::state::AppState;
 use crate::update_check::UpdateCheckResult;
 
 /// Return the last N lines from the active rolling log file.
-#[tauri::command]
-#[specta::specta]
 pub fn get_log_tail(max_lines: u32) -> Result<String, String> {
     let lines = max_lines.clamp(1, 500) as usize;
     // Transcript lines are stripped and paths redacted here rather than in the
@@ -18,17 +16,13 @@ pub fn get_log_tail(max_lines: u32) -> Result<String, String> {
 }
 
 /// Paths and runtime snapshot for the copy-diagnostics action.
-#[tauri::command]
-#[specta::specta]
-pub fn get_diagnostics_bundle(state: State<'_, AppState>) -> Result<DiagnosticsBundle, String> {
+pub fn get_diagnostics_bundle(state: Arc<AppState>) -> Result<DiagnosticsBundle, String> {
     let settings = AppSettings::load(&state.db)?;
     Ok(collect_bundle(&state, &settings))
 }
 
 /// Full diagnostics text (bundle + recent log tail) for clipboard copy.
-#[tauri::command]
-#[specta::specta]
-pub fn get_diagnostics_text(state: State<'_, AppState>) -> Result<String, String> {
+pub fn get_diagnostics_text(state: Arc<AppState>) -> Result<String, String> {
     let settings = AppSettings::load(&state.db)?;
     let bundle = collect_bundle(&state, &settings);
     let log_tail = tail_log_file(200).unwrap_or_else(|e| format!("(log tail unavailable: {e})"));
@@ -36,15 +30,13 @@ pub fn get_diagnostics_text(state: State<'_, AppState>) -> Result<String, String
 }
 
 /// Version metadata reported to the frontend during application bootstrap.
-#[derive(serde::Serialize, specta::Type)]
+#[derive(serde::Serialize)]
 pub struct AppVersion {
     pub version: String,
     pub is_local_build: bool,
 }
 
 /// Return the running binary's version and whether it is an unstamped local build.
-#[tauri::command]
-#[specta::specta]
 pub fn get_app_version() -> AppVersion {
     AppVersion {
         version: crate::update_check::current_version(),
@@ -54,20 +46,16 @@ pub fn get_app_version() -> AppVersion {
 
 /// Check GitHub releases for a newer version. Network errors are returned in
 /// the result payload so the UI can show a soft failure.
-#[tauri::command]
-#[specta::specta]
 pub async fn check_for_updates() -> Result<UpdateCheckResult, String> {
-    tauri::async_runtime::spawn_blocking(crate::update_check::check_for_updates)
+    crate::async_runtime::spawn_blocking(crate::update_check::check_for_updates)
         .await
         .map_err(|e| format!("Update check task failed: {e}"))
 }
 
 /// Release notes for a specific installed version tag (What's New). Returns
 /// `None` when the tag is missing or the network request fails.
-#[tauri::command]
-#[specta::specta]
 pub async fn get_release_notes_for_version(version: String) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::async_runtime::spawn_blocking(move || {
         crate::update_check::release_notes_for_version(&version)
     })
     .await
@@ -79,8 +67,6 @@ pub async fn get_release_notes_for_version(version: String) -> Result<Option<Str
 /// silently does nothing; this shells out to `open` instead. Restricted to
 /// `https://github.com/` URLs since it's only ever passed the release URL
 /// returned by `check_for_updates`.
-#[tauri::command]
-#[specta::specta]
 pub fn open_release_page(url: String) -> Result<(), String> {
     if !url.starts_with("https://github.com/") {
         return Err("Refusing to open a non-GitHub URL".into());

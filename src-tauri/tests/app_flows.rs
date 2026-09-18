@@ -1,39 +1,19 @@
 //! Smoke-level end-to-end tests for the two critical lifecycles: dictation
-//! round-trip and "meeting stop persists a meeting". Drives the real Tauri
-//! command functions from `souffle_lib::commands` against a
-//! `tauri::test::MockRuntime` app, with a `MockEngine` swapped in for the
-//! transcription engine (via the actor's injectable `EngineFactory`) and a
-//! temp-file SQLite database. No GPU, no real audio hardware, no webview —
-//! `tauri-driver` does not support macOS, so this exercises the command
-//! layer directly instead of driving a real window through WebDriver.
+//! round-trip and "meeting stop persists a meeting". Drives the real command
+//! functions from `souffle_lib::commands` against a plain `Arc<AppState>`,
+//! with a `MockEngine` swapped in for the transcription engine (via the
+//! actor's injectable `EngineFactory`) and a temp-file SQLite database. No
+//! GPU, no real audio hardware.
 //!
-//! ## Coverage note: why `stop_meeting_recording` isn't called directly
-//!
-//! `AppState::app_handle` is a concrete `tauri::AppHandle` — the
-//! `#[default_runtime(crate::Wry, wry)]` macro Tauri applies to `AppHandle`
-//! makes the bare (unparameterized) name mean `AppHandle<Wry>`, not generic
-//! over the runtime. A `MockRuntime`-backed app can never produce one (that
-//! would be a type error), so `state.app_handle` stays `None` for this whole
-//! suite — exactly what `AppState::apply_transition` already tolerates (its
-//! event-emission block is a no-op when `app_handle` is unset, clearly
-//! designed with this in mind).
-//!
-//! `start_meeting_recording`, `resume_meeting_recording`, `start_transcription`,
-//! `stop_transcription`, and every read-path command never touch
-//! `app_handle`, so those run as the literal, unmodified `#[tauri::command]`
-//! functions below. `stop_meeting_recording` is the one exception: it calls
-//! `state.app_handle()` to spawn a background finalize task that looks
-//! itself up again via `AppHandle::state()` and emits `MeetingFinalized` for
-//! the frontend. Building a real, window-backed `AppHandle<Wry>` needs the
-//! platform event loop on the main thread, which conflicts with the
-//! `cargo test` harness's threading model — the same class of fragility as
-//! the tauri-driver-on-macOS gap this test suite exists to work around. So
-//! `stop_meeting_and_persist` below drives the exact same primitives that
-//! background task uses (`EngineActorHandle::stop_session`,
-//! `MeetingAccumulator::into_transcript`, `Database::save_meeting`, the
-//! `StopRecording`/`StopComplete` transitions) directly, synchronously,
-//! instead of through the outer AppHandle-spawning wrapper. Everything
-//! except that background-task glue itself is exercised.
+//! SOU-191 note: before this ticket, `AppState` was managed inside a
+//! `tauri::test::MockRuntime` app because commands took `tauri::State`/
+//! `AppHandle`, and `stop_meeting_recording`'s background finalize task
+//! specifically could not be driven here — building a real, window-backed
+//! `AppHandle<Wry>` needs the platform event loop, which conflicts with the
+//! `cargo test` harness's threading model. Now that commands take
+//! `Arc<AppState>` directly (owned, 'static, no runtime container), that
+//! whole workaround is gone: `stop_meeting_recording` runs as the literal,
+//! unmodified command below, same as everything else in this suite.
 
 // `other => panic!("expected X, got {other:?}")` is the assertion itself here:
 // a new variant makes the test fail loudly with the state it actually saw,
@@ -42,13 +22,11 @@
 #![allow(clippy::wildcard_enum_match_arm)]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender};
-use tauri::Manager;
-use tauri::ipc::{Channel, InvokeResponseBody};
 use tempfile::TempDir;
 
 use souffle_lib::audio::{AudioChunk, AudioMessage};
@@ -60,6 +38,7 @@ use souffle_lib::engine::{
     TranscriptionEngine, TranscriptionSegment, default_transcription_profile,
 };
 use souffle_lib::pipeline::EngineActorHandle;
+use souffle_lib::progress::ProgressChannel;
 use souffle_lib::settings::AppSettings;
 use souffle_lib::state::{AppState, AudioCommand};
 use souffle_lib::state_machine::{AppStateMachine, StateAction};
@@ -68,11 +47,11 @@ use souffle_lib::state_machine::{AppStateMachine, StateAction};
 /// transcription backend, mirroring `pipeline::actor::tests::spawn_with_mock`.
 fn spawn_mock_actor(mock: MockEngine) -> (EngineActorHandle, Sender<AudioMessage>) {
     let (audio_tx, audio_rx) = crossbeam_channel::unbounded();
-    let cell = Mutex::new(Some(mock));
+    let cell = std::sync::Mutex::new(Some(mock));
     let actor = EngineActorHandle::spawn(
         audio_rx,
         Arc::new(std::sync::atomic::AtomicU64::new(0)),
-        Arc::new(Mutex::new(None)),
+        Arc::new(std::sync::Mutex::new(None)),
         Box::new(move |_profile| {
             cell.lock()
                 .unwrap()
@@ -113,9 +92,11 @@ fn bring_to_ready(state: &AppState, actor: &EngineActorHandle) {
 /// Test harness: everything needed to call commands end-to-end plus the
 /// pieces (audio channel, actor, db) needed to drive/inspect them directly.
 struct Harness {
-    app: tauri::App<tauri::test::MockRuntime>,
+    state: Arc<AppState>,
     db: Arc<Database>,
-    actor: Arc<EngineActorHandle>,
+    /// Kept alive via `state.engine_actor` (same `Arc`); nothing in this
+    /// test suite needs to touch it directly anymore now that
+    /// `stop_meeting_recording` runs unmodified (see the module doc).
     audio_msg_tx: Sender<AudioMessage>,
     /// Kept alive so `AppState::audio_cmd_sender.send(...)` never errors with
     /// "all receivers dropped" — nothing needs to read from it since there is
@@ -151,18 +132,17 @@ fn build_harness(mock: MockEngine) -> Harness {
     let (audio_cmd_tx, audio_cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
     let audio_rms = Arc::new(AtomicU32::new(0f32.to_bits()));
 
-    let app_state = AppState::new(audio_cmd_tx, Arc::clone(&actor), Arc::clone(&db), audio_rms);
-    bring_to_ready(&app_state, &actor);
-
-    let app = tauri::test::mock_builder()
-        .manage(app_state)
-        .build(tauri::test::mock_context(tauri::test::noop_assets()))
-        .expect("build mock tauri app");
+    let state = Arc::new(AppState::new(
+        audio_cmd_tx,
+        Arc::clone(&actor),
+        Arc::clone(&db),
+        audio_rms,
+    ));
+    bring_to_ready(&state, &actor);
 
     Harness {
-        app,
+        state,
         db,
-        actor,
         audio_msg_tx,
         audio_cmd_rx,
         _tmp: tmp,
@@ -180,52 +160,38 @@ fn audio_chunk(session_id: u64) -> AudioMessage {
     })
 }
 
-/// A `Channel` that deserializes every message as `TranscriptionSegment` and
-/// appends it to a shared `Vec`, so tests can assert on what streamed back.
-fn collecting_channel() -> (
-    Arc<Mutex<Vec<TranscriptionSegment>>>,
-    Channel<TranscriptionSegment>,
-) {
-    let collected: Arc<Mutex<Vec<TranscriptionSegment>>> = Arc::new(Mutex::new(Vec::new()));
-    let collected_ref = Arc::clone(&collected);
-    let channel = Channel::new(move |body| {
-        if let InvokeResponseBody::Json(json) = body
-            && let Ok(segment) = serde_json::from_str::<TranscriptionSegment>(&json)
-        {
-            collected_ref.lock().unwrap().push(segment);
+/// `stop_meeting_recording` is a decoupled stop: it returns once the state
+/// machine reaches `Stopping`, while the drain+save finishes on a background
+/// task. Tests that need the stop fully settled (machine back to `Ready`,
+/// the meeting row saved) poll for it instead of assuming it finished
+/// synchronously.
+async fn wait_until_ready(state: &AppState) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if matches!(
+            state.current_machine_state().unwrap(),
+            AppStateMachine::Ready { .. }
+        ) {
+            return;
         }
-        Ok(())
-    });
-    (collected, channel)
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("machine did not reach Ready within the deadline");
 }
 
-/// Stop an active meeting recording and persist it, driving the same
-/// primitives `commands::stop_meeting_recording`'s background task uses (see
-/// the module doc for why the command itself isn't called here).
-fn stop_meeting_and_persist(h: &Harness, state: &tauri::State<'_, AppState>) {
-    assert!(
-        state.current_machine_state().unwrap().is_recording(),
-        "expected an active recording session before stopping"
-    );
-    state
-        .apply_transition(StateAction::StopRecording)
-        .expect("StopRecording transition");
-
-    let _ = state.audio_cmd_sender.send(AudioCommand::Stop);
-    h.actor
-        .stop_session(Duration::from_secs(5))
-        .expect("actor stop_session");
-
-    if let Ok(mut guard) = state.meeting_accumulator.lock()
-        && let Some(meeting) = guard.take()
-    {
-        let transcript = meeting.into_transcript(chrono::Utc::now());
-        h.db.save_meeting(&transcript).expect("save meeting");
-    }
-
-    state
-        .apply_transition(StateAction::StopComplete)
-        .expect("StopComplete transition");
+/// A channel that appends every message to a shared `Vec`, so tests can
+/// assert on what streamed back.
+fn collecting_channel() -> (
+    Arc<std::sync::Mutex<Vec<TranscriptionSegment>>>,
+    ProgressChannel<TranscriptionSegment>,
+) {
+    let collected: Arc<std::sync::Mutex<Vec<TranscriptionSegment>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let collected_ref = Arc::clone(&collected);
+    let channel = ProgressChannel::new(move |segment| {
+        collected_ref.lock().unwrap().push(segment);
+    });
+    (collected, channel)
 }
 
 #[tokio::test]
@@ -243,11 +209,11 @@ async fn meeting_stop_persists_meeting() {
         1,
     );
     let h = build_harness(mock);
-    let state = h.app.state::<AppState>();
+    let state = Arc::clone(&h.state);
 
     let (collected, channel) = collecting_channel();
 
-    commands::start_meeting_recording(state.clone(), "Weekly Sync".to_string(), None, channel)
+    commands::start_meeting_recording(Arc::clone(&state), "Weekly Sync".to_string(), None, channel)
         .await
         .expect("start_meeting_recording");
 
@@ -268,14 +234,16 @@ async fn meeting_stop_persists_meeting() {
         .send(AudioMessage::EndOfStream { session_id })
         .unwrap();
 
-    stop_meeting_and_persist(&h, &state);
+    let returned_id = commands::stop_meeting_recording(Arc::clone(&state))
+        .await
+        .expect("stop_meeting_recording");
+    assert_eq!(returned_id, meeting_id);
 
-    assert!(matches!(
-        state.current_machine_state().unwrap(),
-        AppStateMachine::Ready { .. }
-    ));
+    // Decoupled stop: the background drain+save runs after the command
+    // returns.
+    wait_until_ready(&state).await;
 
-    // Segments streamed live to the frontend during the meeting.
+    // Segments streamed live during the meeting.
     let streamed = collected.lock().unwrap();
     assert!(
         streamed.iter().any(|s| s.text == "hello meeting"),
@@ -297,7 +265,7 @@ async fn meeting_stop_persists_meeting() {
         meeting.segments.iter().map(|s| &s.text).collect::<Vec<_>>()
     );
 
-    let list = commands::list_meetings(state.clone()).expect("list_meetings");
+    let list = commands::list_meetings(Arc::clone(&state)).expect("list_meetings");
     assert!(
         list.iter().any(|m| m.id == meeting_id),
         "expected the finalized meeting to show up in list_meetings"
@@ -319,11 +287,11 @@ async fn dictation_round_trip() {
         1,
     );
     let h = build_harness(mock);
-    let state = h.app.state::<AppState>();
+    let state = Arc::clone(&h.state);
 
     let (collected, channel) = collecting_channel();
 
-    commands::start_transcription(state.clone(), channel, false)
+    commands::start_transcription(Arc::clone(&state), channel, false)
         .await
         .expect("start_transcription");
 
@@ -337,9 +305,7 @@ async fn dictation_round_trip() {
         .send(AudioMessage::EndOfStream { session_id })
         .unwrap();
 
-    // `stop_transcription` never touches `AppState::app_handle`, so — unlike
-    // the meeting stop above — it runs as the real, unmodified command.
-    commands::stop_transcription(state.clone())
+    commands::stop_transcription(Arc::clone(&state))
         .await
         .expect("stop_transcription");
 
@@ -360,12 +326,13 @@ async fn dictation_round_trip() {
     );
     drop(streamed);
 
-    // Mirrors what the frontend does after a dictation session ends: save
-    // the assembled text to history.
-    commands::add_dictation_entry(state.clone(), full_text.clone()).expect("add_dictation_entry");
+    // Mirrors what the UI does after a dictation session ends: save the
+    // assembled text to history.
+    commands::add_dictation_entry(Arc::clone(&state), full_text.clone())
+        .expect("add_dictation_entry");
 
     let history =
-        commands::list_dictation_entries(state.clone(), None).expect("list_dictation_entries");
+        commands::list_dictation_entries(Arc::clone(&state), None).expect("list_dictation_entries");
     assert!(
         history.iter().any(|e| e.text == full_text),
         "expected the dictation entry to be saved to history, got: {:?}",
@@ -391,11 +358,11 @@ async fn stop_transcription_refuses_a_meeting_recording() {
         1,
     );
     let h = build_harness(mock);
-    let state = h.app.state::<AppState>();
+    let state = Arc::clone(&h.state);
 
     let (_collected, channel) = collecting_channel();
 
-    commands::start_meeting_recording(state.clone(), "Weekly Sync".to_string(), None, channel)
+    commands::start_meeting_recording(Arc::clone(&state), "Weekly Sync".to_string(), None, channel)
         .await
         .expect("start_meeting_recording");
 
@@ -404,7 +371,7 @@ async fn stop_transcription_refuses_a_meeting_recording() {
         other => panic!("expected RecordingMeeting after start, got {other:?}"),
     };
 
-    let result = commands::stop_transcription(state.clone()).await;
+    let result = commands::stop_transcription(Arc::clone(&state)).await;
     assert!(
         result.is_err(),
         "stop_transcription must refuse a meeting recording, got {result:?}"
@@ -451,10 +418,10 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
         1,
     );
     let h = build_harness(mock);
-    let state = h.app.state::<AppState>();
+    let state = Arc::clone(&h.state);
 
     let (_collected, channel) = collecting_channel();
-    commands::start_meeting_recording(state.clone(), "Sleepy Sync".to_string(), None, channel)
+    commands::start_meeting_recording(Arc::clone(&state), "Sleepy Sync".to_string(), None, channel)
         .await
         .expect("start_meeting_recording");
 
@@ -472,31 +439,37 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
         .send(AudioMessage::EndOfStream { session_id })
         .unwrap();
 
-    // Mirror handle_system_will_sleep: remember the id, then run the same
-    // stop+drain the sleep-triggered background task performs.
+    // Mirror handle_system_will_sleep: remember the id, then stop through
+    // the same command a user-initiated stop takes.
     state.set_sleep_paused_meeting(meeting_id.clone());
-    stop_meeting_and_persist(&h, &state);
+    commands::stop_meeting_recording(Arc::clone(&state))
+        .await
+        .expect("stop_meeting_recording");
+    wait_until_ready(&state).await;
 
-    // Two peeks in a row (matching the frontend's SystemWokeUp event plus
-    // its visibilitychange belt-and-braces recheck) must both see the id:
-    // neither call may consume it.
+    // Two peeks in a row (matching the UI's wake handling plus a
+    // belt-and-braces recheck) must both see the id: neither call may
+    // consume it.
     assert_eq!(
-        commands::peek_sleep_paused_meeting(state.clone()),
+        commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         Some(meeting_id.clone())
     );
     assert_eq!(
-        commands::peek_sleep_paused_meeting(state.clone()),
+        commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         Some(meeting_id.clone())
     );
 
     // Resuming goes through launch_meeting, which clears the flag
     // unconditionally: a later wake must not re-offer this meeting.
     let (_collected2, channel2) = collecting_channel();
-    commands::resume_meeting_recording(state.clone(), meeting_id.clone(), channel2)
+    commands::resume_meeting_recording(Arc::clone(&state), meeting_id.clone(), channel2)
         .await
         .expect("resume_meeting_recording");
 
-    assert_eq!(commands::peek_sleep_paused_meeting(state.clone()), None);
+    assert_eq!(
+        commands::peek_sleep_paused_meeting(Arc::clone(&state)),
+        None
+    );
 }
 
 /// `clear_sleep_paused_meeting` lets the frontend drop the flag on an
@@ -505,28 +478,31 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
 #[tokio::test]
 async fn clear_sleep_paused_meeting_command_clears_without_resuming() {
     let h = build_harness(MockEngine::new());
-    let state = h.app.state::<AppState>();
+    let state = Arc::clone(&h.state);
 
     state.set_sleep_paused_meeting("meeting-x".to_string());
     assert_eq!(
-        commands::peek_sleep_paused_meeting(state.clone()),
+        commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         Some("meeting-x".to_string())
     );
 
-    commands::clear_sleep_paused_meeting(state.clone());
+    commands::clear_sleep_paused_meeting(Arc::clone(&state));
 
-    assert_eq!(commands::peek_sleep_paused_meeting(state.clone()), None);
+    assert_eq!(
+        commands::peek_sleep_paused_meeting(Arc::clone(&state)),
+        None
+    );
 }
 
 #[tokio::test]
 async fn failed_resume_preserves_sleep_paused_flag() {
     let h = build_harness(MockEngine::new());
-    let state = h.app.state::<AppState>();
+    let state = Arc::clone(&h.state);
 
     // Mock a sleeping meeting
     state.set_sleep_paused_meeting("meeting-x".to_string());
     assert_eq!(
-        commands::peek_sleep_paused_meeting(state.clone()),
+        commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         Some("meeting-x".to_string())
     );
 
@@ -535,7 +511,8 @@ async fn failed_resume_preserves_sleep_paused_flag() {
 
     let (_collected, channel) = collecting_channel();
     let result =
-        commands::resume_meeting_recording(state.clone(), "meeting-x".to_string(), channel).await;
+        commands::resume_meeting_recording(Arc::clone(&state), "meeting-x".to_string(), channel)
+            .await;
     assert!(
         result.is_err(),
         "resume should fail because audio cmd channel is dropped"
@@ -543,7 +520,7 @@ async fn failed_resume_preserves_sleep_paused_flag() {
 
     // The flag must survive because the resume failed
     assert_eq!(
-        commands::peek_sleep_paused_meeting(state.clone()),
+        commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         Some("meeting-x".to_string())
     );
 }

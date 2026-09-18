@@ -65,7 +65,7 @@ const DICTATION_CEILING_SECONDS_KEY: &str = "dictation_ceiling_seconds";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PasteMethod {
     #[default]
@@ -75,7 +75,7 @@ pub enum PasteMethod {
     Ax,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DictationPolishTemplate {
     pub id: String,
     pub label: String,
@@ -85,14 +85,14 @@ pub struct DictationPolishTemplate {
 /// A meeting-summary template: `prompt` replaces the final-pass system
 /// prompt only (map/merge prompts stay fixed). Built-ins ship with
 /// well-known ids and are non-deletable; the user can also add their own.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SummaryTemplate {
     pub id: String,
     pub name: String,
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     #[default]
@@ -105,7 +105,7 @@ pub enum Theme {
 /// deletes it. Opt-in: recording itself only happens when this is not `Off`.
 /// Heuristic prior for meeting language detection and mismatch resets.
 /// Never passed to the STT engine as a forced decode language.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingTranscriptionLanguage {
     #[default]
@@ -114,7 +114,7 @@ pub enum MeetingTranscriptionLanguage {
     Fr,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingAudioRetention {
     /// No recording at all; existing recordings from a previous, more
@@ -132,7 +132,7 @@ pub enum MeetingAudioRetention {
     KeepForever,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppSettings {
     pub theme: Theme,
     pub locale: String,
@@ -253,7 +253,7 @@ pub const MAX_PASTE_DELAY_MS: u64 = 1000;
 /// The numeric choices the settings UI may offer, served from the same file
 /// that validates them. `sanitize_for_save` alone decides what is acceptable;
 /// this is how the UI finds out instead of restating it.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsOptions {
     pub model_unload_timeout_minutes: Vec<u32>,
     pub meeting_autostop_minutes: Vec<u32>,
@@ -999,7 +999,7 @@ fn dedupe_known_devices(known: &mut Vec<crate::audio::KnownDevice>) {
     known.retain(|entry| seen.insert(entry.uid.clone()));
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ShortcutSettings {
     pub toggle: String,
     pub push_to_talk: String,

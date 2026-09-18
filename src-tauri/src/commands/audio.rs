@@ -1,4 +1,4 @@
-use tauri::State;
+use std::sync::Arc;
 
 use crate::audio::capture::list_input_devices;
 use crate::audio::route_notice::observe_and_notices;
@@ -8,31 +8,20 @@ use crate::db::Database;
 use crate::settings::AppSettings;
 use crate::state::{AppState, AudioCommand};
 use crossbeam_channel::Sender;
-use tauri::AppHandle;
-use tauri_specta::Event;
 
 /// List available audio input devices
-#[tauri::command]
-#[specta::specta]
 pub fn list_audio_devices() -> Result<Vec<AudioInputDevice>, String> {
     Ok(list_input_devices())
 }
 
 /// Select an audio input device by stable CoreAudio UID. When the UID is not
 /// connected, the pin is kept and capture falls back through the priority
-/// policy; the frontend is notified via [`crate::app_events::InputPinUnavailable`].
-#[tauri::command]
-#[specta::specta]
-pub fn select_audio_device(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    device_uid: String,
-) -> Result<(), String> {
+/// policy.
+pub fn select_audio_device(state: Arc<AppState>, device_uid: String) -> Result<(), String> {
     state
         .audio_cmd_sender
-        .send(AudioCommand::SelectDevice(device_uid.clone()))
+        .send(AudioCommand::SelectDevice(device_uid))
         .map_err(|e| format!("Failed to send device selection: {e}"))?;
-    emit_pin_status(&app, device_uid.as_str());
     Ok(())
 }
 
@@ -51,12 +40,10 @@ pub fn prime_input_route_snapshot(db: &Database) {
 }
 
 /// React to CoreAudio device-list or default-input changes: refresh known
-/// devices, push the updated policy to capture, hot-swap when recording, and
-/// notify the frontend.
+/// devices, push the updated policy to capture, and hot-swap when recording.
 pub fn handle_input_route_change(
     db: &Database,
     cmd_tx: &Sender<AudioCommand>,
-    app: &AppHandle,
 ) -> Result<(), String> {
     let (priority, allow_bluetooth_mic) = AppSettings::sync_input_priority_from_devices(db)?;
     cmd_tx
@@ -67,21 +54,15 @@ pub fn handle_input_route_change(
         .map_err(|e| format!("Failed to push input policy: {e}"))?;
 
     let devices = list_input_devices();
-    let _ = crate::app_events::InputDevicesChanged {
-        devices: devices.clone(),
-    }
-    .emit(app);
-
     let settings = AppSettings::load(db).ok();
     let resolved =
         resolved_capture_uid(&devices, settings.as_ref(), &priority, allow_bluetooth_mic);
-    for notice in observe_and_notices(&devices, resolved) {
-        let _ = notice.emit(app);
-    }
+    // Notices (device switched/connected/lost) had no consumer once the
+    // Svelte frontend was removed — `observe_and_notices` still runs for its
+    // real side effect (updating the "last known device" bookkeeping it
+    // owns), the resulting notice values themselves are just discarded.
+    let _ = observe_and_notices(&devices, resolved);
 
-    if let Some(uid) = settings.as_ref().and_then(|s| s.audio_device.as_deref()) {
-        emit_pin_status(app, uid);
-    }
     Ok(())
 }
 
@@ -107,30 +88,10 @@ fn resolved_capture_uid(
     )
 }
 
-fn emit_pin_status(app: &AppHandle, uid: &str) {
-    if uid.is_empty() {
-        return;
-    }
-    let connected = list_input_devices().iter().any(|device| device.uid == uid);
-    if connected {
-        let _ = crate::app_events::InputPinAvailable {
-            uid: uid.to_string(),
-        }
-        .emit(app);
-    } else {
-        let _ = crate::app_events::InputPinUnavailable {
-            uid: uid.to_string(),
-        }
-        .emit(app);
-    }
-}
-
 /// Current `kAudioDevicePropertyNominalSampleRate` for an input device.
 /// An empty UID uses the system default input. Read-only, never writes.
-#[tauri::command]
-#[specta::specta]
 pub async fn get_input_sample_rate(device_uid: String) -> Result<u32, String> {
-    tauri::async_runtime::spawn_blocking(move || sample_rate::read_input_sample_rate(&device_uid))
+    crate::async_runtime::spawn_blocking(move || sample_rate::read_input_sample_rate(&device_uid))
         .await
         .map_err(|e| format!("Could not read the sample rate: {e}"))?
 }
@@ -138,35 +99,27 @@ pub async fn get_input_sample_rate(device_uid: String) -> Result<u32, String> {
 /// Set the device's nominal sample rate to 48 kHz (or the closest supported
 /// rate at or below it). Writes `kAudioDevicePropertyNominalSampleRate` once.
 /// Call only from an explicit Settings click.
-#[tauri::command]
-#[specta::specta]
 pub async fn reset_input_sample_rate(device_uid: String) -> Result<u32, String> {
-    tauri::async_runtime::spawn_blocking(move || sample_rate::reset_input_sample_rate(&device_uid))
+    crate::async_runtime::spawn_blocking(move || sample_rate::reset_input_sample_rate(&device_uid))
         .await
         .map_err(|e| format!("Could not reset the sample rate: {e}"))?
 }
 
 /// Whether system-audio capture (Core Audio process taps) is available on this OS
-#[tauri::command]
-#[specta::specta]
 pub fn get_system_audio_support() -> bool {
     crate::platform::system_audio_capture_supported()
 }
 
 /// Whether this Mac has a battery (i.e. is a laptop). Gates the
 /// clamshell-microphone setting in the UI — meaningless on a desktop Mac.
-#[tauri::command]
-#[specta::specta]
 pub fn is_laptop() -> bool {
     crate::power::is_laptop()
 }
 
 /// Debug: record system audio for `seconds` and write it to a WAV file.
 /// Returns the file path. Exercises the tap end-to-end (TCC prompt included).
-#[tauri::command]
-#[specta::specta]
 pub async fn debug_record_system_audio(seconds: u32) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || record_system_audio_wav(seconds))
+    crate::async_runtime::spawn_blocking(move || record_system_audio_wav(seconds))
         .await
         .map_err(|e| format!("Task failed: {e}"))?
 }
@@ -239,8 +192,6 @@ fn record_system_audio_wav(_seconds: u32) -> Result<String, String> {
 /// Last system-audio leg status of the current meeting, for a webview that
 /// reloaded after the `SystemAudioStatus` event already fired (SOU-073).
 /// `None` outside a meeting session or before the tap was first attempted.
-#[tauri::command]
-#[specta::specta]
 pub fn get_system_audio_status() -> Option<crate::app_events::SystemAudioStatus> {
     crate::audio::capture::system_audio_status()
 }

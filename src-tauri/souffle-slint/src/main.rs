@@ -1,6 +1,6 @@
-// SOU-187: standalone Slint shell backed by a real headless Tauri App
-// (souffle_lib::slint_bridge) - no webview, but the real AppState (audio
-// thread, engine actor, database). AC5 pattern: state and actions cross the
+// SOU-187/191: standalone Slint shell backed by the real `AppState` (audio
+// thread, engine actor, database) via `souffle_lib::bootstrap::bootstrap()` -
+// no webview, no Tauri runtime. AC5 pattern: state and actions cross the
 // Rust<->UI boundary as plain Slint properties and callbacks - direct
 // in-process function calls, no IPC, no serialization.
 slint::include_modules!();
@@ -26,15 +26,22 @@ use souffle_lib::audio::AudioInputDevice;
 use souffle_lib::engine::{
     TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
+use souffle_lib::native::bridge::NativeAction;
 use souffle_lib::permissions::{PermState, PermissionKind};
+use souffle_lib::progress::ProgressChannel;
 use souffle_lib::settings::{AppSettings, ShortcutSettings};
 use souffle_lib::state::AppState;
 use souffle_lib::transcript::{MeetingParticipant, MeetingTranscript};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
-use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager};
+
+/// `AppHandle` was Tauri's cloneable, 'static, `Send`+`Sync` handle used to
+/// reach `AppState` from any thread/task. `Arc<AppState>` has exactly the
+/// same properties directly, so this alias keeps every `handle: AppHandle`
+/// parameter below unchanged, while removing the Tauri dependency itself.
+type AppHandle = Arc<AppState>;
 
 /// Notes autosave debounce, matching `NOTES_DEBOUNCE_MS` in
 /// features/meeting/controller.svelte.ts.
@@ -102,7 +109,7 @@ fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
     let kind_filter = window.get_kind_filter();
     let search_query = window.get_search_query().to_string();
 
-    let state = tauri_handle.state::<souffle_lib::state::AppState>();
+    let state = Arc::clone(tauri_handle);
     let dictations = match souffle_lib::commands::list_dictation_entries(state, Some(200)) {
         Ok(entries) => entries,
         Err(e) => {
@@ -110,7 +117,7 @@ fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
             Vec::new()
         }
     };
-    let state = tauri_handle.state::<souffle_lib::state::AppState>();
+    let state = Arc::clone(tauri_handle);
     let meetings = match souffle_lib::commands::list_meetings(state) {
         Ok(meetings) => meetings,
         Err(e) => {
@@ -432,7 +439,7 @@ fn load_calendars_if_enabled(
 /// Runs the real `check_summary_providers()` network/availability check and
 /// repopulates the whole IA tab from the result - shared by settings-open
 /// and the "Retry" button, since both need the same round trip. `slint::
-/// spawn_local`, not `tauri::async_runtime::spawn`: this closes over
+/// spawn_local`, not `souffle_lib::async_runtime::spawn`: this closes over
 /// `Rc<RefCell<..>>` state, which is not `Send`.
 fn refresh_summary_providers(
     weak: slint::Weak<MainWindow>,
@@ -442,7 +449,7 @@ fn refresh_summary_providers(
     summary_template_editing: Rc<RefCell<String>>,
 ) {
     slint::spawn_local(async move {
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         let status = souffle_lib::commands::check_summary_providers(state).await;
         let Some(window) = weak.upgrade() else {
             return;
@@ -474,7 +481,7 @@ fn load_transcription_model_state(
     settings_state: &Rc<RefCell<Option<AppSettings>>>,
     model_options_state: &Rc<RefCell<Vec<model_ui::FlatModelOption>>>,
 ) {
-    let state = handle.state::<AppState>();
+    let state = Arc::clone(handle);
     let catalog = match souffle_lib::commands::get_transcription_catalog(state) {
         Ok(catalog) => catalog,
         Err(e) => {
@@ -502,7 +509,7 @@ fn load_transcription_model_state(
         model_id: catalog.selected_model_id.clone(),
         backend_id: catalog.selected_backend_id.clone(),
     };
-    let state = handle.state::<AppState>();
+    let state = Arc::clone(handle);
     match souffle_lib::commands::get_model_status(state, selection) {
         Ok(status) => {
             window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
@@ -620,7 +627,7 @@ fn open_meeting_detail(
 ) {
     stop_audio_player(player, progress_timer);
     stop_transcript_window(transcript_state, transcript_timer);
-    let state = handle.state::<AppState>();
+    let state = Arc::clone(handle);
     match souffle_lib::commands::get_meeting(state, meeting_id.to_string()) {
         Ok(meeting) => {
             populate_meeting_detail(window, &meeting);
@@ -643,14 +650,14 @@ fn open_meeting_detail(
 /// flow belongs to SOU-190 (onboarding/dialogs), not this ticket.
 async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
     let selection = TranscriptionProfileSelection::default();
-    let state = handle.state::<AppState>();
+    let state = Arc::clone(handle);
     let status = souffle_lib::commands::get_model_status(state, selection)?;
     match status.phase {
         TranscriptionRuntimePhase::Ready => Ok(()),
         TranscriptionRuntimePhase::LoadRequired => {
             let handle = handle.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                let state = handle.state::<AppState>();
+            souffle_lib::async_runtime::spawn_blocking(move || {
+                let state = Arc::clone(&handle);
                 souffle_lib::commands::load_model(state, TranscriptionProfileSelection::default())
             })
             .await
@@ -671,17 +678,8 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
 /// paragraph-grouped/speaker-lane rendering LiveSessionCard.svelte does -
 /// that's real, separate work (windowing, speaker lanes, inline edit),
 /// deliberately deferred and noted here rather than half-built.
-fn live_segment_channel(weak: slint::Weak<MainWindow>) -> Channel<TranscriptionSegment> {
-    Channel::new(move |body| {
-        // Channel::send serializes via serde_json regardless of the type
-        // parameter (see IpcResponse's blanket impl) - the callback always
-        // receives the raw IPC body, typed or not.
-        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
-            return Ok(());
-        };
-        let Ok(segment) = serde_json::from_str::<TranscriptionSegment>(&json) else {
-            return Ok(());
-        };
+fn live_segment_channel(weak: slint::Weak<MainWindow>) -> ProgressChannel<TranscriptionSegment> {
+    ProgressChannel::new(move |segment: TranscriptionSegment| {
         let weak = weak.clone();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(window) = weak.upgrade() else {
@@ -702,7 +700,6 @@ fn live_segment_channel(weak: slint::Weak<MainWindow>) -> Channel<TranscriptionS
                 window.set_live_tentative(segment.text.into());
             }
         });
-        Ok(())
     })
 }
 
@@ -712,15 +709,8 @@ fn live_segment_channel(weak: slint::Weak<MainWindow>) -> Channel<TranscriptionS
 /// "Download recommended model" in the IA tab.
 fn ollama_pull_channel(
     weak: slint::Weak<MainWindow>,
-) -> Channel<souffle_lib::summary::OllamaPullProgress> {
-    Channel::new(move |body| {
-        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
-            return Ok(());
-        };
-        let Ok(progress) = serde_json::from_str::<souffle_lib::summary::OllamaPullProgress>(&json)
-        else {
-            return Ok(());
-        };
+) -> ProgressChannel<souffle_lib::summary::OllamaPullProgress> {
+    ProgressChannel::new(move |progress: souffle_lib::summary::OllamaPullProgress| {
         let weak = weak.clone();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(window) = weak.upgrade() else {
@@ -740,7 +730,6 @@ fn ollama_pull_channel(
                 window.set_settings_ollama_pull_error(error.into());
             }
         });
-        Ok(())
     })
 }
 
@@ -755,7 +744,7 @@ fn start_model_transition(
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
 ) {
-    let state = handle.state::<AppState>();
+    let state = Arc::clone(&handle);
     let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
         Ok(status) => status,
         Err(e) => {
@@ -781,7 +770,7 @@ fn start_model_transition(
             window.set_settings_model_downloading(true);
             window.set_settings_model_download_progress_label("".into());
             window.set_settings_model_download_progress_fraction(0.0);
-            let state = handle.state::<AppState>();
+            let state = Arc::clone(&handle);
             let channel = model_download_channel(weak.clone(), handle.clone(), selection.clone());
             if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
                 window.set_settings_model_downloading(false);
@@ -802,8 +791,8 @@ fn load_model_in_background(
     slint::spawn_local(async move {
         let handle_for_load = handle.clone();
         let selection_for_load = selection.clone();
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            let state = handle_for_load.state::<AppState>();
+        let result = souffle_lib::async_runtime::spawn_blocking(move || {
+            let state = Arc::clone(&handle_for_load);
             souffle_lib::commands::load_model(state, selection_for_load)
         })
         .await
@@ -827,15 +816,8 @@ fn model_download_channel(
     weak: slint::Weak<MainWindow>,
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
-) -> Channel<souffle_lib::models::DownloadProgress> {
-    Channel::new(move |body| {
-        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
-            return Ok(());
-        };
-        let Ok(progress) = serde_json::from_str::<souffle_lib::models::DownloadProgress>(&json)
-        else {
-            return Ok(());
-        };
+) -> ProgressChannel<souffle_lib::models::DownloadProgress> {
+    ProgressChannel::new(move |progress: souffle_lib::models::DownloadProgress| {
         let weak = weak.clone();
         let handle = handle.clone();
         let selection = selection.clone();
@@ -866,7 +848,6 @@ fn model_download_channel(
                 }
             }
         });
-        Ok(())
     })
 }
 
@@ -876,7 +857,7 @@ fn model_download_channel(
 /// `dictation_cancel::sync`, which touches `app.global_shortcut()` to arm the
 /// Escape-cancels-dictation binding. That registration needs a thread with a
 /// live run loop; a background tokio worker thread (where a plain
-/// `tauri::async_runtime::spawn`ed task runs) has none, and the call hangs
+/// `souffle_lib::async_runtime::spawn`ed task runs) has none, and the call hangs
 /// forever - confirmed by bisecting with temporary eprintln!s, not guessed.
 /// The real OS main thread (Slint's own, via `window.run()`) does have one.
 /// Model loading (the slow part, seconds) stays off-thread via
@@ -899,8 +880,8 @@ where
 async fn start_dictation(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Result<(), String> {
     ensure_model_ready(&handle).await?;
     run_on_main_thread(move || {
-        tauri::async_runtime::block_on(async move {
-            let state = handle.state::<AppState>();
+        souffle_lib::async_runtime::block_on(async move {
+            let state = Arc::clone(&handle);
             souffle_lib::commands::start_transcription(state, live_segment_channel(weak), true)
                 .await
         })
@@ -913,8 +894,8 @@ async fn start_meeting(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Resu
     // Mirrors defaultMeetingTitle() in meeting/controller.svelte.ts.
     let title = format!("Meeting {}", default_meeting_date());
     run_on_main_thread(move || {
-        tauri::async_runtime::block_on(async move {
-            let state = handle.state::<AppState>();
+        souffle_lib::async_runtime::block_on(async move {
+            let state = Arc::clone(&handle);
             souffle_lib::commands::start_meeting_recording(
                 state,
                 title,
@@ -941,8 +922,8 @@ fn default_meeting_date() -> String {
 
 async fn stop_dictation(handle: AppHandle) -> Result<(), String> {
     run_on_main_thread(move || {
-        tauri::async_runtime::block_on(async move {
-            let state = handle.state::<AppState>();
+        souffle_lib::async_runtime::block_on(async move {
+            let state = Arc::clone(&handle);
             souffle_lib::commands::stop_transcription(state).await
         })
     })
@@ -951,8 +932,8 @@ async fn stop_dictation(handle: AppHandle) -> Result<(), String> {
 
 async fn stop_meeting(handle: AppHandle) -> Result<String, String> {
     run_on_main_thread(move || {
-        tauri::async_runtime::block_on(async move {
-            let state = handle.state::<AppState>();
+        souffle_lib::async_runtime::block_on(async move {
+            let state = Arc::clone(&handle);
             souffle_lib::commands::stop_meeting_recording(state).await
         })
     })
@@ -1081,7 +1062,7 @@ fn show_onboarding_step(
                 .map(|o| o.selection());
             drop(guard);
             let phase = selection.and_then(|selection| {
-                souffle_lib::commands::get_model_status(handle.state::<AppState>(), selection).ok()
+                souffle_lib::commands::get_model_status(Arc::clone(handle), selection).ok()
             });
             let phase_str = match phase.map(|s| s.phase) {
                 Some(TranscriptionRuntimePhase::Ready) => "ready",
@@ -1166,13 +1147,12 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
     let onboarding_poll_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
     let handle = tauri_handle.clone();
-    let state = handle.state::<AppState>();
+    let state = Arc::clone(&handle);
     let default_selection = TranscriptionProfileSelection::default();
     let phase = souffle_lib::commands::get_model_status(state, default_selection)
         .map(|s| s.phase)
         .unwrap_or(TranscriptionRuntimePhase::DownloadRequired);
     let machine_state = handle
-        .state::<AppState>()
         .current_machine_state()
         .unwrap_or(souffle_lib::state_machine::AppStateMachine::Idle);
     let flags = onboarding_flags::read_setup_flags();
@@ -1183,19 +1163,19 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
         guard.steps = onboarding_flags::wizard_steps(flags);
         guard.recovery_only = flags.setup_done;
         guard.devices = souffle_lib::commands::list_audio_devices().unwrap_or_default();
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Ok(settings) = souffle_lib::commands::get_settings(state) {
             guard.selected_device = settings.audio_device.unwrap_or_default();
             guard.auto_paste = settings.auto_paste;
         }
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Ok(catalog) = souffle_lib::commands::get_transcription_catalog(state) {
             guard.model_options = model_ui::list_available_model_options(&catalog);
             guard.selected_model_index = guard.model_options.iter().position(|o| {
                 o.engine_id == catalog.selected_engine_id && o.model_id == catalog.selected_model_id
             });
         }
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Ok(shortcuts) = souffle_lib::commands::get_shortcuts(state) {
             guard.toggle_shortcut = shortcuts.toggle;
         }
@@ -1214,11 +1194,11 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
     let weak = window.as_weak();
     window.on_onboarding_locale_changed(move |locale| {
         if let Err(e) = (|| -> Result<(), String> {
-            let state = handle.state::<AppState>();
+            let state = Arc::clone(&handle);
             let mut settings = souffle_lib::commands::get_settings(state)?;
             settings.locale = locale.to_string();
-            let state = handle.state::<AppState>();
-            souffle_lib::commands::save_settings(handle.clone(), state, settings)
+            let state = Arc::clone(&handle);
+            souffle_lib::commands::save_settings(state, settings)
         })() {
             eprintln!("Failed to save onboarding locale: {e}");
         }
@@ -1475,15 +1455,12 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
             }
             "microphone" => {
                 let uid = ob_for_continue.borrow().selected_device.clone();
-                let state = handle.state::<AppState>();
-                let _ =
-                    souffle_lib::commands::select_audio_device(handle.clone(), state, uid.clone());
-                if let Ok(mut settings) =
-                    souffle_lib::commands::get_settings(handle.state::<AppState>())
-                {
+                let state = Arc::clone(&handle);
+                let _ = souffle_lib::commands::select_audio_device(state, uid.clone());
+                if let Ok(mut settings) = souffle_lib::commands::get_settings(Arc::clone(&handle)) {
                     settings.audio_device = if uid.is_empty() { None } else { Some(uid) };
-                    let state = handle.state::<AppState>();
-                    let _ = souffle_lib::commands::save_settings(handle.clone(), state, settings);
+                    let state = Arc::clone(&handle);
+                    let _ = souffle_lib::commands::save_settings(state, settings);
                 }
                 advance_onboarding_step(
                     &window,
@@ -1520,14 +1497,12 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
                 let Some((engine_id, model_id, backend_id, selection)) = selection else {
                     return;
                 };
-                if let Ok(mut settings) =
-                    souffle_lib::commands::get_settings(handle.state::<AppState>())
-                {
+                if let Ok(mut settings) = souffle_lib::commands::get_settings(Arc::clone(&handle)) {
                     settings.transcription_engine_id = engine_id;
                     settings.transcription_model_id = model_id;
                     settings.transcription_backend_id = backend_id;
-                    let state = handle.state::<AppState>();
-                    let _ = souffle_lib::commands::save_settings(handle.clone(), state, settings);
+                    let state = Arc::clone(&handle);
+                    let _ = souffle_lib::commands::save_settings(state, settings);
                 }
                 window.set_onboarding_busy(true);
                 window.set_onboarding_continue_enabled(false);
@@ -1538,16 +1513,14 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
                     let guard = ob_for_continue.borrow();
                     (guard.auto_paste, guard.recovery_only)
                 };
-                if let Ok(mut settings) =
-                    souffle_lib::commands::get_settings(handle.state::<AppState>())
-                {
+                if let Ok(mut settings) = souffle_lib::commands::get_settings(Arc::clone(&handle)) {
                     settings.auto_paste = auto_paste;
                     settings.autostart_enabled = onboarding_flags::decide_autostart_on_finish(
                         recovery_only,
                         settings.autostart_enabled,
                     );
-                    let state = handle.state::<AppState>();
-                    let _ = souffle_lib::commands::save_settings(handle.clone(), state, settings);
+                    let state = Arc::clone(&handle);
+                    let _ = souffle_lib::commands::save_settings(state, settings);
                 }
                 onboarding_flags::mark_setup_complete();
                 *onboarding_poll_timer_for_continue.borrow_mut() = None;
@@ -1597,11 +1570,11 @@ fn apply_onboarding_shortcut(
 ) {
     window.set_onboarding_shortcut_recording(false);
     ob.borrow_mut().toggle_shortcut = value.clone();
-    let state = handle.state::<AppState>();
+    let state = Arc::clone(handle);
     let mut shortcuts = souffle_lib::commands::get_shortcuts(state).unwrap_or_default();
     shortcuts.toggle = value;
-    let state = handle.state::<AppState>();
-    match souffle_lib::commands::save_shortcuts(handle.clone(), state, shortcuts) {
+    let state = Arc::clone(handle);
+    match souffle_lib::commands::save_shortcuts(state, shortcuts) {
         Ok(()) => {
             window.set_onboarding_shortcut_error("".into());
             let guard = ob.borrow();
@@ -1622,7 +1595,7 @@ fn start_onboarding_model_transition(
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
 ) {
-    let state = handle.state::<AppState>();
+    let state = Arc::clone(&handle);
     let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
         Ok(status) => status,
         Err(e) => {
@@ -1650,9 +1623,8 @@ fn start_onboarding_model_transition(
             let selection2 = selection.clone();
             slint::spawn_local(async move {
                 let handle3 = handle2.clone();
-                let result = tauri::async_runtime::spawn_blocking(move || {
-                    let state = handle3.state::<AppState>();
-                    souffle_lib::commands::load_model(state, selection2)
+                let result = souffle_lib::async_runtime::spawn_blocking(move || {
+                    souffle_lib::commands::load_model(handle3, selection2)
                 })
                 .await
                 .map_err(|e| format!("Join load_model task: {e}"))
@@ -1672,7 +1644,7 @@ fn start_onboarding_model_transition(
             window.set_onboarding_model_phase("downloading".into());
             window.set_onboarding_download_progress_label("".into());
             window.set_onboarding_download_progress_fraction(0.0);
-            let state = handle.state::<AppState>();
+            let state = Arc::clone(&handle);
             let channel =
                 onboarding_model_download_channel(weak.clone(), handle.clone(), selection.clone());
             if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
@@ -1688,15 +1660,8 @@ fn onboarding_model_download_channel(
     weak: slint::Weak<MainWindow>,
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
-) -> Channel<souffle_lib::models::DownloadProgress> {
-    Channel::new(move |body| {
-        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
-            return Ok(());
-        };
-        let Ok(progress) = serde_json::from_str::<souffle_lib::models::DownloadProgress>(&json)
-        else {
-            return Ok(());
-        };
+) -> ProgressChannel<souffle_lib::models::DownloadProgress> {
+    ProgressChannel::new(move |progress: souffle_lib::models::DownloadProgress| {
         let weak = weak.clone();
         let handle = handle.clone();
         let selection = selection.clone();
@@ -1730,7 +1695,6 @@ fn onboarding_model_download_channel(
                 }
             }
         });
-        Ok(())
     })
 }
 
@@ -1742,16 +1706,15 @@ fn onboarding_model_download_channel(
 fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_open: bool) {
     let handle = tauri_handle.clone();
     window.on_whats_new_dismissed(move || {
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Ok(mut settings) = souffle_lib::commands::get_settings(state) {
             settings.last_seen_version = souffle_lib::commands::get_app_version().version;
-            let state = handle.state::<AppState>();
-            let _ = souffle_lib::commands::save_settings(handle.clone(), state, settings);
+            let state = Arc::clone(&handle);
+            let _ = souffle_lib::commands::save_settings(state, settings);
         }
     });
 
     let weak = window.as_weak();
-    let handle = tauri_handle.clone();
     window.on_update_download_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
@@ -1759,9 +1722,8 @@ fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_
         window.set_update_phase("downloading".into());
         window.set_update_error_message("".into());
         let weak = weak.clone();
-        let handle = handle.clone();
         slint::spawn_local(async move {
-            let result = souffle_lib::commands::download_update(handle).await;
+            let result = souffle_lib::commands::download_update().await;
             let Some(window) = weak.upgrade() else {
                 return;
             };
@@ -1786,8 +1748,8 @@ fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_
         let weak = weak.clone();
         let handle = handle.clone();
         slint::spawn_local(async move {
-            let state = handle.state::<AppState>();
-            if let Err(e) = souffle_lib::commands::install_update(handle.clone(), state).await
+            let state = Arc::clone(&handle);
+            if let Err(e) = souffle_lib::commands::install_update(state).await
                 && let Some(window) = weak.upgrade()
             {
                 window.set_update_error_message(e.into());
@@ -1830,7 +1792,7 @@ fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_
 
     let handle = tauri_handle;
     let weak = window.as_weak();
-    let Ok(settings) = souffle_lib::commands::get_settings(handle.state::<AppState>()) else {
+    let Ok(settings) = souffle_lib::commands::get_settings(Arc::clone(&handle)) else {
         return;
     };
     let app_version = souffle_lib::commands::get_app_version();
@@ -1845,8 +1807,8 @@ fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_
         if settings.last_seen_version != current_version {
             let mut next = settings.clone();
             next.last_seen_version = current_version.clone();
-            let state = handle.state::<AppState>();
-            let _ = souffle_lib::commands::save_settings(handle.clone(), state, next);
+            let state = Arc::clone(&handle);
+            let _ = souffle_lib::commands::save_settings(state, next);
         }
     } else if settings.last_seen_version != current_version {
         window.set_whats_new_version(current_version.clone().into());
@@ -1874,7 +1836,7 @@ fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_
                 );
                 window.set_update_release_url(result.release_url.unwrap_or_default().into());
                 window.set_update_phase("idle".into());
-                let state = handle.state::<AppState>();
+                let state = Arc::clone(&handle);
                 let blocked = souffle_lib::commands::get_update_install_block(state)
                     .ok()
                     .flatten();
@@ -1914,7 +1876,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     window.on_dictate_requested(move || {
         let weak = weak.clone();
         let handle = handle.clone();
-        tauri::async_runtime::spawn(async move {
+        souffle_lib::async_runtime::spawn(async move {
             let result = start_dictation(handle, weak.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
                 Ok(()) => {
@@ -1934,7 +1896,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     window.on_meeting_requested(move || {
         let weak = weak.clone();
         let handle = handle.clone();
-        tauri::async_runtime::spawn(async move {
+        souffle_lib::async_runtime::spawn(async move {
             let result = start_meeting(handle, weak.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
                 Ok(()) => {
@@ -1958,7 +1920,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let mode = current.get_recording_mode();
         let weak = weak.clone();
         let handle = handle.clone();
-        tauri::async_runtime::spawn(async move {
+        souffle_lib::async_runtime::spawn(async move {
             let handle_for_refresh = handle.clone();
             if mode == RecordingMode::Meeting {
                 let result = stop_meeting(handle.clone()).await;
@@ -2106,7 +2068,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
         let pronunciation = pronunciation.trim();
         let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Err(e) =
             souffle_lib::commands::add_dictionary_entry(state, term, pronunciation, None)
         {
@@ -2121,7 +2083,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             return;
         };
         let id = window.get_active_meeting_id().to_string();
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         match souffle_lib::commands::rename_meeting(state, id, new_title.to_string()) {
             Ok(()) => {
                 window.set_meeting_detail_title(new_title);
@@ -2148,7 +2110,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let weak = weak.clone();
         let timer = slint::Timer::default();
         timer.start(slint::TimerMode::SingleShot, NOTES_DEBOUNCE, move || {
-            let state = handle.state::<AppState>();
+            let state = Arc::clone(&handle);
             let result = souffle_lib::commands::save_meeting_notes(
                 state,
                 meeting_id.clone(),
@@ -2170,7 +2132,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     window.on_timeline_item_removed(move |kind, id| {
-        let state = handle.state::<souffle_lib::state::AppState>();
+        let state = Arc::clone(&handle);
         let result = if kind == TimelineKind::Dictation {
             souffle_lib::commands::delete_dictation_entry(state, id.to_string())
         } else {
@@ -2235,7 +2197,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         match souffle_lib::commands::get_settings(state) {
             Ok(settings) => {
                 settings_ui::populate(&window, &settings);
@@ -2248,7 +2210,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             }
             Err(e) => eprintln!("Failed to load settings: {e}"),
         }
-        match souffle_lib::commands::get_data_stats(handle.state::<AppState>()) {
+        match souffle_lib::commands::get_data_stats(Arc::clone(&handle)) {
             Ok(stats) => data_ui::populate_stats(&window, &stats),
             Err(e) => eprintln!("Failed to load data stats: {e}"),
         }
@@ -2256,7 +2218,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             Ok(info) => data_ui::populate_mcp(&window, &info),
             Err(e) => eprintln!("Failed to load MCP setup info: {e}"),
         }
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         match souffle_lib::commands::get_shortcuts(state) {
             Ok(shortcuts) => {
                 let natives = souffle_lib::commands::get_native_shortcuts();
@@ -2286,12 +2248,12 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             &settings_state_for_open,
             &model_options_state_for_open,
         );
-        match souffle_lib::commands::list_dictionary(handle.state::<AppState>()) {
+        match souffle_lib::commands::list_dictionary(Arc::clone(&handle)) {
             Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
             Err(e) => eprintln!("Failed to load dictionary: {e}"),
         }
         *snippet_editing_for_open.borrow_mut() = None;
-        match souffle_lib::commands::list_snippets(handle.state::<AppState>()) {
+        match souffle_lib::commands::list_snippets(Arc::clone(&handle)) {
             Ok(entries) => {
                 lists_ui::populate_snippets(&window, &entries, None);
                 *snippets_list_state_for_open.borrow_mut() = entries;
@@ -2329,10 +2291,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             return;
         };
         mutate(settings);
-        let state = handle.state::<AppState>();
-        if let Err(e) =
-            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
-        {
+        let state = Arc::clone(handle);
+        if let Err(e) = souffle_lib::commands::save_settings(state, settings.clone()) {
             eprintln!("Failed to save settings: {e}");
         }
     }
@@ -2361,8 +2321,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             "ptt" => shortcuts.push_to_talk = value,
             _ => return,
         }
-        let state = handle.state::<AppState>();
-        match souffle_lib::commands::save_shortcuts(handle.clone(), state, shortcuts.clone()) {
+        let state = Arc::clone(handle);
+        match souffle_lib::commands::save_shortcuts(state, shortcuts.clone()) {
             Ok(()) => {
                 window.set_settings_shortcut_error("".into());
                 let natives = souffle_lib::commands::get_native_shortcuts();
@@ -2487,7 +2447,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         };
         let handle = handle.clone();
         let settings_state = settings_state_for_calendar_enabled.clone();
-        // Not `tauri::async_runtime::spawn`: this closes over an
+        // Not `souffle_lib::async_runtime::spawn`: this closes over an
         // `Rc<RefCell<..>>`, which is not `Send`. `request_permission`
         // blocks on the native TCC prompt internally (off its own thread via
         // `spawn_blocking`), so awaiting it on Slint's single-threaded local
@@ -2582,10 +2542,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             next
         };
         let selected_ids = settings.calendar_selected_ids.clone();
-        let state = handle.state::<AppState>();
-        if let Err(e) =
-            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
-        {
+        let state = Arc::clone(&handle);
+        if let Err(e) = souffle_lib::commands::save_settings(state, settings.clone()) {
             eprintln!("Failed to save settings: {e}");
         }
         drop(guard);
@@ -2614,10 +2572,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         };
         let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_device.borrow(), &label)
             .unwrap_or_default();
-        let state = handle.state::<AppState>();
-        if let Err(e) =
-            souffle_lib::commands::select_audio_device(handle.clone(), state, uid.clone())
-        {
+        let state = Arc::clone(&handle);
+        if let Err(e) = souffle_lib::commands::select_audio_device(state, uid.clone()) {
             eprintln!("Failed to select audio device: {e}");
         }
         save_settings_field(&handle, &settings_state_for_device, |settings| {
@@ -2758,10 +2714,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             return;
         };
         settings.input_priority.priorities = next;
-        let state = handle.state::<AppState>();
-        if let Err(e) =
-            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
-        {
+        let state = Arc::clone(&handle);
+        if let Err(e) = souffle_lib::commands::save_settings(state, settings.clone()) {
             eprintln!("Failed to save settings: {e}");
         }
         drop(guard);
@@ -2802,7 +2756,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         let mut guard = settings_state_for_remove.borrow_mut();
         let Some(settings) = guard.as_mut() else {
             return;
@@ -2815,9 +2769,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         if settings.clamshell_audio_device.as_deref() == Some(uid.as_str()) {
             settings.clamshell_audio_device = None;
         }
-        if let Err(e) =
-            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
-        {
+        if let Err(e) = souffle_lib::commands::save_settings(state, settings.clone()) {
             eprintln!("Failed to save settings: {e}");
         }
         drop(guard);
@@ -2928,8 +2880,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         };
         window.set_settings_data_exporting(true);
         window.set_settings_data_export_status("".into());
-        let state = handle.state::<AppState>();
-        let result = souffle_lib::commands::export_archive(handle.clone(), state, dir.clone());
+        let state = Arc::clone(&handle);
+        let result = souffle_lib::commands::export_archive(state, dir.clone());
         window.set_settings_data_exporting(false);
         match result {
             Ok(()) => window.set_settings_data_export_status(
@@ -3098,7 +3050,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let summary_status_state_for_pull = summary_status_state_for_pull.clone();
         let summary_template_editing_for_pull = summary_template_editing_for_pull.clone();
         slint::spawn_local(async move {
-            let state = handle.state::<AppState>();
+            let state = Arc::clone(&handle);
             let result = souffle_lib::commands::pull_recommended_ollama_model(state, channel).await;
             let Some(window) = weak.upgrade() else {
                 return;
@@ -3421,7 +3373,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
         let category = (!category.is_empty()).then(|| category.to_string());
         if let Err(e) = souffle_lib::commands::add_dictionary_entry(
@@ -3434,7 +3386,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             return;
         }
         window.set_settings_dictionary_add_error("".into());
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         match souffle_lib::commands::list_dictionary(state) {
             Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
             Err(e) => eprintln!("Failed to reload dictionary: {e}"),
@@ -3447,12 +3399,12 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Err(e) = souffle_lib::commands::delete_dictionary_entry(state, id as i64) {
             eprintln!("Failed to delete dictionary entry: {e}");
             return;
         }
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         match souffle_lib::commands::list_dictionary(state) {
             Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
             Err(e) => eprintln!("Failed to reload dictionary: {e}"),
@@ -3466,13 +3418,13 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Err(e) = souffle_lib::commands::add_snippet(state, &trigger, &expansion) {
             window.set_settings_snippet_add_error(e.into());
             return;
         }
         window.set_settings_snippet_add_error("".into());
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         match souffle_lib::commands::list_snippets(state) {
             Ok(entries) => {
                 lists_ui::populate_snippets(&window, &entries, None);
@@ -3490,12 +3442,12 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Err(e) = souffle_lib::commands::delete_snippet(state, id as i64) {
             eprintln!("Failed to delete snippet: {e}");
             return;
         }
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         match souffle_lib::commands::list_snippets(state) {
             Ok(entries) => {
                 let editing = *snippet_editing_for_delete.borrow();
@@ -3544,7 +3496,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         if let Err(e) =
             souffle_lib::commands::update_snippet(state, id as i64, &trigger, &expansion)
         {
@@ -3553,7 +3505,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
         window.set_settings_snippet_update_error("".into());
         *snippet_editing_for_save.borrow_mut() = None;
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         match souffle_lib::commands::list_snippets(state) {
             Ok(entries) => {
                 lists_ui::populate_snippets(&window, &entries, None);
@@ -3672,7 +3624,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             return;
         };
         window.set_settings_copying_diagnostics(true);
-        let state = handle.state::<AppState>();
+        let state = Arc::clone(&handle);
         let text = souffle_lib::commands::get_diagnostics_text(state);
         window.set_settings_copying_diagnostics(false);
         match text {
@@ -3695,21 +3647,132 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     });
 }
 
+/// Handles a [`souffle_lib::native::bridge::NativeAction`] on the Slint main
+/// thread by invoking the same window callbacks a button click would (SOU-191).
+/// Escape-cancel and a normal stop are currently equivalent here: neither
+/// path pastes or polishes the dictation text today (grepped — no
+/// `commands::paste_text`/`commands::polish_dictation` call sites exist yet
+/// in this shell), a pre-existing SOU-187 gap this ticket does not close.
+fn dispatch_native_action(window: &MainWindow, handle: &AppHandle, action: NativeAction) {
+    use souffle_lib::native::bridge::AppView;
+
+    match action {
+        NativeAction::ToggleDictation => match window.get_recording_mode() {
+            RecordingMode::Idle => window.invoke_dictate_requested(),
+            RecordingMode::Dictation => window.invoke_stop_requested(),
+            // A meeting owns the recording session (SOU-044): the toggle
+            // shortcut must not start dictation on top of it.
+            RecordingMode::Meeting => {}
+        },
+        NativeAction::PttStart => {
+            if window.get_recording_mode() == RecordingMode::Idle {
+                window.invoke_dictate_requested();
+            }
+        }
+        NativeAction::PttStop | NativeAction::CancelDictation => {
+            if window.get_recording_mode() == RecordingMode::Dictation {
+                window.invoke_stop_requested();
+            }
+        }
+        NativeAction::StopMeeting => {
+            if window.get_recording_mode() == RecordingMode::Meeting {
+                window.invoke_stop_requested();
+            }
+        }
+        NativeAction::StopDictation => {
+            if window.get_recording_mode() == RecordingMode::Dictation {
+                window.invoke_stop_requested();
+            }
+        }
+        NativeAction::Navigate(AppView::Home) => window.set_settings_open(false),
+        NativeAction::Navigate(AppView::Settings) => window.set_settings_open(true),
+        NativeAction::ShowMainWindow => {
+            let _ = window.show();
+        }
+        NativeAction::UpdateAvailable {
+            latest_version,
+            release_notes,
+            release_url,
+        } => {
+            if window.get_whats_new_open() || window.get_update_available_open() {
+                return;
+            }
+            window.set_update_latest_version(latest_version.into());
+            let notes = release_notes
+                .unwrap_or_else(|| "Voir les notes de version sur GitHub.".to_string());
+            let blocks = markdown::render_blocks(&notes);
+            window.set_update_release_notes_blocks(
+                std::rc::Rc::new(slint::VecModel::from(blocks)).into(),
+            );
+            window.set_update_release_url(release_url.unwrap_or_default().into());
+            window.set_update_phase("idle".into());
+            let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(handle))
+                .ok()
+                .flatten();
+            window.set_update_install_blocked_reason(
+                blocked
+                    .map(|r| r.as_str().to_string())
+                    .unwrap_or_default()
+                    .into(),
+            );
+            window.set_update_available_open(true);
+        }
+    }
+}
+
+/// Receives actions from native OS surfaces (global shortcuts, tray menu,
+/// pill HUD stop button, a second app launch, the background update
+/// checker) that have no window of their own to act through, and forwards
+/// each to the Slint main thread (SOU-191). Replaces the pre-191
+/// `tauri_specta::Event::emit` calls those surfaces used to make, which had
+/// no listener once the Svelte webview was removed.
+fn spawn_native_action_receiver(weak: slint::Weak<MainWindow>, handle: AppHandle) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    souffle_lib::native::bridge::set_sink(tx);
+    std::thread::Builder::new()
+        .name("native-action-receiver".into())
+        .spawn(move || {
+            for action in rx {
+                let weak = weak.clone();
+                let handle = handle.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(window) = weak.upgrade() {
+                        dispatch_native_action(&window, &handle, action);
+                    }
+                });
+            }
+        })
+        .expect("failed to spawn native action receiver thread");
+}
+
 fn main() {
-    // Real bootstrap (audio thread, engine actor, DB, replayed .setup()) -
-    // see slint_bridge.rs. Must run before Slint's own window/event loop.
-    let tauri_app = souffle_lib::slint_bridge::build();
-    let tauri_handle = tauri_app.handle().clone();
-    // Never call .run() on this App; it must simply stay alive so the
-    // AppHandle above keeps working while Slint owns the OS event loop.
-    std::mem::forget(tauri_app);
+    if let Some(code) = souffle_lib::cli::try_run_headless() {
+        std::process::exit(code);
+    }
+    if !souffle_lib::bootstrap::acquire_single_instance() {
+        return;
+    }
+
+    // Real bootstrap (audio thread, engine actor, DB). Must run before
+    // Slint's own window/event loop; `handle` is the same `Arc<AppState>`
+    // every command below takes.
+    let handle: AppHandle = souffle_lib::bootstrap::bootstrap();
 
     let window = MainWindow::new().expect("failed to create Slint window");
 
+    // Close hides; it must not destroy. The pill + tray keep the process
+    // alive, so a destroyed main window leaves Soufflé in the Dock and menu
+    // bar with no window to bring back (mirrors the pre-191 Tauri
+    // `CloseRequested` -> `prevent_close` + `hide` behavior).
+    window
+        .window()
+        .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+
+    spawn_native_action_receiver(window.as_weak(), handle.clone());
+
     // Real shortcut setting, not a placeholder - mirrors HomeView.svelte's
     // onMount getShortcuts() call.
-    let state = tauri_handle.state::<souffle_lib::state::AppState>();
-    match souffle_lib::commands::get_shortcuts(state) {
+    match souffle_lib::commands::get_shortcuts(handle.clone()) {
         Ok(shortcuts) => {
             window.set_dictation_shortcut(format_shortcut_label(&shortcuts.toggle).into());
         }
@@ -3717,10 +3780,10 @@ fn main() {
     }
     window.set_settings_app_version(souffle_lib::commands::get_app_version().version.into());
 
-    refresh_timeline(&window, &tauri_handle);
-    let onboarding_open = wire_onboarding_callbacks(&window, tauri_handle.clone());
-    wire_update_dialogs(&window, tauri_handle.clone(), onboarding_open);
-    wire_callbacks(&window, tauri_handle);
+    refresh_timeline(&window, &handle);
+    let onboarding_open = wire_onboarding_callbacks(&window, handle.clone());
+    wire_update_dialogs(&window, handle.clone(), onboarding_open);
+    wire_callbacks(&window, handle);
 
     window.run().expect("event loop failed");
 }

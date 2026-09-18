@@ -25,7 +25,7 @@ const KYUTAI_2_6B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-2-6b-en";
 const WHISPER_TURBO_GGML_ARTIFACT_ID: &str = "hf-ggml-large-v3-turbo";
 const PARAKEET_TDT_06B_V3_ONNX_ARTIFACT_ID: &str = "hf-onnx-parakeet-tdt-0-6b-v3";
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionProfileSelection {
     pub engine_id: String,
     pub model_id: String,
@@ -42,7 +42,7 @@ impl Default for TranscriptionProfileSelection {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionProfile {
     pub engine_id: String,
     pub engine_label: String,
@@ -89,7 +89,7 @@ impl TranscriptionProfile {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionCapabilities {
     pub supports_streaming: bool,
     pub supports_batch_transcription: bool,
@@ -98,14 +98,14 @@ pub struct TranscriptionCapabilities {
     pub supports_partial_results: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct AudioInputRequirements {
     pub sample_rate_hz: u32,
     pub channels: u8,
     pub chunk_size_samples: u32,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct ModelArtifactDescriptor {
     pub id: String,
     pub label: String,
@@ -118,7 +118,7 @@ pub struct ModelArtifactDescriptor {
     pub required_files: Vec<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionRuntimeBackendDescriptor {
     pub id: String,
     pub label: String,
@@ -129,7 +129,7 @@ pub struct TranscriptionRuntimeBackendDescriptor {
     pub artifacts: Vec<ModelArtifactDescriptor>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionModelDescriptor {
     pub id: String,
     pub label: String,
@@ -145,7 +145,7 @@ pub struct TranscriptionModelDescriptor {
     pub recommended_backend_id: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionEngineDescriptor {
     pub id: String,
     pub label: String,
@@ -153,7 +153,7 @@ pub struct TranscriptionEngineDescriptor {
     pub models: Vec<TranscriptionModelDescriptor>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionCatalog {
     pub engines: Vec<TranscriptionEngineDescriptor>,
     pub selected_engine_id: String,
@@ -161,7 +161,7 @@ pub struct TranscriptionCatalog {
     pub selected_backend_id: String,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionRuntimePhase {
     DownloadRequired,
@@ -169,7 +169,7 @@ pub enum TranscriptionRuntimePhase {
     Ready,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionRuntimeStatus {
     pub profile: TranscriptionProfile,
     pub phase: TranscriptionRuntimePhase,
@@ -304,9 +304,7 @@ pub trait TranscriptionEngine {
 /// dropped persistent-speaker feature. `Speaker::parse` and
 /// `deserialize_optional_speaker` absorb those into `None` so old meetings
 /// keep loading; that tolerance lives there, not in `Deserialize`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, specta::Type,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Speaker {
     Me,
@@ -342,7 +340,7 @@ impl Speaker {
 }
 
 /// A piece of transcribed text with metadata
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionSegment {
     pub text: String,
     pub start_time: f64,

@@ -14,7 +14,7 @@ use crate::export::{self, ExportFormat};
 
 /// Settings > Data stats line: database size, row counts, and recorded
 /// meeting audio size.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataStats {
     pub db_size_bytes: u64,
     pub meeting_count: u32,

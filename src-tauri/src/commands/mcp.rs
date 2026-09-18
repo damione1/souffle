@@ -26,7 +26,7 @@ fn shell_escape_path(path: &str) -> String {
     format!("'{}'", path.replace('\'', "'\\''"))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpSetupInfo {
     pub binary_path: String,
     pub exists: bool,
@@ -67,8 +67,6 @@ pub fn resolve_mcp_binary_path() -> PathBuf {
 /// Resolve the sidecar path and build the copy/paste snippets for Settings >
 /// Data. Never fails: an absent binary is a valid (if inactionable) state
 /// the UI shows, not an error.
-#[tauri::command]
-#[specta::specta]
 pub fn get_mcp_setup_info() -> Result<McpSetupInfo, String> {
     let path = resolve_mcp_binary_path();
     let exists = path.is_file();
@@ -96,8 +94,6 @@ pub fn get_mcp_setup_info() -> Result<McpSetupInfo, String> {
 /// Used by the Settings UI's "Test connection" button as a quick smoke test
 /// that the binary actually speaks MCP. `tools/list` alone is intentional:
 /// it proves stdio JSON-RPC works without needing a populated database.
-#[tauri::command]
-#[specta::specta]
 pub fn test_mcp_connection() -> Result<String, String> {
     let path = resolve_mcp_binary_path();
     if !path.is_file() {

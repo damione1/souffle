@@ -16,18 +16,15 @@
 //!   the main-window controller then runs `stop_transcription` + polish/paste.
 //!   Meetings use `MeetingStopRequested`, same path as the tray.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager};
-use tauri_specta::Event;
 use tracing::warn;
 
-use crate::app_events::{
-    DictationStopRequested, MeetingStopRequested, PillHoldChanged, PillHoldKind,
-};
+use crate::app_events::PillHoldKind;
 use crate::db::Database;
+use crate::native::bridge::{self, NativeAction};
 use crate::settings::PILL_POSITION_KEY;
 use crate::state::AppState;
 use crate::state_machine::{AppStateMachine, RecordingKind};
@@ -125,31 +122,31 @@ pub const LIVE_TEXT_MAX_CHARS: usize = 360;
 // ---------------------------------------------------------------------------
 
 /// Create the native panel and install the stop callback.
-/// Must be called from the Tauri setup closure (main thread).
-pub fn create_panel(app: &AppHandle) {
+/// Must be called during startup (main thread).
+pub fn create_panel(state: &Arc<AppState>) {
     // SAFETY: Swift hops to the main thread internally.
     unsafe { pill_panel_create() };
-    install_stop_callback(app.clone());
+    install_stop_callback(Arc::clone(state));
 }
 
-fn install_stop_callback(app: AppHandle) {
-    STOP_APP_HANDLE.set(std::sync::Mutex::new(Some(app))).ok();
+fn install_stop_callback(state: Arc<AppState>) {
+    STOP_STATE.set(std::sync::Mutex::new(Some(state))).ok();
 
     unsafe extern "C" fn on_stop(_recording_mode: i32) {
-        let app = {
-            let Some(guard) = STOP_APP_HANDLE.get() else {
+        let state = {
+            let Some(guard) = STOP_STATE.get() else {
                 return;
             };
             let Ok(guard) = guard.lock() else {
                 return;
             };
-            let Some(app) = guard.as_ref() else {
+            let Some(state) = guard.as_ref() else {
                 return;
             };
-            app.clone()
+            Arc::clone(state)
         };
 
-        let Ok(machine) = app.state::<AppState>().current_machine_state() else {
+        let Ok(machine) = state.current_machine_state() else {
             return;
         };
         // Trust the machine, not Swift's latched mode. A stale dictation
@@ -158,11 +155,11 @@ fn install_stop_callback(app: AppHandle) {
         match hud_stop_target(&machine) {
             Some(HudStopTarget::Meeting) => {
                 tracing::info!("HUD stop routed to meeting");
-                let _ = MeetingStopRequested.emit(&app);
+                bridge::dispatch(NativeAction::StopMeeting);
             }
             Some(HudStopTarget::Dictation) => {
                 tracing::info!("HUD stop routed to dictation");
-                let _ = DictationStopRequested.emit(&app);
+                bridge::dispatch(NativeAction::StopDictation);
             }
             None => {
                 tracing::info!("HUD stop ignored (not recording)");
@@ -171,7 +168,7 @@ fn install_stop_callback(app: AppHandle) {
     }
 
     // SAFETY: `on_stop` is a plain C function pointer; Swift may call it
-    // from the main thread. AppHandle is Send + Sync.
+    // from the main thread. `Arc<AppState>` is Send + Sync.
     unsafe { pill_panel_set_stop_callback(Some(on_stop)) };
 }
 
@@ -203,7 +200,7 @@ fn hud_stop_target(machine: &AppStateMachine) -> Option<HudStopTarget> {
     }
 }
 
-static STOP_APP_HANDLE: std::sync::OnceLock<std::sync::Mutex<Option<AppHandle>>> =
+static STOP_STATE: std::sync::OnceLock<std::sync::Mutex<Option<Arc<AppState>>>> =
     std::sync::OnceLock::new();
 
 // ---------------------------------------------------------------------------
@@ -253,9 +250,8 @@ fn custom_origin() -> Option<(f64, f64)> {
     CUSTOM_ORIGIN.lock().ok().and_then(|guard| *guard)
 }
 
-fn locale_is_french(app: &AppHandle) -> bool {
-    app.try_state::<AppState>()
-        .and_then(|state| crate::settings::AppSettings::load(&state.db).ok())
+fn locale_is_french(state: &AppState) -> bool {
+    crate::settings::AppSettings::load(&state.db)
         .map(|settings| settings.locale.starts_with("fr"))
         .unwrap_or(false)
 }
@@ -312,15 +308,12 @@ fn apply_mode(mode: PillPanelMode, fr: bool) {
 // Public hold API
 // ---------------------------------------------------------------------------
 
-pub fn set_hold(app: &AppHandle, kind: PillHoldKind) {
+pub fn set_hold(kind: PillHoldKind) {
     set_hold_state(kind);
-    let _ = PillHoldChanged { kind: Some(kind) }.emit(app);
 }
 
-pub fn clear_hold(app: &AppHandle) {
-    if clear_hold_state() {
-        let _ = PillHoldChanged { kind: None }.emit(app);
-    }
+pub fn clear_hold() {
+    clear_hold_state();
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +321,7 @@ pub fn clear_hold(app: &AppHandle) {
 // ---------------------------------------------------------------------------
 
 /// Show/hide the pill and update mode. Called on every state transition.
-pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
+pub fn sync(state: &AppState, machine: &AppStateMachine) {
     let recording = matches!(
         machine,
         AppStateMachine::RecordingDictation { .. } | AppStateMachine::RecordingMeeting { .. }
@@ -336,11 +329,11 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
 
     let was_recording = LAST_RECORDING.swap(recording, Ordering::SeqCst);
     if should_clear_hold_on_sync(was_recording, recording) {
-        clear_hold(app);
+        clear_hold();
     }
 
     let show = should_show_pill(recording, is_held(), is_hidden());
-    let fr = locale_is_french(app);
+    let fr = locale_is_french(state);
 
     let mode = if is_held() {
         PillPanelMode::Polishing
@@ -365,7 +358,7 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
     apply_mode(mode, fr);
 
     if !show {
-        persist_position(app);
+        persist_position(state);
         if let Some(empty) = to_cstring("") {
             unsafe { pill_panel_set_live_text(empty.as_ptr()) };
         }
@@ -431,7 +424,7 @@ pub(crate) fn restore_from_db(db: &Database, hidden: bool) {
     }
 }
 
-fn persist_position(app: &tauri::AppHandle) {
+fn persist_position(state: &AppState) {
     let mut x: f64 = 0.0;
     let mut y: f64 = 0.0;
     let has_origin = unsafe { pill_panel_get_origin(&mut x, &mut y) } != 0;
@@ -440,9 +433,6 @@ fn persist_position(app: &tauri::AppHandle) {
     }
     store_custom_origin(Some((x, y)));
 
-    let Some(state) = app.try_state::<AppState>() else {
-        return;
-    };
     match serde_json::to_string(&(x, y)) {
         Ok(raw) => {
             if let Err(e) = state.db.set_setting(PILL_POSITION_KEY, &raw) {

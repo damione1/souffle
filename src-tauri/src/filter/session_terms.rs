@@ -20,7 +20,7 @@ const MIN_TOKEN_LEN: usize = 3;
 /// An explicit misspelling-to-term pair registered when the user edits live
 /// transcript text. Applied through the dictionary filter for the rest of the
 /// recording session only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionCorrection {
     pub misspelling: String,
     pub term: String,

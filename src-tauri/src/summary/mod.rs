@@ -57,7 +57,7 @@ pub fn structured_extract_for_persist(
 /// Which phase of summarization a progress event belongs to, so the frontend
 /// can show a live stage label ("Summarizing part 3 of 12", "Combining...",
 /// "Extracting outcomes...") instead of a silent multi-minute spinner.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SummarizeStage {
     /// Per-chunk map pass over the raw transcript.
@@ -72,7 +72,7 @@ pub enum SummarizeStage {
     Extract,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummarizeProgress {
     pub text: String,
     pub done: bool,
@@ -95,7 +95,7 @@ impl SummarizeProgress {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SummaryProviderKind {
     Ollama,
@@ -107,7 +107,7 @@ pub enum SummaryProviderKind {
 /// Before this existed the provider was inferred from the selected model id,
 /// so a stale Ollama model name silently decided the provider, and an
 /// unavailable one silently handed the work to whatever else was around.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SummaryProviderChoice {
     /// Apple Intelligence when this Mac offers it, Ollama otherwise.
@@ -164,7 +164,7 @@ impl ModelChoiceError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryModelDescriptor {
     pub id: String,
     pub label: String,
@@ -172,7 +172,7 @@ pub struct SummaryModelDescriptor {
     pub can_summarize: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryProvidersStatus {
     pub ollama_url: String,
     pub ollama_available: bool,

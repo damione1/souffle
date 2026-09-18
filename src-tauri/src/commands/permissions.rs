@@ -10,10 +10,8 @@ use crate::permissions::{
 /// trips to `tccd`, and a synchronous command runs on the main thread, where
 /// a stalled `tccd` would freeze the window. Nothing here needs the main
 /// thread — only *requests* do (SOU-122).
-#[tauri::command]
-#[specta::specta]
 pub async fn get_permission_status() -> Result<PermissionStatus, String> {
-    tauri::async_runtime::spawn_blocking(permissions::snapshot)
+    crate::async_runtime::spawn_blocking(permissions::snapshot)
         .await
         .map_err(|e| format!("Permission status read failed: {e}"))
 }
@@ -21,10 +19,8 @@ pub async fn get_permission_status() -> Result<PermissionStatus, String> {
 /// Trigger the native prompt (or open System Settings) for one permission.
 /// Blocks until the user answers the dialog, so it runs off the command
 /// thread.
-#[tauri::command]
-#[specta::specta]
 pub async fn request_permission(kind: PermissionKind) -> Result<PermState, String> {
-    tauri::async_runtime::spawn_blocking(move || permissions::request(kind))
+    crate::async_runtime::spawn_blocking(move || permissions::request(kind))
         .await
         .map_err(|e| format!("Permission request failed: {e}"))
 }
@@ -34,10 +30,8 @@ pub async fn request_permission(kind: PermissionKind) -> Result<PermState, Strin
 /// Souffle as granted while `AXIsProcessTrusted` still returns false, because
 /// the TCC entry is keyed to the previous code-signing identity. Runs off
 /// the command thread since it shells out and may block on the prompt.
-#[tauri::command]
-#[specta::specta]
 pub async fn repair_accessibility_permission() -> Result<RepairAccessibilityResult, String> {
-    tauri::async_runtime::spawn_blocking(permissions::repair_accessibility)
+    crate::async_runtime::spawn_blocking(permissions::repair_accessibility)
         .await
         .map_err(|e| format!("Accessibility repair failed: {e}"))?
 }

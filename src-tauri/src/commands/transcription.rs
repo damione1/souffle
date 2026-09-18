@@ -3,19 +3,16 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use crossbeam_channel::Sender;
-use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State};
-use tauri_plugin_notification::NotificationExt;
-use tauri_specta::Event;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::app_events::{MeetingFinalized, SystemAudioReason, SystemWokeUp};
+use crate::app_events::SystemAudioReason;
 use crate::constants::STOP_REPLY_TIMEOUT_SECS;
 use crate::db::Database;
 use crate::engine::TranscriptionSegment;
 use crate::lock_ext::MutexExt;
 use crate::pipeline::{EngineActorHandle, SegmentCallback, SessionConfig};
+use crate::progress::ProgressChannel;
 use crate::settings::AppSettings;
 use crate::state::{AppState, AudioCommand, MeetingAccumulator};
 use crate::state_machine::{AppStateMachine, StateAction};
@@ -64,12 +61,12 @@ fn meeting_header(acc: &MeetingAccumulator) -> MeetingTranscript {
 /// on the engine-actor thread (not the realtime audio callback), so the batched
 /// DB write is acceptable. The accumulator lock is dropped before the write.
 fn build_meeting_on_segment(
-    channel: Channel<TranscriptionSegment>,
+    channel: ProgressChannel<TranscriptionSegment>,
     accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     db: Arc<Database>,
 ) -> SegmentCallback {
     Box::new(move |seg| {
-        let _ = channel.send(seg.clone());
+        channel.send(seg.clone());
 
         // Tentatives are live-UI only. Persisting them would write a row
         // that the later final then duplicates.
@@ -128,7 +125,7 @@ async fn launch_meeting(
     state: &AppState,
     accumulator: MeetingAccumulator,
     event_description: Option<String>,
-    channel: Channel<TranscriptionSegment>,
+    channel: ProgressChannel<TranscriptionSegment>,
 ) -> Result<u64, String> {
     let session_id = next_audio_session_id(state)?;
 
@@ -175,8 +172,7 @@ async fn launch_meeting(
     let audio = state.audio_cmd_sender.clone();
     let db = Arc::clone(&state.db);
     let acc = Arc::clone(&state.meeting_accumulator);
-    let app = state.app_handle().ok();
-    let res = tauri::async_runtime::spawn_blocking(move || {
+    let res = crate::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
             &actor,
             &audio,
@@ -186,7 +182,6 @@ async fn launch_meeting(
             session_terms,
             Some(recording_target),
             on_segment,
-            app,
         )
     })
     .await
@@ -257,29 +252,27 @@ enum SystemAudioPlan {
     Skip(Option<SystemAudioReason>),
 }
 
-/// Apply the plan: a skipped leg is emitted *and* stored right here, before
-/// the capture thread is asked for anything, so the "we never even tried"
-/// case is as visible as a failure. Returns whether to attempt the tap.
-fn apply_system_audio_plan(app: Option<&AppHandle>, plan: SystemAudioPlan) -> bool {
+/// Apply the plan: a skipped leg is stored right here, before the capture
+/// thread is asked for anything, so the "we never even tried" case is as
+/// visible as a failure. Returns whether to attempt the tap.
+fn apply_system_audio_plan(plan: SystemAudioPlan) -> bool {
     if let SystemAudioPlan::Skip(Some(reason_code)) = plan {
-        crate::audio::capture::emit_system_audio_status(app, false, Some(reason_code), None);
+        crate::audio::capture::emit_system_audio_status(false, Some(reason_code), None);
     }
     plan == SystemAudioPlan::Attempt
 }
 
-/// Report the outcome of the system-audio probe, then hand back the tap.
-/// A failure goes through the shared helper, which stores the snapshot as
-/// well as emitting it: emitting alone left a reloaded webview with nothing
-/// (SOU-119). Generic over the tap so the reporting can be tested without
-/// CoreAudio.
+/// Report the outcome of the system-audio probe, then hand back the tap. A
+/// failure goes through the shared helper, which stores the snapshot for a
+/// later `get_system_audio_status` read (SOU-119). Generic over the tap so
+/// the reporting can be tested without CoreAudio.
 #[cfg(target_os = "macos")]
-fn report_probe_outcome<T>(app: Option<&AppHandle>, outcome: Result<T, String>) -> Option<T> {
+fn report_probe_outcome<T>(outcome: Result<T, String>) -> Option<T> {
     match outcome {
         Ok(tap) => Some(tap),
         Err(reason) => {
             tracing::warn!("System audio tap probe failed, downgrading to mic only: {reason}");
             crate::audio::capture::emit_system_audio_status(
-                app,
                 false,
                 Some(crate::audio::system_tap::failure_reason(&reason)),
                 Some(reason),
@@ -335,25 +328,19 @@ fn start_pipeline_blocking(
     session_terms: Vec<String>,
     recording_target: Option<RecordingTarget>,
     on_segment: SegmentCallback,
-    app: Option<AppHandle>,
 ) -> Result<(), String> {
     // Snapshot settings and dictionary; the actor builds filter chains on its
     // own thread to keep ONNX/Metal work off the command thread.
     let settings = crate::settings::AppSettings::load(db)?;
-    #[cfg(not(target_os = "macos"))]
-    let _ = &app;
 
     // Zero the tallies before the first status of this session is built, so
     // a previous meeting's samples cannot be read as this one's (SOU-119).
     crate::audio::capture::begin_system_audio_session(session_id);
-    let capture_system_audio = apply_system_audio_plan(
-        app.as_ref(),
-        system_audio_plan(
-            mode,
-            settings.capture_system_audio,
-            crate::platform::system_audio_capture_supported(),
-        ),
-    );
+    let capture_system_audio = apply_system_audio_plan(system_audio_plan(
+        mode,
+        settings.capture_system_audio,
+        crate::platform::system_audio_capture_supported(),
+    ));
 
     // SOU-082: learn whether a tap will come up *before* committing the
     // engine to dual-lane diarization. The probe must not stay alive across
@@ -369,7 +356,7 @@ fn start_pipeline_blocking(
             ringbuf::HeapRb::<f32>::new(crate::audio::mixer::MIX_RATE as usize * 2).split();
         let probe =
             crate::audio::system_tap::spawn_tap(tap_prod, std::time::Duration::from_secs(5));
-        match report_probe_outcome(app.as_ref(), probe) {
+        match report_probe_outcome(probe) {
             Some(tap) => {
                 drop(tap);
                 true
@@ -508,14 +495,13 @@ fn dictation_live_preview(accumulated: &str, tentative: &str) -> String {
 /// push the same tail to the native HUD. Meetings do not go through this
 /// path — their own `build_meeting_on_segment` never touches live text.
 fn build_dictation_on_segment(
-    app: AppHandle,
-    channel: Channel<crate::engine::TranscriptionSegment>,
+    channel: ProgressChannel<crate::engine::TranscriptionSegment>,
 ) -> SegmentCallback {
     let live_text = Mutex::new(DictationLiveTextState::default());
     Box::new(move |seg| {
         let is_final = seg.is_final;
         let text = seg.text.clone();
-        let _ = channel.send(seg);
+        channel.send(seg);
 
         let Ok(mut state) = live_text.lock() else {
             return;
@@ -525,7 +511,6 @@ fn build_dictation_on_segment(
             let tail = crate::pill::live_text_tail(&preview, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
             crate::pill::push_live_text(&tail);
-            let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
             return;
         }
         if !state.accumulated.is_empty()
@@ -547,7 +532,6 @@ fn build_dictation_on_segment(
                 crate::pill::live_text_tail(&state.accumulated, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
             crate::pill::push_live_text(&tail);
-            let _ = crate::app_events::DictationLiveText { text: tail }.emit(&app);
         }
     })
 }
@@ -559,11 +543,9 @@ fn build_dictation_on_segment(
 ///
 /// `cancel_on_escape` arms the transient Escape binding for toggle dictation
 /// (SOU-117). Push-to-talk passes false: releasing the PTT key is its cancel.
-#[tauri::command]
-#[specta::specta]
 pub async fn start_transcription(
-    state: State<'_, AppState>,
-    channel: Channel<crate::engine::TranscriptionSegment>,
+    state: Arc<AppState>,
+    channel: ProgressChannel<crate::engine::TranscriptionSegment>,
     cancel_on_escape: bool,
 ) -> Result<(), String> {
     info!("Starting streaming transcription");
@@ -580,20 +562,12 @@ pub async fn start_transcription(
     }
     let session_id = next_audio_session_id(&state)?;
 
-    let on_segment: SegmentCallback = match state.app_handle() {
-        Ok(app) => build_dictation_on_segment(app, channel),
-        // No AppHandle (should not happen once the app is running): keep
-        // forwarding segments to the main window even without live text.
-        Err(_) => Box::new(move |seg| {
-            let _ = channel.send(seg);
-        }),
-    };
+    let on_segment: SegmentCallback = build_dictation_on_segment(channel);
 
     let actor = Arc::clone(&state.engine_actor);
     let audio = state.audio_cmd_sender.clone();
     let db = Arc::clone(&state.db);
-    let app = state.app_handle().ok();
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
             &actor,
             &audio,
@@ -603,7 +577,6 @@ pub async fn start_transcription(
             Vec::new(),
             None,
             on_segment,
-            app,
         )
     })
     .await
@@ -611,10 +584,8 @@ pub async fn start_transcription(
 
     state.apply_transition(StateAction::StartDictation { session_id })?;
     crate::dictation_cancel::set_wanted(cancel_on_escape);
-    if let Ok(app) = state.app_handle()
-        && let Ok(machine) = state.current_machine_state()
-    {
-        crate::dictation_cancel::sync(&app, &machine);
+    if let Ok(machine) = state.current_machine_state() {
+        crate::dictation_cancel::sync(&state, &machine);
     }
 
     if let Ok(settings) = AppSettings::load(&state.db) {
@@ -633,9 +604,7 @@ pub async fn start_transcription(
 /// Awaits the drain so the frontend's assembled transcript (used for clipboard
 /// and dictation history) is complete before this resolves. The drain runs in
 /// `spawn_blocking`, so awaiting it does not freeze the window.
-#[tauri::command]
-#[specta::specta]
-pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn stop_transcription(state: Arc<AppState>) -> Result<(), String> {
     let current_state = state.current_machine_state()?;
     let is_dictation = matches!(current_state, AppStateMachine::RecordingDictation { .. });
     let is_stopping_dictation = matches!(
@@ -666,7 +635,7 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
     // Pipeline stop can fail (e.g. drain timeout) but we MUST complete the
     // state transition — otherwise the machine stays stuck in Stopping.
     let stop_result =
-        tauri::async_runtime::spawn_blocking(move || stop_pipeline_blocking(&actor, &audio))
+        crate::async_runtime::spawn_blocking(move || stop_pipeline_blocking(&actor, &audio))
             .await
             .map_err(|e| format!("Join stop task: {e}"))?;
     if let Err(e) = stop_result {
@@ -679,12 +648,8 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
     // Clear the pill's live-text preview now that the session is over — the
     // dictation on_segment closure (and its accumulated text) is dropped
     // with the session, so nothing else will do this.
-    if is_dictation && let Ok(app) = state.app_handle() {
+    if is_dictation {
         crate::pill::push_live_text("");
-        let _ = crate::app_events::DictationLiveText {
-            text: String::new(),
-        }
-        .emit(&app);
     }
 
     if is_dictation && let Ok(settings) = AppSettings::load(&state.db) {
@@ -699,13 +664,11 @@ pub async fn stop_transcription(state: State<'_, AppState>) -> Result<(), String
 }
 
 /// Start meeting recording with live transcription.
-#[tauri::command]
-#[specta::specta]
 pub async fn start_meeting_recording(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     title: String,
     calendar: Option<MeetingCalendarContext>,
-    channel: Channel<crate::engine::TranscriptionSegment>,
+    channel: ProgressChannel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
     // The title is not logged: started from a calendar event it is the event
     // title, which routinely carries a client or a colleague's name.
@@ -767,12 +730,10 @@ pub async fn start_meeting_recording(
 }
 
 /// Resume recording on an existing meeting and append new transcript segments.
-#[tauri::command]
-#[specta::specta]
 pub async fn resume_meeting_recording(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     meeting_id: String,
-    channel: Channel<crate::engine::TranscriptionSegment>,
+    channel: ProgressChannel<crate::engine::TranscriptionSegment>,
 ) -> Result<(), String> {
     info!(meeting_id = %meeting_id, "Resuming meeting recording");
 
@@ -837,9 +798,7 @@ pub async fn resume_meeting_recording(
 /// id immediately, and drains + saves in the background. Segments were persisted
 /// incrementally during the meeting, so the detail view can render right away
 /// and reconcile when the `MeetingFinalized` event fires.
-#[tauri::command]
-#[specta::specta]
-pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn stop_meeting_recording(state: Arc<AppState>) -> Result<String, String> {
     let machine = state.current_machine_state()?;
     if !machine.is_recording() {
         return Err("Not recording".into());
@@ -859,20 +818,14 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
         .map(|m| m.id.clone())
         .ok_or("No meeting accumulator")?;
 
-    // Fetch the handle BEFORE transitioning: the background task needs it to
-    // complete the stop, so if it's somehow missing we must fail before leaving
-    // the machine stuck in Stopping.
-    let app = state.app_handle()?;
-
     // Transition to Stopping immediately so the UI can show "Finalizing…".
     state.apply_transition(StateAction::StopRecording)?;
 
     // Finish off-thread: drain the engine, save the authoritative transcript,
-    // then complete the transition and notify the frontend.
-    let id_for_task = meeting_id.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-
+    // then complete the transition. `state` is `Arc<AppState>` (owned,
+    // 'static), so the background task just clones it directly.
+    let state = Arc::clone(&state);
+    crate::async_runtime::spawn_blocking(move || {
         // Only the fallible drain+save is guarded: if it panics (e.g. an engine
         // or DB driver bug), the transition and event emit below still must run
         // so the machine never gets stuck in Stopping. Segments already flushed
@@ -946,19 +899,12 @@ pub async fn stop_meeting_recording(state: State<'_, AppState>) -> Result<String
         if let Some(err) = pipeline_err {
             warn!("Pipeline stop failed (meeting saved anyway): {err}");
         }
-
-        let _ = MeetingFinalized {
-            id: id_for_task.clone(),
-        }
-        .emit(&app);
     });
 
     Ok(meeting_id)
 }
 
 /// Insert dictation text into the active app (clipboard paste or simulated typing).
-#[tauri::command]
-#[specta::specta]
 pub fn paste_text(
     text: String,
     delay_ms: u64,
@@ -985,8 +931,6 @@ pub fn paste_text(
 
 /// Write text to the pasteboard without pasting. Cancels a pending clipboard
 /// restore so a failed ⌘V cannot wipe the transcription 400 ms later.
-#[tauri::command]
-#[specta::specta]
 pub fn copy_text(text: String) -> Result<(), String> {
     crate::clipboard::copy_text(&text)
 }
@@ -1043,25 +987,18 @@ fn paste_failure_notification_text(
 /// matching the calendar reminder and meeting-idle notifications: action
 /// buttons and click callbacks are unreliable on macOS with the
 /// notification plugin.
-#[tauri::command]
-#[specta::specta]
 pub fn notify_paste_failed(
-    app: AppHandle,
+    state: Arc<AppState>,
     error: String,
     saved_to_history: bool,
 ) -> Result<(), String> {
-    let state = app.state::<AppState>();
     let french = AppSettings::load(&state.db)
         .map(|settings| settings.locale.starts_with("fr"))
         .unwrap_or(false);
 
     let (title, body) = paste_failure_notification_text(french, &error, saved_to_history);
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .map_err(|e| format!("Paste failure notification failed: {e}"))
+    crate::native::notifications::notify(title, body);
+    Ok(())
 }
 
 /// Called from the `NSWorkspace` will-sleep observer (installed in `power.rs`
@@ -1075,8 +1012,7 @@ pub fn notify_paste_failed(
 ///
 /// Must not block: the drain runs in a spawned task, not inline, since this
 /// fires from the AppKit notification callback on the main thread.
-pub fn handle_system_will_sleep(app: &AppHandle) {
-    let state = app.state::<AppState>();
+pub fn handle_system_will_sleep(state: &Arc<AppState>) {
     let Ok(machine) = state.current_machine_state() else {
         return;
     };
@@ -1101,10 +1037,9 @@ pub fn handle_system_will_sleep(app: &AppHandle) {
     }
 
     info!("System will sleep: stopping the active recording session");
-    let app = app.clone();
+    let state = Arc::clone(state);
     let is_meeting = meeting_id.is_some();
-    tauri::async_runtime::spawn(async move {
-        let state = app.state::<AppState>();
+    crate::async_runtime::spawn(async move {
         // `Stopping` also satisfies `is_recording()`, so a sleep landing
         // right as a user-initiated stop is already in flight harmlessly
         // no-ops here (the command below rejects a non-matching state).
@@ -1120,11 +1055,12 @@ pub fn handle_system_will_sleep(app: &AppHandle) {
 }
 
 /// Called from the `NSWorkspace` did-wake observer on the main thread.
-/// Just notifies the frontend — resuming a paused meeting needs a frontend
-/// segment channel, so the backend cannot resume on its own.
-pub fn handle_system_did_wake(app: &AppHandle) {
+/// `peek_sleep_paused_meeting` lets a caller check on demand whether a
+/// meeting needs a resume offer; nothing currently polls it proactively on
+/// wake (the Svelte-era "SystemWokeUp -> offer resume" banner has no Slint
+/// equivalent yet — pre-existing gap, not introduced by this ticket).
+pub fn handle_system_did_wake() {
     info!("System woke up");
-    let _ = SystemWokeUp.emit(app);
 }
 
 /// Return the meeting id paused by the system-sleep handler, if any, without
@@ -1134,9 +1070,7 @@ pub fn handle_system_did_wake(app: &AppHandle) {
 /// stop may still be draining when wake fires: the frontend needs to be
 /// able to check again once it finishes, rather than have the first check
 /// burn the id before a resume was actually attempted.
-#[tauri::command]
-#[specta::specta]
-pub fn peek_sleep_paused_meeting(state: State<'_, AppState>) -> Option<String> {
+pub fn peek_sleep_paused_meeting(state: Arc<AppState>) -> Option<String> {
     state.peek_sleep_paused_meeting()
 }
 
@@ -1145,9 +1079,7 @@ pub fn peek_sleep_paused_meeting(state: State<'_, AppState>) -> Option<String> {
 /// declines to resume. `launch_meeting` also clears it unconditionally on
 /// every recording start, so a resume that goes through the normal start
 /// path never needs this to avoid re-offering the same meeting later.
-#[tauri::command]
-#[specta::specta]
-pub fn clear_sleep_paused_meeting(state: State<'_, AppState>) {
+pub fn clear_sleep_paused_meeting(state: Arc<AppState>) {
     state.clear_sleep_paused_meeting();
 }
 
@@ -1161,11 +1093,11 @@ mod tests {
         dictation_live_preview, paste_failure_notification_text, system_audio_plan,
     };
     use crate::engine::{TranscriptionSegment, default_transcription_profile};
+    use crate::progress::ProgressChannel;
     use crate::state::MeetingAccumulator;
     use crate::test_helpers::fixtures::test_db;
     use chrono::Utc;
     use std::sync::{Arc, Mutex};
-    use tauri::ipc::Channel;
 
     fn test_segment(text: &str, is_final: bool) -> TranscriptionSegment {
         TranscriptionSegment {
@@ -1206,7 +1138,7 @@ mod tests {
             persisted_new_count: 0,
         })));
 
-        let channel: Channel<TranscriptionSegment> = Channel::new(|_| Ok(()));
+        let channel: ProgressChannel<TranscriptionSegment> = ProgressChannel::new(|_| {});
         let on_segment = build_meeting_on_segment(channel, Arc::clone(&accumulator), db);
 
         for i in 0..MEETING_FLUSH_THRESHOLD {
@@ -1254,7 +1186,7 @@ mod tests {
             persisted_new_count: 0,
         })));
 
-        let channel: Channel<TranscriptionSegment> = Channel::new(|_| Ok(()));
+        let channel: ProgressChannel<TranscriptionSegment> = ProgressChannel::new(|_| {});
         let on_segment = build_meeting_on_segment(channel, Arc::clone(&accumulator), db);
 
         on_segment(test_segment("pending", false));
@@ -1380,10 +1312,9 @@ mod tests {
             .unwrap();
         crate::audio::capture::status_test_support::reset();
 
-        let outcome = report_probe_outcome::<()>(
-            None,
-            Err("AudioHardwareCreateProcessTap failed (560227702)".into()),
-        );
+        let outcome = report_probe_outcome::<()>(Err(
+            "AudioHardwareCreateProcessTap failed (560227702)".into(),
+        ));
 
         assert!(outcome.is_none());
         let stored = crate::commands::get_system_audio_status().expect("status must be stored");
@@ -1407,7 +1338,7 @@ mod tests {
         crate::audio::capture::status_test_support::reset();
 
         let attempt =
-            apply_system_audio_plan(None, system_audio_plan(PipelineMode::Meeting, false, true));
+            apply_system_audio_plan(system_audio_plan(PipelineMode::Meeting, false, true));
 
         assert!(!attempt, "nothing to attempt with the setting off");
         let stored = crate::commands::get_system_audio_status().expect("status must be stored");
@@ -1425,7 +1356,7 @@ mod tests {
         crate::audio::capture::status_test_support::reset();
 
         let attempt =
-            apply_system_audio_plan(None, system_audio_plan(PipelineMode::Dictation, true, true));
+            apply_system_audio_plan(system_audio_plan(PipelineMode::Dictation, true, true));
 
         assert!(!attempt);
         assert!(crate::commands::get_system_audio_status().is_none());
@@ -1438,8 +1369,7 @@ mod tests {
             .unwrap();
         crate::audio::capture::status_test_support::reset();
 
-        let attempt =
-            apply_system_audio_plan(None, system_audio_plan(PipelineMode::Meeting, true, true));
+        let attempt = apply_system_audio_plan(system_audio_plan(PipelineMode::Meeting, true, true));
 
         assert!(attempt, "the probe decides from here");
         assert!(

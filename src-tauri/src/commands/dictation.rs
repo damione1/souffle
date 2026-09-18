@@ -1,4 +1,4 @@
-use tauri::State;
+use std::sync::Arc;
 
 use crate::settings::AppSettings;
 use crate::state::AppState;
@@ -7,10 +7,8 @@ use crate::summary::{
 };
 
 /// List dictation history entries
-#[tauri::command]
-#[specta::specta]
 pub fn list_dictation_entries(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     limit: Option<i64>,
 ) -> Result<Vec<crate::db::dictation::DictationEntry>, String> {
     state.db.list_dictation_entries(limit.unwrap_or(50))
@@ -18,9 +16,7 @@ pub fn list_dictation_entries(
 
 /// Add a dictation history entry. Returns the generated id so a later polish
 /// pass can update the same row instead of inserting a second one.
-#[tauri::command]
-#[specta::specta]
-pub fn add_dictation_entry(state: State<'_, AppState>, text: String) -> Result<String, String> {
+pub fn add_dictation_entry(state: Arc<AppState>, text: String) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
     state.db.add_dictation_entry(&id, &text, &timestamp)?;
@@ -31,10 +27,8 @@ pub fn add_dictation_entry(state: State<'_, AppState>, text: String) -> Result<S
 }
 
 /// Replace the text of an existing dictation entry (e.g. after polish).
-#[tauri::command]
-#[specta::specta]
 pub fn update_dictation_entry(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
     text: String,
 ) -> Result<(), String> {
@@ -44,28 +38,22 @@ pub fn update_dictation_entry(
 }
 
 /// Delete a single dictation entry
-#[tauri::command]
-#[specta::specta]
-pub fn delete_dictation_entry(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub fn delete_dictation_entry(state: Arc<AppState>, id: String) -> Result<(), String> {
     state.db.delete_dictation_entry(&id)?;
     sync_tray(&state);
     Ok(())
 }
 
 /// Clear all dictation history
-#[tauri::command]
-#[specta::specta]
-pub fn clear_dictation_history(state: State<'_, AppState>) -> Result<(), String> {
+pub fn clear_dictation_history(state: Arc<AppState>) -> Result<(), String> {
     state.db.clear_dictation_entries()?;
     sync_tray(&state);
     Ok(())
 }
 
 /// Optional LLM polish pass for dictation text before paste/history.
-#[tauri::command]
-#[specta::specta]
 pub async fn polish_dictation(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     text: String,
     focused_app: Option<String>,
 ) -> Result<DictationPolishResult, String> {
@@ -87,10 +75,8 @@ pub async fn polish_dictation(
 }
 
 /// Best-effort tray refresh so "Copy Last Transcription" tracks history.
-/// No-op without a handle (tests, early startup) — same tolerance as
-/// `apply_transition`.
 fn sync_tray(state: &AppState) {
-    if let (Ok(app), Ok(machine)) = (state.app_handle(), state.current_machine_state()) {
-        crate::tray::sync(&app, &machine);
+    if let Ok(machine) = state.current_machine_state() {
+        crate::tray::sync(state, &machine);
     }
 }

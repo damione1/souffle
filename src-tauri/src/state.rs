@@ -2,11 +2,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::Sender;
-use tauri::AppHandle;
-use tauri_specta::Event;
 use tracing::{debug, error, info, warn};
 
-use crate::app_events::StateChanged;
 use crate::db::Database;
 use crate::engine::{TranscriptionProfile, TranscriptionSegment};
 use crate::lock_ext::MutexExt;
@@ -51,9 +48,6 @@ pub enum AudioCommand {
         priority: crate::audio::InputPriority,
         allow_bluetooth_mic: bool,
     },
-    /// Give the audio thread an AppHandle so meeting mode can emit
-    /// SystemAudioStatus events.
-    AttachApp(AppHandle),
     /// Re-run input resolution and hot-swap the mic leg when needed (device
     /// list or default-input change, priority update, explicit pin change).
     RefreshInputRoute,
@@ -163,8 +157,6 @@ pub struct AppState {
     pub audio_rms: Arc<AtomicU32>,
     /// Unified state machine — the source of truth for app lifecycle
     pub machine: Mutex<AppStateMachine>,
-    /// Tauri app handle for emitting events (set during setup)
-    pub app_handle: Mutex<Option<AppHandle>>,
     /// Set when a meeting recording is stopped by the system-sleep handler
     /// (as opposed to a user-initiated stop), so the frontend can offer to
     /// resume it after wake. Read non-destructively by
@@ -207,7 +199,6 @@ impl AppState {
             db,
             audio_rms,
             machine: Mutex::new(AppStateMachine::Idle),
-            app_handle: Mutex::new(None),
             sleep_paused_meeting_id: Mutex::new(None),
             live_edit_lock: Mutex::new(()),
             ptt_paused_until: Mutex::new(None),
@@ -240,17 +231,15 @@ impl AppState {
         }
     }
 
-    /// Apply a state transition, update the machine, and emit a StateChanged event.
+    /// Apply a state transition and update the machine.
     ///
-    /// INVARIANT: never call window/AppKit operations (they dispatch to the
-    /// main thread and block until it services them) while holding an
-    /// AppState mutex. A `#[tauri::command]` running on the main thread may
-    /// be waiting on that very mutex (e.g. `state.app_handle()`), which
-    /// deadlocks both threads permanently: this method waits forever for the
-    /// main thread to drain its queue, and the main thread waits forever for
-    /// this method to release the lock. So the `machine` lock is scoped to
-    /// just the transition itself, and the `AppHandle` is cloned out of its
-    /// lock before any emit/sync call runs.
+    /// INVARIANT: never call window/AppKit operations while holding the
+    /// `machine` mutex. `pill::sync`/`tray::sync`/`dictation_cancel::sync`
+    /// dispatch to the main thread and block until it services them; a
+    /// command running on the main thread may be waiting on this very mutex,
+    /// which deadlocks both threads permanently. So the lock is scoped to
+    /// just the transition itself, and the sync calls run after it is
+    /// released.
     pub fn apply_transition(&self, action: StateAction) -> Result<AppStateMachine, String> {
         let new_state = {
             let mut machine = self.machine.acquire()?;
@@ -264,13 +253,9 @@ impl AppState {
             new_state
         };
 
-        let handle = self.app_handle.acquire()?.as_ref().cloned();
-        if let Some(handle) = handle {
-            let _ = StateChanged(new_state.clone()).emit(&handle);
-            crate::pill::sync(&handle, &new_state);
-            crate::tray::sync(&handle, &new_state);
-            crate::dictation_cancel::sync(&handle, &new_state);
-        }
+        crate::pill::sync(self, &new_state);
+        crate::tray::sync(self, &new_state);
+        crate::dictation_cancel::sync(self, &new_state);
 
         Ok(new_state)
     }
@@ -278,16 +263,6 @@ impl AppState {
     /// Get a clone of the current machine state.
     pub fn current_machine_state(&self) -> Result<AppStateMachine, String> {
         Ok(self.machine.acquire()?.clone())
-    }
-
-    /// Clone the stored AppHandle (set during setup). Used by async commands to
-    /// drive background finalization tasks that re-fetch `AppState` off-thread.
-    pub fn app_handle(&self) -> Result<AppHandle, String> {
-        self.app_handle
-            .acquire()?
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "App handle not set".to_string())
     }
 
     /// The engine actor unloaded an idle model to reclaim memory. Mirrors the

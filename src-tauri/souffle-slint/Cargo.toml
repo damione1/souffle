@@ -22,10 +22,9 @@ serde_json = "1"
 # SOU-187 milestone 7: native audio playback for MeetingDetail (AC14/AC16).
 # Same version already used by the main `souffle` crate for capture.
 cpal = "0.17"
-# SOU-187 documented exception to SOU-186 AC9 ("zero tauri* in this crate's
-# tree"): the recording backend is built on tauri::State/AppHandle, so the
-# headless bridge needs the `Manager` trait here too. Closed by SOU-191.
-tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png", "protocol-asset"] }
+# SOU-191: receives NativeAction from souffle_lib::native::bridge (global
+# shortcuts, tray, pill HUD stop, single-instance, background update check).
+crossbeam-channel = "0.5"
 # SOU-188: native clipboard write for "Copy diagnostics" - same crate/version
 # the main `souffle` crate already uses (src/clipboard.rs), no webview
 # clipboard API to fall back on here.

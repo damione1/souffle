@@ -1,7 +1,7 @@
 //! Stable CoreAudio input-device identity and preference helpers.
 
 /// Human-facing transport label for an input device.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportType {
     BuiltIn,
@@ -14,7 +14,7 @@ pub enum TransportType {
 }
 
 /// An input-capable audio device as reported to the frontend.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AudioInputDevice {
     /// Stable CoreAudio device UID (`kAudioDevicePropertyDeviceUID`).
     pub uid: String,

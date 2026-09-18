@@ -1,88 +1,37 @@
 use std::path::PathBuf;
-
-use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State};
-use tauri_plugin_dialog::DialogExt;
+use std::sync::Arc;
 
 use crate::db::search::SearchResult;
 use crate::engine::TranscriptionSegment;
 use crate::export::{self, ExportFormat};
+use crate::progress::ProgressChannel;
 use crate::settings::AppSettings;
 use crate::state::AppState;
 
-/// Native save panel, parented to `main` after bringing the app forward.
-///
-/// The JS dialog plugin parents to whichever webview invoked it. WKWebView
-/// swallows OS surfaces the same way it swallows `target="_blank"` (see
-/// `open_release_page`): click, nothing opens. Talk to AppKit from this
-/// side of the webview, always parented to `main`.
-pub(crate) fn pick_save_path(
-    app: &AppHandle,
-    file_name: &str,
-    extension: &str,
-) -> Result<Option<PathBuf>, String> {
-    bring_app_forward(app);
-
-    let Some(main) = app.get_webview_window("main") else {
-        return Err("Main window is gone; cannot show the save dialog".into());
-    };
-
-    let picked = app
-        .dialog()
-        .file()
-        .set_file_name(file_name)
-        .add_filter(extension.to_uppercase(), &[extension])
-        .set_parent(&main)
-        .blocking_save_file();
-
-    match picked {
-        Some(path) => path
-            .into_path()
-            .map(Some)
-            .map_err(|e| format!("Save path: {e}")),
-        None => Ok(None),
-    }
-}
-
-fn bring_app_forward(app: &AppHandle) {
-    let (tx, rx) = std::sync::mpsc::sync_channel(0);
-    let app = app.clone();
-    let _ = app.clone().run_on_main_thread(move || {
-        #[cfg(target_os = "macos")]
-        crate::tray::activate_app();
-        if let Some(main) = app.get_webview_window("main") {
-            let _ = main.unminimize();
-            let _ = main.show();
-            let _ = main.set_focus();
-        }
-        let _ = tx.send(());
-    });
-    let _ = rx.recv();
+/// Native save panel. Must be called from the main thread (`native::dialog`'s
+/// own precondition) — callers in `souffle-slint` already have a
+/// `run_on_main_thread` helper for exactly this.
+pub(crate) fn pick_save_path(file_name: &str, extension: &str) -> Result<Option<PathBuf>, String> {
+    crate::native::dialog::pick_save_path(file_name, extension)
 }
 
 /// List all saved meetings
-#[tauri::command]
-#[specta::specta]
 pub fn list_meetings(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
 ) -> Result<Vec<crate::transcript::MeetingListItem>, String> {
     state.db.list_meetings()
 }
 
 /// Get a full meeting transcript by ID
-#[tauri::command]
-#[specta::specta]
 pub fn get_meeting(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
 ) -> Result<crate::transcript::MeetingTranscript, String> {
     state.db.load_meeting(&id)
 }
 
 /// Delete a meeting by ID, including any recorded audio.
-#[tauri::command]
-#[specta::specta]
-pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub fn delete_meeting(state: Arc<AppState>, id: String) -> Result<(), String> {
     state.db.delete_meeting(&id)?;
 
     let recordings_dir = crate::audio::recorder::meeting_recordings_dir(&id);
@@ -98,8 +47,6 @@ pub fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), Stri
 /// List the recorded audio files for a meeting (empty if recording was never
 /// enabled, or none survived retention). Reads the filesystem directly —
 /// nothing here is persisted in the database.
-#[tauri::command]
-#[specta::specta]
 pub fn get_meeting_audio(
     meeting_id: String,
 ) -> Result<Vec<crate::transcript::MeetingAudioSession>, String> {
@@ -118,10 +65,8 @@ pub fn get_meeting_audio(
 
 /// Save the user's live meeting notes. Updates the in-memory accumulator
 /// and immediately persists to the DB (for crash recovery).
-#[tauri::command]
-#[specta::specta]
 pub fn save_meeting_notes(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
     notes: Option<String>,
 ) -> Result<(), String> {
@@ -144,9 +89,7 @@ pub fn save_meeting_notes(
 
 /// Rename a meeting. Updates the in-memory accumulator and immediately
 /// persists to the DB (for crash recovery).
-#[tauri::command]
-#[specta::specta]
-pub fn rename_meeting(state: State<'_, AppState>, id: String, title: String) -> Result<(), String> {
+pub fn rename_meeting(state: Arc<AppState>, id: String, title: String) -> Result<(), String> {
     let title = title.trim().to_string();
     if title.is_empty() {
         return Err("Title cannot be empty".into());
@@ -166,10 +109,8 @@ pub fn rename_meeting(state: State<'_, AppState>, id: String, title: String) -> 
 }
 
 /// Save an edited transcript for a meeting
-#[tauri::command]
-#[specta::specta]
 pub fn save_edited_transcript(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
     edited_transcript: Option<String>,
 ) -> Result<(), String> {
@@ -182,10 +123,8 @@ pub fn save_edited_transcript(
 /// segments in the accumulator (and on disk when already flushed), and
 /// register session corrections so later STT output of the same misspelling
 /// is rewritten for the rest of this recording session.
-#[tauri::command]
-#[specta::specta]
 pub fn apply_live_paragraph_edit(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     meeting_id: String,
     segment_indices: Vec<u32>,
     new_text: String,
@@ -309,10 +248,8 @@ fn restore_segment_texts(state: &AppState, meeting_id: &str, previous: &[(usize,
 
 /// Register a misspelling-to-term pair for the active recording session so
 /// later STT output of the same form is rewritten immediately.
-#[tauri::command]
-#[specta::specta]
 pub fn add_session_correction(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     misspelling: String,
     term: String,
 ) -> Result<(), String> {
@@ -389,10 +326,8 @@ fn redistribute_segment_texts_at(
 
 /// Render a meeting export without writing to disk. Used by tests and, if
 /// ever needed, a clipboard-copy affordance.
-#[tauri::command]
-#[specta::specta]
 pub fn export_meeting_preview(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
     format: ExportFormat,
 ) -> Result<String, String> {
@@ -402,10 +337,8 @@ pub fn export_meeting_preview(
 
 /// Suggested filename for a meeting export (e.g. `2026-07-09-weekly-sync.md`),
 /// used as the save dialog's default path.
-#[tauri::command]
-#[specta::specta]
 pub fn export_meeting_filename(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
     format: ExportFormat,
 ) -> Result<String, String> {
@@ -415,10 +348,8 @@ pub fn export_meeting_filename(
 
 /// Render a meeting export and write it to `path`. The save dialog itself
 /// (picking `path`) runs frontend-side via the dialog plugin.
-#[tauri::command]
-#[specta::specta]
 pub fn export_meeting_to_file(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
     format: ExportFormat,
     path: String,
@@ -428,13 +359,12 @@ pub fn export_meeting_to_file(
     std::fs::write(&path, rendered).map_err(|e| format!("Write export file: {e}"))
 }
 
-/// Show a native save dialog and write the meeting export. Runs off the
-/// webview (see [`pick_save_path`]); cancel is a no-op, not an error.
-#[tauri::command]
-#[specta::specta]
+/// Show a native save dialog and write the meeting export. `pick_save_path`
+/// requires the main thread (see its own doc comment); the caller in
+/// `souffle-slint` runs this whole command through its `run_on_main_thread`
+/// helper for exactly that reason. Cancel is a no-op, not an error.
 pub async fn save_meeting_export(
-    app: AppHandle,
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
     format: ExportFormat,
 ) -> Result<(), String> {
@@ -443,32 +373,20 @@ pub async fn save_meeting_export(
     let extension = export::export_extension(format).to_string();
     let rendered = export::render_meeting(&meeting, format)?;
 
-    let picked =
-        tauri::async_runtime::spawn_blocking(move || pick_save_path(&app, &filename, &extension))
-            .await
-            .map_err(|e| format!("Save dialog task failed: {e}"))??;
-
-    let Some(path) = picked else {
+    let Some(path) = pick_save_path(&filename, &extension)? else {
         return Ok(());
     };
     std::fs::write(&path, rendered).map_err(|e| format!("Write export file: {e}"))
 }
 
 /// Suggested filename for a meeting audio export (e.g. `2026-07-09-weekly-sync.ogg`).
-#[tauri::command]
-#[specta::specta]
-pub fn export_meeting_audio_filename(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<String, String> {
+pub fn export_meeting_audio_filename(state: Arc<AppState>, id: String) -> Result<String, String> {
     let meeting = state.db.load_meeting(&id)?;
     Ok(export::export_audio_filename(&meeting))
 }
 
 /// Copy recorded audio for a meeting to `path`. One session writes that
 /// file; several sessions write `{stem}-1.ogg`, `{stem}-2.ogg`, … next to it.
-#[tauri::command]
-#[specta::specta]
 pub fn export_meeting_audio_to_file(id: String, path: String) -> Result<(), String> {
     let sources: Vec<_> = crate::audio::recorder::list_session_files(&id)
         .map_err(|e| format!("List session files: {e}"))?
@@ -479,15 +397,9 @@ pub fn export_meeting_audio_to_file(id: String, path: String) -> Result<(), Stri
     Ok(())
 }
 
-/// Show a native save dialog and copy recorded audio. Same webview
-/// parenting issue as [`save_meeting_export`]; cancel is a no-op.
-#[tauri::command]
-#[specta::specta]
-pub async fn save_meeting_audio_export(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
+/// Show a native save dialog and copy recorded audio. Same main-thread
+/// requirement as [`save_meeting_export`]; cancel is a no-op.
+pub async fn save_meeting_audio_export(state: Arc<AppState>, id: String) -> Result<(), String> {
     let meeting = state.db.load_meeting(&id)?;
     let filename = export::export_audio_filename(&meeting);
     let sources: Vec<_> = crate::audio::recorder::list_session_files(&id)
@@ -499,12 +411,7 @@ pub async fn save_meeting_audio_export(
         return Err("No recorded audio for this meeting".into());
     }
 
-    let picked =
-        tauri::async_runtime::spawn_blocking(move || pick_save_path(&app, &filename, "ogg"))
-            .await
-            .map_err(|e| format!("Save dialog task failed: {e}"))??;
-
-    let Some(path) = picked else {
+    let Some(path) = pick_save_path(&filename, "ogg")? else {
         return Ok(());
     };
     export::copy_audio_sessions(&sources, &path)?;
@@ -512,10 +419,8 @@ pub async fn save_meeting_audio_export(
 }
 
 /// List available summary providers and models (Ollama + Apple Intelligence).
-#[tauri::command]
-#[specta::specta]
 pub async fn check_summary_providers(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
 ) -> Result<crate::summary::SummaryProvidersStatus, String> {
     let settings = AppSettings::load(&state.db)?;
     Ok(crate::summary::check_providers(&settings.ollama_url).await)
@@ -523,11 +428,9 @@ pub async fn check_summary_providers(
 
 /// Pull the recommended Ollama chat model (`qwen2.5:7b`) into the configured
 /// server. Progress is streamed back via the Channel API.
-#[tauri::command]
-#[specta::specta]
 pub async fn pull_recommended_ollama_model(
-    state: State<'_, AppState>,
-    channel: Channel<crate::summary::OllamaPullProgress>,
+    state: Arc<AppState>,
+    channel: ProgressChannel<crate::summary::OllamaPullProgress>,
 ) -> Result<String, String> {
     let settings = AppSettings::load(&state.db)?;
     let url = if settings.ollama_url.trim().is_empty() {
@@ -537,7 +440,7 @@ pub async fn pull_recommended_ollama_model(
     };
     let model = crate::summary::RECOMMENDED_OLLAMA_MODEL;
     crate::summary::pull_model(url, model, |progress| {
-        let _ = channel.send(progress);
+        channel.send(progress);
     })
     .await?;
     Ok(model.to_string())
@@ -548,14 +451,12 @@ pub async fn pull_recommended_ollama_model(
 /// `template_id` picks the summary template controlling the final-pass system
 /// prompt; `None` (or an unknown id) falls back to the default template
 /// configured in settings, so automatic summarization always uses the default.
-#[tauri::command]
-#[specta::specta]
 pub async fn summarize_meeting(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     id: String,
     model: String,
     template_id: Option<String>,
-    channel: Channel<crate::summary::SummarizeProgress>,
+    channel: ProgressChannel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
     let transcript = state.db.load_meeting(&id)?;
     let generated_from_edited = transcript.edited_transcript.clone();
@@ -595,12 +496,12 @@ pub async fn summarize_meeting(
         &final_system_prompt,
         output_language,
         move |progress| {
-            let _ = channel_clone.send(progress);
+            channel_clone.send(progress);
         },
     )
     .await?;
 
-    let _ = channel.send(crate::summary::SummarizeProgress {
+    channel.send(crate::summary::SummarizeProgress {
         text: String::new(),
         done: false,
         stage: crate::summary::SummarizeStage::Extract,
@@ -637,10 +538,8 @@ pub async fn summarize_meeting(
 }
 
 /// Full-text search across meetings and dictation entries
-#[tauri::command]
-#[specta::specta]
 pub fn search_text(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
     query: String,
     limit: Option<i64>,
 ) -> Result<Vec<SearchResult>, String> {

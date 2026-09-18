@@ -16,12 +16,9 @@ use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
-use tauri::Manager;
-use tauri_plugin_notification::NotificationExt;
-use tauri_specta::Event;
 use tracing::{debug, error, info, warn};
 
-use crate::app_events::{MeetingIdle, MeetingIdleReason, PipelineError, PipelineErrorScope};
+use crate::app_events::MeetingIdleReason;
 use crate::audio::{AudioChunk, AudioMessage};
 use crate::engine::{
     AudioInputRequirements, Speaker, TranscriptionEngine, TranscriptionProfile,
@@ -32,6 +29,7 @@ use crate::filter::{
     build_text_filters, session_terms::SessionCorrection,
 };
 use crate::platform::with_autorelease_pool;
+use crate::state::AppState;
 
 use super::SegmentCallback;
 use super::health::{SessionHealth, StallAction, StallRecovery};
@@ -79,9 +77,9 @@ pub struct SessionConfig {
 }
 
 pub enum EngineCommand {
-    /// Give the actor an AppHandle so it can emit health/error events and
-    /// fail the state machine on mid-session fatalities. Sent once in setup.
-    AttachApp(tauri::AppHandle),
+    /// Give the actor the shared `AppState` so it can fail the state machine
+    /// on mid-session fatalities (`abort_active_session`). Sent once in setup.
+    AttachApp(Arc<AppState>),
     LoadModel {
         profile: TranscriptionProfile,
         model_dir: PathBuf,
@@ -183,8 +181,8 @@ impl EngineActorHandle {
         }
     }
 
-    /// Fire-and-forget: hand the actor an AppHandle for event emission.
-    pub fn attach_app(&self, app: tauri::AppHandle) {
+    /// Fire-and-forget: hand the actor the shared `AppState`.
+    pub fn attach_app(&self, app: Arc<AppState>) {
         let _ = self.cmd_tx.send(EngineCommand::AttachApp(app));
     }
 
@@ -305,7 +303,7 @@ struct EngineActor {
     audio_rx: Receiver<AudioMessage>,
     factory: EngineFactory,
     engine: Option<Box<dyn TranscriptionEngine>>,
-    app: Option<tauri::AppHandle>,
+    app: Option<Arc<AppState>>,
     dropped_counter: Arc<AtomicU64>,
     /// Reason the audio capture thread set right before it exits after an
     /// unrecoverable failure (e.g. mic loss with no other source). Read
@@ -526,23 +524,13 @@ impl EngineActor {
         info!("Engine actor shut down cleanly");
     }
 
-    /// A session died mid-recording: surface the error to the frontend, then
-    /// let `AppState` stop audio capture, salvage any in-progress meeting,
-    /// and fail the state machine so the UI leaves the recording state.
-    /// Without this, the old pipeline died silently and the app looked like
-    /// it "just stopped transcribing". The pipeline layer only owns emitting
-    /// the event here; the rest is app-level cleanup that doesn't belong on
-    /// this side of the actor/command boundary.
+    /// A session died mid-recording: let `AppState` stop audio capture,
+    /// salvage any in-progress meeting, and fail the state machine so the UI
+    /// leaves the recording state. Without this, the old pipeline died
+    /// silently and the app looked like it "just stopped transcribing".
     fn handle_session_abort(&mut self, message: String) {
         if let Some(app) = &self.app {
-            let _ = PipelineError {
-                scope: PipelineErrorScope::Session,
-                message: message.clone(),
-            }
-            .emit(app);
-
-            app.state::<crate::state::AppState>()
-                .abort_active_session(message);
+            app.abort_active_session(message);
         }
         // Drain whatever audio is still queued (including the EndOfStream the
         // audio thread sends on Stop) so nothing stale leaks into the next session.
@@ -581,7 +569,7 @@ impl EngineActor {
         );
         with_autorelease_pool(|| self.drop_engine());
         if let Some(app) = &self.app {
-            app.state::<crate::state::AppState>().unload_idle_model();
+            app.unload_idle_model();
         }
     }
 
@@ -1347,7 +1335,7 @@ fn run_session_loop(
     text_filters: &Rc<RefCell<TextFilterChain>>,
     filter_state: &Rc<RefCell<LiveFilterState>>,
     health: &mut SessionHealth,
-    app: Option<&tauri::AppHandle>,
+    app: Option<&Arc<AppState>>,
     mode: &mut dyn SessionMode,
     pending_unload_timeout: &mut Option<Option<Duration>>,
     mut idle_monitor: Option<MeetingIdleMonitor>,
@@ -1377,9 +1365,6 @@ fn run_session_loop(
         // recovery ladder.
         if let Some(snapshot) = health.tick(audio_rx.len()) {
             let action = stall_recovery.on_snapshot(snapshot.status, Instant::now());
-            if let Some(app) = app {
-                let _ = snapshot.emit(app);
-            }
             match action {
                 Some(StallAction::Reset) => attempt_stall_recovery_reset(engine, session_id),
                 Some(StallAction::Abort) => {
@@ -1397,16 +1382,9 @@ fn run_session_loop(
         if let Some(monitor) = idle_monitor.as_mut()
             && let Some(signal) = monitor.tick(Instant::now())
             && let Some(app) = app
+            && signal.first
         {
-            let _ = MeetingIdle {
-                reason: signal.reason,
-                idle_seconds: signal.idle_seconds,
-                threshold_seconds: signal.threshold_seconds,
-            }
-            .emit(app);
-            if signal.first {
-                notify_meeting_idle(app, signal.reason);
-            }
+            notify_meeting_idle(app, signal.reason);
         }
 
         if last_heartbeat.elapsed() >= HEARTBEAT {
@@ -1581,15 +1559,6 @@ fn run_session_loop(
                             // silently eating audio for the rest of the session.
                             consecutive_errors += 1;
                             error!("Transcribe error (frame skipped): {e}");
-                            if consecutive_errors == 1
-                                && let Some(app) = app
-                            {
-                                let _ = PipelineError {
-                                    scope: PipelineErrorScope::Frame,
-                                    message: e.clone(),
-                                }
-                                .emit(app);
-                            }
                             if consecutive_errors >= MAX_CONSECUTIVE_FRAME_ERRORS {
                                 if let Some((reply, _)) = pending_stop.take() {
                                     let _ = reply.send(Err(format!("Session aborted: {e}")));
@@ -1767,8 +1736,8 @@ fn emit_filtered(
 /// re-signals (throttled webview convergence) must not spam the OS.
 /// Informational only: no action buttons, matching the calendar reminder's
 /// notification (action buttons/click callbacks are unreliable on macOS).
-fn notify_meeting_idle(app: &tauri::AppHandle, reason: MeetingIdleReason) {
-    let db = &app.state::<crate::state::AppState>().db;
+fn notify_meeting_idle(app: &Arc<AppState>, reason: MeetingIdleReason) {
+    let db = &app.db;
     let locale = crate::settings::AppSettings::load(db)
         .map(|settings| settings.locale)
         .unwrap_or_default();
@@ -1801,9 +1770,7 @@ fn notify_meeting_idle(app: &tauri::AppHandle, reason: MeetingIdleReason) {
         ),
     };
 
-    if let Err(e) = app.notification().builder().title(title).body(body).show() {
-        warn!("Meeting idle notification failed: {e}");
-    }
+    crate::native::notifications::notify(title, body);
 }
 
 #[cfg(test)]

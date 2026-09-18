@@ -1,26 +1,20 @@
 //! Transient Escape binding that discards an in-progress toggle dictation.
 //!
 //! Armed only while the machine is `RecordingDictation` *and* the session
-//! asked for it (toggle, not push-to-talk). `register_shortcuts` calls
-//! `unregister_all`, so this module re-applies the binding afterwards when
-//! a cancelable session is still live.
+//! asked for it (toggle, not push-to-talk). `native::shortcuts::register_shortcuts`
+//! calls `unregister_all`, so this module re-applies the binding afterwards
+//! when a cancelable session is still live. The actual keypress -> action
+//! dispatch lives in `native::shortcuts::spawn_event_loop` (SOU-191); this
+//! module only decides whether the binding should currently exist.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tauri::{AppHandle, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use tauri_specta::Event;
 use tracing::warn;
 
-use crate::app_events::{
-    DictationCancelRequested, ShortcutPttStart, ShortcutPttStop, ShortcutToggle,
-};
-use crate::modifier_shortcut::is_native_shortcut;
+use crate::native::shortcuts;
 use crate::settings::ShortcutSettings;
 use crate::state::AppState;
 use crate::state_machine::AppStateMachine;
-
-const ESCAPE: &str = "Escape";
 
 static WANTED: AtomicBool = AtomicBool::new(false);
 static ARMED: AtomicBool = AtomicBool::new(false);
@@ -39,7 +33,7 @@ pub fn mark_unregistered() {
     ARMED.store(false, Ordering::SeqCst);
 }
 
-pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
+pub fn sync(state: &AppState, machine: &AppStateMachine) {
     let in_dictation = matches!(machine, AppStateMachine::RecordingDictation { .. });
     if !in_dictation {
         WANTED.store(false, Ordering::SeqCst);
@@ -51,105 +45,40 @@ pub fn sync(app: &AppHandle, machine: &AppStateMachine) {
     }
 
     if should {
-        arm(app);
+        arm();
     } else {
-        disarm(app);
+        disarm(state);
     }
 }
 
-fn arm(app: &AppHandle) {
-    let gs = app.global_shortcut();
-    if gs.is_registered(ESCAPE)
-        && let Err(e) = gs.unregister(ESCAPE)
-    {
-        warn!(error = %e, "Failed to replace Escape binding for dictation cancel");
-        return;
-    }
-    match gs.on_shortcut(ESCAPE, |app, _shortcut, event| {
-        if event.state != ShortcutState::Pressed {
-            return;
-        }
-        // If unregister failed, this callback can outlive the session.
-        // Re-check the machine so Escape cannot cancel a later PTT take
-        // or fire while idle (SOU-117 AC6 / AC7).
-        let Some(state) = app.try_state::<AppState>() else {
-            return;
-        };
-        let Ok(machine) = state.current_machine_state() else {
-            return;
-        };
-        if should_arm(WANTED.load(Ordering::SeqCst), &machine) {
-            let _ = DictationCancelRequested.emit(app);
-        }
-    }) {
+fn arm() {
+    match shortcuts::arm_escape_cancel() {
         Ok(()) => {
             ARMED.store(true, Ordering::SeqCst);
             tracing::info!("Dictation cancel shortcut armed");
         }
         Err(e) => {
             warn!(error = %e, "Failed to arm Escape dictation cancel");
-            restore_user_escape(app);
         }
     }
 }
 
-fn disarm(app: &AppHandle) {
-    let gs = app.global_shortcut();
-    if gs.is_registered(ESCAPE)
-        && let Err(e) = gs.unregister(ESCAPE)
-    {
+fn disarm(state: &AppState) {
+    if let Err(e) = shortcuts::disarm_escape() {
         warn!(error = %e, "Failed to unregister Escape dictation cancel");
         return;
     }
     ARMED.store(false, Ordering::SeqCst);
-    restore_user_escape(app);
+    restore_user_escape(state);
     tracing::info!("Dictation cancel shortcut disarmed");
 }
 
-fn restore_user_escape(app: &AppHandle) {
-    let Some(state) = app.try_state::<AppState>() else {
+fn restore_user_escape(state: &AppState) {
+    let Ok(shortcuts_settings) = ShortcutSettings::load(&state.db) else {
         return;
     };
-    let Ok(shortcuts) = ShortcutSettings::load(&state.db) else {
-        return;
-    };
-    let gs = app.global_shortcut();
-
-    if shortcuts.toggle == ESCAPE {
-        if let Err(e) = gs.on_shortcut(ESCAPE, |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                let _ = ShortcutToggle.emit(app);
-            }
-        }) {
-            warn!(error = %e, "Failed to restore Escape as toggle shortcut");
-        }
-        return;
-    }
-
-    if shortcuts.push_to_talk != ESCAPE || is_native_shortcut(&shortcuts.push_to_talk) {
-        return;
-    }
-    if let Err(e) = gs.on_shortcut(ESCAPE, |app, _shortcut, event| match event.state {
-        ShortcutState::Pressed => {
-            let state = app.state::<AppState>();
-            if state.ptt_is_paused() {
-                state.ptt_start_armed.store(false, Ordering::SeqCst);
-            } else {
-                state.ptt_start_armed.store(true, Ordering::SeqCst);
-                let _ = ShortcutPttStart.emit(app);
-            }
-        }
-        ShortcutState::Released => {
-            if app
-                .state::<AppState>()
-                .ptt_start_armed
-                .swap(false, Ordering::SeqCst)
-            {
-                let _ = ShortcutPttStop.emit(app);
-            }
-        }
-    }) {
-        warn!(error = %e, "Failed to restore Escape as push-to-talk shortcut");
+    if let Err(e) = shortcuts::restore_escape_role(&shortcuts_settings) {
+        warn!(error = %e, "Failed to restore Escape as a user shortcut");
     }
 }
 

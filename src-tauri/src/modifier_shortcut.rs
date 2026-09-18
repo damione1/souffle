@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -8,16 +8,14 @@ use core_graphics::event::{
     CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventType, CallbackResult,
 };
-use tauri::{AppHandle, Manager};
-use tauri_specta::Event;
 use tracing::{error, info};
 
-use crate::app_events::{ModifierTapStatus, ShortcutPttStart, ShortcutPttStop, ShortcutToggle};
+use crate::app_events::ModifierTapStatus;
+use crate::native::bridge::{self, NativeAction};
 use crate::state::AppState;
 
-/// Last `ModifierTapStatus` emitted. The event is edge-triggered (install
-/// success/failure), so a webview that reloads has nothing to listen to until
-/// the next retry; bootstrap reads this snapshot instead (SOU-116).
+/// Last `ModifierTapStatus` observed. Edge-triggered install success/failure;
+/// a read, not a rebuild.
 static MODIFIER_TAP_STATUS: Mutex<Option<ModifierTapStatus>> = Mutex::new(None);
 
 /// Snapshot for `commands::get_modifier_tap_status`. A read, never a rebuild.
@@ -25,20 +23,9 @@ pub fn modifier_tap_status() -> Option<ModifierTapStatus> {
     MODIFIER_TAP_STATUS.lock().ok().and_then(|guard| *guard)
 }
 
-fn store_and_emit_modifier_tap_status(app: &AppHandle, installed: bool) {
-    let status = ModifierTapStatus { installed };
-    let changed = match MODIFIER_TAP_STATUS.lock() {
-        Ok(mut guard) => {
-            let changed = guard.map(|s| s.installed) != Some(installed);
-            *guard = Some(status);
-            changed
-        }
-        Err(_) => true,
-    };
-    // The waiting thread re-reads the permission every couple of seconds.
-    // The banner only needs the transitions, not the polling.
-    if changed {
-        let _ = status.emit(app);
+fn store_modifier_tap_status(installed: bool) {
+    if let Ok(mut guard) = MODIFIER_TAP_STATUS.lock() {
+        *guard = Some(ModifierTapStatus { installed });
     }
 }
 
@@ -49,12 +36,12 @@ pub(crate) enum ShortcutRegistrationTarget {
     None,
     /// Single native key handled by the CGEventTap.
     Native,
-    /// Classic combo handled by `tauri-plugin-global-shortcut`.
+    /// Classic combo handled by `native::shortcuts`.
     Plugin,
 }
 
-/// Single-key bindings that the plugin cannot register. Combos stay on
-/// `tauri-plugin-global-shortcut` (SOU-032). Shared by Toggle and PTT (SOU-115).
+/// Single-key bindings the combo mechanism cannot register. Combos go
+/// through `native::shortcuts` (SOU-032). Shared by Toggle and PTT (SOU-115).
 ///
 /// The settings UI needs the same list to warn that a binding will require
 /// Accessibility, so `commands::settings::get_native_shortcuts` hands it over
@@ -82,7 +69,7 @@ pub(crate) fn is_native_shortcut(shortcut: &str) -> bool {
     NATIVE_SHORTCUTS.contains(&shortcut)
 }
 
-/// Route a stored accelerator to the native tap or the global-shortcut plugin.
+/// Route a stored accelerator to the native tap or the combo mechanism.
 pub(crate) fn shortcut_registration_target(shortcut: &str) -> ShortcutRegistrationTarget {
     if shortcut.is_empty() {
         ShortcutRegistrationTarget::None
@@ -112,9 +99,9 @@ static TAP_WANTED: AtomicBool = AtomicBool::new(false);
 /// an unwanted tap is disabled rather than torn down.
 static TAP_THREAD_SPAWNED: AtomicBool = AtomicBool::new(false);
 
-/// Give the Tauri setup hook time to finish managing `AppState` before the
-/// callback reads it. Status is not emitted during this window so the
-/// settings banner cannot flash on every launch (SOU-116 risk zone).
+/// Give startup time to finish before the callback reads `AppState`. Status
+/// is not reported during this window so the settings banner cannot flash on
+/// every launch (SOU-116 risk zone).
 const TAP_STARTUP_GRACE: Duration = Duration::from_millis(500);
 
 /// How often the thread re-reads the Accessibility snapshot while it waits
@@ -154,15 +141,14 @@ fn signal_tap_wanted_changed() {
 /// keystroke on the machine. Called from `register_shortcuts`, so a combo
 /// saved in Settings takes the tap out and a single key puts it back without
 /// a restart.
-pub fn sync_modifier_tap(app: &AppHandle, needed: bool) {
+pub fn sync_modifier_tap(state: Arc<AppState>, needed: bool) {
     TAP_WANTED.store(needed, Ordering::SeqCst);
     signal_tap_wanted_changed();
     set_tap_enabled(needed);
     if !needed || TAP_THREAD_SPAWNED.swap(true, Ordering::SeqCst) {
         return;
     }
-    let app = app.clone();
-    thread::spawn(move || run_modifier_tap(app));
+    thread::spawn(move || run_modifier_tap(state));
 }
 
 /// True when either configured shortcut is a single native key.
@@ -172,7 +158,7 @@ pub(crate) fn tap_is_needed(toggle: &str, push_to_talk: &str) -> bool {
         .any(|s| shortcut_registration_target(s) == ShortcutRegistrationTarget::Native)
 }
 
-fn run_modifier_tap(app: AppHandle) {
+fn run_modifier_tap(state: Arc<AppState>) {
     thread::sleep(TAP_STARTUP_GRACE);
     let mut warned = false;
     loop {
@@ -184,10 +170,10 @@ fn run_modifier_tap(app: AppHandle) {
         // TCC request. Reading first is what keeps the wait from raising a
         // prompt every couple of seconds; the banner carries the news
         // instead (SOU-116).
-        if crate::permissions::accessibility_granted() && install_and_run(app.clone()) {
+        if crate::permissions::accessibility_granted() && install_and_run(Arc::clone(&state)) {
             return;
         }
-        store_and_emit_modifier_tap_status(&app, false);
+        store_modifier_tap_status(false);
         if !warned {
             error!("Native shortcut tap not installed. Is Accessibility granted?");
             warned = true;
@@ -215,11 +201,7 @@ fn set_tap_enabled(enabled: bool) {
 #[cfg(not(target_os = "macos"))]
 fn set_tap_enabled(_enabled: bool) {}
 
-fn install_and_run(app: AppHandle) -> bool {
-    // Callback takes ownership of `app`; keep a handle for status emits after
-    // install succeeds or the runloop source fails to attach.
-    let app_for_status = app.clone();
-
+fn install_and_run(state: Arc<AppState>) -> bool {
     let tap_result = CGEventTap::new(
         CGEventTapLocation::HID,
         CGEventTapPlacement::HeadInsertEventTap,
@@ -238,10 +220,6 @@ fn install_and_run(app: AppHandle) -> bool {
                 return CallbackResult::Keep;
             }
 
-            let state = match app.try_state::<AppState>() {
-                Some(s) => s.inner(),
-                None => return CallbackResult::Keep,
-            };
             let toggle_shortcut = {
                 // A poisoned lock must not panic here: this runs inside the
                 // C callback of an active HID tap, in front of every
@@ -286,17 +264,17 @@ fn install_and_run(app: AppHandle) -> bool {
 
                 if is_pressed {
                     if matches_toggle {
-                        emit_toggle(state, &app);
+                        dispatch_toggle(&state);
                     }
                     if matches_ptt {
-                        emit_ptt_start(state, &app);
+                        dispatch_ptt_start(&state);
                     }
                 } else {
                     if matches_toggle {
                         state.toggle_armed.store(false, Ordering::SeqCst);
                     }
                     if matches_ptt && state.ptt_start_armed.swap(false, Ordering::SeqCst) {
-                        let _ = ShortcutPttStop.emit(&app);
+                        bridge::dispatch(NativeAction::PttStop);
                     }
                 }
                 return CallbackResult::Drop;
@@ -304,10 +282,10 @@ fn install_and_run(app: AppHandle) -> bool {
 
             if matches!(event_type, CGEventType::KeyDown) {
                 if matches_toggle {
-                    emit_toggle(state, &app);
+                    dispatch_toggle(&state);
                 }
                 if matches_ptt {
-                    emit_ptt_start(state, &app);
+                    dispatch_ptt_start(&state);
                 }
                 return CallbackResult::Drop;
             } else if matches!(event_type, CGEventType::KeyUp) {
@@ -315,7 +293,7 @@ fn install_and_run(app: AppHandle) -> bool {
                     state.toggle_armed.store(false, Ordering::SeqCst);
                 }
                 if matches_ptt && state.ptt_start_armed.swap(false, Ordering::SeqCst) {
-                    let _ = ShortcutPttStop.emit(&app);
+                    bridge::dispatch(NativeAction::PttStop);
                 }
                 return CallbackResult::Drop;
             }
@@ -327,14 +305,14 @@ fn install_and_run(app: AppHandle) -> bool {
     match tap_result {
         Ok(tap) => {
             info!("Modifier CGEventTap installed");
-            store_and_emit_modifier_tap_status(&app_for_status, true);
+            store_modifier_tap_status(true);
             TAP_PORT.store(
                 tap.mach_port().as_concrete_TypeRef() as usize,
                 Ordering::SeqCst,
             );
             let Ok(loop_source) = tap.mach_port().create_runloop_source(0) else {
                 clear_tap_port();
-                store_and_emit_modifier_tap_status(&app_for_status, false);
+                store_modifier_tap_status(false);
                 return false;
             };
             let current_loop = core_foundation::runloop::CFRunLoop::get_current();
@@ -361,21 +339,21 @@ fn clear_tap_port() {
     TAP_PORT.store(0, Ordering::SeqCst);
 }
 
-fn emit_toggle(state: &AppState, app: &AppHandle) {
+fn dispatch_toggle(state: &AppState) {
     // Key-repeat (and extra FlagsChanged) must not re-fire Toggle.
     if !state.toggle_armed.swap(true, Ordering::SeqCst) {
-        let _ = ShortcutToggle.emit(app);
+        bridge::dispatch(NativeAction::ToggleDictation);
     }
 }
 
-fn emit_ptt_start(state: &AppState, app: &AppHandle) {
+fn dispatch_ptt_start(state: &AppState) {
     if state.ptt_is_paused() {
         state.ptt_start_armed.store(false, Ordering::SeqCst);
         return;
     }
-    // Key-repeat (and extra FlagsChanged) must not re-emit Start.
+    // Key-repeat (and extra FlagsChanged) must not re-fire PttStart.
     if !state.ptt_start_armed.swap(true, Ordering::SeqCst) {
-        let _ = ShortcutPttStart.emit(app);
+        bridge::dispatch(NativeAction::PttStart);
     }
 }
 

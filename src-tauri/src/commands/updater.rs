@@ -1,23 +1,22 @@
-//! Download and install in-app updates via `tauri-plugin-updater`.
+//! Download and install in-app updates via `native::updater` (SOU-191).
 //!
 //! Detection stays in [`crate::update_check`]: this module only executes.
-//! Progress and ready bytes live here so a webview reload cannot lose them.
+//! Progress and ready bytes live here so a UI reload cannot lose them.
 
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
-use tauri_plugin_updater::{Update, UpdaterExt};
-use tauri_specta::Event;
 use tracing::{info, warn};
 
-use crate::app_events::{UpdateDownloadProgress, UpdatePhase};
+use crate::app_events::UpdatePhase;
+use crate::native::updater::ReadyUpdate;
 use crate::state::AppState;
 use crate::state_machine::AppStateMachine;
 
 /// Why "Install and restart" must stay disabled / refuse before any side effect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallBlockReason {
     RecordingDictation,
@@ -41,7 +40,7 @@ impl InstallBlockReason {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateDownloadStatus {
     pub phase: UpdatePhase,
     pub version: Option<String>,
@@ -52,12 +51,6 @@ pub struct UpdateDownloadStatus {
     pub manual_fallback: bool,
 }
 
-struct ReadyPackage {
-    update: Update,
-    bytes: Vec<u8>,
-    version: String,
-}
-
 struct DownloadState {
     phase: UpdatePhase,
     version: Option<String>,
@@ -65,7 +58,7 @@ struct DownloadState {
     total_bytes: Option<u64>,
     error: Option<String>,
     manual_fallback: bool,
-    ready: Option<ReadyPackage>,
+    ready: Option<ReadyUpdate>,
 }
 
 impl Default for DownloadState {
@@ -93,18 +86,6 @@ impl DownloadState {
             manual_fallback: self.manual_fallback,
         }
     }
-}
-
-fn emit_status(app: &AppHandle, status: UpdateDownloadStatus) {
-    let _ = (UpdateDownloadProgress {
-        phase: status.phase,
-        version: status.version,
-        downloaded_bytes: status.downloaded_bytes,
-        total_bytes: status.total_bytes,
-        error: status.error,
-        manual_fallback: status.manual_fallback,
-    })
-    .emit(app);
 }
 
 static DOWNLOAD: Mutex<DownloadState> = Mutex::new(DownloadState {
@@ -145,41 +126,26 @@ fn with_state<R>(f: impl FnOnce(&mut DownloadState) -> R) -> Result<R, String> {
     Ok(f(&mut guard))
 }
 
-fn mutate_and_emit(app: &AppHandle, f: impl FnOnce(&mut DownloadState)) -> Result<(), String> {
-    let status = with_state(|s| {
-        f(s);
-        s.status()
-    })?;
-    emit_status(app, status);
-    Ok(())
-}
-
 fn attempt_is_current(attempt: u64) -> bool {
     DOWNLOAD_ATTEMPT.load(Ordering::SeqCst) == attempt
 }
 
 /// Snapshot of the in-flight / ready update download. Source of truth for the UI.
-#[tauri::command]
-#[specta::specta]
 pub fn get_update_download_status() -> Result<UpdateDownloadStatus, String> {
     with_state(|s| s.status())
 }
 
 /// Why install is currently refused, if it is. Pure read — no side effects.
-#[tauri::command]
-#[specta::specta]
 pub fn get_update_install_block(
-    state: State<'_, AppState>,
+    state: Arc<AppState>,
 ) -> Result<Option<InstallBlockReason>, String> {
     let machine = state.current_machine_state()?;
     Ok(install_blocked_reason(&machine))
 }
 
 /// Start downloading the updater artifact. Detection has already happened via
-/// `update_check`; this only obtains a plugin handle and fetches bytes.
-#[tauri::command]
-#[specta::specta]
-pub async fn download_update(app: AppHandle) -> Result<UpdateDownloadStatus, String> {
+/// `update_check`; this fetches the signed manifest, downloads, and verifies.
+pub async fn download_update() -> Result<UpdateDownloadStatus, String> {
     let attempt = {
         let busy =
             with_state(|s| matches!(s.phase, UpdatePhase::Downloading | UpdatePhase::Ready))?;
@@ -188,7 +154,7 @@ pub async fn download_update(app: AppHandle) -> Result<UpdateDownloadStatus, Str
         }
         CANCEL_DOWNLOAD.store(false, Ordering::SeqCst);
         let attempt = DOWNLOAD_ATTEMPT.fetch_add(1, Ordering::SeqCst) + 1;
-        mutate_and_emit(&app, |s| {
+        with_state(|s| {
             *s = DownloadState {
                 phase: UpdatePhase::Downloading,
                 ..DownloadState::default()
@@ -197,146 +163,65 @@ pub async fn download_update(app: AppHandle) -> Result<UpdateDownloadStatus, Str
         attempt
     };
 
-    let updater = match app.updater() {
-        Ok(updater) => updater,
-        Err(e) => {
-            if !attempt_is_current(attempt) {
-                return with_state(|s| s.status());
-            }
-            return fail(&app, format!("Updater unavailable: {e}"), true);
+    let result = crate::native::updater::download_and_verify(move |downloaded, total| {
+        if !attempt_is_current(attempt) {
+            return;
         }
-    };
-
-    let update = match updater.check().await {
-        Ok(Some(update)) => update,
-        Ok(None) => {
-            if !attempt_is_current(attempt) {
-                return with_state(|s| s.status());
+        let _ = with_state(|s| {
+            if s.phase == UpdatePhase::Downloading {
+                s.downloaded_bytes = downloaded;
+                if let Some(total) = total {
+                    s.total_bytes = Some(total);
+                }
             }
-            // Release exists (update_check said so) but no updater artifact yet.
-            return fail(
-                &app,
-                "This release has no in-app update package yet. Download it from GitHub instead."
-                    .into(),
-                true,
-            );
-        }
-        Err(e) => {
-            if !attempt_is_current(attempt) {
-                return with_state(|s| s.status());
-            }
-            let message = e.to_string();
-            return fail(
-                &app,
-                format!("Could not prepare the update: {message}"),
-                true,
-            );
-        }
-    };
+        });
+    })
+    .await;
 
     if CANCEL_DOWNLOAD.load(Ordering::SeqCst) || !attempt_is_current(attempt) {
         return with_state(|s| s.status());
     }
 
-    let version = update.version.clone();
-    mutate_and_emit(&app, |s| {
-        if attempt_is_current(attempt) && s.phase == UpdatePhase::Downloading {
-            s.version = Some(version.clone());
-        }
-    })?;
-
-    let app_progress = app.clone();
-    let download_result = update
-        .download(
-            |chunk_len, content_length| {
-                if CANCEL_DOWNLOAD.load(Ordering::SeqCst) || !attempt_is_current(attempt) {
-                    return;
-                }
-                let status = with_state(|s| {
-                    if !attempt_is_current(attempt) || s.phase != UpdatePhase::Downloading {
-                        return None;
-                    }
-                    s.downloaded_bytes = s.downloaded_bytes.saturating_add(chunk_len as u64);
-                    if content_length.is_some() {
-                        s.total_bytes = content_length;
-                    }
-                    Some(s.status())
-                })
-                .ok()
-                .flatten();
-                if let Some(status) = status {
-                    emit_status(&app_progress, status);
-                }
-            },
-            || {},
-        )
-        .await;
-
-    if CANCEL_DOWNLOAD.load(Ordering::SeqCst) || !attempt_is_current(attempt) {
-        return with_state(|s| s.status());
-    }
-
-    match download_result {
-        Ok(bytes) => {
-            if CANCEL_DOWNLOAD.load(Ordering::SeqCst) || !attempt_is_current(attempt) {
-                return with_state(|s| s.status());
-            }
+    match result {
+        Ok(ready) => {
             info!(
-                version = %version,
-                bytes = bytes.len(),
+                version = %ready.version,
+                bytes = ready.bytes.len(),
                 "Update package downloaded and verified"
             );
-            let status = with_state(|s| {
+            with_state(|s| {
                 if !attempt_is_current(attempt) || s.phase != UpdatePhase::Downloading {
                     return s.status();
                 }
                 s.phase = UpdatePhase::Ready;
-                s.version = Some(version.clone());
-                s.downloaded_bytes = bytes.len() as u64;
-                s.total_bytes = Some(bytes.len() as u64);
+                s.version = Some(ready.version.clone());
+                s.downloaded_bytes = ready.bytes.len() as u64;
+                s.total_bytes = Some(ready.bytes.len() as u64);
                 s.error = None;
                 s.manual_fallback = false;
-                s.ready = Some(ReadyPackage {
-                    update,
-                    bytes,
-                    version,
-                });
+                s.ready = Some(ready);
                 s.status()
-            })?;
-            emit_status(&app, status.clone());
-            Ok(status)
+            })
         }
-        Err(e) => {
-            if !attempt_is_current(attempt) {
-                return with_state(|s| s.status());
-            }
-            let message = e.to_string();
-            fail(&app, format!("Update download failed: {message}"), true)
-        }
+        Err(e) => fail(format!("Update download failed: {e}"), true),
     }
 }
 
 /// Abandon an in-flight download. No-op if nothing is downloading.
-#[tauri::command]
-#[specta::specta]
-pub fn cancel_update_download(app: AppHandle) -> Result<UpdateDownloadStatus, String> {
+pub fn cancel_update_download() -> Result<UpdateDownloadStatus, String> {
     CANCEL_DOWNLOAD.store(true, Ordering::SeqCst);
     DOWNLOAD_ATTEMPT.fetch_add(1, Ordering::SeqCst);
-    let status = with_state(|s| {
+    with_state(|s| {
         if matches!(s.phase, UpdatePhase::Downloading) {
             *s = DownloadState::default();
         }
         s.status()
-    })?;
-    emit_status(&app, status.clone());
-    Ok(status)
+    })
 }
 
 /// Replace the on-disk bundle and restart. Refuses before any side effect when
 /// the state machine is busy.
-#[tauri::command]
-#[specta::specta]
-pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn install_update(state: Arc<AppState>) -> Result<(), String> {
     let machine = state.current_machine_state()?;
     if let Some(reason) = install_blocked_reason(&machine) {
         return Err(format!(
@@ -354,46 +239,20 @@ pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Resul
             .ok_or_else(|| "No update package is ready to install".to_string())
     })??;
 
-    let version = package.version.clone();
-    // Install first: the running process keeps its in-memory engine until we
-    // restart. Shutting down before a fallible install would leave transcription
-    // dead if the write fails.
-    if let Err(e) = package.update.install(&package.bytes) {
-        let message = e.to_string();
-        let user = format!(
-            "Could not write the update (is Soufflé in /Applications writable?): {message}"
-        );
-        // Put the package back so a retry is possible after a write failure.
-        let status = with_state(|s| {
-            s.phase = UpdatePhase::Failed;
-            s.version = Some(version.clone());
-            s.error = Some(user.clone());
-            s.manual_fallback = true;
-            s.ready = Some(package);
-            s.status()
-        })?;
-        emit_status(&app, status);
-        return Err(user);
-    }
-
-    // Explicit shutdown: AppHandle::restart() on the main thread skips
-    // ExitRequested (tauri 2.11), and we must free Metal before process exit.
+    // Explicit shutdown before install: free Metal before the process exits
+    // as part of the relaunch, same requirement `RunEvent::ExitRequested`
+    // enforced before this ticket.
     if let Err(e) = state.engine_actor.shutdown() {
         warn!("Engine shutdown before update restart: {e}");
     }
 
-    info!(version = %version, "Update installed; restarting");
-    app.restart();
-    #[allow(unreachable_code)]
-    Ok(())
+    info!(version = %package.version, "Installing update; relaunching");
+    // Never returns on success — the process exits as part of the relaunch.
+    crate::native::updater::install_and_relaunch(&package.bytes)
 }
 
-fn fail(
-    app: &AppHandle,
-    error: String,
-    manual_fallback: bool,
-) -> Result<UpdateDownloadStatus, String> {
-    let status = with_state(|s| {
+fn fail(error: String, manual_fallback: bool) -> Result<UpdateDownloadStatus, String> {
+    with_state(|s| {
         let version = s.version.clone();
         *s = DownloadState {
             phase: UpdatePhase::Failed,
@@ -403,9 +262,7 @@ fn fail(
             ..DownloadState::default()
         };
         s.status()
-    })?;
-    emit_status(app, status.clone());
-    Ok(status)
+    })
 }
 
 #[cfg(test)]
@@ -518,7 +375,6 @@ mod tests {
                 ..DownloadState::default()
             };
         });
-        // Mimic cancel_update_download without needing an AppHandle emit.
         CANCEL_DOWNLOAD.store(true, Ordering::SeqCst);
         DOWNLOAD_ATTEMPT.fetch_add(1, Ordering::SeqCst);
         let _ = with_state(|s| {

@@ -14,13 +14,12 @@ pub mod scheduler;
 
 use chrono::{DateTime, Duration as ChronoDuration, Local, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 use crate::permissions::PermState;
 use crate::transcript::MeetingParticipant;
 
 /// One calendar as shown in the settings picker.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalendarInfo {
     pub id: String,
     pub title: String,
@@ -29,7 +28,7 @@ pub struct CalendarInfo {
 }
 
 /// One occurrence of a calendar event (recurring events arrive pre-expanded).
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalendarEvent {
     /// EKEvent identifier — shared by all occurrences of a recurring event,
     /// so dedup keys must combine it with `start`.
@@ -50,7 +49,7 @@ pub struct CalendarEvent {
 
 /// Today's events plus the permission state, so the UI can render the
 /// no-permission case without string-matching errors.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodayCalendar {
     pub permission: PermState,
     pub events: Vec<CalendarEvent>,
