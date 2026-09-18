@@ -26,6 +26,7 @@ use settings_values::SettingsCache;
 use slint::Model;
 use souffle_lib::audio::AudioInputDevice;
 use souffle_lib::calendar::CalendarEvent;
+use souffle_lib::commands::SettingsSaveOutcome;
 use souffle_lib::engine::{
     Speaker, TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
@@ -2930,23 +2931,24 @@ fn wire_callbacks(
         handle: &AppHandle,
         settings_state: &SettingsCache,
         mutate: impl FnOnce(&mut AppSettings),
-    ) {
+    ) -> SettingsSaveOutcome {
         let outcome = settings_values::save_field(
             settings_state,
             || souffle_lib::commands::get_settings(handle.clone()),
             |candidate| souffle_lib::commands::save_settings_observed(handle.clone(), candidate),
             mutate,
         );
-        match outcome {
-            souffle_lib::commands::SettingsSaveOutcome::Observed { result, .. } => {
+        match &outcome {
+            SettingsSaveOutcome::Observed { result, .. } => {
                 if let Err(error) = result {
                     eprintln!("Failed to save settings: {error}");
                 }
             }
-            souffle_lib::commands::SettingsSaveOutcome::Unavailable { result, read_error } => {
+            SettingsSaveOutcome::Unavailable { result, read_error } => {
                 eprintln!("Settings state unavailable after save {result:?}: {read_error}");
             }
         }
+        outcome
     }
 
     fn schedule_settings_save(
@@ -2958,7 +2960,9 @@ fn wire_callbacks(
         timer.start(
             slint::TimerMode::SingleShot,
             Duration::from_millis(400),
-            move || save_settings_field(&handle, &settings_state, |_| {}),
+            move || {
+                save_settings_field(&handle, &settings_state, |_| {});
+            },
         );
         *timer_state.borrow_mut() = Some(timer);
     }
@@ -3079,18 +3083,24 @@ fn wire_callbacks(
     let upcoming_for_enable = upcoming_cache.clone();
     window.on_settings_calendar_enabled_changed(move |enabled| {
         if !enabled {
-            save_settings_field(&handle, &settings_state_for_calendar_enabled, |settings| {
-                settings.calendar_integration_enabled = false;
-            });
-            if let Some(window) = weak.upgrade() {
-                window.set_settings_calendar_enabled(false);
-                settings_ui::populate_calendars(
-                    &window,
-                    &[],
-                    &[],
-                    souffle_lib::calendar::authorization_state(),
-                );
-                apply_upcoming(&window, &[], &upcoming_for_enable);
+            let outcome =
+                save_settings_field(&handle, &settings_state_for_calendar_enabled, |settings| {
+                    settings.calendar_integration_enabled = false
+                });
+            if let SettingsSaveOutcome::Observed { settings, .. } = outcome
+                && let Some(window) = weak.upgrade()
+            {
+                let enabled = settings.calendar_integration_enabled;
+                window.set_settings_calendar_enabled(enabled);
+                if !enabled {
+                    settings_ui::populate_calendars(
+                        &window,
+                        &[],
+                        &[],
+                        souffle_lib::calendar::authorization_state(),
+                    );
+                    apply_upcoming(&window, &[], &upcoming_for_enable);
+                }
             }
             return;
         }
@@ -3114,15 +3124,25 @@ fn wire_callbacks(
                 settings_ui::populate_calendars(&window, &[], &[], permission);
                 return;
             }
-            save_settings_field(&handle, &settings_state, |settings| {
+            let outcome = save_settings_field(&handle, &settings_state, |settings| {
                 settings.calendar_integration_enabled = true;
             });
-            window.set_settings_calendar_enabled(true);
-            let selected_ids = settings_state
-                .borrow()
-                .as_ref()
-                .map(|s| s.calendar_selected_ids.clone())
-                .unwrap_or_default();
+            let SettingsSaveOutcome::Observed { settings, .. } = outcome else {
+                return;
+            };
+            let enabled = settings.calendar_integration_enabled;
+            window.set_settings_calendar_enabled(enabled);
+            if !enabled {
+                settings_ui::populate_calendars(
+                    &window,
+                    &[],
+                    &[],
+                    souffle_lib::calendar::authorization_state(),
+                );
+                apply_upcoming(&window, &[], &upcoming_for_enable);
+                return;
+            }
+            let selected_ids = settings.calendar_selected_ids.clone();
             match souffle_lib::calendar::list_calendars() {
                 Ok(list) => settings_ui::populate_calendars(
                     &window,
