@@ -1,0 +1,85 @@
+import { LineEdit } from "std-widgets.slint";
+import { ActionHero } from "components/action_hero.slint";
+import { StatusBanner } from "components/status_banner.slint";
+import { TimelineSection, TimelineDayGroup } from "components/timeline_section.slint";
+import { FilterChip } from "components/filter_chip.slint";
+import { TimelineFilter, TimelineKind } from "types.slint";
+
+// Port of components/HomeView.svelte's idle branch (search + filters +
+// Timeline).
+export component IdleView inherits VerticalLayout {
+    in property <string> dictation-shortcut;
+    in property <bool> model-ready: true;
+    in-out property <string> search-query;
+    in property <TimelineFilter> kind-filter: TimelineFilter.all;
+    in property <string> transcription-status-message;
+    in property <string> meeting-status-message;
+    in property <[TimelineDayGroup]> timeline-groups;
+    in property <bool> timeline-is-empty: true;
+    in property <bool> timeline-has-matches: true;
+    in property <string> live-meeting-id;
+
+    callback dictate-requested();
+    callback meeting-requested();
+    callback filter-changed(TimelineFilter);
+    callback search-changed(string);
+    callback dismiss-transcription-status();
+    callback dismiss-meeting-status();
+    callback timeline-item-opened(TimelineKind, string);
+    callback timeline-item-removed(TimelineKind, string);
+
+    padding: 24px;
+    spacing: 18px;
+
+    if root.transcription-status-message != "": StatusBanner {
+        message: root.transcription-status-message;
+        dismissed => { root.dismiss-transcription-status(); }
+    }
+    if root.meeting-status-message != "": StatusBanner {
+        message: root.meeting-status-message;
+        dismissed => { root.dismiss-meeting-status(); }
+    }
+
+    ActionHero {
+        dictation-shortcut: root.dictation-shortcut;
+        model-ready: root.model-ready;
+        dictate-requested => { root.dictate-requested(); }
+        meeting-requested => { root.meeting-requested(); }
+    }
+
+    search-field := LineEdit {
+        placeholder-text: "Rechercher…";
+        text <=> root.search-query;
+        edited(text) => { root.search-changed(text); }
+    }
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+
+        FilterChip {
+            text: "Tout";
+            selected: root.kind-filter == TimelineFilter.all;
+            clicked => { root.filter-changed(TimelineFilter.all); }
+        }
+        FilterChip {
+            text: "Réunions";
+            selected: root.kind-filter == TimelineFilter.meeting;
+            clicked => { root.filter-changed(TimelineFilter.meeting); }
+        }
+        FilterChip {
+            text: "Dictées";
+            selected: root.kind-filter == TimelineFilter.dictation;
+            clicked => { root.filter-changed(TimelineFilter.dictation); }
+        }
+    }
+
+    TimelineSection {
+        groups: root.timeline-groups;
+        is-empty: root.timeline-is-empty;
+        has-matches: root.timeline-has-matches;
+        live-meeting-id: root.live-meeting-id;
+        item-opened(kind, id) => { root.timeline-item-opened(kind, id); }
+        item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
+    }
+}

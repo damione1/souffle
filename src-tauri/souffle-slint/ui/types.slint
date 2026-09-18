@@ -1,0 +1,14 @@
+// Shared enums for closed state sets, instead of comparing bare strings
+// (kept as plain `string` in milestones 1-5 for recording-mode/kind-filter/
+// TimelineEntry.kind/notes-save-state - corrected here before more state
+// like this accumulates in the milestones ahead).
+
+export enum RecordingMode { idle, dictation, meeting }
+
+// A timeline entry's own kind - always one specific thing, never "all".
+export enum TimelineKind { meeting, dictation }
+
+// The Timeline's kind filter - a superset of TimelineKind with "all" added.
+export enum TimelineFilter { all, meeting, dictation }
+
+export enum NotesSaveState { idle, pending, saved }

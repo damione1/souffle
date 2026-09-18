@@ -1,0 +1,38 @@
+import { Button } from "std-widgets.slint";
+
+// Port of components/ui/StatusBanner.svelte. `action-label` empty means no
+// action button; the caller is responsible for not instantiating this at
+// all when there's no message (mirrors the Svelte `{#if message}` guard).
+export component StatusBanner inherits Rectangle {
+    in property <string> message;
+    in property <string> action-label;
+
+    callback action-triggered();
+    callback dismissed();
+
+    border-width: 1px;
+    border-color: #cc8800;
+    border-radius: 6px;
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+
+        Text {
+            text: root.message;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+
+        if root.action-label != "": Button {
+            text: root.action-label;
+            clicked => { root.action-triggered(); }
+        }
+
+        Button {
+            text: "×";
+            clicked => { root.dismissed(); }
+        }
+    }
+}

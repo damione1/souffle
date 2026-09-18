@@ -34,7 +34,16 @@ pub const LEGACY_APP_IDENTIFIER: &str = "com.souffle.app";
 
 /// Bundle id of *this* process. Nightly builds are `com.souffle.desktop.nightly`;
 /// cargo test and a bare binary fall back to [`APP_IDENTIFIER`].
+///
+/// `SOUFFLE_APP_IDENTIFIER` overrides both: a bare dev binary (no app bundle,
+/// e.g. `souffle-slint` during the SOU-187 migration) has no `Info.plist` to
+/// read a bundle id from, so without this it would silently fall through to
+/// the real production identifier and read/write the user's actual data.
+/// Unset in production and nightly builds, so this has no effect on them.
 pub fn running_app_identifier() -> String {
+    if let Ok(id) = std::env::var("SOUFFLE_APP_IDENTIFIER") {
+        return id;
+    }
     #[cfg(target_os = "macos")]
     if let Some(id) = macos_bundle_identifier()
         && id.starts_with("com.souffle.")

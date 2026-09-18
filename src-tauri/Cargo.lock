@@ -9063,8 +9063,14 @@ dependencies = [
 name = "souffle-slint"
 version = "0.0.0"
 dependencies = [
+ "chrono",
+ "cpal",
+ "serde_json",
  "slint",
  "slint-build",
+ "souffle",
+ "tauri",
+ "tokio",
 ]
 
 [[package]]

@@ -1,30 +1,913 @@
-// SOU-186: standalone Slint shell, no Tauri anywhere in this crate's dependency graph.
-//
-// AC5 pattern: state and actions cross the Rust<->UI boundary as plain Slint
-// properties and callbacks - direct in-process function calls, no JSON, no
-// specta-generated bindings, no serialization at all. `ping_count` below
-// stands in for real backend state (today: AppState behind specta commands);
-// `on_ping_requested` stands in for a Tauri command handler.
+// SOU-187: standalone Slint shell backed by a real headless Tauri App
+// (souffle_lib::slint_bridge) - no webview, but the real AppState (audio
+// thread, engine actor, database). AC5 pattern: state and actions cross the
+// Rust<->UI boundary as plain Slint properties and callbacks - direct
+// in-process function calls, no IPC, no serialization.
 slint::include_modules!();
 
-use std::cell::Cell;
+mod audio_player;
+mod summary;
+mod timeline;
+mod transcript;
+
+use souffle_lib::engine::{
+    TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
+};
+use souffle_lib::state::AppState;
+use souffle_lib::transcript::{MeetingParticipant, MeetingTranscript};
+use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager};
 
-fn main() {
-    let window = MainWindow::new().expect("failed to create Slint window");
+/// Notes autosave debounce, matching `NOTES_DEBOUNCE_MS` in
+/// features/meeting/controller.svelte.ts.
+const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
 
-    // Rust-owned state, not UI state - the pattern any real backend
-    // (AppState, pipeline status, settings) follows.
-    let ping_count = Rc::new(Cell::new(0u32));
+/// Matches `TranscriptSection`'s fixed `height: 260px` Rectangle - the
+/// windowing math below only needs to be approximately right (it pads with
+/// `TRANSCRIPT_SCROLL_MARGIN` on each side), not pixel-exact.
+const TRANSCRIPT_VIEWPORT_HEIGHT: f32 = 260.0;
+const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
+/// How often to re-check the transcript's scroll position and possibly
+/// mount a different slice (SOU-187 milestone 8b, AC15). Same idea as
+/// `start_audio_progress_timer`'s 150ms poll below, just faster since
+/// scrolling is more time-sensitive than a playback position label.
+const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
+
+/// Backing data for the virtualized transcript list: the full block list
+/// plus precomputed cumulative height estimates (see
+/// `transcript::compute_offsets`). `MeetingDetail`'s `transcript-blocks`
+/// property only ever holds the current visible slice of this, never the
+/// whole thing - that's the actual virtualization.
+struct TranscriptState {
+    blocks: Vec<TranscriptBlock>,
+    offsets: Vec<f32>,
+    mounted_start: usize,
+    mounted_end: usize,
+}
+
+// Port of src/lib/utils/format.ts::formatShortcutLabel.
+fn format_shortcut_label(shortcut: &str) -> String {
+    if shortcut.is_empty() {
+        return String::new();
+    }
+    shortcut
+        .replace("CommandOrControl", "\u{2318}")
+        .replace("Shift", "\u{21e7}")
+        .replace("Alt", "\u{2325}")
+        .replace('+', " ")
+}
+
+/// Re-fetches dictations + meetings from the real database and rebuilds the
+/// Timeline model - mirrors features/timeline/controller.svelte.ts's
+/// `refresh()`. Reads the current filter/search straight off the window
+/// (already the source of truth via its in-out properties) rather than
+/// threading them through as parameters.
+fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
+    let kind_filter = window.get_kind_filter();
+    let search_query = window.get_search_query().to_string();
+
+    let state = tauri_handle.state::<souffle_lib::state::AppState>();
+    let dictations = match souffle_lib::commands::list_dictation_entries(state, Some(200)) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!("Failed to list dictation entries: {e}");
+            Vec::new()
+        }
+    };
+    let state = tauri_handle.state::<souffle_lib::state::AppState>();
+    let meetings = match souffle_lib::commands::list_meetings(state) {
+        Ok(meetings) => meetings,
+        Err(e) => {
+            eprintln!("Failed to list meetings: {e}");
+            Vec::new()
+        }
+    };
+
+    let is_empty = dictations.is_empty() && meetings.is_empty();
+    let groups = timeline::build_groups(&dictations, &meetings, kind_filter, &search_query);
+    window.set_timeline_has_matches(!groups.is_empty());
+    window.set_timeline_groups(std::rc::Rc::new(slint::VecModel::from(groups)).into());
+    window.set_timeline_is_empty(is_empty);
+}
+
+/// Port of the inline template in MeetingHeaderSection.svelte:
+/// `{name}{is_organizer ? " (organisateur)" : ""}{is_current_user ? " (vous)" : ""}`.
+fn participant_label(p: &MeetingParticipant) -> String {
+    let mut label = p.name.clone();
+    if p.is_organizer {
+        label.push_str(" (organisateur)");
+    }
+    if p.is_current_user {
+        label.push_str(" (vous)");
+    }
+    label
+}
+
+/// Port of the meta line in MeetingHeaderSection.svelte (date, duration,
+/// segment count, session count) for the completed-meeting case only - the
+/// live-recording case is out of scope here, see meeting_detail.slint.
+/// `formatDate`'s `new Date(iso).toLocaleString()` is locale/OS-dependent;
+/// this uses a fixed French `dd/mm/yyyy hh:mm` instead of trying to
+/// replicate that, consistent with the rest of this port (day_label etc.
+/// already hardcode French).
+fn meta_line(meeting: &MeetingTranscript) -> String {
+    let date = meeting
+        .started_at
+        .with_timezone(&chrono::Local)
+        .format("%d/%m/%Y %H:%M");
+    let duration = timeline::format_duration(meeting.duration_seconds);
+    let segments = meeting.segments.len();
+    let mut line = format!("{date} \u{b7} {duration} \u{b7} {segments} segments");
+    let sessions = meeting.recording_sessions.len();
+    if sessions > 1 {
+        line.push_str(&format!(" \u{b7} {sessions} sessions"));
+    }
+    line
+}
+
+/// Loads a meeting and pushes it into MeetingDetail's properties - mirrors
+/// `controller.svelte.ts`'s `openMeeting`/`loadMeeting` effect.
+fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
+    window.set_active_meeting_id(meeting.id.clone().into());
+    window.set_meeting_detail_title(meeting.title.clone().into());
+    window.set_meeting_detail_meta(meta_line(meeting).into());
+    window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
+    let participants: Vec<slint::SharedString> = meeting
+        .participants
+        .iter()
+        .map(|p| participant_label(p).into())
+        .collect();
+    window.set_meeting_detail_participants(
+        std::rc::Rc::new(slint::VecModel::from(participants)).into(),
+    );
+    window.set_meeting_detail_notes(meeting.notes.clone().unwrap_or_default().into());
+    window.set_meeting_detail_notes_save_state(NotesSaveState::Idle);
+    window.set_meeting_detail_transcript_segment_count(meeting.segments.len() as i32);
+
+    let summary_text = meeting.summary.clone().unwrap_or_default();
+    let key_points: Vec<slint::SharedString> = summary::extract_key_points(&summary_text)
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    window.set_meeting_detail_summary(summary_text.into());
+    window.set_meeting_detail_summary_is_stale(meeting.summary_is_stale);
+    window.set_meeting_detail_summary_model_label(
+        meeting.summary_model.clone().unwrap_or_default().into(),
+    );
+    window.set_meeting_detail_summary_key_points(
+        std::rc::Rc::new(slint::VecModel::from(key_points)).into(),
+    );
+    let structured = meeting.structured_summary.clone().unwrap_or_default();
+    let decisions: Vec<slint::SharedString> =
+        structured.decisions.into_iter().map(Into::into).collect();
+    let action_items: Vec<StructuredActionItem> = structured
+        .action_items
+        .into_iter()
+        .map(|item| StructuredActionItem {
+            text: item.text.into(),
+            owner: item.owner.unwrap_or_default().into(),
+        })
+        .collect();
+    let open_questions: Vec<slint::SharedString> = structured
+        .open_questions
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    window.set_meeting_detail_summary_decisions(
+        std::rc::Rc::new(slint::VecModel::from(decisions)).into(),
+    );
+    window.set_meeting_detail_summary_action_items(
+        std::rc::Rc::new(slint::VecModel::from(action_items)).into(),
+    );
+    window.set_meeting_detail_summary_open_questions(
+        std::rc::Rc::new(slint::VecModel::from(open_questions)).into(),
+    );
+}
+
+/// Sets `transcript_state` to `meeting`'s full block list + offsets, mounts
+/// the initial (scroll-top) slice, and (re)starts the scroll-poll timer
+/// that keeps the mounted slice matched to `scroll-top` while the meeting
+/// is open. Separate from `populate_meeting_detail` because it owns
+/// mutable shared state the header/notes population doesn't need.
+fn load_meeting_transcript_window(
+    window: &MainWindow,
+    meeting: &MeetingTranscript,
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    weak: slint::Weak<MainWindow>,
+) {
+    let blocks =
+        transcript::build_transcript_blocks(&meeting.segments, &meeting.recording_sessions);
+    let offsets = transcript::compute_offsets(&blocks);
+    *transcript_state.borrow_mut() = Some(TranscriptState {
+        blocks,
+        offsets,
+        mounted_start: usize::MAX,
+        mounted_end: usize::MAX,
+    });
+    window.invoke_reset_meeting_detail_transcript_scroll();
+    update_transcript_window(window, transcript_state, 0.0);
+    *transcript_timer.borrow_mut() = Some(start_transcript_scroll_timer(
+        weak,
+        transcript_state.clone(),
+    ));
+}
+
+/// Recomputes which slice of `transcript_state`'s blocks should be mounted
+/// for `scroll_top` (px scrolled down from the top) and pushes it into
+/// `MeetingDetail`'s properties, but only when the slice actually changed -
+/// rebuilding the Slint model on every poll tick even while stationary
+/// would be wasted work.
+fn update_transcript_window(
+    window: &MainWindow,
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    scroll_top: f32,
+) {
+    let mut guard = transcript_state.borrow_mut();
+    let Some(state) = guard.as_mut() else {
+        return;
+    };
+    let win = transcript::visible_window(
+        &state.offsets,
+        scroll_top,
+        TRANSCRIPT_VIEWPORT_HEIGHT,
+        TRANSCRIPT_SCROLL_MARGIN,
+    );
+    if win.start == state.mounted_start && win.end == state.mounted_end {
+        return;
+    }
+    state.mounted_start = win.start;
+    state.mounted_end = win.end;
+    let slice = state.blocks[win.start..win.end].to_vec();
+    let mounted = slice.len();
+    let total = state.blocks.len();
+    window.set_meeting_detail_transcript_blocks(
+        std::rc::Rc::new(slint::VecModel::from(slice)).into(),
+    );
+    window.set_meeting_detail_transcript_spacer_before(win.spacer_before);
+    window.set_meeting_detail_transcript_spacer_after(win.spacer_after);
+    // AC15's "active node counter" evidence: this stays small and bounded
+    // even for a meeting with thousands of paragraphs - see
+    // `transcript::tests::visible_window_slices_a_huge_transcript_to_a_bounded_count`
+    // for the automated version of this same claim.
+    eprintln!("transcript window: {mounted}/{total} blocks mounted (SOU-187 AC15)");
+}
+
+/// Repeatedly (80ms) reads the real Flickable scroll position out of
+/// `MeetingDetail` and re-windows the transcript if it moved - same
+/// Rust-polls-Slint pattern as `start_audio_progress_timer` below, needed
+/// because Slint's expression language can't do the offset/binary-search
+/// math `visible_window` does.
+fn start_transcript_scroll_timer(
+    weak: slint::Weak<MainWindow>,
+    transcript_state: Rc<RefCell<Option<TranscriptState>>>,
+) -> slint::Timer {
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        TRANSCRIPT_SCROLL_POLL,
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            // Flickable's viewport-y (and its `-px` mirror) is negative-going-
+            // down; scroll_top here is the usual positive "distance scrolled
+            // from the top".
+            let scroll_top = -window.get_meeting_detail_transcript_scroll_top_px();
+            update_transcript_window(&window, &transcript_state, scroll_top);
+        },
+    );
+    timer
+}
+
+/// Drops the transcript window state/timer - mirrors `stop_audio_player`.
+/// Called before loading a different meeting's transcript and when leaving
+/// MeetingDetail, so a stale huge block list never lingers in memory and
+/// the poll timer never fires against a slice that no longer applies.
+fn stop_transcript_window(
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
+) {
+    *transcript_timer.borrow_mut() = None;
+    *transcript_state.borrow_mut() = None;
+}
+
+/// Stops and drops any currently loaded audio player/progress timer -
+/// dropping `AudioPlayer` stops its `cpal` stream. Called before loading a
+/// different meeting's audio and when leaving MeetingDetail, so switching
+/// meetings never leaves a stale stream playing in the background.
+fn stop_audio_player(
+    player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+) {
+    *progress_timer.borrow_mut() = None;
+    *player.borrow_mut() = None;
+}
+
+/// Repeatedly (150ms) reflects the loaded player's real position/playing
+/// state into the window's properties - mirrors the `<audio>` element's
+/// `timeupdate` event that `MeetingAudioPlayerSection.svelte` listens to.
+/// Left running for as long as MeetingDetail with audio is open (not just
+/// while playing): simpler and safe (no self-drop from inside its own
+/// callback) at the cost of a harmless no-op tick every 150ms while paused.
+fn start_audio_progress_timer(
+    weak: slint::Weak<MainWindow>,
+    player: Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+) -> slint::Timer {
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(150),
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let guard = player.borrow();
+            let Some(p) = guard.as_ref() else {
+                return;
+            };
+            window.set_meeting_detail_audio_progress(p.progress());
+            window.set_meeting_detail_audio_position_label(
+                timeline::format_duration(p.position_seconds()).into(),
+            );
+            window.set_meeting_detail_audio_is_playing(p.is_playing());
+        },
+    );
+    timer
+}
+
+/// Loads (decodes + opens a paused output stream for) the first recorded
+/// session of `meeting_id`, if any - mirrors `getMeetingAudio` populating
+/// `MeetingAudioPlayerSection`. Multiple recording sessions (a meeting
+/// resumed after being stopped) are real but out of scope here: only the
+/// first session plays, same honest v1 boundary as the rest of this
+/// milestone, not silently wrong for the common single-session case.
+fn load_meeting_audio(
+    window: &MainWindow,
+    meeting_id: &str,
+    player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    weak: slint::Weak<MainWindow>,
+) {
+    let sessions = souffle_lib::commands::get_meeting_audio(meeting_id.to_string())
+        .inspect_err(|e| eprintln!("Failed to list meeting audio: {e}"))
+        .unwrap_or_default();
+    let Some(session) = sessions.first() else {
+        window.set_meeting_detail_has_audio(false);
+        window.set_meeting_detail_audio_peaks(
+            std::rc::Rc::new(slint::VecModel::from(Vec::<f32>::new())).into(),
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&session.path);
+    match audio_player::load(&path) {
+        Ok((loaded, peaks)) => {
+            window.set_meeting_detail_has_audio(true);
+            window.set_meeting_detail_audio_peaks(
+                std::rc::Rc::new(slint::VecModel::from(peaks)).into(),
+            );
+            window.set_meeting_detail_audio_duration_label(
+                timeline::format_duration(loaded.duration_seconds()).into(),
+            );
+            window.set_meeting_detail_audio_position_label(timeline::format_duration(0.0).into());
+            window.set_meeting_detail_audio_progress(0.0);
+            window.set_meeting_detail_audio_is_playing(false);
+            *player.borrow_mut() = Some(loaded);
+            *progress_timer.borrow_mut() = Some(start_audio_progress_timer(weak, player.clone()));
+        }
+        Err(e) => {
+            eprintln!("Failed to load meeting audio: {e}");
+            window.set_meeting_detail_has_audio(false);
+        }
+    }
+}
+
+/// Opens a meeting in MeetingDetail: stops whatever audio was previously
+/// loaded, fetches the meeting, and populates header/notes/transcript/audio.
+/// Shared by "open from Timeline" and "just stopped this meeting recording",
+/// the latter of which must land the user on the meeting they just
+/// finished, not back on the Timeline.
+#[allow(clippy::too_many_arguments)]
+fn open_meeting_detail(
+    window: &MainWindow,
+    handle: &AppHandle,
+    meeting_id: &str,
+    player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    weak: slint::Weak<MainWindow>,
+) {
+    stop_audio_player(player, progress_timer);
+    stop_transcript_window(transcript_state, transcript_timer);
+    let state = handle.state::<AppState>();
+    match souffle_lib::commands::get_meeting(state, meeting_id.to_string()) {
+        Ok(meeting) => {
+            populate_meeting_detail(window, &meeting);
+            load_meeting_audio(window, &meeting.id, player, progress_timer, weak.clone());
+            load_meeting_transcript_window(
+                window,
+                &meeting,
+                transcript_state,
+                transcript_timer,
+                weak,
+            );
+        }
+        Err(e) => eprintln!("Failed to load meeting {meeting_id}: {e}"),
+    }
+}
+
+/// Mirrors `ensureModelLoaded` in transcription/runtime.ts: ready is a no-op,
+/// load_required loads it, download_required is refused rather than
+/// triggering a real (multi-GB, network-bound) download from here - that
+/// flow belongs to SOU-190 (onboarding/dialogs), not this ticket.
+async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
+    let selection = TranscriptionProfileSelection::default();
+    let state = handle.state::<AppState>();
+    let status = souffle_lib::commands::get_model_status(state, selection)?;
+    match status.phase {
+        TranscriptionRuntimePhase::Ready => Ok(()),
+        TranscriptionRuntimePhase::LoadRequired => {
+            let handle = handle.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let state = handle.state::<AppState>();
+                souffle_lib::commands::load_model(state, TranscriptionProfileSelection::default())
+            })
+            .await
+            .map_err(|e| format!("Join load_model task: {e}"))?
+        }
+        TranscriptionRuntimePhase::DownloadRequired => {
+            Err("Modèle non téléchargé - ouvrez Réglages pour le télécharger.".into())
+        }
+    }
+}
+
+/// Pushes each transcribed segment into the window's `live-text`/
+/// `live-tentative` properties. Runs on the engine-actor thread, not the
+/// Slint main thread, so every update is marshaled via
+/// `invoke_from_event_loop` - the same reasoning as `run_on_main_thread`,
+/// just fire-and-forget instead of awaited. Milestone 5 scope: a single
+/// running text block for both dictation and meetings, not the full
+/// paragraph-grouped/speaker-lane rendering LiveSessionCard.svelte does -
+/// that's real, separate work (windowing, speaker lanes, inline edit),
+/// deliberately deferred and noted here rather than half-built.
+fn live_segment_channel(weak: slint::Weak<MainWindow>) -> Channel<TranscriptionSegment> {
+    Channel::new(move |body| {
+        // Channel::send serializes via serde_json regardless of the type
+        // parameter (see IpcResponse's blanket impl) - the callback always
+        // receives the raw IPC body, typed or not.
+        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+            return Ok(());
+        };
+        let Ok(segment) = serde_json::from_str::<TranscriptionSegment>(&json) else {
+            return Ok(());
+        };
+        let weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            if segment.is_final {
+                let mut text = window.get_live_text().to_string();
+                let trimmed = segment.text.trim();
+                if !trimmed.is_empty() {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(trimmed);
+                }
+                window.set_live_text(text.into());
+                window.set_live_tentative("".into());
+            } else {
+                window.set_live_tentative(segment.text.into());
+            }
+        });
+        Ok(())
+    })
+}
+
+/// Runs `f` on the real Slint/OS main thread and returns its result.
+///
+/// Found the hard way (milestone 4): `start_transcription` internally calls
+/// `dictation_cancel::sync`, which touches `app.global_shortcut()` to arm the
+/// Escape-cancels-dictation binding. That registration needs a thread with a
+/// live run loop; a background tokio worker thread (where a plain
+/// `tauri::async_runtime::spawn`ed task runs) has none, and the call hangs
+/// forever - confirmed by bisecting with temporary eprintln!s, not guessed.
+/// The real OS main thread (Slint's own, via `window.run()`) does have one.
+/// Model loading (the slow part, seconds) stays off-thread via
+/// `ensure_model_ready`'s `spawn_blocking`; only the fast (tens to hundreds
+/// of ms once the model is loaded) plugin-touching command call itself needs
+/// this - a brief, acceptable main-thread pause, not a multi-second freeze.
+async fn run_on_main_thread<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    slint::invoke_from_event_loop(move || {
+        let _ = tx.send(f());
+    })
+    .expect("Slint event loop is gone");
+    rx.await.expect("main-thread task dropped its result")
+}
+
+async fn start_dictation(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Result<(), String> {
+    ensure_model_ready(&handle).await?;
+    run_on_main_thread(move || {
+        tauri::async_runtime::block_on(async move {
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::start_transcription(state, live_segment_channel(weak), true)
+                .await
+        })
+    })
+    .await
+}
+
+async fn start_meeting(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Result<(), String> {
+    ensure_model_ready(&handle).await?;
+    // Mirrors defaultMeetingTitle() in meeting/controller.svelte.ts.
+    let title = format!("Meeting {}", default_meeting_date());
+    run_on_main_thread(move || {
+        tauri::async_runtime::block_on(async move {
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::start_meeting_recording(
+                state,
+                title,
+                None,
+                live_segment_channel(weak),
+            )
+            .await
+        })
+    })
+    .await
+}
+
+/// `M/D/YYYY`, matching `new Date().toLocaleDateString()`'s en-US default
+/// used by `defaultMeetingTitle()`.
+fn default_meeting_date() -> String {
+    let local = chrono::Local::now();
+    format!(
+        "{}/{}/{}",
+        local.format("%-m"),
+        local.format("%-d"),
+        local.format("%Y")
+    )
+}
+
+async fn stop_dictation(handle: AppHandle) -> Result<(), String> {
+    run_on_main_thread(move || {
+        tauri::async_runtime::block_on(async move {
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::stop_transcription(state).await
+        })
+    })
+    .await
+}
+
+async fn stop_meeting(handle: AppHandle) -> Result<String, String> {
+    run_on_main_thread(move || {
+        tauri::async_runtime::block_on(async move {
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::stop_meeting_recording(state).await
+        })
+    })
+    .await
+}
+
+/// Milestone 3 wires the real Timeline (this function); milestones 4-6 wire
+/// dictate/meeting start and opening a meeting's detail. Until then those
+/// two callbacks only log - no fabricated state change on click.
+///
+/// Plain `eprintln!`, not `tracing`: this dev shell's own diagnostics are
+/// unrelated to the production log file/filter (`SOUFFLE_LOG`, scoped to the
+/// `souffle` lib crate's own targets), which was the wrong tool here and
+/// silently swallowed these lines during milestone 2 verification.
+fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
+    // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
+    // and the play-pause/seek callbacks below - one loaded player at a
+    // time, for whichever meeting is currently open in MeetingDetail.
+    let player: Rc<RefCell<Option<audio_player::AudioPlayer>>> = Rc::new(RefCell::new(None));
+    let progress_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    // Same sharing pattern, for the virtualized transcript list (AC15).
+    let transcript_state: Rc<RefCell<Option<TranscriptState>>> = Rc::new(RefCell::new(None));
+    let transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
     let weak = window.as_weak();
-    window.on_ping_requested(move || {
-        ping_count.set(ping_count.get() + 1);
-        // Push new state into the UI: a direct setter call, not a message.
+    let handle = tauri_handle.clone();
+    window.on_dictate_requested(move || {
+        let weak = weak.clone();
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = start_dictation(handle, weak.clone()).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
+                Ok(()) => {
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    window.set_recording_mode(RecordingMode::Dictation);
+                }
+                Err(e) => window.set_transcription_status_message(e.into()),
+            }) {
+                eprintln!("upgrade_in_event_loop failed (dictate): {e}");
+            }
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_meeting_requested(move || {
+        let weak = weak.clone();
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = start_meeting(handle, weak.clone()).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
+                Ok(()) => {
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    window.set_recording_mode(RecordingMode::Meeting);
+                }
+                Err(e) => window.set_meeting_status_message(e.into()),
+            }) {
+                eprintln!("upgrade_in_event_loop failed (meeting): {e}");
+            }
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_stop_requested(move || {
+        let Some(current) = weak.upgrade() else {
+            return;
+        };
+        let mode = current.get_recording_mode();
+        let weak = weak.clone();
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let handle_for_refresh = handle.clone();
+            if mode == RecordingMode::Meeting {
+                let result = stop_meeting(handle.clone()).await;
+                // Send-safe on purpose: this closure cannot capture the
+                // Rc<RefCell<AudioPlayer>> player state (Rc isn't Send, and
+                // upgrade_in_event_loop requires it) - re-invoking the
+                // already-registered timeline-item-opened callback (which
+                // does capture it, as a plain same-thread closure) reuses
+                // the real open-meeting path instead of duplicating it.
+                if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    match result {
+                        // A stopped meeting recording lands the user back on
+                        // that meeting's detail, not the Timeline - they
+                        // were just looking at it live.
+                        Ok(meeting_id) => {
+                            window.set_recording_mode(RecordingMode::Idle);
+                            window.invoke_timeline_item_opened(
+                                TimelineKind::Meeting,
+                                meeting_id.into(),
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to stop meeting: {e}");
+                            window.set_recording_mode(RecordingMode::Idle);
+                            refresh_timeline(&window, &handle_for_refresh);
+                        }
+                    }
+                }) {
+                    eprintln!("upgrade_in_event_loop failed (stop meeting): {e}");
+                }
+            } else {
+                let result = stop_dictation(handle).await;
+                if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                    if let Err(e) = result {
+                        eprintln!("Failed to stop dictation: {e}");
+                    }
+                    window.set_recording_mode(RecordingMode::Idle);
+                    window.set_live_text("".into());
+                    window.set_live_tentative("".into());
+                    refresh_timeline(&window, &handle_for_refresh);
+                }) {
+                    eprintln!("upgrade_in_event_loop failed (stop dictation): {e}");
+                }
+            }
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_filter_changed(move |kind| {
         if let Some(window) = weak.upgrade() {
-            window.set_status_text(format!("pinged {} time(s)", ping_count.get()).into());
+            window.set_kind_filter(kind);
+            refresh_timeline(&window, &handle);
         }
     });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_search_changed(move |_query| {
+        if let Some(window) = weak.upgrade() {
+            refresh_timeline(&window, &handle);
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let player_for_open = player.clone();
+    let progress_timer_for_open = progress_timer.clone();
+    let transcript_state_for_open = transcript_state.clone();
+    let transcript_timer_for_open = transcript_timer.clone();
+    window.on_timeline_item_opened(move |kind, id| {
+        if kind != TimelineKind::Meeting {
+            // Dictation inline-expand has no Slint equivalent yet - real
+            // action, just not ported.
+            eprintln!("timeline-item-opened: dictation {id} (inline-expand not wired yet)");
+            return;
+        }
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        open_meeting_detail(
+            &window,
+            &handle,
+            &id,
+            &player_for_open,
+            &progress_timer_for_open,
+            &transcript_state_for_open,
+            &transcript_timer_for_open,
+            weak.clone(),
+        );
+    });
+
+    let weak = window.as_weak();
+    let player_for_back = player.clone();
+    let progress_timer_for_back = progress_timer.clone();
+    let transcript_state_for_back = transcript_state.clone();
+    let transcript_timer_for_back = transcript_timer.clone();
+    window.on_meeting_detail_back(move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_active_meeting_id("".into());
+        }
+        stop_audio_player(&player_for_back, &progress_timer_for_back);
+        stop_transcript_window(&transcript_state_for_back, &transcript_timer_for_back);
+    });
+
+    let weak = window.as_weak();
+    let player_for_play = player.clone();
+    window.on_meeting_detail_audio_play_pause_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let guard = player_for_play.borrow();
+        let Some(p) = guard.as_ref() else {
+            return;
+        };
+        if p.is_playing() {
+            p.pause();
+        } else {
+            p.play();
+        }
+        window.set_meeting_detail_audio_is_playing(p.is_playing());
+    });
+
+    let player_for_seek = player.clone();
+    window.on_meeting_detail_audio_seek_requested(move |fraction| {
+        if let Some(p) = player_for_seek.borrow().as_ref() {
+            p.seek_to(fraction);
+        }
+    });
+
+    let player_for_paragraph = player.clone();
+    window.on_meeting_detail_transcript_paragraph_clicked(move |_session_index, start_time| {
+        if let Some(p) = player_for_paragraph.borrow().as_ref() {
+            p.seek_to_seconds(f64::from(start_time));
+        }
+    });
+
+    let handle = tauri_handle.clone();
+    window.on_meeting_detail_transcript_alias_save_requested(move |term, pronunciation| {
+        let term = term.trim().to_string();
+        if term.is_empty() {
+            return;
+        }
+        let pronunciation = pronunciation.trim();
+        let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::add_dictionary_entry(state, term, pronunciation, None)
+        {
+            eprintln!("Failed to add dictionary alias: {e}");
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_meeting_detail_rename(move |new_title| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let id = window.get_active_meeting_id().to_string();
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::rename_meeting(state, id, new_title.to_string()) {
+            Ok(()) => {
+                window.set_meeting_detail_title(new_title);
+                refresh_timeline(&window, &handle);
+            }
+            Err(e) => eprintln!("Failed to rename meeting: {e}"),
+        }
+    });
+
+    // Debounced autosave: each edit restarts the timer, dropping the
+    // previous one (a live `slint::Timer` cancels on drop) - mirrors
+    // `onNotesChange`/`flushNotes` in controller.svelte.ts.
+    let notes_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_meeting_detail_notes_changed(move |value| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_meeting_detail_notes_save_state(NotesSaveState::Pending);
+        let meeting_id = window.get_active_meeting_id().to_string();
+        let value = value.to_string();
+        let handle = handle.clone();
+        let weak = weak.clone();
+        let timer = slint::Timer::default();
+        timer.start(slint::TimerMode::SingleShot, NOTES_DEBOUNCE, move || {
+            let state = handle.state::<AppState>();
+            let result = souffle_lib::commands::save_meeting_notes(
+                state,
+                meeting_id.clone(),
+                Some(value.clone()),
+            );
+            if let Some(window) = weak.upgrade() {
+                match result {
+                    Ok(()) => window.set_meeting_detail_notes_save_state(NotesSaveState::Saved),
+                    Err(e) => {
+                        eprintln!("Failed to save meeting notes: {e}");
+                        window.set_meeting_detail_notes_save_state(NotesSaveState::Idle);
+                    }
+                }
+            }
+        });
+        *notes_timer.borrow_mut() = Some(timer);
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_timeline_item_removed(move |kind, id| {
+        let state = handle.state::<souffle_lib::state::AppState>();
+        let result = if kind == TimelineKind::Dictation {
+            souffle_lib::commands::delete_dictation_entry(state, id.to_string())
+        } else {
+            souffle_lib::commands::delete_meeting(state, id.to_string())
+        };
+        if let Err(e) = result {
+            eprintln!("Failed to delete {kind:?} {id}: {e}");
+        }
+        if let Some(window) = weak.upgrade() {
+            refresh_timeline(&window, &handle);
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_dismiss_transcription_status(move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_transcription_status_message("".into());
+        }
+    });
+    let weak = window.as_weak();
+    window.on_dismiss_meeting_status(move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_meeting_status_message("".into());
+        }
+    });
+}
+
+fn main() {
+    // Real bootstrap (audio thread, engine actor, DB, replayed .setup()) -
+    // see slint_bridge.rs. Must run before Slint's own window/event loop.
+    let tauri_app = souffle_lib::slint_bridge::build();
+    let tauri_handle = tauri_app.handle().clone();
+    // Never call .run() on this App; it must simply stay alive so the
+    // AppHandle above keeps working while Slint owns the OS event loop.
+    std::mem::forget(tauri_app);
+
+    let window = MainWindow::new().expect("failed to create Slint window");
+
+    // Real shortcut setting, not a placeholder - mirrors HomeView.svelte's
+    // onMount getShortcuts() call.
+    let state = tauri_handle.state::<souffle_lib::state::AppState>();
+    match souffle_lib::commands::get_shortcuts(state) {
+        Ok(shortcuts) => {
+            window.set_dictation_shortcut(format_shortcut_label(&shortcuts.toggle).into());
+        }
+        Err(e) => eprintln!("Failed to load shortcuts: {e}"),
+    }
+
+    refresh_timeline(&window, &tauri_handle);
+    wire_callbacks(&window, tauri_handle);
 
     window.run().expect("event loop failed");
 }

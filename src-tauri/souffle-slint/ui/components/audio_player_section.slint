@@ -1,0 +1,88 @@
+// Native audio player for MeetingDetail (SOU-187 milestone 7, AC14/AC16).
+// New engineering, not a port: MeetingAudioPlayerSection.svelte is a bare
+// `<input type="range">` next to an HTML `<audio>` element, no waveform at
+// all. Click-to-seek only (no drag-to-scrub) - a real, honest v1 boundary,
+// not a hidden gap.
+export component AudioPlayerSection inherits VerticalLayout {
+    in property <bool> has-audio: false;
+    in property <bool> is-playing: false;
+    in property <[float]> peaks;
+    in property <float> progress; // 0.0..1.0
+    in property <string> position-label;
+    in property <string> duration-label;
+
+    callback play-pause-requested();
+    callback seek-requested(float); // 0.0..1.0
+
+    spacing: 8px;
+
+    if !root.has-audio: Text {
+        text: "Aucun enregistrement audio pour cette r\u{e9}union.";
+        color: #888888;
+        font-size: 12px;
+    }
+
+    if root.has-audio: HorizontalLayout {
+        spacing: 10px;
+
+        play-btn := Rectangle {
+            width: 36px;
+            height: 36px;
+            border-radius: 18px;
+            background: play-area.has-hover ? #4a4a4a : #3a3a3a;
+
+            accessible-role: button;
+            accessible-label: root.is-playing ? "Pause" : "Lecture";
+            accessible-action-default => { root.play-pause-requested(); }
+
+            play-area := TouchArea {
+                clicked => { root.play-pause-requested(); }
+            }
+
+            Text {
+                text: root.is-playing ? "\u{23f8}" : "\u{25b6}";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: root.position-label + " / " + root.duration-label;
+            color: #888888;
+            font-size: 11px;
+            font-family: "monospace";
+            vertical-alignment: center;
+        }
+    }
+
+    if root.has-audio: waveform-area := Rectangle {
+        height: 56px;
+
+        accessible-role: slider;
+        accessible-label: "Position de lecture";
+
+        seek-area := TouchArea {
+            clicked => {
+                root.seek-requested(self.mouse-x / self.width);
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 1px;
+
+            // Each bar is centered in its column (not top-anchored), so it
+            // extends both up and down from the row's vertical middle - the
+            // usual mirrored waveform look, not a bar chart hanging from
+            // the top.
+            for peak[i] in root.peaks: VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+
+                Rectangle {
+                    height: max(2px, peak * waveform-area.height);
+                    background: (i * 1.0 / root.peaks.length) < root.progress ? #4a9eff : #555555;
+                }
+            }
+        }
+    }
+}
