@@ -3186,34 +3186,34 @@ fn wire_callbacks(
             .map(|row| row.id.to_string())
             .collect();
         let id_string = id.to_string();
-        let mut selected_ids = None;
-        save_settings_field(&handle, &settings_state_for_calendar_toggle, |settings| {
-            let effective = if settings.calendar_selected_ids.is_empty() {
-                all_ids.clone()
-            } else {
-                settings.calendar_selected_ids.clone()
-            };
-            let mut next = effective.clone();
-            if let Some(pos) = next.iter().position(|existing| existing == &id_string) {
-                next.remove(pos);
-            } else {
-                next.push(id_string.clone());
-            }
-            if next.is_empty() {
-                // Mirrors `toggleCalendarSelected()`: the last checked
-                // calendar cannot be unchecked.
-                return;
-            }
-            settings.calendar_selected_ids = if next.len() == all_ids.len() {
-                Vec::new()
-            } else {
-                next
-            };
-            selected_ids = Some(settings.calendar_selected_ids.clone());
-        });
-        let Some(selected_ids) = selected_ids else {
+        let outcome =
+            save_settings_field(&handle, &settings_state_for_calendar_toggle, |settings| {
+                let effective = if settings.calendar_selected_ids.is_empty() {
+                    all_ids.clone()
+                } else {
+                    settings.calendar_selected_ids.clone()
+                };
+                let mut next = effective.clone();
+                if let Some(pos) = next.iter().position(|existing| existing == &id_string) {
+                    next.remove(pos);
+                } else {
+                    next.push(id_string.clone());
+                }
+                if next.is_empty() {
+                    // Mirrors `toggleCalendarSelected()`: the last checked
+                    // calendar cannot be unchecked.
+                    return;
+                }
+                settings.calendar_selected_ids = if next.len() == all_ids.len() {
+                    Vec::new()
+                } else {
+                    next
+                };
+            });
+        let SettingsSaveOutcome::Observed { settings, .. } = outcome else {
             return;
         };
+        let selected_ids = settings.calendar_selected_ids;
         match souffle_lib::calendar::list_calendars() {
             Ok(calendars) => settings_ui::populate_calendars(
                 &window,
