@@ -21,6 +21,13 @@ reviews:
     enabled: false
     labels:
       - ci-green
+    # The migration and release trains use stacked PRs whose base is not the
+    # repository default branch. Keep those PRs eligible for the label-gated
+    # review once their CI has passed.
+    base_branches:
+      - "develop"
+      - "feature/.*"
+      - "release/.*"
 
   # Generated and vendored code is not reviewable material.
   path_filters:
