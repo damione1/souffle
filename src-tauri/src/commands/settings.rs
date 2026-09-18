@@ -2,15 +2,29 @@ use std::sync::{Arc, Mutex};
 
 use crate::db::Database;
 use crate::lock_ext::MutexExt;
-use crate::settings::{AppSettings, ShortcutSettings};
+use crate::settings::{AppSettings, PreparedSettingsSaveError, ShortcutSettings};
 use crate::state::AppState;
 use crate::state_machine::AppStateMachine;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingsEffectFailure {
+    Autostart { message: String },
+    Logging { message: String },
+}
+
+impl SettingsEffectFailure {
+    fn user_message(&self) -> &str {
+        match self {
+            Self::Autostart { message } | Self::Logging { message } => message,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsSaveError {
     Rejected { message: String },
     NotCommitted { message: String },
-    EffectFailedAfterCommit { message: String },
+    EffectFailedAfterCommit { cause: SettingsEffectFailure },
 }
 
 impl SettingsSaveError {
@@ -18,8 +32,11 @@ impl SettingsSaveError {
         match self {
             Self::Rejected { message } => message.clone(),
             Self::NotCommitted { message } => message.clone(),
-            Self::EffectFailedAfterCommit { message } => {
-                format!("Settings were saved, but a native effect failed: {message}")
+            Self::EffectFailedAfterCommit { cause } => {
+                format!(
+                    "Settings were saved, but a native effect failed: {}",
+                    cause.user_message()
+                )
             }
         }
     }
@@ -97,7 +114,7 @@ fn save_settings_with_effects(
     db: &Database,
     machine: &Mutex<AppStateMachine>,
     settings: AppSettings,
-    apply_effects: impl FnOnce(&AppSettings) -> Result<(), String>,
+    apply_effects: impl FnOnce(&AppSettings) -> Result<(), SettingsEffectFailure>,
 ) -> SettingsSaveResult {
     let settings = settings
         .prepare_for_save()
@@ -109,41 +126,36 @@ fn save_settings_with_effects(
         let machine = machine
             .acquire()
             .map_err(|message| SettingsSaveError::NotCommitted { message })?;
-        if machine.is_recording() {
-            let Some(profile) = machine.active_profile() else {
-                return Err(SettingsSaveError::Rejected {
-                    message: "Cannot verify the active transcription model while recording".into(),
-                });
-            };
-            if settings.transcription_engine_id != profile.engine_id
-                || settings.transcription_model_id != profile.model_id
-                || settings.transcription_backend_id != profile.backend_id
-            {
-                return Err(SettingsSaveError::Rejected {
-                    message: "Cannot change the transcription model while recording".into(),
-                });
-            }
-        }
-
         settings
-            .save_prepared(db)
-            .map_err(|message| SettingsSaveError::NotCommitted { message })?;
+            .save_prepared_with_recording_guard(db, machine.is_recording())
+            .map_err(|error| match error {
+                PreparedSettingsSaveError::ModelChangeRejected => SettingsSaveError::Rejected {
+                    message: "Cannot change the transcription model while recording".into(),
+                },
+                PreparedSettingsSaveError::Persistence { message } => {
+                    SettingsSaveError::NotCommitted { message }
+                }
+            })?;
     }
 
-    apply_effects(&settings)
-        .map_err(|message| SettingsSaveError::EffectFailedAfterCommit { message })
+    apply_effects(&settings).map_err(|cause| SettingsSaveError::EffectFailedAfterCommit { cause })
 }
 
-fn apply_settings_effects(state: &Arc<AppState>, settings: &AppSettings) -> Result<(), String> {
+fn apply_settings_effects(
+    state: &Arc<AppState>,
+    settings: &AppSettings,
+) -> Result<(), SettingsEffectFailure> {
     #[cfg(target_os = "macos")]
     {
         if settings.autostart_enabled != crate::autostart::is_enabled() {
-            crate::autostart::set_enabled(settings.autostart_enabled)?;
+            crate::autostart::set_enabled(settings.autostart_enabled)
+                .map_err(|message| SettingsEffectFailure::Autostart { message })?;
         }
     }
 
     crate::debug::set_transcription_debug(settings.debug_transcription);
-    crate::logging::set_level(settings.log_level)?;
+    crate::logging::set_level(settings.log_level)
+        .map_err(|message| SettingsEffectFailure::Logging { message })?;
     state
         .engine_actor
         .set_unload_timeout(settings.model_unload_timeout_minutes);
@@ -241,7 +253,7 @@ mod tests {
     use std::cell::Cell;
     use std::sync::{Arc, Barrier, Mutex};
 
-    use super::{SettingsSaveError, save_settings_with_effects};
+    use super::{SettingsEffectFailure, SettingsSaveError, save_settings_with_effects};
     use crate::audio::InputPriority;
     use crate::engine::default_transcription_profile;
     use crate::settings::{AppSettings, MeetingTranscriptionLanguage, Theme};
@@ -300,7 +312,13 @@ mod tests {
     #[test]
     fn recording_allows_theme_locale_language_and_microphone_policy_changes() {
         let (db, _dir) = test_db();
-        let initial = AppSettings::default();
+        // A model selection is persisted before its asynchronous load starts.
+        // Hot settings must remain writable if recording begins on the still
+        // active previous profile during that transition window.
+        let initial = AppSettings {
+            transcription_model_id: "stt-2.6b-en".into(),
+            ..AppSettings::default()
+        };
         initial.save(&db).expect("save initial settings");
         let candidate = AppSettings {
             theme: Theme::Dark,
@@ -330,6 +348,7 @@ mod tests {
         );
         assert!(stored.allow_bluetooth_mic);
         assert_eq!(stored.input_priority.priorities, ["preferred-mic"]);
+        assert_eq!(stored.transcription_model_id, "stt-2.6b-en");
     }
 
     #[test]
@@ -344,13 +363,17 @@ mod tests {
 
         let result =
             save_settings_with_effects(&db, &Mutex::new(AppStateMachine::Idle), candidate, |_| {
-                Err("injected native effect failure".into())
+                Err(SettingsEffectFailure::Logging {
+                    message: "injected native effect failure".into(),
+                })
             });
         let error = result.expect_err("native effect must fail");
         assert_eq!(
             error,
             SettingsSaveError::EffectFailedAfterCommit {
-                message: "injected native effect failure".into()
+                cause: SettingsEffectFailure::Logging {
+                    message: "injected native effect failure".into()
+                }
             }
         );
         assert!(error.committed());

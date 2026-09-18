@@ -6,6 +6,8 @@ use std::rc::Rc;
 
 use slint::ComponentHandle;
 use souffle_lib::audio::AudioInputDevice;
+#[cfg(test)]
+use souffle_lib::commands::SettingsEffectFailure;
 use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
 use souffle_lib::settings::{AppSettings, Theme as SettingsTheme};
 use souffle_lib::summary::SummaryProvidersStatus;
@@ -705,7 +707,9 @@ mod tests {
                         SettingsSaveOutcome::Observed {
                             settings: Box::new(AppSettings::load(&save_db).unwrap()),
                             result: Err(SettingsSaveError::EffectFailedAfterCommit {
-                                message: "native effect failed after commit".into(),
+                                cause: SettingsEffectFailure::Logging {
+                                    message: "native effect failed after commit".into(),
+                                },
                             }),
                         }
                     }

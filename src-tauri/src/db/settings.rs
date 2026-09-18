@@ -5,18 +5,21 @@ use crate::lock_ext::MutexExt;
 use super::Database;
 
 impl Database {
-    pub(crate) fn with_settings_transaction(
+    pub(crate) fn with_settings_transaction<E>(
         &self,
-        operation: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<(), String>,
-    ) -> Result<(), String> {
-        let mut conn = self.conn.acquire()?;
+        operation: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<(), E>,
+    ) -> Result<(), E>
+    where
+        E: From<String>,
+    {
+        let mut conn = self.conn.acquire().map_err(E::from)?;
         let transaction = conn
             .transaction()
-            .map_err(|e| format!("Begin settings transaction: {e}"))?;
+            .map_err(|e| E::from(format!("Begin settings transaction: {e}")))?;
         operation(&transaction)?;
         transaction
             .commit()
-            .map_err(|e| format!("Commit settings transaction: {e}"))
+            .map_err(|e| E::from(format!("Commit settings transaction: {e}")))
     }
 
     #[cfg(test)]

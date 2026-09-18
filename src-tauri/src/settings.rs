@@ -5,7 +5,8 @@ use crate::audio::InputPriority;
 use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::db::Database;
 use crate::engine::{
-    CANDLE_BACKEND_ID, KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, resolve_transcription_profile,
+    CANDLE_BACKEND_ID, KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, TranscriptionProfileSelection,
+    resolve_transcription_profile,
 };
 use crate::logging::LogLevel;
 use crate::summary::SummaryProviderChoice;
@@ -60,6 +61,18 @@ const SUMMARY_TEMPLATES_KEY: &str = "summary_templates";
 const LOG_LEVEL_KEY: &str = "log_level";
 const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PreparedSettingsSaveError {
+    ModelChangeRejected,
+    Persistence { message: String },
+}
+
+impl From<String> for PreparedSettingsSaveError {
+    fn from(message: String) -> Self {
+        Self::Persistence { message }
+    }
+}
 const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
 const DICTATION_CEILING_SECONDS_KEY: &str = "dictation_ceiling_seconds";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
@@ -824,8 +837,33 @@ impl AppSettings {
 
     /// Persist one snapshot already returned by `prepare_for_save`.
     pub(crate) fn save_prepared(&self, db: &Database) -> Result<(), String> {
-        let normalized = self;
+        self.save_prepared_with_recording_guard(db, false)
+            .map_err(|error| match error {
+                PreparedSettingsSaveError::ModelChangeRejected => {
+                    "Unexpected model-change rejection outside recording".into()
+                }
+                PreparedSettingsSaveError::Persistence { message } => message,
+            })
+    }
+
+    /// Persist one prepared snapshot while atomically refusing a model change
+    /// if the canonical state machine is recording. The durable selection is
+    /// read inside the same SQLite transaction as the writes, so another save
+    /// cannot open a time-of-check/time-of-use window.
+    pub(crate) fn save_prepared_with_recording_guard(
+        &self,
+        db: &Database,
+        is_recording: bool,
+    ) -> Result<(), PreparedSettingsSaveError> {
         db.with_settings_transaction(|transaction| {
+            if is_recording {
+                let stored_selection = read_transcription_selection_in_transaction(transaction)?;
+                if self.transcription_selection() != stored_selection {
+                    return Err(PreparedSettingsSaveError::ModelChangeRejected);
+                }
+            }
+
+            let normalized = self;
             write_json_setting_in_transaction(transaction, THEME_KEY, &normalized.theme)?;
             write_json_setting_in_transaction(transaction, LOCALE_KEY, &normalized.locale)?;
             write_json_setting_in_transaction(transaction, AUTO_PASTE_KEY, &normalized.auto_paste)?;
@@ -1037,8 +1075,17 @@ impl AppSettings {
                 transaction,
                 ALLOW_BLUETOOTH_MIC_KEY,
                 &normalized.allow_bluetooth_mic,
-            )
+            )?;
+            Ok(())
         })
+    }
+
+    fn transcription_selection(&self) -> TranscriptionProfileSelection {
+        TranscriptionProfileSelection {
+            engine_id: self.transcription_engine_id.clone(),
+            model_id: self.transcription_model_id.clone(),
+            backend_id: self.transcription_backend_id.clone(),
+        }
     }
 }
 
@@ -1141,6 +1188,50 @@ where
             .map_err(|e| format!("Parse setting '{key}': {e}")),
         None => Ok(None),
     }
+}
+
+fn read_json_setting_in_transaction<T>(
+    transaction: &rusqlite::Transaction<'_>,
+    key: &str,
+) -> Result<Option<T>, String>
+where
+    T: DeserializeOwned,
+{
+    let result = transaction.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        rusqlite::params![key],
+        |row| row.get::<_, String>(0),
+    );
+    match result {
+        Ok(raw_value) => serde_json::from_str(&raw_value)
+            .map(Some)
+            .map_err(|e| format!("Parse setting '{key}': {e}")),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(format!("Query setting '{key}': {e}")),
+    }
+}
+
+fn read_transcription_selection_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+) -> Result<TranscriptionProfileSelection, PreparedSettingsSaveError> {
+    let mut settings = AppSettings::default();
+    if let Some(engine_id) =
+        read_json_setting_in_transaction::<String>(transaction, TRANSCRIPTION_ENGINE_ID_KEY)?
+    {
+        settings.transcription_engine_id = engine_id;
+    }
+    if let Some(model_id) =
+        read_json_setting_in_transaction::<String>(transaction, TRANSCRIPTION_MODEL_ID_KEY)?
+    {
+        settings.transcription_model_id = model_id;
+    }
+    if let Some(backend_id) =
+        read_json_setting_in_transaction::<String>(transaction, TRANSCRIPTION_BACKEND_ID_KEY)?
+    {
+        settings.transcription_backend_id = backend_id;
+    }
+
+    Ok(settings.sanitized().transcription_selection())
 }
 
 fn write_json_setting<T>(db: &Database, key: &str, value: &T) -> Result<(), String>
