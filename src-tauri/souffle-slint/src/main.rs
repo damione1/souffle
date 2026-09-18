@@ -1563,6 +1563,7 @@ fn wire_onboarding_callbacks(
             settings.locale = locale.to_string();
             let state = Arc::clone(&handle);
             souffle_lib::commands::save_settings(state, settings)
+                .map_err(|error| error.user_message())
         })() {
             eprintln!("Failed to save onboarding locale: {e}");
         }

@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use slint::ComponentHandle;
 use souffle_lib::audio::AudioInputDevice;
-use souffle_lib::commands::SettingsSaveOutcome;
+use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
 use souffle_lib::settings::{AppSettings, Theme as SettingsTheme};
 use souffle_lib::summary::SummaryProvidersStatus;
 
@@ -59,12 +59,16 @@ impl SettingsCache {
             return;
         };
         let message = match outcome {
-            SettingsSaveOutcome::Observed { result, .. } => {
-                result.as_ref().err().cloned().unwrap_or_default()
-            }
+            SettingsSaveOutcome::Observed { result, .. } => match result {
+                Ok(()) => String::new(),
+                Err(error) => error.user_message(),
+            },
             SettingsSaveOutcome::Unavailable { result, read_error } => match result {
                 Ok(()) => format!("Stored settings are unknown: {read_error}"),
-                Err(error) => format!("{error}. Stored settings are unknown: {read_error}"),
+                Err(error) => format!(
+                    "{}. Stored settings are unknown: {read_error}",
+                    error.user_message()
+                ),
             },
         };
         window.set_settings_save_error(message.into());
@@ -117,7 +121,9 @@ pub(crate) fn save_field(
             Err(read_error) => {
                 cache.mark_unknown();
                 let outcome = SettingsSaveOutcome::Unavailable {
-                    result: Err("Settings could not be loaded before saving".into()),
+                    result: Err(SettingsSaveError::NotCommitted {
+                        message: "Settings could not be loaded before saving".into(),
+                    }),
                     read_error,
                 };
                 cache.publish_save_status(&outcome);
@@ -359,6 +365,10 @@ mod tests {
         MainWindow::new().unwrap()
     }
 
+    fn committed_result(result: Result<(), String>) -> Result<(), SettingsSaveError> {
+        result.map_err(|message| SettingsSaveError::NotCommitted { message })
+    }
+
     fn device(uid: &str, name: &str) -> AudioInputDevice {
         AudioInputDevice {
             uid: uid.into(),
@@ -457,7 +467,7 @@ mod tests {
                 }),
                 save: Rc::new(move |settings| {
                     save_count.set(save_count.get() + 1);
-                    let result = settings.save(&save_db);
+                    let result = committed_result(settings.save(&save_db));
                     SettingsSaveOutcome::from_results(result, AppSettings::load(&save_db))
                 }),
                 apply_appearance: Rc::new(move |dark| projected_appearance.set(Some(dark))),
@@ -686,13 +696,17 @@ mod tests {
                 match current_step {
                     0 => SettingsSaveOutcome::Observed {
                         settings: Box::new(AppSettings::load(&save_db).unwrap()),
-                        result: Err("write rejected".into()),
+                        result: Err(SettingsSaveError::Rejected {
+                            message: "write rejected".into(),
+                        }),
                     },
                     1 => {
                         candidate.save(&save_db).unwrap();
                         SettingsSaveOutcome::Observed {
                             settings: Box::new(AppSettings::load(&save_db).unwrap()),
-                            result: Err("native effect failed after commit".into()),
+                            result: Err(SettingsSaveError::EffectFailedAfterCommit {
+                                message: "native effect failed after commit".into(),
+                            }),
                         }
                     }
                     2 => {
@@ -703,7 +717,7 @@ mod tests {
                         }
                     }
                     3 => {
-                        let result = candidate.save(&save_db);
+                        let result = committed_result(candidate.save(&save_db));
                         SettingsSaveOutcome::from_results(result, AppSettings::load(&save_db))
                     }
                     4 => {
@@ -766,7 +780,7 @@ mod tests {
             &cache,
             move || AppSettings::load(&load_db),
             move |candidate| {
-                let result = candidate.save(&save_db);
+                let result = committed_result(candidate.save(&save_db));
                 SettingsSaveOutcome::from_results(result, AppSettings::load(&save_db))
             },
             |settings| settings.calendar_selected_ids = vec!["calendar-a".into()],
@@ -787,7 +801,9 @@ mod tests {
             || unreachable!("the observed cache must avoid a fallback read"),
             move |_| SettingsSaveOutcome::Observed {
                 settings: Box::new(AppSettings::load(&rejected_save_db).unwrap()),
-                result: Err("legacy write rejected".into()),
+                result: Err(SettingsSaveError::Rejected {
+                    message: "legacy write rejected".into(),
+                }),
             },
             |_| {},
         );
@@ -805,7 +821,7 @@ mod tests {
             &cache,
             || unreachable!("the observed cache must avoid a fallback read"),
             move |candidate| {
-                let result = candidate.save(&clear_save_db);
+                let result = committed_result(candidate.save(&clear_save_db));
                 SettingsSaveOutcome::from_results(result, AppSettings::load(&clear_save_db))
             },
             |_| {},

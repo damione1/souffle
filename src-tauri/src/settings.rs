@@ -347,6 +347,15 @@ impl AppSettings {
     }
 
     pub fn load(db: &Database) -> Result<Self, String> {
+        let mut settings = Self::load_read_only(db)?;
+        Self::migrate_audio_device_preferences(&mut settings, db)?;
+        Ok(settings)
+    }
+
+    /// Read and normalize the persisted snapshot without running migrations or
+    /// writing any key. Save preflight and post-save observation must use this
+    /// path so a rejected or failed save cannot mutate the database indirectly.
+    pub(crate) fn load_read_only(db: &Database) -> Result<Self, String> {
         let mut settings = Self::default();
 
         if let Some(theme) = read_json_setting::<Theme>(db, THEME_KEY)? {
@@ -541,10 +550,7 @@ impl AppSettings {
             settings.last_seen_version = last_seen_version;
         }
 
-        let mut settings = settings.sanitized();
-        Self::migrate_audio_device_preferences(&mut settings, db)?;
-
-        Ok(settings)
+        Ok(settings.sanitized())
     }
 
     /// Best-effort upgrade from legacy name pins to stable CoreAudio UIDs.
@@ -609,25 +615,6 @@ impl AppSettings {
         normalized.transcription_backend_id = profile.backend_id;
 
         Ok(normalized)
-    }
-
-    /// Keep the stored transcription triple when a recording is in progress.
-    /// Other settings in `self` are left untouched. Returns true when the
-    /// incoming triple was pinned back.
-    pub fn pin_transcription_while_recording(&mut self, stored: &Self, is_recording: bool) -> bool {
-        if !is_recording {
-            return false;
-        }
-        let unchanged = self.transcription_engine_id == stored.transcription_engine_id
-            && self.transcription_model_id == stored.transcription_model_id
-            && self.transcription_backend_id == stored.transcription_backend_id;
-        if unchanged {
-            return false;
-        }
-        self.transcription_engine_id = stored.transcription_engine_id.clone();
-        self.transcription_model_id = stored.transcription_model_id.clone();
-        self.transcription_backend_id = stored.transcription_backend_id.clone();
-        true
     }
 
     /// Normalize recoverable settings values, replacing invalid choices with defaults.
@@ -817,7 +804,9 @@ impl AppSettings {
         Ok((normalized.input_priority, normalized.allow_bluetooth_mic))
     }
 
-    pub fn save(&self, db: &Database) -> Result<(), String> {
+    /// Fully validate and normalize the snapshot, including the current audio
+    /// device catalogue, before any database or machine-state lock is held.
+    pub(crate) fn prepare_for_save(&self) -> Result<Self, String> {
         let mut normalized = self.sanitize_for_save()?;
         #[cfg(target_os = "macos")]
         {
@@ -826,161 +815,230 @@ impl AppSettings {
 
             touch_known(&mut normalized.input_priority, &list_devices());
         }
+        Ok(normalized)
+    }
 
-        write_json_setting(db, THEME_KEY, &normalized.theme)?;
-        write_json_setting(db, LOCALE_KEY, &normalized.locale)?;
-        write_json_setting(db, AUTO_PASTE_KEY, &normalized.auto_paste)?;
-        write_json_setting(db, PASTE_DELAY_MS_KEY, &normalized.paste_delay_ms)?;
-        write_json_setting(db, PASTE_METHOD_KEY, &normalized.paste_method)?;
-        write_json_setting(db, OLLAMA_URL_KEY, &normalized.ollama_url)?;
-        write_json_setting(db, SUMMARY_PROVIDER_KEY, &normalized.summary_provider)?;
-        write_json_setting(db, OLLAMA_MODEL_KEY, &normalized.ollama_model)?;
-        write_json_setting(
-            db,
-            TRANSCRIPTION_ENGINE_ID_KEY,
-            &normalized.transcription_engine_id,
-        )?;
-        write_json_setting(
-            db,
-            TRANSCRIPTION_MODEL_ID_KEY,
-            &normalized.transcription_model_id,
-        )?;
-        write_json_setting(
-            db,
-            TRANSCRIPTION_BACKEND_ID_KEY,
-            &normalized.transcription_backend_id,
-        )?;
-        write_json_setting(db, DEBUG_TRANSCRIPTION_KEY, &normalized.debug_transcription)?;
-        write_json_setting(db, LOG_LEVEL_KEY, &normalized.log_level)?;
-        write_json_setting(db, VAD_ENABLED_KEY, &normalized.vad_enabled)?;
-        write_json_setting(db, FILLER_REMOVAL_KEY, &normalized.filler_removal)?;
-        write_json_setting(db, STUTTER_COLLAPSE_KEY, &normalized.stutter_collapse)?;
-        write_json_setting(
-            db,
-            DICTIONARY_CORRECTION_KEY,
-            &normalized.dictionary_correction,
-        )?;
-        write_json_setting(
-            db,
-            CAPTURE_SYSTEM_AUDIO_KEY,
-            &normalized.capture_system_audio,
-        )?;
-        write_json_setting(
-            db,
-            CALENDAR_INTEGRATION_ENABLED_KEY,
-            &normalized.calendar_integration_enabled,
-        )?;
-        write_json_setting(
-            db,
-            CALENDAR_SELECTED_IDS_KEY,
-            &normalized.calendar_selected_ids,
-        )?;
-        write_json_setting(
-            db,
-            CALENDAR_REMINDER_MINUTES_KEY,
-            &normalized.calendar_reminder_minutes,
-        )?;
-        write_json_setting(
-            db,
-            CALENDAR_AUTOSTART_ENABLED_KEY,
-            &normalized.calendar_autostart_enabled,
-        )?;
-        write_json_setting(
-            db,
-            FEEDBACK_SOUNDS_ENABLED_KEY,
-            &normalized.feedback_sounds_enabled,
-        )?;
-        write_json_setting(db, PILL_HIDDEN_KEY, &normalized.pill_hidden)?;
-        write_json_setting(
-            db,
-            FEEDBACK_SOUNDS_VOLUME_KEY,
-            &normalized.feedback_sounds_volume,
-        )?;
-        write_json_setting(
-            db,
-            AUTO_UPDATE_CHECK_ENABLED_KEY,
-            &normalized.auto_update_check_enabled,
-        )?;
-        write_json_setting(
-            db,
-            MODEL_UNLOAD_TIMEOUT_MINUTES_KEY,
-            &normalized.model_unload_timeout_minutes,
-        )?;
-        write_json_setting(
-            db,
-            MEETING_AUTOSTOP_ENABLED_KEY,
-            &normalized.meeting_autostop_enabled,
-        )?;
-        write_json_setting(
-            db,
-            MEETING_AUTOSTOP_MINUTES_KEY,
-            &normalized.meeting_autostop_minutes,
-        )?;
-        write_json_setting(
-            db,
-            MEETING_MAX_DURATION_MINUTES_KEY,
-            &normalized.meeting_max_duration_minutes,
-        )?;
-        write_json_setting(db, AUTOSTART_ENABLED_KEY, &normalized.autostart_enabled)?;
-        write_json_setting(
-            db,
-            MEETING_AUDIO_RETENTION_KEY,
-            &normalized.meeting_audio_retention,
-        )?;
-        write_json_setting(
-            db,
-            MEETING_TRANSCRIPTION_LANGUAGE_KEY,
-            &normalized.meeting_transcription_language,
-        )?;
-        write_json_setting(
-            db,
-            DICTATION_POLISH_ENABLED_KEY,
-            &normalized.dictation_polish_enabled,
-        )?;
-        write_json_setting(
-            db,
-            DICTATION_POLISH_TEMPLATE_ID_KEY,
-            &normalized.dictation_polish_template_id,
-        )?;
-        write_json_setting(
-            db,
-            DICTATION_POLISH_TEMPLATES_KEY,
-            &normalized.dictation_polish_templates,
-        )?;
-        write_json_setting(
-            db,
-            DICTATION_LEARN_FROM_EDIT_KEY,
-            &normalized.dictation_learn_from_edit,
-        )?;
-        write_json_setting(
-            db,
-            DICTATION_CEILING_SECONDS_KEY,
-            &normalized.dictation_ceiling_seconds,
-        )?;
-        write_json_setting(
-            db,
-            DEFAULT_SUMMARY_TEMPLATE_ID_KEY,
-            &normalized.default_summary_template_id,
-        )?;
-        write_json_setting(db, SUMMARY_TEMPLATES_KEY, &normalized.summary_templates)?;
-        write_json_setting(db, LAST_SEEN_VERSION_KEY, &normalized.last_seen_version)?;
+    pub fn save(&self, db: &Database) -> Result<(), String> {
+        self.prepare_for_save()?.save_prepared(db)
+    }
 
-        if let Some(audio_device) = normalized.audio_device.as_ref() {
-            write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
-        } else {
-            db.delete_setting(AUDIO_DEVICE_KEY)?;
-        }
+    /// Persist one snapshot already returned by `prepare_for_save`.
+    pub(crate) fn save_prepared(&self, db: &Database) -> Result<(), String> {
+        let normalized = self;
+        db.with_settings_transaction(|transaction| {
+            write_json_setting_in_transaction(transaction, THEME_KEY, &normalized.theme)?;
+            write_json_setting_in_transaction(transaction, LOCALE_KEY, &normalized.locale)?;
+            write_json_setting_in_transaction(transaction, AUTO_PASTE_KEY, &normalized.auto_paste)?;
+            write_json_setting_in_transaction(
+                transaction,
+                PASTE_DELAY_MS_KEY,
+                &normalized.paste_delay_ms,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                PASTE_METHOD_KEY,
+                &normalized.paste_method,
+            )?;
+            write_json_setting_in_transaction(transaction, OLLAMA_URL_KEY, &normalized.ollama_url)?;
+            write_json_setting_in_transaction(
+                transaction,
+                SUMMARY_PROVIDER_KEY,
+                &normalized.summary_provider,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                OLLAMA_MODEL_KEY,
+                &normalized.ollama_model,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                TRANSCRIPTION_ENGINE_ID_KEY,
+                &normalized.transcription_engine_id,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                TRANSCRIPTION_MODEL_ID_KEY,
+                &normalized.transcription_model_id,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                TRANSCRIPTION_BACKEND_ID_KEY,
+                &normalized.transcription_backend_id,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DEBUG_TRANSCRIPTION_KEY,
+                &normalized.debug_transcription,
+            )?;
+            write_json_setting_in_transaction(transaction, LOG_LEVEL_KEY, &normalized.log_level)?;
+            write_json_setting_in_transaction(
+                transaction,
+                VAD_ENABLED_KEY,
+                &normalized.vad_enabled,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                FILLER_REMOVAL_KEY,
+                &normalized.filler_removal,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                STUTTER_COLLAPSE_KEY,
+                &normalized.stutter_collapse,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DICTIONARY_CORRECTION_KEY,
+                &normalized.dictionary_correction,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                CAPTURE_SYSTEM_AUDIO_KEY,
+                &normalized.capture_system_audio,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                CALENDAR_INTEGRATION_ENABLED_KEY,
+                &normalized.calendar_integration_enabled,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                CALENDAR_SELECTED_IDS_KEY,
+                &normalized.calendar_selected_ids,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                CALENDAR_REMINDER_MINUTES_KEY,
+                &normalized.calendar_reminder_minutes,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                CALENDAR_AUTOSTART_ENABLED_KEY,
+                &normalized.calendar_autostart_enabled,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                FEEDBACK_SOUNDS_ENABLED_KEY,
+                &normalized.feedback_sounds_enabled,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                PILL_HIDDEN_KEY,
+                &normalized.pill_hidden,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                FEEDBACK_SOUNDS_VOLUME_KEY,
+                &normalized.feedback_sounds_volume,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                AUTO_UPDATE_CHECK_ENABLED_KEY,
+                &normalized.auto_update_check_enabled,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                MODEL_UNLOAD_TIMEOUT_MINUTES_KEY,
+                &normalized.model_unload_timeout_minutes,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                MEETING_AUTOSTOP_ENABLED_KEY,
+                &normalized.meeting_autostop_enabled,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                MEETING_AUTOSTOP_MINUTES_KEY,
+                &normalized.meeting_autostop_minutes,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                MEETING_MAX_DURATION_MINUTES_KEY,
+                &normalized.meeting_max_duration_minutes,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                AUTOSTART_ENABLED_KEY,
+                &normalized.autostart_enabled,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                MEETING_AUDIO_RETENTION_KEY,
+                &normalized.meeting_audio_retention,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                MEETING_TRANSCRIPTION_LANGUAGE_KEY,
+                &normalized.meeting_transcription_language,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DICTATION_POLISH_ENABLED_KEY,
+                &normalized.dictation_polish_enabled,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DICTATION_POLISH_TEMPLATE_ID_KEY,
+                &normalized.dictation_polish_template_id,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DICTATION_POLISH_TEMPLATES_KEY,
+                &normalized.dictation_polish_templates,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DICTATION_LEARN_FROM_EDIT_KEY,
+                &normalized.dictation_learn_from_edit,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DICTATION_CEILING_SECONDS_KEY,
+                &normalized.dictation_ceiling_seconds,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DEFAULT_SUMMARY_TEMPLATE_ID_KEY,
+                &normalized.default_summary_template_id,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                SUMMARY_TEMPLATES_KEY,
+                &normalized.summary_templates,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                LAST_SEEN_VERSION_KEY,
+                &normalized.last_seen_version,
+            )?;
 
-        if let Some(clamshell_audio_device) = normalized.clamshell_audio_device.as_ref() {
-            write_json_setting(db, CLAMSHELL_AUDIO_DEVICE_KEY, clamshell_audio_device)?;
-        } else {
-            db.delete_setting(CLAMSHELL_AUDIO_DEVICE_KEY)?;
-        }
+            if let Some(audio_device) = normalized.audio_device.as_ref() {
+                write_json_setting_in_transaction(transaction, AUDIO_DEVICE_KEY, audio_device)?;
+            } else {
+                delete_setting_in_transaction(transaction, AUDIO_DEVICE_KEY)?;
+            }
 
-        write_json_setting(db, INPUT_PRIORITY_KEY, &normalized.input_priority)?;
-        write_json_setting(db, ALLOW_BLUETOOTH_MIC_KEY, &normalized.allow_bluetooth_mic)?;
+            if let Some(clamshell_audio_device) = normalized.clamshell_audio_device.as_ref() {
+                write_json_setting_in_transaction(
+                    transaction,
+                    CLAMSHELL_AUDIO_DEVICE_KEY,
+                    clamshell_audio_device,
+                )?;
+            } else {
+                delete_setting_in_transaction(transaction, CLAMSHELL_AUDIO_DEVICE_KEY)?;
+            }
 
-        Ok(())
+            write_json_setting_in_transaction(
+                transaction,
+                INPUT_PRIORITY_KEY,
+                &normalized.input_priority,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                ALLOW_BLUETOOTH_MIC_KEY,
+                &normalized.allow_bluetooth_mic,
+            )
+        })
     }
 }
 
@@ -1094,11 +1152,43 @@ where
     db.set_setting(key, &encoded)
 }
 
+fn write_json_setting_in_transaction<T>(
+    transaction: &rusqlite::Transaction<'_>,
+    key: &str,
+    value: &T,
+) -> Result<(), String>
+where
+    T: Serialize,
+{
+    let encoded =
+        serde_json::to_string(value).map_err(|e| format!("Serialize setting '{key}': {e}"))?;
+    transaction
+        .execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, encoded],
+        )
+        .map_err(|e| format!("Set setting: {e}"))?;
+    Ok(())
+}
+
+fn delete_setting_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    key: &str,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "DELETE FROM settings WHERE key = ?1",
+            rusqlite::params![key],
+        )
+        .map_err(|e| format!("Delete setting: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AppSettings, MeetingAudioRetention, PasteMethod, SettingsOptions, ShortcutSettings,
-        SummaryProviderChoice, Theme,
+        AUDIO_DEVICE_KEY, AppSettings, CLAMSHELL_AUDIO_DEVICE_KEY, MeetingAudioRetention,
+        PasteMethod, SettingsOptions, ShortcutSettings, SummaryProviderChoice, Theme,
     };
     use crate::audio::InputPriority;
     use crate::constants::OLLAMA_DEFAULT_URL;
@@ -1215,33 +1305,71 @@ mod tests {
     }
 
     #[test]
-    fn pin_transcription_while_recording_keeps_stored_triple() {
-        let stored = AppSettings {
-            transcription_engine_id: "kyutai".into(),
-            transcription_model_id: "stt-1b-en_fr".into(),
-            transcription_backend_id: "candle".into(),
-            ..AppSettings::default()
+    fn app_settings_save_rolls_back_every_key_when_a_middle_write_fails() {
+        let (db, _dir) = test_db();
+        let initial = AppSettings::default();
+        initial.save(&db).expect("save initial settings");
+        let mut before = db.get_all_settings().expect("read initial settings");
+        before.sort();
+
+        db.execute_settings_sql_for_test(
+            r#"
+            CREATE TRIGGER fail_calendar_integration_write
+            BEFORE INSERT ON settings
+            WHEN NEW.key = 'calendar_integration_enabled'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected middle settings write failure');
+            END;
+            "#,
+        )
+        .expect("install failure trigger");
+
+        let candidate = AppSettings {
+            theme: Theme::Dark,
+            calendar_integration_enabled: true,
+            feedback_sounds_volume: 17,
+            ..initial
         };
+        let error = candidate.save(&db).expect_err("injected save must fail");
+        assert!(error.contains("injected middle settings write failure"));
 
-        let mut incoming = stored.clone();
-        incoming.theme = Theme::Light;
-        incoming.transcription_model_id = "stt-2.6b-en".into();
-        assert!(incoming.pin_transcription_while_recording(&stored, true));
-        assert_eq!(incoming.transcription_model_id, "stt-1b-en_fr");
-        assert_eq!(incoming.transcription_engine_id, "kyutai");
-        assert_eq!(incoming.transcription_backend_id, "candle");
-        assert_eq!(incoming.theme, Theme::Light);
+        let mut after = db.get_all_settings().expect("read settings after failure");
+        after.sort();
+        assert_eq!(after, before, "no AppSettings key may change partially");
+    }
 
-        let mut idle_switch = stored.clone();
-        idle_switch.transcription_model_id = "stt-2.6b-en".into();
-        assert!(!idle_switch.pin_transcription_while_recording(&stored, false));
-        assert_eq!(idle_switch.transcription_model_id, "stt-2.6b-en");
+    #[test]
+    fn read_only_snapshot_never_runs_audio_migration_writes() {
+        let (db, _dir) = test_db();
+        db.set_setting(AUDIO_DEVICE_KEY, r#""Legacy Microphone""#)
+            .expect("save legacy audio device");
+        db.set_setting(
+            CLAMSHELL_AUDIO_DEVICE_KEY,
+            r#""Legacy Clamshell Microphone""#,
+        )
+        .expect("save legacy clamshell device");
+        let mut before = db.get_all_settings().expect("read legacy settings");
+        before.sort();
+        db.execute_settings_sql_for_test(
+            r#"
+            CREATE TRIGGER reject_any_settings_write_during_read
+            BEFORE INSERT ON settings
+            BEGIN
+                SELECT RAISE(ABORT, 'read attempted to write settings');
+            END;
+            "#,
+        )
+        .expect("install read-only trigger");
 
-        let mut same_triple = stored.clone();
-        same_triple.theme = Theme::Light;
-        assert!(!same_triple.pin_transcription_while_recording(&stored, true));
-        assert_eq!(same_triple.theme, Theme::Light);
-        assert_eq!(same_triple.transcription_model_id, "stt-1b-en_fr");
+        let settings = AppSettings::load_read_only(&db).expect("load read-only snapshot");
+        assert_eq!(settings.audio_device.as_deref(), Some("Legacy Microphone"));
+        assert_eq!(
+            settings.clamshell_audio_device.as_deref(),
+            Some("Legacy Clamshell Microphone")
+        );
+        let mut after = db.get_all_settings().expect("read settings after snapshot");
+        after.sort();
+        assert_eq!(after, before, "a read-only snapshot must change no key");
     }
 
     // SOU-036: an install that never saw the setting has no key at all. That
