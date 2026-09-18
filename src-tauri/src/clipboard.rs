@@ -250,15 +250,37 @@ fn paste_via_cmd_v(text: &str, delay_ms: u64, enigo: &mut Enigo) -> Result<(), S
 }
 
 fn send_paste_keys(enigo: &mut Enigo) -> Result<(), String> {
+    // Key::Unicode resolves the current layout through Carbon's TIS APIs.
+    // macOS asserts the main dispatch queue for that lookup (SIGTRAP, not a
+    // catchable Rust error). Resolve before pressing Meta and send the raw
+    // keycode on the calling worker, keeping paste delays and Enigo's drop
+    // wait off the UI thread. A physical ANSI V constant would be wrong for
+    // layouts such as Dvorak.
+    let keycode = paste_keycode()?;
     enigo
         .key(Key::Meta, Direction::Press)
         .map_err(|e| format!("Key press Meta: {e}"))?;
-    enigo
-        .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| format!("Key click V: {e}"))?;
-    enigo
+    let pasted = enigo
+        .raw(keycode, Direction::Click)
+        .map_err(|e| format!("Key click V: {e}"));
+    let released = enigo
         .key(Key::Meta, Direction::Release)
-        .map_err(|e| format!("Key release Meta: {e}"))
+        .map_err(|e| format!("Key release Meta: {e}"));
+    pasted.and(released)
+}
+
+fn paste_keycode() -> Result<u16, String> {
+    crate::main_thread::on_main(|| {
+        u16::try_from(Key::Unicode('v'))
+            .map_err(|()| "The current keyboard layout has no paste key".to_string())
+    })
+}
+
+/// Exercises the production layout lookup from the native run-loop test
+/// without sending any keystrokes or changing the user's clipboard.
+#[cfg(feature = "test-support")]
+pub fn test_paste_keycode() -> Result<u16, String> {
+    paste_keycode()
 }
 
 /// Snapshot of the clipboard from before the first paste in an overlapping

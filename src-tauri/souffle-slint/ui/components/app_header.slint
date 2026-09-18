@@ -1,5 +1,5 @@
 import { Theme } from "../theme.slint";
-import { RecordingMode } from "../types.slint";
+import { RecordingMode, TranscriptionPhase } from "../types.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Port of App.svelte's `<header>` - persistent across every view except
@@ -21,7 +21,8 @@ import { LucideIcon, IconSet } from "lucide_icon.slint";
 // `data-tauri-drag-region` role without a Slint-side drag handler.
 export component AppHeader inherits Rectangle {
     in property <bool> settings-open: false;
-    in property <bool> model-ready: true;
+    in property <TranscriptionPhase> model-phase;
+    in property <string> model-status-label;
     in property <RecordingMode> recording-mode: RecordingMode.idle;
     in property <string> model-label: "";
 
@@ -31,11 +32,11 @@ export component AppHeader inherits Rectangle {
     // keeping its own copy, so it can't drift from the actual palette.
     callback theme-toggle-requested();
 
-    property <string> status-label: root.recording-mode != RecordingMode.idle ? "Enregistrement"
-        : root.model-ready ? "Pr\u{ea}t" : "Mod\u{e8}le non t\u{e9}l\u{e9}charg\u{e9}";
+    property <string> status-label: root.recording-mode != RecordingMode.idle ? @tr("Enregistrement")
+        : root.model-status-label;
     property <color> status-color: root.recording-mode != RecordingMode.idle ? Theme.danger
-        : root.model-ready ? Theme.accent : Theme.warning;
-    property <bool> show-model-label: root.recording-mode == RecordingMode.idle && root.model-ready && root.model-label != "";
+        : root.model-phase == TranscriptionPhase.ready ? Theme.accent : Theme.warning;
+    property <bool> show-model-label: root.recording-mode == RecordingMode.idle && root.model-phase == TranscriptionPhase.ready && root.model-label != "";
 
     height: 52px;
     background: Theme.canvas;

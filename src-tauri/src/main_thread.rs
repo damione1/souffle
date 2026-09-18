@@ -5,7 +5,9 @@
 //! pumped run loop (`cargo test`, headless CLI): `dispatch_sync` onto an
 //! unpumped main queue hangs forever (SOU-122 AC3). Every current call site
 //! is behind an early return on a `OnceLock` that only the real bootstrapped
-//! GUI app ever populates, so tests never reach the hop.
+//! GUI app ever populates, except native paste's keyboard-layout lookup:
+//! it requires the caller's GUI run loop. Its integration test owns a real
+//! OS-main run loop instead of using the ordinary cargo-test worker harness.
 
 #[cfg(target_os = "macos")]
 pub fn on_main<R: Send>(f: impl FnOnce() -> R + Send) -> R {

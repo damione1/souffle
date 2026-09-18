@@ -59,13 +59,7 @@ pub fn get_model_status(
 
     // Derive phase from the state machine
     let machine = state.current_machine_state()?;
-    let phase = if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
-        crate::engine::TranscriptionRuntimePhase::Ready
-    } else if models::model_exists(&profile) {
-        crate::engine::TranscriptionRuntimePhase::LoadRequired
-    } else {
-        crate::engine::TranscriptionRuntimePhase::DownloadRequired
-    };
+    let phase = machine.runtime_phase(&profile, models::model_exists(&profile));
 
     Ok(TranscriptionRuntimeStatus {
         profile: profile.clone(),

@@ -6,7 +6,6 @@
 //! state, not a synced setting, matching the original's own scoping choice.
 
 use souffle_lib::engine::TranscriptionRuntimePhase;
-use souffle_lib::state_machine::AppStateMachine;
 use std::path::PathBuf;
 
 pub type SetupStep = &'static str; // "permissions" | "microphone" | "model" | "shortcut"
@@ -48,22 +47,21 @@ pub fn mark_setup_complete() {
     write_marker(&setup_marker());
 }
 
-/// SOU-073: a webview/process reload mid-download reports
-/// `download_required` too, and must not reopen the wizard over a download
-/// that is about to finish.
-pub fn decide_show_setup_wizard(
-    phase: TranscriptionRuntimePhase,
-    flags: SetupFlags,
-    machine_state: &AppStateMachine,
-) -> bool {
+/// First-run onboarding owns its initial model choice. Once setup is complete,
+/// startup restores the persisted selection (including an interrupted download)
+/// without reopening the wizard or requiring another selection in Settings.
+pub fn decide_show_setup_wizard(phase: TranscriptionRuntimePhase, flags: SetupFlags) -> bool {
     if flags.setup_done {
-        return phase == TranscriptionRuntimePhase::DownloadRequired
-            && !matches!(machine_state, AppStateMachine::Downloading { .. });
-    }
-    if flags.permissions_done && phase != TranscriptionRuntimePhase::DownloadRequired {
         return false;
     }
-    true
+    match phase {
+        TranscriptionRuntimePhase::DownloadRequired | TranscriptionRuntimePhase::Failed => true,
+        TranscriptionRuntimePhase::Downloading
+        | TranscriptionRuntimePhase::LoadRequired
+        | TranscriptionRuntimePhase::Loading
+        | TranscriptionRuntimePhase::Ready
+        | TranscriptionRuntimePhase::Unloading => !flags.permissions_done,
+    }
 }
 
 /// SOU-036: what `autostart_enabled` should be once the wizard finishes. A
@@ -92,10 +90,6 @@ pub fn wizard_steps(flags: SetupFlags) -> Vec<SetupStep> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn ready_machine() -> AppStateMachine {
-        AppStateMachine::Idle
-    }
 
     #[test]
     fn wizard_steps_skips_permissions_when_already_done() {
@@ -133,20 +127,18 @@ mod tests {
         assert!(!decide_show_setup_wizard(
             TranscriptionRuntimePhase::Ready,
             flags,
-            &ready_machine()
         ));
     }
 
     #[test]
-    fn reopens_for_model_recovery_when_download_required_and_not_already_downloading() {
+    fn configured_install_restores_missing_model_without_reopening_setup() {
         let flags = SetupFlags {
             permissions_done: true,
             setup_done: true,
         };
-        assert!(decide_show_setup_wizard(
+        assert!(!decide_show_setup_wizard(
             TranscriptionRuntimePhase::DownloadRequired,
             flags,
-            &ready_machine()
         ));
     }
 
@@ -156,13 +148,9 @@ mod tests {
             permissions_done: true,
             setup_done: true,
         };
-        let downloading = AppStateMachine::Downloading {
-            profile: Default::default(),
-        };
         assert!(!decide_show_setup_wizard(
-            TranscriptionRuntimePhase::DownloadRequired,
+            TranscriptionRuntimePhase::Downloading,
             flags,
-            &downloading
         ));
     }
 
@@ -171,7 +159,6 @@ mod tests {
         assert!(decide_show_setup_wizard(
             TranscriptionRuntimePhase::DownloadRequired,
             SetupFlags::default(),
-            &ready_machine()
         ));
     }
 

@@ -592,6 +592,22 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn helper_sigabrt_is_reaped_without_aborting_the_parent() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "kill -ABRT $$"]);
+        let output = run_helper_process(command, &[], Duration::from_secs(2))
+            .expect("helper signal is an exit status, not a parent abort");
+        assert_eq!(output.status.signal(), Some(libc::SIGABRT));
+        assert!(!output.status.success());
+        assert!(super::is_terminal_helper_error(
+            super::HELPER_PROCESS_FAILURE_PREFIX
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn helper_deadline_kills_and_reaps_the_process() {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "sleep 5"]);

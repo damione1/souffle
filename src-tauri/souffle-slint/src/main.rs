@@ -592,24 +592,49 @@ fn load_transcription_model_state(
     window.set_header_model_label(model_ui::selected_model_short_label(&catalog).into());
     *model_options_state.borrow_mut() = model_ui::list_available_model_options(&catalog);
 
-    let selection = TranscriptionProfileSelection {
-        engine_id: catalog.selected_engine_id.clone(),
-        model_id: catalog.selected_model_id.clone(),
-        backend_id: catalog.selected_backend_id.clone(),
-    };
-    let state = Arc::clone(handle);
-    match souffle_lib::commands::get_model_status(state, selection) {
+    refresh_model_runtime(window, handle);
+}
+
+/// Only this projection writes the main window's model phase. Opening Settings,
+/// startup and native transitions all read the same backend snapshot, including
+/// background loads and idle unloads. No poll timer or optimistic ready flag.
+fn refresh_model_runtime(window: &MainWindow, handle: &AppHandle) {
+    let result =
+        souffle_lib::commands::get_transcription_catalog(Arc::clone(handle)).and_then(|catalog| {
+            window.set_header_model_label(model_ui::selected_model_short_label(&catalog).into());
+            souffle_lib::commands::get_model_status(
+                Arc::clone(handle),
+                model_ui::selected_profile(&catalog),
+            )
+        });
+    match result {
         Ok(status) => {
-            window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
-            window.set_settings_model_downloading(false);
-            window.set_settings_model_error_message("".into());
-            match status.phase {
-                TranscriptionRuntimePhase::Ready => window.set_model_ready(true),
-                TranscriptionRuntimePhase::LoadRequired
-                | TranscriptionRuntimePhase::DownloadRequired => window.set_model_ready(false),
+            model_ui::populate_runtime(window, status.phase);
+            if let Ok(souffle_lib::state_machine::AppStateMachine::Error { message, .. }) =
+                handle.current_machine_state()
+            {
+                window.set_settings_model_error_message(message.into());
             }
         }
-        Err(e) => window.set_settings_model_error_message(e.into()),
+        Err(error) => window.set_settings_model_error_message(error.into()),
+    }
+}
+
+/// Reuse the selected-profile transition used by Settings after first-run
+/// onboarding has made its choices. A configured installation never needs to
+/// reselect its model just to warm the engine on a new process launch.
+fn initialize_model_at_startup(window: &MainWindow, handle: AppHandle, onboarding_open: bool) {
+    refresh_model_runtime(window, &handle);
+    if onboarding_open {
+        return;
+    }
+    match souffle_lib::commands::get_transcription_catalog(Arc::clone(&handle)) {
+        Ok(catalog) => start_model_transition(
+            window.as_weak(),
+            handle,
+            model_ui::selected_profile(&catalog),
+        ),
+        Err(error) => window.set_settings_model_error_message(error.into()),
     }
 }
 
@@ -744,14 +769,12 @@ fn open_meeting_detail(
 async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
     let catalog = souffle_lib::commands::get_transcription_catalog(Arc::clone(handle))?;
     let selection = model_ui::selected_profile(&catalog);
-    let state = Arc::clone(handle);
-    let status = souffle_lib::commands::get_model_status(state, selection.clone())?;
+    let status = souffle_lib::commands::get_model_status(handle.clone(), selection.clone())?;
     match status.phase {
         TranscriptionRuntimePhase::Ready => Ok(()),
         TranscriptionRuntimePhase::LoadRequired => {
-            let handle = handle.clone();
+            let state = handle.clone();
             souffle_lib::async_runtime::spawn_blocking(move || {
-                let state = Arc::clone(&handle);
                 souffle_lib::commands::load_model(state, selection)
             })
             .await
@@ -759,6 +782,14 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
         }
         TranscriptionRuntimePhase::DownloadRequired => {
             Err("Modèle non téléchargé - ouvrez Réglages pour le télécharger.".into())
+        }
+        TranscriptionRuntimePhase::Downloading
+        | TranscriptionRuntimePhase::Loading
+        | TranscriptionRuntimePhase::Unloading => {
+            Err("Le modèle est en cours de préparation. Réessayez lorsqu’il est prêt.".into())
+        }
+        TranscriptionRuntimePhase::Failed => {
+            Err("Le modèle est en erreur. Réessayez depuis Réglages.".into())
         }
     }
 }
@@ -899,6 +930,16 @@ fn start_model_transition(
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
 ) {
+    // An explicit retry recovers the canonical machine, not a local busy flag.
+    if let Ok(souffle_lib::state_machine::AppStateMachine::Error { .. }) =
+        handle.current_machine_state()
+        && let Err(error) = souffle_lib::commands::recover_state(Arc::clone(&handle))
+    {
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_model_error_message(error.into());
+        }
+        return;
+    }
     let state = Arc::clone(&handle);
     let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
         Ok(status) => status,
@@ -913,33 +954,27 @@ fn start_model_transition(
         return;
     };
     window.set_settings_model_error_message("".into());
+    refresh_model_runtime(&window, &handle);
     match status.phase {
-        TranscriptionRuntimePhase::Ready => {
-            window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
-            window.set_settings_model_busy(false);
-            window.set_model_ready(true);
-        }
+        TranscriptionRuntimePhase::Ready => {}
         TranscriptionRuntimePhase::LoadRequired => {
-            window.set_settings_model_status_text("Chargement\u{2026}".into());
-            window.set_settings_model_busy(true);
-            window.set_model_ready(false);
             load_model_in_background(weak, handle, selection);
         }
         TranscriptionRuntimePhase::DownloadRequired => {
-            window.set_settings_model_status_text("Téléchargement\u{2026}".into());
-            window.set_settings_model_busy(true);
-            window.set_model_ready(false);
-            window.set_settings_model_downloading(true);
             window.set_settings_model_download_progress_label("".into());
             window.set_settings_model_download_progress_fraction(0.0);
             let state = Arc::clone(&handle);
             let channel = model_download_channel(weak.clone(), handle.clone(), selection.clone());
             if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
-                window.set_settings_model_downloading(false);
-                window.set_settings_model_busy(false);
                 window.set_settings_model_error_message(e.into());
             }
         }
+        // A startup load and a settings-open action can overlap. Observing an
+        // in-flight operation never starts a second one.
+        TranscriptionRuntimePhase::Downloading
+        | TranscriptionRuntimePhase::Loading
+        | TranscriptionRuntimePhase::Unloading
+        | TranscriptionRuntimePhase::Failed => {}
     }
 }
 
@@ -962,15 +997,11 @@ fn load_model_in_background(
         .map_err(|e| format!("Join load_model task: {e}"))
         .and_then(|r| r);
         if let Some(window) = weak.upgrade() {
-            match result {
-                Ok(()) => {
-                    window.set_settings_model_status_text("Pr\u{ea}t".into());
-                    window.set_settings_model_busy(false);
-                    window.set_model_ready(true);
-                }
-                Err(e) => {
-                    window.set_settings_model_busy(false);
-                    window.set_model_ready(false);
+            refresh_model_runtime(&window, &handle);
+            if let Err(e) = result {
+                let phase = souffle_lib::commands::get_model_status(handle.clone(), selection)
+                    .map(|status| status.phase);
+                if !phase.is_ok_and(model_ui::load_is_already_in_progress_or_ready) {
                     window.set_settings_model_error_message(e.into());
                 }
             }
@@ -1013,8 +1044,6 @@ fn model_download_channel(
                 souffle_lib::models::DownloadStatus::Complete => {
                     let globally_complete = model_ui::download_is_globally_complete(&progress);
                     if globally_complete && !load_started.swap(true, Ordering::AcqRel) {
-                        window.set_settings_model_downloading(false);
-                        window.set_settings_model_status_text("Chargement\u{2026}".into());
                         load_model_in_background(weak.clone(), handle.clone(), selection.clone());
                     } else {
                         window.set_settings_model_download_progress_label(
@@ -1027,9 +1056,7 @@ fn model_download_channel(
                     }
                 }
                 souffle_lib::models::DownloadStatus::Error(e) => {
-                    window.set_settings_model_downloading(false);
-                    window.set_settings_model_busy(false);
-                    window.set_model_ready(false);
+                    refresh_model_runtime(&window, &handle);
                     window.set_settings_model_error_message(e.as_str().into());
                 }
             }
@@ -1400,7 +1427,13 @@ fn show_onboarding_step(
             // "Continuer" to kick off the load, matching prior behavior.
             let model_phase = match phase.map(|s| s.phase) {
                 Some(TranscriptionRuntimePhase::Ready) => ModelPhase::Ready,
-                _ => ModelPhase::Pick,
+                Some(TranscriptionRuntimePhase::Downloading) => ModelPhase::Downloading,
+                Some(TranscriptionRuntimePhase::Loading)
+                | Some(TranscriptionRuntimePhase::Unloading) => ModelPhase::Loading,
+                Some(TranscriptionRuntimePhase::DownloadRequired)
+                | Some(TranscriptionRuntimePhase::LoadRequired)
+                | Some(TranscriptionRuntimePhase::Failed)
+                | None => ModelPhase::Pick,
             };
             window.set_onboarding_model_phase(model_phase);
             if model_phase == ModelPhase::Ready {
@@ -1486,11 +1519,8 @@ fn wire_onboarding_callbacks(
         })
         .map(|status| status.phase)
         .unwrap_or(TranscriptionRuntimePhase::DownloadRequired);
-    let machine_state = handle
-        .current_machine_state()
-        .unwrap_or(souffle_lib::state_machine::AppStateMachine::Idle);
     let flags = onboarding_flags::read_setup_flags();
-    let should_show = onboarding_flags::decide_show_setup_wizard(phase, flags, &machine_state);
+    let should_show = onboarding_flags::decide_show_setup_wizard(phase, flags);
 
     if should_show {
         let mut guard = ob.borrow_mut();
@@ -1933,6 +1963,17 @@ fn start_onboarding_model_transition(
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
 ) {
+    if let Ok(souffle_lib::state_machine::AppStateMachine::Error { .. }) =
+        handle.current_machine_state()
+        && let Err(error) = souffle_lib::commands::recover_state(Arc::clone(&handle))
+    {
+        if let Some(window) = weak.upgrade() {
+            window.set_onboarding_busy(false);
+            window.set_onboarding_continue_enabled(true);
+            window.set_onboarding_status_message(error.into());
+        }
+        return;
+    }
     let state = Arc::clone(&handle);
     let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
         Ok(status) => status,
@@ -1993,6 +2034,17 @@ fn start_onboarding_model_transition(
                 window.set_onboarding_continue_enabled(true);
                 window.set_onboarding_status_message(e.into());
             }
+        }
+        TranscriptionRuntimePhase::Downloading => {
+            window.set_onboarding_model_phase(ModelPhase::Downloading);
+        }
+        TranscriptionRuntimePhase::Loading | TranscriptionRuntimePhase::Unloading => {
+            window.set_onboarding_model_phase(ModelPhase::Loading);
+        }
+        TranscriptionRuntimePhase::Failed => {
+            window.set_onboarding_busy(false);
+            window.set_onboarding_continue_enabled(true);
+            window.set_onboarding_status_message("Le modèle est en erreur.".into());
         }
     }
 }
@@ -4427,6 +4479,7 @@ fn dispatch_native_action(window: &MainWindow, handle: &AppHandle, action: Nativ
     use souffle_lib::native::bridge::AppView;
 
     match action {
+        NativeAction::RefreshRuntime => refresh_model_runtime(window, handle),
         NativeAction::ToggleDictation => match window.get_recording_mode() {
             RecordingMode::Idle => window.invoke_dictate_requested(),
             RecordingMode::Dictation => window.invoke_stop_requested(),
@@ -4623,7 +4676,8 @@ fn main() {
     }
     let (onboarding_open, onboarding_state) = wire_onboarding_callbacks(&window, handle.clone());
     wire_update_dialogs(&window, handle.clone(), onboarding_open);
-    wire_callbacks(&window, handle, onboarding_state);
+    wire_callbacks(&window, handle.clone(), onboarding_state);
+    initialize_model_at_startup(&window, handle, onboarding_open);
 
     // Capture publishes its normalized RMS at ~15 Hz. Polling the lock-free
     // value on Slint's event loop keeps rendering single-threaded while the
@@ -4649,6 +4703,24 @@ mod tests {
         DictationEndIntent, DictationTextBuffers, DictationTranscriptDisposition,
         dictation_transcript_disposition, merge_recovery_text, reset_live_buffers,
     };
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn final_executable_can_resolve_the_swift_concurrency_runtime() {
+        // A linker argument emitted by souffle_lib's build script does not
+        // reach this binary. Inspect the linked executable, not a source string:
+        // losing this rpath made FoundationModels abort on TaskPriority metadata.
+        let output = std::process::Command::new("/usr/bin/otool")
+            .arg("-l")
+            .arg(std::env::current_exe().expect("test executable"))
+            .output()
+            .expect("inspect Mach-O load commands");
+        assert!(output.status.success());
+        let commands = String::from_utf8(output.stdout).expect("Mach-O command text");
+        assert!(commands.split("Load command ").any(|command| {
+            command.contains("cmd LC_RPATH") && command.contains("path /usr/lib/swift (offset ")
+        }));
+    }
 
     #[test]
     fn failed_finalization_retains_text_but_cancel_always_discards_it() {

@@ -253,6 +253,7 @@ impl AppState {
             new_state
         };
 
+        crate::native::bridge::dispatch(crate::native::bridge::NativeAction::RefreshRuntime);
         crate::pill::sync(self, &new_state);
         crate::tray::sync(self, &new_state);
         crate::dictation_cancel::sync(self, &new_state);

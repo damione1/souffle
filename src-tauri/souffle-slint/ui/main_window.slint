@@ -15,7 +15,7 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider } from "types.slint";
+import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider } from "types.slint";
 export { SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -52,7 +52,8 @@ export component MainWindow inherits Window {
     background: Theme.canvas;
 
     in property <string> dictation-shortcut;
-    in property <bool> model-ready: true;
+    in property <TranscriptionPhase> model-runtime-phase: TranscriptionPhase.download-required;
+    out property <bool> model-ready: root.model-runtime-phase == TranscriptionPhase.ready;
     in-out property <string> search-query;
     in-out property <TimelineFilter> kind-filter: TimelineFilter.all;
     in property <string> transcription-status-message;
@@ -225,8 +226,10 @@ export component MainWindow inherits Window {
     // `findTranscriptionModel(...)?.label` instead of
     // `listAvailableModelOptions()`'s flat label).
     in property <string> header-model-label;
-    in property <bool> settings-model-busy;
-    in property <bool> settings-model-downloading;
+    out property <bool> settings-model-busy: root.model-runtime-phase == TranscriptionPhase.downloading
+        || root.model-runtime-phase == TranscriptionPhase.loading
+        || root.model-runtime-phase == TranscriptionPhase.unloading;
+    out property <bool> settings-model-downloading: root.model-runtime-phase == TranscriptionPhase.downloading;
     in property <string> settings-model-download-progress-label;
     in property <float> settings-model-download-progress-fraction;
     in property <[string]> settings-unload-timeout-labels;
@@ -427,7 +430,8 @@ export component MainWindow inherits Window {
     if !root.onboarding-open: VerticalLayout {
         AppHeader {
             settings-open: root.settings-open;
-            model-ready: root.model-ready;
+            model-phase: root.model-runtime-phase;
+            model-status-label: root.settings-model-status-text;
             recording-mode: root.recording-mode;
             model-label: root.header-model-label;
             settings-toggled => {
@@ -447,7 +451,9 @@ export component MainWindow inherits Window {
         width: 100%;
         height: 100%;
         dictation-shortcut: root.dictation-shortcut;
-        model-ready: root.model-ready;
+        // A model unloaded after inactivity can be loaded lazily by Start.
+        // The header still says LoadRequired until the FSM actually reaches Ready.
+        model-ready: root.model-ready || root.model-runtime-phase == TranscriptionPhase.load-required;
         search-query <=> root.search-query;
         kind-filter: root.kind-filter;
         transcription-status-message: root.transcription-status-message;
