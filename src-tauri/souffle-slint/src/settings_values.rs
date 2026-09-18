@@ -7,7 +7,7 @@ use std::rc::Rc;
 use slint::ComponentHandle;
 use souffle_lib::audio::AudioInputDevice;
 use souffle_lib::commands::SettingsSaveOutcome;
-use souffle_lib::settings::AppSettings;
+use souffle_lib::settings::{AppSettings, Theme as SettingsTheme};
 use souffle_lib::summary::SummaryProvidersStatus;
 
 use crate::{MainWindow, Theme, audio_ui, ia_ui, model_ui, settings_ui};
@@ -78,6 +78,20 @@ impl SettingsCache {
 
 type DeviceCache = Rc<RefCell<Vec<AudioInputDevice>>>;
 type SummaryCache = Rc<RefCell<Option<SummaryProvidersStatus>>>;
+
+fn canonical_dark_after_save(
+    theme: SettingsTheme,
+    previous_theme: Option<SettingsTheme>,
+    applied_dark: bool,
+    resolve_system: impl FnOnce() -> bool,
+) -> bool {
+    match theme {
+        SettingsTheme::Dark => true,
+        SettingsTheme::Light => false,
+        SettingsTheme::System if previous_theme == Some(SettingsTheme::System) => applied_dark,
+        SettingsTheme::System => resolve_system(),
+    }
+}
 
 /// Same round trip for immediate controls and the existing deferred callers.
 /// The closures isolate OS side effects from controller tests, not a second store.
@@ -164,19 +178,26 @@ impl SettingsValueController {
     }
 
     fn apply(&self, mutate: impl FnOnce(&mut AppSettings)) {
+        let previous_theme = if self.cache.known.get() {
+            self.cache.borrow().as_ref().map(|settings| settings.theme)
+        } else {
+            None
+        };
         let outcome = save_field(&self.cache, || (self.load)(), |s| (self.save)(s), mutate);
         let Some(window) = self.window.upgrade() else {
             return;
         };
         match outcome {
             SettingsSaveOutcome::Observed { settings, .. } => {
-                let theme_changed =
-                    settings_ui::theme_from_slint(window.get_settings_theme()) != settings.theme;
+                let applied_dark = window.global::<Theme>().get_dark();
+                let dark =
+                    canonical_dark_after_save(settings.theme, previous_theme, applied_dark, || {
+                        settings_ui::resolve_dark(SettingsTheme::System)
+                    });
                 self.project(&window, &settings);
                 // Only the theme path touches AppKit, on the callback's UI thread.
                 // Ordinary value publication performs no native or database I/O.
-                if theme_changed {
-                    let dark = settings_ui::resolve_dark(settings.theme);
+                if applied_dark != dark {
                     window.global::<Theme>().set_dark(dark);
                     (self.apply_appearance)(dark);
                 }
@@ -320,9 +341,7 @@ mod tests {
     use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
     use souffle_lib::audio::TransportType;
     use souffle_lib::db::Database;
-    use souffle_lib::settings::{
-        MeetingAudioRetention, MeetingTranscriptionLanguage, PasteMethod, Theme as SettingsTheme,
-    };
+    use souffle_lib::settings::{MeetingAudioRetention, MeetingTranscriptionLanguage, PasteMethod};
     use souffle_lib::summary::{SummaryModelDescriptor, SummaryProviderKind};
 
     struct TestPlatform;
@@ -388,6 +407,14 @@ mod tests {
 
     impl DatabaseHarness {
         fn new(initial: AppSettings) -> Self {
+            Self::with_settings_population(initial, true)
+        }
+
+        fn new_unopened(initial: AppSettings) -> Self {
+            Self::with_settings_population(initial, false)
+        }
+
+        fn with_settings_population(initial: AppSettings, populate_settings: bool) -> Self {
             let window = test_window();
             let directory = tempfile::tempdir().unwrap();
             let db = Rc::new(Database::open(&directory.path().join("settings.db")).unwrap());
@@ -396,7 +423,9 @@ mod tests {
             let devices = Rc::new(RefCell::new(vec![device("mic-1", "Studio Mic")]));
             let summary = Rc::new(RefCell::new(Some(summary_status())));
 
-            settings_ui::populate(&window, &initial);
+            if populate_settings {
+                settings_ui::populate(&window, &initial);
+            }
             audio_ui::populate_device_pickers(
                 &window,
                 &devices.borrow(),
@@ -450,7 +479,59 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_system_theme_reuses_the_applied_value_without_native_resolution() {
+        let resolutions = Cell::new(0);
+        let dark = canonical_dark_after_save(
+            SettingsTheme::System,
+            Some(SettingsTheme::System),
+            false,
+            || {
+                resolutions.set(resolutions.get() + 1);
+                true
+            },
+        );
+        assert!(!dark);
+        assert_eq!(resolutions.get(), 0);
+
+        let dark = canonical_dark_after_save(
+            SettingsTheme::System,
+            Some(SettingsTheme::Light),
+            false,
+            || {
+                resolutions.set(resolutions.get() + 1);
+                true
+            },
+        );
+        assert!(dark);
+        assert_eq!(resolutions.get(), 1);
+    }
+
+    #[test]
     fn all_thirteen_callbacks_publish_the_persisted_snapshot_without_reloading_catalogues() {
+        {
+            let harness = DatabaseHarness::new_unopened(AppSettings {
+                theme: SettingsTheme::Light,
+                ..AppSettings::default()
+            });
+            let window = &harness.window;
+
+            // Settings has not populated its enum yet, but startup has already
+            // applied the persisted light theme to the global palette.
+            assert_eq!(window.get_settings_theme(), crate::AppTheme::Dark);
+            assert!(!window.global::<Theme>().get_dark());
+            assert_eq!(harness.appearance.get(), None);
+
+            window.invoke_theme_toggle_requested();
+
+            assert_eq!(window.get_settings_theme(), crate::AppTheme::Dark);
+            assert!(window.global::<Theme>().get_dark());
+            assert_eq!(harness.appearance.get(), Some(true));
+            assert_eq!(
+                AppSettings::load(&harness.db).unwrap().theme,
+                SettingsTheme::Dark
+            );
+        }
+
         let initial = AppSettings {
             paste_delay_ms: 150,
             ollama_model: "model-a".into(),
