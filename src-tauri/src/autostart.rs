@@ -9,10 +9,20 @@
 #[cfg(target_os = "macos")]
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
+#[cfg(target_os = "macos")]
+static SERVICE_ACCESS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Whether the main app is currently registered as a login item, as reported
 /// by the system.
 #[cfg(target_os = "macos")]
 pub fn is_enabled() -> bool {
+    // SMAppService is a ServiceManagement/XPC object, not AppKit UI. Its SDK
+    // declaration has no main-thread actor/annotation. Settings therefore
+    // calls it from its serialized I/O worker so a slow status request cannot
+    // block Slint; this lock prevents concurrent access from older call sites.
+    let _guard = SERVICE_ACCESS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let service = unsafe { SMAppService::mainAppService() };
     unsafe { service.status() == SMAppServiceStatus::Enabled }
 }
@@ -22,6 +32,9 @@ pub fn is_enabled() -> bool {
 /// with an unchanged toggle stays a no-op.
 #[cfg(target_os = "macos")]
 pub fn set_enabled(enabled: bool) -> Result<(), String> {
+    let _guard = SERVICE_ACCESS
+        .lock()
+        .map_err(|_| "ServiceManagement access lock is poisoned".to_string())?;
     let service = unsafe { SMAppService::mainAppService() };
     let status = unsafe { service.status() };
 

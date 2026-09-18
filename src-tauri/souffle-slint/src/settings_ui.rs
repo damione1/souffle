@@ -40,8 +40,6 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_calendar_autostart_enabled(settings.calendar_autostart_enabled);
     window.set_settings_calendar_reminder_minutes(settings.calendar_reminder_minutes as i32);
 
-    window.set_settings_is_laptop(souffle_lib::commands::is_laptop());
-    window.set_settings_system_audio_supported(souffle_lib::commands::get_system_audio_support());
     window.set_settings_allow_bluetooth_mic(settings.allow_bluetooth_mic);
     window.set_settings_capture_system_audio(settings.capture_system_audio);
     window.set_settings_meeting_transcription_language(meeting_language_to_slint(
@@ -68,6 +66,15 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_meeting_max_duration_labels(shared_string_model(
         &crate::audio_ui::minute_labels(&bounds.meeting_max_duration_minutes),
     ));
+}
+
+pub fn populate_platform_capabilities(
+    window: &MainWindow,
+    is_laptop: bool,
+    system_audio_supported: bool,
+) {
+    window.set_settings_is_laptop(is_laptop);
+    window.set_settings_system_audio_supported(system_audio_supported);
 }
 
 fn shared_string_model(values: &[String]) -> slint::ModelRc<slint::SharedString> {

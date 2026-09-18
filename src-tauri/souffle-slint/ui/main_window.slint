@@ -553,6 +553,13 @@ export component MainWindow inherits Window {
 
     // Drawn last so it overlays whatever is behind it, mirroring App.svelte
     // hiding HomeView under the Settings overlay rather than replacing it.
+    // SOU-202: retain conditional mounting. With OS/DB excluded and a forced
+    // same-data software-render pass (30 repetitions), cold/warm medians were
+    // 65.761/65.872 ms debug and 2.815/2.784 ms release. Both scenarios are
+    // remounts; the measured release reopen is below one frame, Settings is a
+    // rare overlay, and its internal tabs already stay alive, so a permanent
+    // overlay tree is not worth its memory. Software rendering only forces
+    // item-tree/layout work; this is not a shipped Skia/Metal frame claim.
     if root.settings-open: SettingsView {
         width: 100%;
         height: 100%;
