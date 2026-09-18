@@ -16,11 +16,13 @@ mod model_ui;
 mod onboarding_flags;
 mod onboarding_ui;
 mod settings_ui;
+mod settings_values;
 mod shortcut_capture;
 mod summary;
 mod timeline;
 mod transcript;
 
+use settings_values::SettingsCache;
 use slint::Model;
 use souffle_lib::audio::AudioInputDevice;
 use souffle_lib::calendar::CalendarEvent;
@@ -409,10 +411,7 @@ fn start_settings_log_timer(weak: slint::Weak<MainWindow>) -> slint::Timer {
 /// Populates the calendar picker without prompting - mirrors
 /// `loadCalendars()`'s own guard (only queries EventKit when the
 /// integration is already on, which implies access was granted before).
-fn load_calendars_if_enabled(
-    window: &MainWindow,
-    settings_state: &Rc<RefCell<Option<AppSettings>>>,
-) {
+fn load_calendars_if_enabled(window: &MainWindow, settings_state: &SettingsCache) {
     let (enabled, selected_ids) = {
         let guard = settings_state.borrow();
         match guard.as_ref() {
@@ -519,7 +518,7 @@ async fn start_meeting_from_event(
 fn refresh_summary_providers(
     weak: slint::Weak<MainWindow>,
     handle: AppHandle,
-    settings_state: Rc<RefCell<Option<AppSettings>>>,
+    settings_state: SettingsCache,
     summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>>,
     summary_template_editing: Rc<RefCell<String>>,
 ) {
@@ -565,7 +564,7 @@ fn refresh_summary_providers(
 fn load_transcription_model_state(
     window: &MainWindow,
     handle: &AppHandle,
-    settings_state: &Rc<RefCell<Option<AppSettings>>>,
+    settings_state: &SettingsCache,
     model_options_state: &Rc<RefCell<Vec<model_ui::FlatModelOption>>>,
 ) {
     let state = Arc::clone(handle);
@@ -640,7 +639,7 @@ fn initialize_model_at_startup(window: &MainWindow, handle: AppHandle, onboardin
 
 fn load_audio_devices(
     window: &MainWindow,
-    settings_state: &Rc<RefCell<Option<AppSettings>>>,
+    settings_state: &SettingsCache,
     audio_devices_state: &Rc<RefCell<Vec<AudioInputDevice>>>,
 ) {
     let devices = souffle_lib::commands::list_audio_devices().unwrap_or_else(|e| {
@@ -2779,7 +2778,7 @@ fn wire_callbacks(
     // the whole object back (matching `saveSettings()` in
     // controller.svelte.ts) - every field-level callback below mutates this
     // cache and re-saves it, it never redeclares state on the Slint side.
-    let settings_state: Rc<RefCell<Option<AppSettings>>> = Rc::new(RefCell::new(None));
+    let settings_state = SettingsCache::new();
     let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     let polish_prompt_save_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     let summary_prompt_save_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
@@ -2797,6 +2796,15 @@ fn wire_callbacks(
     // Cached so the model picker/download button don't each re-query Ollama.
     let summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>> =
         Rc::new(RefCell::new(None));
+    let settings_values = settings_values::SettingsValueController::new(
+        window,
+        tauri_handle.clone(),
+        settings_state.clone(),
+        audio_devices_state.clone(),
+        summary_status_state.clone(),
+    );
+    settings_values::wire(window, settings_values);
+
     // Which summary template's name/prompt are shown in the edit fields -
     // mirrors `editingTemplateId` in controller.svelte.ts (local UI state,
     // not part of `AppSettings`).
@@ -2832,7 +2840,8 @@ fn wire_callbacks(
             Ok(settings) => {
                 settings_ui::populate(&window, &settings);
                 data_ui::populate(&window, &settings);
-                *settings_state_for_open.borrow_mut() = Some(settings);
+                settings_state_for_open.replace_observed(settings);
+                window.set_settings_save_error("".into());
                 window.set_settings_open(true);
                 refresh_settings_log_tail(&window);
                 *settings_log_timer_for_open.borrow_mut() =
@@ -2917,44 +2926,33 @@ fn wire_callbacks(
         }
     });
 
-    // Save a cloned candidate, then re-read the sanitized/pinned value the
-    // backend actually persisted. The cache must never retain an optimistic
-    // value rejected by validation or pinned while recording.
     fn save_settings_field(
         handle: &AppHandle,
-        settings_state: &Rc<RefCell<Option<AppSettings>>>,
+        settings_state: &SettingsCache,
         mutate: impl FnOnce(&mut AppSettings),
     ) {
-        let original = match settings_state.borrow().clone() {
-            Some(settings) => settings,
-            None => match souffle_lib::commands::get_settings(Arc::clone(handle)) {
-                Ok(loaded) => loaded,
-                Err(e) => {
-                    eprintln!("Failed to load settings: {e}");
-                    return;
+        let outcome = settings_values::save_field(
+            settings_state,
+            || souffle_lib::commands::get_settings(handle.clone()),
+            |candidate| souffle_lib::commands::save_settings_observed(handle.clone(), candidate),
+            mutate,
+        );
+        match outcome {
+            souffle_lib::commands::SettingsSaveOutcome::Observed { result, .. } => {
+                if let Err(error) = result {
+                    eprintln!("Failed to save settings: {error}");
                 }
-            },
-        };
-        let mut candidate = original.clone();
-        mutate(&mut candidate);
-        let state = Arc::clone(handle);
-        if let Err(e) = souffle_lib::commands::save_settings(state, candidate) {
-            eprintln!("Failed to save settings: {e}");
-            *settings_state.borrow_mut() = Some(original);
-            return;
+            }
+            souffle_lib::commands::SettingsSaveOutcome::Unavailable { result, read_error } => {
+                eprintln!("Settings state unavailable after save {result:?}: {read_error}");
+            }
         }
-        let effective =
-            souffle_lib::commands::get_settings(Arc::clone(handle)).unwrap_or_else(|e| {
-                eprintln!("Failed to re-read saved settings: {e}");
-                original
-            });
-        *settings_state.borrow_mut() = Some(effective);
     }
 
     fn schedule_settings_save(
         timer_state: &Rc<RefCell<Option<slint::Timer>>>,
         handle: AppHandle,
-        settings_state: Rc<RefCell<Option<AppSettings>>>,
+        settings_state: SettingsCache,
     ) {
         let timer = slint::Timer::default();
         timer.start(
@@ -3041,55 +3039,6 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
-    let settings_state_for_theme = settings_state.clone();
-    window.on_settings_theme_changed(move |value| {
-        let theme = settings_ui::theme_from_slint(value);
-        save_settings_field(&handle, &settings_state_for_theme, |settings| {
-            settings.theme = theme;
-        });
-        if let Some(window) = weak.upgrade() {
-            let dark = settings_ui::resolve_dark(theme);
-            window.global::<Theme>().set_dark(dark);
-            souffle_lib::native::appearance::apply_resolved(dark);
-        }
-    });
-
-    // Header sun/moon click: mirrors App.svelte's `toggleTheme()` - always
-    // resolves to an explicit dark/light choice (never back to "system"),
-    // applied immediately and persisted the same way the settings picker's
-    // handler above does.
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let settings_state_for_toggle = settings_state.clone();
-    window.on_theme_toggle_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        let now_dark = window.global::<Theme>().get_dark();
-        let next_dark = !now_dark;
-        let next_theme = if next_dark {
-            souffle_lib::settings::Theme::Dark
-        } else {
-            souffle_lib::settings::Theme::Light
-        };
-        window.global::<Theme>().set_dark(next_dark);
-        souffle_lib::native::appearance::apply_resolved(next_dark);
-        save_settings_field(&handle, &settings_state_for_toggle, |settings| {
-            settings.theme = next_theme;
-        });
-        window.set_settings_theme(settings_ui::theme_to_slint(next_theme));
-    });
-
-    let handle = tauri_handle.clone();
-    let settings_state_for_locale = settings_state.clone();
-    window.on_settings_locale_changed(move |value| {
-        save_settings_field(&handle, &settings_state_for_locale, |settings| {
-            settings.locale = settings_ui::locale_from_slint(value).to_string();
-        });
-    });
-
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
     let settings_state_for_auto_paste = settings_state.clone();
     window.on_settings_auto_paste_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_auto_paste, |settings| {
@@ -3098,23 +3047,6 @@ fn wire_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_settings_auto_paste(enabled);
         }
-    });
-
-    let handle = tauri_handle.clone();
-    let settings_state_for_paste_method = settings_state.clone();
-    window.on_settings_paste_method_changed(move |value| {
-        let method = settings_ui::paste_method_from_slint(value);
-        save_settings_field(&handle, &settings_state_for_paste_method, |settings| {
-            settings.paste_method = method;
-        });
-    });
-
-    let handle = tauri_handle.clone();
-    let settings_state_for_paste_delay = settings_state.clone();
-    window.on_settings_paste_delay_changed(move |value| {
-        save_settings_field(&handle, &settings_state_for_paste_delay, |settings| {
-            settings.paste_delay_ms = value.max(0) as u64;
-        });
     });
 
     let weak = window.as_weak();
@@ -3139,14 +3071,6 @@ fn wire_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_settings_feedback_sounds_enabled(enabled);
         }
-    });
-
-    let handle = tauri_handle.clone();
-    let settings_state_for_feedback_volume = settings_state.clone();
-    window.on_settings_feedback_sounds_volume_changed(move |value| {
-        save_settings_field(&handle, &settings_state_for_feedback_volume, |settings| {
-            settings.feedback_sounds_volume = value.clamp(0, 100) as u32;
-        });
     });
 
     let weak = window.as_weak();
@@ -3229,14 +3153,6 @@ fn wire_callbacks(
         }
     });
 
-    let handle = tauri_handle.clone();
-    let settings_state_for_calendar_reminder = settings_state.clone();
-    window.on_settings_calendar_reminder_minutes_changed(move |value| {
-        save_settings_field(&handle, &settings_state_for_calendar_reminder, |settings| {
-            settings.calendar_reminder_minutes = value.clamp(1, 30) as u32;
-        });
-    });
-
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_calendar_toggle = settings_state.clone();
@@ -3249,38 +3165,35 @@ fn wire_callbacks(
             .filter_map(|i| model.row_data(i))
             .map(|row| row.id.to_string())
             .collect();
-        let mut guard = settings_state_for_calendar_toggle.borrow_mut();
-        let Some(settings) = guard.as_mut() else {
-            return;
-        };
-        let effective = if settings.calendar_selected_ids.is_empty() {
-            all_ids.clone()
-        } else {
-            settings.calendar_selected_ids.clone()
-        };
         let id_string = id.to_string();
-        let mut next = effective.clone();
-        if let Some(pos) = next.iter().position(|existing| existing == &id_string) {
-            next.remove(pos);
-        } else {
-            next.push(id_string);
-        }
-        if next.is_empty() {
-            // Mirrors `toggleCalendarSelected()`: the last checked calendar
-            // cannot be unchecked.
+        let mut selected_ids = None;
+        save_settings_field(&handle, &settings_state_for_calendar_toggle, |settings| {
+            let effective = if settings.calendar_selected_ids.is_empty() {
+                all_ids.clone()
+            } else {
+                settings.calendar_selected_ids.clone()
+            };
+            let mut next = effective.clone();
+            if let Some(pos) = next.iter().position(|existing| existing == &id_string) {
+                next.remove(pos);
+            } else {
+                next.push(id_string.clone());
+            }
+            if next.is_empty() {
+                // Mirrors `toggleCalendarSelected()`: the last checked
+                // calendar cannot be unchecked.
+                return;
+            }
+            settings.calendar_selected_ids = if next.len() == all_ids.len() {
+                Vec::new()
+            } else {
+                next
+            };
+            selected_ids = Some(settings.calendar_selected_ids.clone());
+        });
+        let Some(selected_ids) = selected_ids else {
             return;
-        }
-        settings.calendar_selected_ids = if next.len() == all_ids.len() {
-            Vec::new()
-        } else {
-            next
         };
-        let selected_ids = settings.calendar_selected_ids.clone();
-        let state = Arc::clone(&handle);
-        if let Err(e) = souffle_lib::commands::save_settings(state, settings.clone()) {
-            eprintln!("Failed to save settings: {e}");
-        }
-        drop(guard);
         match souffle_lib::calendar::list_calendars() {
             Ok(calendars) => settings_ui::populate_calendars(
                 &window,
@@ -3347,16 +3260,6 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
-    let settings_state_for_clamshell = settings_state.clone();
-    let audio_devices_state_for_clamshell = audio_devices_state.clone();
-    window.on_settings_clamshell_device_changed(move |label| {
-        let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_clamshell.borrow(), &label);
-        save_settings_field(&handle, &settings_state_for_clamshell, |settings| {
-            settings.clamshell_audio_device = uid;
-        });
-    });
-
-    let handle = tauri_handle.clone();
     let settings_state_for_system_audio = settings_state.clone();
     window.on_settings_capture_system_audio_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_system_audio, |settings| {
@@ -3369,15 +3272,6 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
-    let settings_state_for_meeting_lang = settings_state.clone();
-    window.on_settings_meeting_transcription_language_changed(move |value| {
-        let language = settings_ui::meeting_language_from_slint(value);
-        save_settings_field(&handle, &settings_state_for_meeting_lang, |settings| {
-            settings.meeting_transcription_language = language;
-        });
-    });
-
-    let handle = tauri_handle.clone();
     let settings_state_for_autostop_enabled = settings_state.clone();
     window.on_settings_meeting_autostop_enabled_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_autostop_enabled, |settings| {
@@ -3389,28 +3283,6 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let settings_state_for_autostop_minutes = settings_state.clone();
-    window.on_settings_meeting_autostop_changed(move |label| {
-        let Some(minutes) = audio_ui::parse_minute_label(&label) else {
-            return;
-        };
-        save_settings_field(&handle, &settings_state_for_autostop_minutes, |settings| {
-            settings.meeting_autostop_minutes = minutes;
-        });
-    });
-
-    let handle = tauri_handle.clone();
-    let settings_state_for_max_duration = settings_state.clone();
-    window.on_settings_meeting_max_duration_changed(move |label| {
-        let Some(minutes) = audio_ui::parse_minute_label(&label) else {
-            return;
-        };
-        save_settings_field(&handle, &settings_state_for_max_duration, |settings| {
-            settings.meeting_max_duration_minutes = minutes;
-        });
-    });
-
     let handle = tauri_handle.clone();
     let settings_state_for_vad = settings_state.clone();
     window.on_settings_vad_enabled_changed(move |enabled| {
@@ -3467,20 +3339,17 @@ fn wire_callbacks(
             return;
         };
         let devices = audio_devices_state_for_move.borrow().clone();
-        let mut guard = settings_state_for_move.borrow_mut();
-        let Some(settings) = guard.as_mut() else {
+        let mut moved = false;
+        save_settings_field(&handle, &settings_state_for_move, |settings| {
+            let list = microphone_list::build_microphone_list(&devices, &settings.input_priority);
+            if let Some(next) = microphone_list::reorder_microphone_list(&list, &uid, direction) {
+                settings.input_priority.priorities = next;
+                moved = true;
+            }
+        });
+        if !moved {
             return;
-        };
-        let list = microphone_list::build_microphone_list(&devices, &settings.input_priority);
-        let Some(next) = microphone_list::reorder_microphone_list(&list, &uid, direction) else {
-            return;
-        };
-        settings.input_priority.priorities = next;
-        let state = Arc::clone(&handle);
-        if let Err(e) = souffle_lib::commands::save_settings(state, settings.clone()) {
-            eprintln!("Failed to save settings: {e}");
         }
-        drop(guard);
         load_audio_devices(
             &window,
             &settings_state_for_move,
@@ -3518,23 +3387,16 @@ fn wire_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let state = Arc::clone(&handle);
-        let mut guard = settings_state_for_remove.borrow_mut();
-        let Some(settings) = guard.as_mut() else {
-            return;
-        };
-        settings.input_priority =
-            microphone_list::remove_known_device(&settings.input_priority, &uid);
-        if settings.audio_device.as_deref() == Some(uid.as_str()) {
-            settings.audio_device = None;
-        }
-        if settings.clamshell_audio_device.as_deref() == Some(uid.as_str()) {
-            settings.clamshell_audio_device = None;
-        }
-        if let Err(e) = souffle_lib::commands::save_settings(state, settings.clone()) {
-            eprintln!("Failed to save settings: {e}");
-        }
-        drop(guard);
+        save_settings_field(&handle, &settings_state_for_remove, |settings| {
+            settings.input_priority =
+                microphone_list::remove_known_device(&settings.input_priority, &uid);
+            if settings.audio_device.as_deref() == Some(uid.as_str()) {
+                settings.audio_device = None;
+            }
+            if settings.clamshell_audio_device.as_deref() == Some(uid.as_str()) {
+                settings.clamshell_audio_device = None;
+            }
+        });
         load_audio_devices(
             &window,
             &settings_state_for_remove,
@@ -3611,15 +3473,6 @@ fn wire_callbacks(
             }
         })
         .expect("slint event loop not running");
-    });
-
-    let handle = tauri_handle.clone();
-    let settings_state_for_retention = settings_state.clone();
-    window.on_settings_meeting_audio_retention_changed(move |value| {
-        let retention = settings_ui::audio_retention_from_slint(value);
-        save_settings_field(&handle, &settings_state_for_retention, |settings| {
-            settings.meeting_audio_retention = retention;
-        });
     });
 
     let weak = window.as_weak();
@@ -3764,22 +3617,6 @@ fn wire_callbacks(
     window.on_settings_ollama_url_changed(move |value| {
         save_settings_field(&handle, &settings_state_for_ollama_url, |settings| {
             settings.ollama_url = value.to_string();
-        });
-    });
-
-    let handle = tauri_handle.clone();
-    let settings_state_for_ollama_model = settings_state.clone();
-    let summary_status_state_for_ollama_model = summary_status_state.clone();
-    window.on_settings_ollama_model_changed(move |label| {
-        let Some(model_id) = summary_status_state_for_ollama_model
-            .borrow()
-            .as_ref()
-            .and_then(|status| ia_ui::resolve_summary_model_id(&status.models, &label))
-        else {
-            return;
-        };
-        save_settings_field(&handle, &settings_state_for_ollama_model, |settings| {
-            settings.ollama_model = model_id;
         });
     });
 
@@ -4119,17 +3956,6 @@ fn wire_callbacks(
         });
         window.set_settings_selected_model_label(label);
         start_model_transition(weak.clone(), handle.clone(), selection);
-    });
-
-    let handle = tauri_handle.clone();
-    let settings_state_for_unload_timeout = settings_state.clone();
-    window.on_settings_unload_timeout_changed(move |label| {
-        let Some(minutes) = model_ui::parse_unload_timeout_label(&label) else {
-            return;
-        };
-        save_settings_field(&handle, &settings_state_for_unload_timeout, |settings| {
-            settings.model_unload_timeout_minutes = minutes;
-        });
     });
 
     let weak = window.as_weak();

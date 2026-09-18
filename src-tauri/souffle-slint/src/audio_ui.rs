@@ -51,11 +51,14 @@ pub fn populate_device_pickers(
     window.set_settings_clamshell_device_labels(
         std::rc::Rc::new(slint::VecModel::from(clamshell_labels)).into(),
     );
-    let clamshell_label = clamshell
+    window.set_settings_clamshell_device_label(clamshell_device_label(devices, clamshell).into());
+}
+
+pub fn clamshell_device_label(devices: &[AudioInputDevice], clamshell: Option<&str>) -> String {
+    clamshell
         .and_then(|uid| devices.iter().find(|d| d.uid == uid))
         .map(device_label)
-        .unwrap_or_else(|| CLAMSHELL_FOLLOW_LABEL.to_string());
-    window.set_settings_clamshell_device_label(clamshell_label.into());
+        .unwrap_or_else(|| clamshell.unwrap_or(CLAMSHELL_FOLLOW_LABEL).to_string())
 }
 
 /// Inverse of `populate_device_pickers`' label building - `None` means the

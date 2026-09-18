@@ -47,3 +47,6 @@ uuid = { version = "1", features = ["v4"] }
 [build-dependencies]
 lucide-slint = "1.46.0"
 slint-build = "1.9"
+
+[dev-dependencies]
+tempfile = "3"
