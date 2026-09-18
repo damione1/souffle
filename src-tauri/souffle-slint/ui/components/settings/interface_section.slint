@@ -6,8 +6,10 @@ import { SettingsField } from "settings_field.slint";
 // private-use code points for named/modifier keys), not a DOM physical
 // `code`, so the actual accelerator-string parsing happens in Rust
 // (`shortcut_capture.rs`) from the raw `text`/modifier booleans forwarded
-// here - this component only owns focus/recording UI state.
-component ShortcutRecorderButton inherits FocusScope {
+// here - this component only owns focus/recording UI state. Exported so
+// `onboarding_view.slint`'s shortcut step (SOU-190) reuses it instead of a
+// second FocusScope implementation.
+export component ShortcutRecorderButton inherits FocusScope {
     in property <string> shortcut-label;
     in property <bool> recording;
 

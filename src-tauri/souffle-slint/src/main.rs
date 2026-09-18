@@ -10,8 +10,11 @@ mod audio_ui;
 mod data_ui;
 mod ia_ui;
 mod lists_ui;
+mod markdown;
 mod microphone_list;
 mod model_ui;
+mod onboarding_flags;
+mod onboarding_ui;
 mod settings_ui;
 mod shortcut_capture;
 mod summary;
@@ -954,6 +957,938 @@ async fn stop_meeting(handle: AppHandle) -> Result<String, String> {
         })
     })
     .await
+}
+
+/// All mutable state the onboarding wizard needs across its 4 steps, in one
+/// place rather than a dozen separate `Rc<RefCell<..>>`s - unlike
+/// `wire_callbacks`'s per-field caches, this state is only ever touched
+/// while the wizard is open, so bundling it doesn't create the same
+/// cross-feature borrow-conflict risk.
+struct OnboardingState {
+    steps: Vec<&'static str>,
+    step_index: usize,
+    recovery_only: bool,
+    permission_status: souffle_lib::permissions::PermissionStatus,
+    permission_busy: [bool; 3],
+    devices: Vec<AudioInputDevice>,
+    selected_device: String,
+    model_options: Vec<model_ui::FlatModelOption>,
+    selected_model_index: Option<usize>,
+    toggle_shortcut: String,
+    pending_modifier: Option<String>,
+    auto_paste: bool,
+}
+
+impl Default for OnboardingState {
+    fn default() -> Self {
+        Self {
+            steps: Vec::new(),
+            step_index: 0,
+            recovery_only: false,
+            permission_status: souffle_lib::permissions::PermissionStatus {
+                microphone: PermState::Unknown,
+                system_audio: PermState::Unknown,
+                accessibility: PermState::Unknown,
+                calendar: PermState::Unknown,
+            },
+            permission_busy: [false; 3],
+            devices: Vec::new(),
+            selected_device: String::new(),
+            model_options: Vec::new(),
+            selected_model_index: None,
+            toggle_shortcut: String::new(),
+            pending_modifier: None,
+            auto_paste: false,
+        }
+    }
+}
+
+fn device_option_label(device: &AudioInputDevice) -> String {
+    if device.is_default {
+        format!("{} (par défaut)", device.name)
+    } else {
+        device.name.clone()
+    }
+}
+
+/// Renders whatever step `ob.step_index` currently points at - shared by
+/// wizard-open, "Back", and every successful "Continue"/transition.
+fn show_onboarding_step(
+    window: &MainWindow,
+    handle: &AppHandle,
+    ob: &Rc<RefCell<OnboardingState>>,
+) {
+    let (step, step_index, step_count) = {
+        let guard = ob.borrow();
+        (
+            guard.steps.get(guard.step_index).copied().unwrap_or(""),
+            guard.step_index as i32,
+            guard.steps.len() as i32,
+        )
+    };
+    window.set_onboarding_step(step.into());
+    window.set_onboarding_step_index(step_index);
+    window.set_onboarding_step_count(step_count);
+    window.set_onboarding_title(onboarding_ui::step_title(step).into());
+    window.set_onboarding_subtitle(onboarding_ui::step_subtitle(step).into());
+    window.set_onboarding_busy(false);
+    window.set_onboarding_continue_enabled(true);
+    window.set_onboarding_continue_label("Continuer".into());
+
+    match step {
+        "permissions" => {
+            let (status, busy) = {
+                let guard = ob.borrow();
+                (guard.permission_status.clone(), guard.permission_busy)
+            };
+            onboarding_ui::populate_permission_rows(window, &status, busy);
+        }
+        "microphone" => {
+            let guard = ob.borrow();
+            let mut labels: Vec<slint::SharedString> = vec!["Automatique".into()];
+            labels.extend(guard.devices.iter().map(|d| device_option_label(d).into()));
+            window.set_onboarding_device_labels(
+                std::rc::Rc::new(slint::VecModel::from(labels)).into(),
+            );
+            let selected_label = guard
+                .devices
+                .iter()
+                .find(|d| d.uid == guard.selected_device)
+                .map(device_option_label)
+                .unwrap_or_else(|| "Automatique".to_string());
+            window.set_onboarding_selected_device_label(selected_label.into());
+        }
+        "model" => {
+            let guard = ob.borrow();
+            let labels: Vec<slint::SharedString> = guard
+                .model_options
+                .iter()
+                .map(|o| o.label.as_str().into())
+                .collect();
+            window.set_onboarding_model_labels(
+                std::rc::Rc::new(slint::VecModel::from(labels)).into(),
+            );
+            let selected_index = guard.selected_model_index.unwrap_or(0);
+            let selected_label = guard
+                .model_options
+                .get(selected_index)
+                .map(|o| o.label.clone())
+                .unwrap_or_default();
+            window.set_onboarding_selected_model_label(selected_label.into());
+            let selection = guard
+                .model_options
+                .get(selected_index)
+                .map(|o| o.selection());
+            drop(guard);
+            let phase = selection.and_then(|selection| {
+                souffle_lib::commands::get_model_status(handle.state::<AppState>(), selection).ok()
+            });
+            let phase_str = match phase.map(|s| s.phase) {
+                Some(TranscriptionRuntimePhase::Ready) => "ready",
+                Some(TranscriptionRuntimePhase::LoadRequired) => "load_required",
+                _ => "pick",
+            };
+            window.set_onboarding_model_phase(if phase_str == "load_required" {
+                "pick".into()
+            } else {
+                phase_str.into()
+            });
+            if phase_str == "ready" {
+                window.set_onboarding_continue_label("Continuer".into());
+            } else {
+                window.set_onboarding_continue_label("Télécharger et continuer".into());
+            }
+        }
+        "shortcut" => {
+            let guard = ob.borrow();
+            window.set_onboarding_toggle_shortcut_label(
+                format_shortcut_label(&guard.toggle_shortcut).into(),
+            );
+            window.set_onboarding_auto_paste(guard.auto_paste);
+            window.set_onboarding_accessibility_granted(
+                guard.permission_status.accessibility == PermState::Granted,
+            );
+            window.set_onboarding_continue_label("Terminer".into());
+        }
+        _ => {}
+    }
+}
+
+/// Async permission refresh for the permissions step - `get_permission_status`
+/// is a real TCC query, never a value fixed at wizard-open (AC7).
+fn refresh_onboarding_permissions(weak: slint::Weak<MainWindow>, ob: Rc<RefCell<OnboardingState>>) {
+    slint::spawn_local(async move {
+        let status = souffle_lib::commands::get_permission_status().await;
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        if window.get_onboarding_step() != "permissions" {
+            return;
+        }
+        if let Ok(status) = status {
+            let busy = {
+                let mut guard = ob.borrow_mut();
+                guard.permission_status = status.clone();
+                guard.permission_busy
+            };
+            onboarding_ui::populate_permission_rows(&window, &status, busy);
+        }
+    })
+    .expect("slint event loop not running");
+}
+
+fn start_onboarding_permission_poll(
+    weak: slint::Weak<MainWindow>,
+    ob: Rc<RefCell<OnboardingState>>,
+) -> slint::Timer {
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(600),
+        move || {
+            if ob.borrow().permission_busy.iter().any(|b| *b) {
+                return;
+            }
+            refresh_onboarding_permissions(weak.clone(), ob.clone());
+        },
+    );
+    timer
+}
+
+/// Sets up the whole onboarding overlay: decides whether to show it at
+/// startup (`decide_show_setup_wizard`, never a hardcoded "first launch"
+/// flag), then wires every step's callbacks. Model download/load reuse the
+/// same commands `wire_callbacks`'s Settings-tab model selector calls
+/// (`get_model_status`/`download_model`/`load_model`); shortcut capture
+/// reuses `shortcut_capture.rs` the same way the Interface tab does.
+fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bool {
+    let ob: Rc<RefCell<OnboardingState>> = Rc::new(RefCell::new(OnboardingState::default()));
+    let onboarding_poll_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+
+    let handle = tauri_handle.clone();
+    let state = handle.state::<AppState>();
+    let default_selection = TranscriptionProfileSelection::default();
+    let phase = souffle_lib::commands::get_model_status(state, default_selection)
+        .map(|s| s.phase)
+        .unwrap_or(TranscriptionRuntimePhase::DownloadRequired);
+    let machine_state = handle
+        .state::<AppState>()
+        .current_machine_state()
+        .unwrap_or(souffle_lib::state_machine::AppStateMachine::Idle);
+    let flags = onboarding_flags::read_setup_flags();
+    let should_show = onboarding_flags::decide_show_setup_wizard(phase, flags, &machine_state);
+
+    if should_show {
+        let mut guard = ob.borrow_mut();
+        guard.steps = onboarding_flags::wizard_steps(flags);
+        guard.recovery_only = flags.setup_done;
+        guard.devices = souffle_lib::commands::list_audio_devices().unwrap_or_default();
+        let state = handle.state::<AppState>();
+        if let Ok(settings) = souffle_lib::commands::get_settings(state) {
+            guard.selected_device = settings.audio_device.unwrap_or_default();
+            guard.auto_paste = settings.auto_paste;
+        }
+        let state = handle.state::<AppState>();
+        if let Ok(catalog) = souffle_lib::commands::get_transcription_catalog(state) {
+            guard.model_options = model_ui::list_available_model_options(&catalog);
+            guard.selected_model_index = guard.model_options.iter().position(|o| {
+                o.engine_id == catalog.selected_engine_id && o.model_id == catalog.selected_model_id
+            });
+        }
+        let state = handle.state::<AppState>();
+        if let Ok(shortcuts) = souffle_lib::commands::get_shortcuts(state) {
+            guard.toggle_shortcut = shortcuts.toggle;
+        }
+        drop(guard);
+        window.set_onboarding_open(true);
+        show_onboarding_step(window, &handle, &ob);
+        if ob.borrow().steps.first() == Some(&"permissions") {
+            *onboarding_poll_timer.borrow_mut() = Some(start_onboarding_permission_poll(
+                window.as_weak(),
+                ob.clone(),
+            ));
+        }
+    }
+
+    let handle = tauri_handle.clone();
+    let weak = window.as_weak();
+    window.on_onboarding_locale_changed(move |locale| {
+        if let Err(e) = (|| -> Result<(), String> {
+            let state = handle.state::<AppState>();
+            let mut settings = souffle_lib::commands::get_settings(state)?;
+            settings.locale = locale.to_string();
+            let state = handle.state::<AppState>();
+            souffle_lib::commands::save_settings(handle.clone(), state, settings)
+        })() {
+            eprintln!("Failed to save onboarding locale: {e}");
+        }
+        if let Some(window) = weak.upgrade() {
+            window.set_onboarding_locale(locale);
+        }
+    });
+
+    let weak = window.as_weak();
+    let ob_for_grant = ob.clone();
+    window.on_onboarding_grant_requested(move |kind_str| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let Some(index) = onboarding_ui::row_index(&kind_str) else {
+            return;
+        };
+        let kind = match kind_str.as_str() {
+            "microphone" => PermissionKind::Microphone,
+            "system_audio" => PermissionKind::SystemAudio,
+            "accessibility" => PermissionKind::Accessibility,
+            _ => return,
+        };
+        ob_for_grant.borrow_mut().permission_busy[index] = true;
+        {
+            let (status, busy) = {
+                let guard = ob_for_grant.borrow();
+                (guard.permission_status.clone(), guard.permission_busy)
+            };
+            onboarding_ui::populate_permission_rows(&window, &status, busy);
+        }
+        let weak = weak.clone();
+        let ob = ob_for_grant.clone();
+        slint::spawn_local(async move {
+            let result = souffle_lib::commands::request_permission(kind).await;
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let mut guard = ob.borrow_mut();
+            guard.permission_busy[index] = false;
+            if let Ok(state) = result {
+                match kind {
+                    PermissionKind::Microphone => guard.permission_status.microphone = state,
+                    PermissionKind::SystemAudio => guard.permission_status.system_audio = state,
+                    PermissionKind::Accessibility => guard.permission_status.accessibility = state,
+                    PermissionKind::Calendar => {}
+                }
+            }
+            let (status, busy) = (guard.permission_status.clone(), guard.permission_busy);
+            drop(guard);
+            onboarding_ui::populate_permission_rows(&window, &status, busy);
+        })
+        .expect("slint event loop not running");
+    });
+
+    window.on_onboarding_hint_action_requested(move |_kind| {
+        souffle_lib::commands::open_apple_intelligence_settings();
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security")
+            .spawn();
+    });
+
+    let weak = window.as_weak();
+    window.on_onboarding_repair_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_onboarding_repair_busy(true);
+        let weak = weak.clone();
+        slint::spawn_local(async move {
+            let result = souffle_lib::commands::repair_accessibility_permission().await;
+            if let Some(window) = weak.upgrade() {
+                window.set_onboarding_repair_busy(false);
+                match result {
+                    Ok(_) => {
+                        window.set_onboarding_repair_success(true);
+                        window.set_onboarding_repair_cooldown(true);
+                        let weak_for_cooldown = weak.clone();
+                        let timer = slint::Timer::default();
+                        timer.start(
+                            slint::TimerMode::SingleShot,
+                            Duration::from_millis(2500),
+                            move || {
+                                if let Some(window) = weak_for_cooldown.upgrade() {
+                                    window.set_onboarding_repair_cooldown(false);
+                                }
+                            },
+                        );
+                        std::mem::forget(timer);
+                    }
+                    Err(e) => eprintln!("Accessibility repair failed: {e}"),
+                }
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    let ob_for_device = ob.clone();
+    window.on_onboarding_device_changed(move |label| {
+        let mut guard = ob_for_device.borrow_mut();
+        guard.selected_device = if label == "Automatique" {
+            String::new()
+        } else {
+            guard
+                .devices
+                .iter()
+                .find(|d| device_option_label(d) == label.as_str())
+                .map(|d| d.uid.clone())
+                .unwrap_or_default()
+        };
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let ob_for_refresh = ob.clone();
+    window.on_onboarding_refresh_devices_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        ob_for_refresh.borrow_mut().devices =
+            souffle_lib::commands::list_audio_devices().unwrap_or_default();
+        show_onboarding_step(&window, &handle, &ob_for_refresh);
+    });
+
+    let ob_for_model_pick = ob.clone();
+    window.on_onboarding_model_picked(move |label| {
+        let mut guard = ob_for_model_pick.borrow_mut();
+        guard.selected_model_index = guard
+            .model_options
+            .iter()
+            .position(|o| o.label == label.as_str());
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let ob_for_shortcut_record = ob.clone();
+    window.on_onboarding_shortcut_record_requested(move || {
+        let _ = &handle;
+        let _ = &ob_for_shortcut_record;
+        if let Some(window) = weak.upgrade() {
+            window.set_onboarding_shortcut_recording(true);
+            window.set_onboarding_shortcut_error("".into());
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let ob_for_capture = ob.clone();
+    window.on_onboarding_shortcut_captured(move |text, ctrl, shift, alt, meta| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let modifiers = shortcut_capture::Modifiers { control: ctrl, shift, alt, meta };
+        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
+            ob_for_capture.borrow_mut().pending_modifier = Some(name.to_string());
+            return;
+        }
+        ob_for_capture.borrow_mut().pending_modifier = None;
+        if shortcut_capture::missing_modifier(&text, modifiers) {
+            window.set_onboarding_shortcut_error(
+                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
+            );
+            return;
+        }
+        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+            return;
+        };
+        apply_onboarding_shortcut(&handle, &window, &ob_for_capture, value);
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let ob_for_release = ob.clone();
+    window.on_onboarding_shortcut_released(move |text, _ctrl, _shift, _alt, _meta| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+            return;
+        };
+        let mut pending = ob_for_release.borrow_mut();
+        if pending.pending_modifier.as_deref() != Some(name) {
+            return;
+        }
+        pending.pending_modifier = None;
+        drop(pending);
+        apply_onboarding_shortcut(&handle, &window, &ob_for_release, name.to_string());
+    });
+
+    let weak = window.as_weak();
+    let ob_for_clear = ob.clone();
+    let handle = tauri_handle.clone();
+    window.on_onboarding_shortcut_cleared(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        apply_onboarding_shortcut(&handle, &window, &ob_for_clear, String::new());
+    });
+
+    let weak = window.as_weak();
+    let ob_for_cancel = ob.clone();
+    window.on_onboarding_shortcut_cancelled(move || {
+        ob_for_cancel.borrow_mut().pending_modifier = None;
+        if let Some(window) = weak.upgrade() {
+            window.set_onboarding_shortcut_recording(false);
+            window.set_onboarding_shortcut_error("".into());
+        }
+    });
+
+    let ob_for_auto_paste = ob.clone();
+    window.on_onboarding_auto_paste_changed(move |enabled| {
+        ob_for_auto_paste.borrow_mut().auto_paste = enabled;
+    });
+
+    window.on_onboarding_review_accessibility_requested(move || {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security")
+            .spawn();
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let ob_for_back = ob.clone();
+    window.on_onboarding_back_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut guard = ob_for_back.borrow_mut();
+        if guard.step_index > 0 {
+            guard.step_index -= 1;
+        }
+        drop(guard);
+        show_onboarding_step(&window, &handle, &ob_for_back);
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let ob_for_continue = ob.clone();
+    let onboarding_poll_timer_for_continue = onboarding_poll_timer.clone();
+    window.on_onboarding_continue_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let step = window.get_onboarding_step().to_string();
+        match step.as_str() {
+            "permissions" => {
+                onboarding_flags::mark_permissions_done();
+                advance_onboarding_step(
+                    &window,
+                    &handle,
+                    &ob_for_continue,
+                    &onboarding_poll_timer_for_continue,
+                );
+            }
+            "microphone" => {
+                let uid = ob_for_continue.borrow().selected_device.clone();
+                let state = handle.state::<AppState>();
+                let _ =
+                    souffle_lib::commands::select_audio_device(handle.clone(), state, uid.clone());
+                if let Ok(mut settings) =
+                    souffle_lib::commands::get_settings(handle.state::<AppState>())
+                {
+                    settings.audio_device = if uid.is_empty() { None } else { Some(uid) };
+                    let state = handle.state::<AppState>();
+                    let _ = souffle_lib::commands::save_settings(handle.clone(), state, settings);
+                }
+                advance_onboarding_step(
+                    &window,
+                    &handle,
+                    &ob_for_continue,
+                    &onboarding_poll_timer_for_continue,
+                );
+            }
+            "model" => {
+                let phase = window.get_onboarding_model_phase();
+                if phase == "ready" {
+                    advance_onboarding_step(
+                        &window,
+                        &handle,
+                        &ob_for_continue,
+                        &onboarding_poll_timer_for_continue,
+                    );
+                    return;
+                }
+                let selection = {
+                    let guard = ob_for_continue.borrow();
+                    guard
+                        .selected_model_index
+                        .and_then(|i| guard.model_options.get(i))
+                        .map(|o| {
+                            (
+                                o.engine_id.clone(),
+                                o.model_id.clone(),
+                                o.backend_id.clone(),
+                                o.selection(),
+                            )
+                        })
+                };
+                let Some((engine_id, model_id, backend_id, selection)) = selection else {
+                    return;
+                };
+                if let Ok(mut settings) =
+                    souffle_lib::commands::get_settings(handle.state::<AppState>())
+                {
+                    settings.transcription_engine_id = engine_id;
+                    settings.transcription_model_id = model_id;
+                    settings.transcription_backend_id = backend_id;
+                    let state = handle.state::<AppState>();
+                    let _ = souffle_lib::commands::save_settings(handle.clone(), state, settings);
+                }
+                window.set_onboarding_busy(true);
+                window.set_onboarding_continue_enabled(false);
+                start_onboarding_model_transition(weak.clone(), handle.clone(), selection);
+            }
+            "shortcut" => {
+                let (auto_paste, recovery_only) = {
+                    let guard = ob_for_continue.borrow();
+                    (guard.auto_paste, guard.recovery_only)
+                };
+                if let Ok(mut settings) =
+                    souffle_lib::commands::get_settings(handle.state::<AppState>())
+                {
+                    settings.auto_paste = auto_paste;
+                    settings.autostart_enabled = onboarding_flags::decide_autostart_on_finish(
+                        recovery_only,
+                        settings.autostart_enabled,
+                    );
+                    let state = handle.state::<AppState>();
+                    let _ = souffle_lib::commands::save_settings(handle.clone(), state, settings);
+                }
+                onboarding_flags::mark_setup_complete();
+                *onboarding_poll_timer_for_continue.borrow_mut() = None;
+                window.set_onboarding_open(false);
+            }
+            _ => {}
+        }
+    });
+
+    should_show
+}
+
+/// Advances to the next step, stopping/starting the permissions poll timer
+/// as the wizard enters/leaves that step.
+fn advance_onboarding_step(
+    window: &MainWindow,
+    handle: &AppHandle,
+    ob: &Rc<RefCell<OnboardingState>>,
+    poll_timer: &Rc<RefCell<Option<slint::Timer>>>,
+) {
+    {
+        let mut guard = ob.borrow_mut();
+        if guard.step_index + 1 < guard.steps.len() {
+            guard.step_index += 1;
+        }
+    }
+    show_onboarding_step(window, handle, ob);
+    let now_on_permissions = {
+        let guard = ob.borrow();
+        guard.steps.get(guard.step_index) == Some(&"permissions")
+    };
+    if now_on_permissions {
+        *poll_timer.borrow_mut() = Some(start_onboarding_permission_poll(
+            window.as_weak(),
+            ob.clone(),
+        ));
+    } else {
+        *poll_timer.borrow_mut() = None;
+    }
+}
+
+fn apply_onboarding_shortcut(
+    handle: &AppHandle,
+    window: &MainWindow,
+    ob: &Rc<RefCell<OnboardingState>>,
+    value: String,
+) {
+    window.set_onboarding_shortcut_recording(false);
+    ob.borrow_mut().toggle_shortcut = value.clone();
+    let state = handle.state::<AppState>();
+    let mut shortcuts = souffle_lib::commands::get_shortcuts(state).unwrap_or_default();
+    shortcuts.toggle = value;
+    let state = handle.state::<AppState>();
+    match souffle_lib::commands::save_shortcuts(handle.clone(), state, shortcuts) {
+        Ok(()) => {
+            window.set_onboarding_shortcut_error("".into());
+            let guard = ob.borrow();
+            window.set_onboarding_toggle_shortcut_label(
+                format_shortcut_label(&guard.toggle_shortcut).into(),
+            );
+        }
+        Err(e) => window.set_onboarding_shortcut_error(e.into()),
+    }
+}
+
+/// Onboarding-scoped mirror of `start_model_transition` - same commands,
+/// separate `onboarding-*` window properties so this never touches the
+/// Settings tab's model state (the two overlays are never open together,
+/// but nothing here assumes that).
+fn start_onboarding_model_transition(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    selection: TranscriptionProfileSelection,
+) {
+    let state = handle.state::<AppState>();
+    let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
+        Ok(status) => status,
+        Err(e) => {
+            if let Some(window) = weak.upgrade() {
+                window.set_onboarding_busy(false);
+                window.set_onboarding_continue_enabled(true);
+                window.set_onboarding_status_message(e.into());
+            }
+            return;
+        }
+    };
+    let Some(window) = weak.upgrade() else {
+        return;
+    };
+    match status.phase {
+        TranscriptionRuntimePhase::Ready => {
+            window.set_onboarding_model_phase("ready".into());
+            window.set_onboarding_busy(false);
+            window.set_onboarding_continue_enabled(true);
+        }
+        TranscriptionRuntimePhase::LoadRequired => {
+            window.set_onboarding_model_phase("loading".into());
+            let weak2 = weak.clone();
+            let handle2 = handle.clone();
+            let selection2 = selection.clone();
+            slint::spawn_local(async move {
+                let handle3 = handle2.clone();
+                let result = tauri::async_runtime::spawn_blocking(move || {
+                    let state = handle3.state::<AppState>();
+                    souffle_lib::commands::load_model(state, selection2)
+                })
+                .await
+                .map_err(|e| format!("Join load_model task: {e}"))
+                .and_then(|r| r);
+                if let Some(window) = weak2.upgrade() {
+                    window.set_onboarding_busy(false);
+                    window.set_onboarding_continue_enabled(true);
+                    match result {
+                        Ok(()) => window.set_onboarding_model_phase("ready".into()),
+                        Err(e) => window.set_onboarding_status_message(e.into()),
+                    }
+                }
+            })
+            .expect("slint event loop not running");
+        }
+        TranscriptionRuntimePhase::DownloadRequired => {
+            window.set_onboarding_model_phase("downloading".into());
+            window.set_onboarding_download_progress_label("".into());
+            window.set_onboarding_download_progress_fraction(0.0);
+            let state = handle.state::<AppState>();
+            let channel =
+                onboarding_model_download_channel(weak.clone(), handle.clone(), selection.clone());
+            if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
+                window.set_onboarding_busy(false);
+                window.set_onboarding_continue_enabled(true);
+                window.set_onboarding_status_message(e.into());
+            }
+        }
+    }
+}
+
+fn onboarding_model_download_channel(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    selection: TranscriptionProfileSelection,
+) -> Channel<souffle_lib::models::DownloadProgress> {
+    Channel::new(move |body| {
+        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+            return Ok(());
+        };
+        let Ok(progress) = serde_json::from_str::<souffle_lib::models::DownloadProgress>(&json)
+        else {
+            return Ok(());
+        };
+        let weak = weak.clone();
+        let handle = handle.clone();
+        let selection = selection.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            match &progress.status {
+                souffle_lib::models::DownloadStatus::Starting
+                | souffle_lib::models::DownloadStatus::Downloading => {
+                    let fraction = progress
+                        .total_bytes
+                        .filter(|total| *total > 0)
+                        .map(|total| progress.downloaded_bytes as f32 / total as f32)
+                        .unwrap_or(0.0);
+                    window.set_onboarding_download_progress_fraction(fraction);
+                    window.set_onboarding_download_progress_label(progress.file.as_str().into());
+                }
+                souffle_lib::models::DownloadStatus::Complete => {
+                    window.set_onboarding_model_phase("loading".into());
+                    start_onboarding_model_transition(
+                        weak.clone(),
+                        handle.clone(),
+                        selection.clone(),
+                    );
+                }
+                souffle_lib::models::DownloadStatus::Error(e) => {
+                    window.set_onboarding_busy(false);
+                    window.set_onboarding_continue_enabled(true);
+                    window.set_onboarding_status_message(e.as_str().into());
+                }
+            }
+        });
+        Ok(())
+    })
+}
+
+/// "What's New" (a version bump since the last launch) + the automatic
+/// "Update Available" startup check - port of `bootstrap.ts`'s
+/// `whatsNew`/auto-check logic. Never stacks either dialog on top of the
+/// onboarding wizard (`onboarding_open`), matching `bootstrap.ts`'s own
+/// "never stacks on the wizard" comment.
+fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_open: bool) {
+    let handle = tauri_handle.clone();
+    window.on_whats_new_dismissed(move || {
+        let state = handle.state::<AppState>();
+        if let Ok(mut settings) = souffle_lib::commands::get_settings(state) {
+            settings.last_seen_version = souffle_lib::commands::get_app_version().version;
+            let state = handle.state::<AppState>();
+            let _ = souffle_lib::commands::save_settings(handle.clone(), state, settings);
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_update_download_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_update_phase("downloading".into());
+        window.set_update_error_message("".into());
+        let weak = weak.clone();
+        let handle = handle.clone();
+        slint::spawn_local(async move {
+            let result = souffle_lib::commands::download_update(handle).await;
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            match result {
+                Ok(status) if status.error.is_none() => window.set_update_phase("ready".into()),
+                Ok(status) => {
+                    window.set_update_phase("failed".into());
+                    window.set_update_error_message(status.error.unwrap_or_default().into());
+                }
+                Err(e) => {
+                    window.set_update_phase("failed".into());
+                    window.set_update_error_message(e.into());
+                }
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_update_install_requested(move || {
+        let weak = weak.clone();
+        let handle = handle.clone();
+        slint::spawn_local(async move {
+            let state = handle.state::<AppState>();
+            if let Err(e) = souffle_lib::commands::install_update(handle.clone(), state).await
+                && let Some(window) = weak.upgrade()
+            {
+                window.set_update_error_message(e.into());
+            }
+            // On success the process restarts itself; nothing left to update here.
+        })
+        .expect("slint event loop not running");
+    });
+
+    let weak = window.as_weak();
+    window.on_update_open_release_requested(move || {
+        if let Some(window) = weak.upgrade() {
+            let url = window.get_update_release_url().to_string();
+            if !url.is_empty() {
+                let _ = souffle_lib::commands::open_release_page(url);
+            }
+        }
+    });
+
+    window.on_update_dismiss_requested(move || {});
+
+    // Only `https://github.com/...` links are ever emitted by real content
+    // (whole-line links from `check_for_updates`/`whatsNewFallback`), same
+    // constraint `open_release_page` enforces server-side - mirrors the
+    // Svelte version's own comment on why this restriction exists.
+    window.on_whats_new_link_clicked(move |url| {
+        if url.starts_with("https://github.com/") {
+            let _ = souffle_lib::commands::open_release_page(url.to_string());
+        }
+    });
+    window.on_update_link_clicked(move |url| {
+        if url.starts_with("https://github.com/") {
+            let _ = souffle_lib::commands::open_release_page(url.to_string());
+        }
+    });
+
+    if onboarding_open {
+        return;
+    }
+
+    let handle = tauri_handle;
+    let weak = window.as_weak();
+    let Ok(settings) = souffle_lib::commands::get_settings(handle.state::<AppState>()) else {
+        return;
+    };
+    let app_version = souffle_lib::commands::get_app_version();
+    let current_version = app_version.version.clone();
+    let setup_done = onboarding_flags::read_setup_flags().setup_done;
+
+    if app_version.is_local_build {
+        // No release notes to show for a local checkout build.
+    } else if !setup_done || settings.last_seen_version.is_empty() {
+        // First launch / unfinished setup: stamp silently so the changelog
+        // never stacks on the wizard and doesn't pop right after it either.
+        if settings.last_seen_version != current_version {
+            let mut next = settings.clone();
+            next.last_seen_version = current_version.clone();
+            let state = handle.state::<AppState>();
+            let _ = souffle_lib::commands::save_settings(handle.clone(), state, next);
+        }
+    } else if settings.last_seen_version != current_version {
+        window.set_whats_new_version(current_version.clone().into());
+        let blocks = markdown::render_blocks(&format!("Mis à jour vers v{current_version}."));
+        window.set_whats_new_content_blocks(std::rc::Rc::new(slint::VecModel::from(blocks)).into());
+        window.set_whats_new_open(true);
+    }
+
+    if settings.auto_update_check_enabled && !window.get_whats_new_open() {
+        slint::spawn_local(async move {
+            let Ok(result) = souffle_lib::commands::check_for_updates().await else {
+                return;
+            };
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            if result.update_available && result.check_error.is_none() {
+                window.set_update_latest_version(result.latest_version.unwrap_or_default().into());
+                let notes = result
+                    .release_notes
+                    .unwrap_or_else(|| "Voir les notes de version sur GitHub.".to_string());
+                let blocks = markdown::render_blocks(&notes);
+                window.set_update_release_notes_blocks(
+                    std::rc::Rc::new(slint::VecModel::from(blocks)).into(),
+                );
+                window.set_update_release_url(result.release_url.unwrap_or_default().into());
+                window.set_update_phase("idle".into());
+                let state = handle.state::<AppState>();
+                let blocked = souffle_lib::commands::get_update_install_block(state)
+                    .ok()
+                    .flatten();
+                window.set_update_install_blocked_reason(
+                    blocked
+                        .map(|r| r.as_str().to_string())
+                        .unwrap_or_default()
+                        .into(),
+                );
+                window.set_update_available_open(true);
+            }
+        })
+        .expect("slint event loop not running");
+    }
 }
 
 /// Milestone 3 wires the real Timeline (this function); milestones 4-6 wire
@@ -2783,6 +3718,8 @@ fn main() {
     window.set_settings_app_version(souffle_lib::commands::get_app_version().version.into());
 
     refresh_timeline(&window, &tauri_handle);
+    let onboarding_open = wire_onboarding_callbacks(&window, tauri_handle.clone());
+    wire_update_dialogs(&window, tauri_handle.clone(), onboarding_open);
     wire_callbacks(&window, tauri_handle);
 
     window.run().expect("event loop failed");

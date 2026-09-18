@@ -1,0 +1,11 @@
+// A single block of pre-parsed Markdown content (`markdown.rs` on the Rust
+// side). Slint's `@markdown()` builtin only accepts a string literal, not a
+// runtime expression, so dynamic content (release notes, changelogs) is
+// parsed into these blocks in Rust and rendered with real per-kind styling
+// here instead - see `markdown.rs`'s module doc for what is and isn't
+// supported.
+export struct MarkdownBlock {
+    kind: string, // "heading" | "bullet" | "paragraph" | "link"
+    text: string,
+    url: string,
+}

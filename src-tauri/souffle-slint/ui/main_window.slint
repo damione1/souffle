@@ -2,6 +2,11 @@ import { IdleView } from "idle_view.slint";
 import { RecordingView } from "recording_view.slint";
 import { MeetingDetail } from "meeting_detail.slint";
 import { SettingsView } from "settings_view.slint";
+import { OnboardingView } from "onboarding_view.slint";
+import { PermissionRow } from "components/onboarding/permissions_step.slint";
+import { WhatsNewDialog } from "components/onboarding/whats_new_dialog.slint";
+import { UpdateAvailableDialog } from "components/onboarding/update_available_dialog.slint";
+import { MarkdownBlock } from "components/onboarding/markdown_block.slint";
 import { CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneRow } from "components/settings/microphone_section.slint";
 import { DictionaryRow } from "components/settings/dictionary_section.slint";
@@ -291,6 +296,73 @@ export component MainWindow inherits Window {
         root.meeting-detail-transcript-scroll-top = 0px;
     }
 
+    // SOU-190: first-run wizard, drawn above everything else while visible -
+    // same overlay-not-replace pattern as `settings-open`.
+    in-out property <bool> onboarding-open: false;
+    in property <string> onboarding-locale;
+    in property <int> onboarding-step-index;
+    in property <int> onboarding-step-count;
+    in property <string> onboarding-step;
+    in property <string> onboarding-title;
+    in property <string> onboarding-subtitle;
+    in property <string> onboarding-status-message;
+    in property <[PermissionRow]> onboarding-permission-rows;
+    in property <string> onboarding-permissions-error;
+    in property <bool> onboarding-repair-busy;
+    in property <bool> onboarding-repair-success;
+    in property <bool> onboarding-repair-cooldown;
+    in property <[string]> onboarding-device-labels;
+    in property <string> onboarding-selected-device-label;
+    in property <string> onboarding-model-phase;
+    in property <[string]> onboarding-model-labels;
+    in property <string> onboarding-selected-model-label;
+    in property <string> onboarding-download-progress-label;
+    in property <float> onboarding-download-progress-fraction;
+    in property <string> onboarding-toggle-shortcut-label;
+    in-out property <bool> onboarding-shortcut-recording: false;
+    in-out property <string> onboarding-shortcut-error: "";
+    in property <bool> onboarding-auto-paste;
+    in property <bool> onboarding-accessibility-granted;
+    in property <bool> onboarding-busy;
+    in property <bool> onboarding-continue-enabled: true;
+    in property <string> onboarding-continue-label;
+
+    callback onboarding-locale-changed(string);
+    callback onboarding-grant-requested(string);
+    callback onboarding-hint-action-requested(string);
+    callback onboarding-repair-requested();
+    callback onboarding-device-changed(string);
+    callback onboarding-refresh-devices-requested();
+    callback onboarding-model-picked(string);
+    callback onboarding-shortcut-record-requested();
+    callback onboarding-shortcut-captured(string, bool, bool, bool, bool);
+    callback onboarding-shortcut-released(string, bool, bool, bool, bool);
+    callback onboarding-shortcut-cleared();
+    callback onboarding-shortcut-cancelled();
+    callback onboarding-auto-paste-changed(bool);
+    callback onboarding-review-accessibility-requested();
+    callback onboarding-back-requested();
+    callback onboarding-continue-requested();
+
+    in-out property <bool> whats-new-open: false;
+    in property <string> whats-new-version;
+    in property <[MarkdownBlock]> whats-new-content-blocks;
+    callback whats-new-dismissed();
+    callback whats-new-link-clicked(string);
+
+    in-out property <bool> update-available-open: false;
+    in property <string> update-latest-version;
+    in property <[MarkdownBlock]> update-release-notes-blocks;
+    in property <string> update-release-url;
+    in property <string> update-phase;
+    in property <string> update-error-message;
+    in property <string> update-install-blocked-reason;
+    callback update-download-requested();
+    callback update-install-requested();
+    callback update-open-release-requested();
+    callback update-dismiss-requested();
+    callback update-link-clicked(string);
+
     if root.recording-mode == RecordingMode.idle && root.active-meeting-id == "": IdleView {
         dictation-shortcut: root.dictation-shortcut;
         model-ready: root.model-ready;
@@ -549,5 +621,87 @@ export component MainWindow inherits Window {
         snippet-edit-requested(id) => { root.settings-snippet-edit-requested(id); }
         snippet-cancel-edit-requested => { root.settings-snippet-cancel-edit-requested(); }
         snippet-save-edit-requested(id, trigger, expansion) => { root.settings-snippet-save-edit-requested(id, trigger, expansion); }
+    }
+
+    // Drawn last of all: the first-run wizard takes over the whole window
+    // until finished, above even the Settings overlay (the two are never
+    // open at the same time in practice, but this ordering is the honest
+    // one if they ever were).
+    if root.onboarding-open: OnboardingView {
+        width: 100%;
+        height: 100%;
+        locale: root.onboarding-locale;
+        step-index: root.onboarding-step-index;
+        step-count: root.onboarding-step-count;
+        step: root.onboarding-step;
+        title: root.onboarding-title;
+        subtitle: root.onboarding-subtitle;
+        status-message: root.onboarding-status-message;
+        permission-rows: root.onboarding-permission-rows;
+        permissions-error: root.onboarding-permissions-error;
+        repair-busy: root.onboarding-repair-busy;
+        repair-success: root.onboarding-repair-success;
+        repair-cooldown: root.onboarding-repair-cooldown;
+        device-labels: root.onboarding-device-labels;
+        selected-device-label: root.onboarding-selected-device-label;
+        model-phase: root.onboarding-model-phase;
+        model-labels: root.onboarding-model-labels;
+        selected-model-label: root.onboarding-selected-model-label;
+        download-progress-label: root.onboarding-download-progress-label;
+        download-progress-fraction: root.onboarding-download-progress-fraction;
+        toggle-shortcut-label: root.onboarding-toggle-shortcut-label;
+        shortcut-recording: root.onboarding-shortcut-recording;
+        shortcut-error: root.onboarding-shortcut-error;
+        auto-paste: root.onboarding-auto-paste;
+        accessibility-granted: root.onboarding-accessibility-granted;
+        busy: root.onboarding-busy;
+        continue-enabled: root.onboarding-continue-enabled;
+        continue-label: root.onboarding-continue-label;
+        locale-changed(value) => { root.onboarding-locale-changed(value); }
+        grant-requested(kind) => { root.onboarding-grant-requested(kind); }
+        hint-action-requested(kind) => { root.onboarding-hint-action-requested(kind); }
+        repair-requested => { root.onboarding-repair-requested(); }
+        device-changed(value) => { root.onboarding-device-changed(value); }
+        refresh-devices-requested => { root.onboarding-refresh-devices-requested(); }
+        model-picked(value) => { root.onboarding-model-picked(value); }
+        shortcut-record-requested => { root.onboarding-shortcut-record-requested(); }
+        shortcut-captured(text, ctrl, shift, alt, meta) => { root.onboarding-shortcut-captured(text, ctrl, shift, alt, meta); }
+        shortcut-released(text, ctrl, shift, alt, meta) => { root.onboarding-shortcut-released(text, ctrl, shift, alt, meta); }
+        shortcut-cleared => { root.onboarding-shortcut-cleared(); }
+        shortcut-cancelled => { root.onboarding-shortcut-cancelled(); }
+        auto-paste-changed(value) => { root.onboarding-auto-paste-changed(value); }
+        review-accessibility-requested => { root.onboarding-review-accessibility-requested(); }
+        back-requested => { root.onboarding-back-requested(); }
+        continue-requested => { root.onboarding-continue-requested(); }
+    }
+
+    if root.whats-new-open: WhatsNewDialog {
+        width: 100%;
+        height: 100%;
+        version: root.whats-new-version;
+        content-blocks: root.whats-new-content-blocks;
+        dismissed => {
+            root.whats-new-open = false;
+            root.whats-new-dismissed();
+        }
+        link-clicked(url) => { root.whats-new-link-clicked(url); }
+    }
+
+    if root.update-available-open: UpdateAvailableDialog {
+        width: 100%;
+        height: 100%;
+        latest-version: root.update-latest-version;
+        release-notes-blocks: root.update-release-notes-blocks;
+        phase: root.update-phase;
+        error-message: root.update-error-message;
+        install-blocked-reason: root.update-install-blocked-reason;
+        download-requested => { root.update-download-requested(); }
+        install-requested => { root.update-install-requested(); }
+        open-release-requested => { root.update-open-release-requested(); }
+        dismiss-requested => {
+            root.update-available-open = false;
+            root.update-dismiss-requested();
+        }
+        link-clicked(url) => { root.update-link-clicked(url); }
     }
 }

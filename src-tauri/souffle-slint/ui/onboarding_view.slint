@@ -1,0 +1,295 @@
+import { Button, ComboBox, Switch, Palette } from "std-widgets.slint";
+import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
+import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
+
+// Port of OnboardingView.svelte (+ PermissionsStep.svelte inlined as the
+// first step). Model download and shortcut capture reuse the same Rust
+// modules (`model_ui.rs`, `shortcut_capture.rs`) the Settings tab uses, but
+// through their own `onboarding-*` window properties - this overlay and the
+// Settings overlay are never visible at the same time, but keeping their
+// state separate avoids one leaking into the other's fields.
+export component OnboardingView inherits Rectangle {
+    in property <string> locale;
+    in property <int> step-index;
+    in property <int> step-count;
+    in property <string> step; // "permissions" | "microphone" | "model" | "shortcut"
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> status-message;
+
+    in property <[PermissionRow]> permission-rows;
+    in property <string> permissions-error;
+    in property <bool> repair-busy;
+    in property <bool> repair-success;
+    in property <bool> repair-cooldown;
+
+    in property <[string]> device-labels;
+    in property <string> selected-device-label;
+
+    in property <string> model-phase; // "pick" | "downloading" | "loading" | "ready"
+    in property <[string]> model-labels;
+    in property <string> selected-model-label;
+    in property <string> download-progress-label;
+    in property <float> download-progress-fraction;
+
+    in property <string> toggle-shortcut-label;
+    in property <bool> shortcut-recording;
+    in property <string> shortcut-error;
+    in property <bool> auto-paste;
+    in property <bool> accessibility-granted;
+
+    in property <bool> busy;
+    in property <bool> continue-enabled: true;
+    in property <string> continue-label;
+
+    callback locale-changed(string);
+    callback grant-requested(string);
+    callback hint-action-requested(string);
+    callback repair-requested();
+    callback device-changed(string);
+    callback refresh-devices-requested();
+    callback model-picked(string);
+    callback shortcut-record-requested();
+    callback shortcut-captured(string, bool, bool, bool, bool);
+    callback shortcut-released(string, bool, bool, bool, bool);
+    callback shortcut-cleared();
+    callback shortcut-cancelled();
+    callback auto-paste-changed(bool);
+    callback review-accessibility-requested();
+    callback back-requested();
+    callback continue-requested();
+
+    background: Palette.background;
+
+    VerticalLayout {
+        alignment: center;
+        padding: 48px;
+
+        VerticalLayout {
+            max-width: 480px;
+            spacing: 20px;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 8px;
+
+                Text {
+                    text: "Soufflé";
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: white;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Dictée et transcription de réunion, 100% locale.";
+                    font-size: 12px;
+                    color: #999;
+                    horizontal-alignment: center;
+                }
+
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 4px;
+                    Button {
+                        text: "English";
+                        checkable: true;
+                        checked: root.locale == "en";
+                        clicked => { root.locale-changed("en"); }
+                    }
+                    Button {
+                        text: "Français";
+                        checkable: true;
+                        checked: root.locale == "fr";
+                        clicked => { root.locale-changed("fr"); }
+                    }
+                }
+            }
+
+            if root.step-count > 1: HorizontalLayout {
+                alignment: center;
+                spacing: 6px;
+                for i in root.step-count: Rectangle {
+                    width: 24px;
+                    height: 6px;
+                    background: i == root.step-index ? #5b9dfa : #3a3a3a;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: root.title;
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: white;
+                }
+                Text {
+                    text: root.subtitle;
+                    font-size: 12px;
+                    color: #999;
+                    wrap: word-wrap;
+                }
+            }
+
+            if root.status-message != "": Rectangle {
+                border-width: 1px;
+                border-color: #a06a1a;
+                border-radius: 6px;
+                background: #3a2c14;
+                VerticalLayout {
+                    padding: 8px;
+                    Text {
+                        text: root.status-message;
+                        color: #f0c674;
+                        font-size: 11.5px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            if root.step == "permissions": PermissionsStep {
+                rows: root.permission-rows;
+                error-message: root.permissions-error;
+                repair-busy: root.repair-busy;
+                repair-success: root.repair-success;
+                repair-cooldown: root.repair-cooldown;
+                grant-requested(kind) => { root.grant-requested(kind); }
+                hint-action-requested(kind) => { root.hint-action-requested(kind); }
+                repair-requested => { root.repair-requested(); }
+            }
+
+            if root.step == "microphone": VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    ComboBox {
+                        model: root.device-labels;
+                        current-value: root.selected-device-label;
+                        selected(value) => { root.device-changed(value); }
+                    }
+                    Button {
+                        text: "Actualiser";
+                        clicked => { root.refresh-devices-requested(); }
+                    }
+                }
+                Text {
+                    text: "Le microphone peut être changé plus tard dans les Réglages.";
+                    font-size: 11px;
+                    color: #999;
+                    wrap: word-wrap;
+                }
+            }
+
+            if root.step == "model": VerticalLayout {
+                spacing: 8px;
+
+                if root.model-phase == "downloading": VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Téléchargement du modèle…"; font-size: 12px; color: #ccc; }
+                    Text { text: root.download-progress-label; font-size: 10.5px; color: #999; }
+                    Rectangle {
+                        height: 6px;
+                        border-radius: 3px;
+                        background: #3a3a3a;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * max(0.02, root.download-progress-fraction);
+                            height: 100%;
+                            border-radius: 3px;
+                            background: #5b9dfa;
+                        }
+                    }
+                }
+                if root.model-phase == "loading": Text {
+                    text: "Chargement du modèle…";
+                    font-size: 12px;
+                    color: #ccc;
+                }
+                if root.model-phase == "ready": Text {
+                    text: "Modèle prêt.";
+                    font-size: 12px;
+                    color: #6fcf7a;
+                }
+                if root.model-phase == "pick": ComboBox {
+                    model: root.model-labels;
+                    current-value: root.selected-model-label;
+                    selected(value) => { root.model-picked(value); }
+                }
+            }
+
+            if root.step == "shortcut": VerticalLayout {
+                spacing: 10px;
+
+                ShortcutRecorderButton {
+                    shortcut-label: root.toggle-shortcut-label;
+                    recording: root.shortcut-recording;
+                    record-requested => { root.shortcut-record-requested(); }
+                    captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(text, ctrl, shift, alt, meta); }
+                    released(text, ctrl, shift, alt, meta) => { root.shortcut-released(text, ctrl, shift, alt, meta); }
+                    cleared => { root.shortcut-cleared(); }
+                    cancelled => { root.shortcut-cancelled(); }
+                }
+
+                if root.shortcut-error != "": Text {
+                    text: root.shortcut-error;
+                    color: #f08080;
+                    font-size: 11px;
+                }
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: "Coller automatiquement le texte transcrit";
+                        font-size: 12px;
+                        color: #ccc;
+                        vertical-alignment: center;
+                    }
+                    Switch {
+                        checked: root.auto-paste;
+                        toggled => { root.auto-paste-changed(self.checked); }
+                    }
+                }
+
+                if !root.accessibility-granted: HorizontalLayout {
+                    alignment: space-between;
+                    spacing: 8px;
+                    Text {
+                        text: "Le collage automatique nécessite la permission Accessibilité.";
+                        color: #f0c674;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "Vérifier";
+                        clicked => { root.review-accessibility-requested(); }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+
+                if root.step-index > 0: Button {
+                    text: "Retour";
+                    enabled: !root.busy;
+                    clicked => { root.back-requested(); }
+                }
+                if root.step-index == 0 && root.step == "permissions": Text {
+                    text: "Les permissions peuvent être accordées plus tard.";
+                    font-size: 10.5px;
+                    color: #777;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Button {
+                    text: root.continue-label;
+                    enabled: !root.busy && root.continue-enabled;
+                    clicked => { root.continue-requested(); }
+                }
+            }
+        }
+    }
+}
