@@ -2778,7 +2778,7 @@ fn wire_callbacks(
     // the whole object back (matching `saveSettings()` in
     // controller.svelte.ts) - every field-level callback below mutates this
     // cache and re-saves it, it never redeclares state on the Slint side.
-    let settings_state = SettingsCache::new();
+    let settings_state = SettingsCache::new(window);
     let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     let polish_prompt_save_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     let summary_prompt_save_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));

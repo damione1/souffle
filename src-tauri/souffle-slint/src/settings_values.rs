@@ -16,21 +16,24 @@ use crate::{MainWindow, Theme, audio_ui, ia_ui, model_ui, settings_ui};
 pub(crate) struct SettingsCache {
     snapshot: Rc<RefCell<Option<AppSettings>>>,
     known: Rc<Cell<bool>>,
+    window: slint::Weak<MainWindow>,
 }
 
 impl SettingsCache {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(window: &MainWindow) -> Self {
         Self {
             snapshot: Rc::new(RefCell::new(None)),
             known: Rc::new(Cell::new(false)),
+            window: window.as_weak(),
         }
     }
 
     #[cfg(test)]
-    fn with_observed(settings: AppSettings) -> Self {
+    fn with_observed(window: &MainWindow, settings: AppSettings) -> Self {
         Self {
             snapshot: Rc::new(RefCell::new(Some(settings))),
             known: Rc::new(Cell::new(true)),
+            window: window.as_weak(),
         }
     }
 
@@ -49,6 +52,22 @@ impl SettingsCache {
 
     fn mark_unknown(&self) {
         self.known.set(false);
+    }
+
+    fn publish_save_status(&self, outcome: &SettingsSaveOutcome) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let message = match outcome {
+            SettingsSaveOutcome::Observed { result, .. } => {
+                result.as_ref().err().cloned().unwrap_or_default()
+            }
+            SettingsSaveOutcome::Unavailable { result, read_error } => match result {
+                Ok(()) => format!("Stored settings are unknown: {read_error}"),
+                Err(error) => format!("{error}. Stored settings are unknown: {read_error}"),
+            },
+        };
+        window.set_settings_save_error(message.into());
     }
 
     #[cfg(test)]
@@ -83,10 +102,12 @@ pub(crate) fn save_field(
             }
             Err(read_error) => {
                 cache.mark_unknown();
-                return SettingsSaveOutcome::Unavailable {
+                let outcome = SettingsSaveOutcome::Unavailable {
                     result: Err("Settings could not be loaded before saving".into()),
                     read_error,
                 };
+                cache.publish_save_status(&outcome);
+                return outcome;
             }
         },
     };
@@ -106,6 +127,7 @@ pub(crate) fn save_field(
         }
         SettingsSaveOutcome::Unavailable { .. } => cache.mark_unknown(),
     }
+    cache.publish_save_status(&outcome);
     outcome
 }
 
@@ -147,7 +169,7 @@ impl SettingsValueController {
             return;
         };
         match outcome {
-            SettingsSaveOutcome::Observed { settings, result } => {
+            SettingsSaveOutcome::Observed { settings, .. } => {
                 let theme_changed =
                     settings_ui::theme_from_slint(window.get_settings_theme()) != settings.theme;
                 self.project(&window, &settings);
@@ -158,15 +180,8 @@ impl SettingsValueController {
                     window.global::<Theme>().set_dark(dark);
                     (self.apply_appearance)(dark);
                 }
-                window.set_settings_save_error(result.err().unwrap_or_default().into());
             }
-            SettingsSaveOutcome::Unavailable { result, read_error } => {
-                let message = match result {
-                    Ok(()) => format!("Stored settings are unknown: {read_error}"),
-                    Err(error) => format!("{error}. Stored settings are unknown: {read_error}"),
-                };
-                window.set_settings_save_error(message.into());
-            }
+            SettingsSaveOutcome::Unavailable { .. } => {}
         }
     }
 
@@ -393,7 +408,7 @@ mod tests {
                 .global::<Theme>()
                 .set_dark(settings_ui::resolve_dark(initial.theme));
 
-            let cache = SettingsCache::with_observed(initial);
+            let cache = SettingsCache::with_observed(&window, initial);
             let fallback_loads = Rc::new(Cell::new(0));
             let saves = Rc::new(Cell::new(0));
             let load_db = db.clone();
@@ -573,7 +588,7 @@ mod tests {
         initial.save(&db).unwrap();
         settings_ui::populate(&window, &initial);
 
-        let cache = SettingsCache::with_observed(initial);
+        let cache = SettingsCache::with_observed(&window, initial);
         let step = Rc::new(Cell::new(0));
         let load_db = db.clone();
         let save_db = db.clone();
@@ -683,5 +698,37 @@ mod tests {
         assert_eq!(stored.paste_delay_ms, 275);
         assert_eq!(stored.calendar_selected_ids, ["calendar-a"]);
         assert!(cache.is_known());
+        assert!(window.get_settings_save_error().is_empty());
+
+        let rejected_save_db = db.clone();
+        let rejected = save_field(
+            &cache,
+            || unreachable!("the observed cache must avoid a fallback read"),
+            move |_| SettingsSaveOutcome::Observed {
+                settings: Box::new(AppSettings::load(&rejected_save_db).unwrap()),
+                result: Err("legacy write rejected".into()),
+            },
+            |_| {},
+        );
+        assert!(matches!(
+            rejected,
+            SettingsSaveOutcome::Observed { result: Err(_), .. }
+        ));
+        assert!(
+            window
+                .get_settings_save_error()
+                .contains("legacy write rejected")
+        );
+        let clear_save_db = db.clone();
+        save_field(
+            &cache,
+            || unreachable!("the observed cache must avoid a fallback read"),
+            move |candidate| {
+                let result = candidate.save(&clear_save_db);
+                SettingsSaveOutcome::from_results(result, AppSettings::load(&clear_save_db))
+            },
+            |_| {},
+        );
+        assert!(window.get_settings_save_error().is_empty());
     }
 }
