@@ -1,5 +1,8 @@
-import { Switch, Slider } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedSlider } from "../themed_slider.slint";
 
 // Port of FeedbackSoundsSettingsSection.svelte.
 export component FeedbackSoundsSection inherits VerticalLayout {
@@ -9,46 +12,46 @@ export component FeedbackSoundsSection inherits VerticalLayout {
     callback enabled-changed(bool);
     callback volume-changed(int);
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Sons de retour";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: white;
-    }
+    SettingsGroup {
+        title: "SONS DE DICTÉE";
 
-    SettingsField {
-        label: "Activer les sons";
-        description: "Jouer un son au démarrage et à l'arrêt de l'enregistrement.";
+        SettingsField {
+            show-divider: false;
+            label: "Activer les sons";
+            description: "Jouer un son au démarrage et à l'arrêt de l'enregistrement.";
 
-        Switch {
-            checked: root.enabled;
-            toggled => { root.enabled-changed(self.checked); }
-        }
-    }
-
-    if root.enabled: SettingsField {
-        label: "Volume";
-
-        HorizontalLayout {
-            spacing: 10px;
-            max-width: 220px;
-
-            Slider {
-                minimum: 0;
-                maximum: 100;
-                value: root.volume;
-                horizontal-stretch: 1;
-                changed(value) => { root.volume-changed(round(value)); }
+            ThemedSwitch {
+                control-label: "Activer les sons";
+                checked: root.enabled;
+                toggled(new) => { root.enabled-changed(new); }
             }
+        }
 
-            Text {
-                text: root.volume + "%";
-                color: #999;
-                font-size: 11.5px;
-                vertical-alignment: center;
-                width: 34px;
+        if root.enabled: SettingsField {
+            label: "Volume";
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: center;
+                horizontal-stretch: 0;
+
+                ThemedSlider {
+                    value: root.volume;
+                    minimum: 0;
+                    maximum: 100;
+                    changed(value) => { root.volume-changed(value); }
+                }
+
+                Text {
+                    text: root.volume + "%";
+                    color: Theme.text-muted;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    width: 34px;
+                }
             }
         }
     }

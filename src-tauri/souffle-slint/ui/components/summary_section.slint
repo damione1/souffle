@@ -1,6 +1,7 @@
+import { Theme } from "../theme.slint";
 // Port of MeetingSummarySection.svelte + MeetingStructuredSummarySection.svelte
 // - read-only display only (SOU-187 milestone 9, remaining part of AC13).
-// Generation itself (model/template pickers, the "Générer"/"Regénérer"
+// Generation itself (model/template pickers, the "Générer"/"Régénérer"
 // button, streaming progress) is not wired here: it needs the same
 // Channel-based streaming plumbing as milestone 5's live transcript, which
 // is a separate, substantial piece of work. Said here rather than a
@@ -21,11 +22,22 @@ export component SummarySection inherits VerticalLayout {
 
     spacing: 8px;
 
-    if root.summary == "": Text {
-        text: "Aucun r\u{e9}sum\u{e9} g\u{e9}n\u{e9}r\u{e9} pour cette r\u{e9}union (g\u{e9}n\u{e9}ration pas encore branch\u{e9}e ici).";
-        color: #888888;
-        font-size: 11px;
-        wrap: word-wrap;
+    if root.summary == "": VerticalLayout {
+        spacing: 4px;
+
+        Text {
+            text: "R\u{e9}sum\u{e9}";
+            font-size: 11px;
+            font-weight: 600;
+            color: Theme.text-muted;
+        }
+
+        Text {
+            text: "Aucun r\u{e9}sum\u{e9} pour cette r\u{e9}union.";
+            color: Theme.text-muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
     }
 
     if root.summary != "": VerticalLayout {
@@ -39,7 +51,7 @@ export component SummarySection inherits VerticalLayout {
                 text: "R\u{e9}sum\u{e9}";
                 font-size: 11px;
                 font-weight: 600;
-                color: #888888;
+                color: Theme.text-muted;
                 vertical-alignment: center;
             }
 
@@ -47,14 +59,14 @@ export component SummarySection inherits VerticalLayout {
                 text: root.summary-model-label;
                 font-family: "monospace";
                 font-size: 10.5px;
-                color: #777777;
+                color: Theme.text-faint;
                 vertical-alignment: center;
             }
         }
 
         if root.summary-is-stale: Text {
             text: "R\u{e9}sum\u{e9} obsol\u{e8}te (audio ajout\u{e9} depuis)";
-            color: #d4a72c;
+            color: Theme.warning;
             font-size: 11px;
         }
 
@@ -68,7 +80,7 @@ export component SummarySection inherits VerticalLayout {
                     text: (index + 1) + ".";
                     font-family: "monospace";
                     font-size: 11px;
-                    color: #4a9eff;
+                    color: Theme.accent;
                     width: 18px;
                 }
                 Text {
@@ -82,7 +94,7 @@ export component SummarySection inherits VerticalLayout {
 
         Rectangle {
             border-width: 1px;
-            border-color: #3a3a3a;
+            border-color: Theme.surface-4;
 
             VerticalLayout {
                 padding: 12px;
@@ -102,12 +114,12 @@ export component SummarySection inherits VerticalLayout {
                 text: "D\u{e9}cisions";
                 font-size: 11px;
                 font-weight: 600;
-                color: #888888;
+                color: Theme.text-muted;
             }
             for decision in root.decisions: Text {
                 text: "\u{2022} " + decision;
                 font-size: 12px;
-                color: #4a9eff;
+                color: Theme.accent;
                 wrap: word-wrap;
             }
         }
@@ -119,7 +131,7 @@ export component SummarySection inherits VerticalLayout {
                 text: "Actions";
                 font-size: 11px;
                 font-weight: 600;
-                color: #888888;
+                color: Theme.text-muted;
             }
             for item in root.action-items: VerticalLayout {
                 Text {
@@ -131,7 +143,7 @@ export component SummarySection inherits VerticalLayout {
                     text: "\u{2192} " + item.owner;
                     font-family: "monospace";
                     font-size: 10.5px;
-                    color: #777777;
+                    color: Theme.text-faint;
                 }
             }
         }
@@ -143,12 +155,12 @@ export component SummarySection inherits VerticalLayout {
                 text: "Questions ouvertes";
                 font-size: 11px;
                 font-weight: 600;
-                color: #888888;
+                color: Theme.text-muted;
             }
             for question in root.open-questions: Text {
                 text: "\u{2022} " + question;
                 font-size: 12px;
-                color: #cccccc;
+                color: Theme.text-secondary;
                 wrap: word-wrap;
             }
         }

@@ -1,5 +1,8 @@
-import { Switch, Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton } from "../themed_button.slint";
 
 // Port of AboutSettingsSection.svelte. `UpdateAction` (the download-progress
 // + install button shown once an update is found) is not built here - a
@@ -18,65 +21,88 @@ export component AboutSection inherits VerticalLayout {
     callback check-updates-requested();
     callback auto-update-check-changed(bool);
 
-    spacing: 8px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "À propos";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: white;
-    }
+    SettingsGroup {
+        title: "À PROPOS";
 
-    HorizontalLayout {
-        alignment: space-between;
-        Text { text: "Version"; font-size: 12.5px; color: #999; }
-        Text { text: "v" + root.app-version; font-size: 12.5px; color: #ddd; }
-    }
-    HorizontalLayout {
-        alignment: space-between;
-        Text { text: "Transcription"; font-size: 12.5px; color: #999; }
-        Text { text: root.transcription-label; font-size: 12.5px; color: #ddd; }
-    }
-    HorizontalLayout {
-        alignment: space-between;
-        Text { text: "Résumés"; font-size: 12.5px; color: #999; }
-        Text { text: root.summary-label; font-size: 12.5px; color: #ddd; }
-    }
-    HorizontalLayout {
-        alignment: space-between;
-        Text { text: "Confidentialité"; font-size: 12.5px; color: #999; }
-        Text { text: "100% local"; font-size: 12.5px; color: #ddd; }
-    }
+        SettingsField {
+            show-divider: false;
+            label: "Version";
 
-    HorizontalLayout {
-        alignment: space-between;
-        Text {
-            text: "Mises à jour";
-            font-size: 12.5px;
-            color: #999;
-            vertical-alignment: center;
+            Text {
+                text: root.app-version == "local build" ? "Build local" : "v" + root.app-version;
+                font-size: 13px;
+                color: Theme.text-secondary;
+                horizontal-alignment: right;
+                overflow: elide;
+                width: Theme.settings-control-width;
+                vertical-alignment: center;
+            }
         }
-        Button {
-            text: root.checking-updates ? "Vérification…" : "Vérifier les mises à jour";
-            enabled: !root.checking-updates;
-            clicked => { root.check-updates-requested(); }
+
+        SettingsField {
+            label: "Transcription";
+
+            Text {
+                text: root.transcription-label;
+                font-size: 13px;
+                color: Theme.text-secondary;
+                horizontal-alignment: right;
+                overflow: elide;
+                width: Theme.settings-control-width;
+                vertical-alignment: center;
+            }
         }
-    }
 
-    if root.update-status != "": Text {
-        text: root.update-status;
-        font-size: 11.5px;
-        color: #999;
-        wrap: word-wrap;
-    }
+        SettingsField {
+            label: "Résumés";
 
-    SettingsField {
-        label: "Vérification automatique";
-        description: "Vérifier les mises à jour au démarrage.";
+            Text {
+                text: root.summary-label;
+                font-size: 13px;
+                color: Theme.text-secondary;
+                horizontal-alignment: right;
+                overflow: elide;
+                width: Theme.settings-control-width;
+                vertical-alignment: center;
+            }
+        }
 
-        Switch {
-            checked: root.auto-update-check;
-            toggled => { root.auto-update-check-changed(self.checked); }
+        SettingsField {
+            label: "Confidentialité";
+
+            Text {
+                text: "100% local";
+                font-size: 13px;
+                color: Theme.text-secondary;
+                horizontal-alignment: right;
+                width: Theme.settings-control-width;
+                vertical-alignment: center;
+            }
+        }
+
+        SettingsField {
+            label: "Mises à jour";
+            description: root.update-status;
+
+            ThemedButton {
+                text: root.checking-updates ? "Vérification…" : "Vérifier les mises à jour";
+                enabled: !root.checking-updates;
+                clicked => { root.check-updates-requested(); }
+            }
+        }
+
+        SettingsField {
+            label: "Vérification automatique";
+            description: "Vérifier les mises à jour au démarrage.";
+
+            ThemedSwitch {
+                control-label: "Vérification automatique des mises à jour";
+                checked: root.auto-update-check;
+                toggled(new) => { root.auto-update-check-changed(new); }
+            }
         }
     }
 }

@@ -1,10 +1,12 @@
-import { Switch, SpinBox, CheckBox, Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { ThemedSpinBox } from "../themed_spin.slint";
+import { ThemedCheckbox } from "../themed_checkbox.slint";
+import { AccessState } from "../../types.slint";
 
-// One calendar in the picker list. Pre-grouped and pre-sorted by Rust
-// (`calendar_ui.rs`) so this stays a single flat `for` loop instead of the
-// Svelte version's nested `{#each grouped as [source, group]}` - `show-header`
-// is true only on the first row of each `source-title` run.
 export struct CalendarRow {
     id: string,
     title: string,
@@ -16,7 +18,7 @@ export struct CalendarRow {
 // Port of CalendarSettingsSection.svelte.
 export component CalendarSection inherits VerticalLayout {
     in property <bool> enabled;
-    in property <string> permission; // "granted" | "denied" | "unknown" | "unsupported"
+    in property <AccessState> permission;
     in property <bool> autostart-enabled;
     in property <int> reminder-minutes;
     in property <[CalendarRow]> calendars;
@@ -27,107 +29,124 @@ export component CalendarSection inherits VerticalLayout {
     callback calendar-toggled(string);
     callback open-system-settings-requested();
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Réunions";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: white;
-    }
+    SettingsGroup {
+        title: "CALENDRIER";
 
-    SettingsField {
-        label: "Intégration du calendrier";
-        description: "Afficher les réunions à venir et proposer de démarrer l'enregistrement.";
+        SettingsField {
+            show-divider: false;
+            label: "Intégration du calendrier";
+            description: "Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.";
 
-        Switch {
-            checked: root.enabled;
-            toggled => { root.enabled-changed(self.checked); }
-        }
-    }
-
-    if root.permission == "denied": Rectangle {
-        border-width: 1px;
-        border-color: #a02a2a;
-        border-radius: 6px;
-        background: #3a1414;
-
-        HorizontalLayout {
-            padding: 10px;
-            spacing: 10px;
-            alignment: space-between;
-
-            Text {
-                text: "L'accès au calendrier a été refusé.";
-                color: #f08080;
-                font-size: 11.5px;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-            }
-
-            Button {
-                text: "Ouvrir Réglages Système";
-                clicked => { root.open-system-settings-requested(); }
+            ThemedSwitch {
+                control-label: "Intégration du calendrier";
+                checked: root.enabled;
+                toggled(new) => { root.enabled-changed(new); }
             }
         }
-    }
 
-    if root.enabled && root.permission == "granted": SettingsField {
-        label: "Démarrage automatique";
-        description: "Proposer de démarrer l'enregistrement quand une réunion commence.";
-
-        Switch {
-            checked: root.autostart-enabled;
-            toggled => { root.autostart-enabled-changed(self.checked); }
-        }
-    }
-
-    if root.enabled && root.permission == "granted": SettingsField {
-        label: "Rappel (minutes avant)";
-
-        SpinBox {
-            minimum: 1;
-            maximum: 30;
-            value: root.reminder-minutes;
-            edited(value) => { root.reminder-minutes-changed(value); }
-        }
-    }
-
-    if root.enabled && root.permission == "granted" && root.calendars.length > 0: VerticalLayout {
-        spacing: 4px;
-
-        Text {
-            text: "Calendriers";
-            font-size: 13px;
-            font-weight: 600;
-            color: white;
-        }
-        Text {
-            text: "Aucune sélection = tous les calendriers.";
-            font-size: 11.5px;
-            color: #999;
-        }
-
-        for row in root.calendars: VerticalLayout {
-            if row.show-header && row.source-title != "": Text {
-                text: row.source-title;
-                font-size: 10.5px;
-                font-weight: 700;
-                color: #999;
-            }
+        if root.permission == AccessState.denied: Rectangle {
+            background: Theme.danger.with-alpha(0.1);
 
             HorizontalLayout {
-                spacing: 8px;
+                padding: 12px;
+                spacing: 16px;
+                alignment: space-between;
 
-                CheckBox {
-                    checked: row.selected;
-                    toggled => { root.calendar-toggled(row.id); }
-                }
                 Text {
-                    text: row.title;
-                    font-size: 12.5px;
-                    color: #ddd;
+                    text: "L'accès au calendrier a été refusé.";
+                    color: Theme.text-primary;
+                    font-size: 13.5px;
+                    wrap: word-wrap;
                     vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                ThemedButton {
+                    text: "Ouvrir les Réglages Système";
+                    kind: ThemedButtonKind.primary;
+                    clicked => { root.open-system-settings-requested(); }
+                }
+            }
+        }
+
+        if root.enabled && root.permission == AccessState.granted: SettingsField {
+            label: "Proposer au début de la réunion";
+            description: "Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement.";
+
+            ThemedSwitch {
+                control-label: "Proposer au début de la réunion";
+                checked: root.autostart-enabled;
+                toggled(new) => { root.autostart-enabled-changed(new); }
+            }
+        }
+
+        if root.enabled && root.permission == AccessState.granted: SettingsField {
+            label: "Délai du rappel";
+            description: "Minutes avant un événement pour proposer de démarrer une transcription (1-30).";
+
+            ThemedSpinBox {
+                control-label: "Délai du rappel en minutes";
+                value: root.reminder-minutes;
+                minimum: 1;
+                maximum: 30;
+                step: 1;
+                edited(value) => { root.reminder-minutes-changed(value); }
+            }
+        }
+
+        if root.enabled && root.permission == AccessState.granted && root.calendars.length > 0: VerticalLayout {
+            padding-top: 15px;
+            padding-bottom: 15px;
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: "Calendriers";
+                font-size: 13.5px;
+                color: Theme.text-secondary;
+            }
+            Text {
+                text: "Tous les calendriers sont inclus ; décochez ceux à masquer.";
+                font-size: 12px;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+
+            for row in root.calendars: VerticalLayout {
+                alignment: start;
+                spacing: 4px;
+
+                if row.show-header && row.source-title != "": VerticalLayout {
+                    padding-top: 10px;
+                    padding-bottom: 4px;
+                    Text {
+                        text: row.source-title;
+                        font-size: 10.5px;
+                        font-family: "Archivo Bold";
+                        letter-spacing: 1px;
+                        color: Theme.text-tertiary;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    ThemedCheckbox {
+                        checked: row.selected;
+                        toggled(_) => { root.calendar-toggled(row.id); }
+                    }
+                    Text {
+                        text: row.title;
+                        font-size: 13.5px;
+                        color: Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }

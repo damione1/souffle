@@ -165,8 +165,12 @@ pub struct TranscriptionCatalog {
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionRuntimePhase {
     DownloadRequired,
+    Downloading,
     LoadRequired,
+    Loading,
     Ready,
+    Unloading,
+    Failed,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

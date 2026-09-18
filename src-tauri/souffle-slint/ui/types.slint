@@ -5,6 +5,9 @@
 
 export enum RecordingMode { idle, dictation, meeting }
 
+// Mirrors souffle_lib::engine::Speaker at the compiled UI boundary.
+export enum SpeakerRole { me, them }
+
 // A timeline entry's own kind - always one specific thing, never "all".
 export enum TimelineKind { meeting, dictation }
 
@@ -12,3 +15,39 @@ export enum TimelineKind { meeting, dictation }
 export enum TimelineFilter { all, meeting, dictation }
 
 export enum NotesSaveState { idle, pending, saved }
+
+// Onboarding's model step - missed the string->enum cleanup above when it
+// was added later.
+export enum ModelPhase { pick, downloading, loading, ready }
+
+// Projection of souffle_lib::engine::TranscriptionRuntimePhase. The Rust
+// AppStateMachine owns every transition; Slint only derives presentation.
+export enum TranscriptionPhase { download-required, downloading, load-required, loading, ready, unloading, failed }
+
+// Today's calendar row: computed in Rust from start/end vs now, never a
+// free-form string. Adding a variant must break every `if phase ==` site.
+export enum UpcomingPhase { past, now, next, later }
+
+// Closed settings sets. Declared once here, converted exhaustively at the
+// Rust boundary (`settings_ui.rs`) from the matching `souffle_lib` enums.
+// Never pass these as strings through a property or callback.
+export enum SettingsTab { transcription, ai, audio, interface, meetings, system }
+
+export enum AppTheme { dark, light, system }
+
+export enum AppLocale { en, fr }
+
+// `typing` not `type`: `type` is reserved in Slint. Maps to PasteMethod::Type.
+export enum PasteMethod { clipboard, typing, ax }
+
+export enum MeetingLanguage { auto, en, fr }
+
+export enum LogLevel { error, warn, info, debug, trace }
+
+export enum AudioRetention { off, keep-7d, keep-30d, keep-forever }
+
+export enum AccessState { granted, denied, unknown, unsupported, no-device }
+
+export enum ShortcutField { none, toggle, ptt }
+
+export enum SummaryProvider { auto, apple-intelligence, ollama }

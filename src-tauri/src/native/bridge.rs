@@ -26,6 +26,9 @@ pub enum AppView {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NativeAction {
+    /// The canonical state machine changed. The UI re-reads its snapshot;
+    /// no second state or potentially stale event payload is maintained.
+    RefreshRuntime,
     /// Global shortcut / tray menu: start dictation if idle, stop if
     /// recording a dictation. A no-op while a meeting is recording (SOU-044:
     /// a meeting owns the session).

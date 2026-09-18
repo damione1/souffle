@@ -1,5 +1,11 @@
-import { Switch, ComboBox, SpinBox, Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedSpinBox } from "../themed_spin.slint";
+import { AppTheme, AppLocale, PasteMethod, ShortcutField } from "../../types.slint";
 
 // Captures the next key press as a shortcut accelerator. Slint's `KeyEvent`
 // only hands over a produced character (or one of i-slint-common's
@@ -19,22 +25,25 @@ export component ShortcutRecorderButton inherits FocusScope {
     callback cleared();
     callback cancelled();
 
-    width: 170px;
-    height: 30px;
+    width: 128px;
+    height: Theme.settings-control-height;
 
     Rectangle {
         border-width: 1px;
-        border-color: root.recording ? #5b9dfa : #3a3a3a;
-        border-radius: 6px;
-        background: #262626;
+        border-color: root.recording ? Theme.accent.with-alpha(0.4) : Theme.ghost-border;
+        border-radius: 4px;
+        background: root.recording ? Theme.accent.with-alpha(0.16) : Theme.input;
 
         Text {
-            text: root.recording ? "Appuyez sur une touche…" : (root.shortcut-label == "" ? "Non défini" : root.shortcut-label);
-            color: root.recording ? #5b9dfa : white;
-            font-size: 12px;
+            text: root.recording ? "Appuyez…" : (root.shortcut-label == "" ? "Non défini" : root.shortcut-label);
+            color: root.recording ? Theme.accent : (root.shortcut-label == "" ? Theme.text-muted : Theme.text-secondary);
+            font-size: 13px;
+            font-family: "JetBrains Mono";
+            font-weight: 500;
             horizontal-alignment: center;
             vertical-alignment: center;
             width: 100%;
+            height: 100%;
         }
     }
 
@@ -71,217 +80,251 @@ export component ShortcutRecorderButton inherits FocusScope {
 }
 
 // Port of InterfaceSettingsSection.svelte. Runtime locale switching is out
-// of scope for this Slint shell (the whole UI is hardcoded French so far,
-// established in earlier SOU-185 milestones) - the locale field still
-// round-trips through the real `AppSettings.locale` for persistence parity
-// (AC4), it just has no visible effect yet.
+// of scope for this Slint shell (the whole UI is hardcoded French so far) -
+// the locale field still round-trips through the real `AppSettings.locale`.
 export component InterfaceSection inherits VerticalLayout {
-    in property <string> theme; // "dark" | "light" | "system"
-    in property <string> locale; // "en" | "fr" | ""
+    in property <AppTheme> theme;
+    in property <AppLocale> locale;
     in property <bool> auto-paste;
-    in property <string> paste-method; // "clipboard" | "type" | "ax"
+    in property <PasteMethod> paste-method;
     in property <int> paste-delay-ms;
     in property <int> paste-delay-min;
     in property <int> paste-delay-max;
     in property <string> toggle-shortcut-label;
     in property <string> ptt-shortcut-label;
-    in property <string> recording-field; // "" | "toggle" | "ptt"
+    in property <ShortcutField> recording-field;
     in property <string> shortcut-error;
     in property <bool> native-tap-warning-visible;
     in property <bool> pill-hidden;
 
-    callback theme-changed(string);
-    callback locale-changed(string);
+    callback theme-changed(AppTheme);
+    callback locale-changed(AppLocale);
     callback auto-paste-changed(bool);
-    callback paste-method-changed(string);
+    callback paste-method-changed(PasteMethod);
     callback paste-delay-changed(int);
     callback pill-hidden-changed(bool);
-    callback shortcut-record-requested(string);
-    callback shortcut-captured(string, string, bool, bool, bool, bool);
-    callback shortcut-released(string, string, bool, bool, bool, bool);
-    callback shortcut-cleared(string);
+    callback shortcut-record-requested(ShortcutField);
+    callback shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
+    callback shortcut-released(ShortcutField, string, bool, bool, bool, bool);
+    callback shortcut-cleared(ShortcutField);
     callback shortcut-cancelled();
     callback permissions-review-requested();
 
-    pure function locale-label(value: string) -> string {
-        if value == "fr" { return "Français"; }
-        return "English";
+    pure function locale-label(value: AppLocale) -> string {
+        if value == AppLocale.fr { return "Français"; }
+        if value == AppLocale.en { return "Anglais"; }
+        return "";
     }
-    pure function locale-value(label: string) -> string {
-        if label == "Français" { return "fr"; }
-        return "en";
-    }
-    pure function paste-method-label(value: string) -> string {
-        if value == "type" { return "Simulation de frappe"; }
-        if value == "ax" { return "Accessibilité"; }
-        return "Presse-papiers";
-    }
-    pure function paste-method-value(label: string) -> string {
-        if label == "Simulation de frappe" { return "type"; }
-        if label == "Accessibilité" { return "ax"; }
-        return "clipboard";
+    pure function paste-method-label(value: PasteMethod) -> string {
+        if value == PasteMethod.clipboard { return "Presse-papiers (⌘V)"; }
+        if value == PasteMethod.typing { return "Frappe simulée"; }
+        if value == PasteMethod.ax { return "Champ ciblé"; }
+        return "";
     }
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Interface";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: white;
-    }
+    SettingsGroup {
+        title: "INTERFACE";
 
-    SettingsField {
-        label: "Langue";
-        description: "Langue de l'interface.";
+        SettingsField {
+            show-divider: false;
+            label: "Langue";
+            description: "Choisissez la langue de l'interface.";
 
-        ComboBox {
-            model: ["English", "Français"];
-            current-value: root.locale-label(root.locale);
-            selected(value) => { root.locale-changed(root.locale-value(value)); }
-        }
-    }
-
-    SettingsField {
-        label: "Thème";
-
-        HorizontalLayout {
-            spacing: 4px;
-
-            Button {
-                text: "Sombre";
-                checkable: true;
-                checked: root.theme == "dark";
-                clicked => { root.theme-changed("dark"); }
-            }
-            Button {
-                text: "Clair";
-                checkable: true;
-                checked: root.theme == "light";
-                clicked => { root.theme-changed("light"); }
-            }
-            Button {
-                text: "Système";
-                checkable: true;
-                checked: root.theme == "system";
-                clicked => { root.theme-changed("system"); }
+            ThemedComboBox {
+                control-label: "Langue de l'interface";
+                model: [root.locale-label(AppLocale.en), root.locale-label(AppLocale.fr)];
+                current-value: root.locale-label(root.locale);
+                selected(value) => {
+                    if value == root.locale-label(AppLocale.fr) {
+                        root.locale-changed(AppLocale.fr);
+                    }
+                    if value == root.locale-label(AppLocale.en) {
+                        root.locale-changed(AppLocale.en);
+                    }
+                }
             }
         }
-    }
 
-    SettingsField {
-        label: "Collage automatique";
-        description: "Coller automatiquement le texte transcrit dans l'application active.";
+        SettingsField {
+            label: "Thème";
 
-        Switch {
-            checked: root.auto-paste;
-            toggled => { root.auto-paste-changed(self.checked); }
-        }
-    }
+            HorizontalLayout {
+                spacing: 0px;
+                horizontal-stretch: 0;
+                vertical-stretch: 0;
 
-    if root.auto-paste: SettingsField {
-        label: "Méthode de collage";
-
-        ComboBox {
-            model: ["Presse-papiers", "Simulation de frappe", "Accessibilité"];
-            current-value: root.paste-method-label(root.paste-method);
-            selected(value) => { root.paste-method-changed(root.paste-method-value(value)); }
-        }
-    }
-
-    if root.auto-paste: SettingsField {
-        label: "Délai de collage";
-        description: "Délai avant le collage automatique, en millisecondes.";
-
-        SpinBox {
-            minimum: root.paste-delay-min;
-            maximum: root.paste-delay-max;
-            step-size: 50;
-            value: root.paste-delay-ms;
-            edited(value) => { root.paste-delay-changed(value); }
-        }
-    }
-
-    SettingsField {
-        label: "Basculer l'enregistrement";
-        description: "Démarre ou arrête la dictée.";
-
-        ShortcutRecorderButton {
-            shortcut-label: root.toggle-shortcut-label;
-            recording: root.recording-field == "toggle";
-            record-requested => { root.shortcut-record-requested("toggle"); }
-            captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured("toggle", text, ctrl, shift, alt, meta); }
-            released(text, ctrl, shift, alt, meta) => { root.shortcut-released("toggle", text, ctrl, shift, alt, meta); }
-            cleared => { root.shortcut-cleared("toggle"); }
-            cancelled => { root.shortcut-cancelled(); }
-        }
-    }
-
-    SettingsField {
-        label: "Appui maintenu (dictée)";
-        description: "Enregistre tant que la touche est maintenue.";
-
-        ShortcutRecorderButton {
-            shortcut-label: root.ptt-shortcut-label;
-            recording: root.recording-field == "ptt";
-            record-requested => { root.shortcut-record-requested("ptt"); }
-            captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured("ptt", text, ctrl, shift, alt, meta); }
-            released(text, ctrl, shift, alt, meta) => { root.shortcut-released("ptt", text, ctrl, shift, alt, meta); }
-            cleared => { root.shortcut-cleared("ptt"); }
-            cancelled => { root.shortcut-cancelled(); }
-        }
-    }
-
-    SettingsField {
-        label: "Masquer la pastille";
-        description: "Ne pas afficher la pastille flottante pendant l'enregistrement.";
-
-        Switch {
-            checked: root.pill-hidden;
-            toggled => { root.pill-hidden-changed(self.checked); }
-        }
-    }
-
-    if root.native-tap-warning-visible: Rectangle {
-        border-width: 1px;
-        border-color: #a06a1a;
-        border-radius: 6px;
-        background: #3a2c14;
-
-        HorizontalLayout {
-            padding: 10px;
-            spacing: 10px;
-            alignment: space-between;
-
-            Text {
-                text: "Ce raccourci nécessite la permission Accessibilité, qui n'est pas accordée.";
-                color: #f0c674;
-                font-size: 11.5px;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-            }
-
-            Button {
-                text: "Vérifier les permissions";
-                clicked => { root.permissions-review-requested(); }
+                ThemedButton {
+                    text: "Sombre";
+                    kind: root.theme == AppTheme.dark ? ThemedButtonKind.active : ThemedButtonKind.default;
+                    clicked => { root.theme-changed(AppTheme.dark); }
+                }
+                ThemedButton {
+                    text: "Clair";
+                    kind: root.theme == AppTheme.light ? ThemedButtonKind.active : ThemedButtonKind.default;
+                    clicked => { root.theme-changed(AppTheme.light); }
+                }
+                ThemedButton {
+                    text: "Système";
+                    kind: root.theme == AppTheme.system ? ThemedButtonKind.active : ThemedButtonKind.default;
+                    clicked => { root.theme-changed(AppTheme.system); }
+                }
             }
         }
-    }
 
-    if root.shortcut-error != "": Rectangle {
-        border-width: 1px;
-        border-color: #a02a2a;
-        border-radius: 6px;
-        background: #3a1414;
+        SettingsField {
+            label: "Collage automatique après dictée";
+            description: "Colle automatiquement la transcription à l'arrêt de l'enregistrement.";
 
-        VerticalLayout {
-            padding: 10px;
+            ThemedSwitch {
+                control-label: "Collage automatique après dictée";
+                checked: root.auto-paste;
+                toggled(new) => { root.auto-paste-changed(new); }
+            }
+        }
 
-            Text {
-                text: root.shortcut-error;
-                color: #f08080;
-                font-size: 11.5px;
-                wrap: word-wrap;
+        if root.auto-paste: SettingsField {
+            label: "Méthode de collage";
+            description: "Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).";
+
+            ThemedComboBox {
+                control-label: "Méthode de collage";
+                model: [
+                    root.paste-method-label(PasteMethod.clipboard),
+                    root.paste-method-label(PasteMethod.typing),
+                    root.paste-method-label(PasteMethod.ax),
+                ];
+                current-value: root.paste-method-label(root.paste-method);
+                selected(value) => {
+                    if value == root.paste-method-label(PasteMethod.clipboard) {
+                        root.paste-method-changed(PasteMethod.clipboard);
+                    }
+                    if value == root.paste-method-label(PasteMethod.typing) {
+                        root.paste-method-changed(PasteMethod.typing);
+                    }
+                    if value == root.paste-method-label(PasteMethod.ax) {
+                        root.paste-method-changed(PasteMethod.ax);
+                    }
+                }
+            }
+        }
+
+        if root.auto-paste: SettingsField {
+            label: "Délai de collage (ms)";
+            description: "Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.";
+
+            ThemedSpinBox {
+                control-label: "Délai de collage en millisecondes";
+                value: root.paste-delay-ms;
+                minimum: root.paste-delay-min;
+                maximum: root.paste-delay-max;
+                step: 50;
+                edited(value) => { root.paste-delay-changed(value); }
+            }
+        }
+
+        SettingsField {
+            label: "Basculer l'enregistrement";
+            description: "Appuyez une fois pour démarrer ou arrêter la dictée.";
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: center;
+                horizontal-stretch: 0;
+
+                ShortcutRecorderButton {
+                    shortcut-label: root.toggle-shortcut-label;
+                    recording: root.recording-field == ShortcutField.toggle;
+                    record-requested => { root.shortcut-record-requested(ShortcutField.toggle); }
+                    captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
+                    released(text, ctrl, shift, alt, meta) => { root.shortcut-released(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
+                    cleared => { root.shortcut-cleared(ShortcutField.toggle); }
+                    cancelled => { root.shortcut-cancelled(); }
+                }
+                if root.toggle-shortcut-label != "": ThemedButton {
+                    text: "Effacer";
+                    kind: ThemedButtonKind.ghost;
+                    clicked => { root.shortcut-cleared(ShortcutField.toggle); }
+                }
+            }
+        }
+
+        SettingsField {
+            label: "Appuyer pour parler";
+            description: "Maintenez pour enregistrer, relâchez pour arrêter.";
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: center;
+                horizontal-stretch: 0;
+
+                ShortcutRecorderButton {
+                    shortcut-label: root.ptt-shortcut-label;
+                    recording: root.recording-field == ShortcutField.ptt;
+                    record-requested => { root.shortcut-record-requested(ShortcutField.ptt); }
+                    captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
+                    released(text, ctrl, shift, alt, meta) => { root.shortcut-released(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
+                    cleared => { root.shortcut-cleared(ShortcutField.ptt); }
+                    cancelled => { root.shortcut-cancelled(); }
+                }
+                if root.ptt-shortcut-label != "": ThemedButton {
+                    text: "Effacer";
+                    kind: ThemedButtonKind.ghost;
+                    clicked => { root.shortcut-cleared(ShortcutField.ptt); }
+                }
+            }
+        }
+
+        SettingsField {
+            label: "Masquer l'overlay d'enregistrement";
+            description: "Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.";
+
+            ThemedSwitch {
+                control-label: "Masquer l'overlay d'enregistrement";
+                checked: root.pill-hidden;
+                toggled(new) => { root.pill-hidden-changed(new); }
+            }
+        }
+
+        if root.native-tap-warning-visible: Rectangle {
+            background: Theme.warning.with-alpha(0.1);
+
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 10px;
+                alignment: space-between;
+
+                Text {
+                    text: "Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.";
+                    color: Theme.warning;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+
+                ThemedButton {
+                    text: "Vérifier les permissions";
+                    kind: ThemedButtonKind.ghost;
+                    clicked => { root.permissions-review-requested(); }
+                }
+            }
+        }
+
+        if root.shortcut-error != "": Rectangle {
+            background: Theme.danger.with-alpha(0.1);
+
+            VerticalLayout {
+                padding: 12px;
+
+                Text {
+                    text: root.shortcut-error;
+                    color: Theme.danger;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
             }
         }
     }

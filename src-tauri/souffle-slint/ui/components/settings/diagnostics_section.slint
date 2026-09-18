@@ -1,111 +1,132 @@
-import { Switch, ComboBox, Button, ScrollView } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { LogLevel } from "../../types.slint";
 
 // Port of DiagnosticsSettingsSection.svelte. `log-tail` is refreshed by
-// main.rs on a timer while the Diagnostics tab is visible (same poll idea as
-// the Svelte version's setInterval), not computed here.
+// main.rs on a timer while the Diagnostics tab is visible.
 export component DiagnosticsSection inherits VerticalLayout {
     in-out property <bool> debug-transcription;
-    in property <string> log-level; // "error" | "warn" | "info" | "debug" | "trace"
+    in property <LogLevel> log-level;
     in property <string> log-tail;
     in property <bool> copying-diagnostics: false;
 
     callback debug-transcription-changed(bool);
-    callback log-level-changed(string);
+    callback log-level-changed(LogLevel);
     callback copy-diagnostics-requested();
 
-    // `LogLevel::as_str()` <-> the French combobox labels below.
-    pure function log-level-label(value: string) -> string {
-        if value == "error" { return "Erreur"; }
-        if value == "warn" { return "Avertissement"; }
-        if value == "debug" { return "Débogage"; }
-        if value == "trace" { return "Trace"; }
-        return "Info";
+    pure function log-level-label(value: LogLevel) -> string {
+        if value == LogLevel.error { return "Erreur"; }
+        if value == LogLevel.warn { return "Avertissement"; }
+        if value == LogLevel.info { return "Information"; }
+        if value == LogLevel.debug { return "Débogage"; }
+        if value == LogLevel.trace { return "Trace"; }
+        return "";
     }
 
-    pure function log-level-value(label: string) -> string {
-        if label == "Erreur" { return "error"; }
-        if label == "Avertissement" { return "warn"; }
-        if label == "Débogage" { return "debug"; }
-        if label == "Trace" { return "trace"; }
-        return "info";
-    }
+    spacing: 22px;
+    alignment: start;
 
-    spacing: 10px;
+    SettingsGroup {
+        title: "DIAGNOSTICS";
 
-    Text {
-        text: "Diagnostics";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: white;
-    }
+        SettingsField {
+            show-divider: false;
+            label: "Niveau de journal";
+            description: "Quantité de détails que Soufflé écrit dans le fichier journal.";
 
-    SettingsField {
-        label: "Niveau de journal";
-        description: "Quantité de détails écrits dans le fichier journal.";
-
-        ComboBox {
-            model: ["Erreur", "Avertissement", "Info", "Débogage", "Trace"];
-            current-value: root.log-level-label(root.log-level);
-            selected(value) => { root.log-level-changed(root.log-level-value(value)); }
-        }
-    }
-
-    SettingsField {
-        label: "Journaux détaillés de transcription";
-        description: "Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.";
-
-        Switch {
-            checked <=> root.debug-transcription;
-            toggled => { root.debug-transcription-changed(root.debug-transcription); }
-        }
-    }
-
-    VerticalLayout {
-        spacing: 4px;
-
-        Text {
-            text: "Journal en direct";
-            font-size: 13px;
-            font-weight: 600;
-            color: white;
-        }
-        Text {
-            text: "Fin du fichier journal actuel, actualisé toutes les quelques secondes.";
-            font-size: 11.5px;
-            color: #999;
-            wrap: word-wrap;
-        }
-
-        Rectangle {
-            height: 140px;
-            border-width: 1px;
-            border-color: #3a3a3a;
-
-            ScrollView {
-                VerticalLayout {
-                    padding: 8px;
-                    alignment: start;
-
-                    Text {
-                        text: root.log-tail == "" ? "Aucune entrée de journal pour l'instant." : root.log-tail;
-                        font-family: "monospace";
-                        font-size: 10.5px;
-                        color: #cccccc;
-                        wrap: word-wrap;
-                    }
+            ThemedComboBox {
+                control-label: "Niveau de journal";
+                model: [
+                    root.log-level-label(LogLevel.error),
+                    root.log-level-label(LogLevel.warn),
+                    root.log-level-label(LogLevel.info),
+                    root.log-level-label(LogLevel.debug),
+                    root.log-level-label(LogLevel.trace),
+                ];
+                current-value: root.log-level-label(root.log-level);
+                selected(value) => {
+                    if value == root.log-level-label(LogLevel.error) { root.log-level-changed(LogLevel.error); }
+                    if value == root.log-level-label(LogLevel.warn) { root.log-level-changed(LogLevel.warn); }
+                    if value == root.log-level-label(LogLevel.info) { root.log-level-changed(LogLevel.info); }
+                    if value == root.log-level-label(LogLevel.debug) { root.log-level-changed(LogLevel.debug); }
+                    if value == root.log-level-label(LogLevel.trace) { root.log-level-changed(LogLevel.trace); }
                 }
             }
         }
-    }
 
-    HorizontalLayout {
-        alignment: end;
+        SettingsField {
+            label: "Journaux détaillés de transcription";
+            description: "Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.";
 
-        Button {
-            text: root.copying-diagnostics ? "Copie…" : "Copier les diagnostics";
-            enabled: !root.copying-diagnostics;
-            clicked => { root.copy-diagnostics-requested(); }
+            ThemedSwitch {
+                control-label: "Journaux détaillés de transcription";
+                checked: root.debug-transcription;
+                toggled(new) => { root.debug-transcription-changed(new); }
+            }
+        }
+
+        VerticalLayout {
+            padding-top: 15px;
+            padding-bottom: 8px;
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: "Journal en direct";
+                font-size: 13.5px;
+                color: Theme.text-secondary;
+            }
+            Text {
+                text: "Fin du fichier journal actuel, actualisé toutes les quelques secondes.";
+                font-size: 12px;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+
+            Rectangle {
+                height: 140px;
+                border-width: 1px;
+                border-color: Theme.ghost-border;
+                background: Theme.input;
+                vertical-stretch: 0;
+
+                Flickable {
+                    width: 100%;
+                    height: 100%;
+                    viewport-width: self.width;
+
+                    TextInput {
+                        width: parent.width - 16px;
+                        height: max(parent.height - 16px, self.preferred-height);
+                        x: 8px;
+                        y: 8px;
+                        text: root.log-tail == "" ? "Aucune entrée de journal pour l'instant." : root.log-tail;
+                        font-family: "JetBrains Mono";
+                        font-size: 10.5px;
+                        color: Theme.text-secondary;
+                        wrap: word-wrap;
+                        single-line: false;
+                        read-only: true;
+                        selection-background-color: Theme.accent.with-alpha(0.28);
+                        accessible-label: "Journal en direct";
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                ThemedButton {
+                    text: root.copying-diagnostics ? "Copie…" : "Copier les diagnostics";
+                    enabled: !root.copying-diagnostics;
+                    clicked => { root.copy-diagnostics-requested(); }
+                }
+            }
         }
     }
 }

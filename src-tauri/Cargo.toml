@@ -29,6 +29,11 @@ edition = "2024"
 name = "souffle_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[test]]
+name = "native_paste_main_thread"
+path = "tests/native_paste_main_thread.rs"
+harness = false
+
 [lints]
 workspace = true
 

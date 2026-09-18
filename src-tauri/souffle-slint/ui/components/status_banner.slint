@@ -1,4 +1,5 @@
 import { Button } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 
 // Port of components/ui/StatusBanner.svelte. `action-label` empty means no
 // action button; the caller is responsible for not instantiating this at
@@ -11,8 +12,9 @@ export component StatusBanner inherits Rectangle {
     callback dismissed();
 
     border-width: 1px;
-    border-color: #cc8800;
+    border-color: Theme.warning;
     border-radius: 6px;
+    background: Theme.surface-2;
 
     HorizontalLayout {
         padding: 12px;
@@ -20,6 +22,7 @@ export component StatusBanner inherits Rectangle {
 
         Text {
             text: root.message;
+            color: Theme.text-primary;
             vertical-alignment: center;
             wrap: word-wrap;
             horizontal-stretch: 1;

@@ -10,6 +10,7 @@ use souffle_lib::engine::{
     TranscriptionCatalog, TranscriptionModelDescriptor, TranscriptionProfileSelection,
     TranscriptionRuntimeBackendDescriptor, TranscriptionRuntimePhase,
 };
+use souffle_lib::models::{DownloadProgress, DownloadStatus};
 
 pub struct FlatModelOption {
     pub engine_id: String,
@@ -73,11 +74,105 @@ pub fn find_option<'a>(options: &'a [FlatModelOption], label: &str) -> Option<&'
     options.iter().find(|o| o.label == label)
 }
 
+/// Port of `findTranscriptionModel(...)?.label` - the bare model label
+/// ("STT 1B FR/EN"), not `list_available_model_options`'s "Engine — Model"
+/// (that combined form is for the settings picker, which needs to
+/// disambiguate engines; `App.svelte`'s `StatusChip` reads this instead).
+pub fn model_short_label(
+    catalog: &TranscriptionCatalog,
+    engine_id: &str,
+    model_id: &str,
+) -> String {
+    catalog
+        .engines
+        .iter()
+        .find(|engine| engine.id == engine_id)
+        .and_then(|engine| engine.models.iter().find(|m| m.id == model_id))
+        .map(|m| m.label.clone())
+        .unwrap_or_default()
+}
+
+pub fn selected_model_short_label(catalog: &TranscriptionCatalog) -> String {
+    model_short_label(
+        catalog,
+        &catalog.selected_engine_id,
+        &catalog.selected_model_id,
+    )
+}
+
+/// The catalogue is the source of truth for the active open-set identifiers.
+/// Recording startup must use this selection rather than the library default:
+/// users can legitimately select a different downloaded model in Settings.
+pub fn selected_profile(catalog: &TranscriptionCatalog) -> TranscriptionProfileSelection {
+    TranscriptionProfileSelection {
+        engine_id: catalog.selected_engine_id.clone(),
+        model_id: catalog.selected_model_id.clone(),
+        backend_id: catalog.selected_backend_id.clone(),
+    }
+}
+
+pub fn download_is_globally_complete(progress: &DownloadProgress) -> bool {
+    matches!(progress.status, DownloadStatus::Complete)
+        && progress.total_files > 0
+        && progress.completed_files >= progress.total_files
+}
+
 pub fn phase_label(phase: TranscriptionRuntimePhase) -> &'static str {
     match phase {
         TranscriptionRuntimePhase::DownloadRequired => "Téléchargement requis",
+        TranscriptionRuntimePhase::Downloading => "Téléchargement…",
         TranscriptionRuntimePhase::LoadRequired => "Chargement requis",
+        TranscriptionRuntimePhase::Loading => "Chargement…",
         TranscriptionRuntimePhase::Ready => "Prêt",
+        TranscriptionRuntimePhase::Unloading => "Déchargement…",
+        TranscriptionRuntimePhase::Failed => "Erreur du modèle",
+    }
+}
+
+impl From<TranscriptionRuntimePhase> for crate::TranscriptionPhase {
+    fn from(phase: TranscriptionRuntimePhase) -> Self {
+        match phase {
+            TranscriptionRuntimePhase::DownloadRequired => Self::DownloadRequired,
+            TranscriptionRuntimePhase::Downloading => Self::Downloading,
+            TranscriptionRuntimePhase::LoadRequired => Self::LoadRequired,
+            TranscriptionRuntimePhase::Loading => Self::Loading,
+            TranscriptionRuntimePhase::Ready => Self::Ready,
+            TranscriptionRuntimePhase::Unloading => Self::Unloading,
+            TranscriptionRuntimePhase::Failed => Self::Failed,
+        }
+    }
+}
+
+impl From<crate::TranscriptionPhase> for TranscriptionRuntimePhase {
+    fn from(phase: crate::TranscriptionPhase) -> Self {
+        match phase {
+            crate::TranscriptionPhase::DownloadRequired => Self::DownloadRequired,
+            crate::TranscriptionPhase::Downloading => Self::Downloading,
+            crate::TranscriptionPhase::LoadRequired => Self::LoadRequired,
+            crate::TranscriptionPhase::Loading => Self::Loading,
+            crate::TranscriptionPhase::Ready => Self::Ready,
+            crate::TranscriptionPhase::Unloading => Self::Unloading,
+            crate::TranscriptionPhase::Failed => Self::Failed,
+        }
+    }
+}
+
+pub fn populate_runtime(window: &MainWindow, phase: TranscriptionRuntimePhase) {
+    window.set_model_runtime_phase(phase.into());
+    window.set_settings_model_status_text(phase_label(phase).into());
+}
+
+/// The FSM already arbitrates StartLoad atomically. A losing concurrent caller
+/// ignores its error only when this snapshot proves Loading/Ready; subsequent
+/// transition notifications refresh the UI without a second lock or busy state.
+pub fn load_is_already_in_progress_or_ready(phase: TranscriptionRuntimePhase) -> bool {
+    match phase {
+        TranscriptionRuntimePhase::Loading | TranscriptionRuntimePhase::Ready => true,
+        TranscriptionRuntimePhase::DownloadRequired
+        | TranscriptionRuntimePhase::Downloading
+        | TranscriptionRuntimePhase::LoadRequired
+        | TranscriptionRuntimePhase::Unloading
+        | TranscriptionRuntimePhase::Failed => false,
     }
 }
 
@@ -168,5 +263,73 @@ mod tests {
             phase_label(TranscriptionRuntimePhase::LoadRequired),
             "Chargement requis"
         );
+    }
+
+    #[test]
+    fn runtime_phase_round_trips_without_losing_in_flight_states() {
+        for phase in [
+            TranscriptionRuntimePhase::DownloadRequired,
+            TranscriptionRuntimePhase::Downloading,
+            TranscriptionRuntimePhase::LoadRequired,
+            TranscriptionRuntimePhase::Loading,
+            TranscriptionRuntimePhase::Ready,
+            TranscriptionRuntimePhase::Unloading,
+            TranscriptionRuntimePhase::Failed,
+        ] {
+            assert_eq!(
+                TranscriptionRuntimePhase::from(crate::TranscriptionPhase::from(phase)),
+                phase
+            );
+            assert!(!phase_label(phase).is_empty());
+        }
+    }
+
+    #[test]
+    fn startup_selection_uses_persisted_catalog_ids_not_defaults() {
+        let catalog = TranscriptionCatalog {
+            engines: Vec::new(),
+            selected_engine_id: "configured-engine".into(),
+            selected_model_id: "configured-model".into(),
+            selected_backend_id: "configured-backend".into(),
+        };
+        let selected = selected_profile(&catalog);
+        assert_eq!(selected.engine_id, catalog.selected_engine_id);
+        assert_eq!(selected.model_id, catalog.selected_model_id);
+        assert_eq!(selected.backend_id, catalog.selected_backend_id);
+    }
+
+    #[test]
+    fn concurrent_load_only_accepts_a_loading_or_ready_fsm() {
+        assert!(load_is_already_in_progress_or_ready(
+            TranscriptionRuntimePhase::Loading
+        ));
+        assert!(load_is_already_in_progress_or_ready(
+            TranscriptionRuntimePhase::Ready
+        ));
+        for phase in [
+            TranscriptionRuntimePhase::DownloadRequired,
+            TranscriptionRuntimePhase::Downloading,
+            TranscriptionRuntimePhase::LoadRequired,
+            TranscriptionRuntimePhase::Unloading,
+            TranscriptionRuntimePhase::Failed,
+        ] {
+            assert!(!load_is_already_in_progress_or_ready(phase));
+        }
+    }
+
+    #[test]
+    fn download_only_completes_after_every_artifact() {
+        let progress = |completed_files, total_files| DownloadProgress {
+            file: "artifact".into(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+            completed_files,
+            total_files,
+            status: DownloadStatus::Complete,
+        };
+
+        assert!(!download_is_globally_complete(&progress(1, 0)));
+        assert!(!download_is_globally_complete(&progress(1, 2)));
+        assert!(download_is_globally_complete(&progress(2, 2)));
     }
 }

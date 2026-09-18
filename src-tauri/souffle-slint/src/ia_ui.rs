@@ -46,8 +46,7 @@ pub fn populate_intelligence(
     settings: &AppSettings,
     status: &SummaryProvidersStatus,
 ) {
-    window
-        .set_settings_summary_provider(summary_provider_to_str(&settings.summary_provider).into());
+    window.set_settings_summary_provider(summary_provider_to_slint(settings.summary_provider));
     window.set_settings_apple_intelligence_available(status.apple_intelligence_available);
     window.set_settings_apple_intelligence_reason(
         status
@@ -105,21 +104,25 @@ pub fn resolve_summary_model_id(models: &[SummaryModelDescriptor], label: &str) 
         .map(|m| m.id.clone())
 }
 
-fn summary_provider_to_str(value: &souffle_lib::summary::SummaryProviderChoice) -> &'static str {
+fn summary_provider_to_slint(
+    value: souffle_lib::summary::SummaryProviderChoice,
+) -> crate::SummaryProvider {
     use souffle_lib::summary::SummaryProviderChoice;
     match value {
-        SummaryProviderChoice::Auto => "auto",
-        SummaryProviderChoice::AppleIntelligence => "apple_intelligence",
-        SummaryProviderChoice::Ollama => "ollama",
+        SummaryProviderChoice::Auto => crate::SummaryProvider::Auto,
+        SummaryProviderChoice::AppleIntelligence => crate::SummaryProvider::AppleIntelligence,
+        SummaryProviderChoice::Ollama => crate::SummaryProvider::Ollama,
     }
 }
 
-pub fn summary_provider_from_str(value: &str) -> souffle_lib::summary::SummaryProviderChoice {
+pub fn summary_provider_from_slint(
+    value: crate::SummaryProvider,
+) -> souffle_lib::summary::SummaryProviderChoice {
     use souffle_lib::summary::SummaryProviderChoice;
     match value {
-        "apple_intelligence" => SummaryProviderChoice::AppleIntelligence,
-        "ollama" => SummaryProviderChoice::Ollama,
-        _ => SummaryProviderChoice::Auto,
+        crate::SummaryProvider::Auto => SummaryProviderChoice::Auto,
+        crate::SummaryProvider::AppleIntelligence => SummaryProviderChoice::AppleIntelligence,
+        crate::SummaryProvider::Ollama => SummaryProviderChoice::Ollama,
     }
 }
 

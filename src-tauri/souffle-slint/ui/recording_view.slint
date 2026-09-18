@@ -1,85 +1,447 @@
 import { ScrollView } from "std-widgets.slint";
-import { RecordingMode } from "types.slint";
+import { RecordingMode, SpeakerRole } from "types.slint";
+import { Theme } from "theme.slint";
+import { LucideIcon, IconSet } from "components/lucide_icon.slint";
+import { ThemedTextArea } from "components/themed_text_area.slint";
 
-// Live-recording view for SOU-187. Milestone 4 proved the real start/stop
-// round-trip; milestone 5 adds the real live transcript (single running
-// text block, both modes). Still deliberately not LiveSessionCard.svelte
-// parity - no paragraph/speaker-lane grouping, no inline word edit, no
-// waveform, no notes autosave. Said here honestly, not hidden.
-export component RecordingView inherits VerticalLayout {
-    in property <RecordingMode> mode; // never RecordingMode.idle - see main_window.slint
+// LiveSessionCard.svelte parity surface. The two modes deliberately share
+// the session toolbar, while their bodies stay distinct: dictation is a
+// single writing surface; meetings add transcript context and live notes.
+export component RecordingView inherits Rectangle {
+    in property <RecordingMode> mode; // never idle - see main_window.slint
     in property <string> live-text;
     in property <string> live-tentative;
+    in property <string> live-me-text;
+    in property <string> live-them-text;
+    in property <SpeakerRole> live-tentative-speaker: SpeakerRole.me;
+    in property <bool> live-tentative-has-speaker: false;
+    in property <float> audio-level: 0.0;
+    in-out property <string> notes;
+    in property <bool> system-audio-active: true;
+    in property <bool> auto-paste: false;
 
     callback stop-requested();
+    callback notes-changed(string);
 
-    padding: 24px;
-    spacing: 18px;
+    property <string> combined-text: root.live-tentative == "" ? root.live-text
+        : root.live-text == "" ? root.live-tentative
+        : root.live-text + " " + root.live-tentative;
+    property <int> elapsed-seconds: 0;
+    property <int> elapsed-minutes: root.elapsed-seconds / 60;
+    property <int> elapsed-remainder: Math.mod(root.elapsed-seconds, 60);
+    property <string> elapsed-label: root.elapsed-minutes + ":" +
+        (root.elapsed-remainder < 10 ? "0" : "") + root.elapsed-remainder;
 
-    HorizontalLayout {
-        spacing: 12px;
-        alignment: space-between;
+    Timer {
+        interval: 1s;
+        running: true;
+        triggered => { root.elapsed-seconds += 1; }
+    }
 
-        Text {
-            text: root.mode == RecordingMode.meeting ? "R\u{e9}union en cours\u{2026}" : "Dict\u{e9}e en cours\u{2026}";
-            font-size: 18px;
-            font-weight: 600;
-            vertical-alignment: center;
-        }
+    VerticalLayout {
+        width: min(root.width - 52px, 720px);
+        height: root.height;
+        x: (root.width - self.width) / 2;
+        padding-top: 26px;
+        padding-bottom: 34px;
+        spacing: 18px;
+        alignment: start;
 
-        Rectangle {
-            height: 40px;
-            width: 120px;
-            border-radius: 20px;
-            background: #cc4444;
+        HorizontalLayout {
+            height: 38px;
+            vertical-stretch: 0;
+            spacing: 14px;
 
-            accessible-role: button;
-            accessible-label: "Arr\u{ea}ter";
-            accessible-action-default => { root.stop-requested(); }
+            status := Rectangle {
+                width: status-label.preferred-width + 38px;
+                height: 38px;
+                horizontal-stretch: 0;
+                background: transparent;
 
-            TouchArea {
-                clicked => { root.stop-requested(); }
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 27px;
+                    background: Theme.danger;
+
+                    Rectangle {
+                        x: 11px;
+                        y: (parent.height - self.height) / 2;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: Theme.on-danger;
+                    }
+                    status-label := Text {
+                        x: 27px;
+                        width: self.preferred-width;
+                        height: parent.height;
+                        text: root.mode == RecordingMode.meeting ? "Réunion en direct" : "Dictée";
+                        font-family: "Archivo SemiBold";
+                        font-size: 12.5px;
+                        color: Theme.on-danger;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            waveform := Rectangle {
+                horizontal-stretch: 1;
+                height: 38px;
+
+                wave-strip := Rectangle {
+                    x: parent.width - self.width;
+                    y: (parent.height - self.height) / 2;
+                    width: min(120px, parent.width);
+                    height: 22px;
+
+                    Rectangle {
+                        y: parent.height / 2;
+                        height: 1px;
+                        width: parent.width;
+                        background: Theme.accent.with-alpha(0.24);
+                    }
+                    HorizontalLayout {
+                        spacing: 2px;
+                        alignment: center;
+                        for peak in [0.28, 0.42, 0.58, 0.76, 0.94, 0.72, 0.88, 0.62, 0.48, 0.34, 0.52, 0.30]: VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            Rectangle {
+                                width: 3px;
+                                height: max(2px, peak * max(3px, root.audio-level * waveform.height));
+                                border-radius: 1px;
+                                background: Theme.accent.with-alpha(0.55);
+                            }
+                        }
+                    }
+                }
             }
 
             Text {
-                text: "Arr\u{ea}ter";
-                color: white;
-                font-weight: 600;
-                horizontal-alignment: center;
+                width: 46px;
+                horizontal-stretch: 0;
+                text: root.elapsed-label;
+                font-family: "JetBrains Mono";
+                font-size: 14px;
+                color: Theme.text-tertiary;
+                horizontal-alignment: right;
                 vertical-alignment: center;
             }
-        }
-    }
 
-    Text {
-        text: "Jalon 5 : transcript live seulement - pas de regroupement par paragraphe/locuteur, pas d'\u{e9}dition inline, pas de waveform ici.";
-        color: #888888;
-        font-size: 11px;
-        wrap: word-wrap;
-    }
+            stop-control := FocusScope {
+                width: 92px;
+                height: 38px;
+                horizontal-stretch: 0;
+                accessible-role: button;
+                accessible-label: "Arrêter l'enregistrement";
+                accessible-enabled: true;
+                accessible-action-default => { root.stop-requested(); }
 
-    Rectangle {
-        vertical-stretch: 1;
-        border-width: 1px;
-        border-color: #3a3a3a;
-
-        ScrollView {
-            VerticalLayout {
-                padding: 16px;
-                alignment: start;
-
-                Text {
-                    text: root.live-text == "" && root.live-tentative == "" ? "En \u{e9}coute\u{2026}" : root.live-text;
-                    font-size: 16px;
-                    color: root.live-text == "" ? #888888 : white;
-                    wrap: word-wrap;
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.stop-requested();
+                        return accept;
+                    }
+                    return reject;
                 }
 
-                if root.live-tentative != "": Text {
-                    text: root.live-tentative;
-                    font-size: 16px;
-                    color: #888888;
+                Rectangle {
+                    border-radius: 4px;
+                    border-width: stop-control.has-focus ? 2px : 0px;
+                    border-color: Theme.text-primary;
+                    background: stop-area.pressed ? Theme.danger-strong : stop-area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger;
+
+                    stop-area := TouchArea {
+                        clicked => {
+                            stop-control.focus();
+                            root.stop-requested();
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 13px;
+                            height: parent.height;
+
+                            LucideIcon {
+                                x: 0px;
+                                y: (parent.height - self.height) / 2;
+                                width: 13px;
+                                height: 13px;
+                                icon: IconSet.Square;
+                                icon-color: Theme.on-danger;
+                                filled: true;
+                            }
+                        }
+                        Text {
+                            text: "Arrêter";
+                            font-family: "Archivo SemiBold";
+                            font-size: 13.5px;
+                            color: Theme.on-danger;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.mode == RecordingMode.meeting && !root.system-audio-active: Rectangle {
+            height: 48px;
+            vertical-stretch: 0;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Theme.warning.with-alpha(0.55);
+            background: Theme.warning.with-alpha(0.10);
+
+            accessible-role: text;
+            accessible-label: "Attention. Seul votre microphone est enregistré. L'audio des autres participants est indisponible.";
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 10px;
+                alignment: start;
+
+                LucideIcon {
+                    width: 17px;
+                    height: 17px;
+                    icon: IconSet.TriangleAlert;
+                    icon-color: Theme.warning;
+                }
+
+                Text {
+                    text: "Seul votre microphone est enregistré. L’audio des autres participants est indisponible.";
+                    font-size: 12.5px;
+                    font-family: "Archivo SemiBold";
+                    color: Theme.text-secondary;
                     wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if root.mode == RecordingMode.dictation: Rectangle {
+            min-height: 240px;
+            vertical-stretch: 1;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Theme.border-soft;
+
+            VerticalLayout {
+                padding-left: 22px;
+                padding-right: 22px;
+                padding-top: 20px;
+                padding-bottom: 18px;
+                spacing: 14px;
+
+                ScrollView {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        alignment: start;
+                        Text {
+                            width: parent.width;
+                            text: root.combined-text == "" ? "À l'écoute…" : root.combined-text;
+                            font-size: root.combined-text == "" ? 14px : 19px;
+                            color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                if root.auto-paste: HorizontalLayout {
+                    height: 18px;
+                    vertical-stretch: 0;
+                    spacing: 9px;
+                    alignment: start;
+
+                    LucideIcon {
+                        icon: IconSet.ClipboardCheck;
+                        icon-color: Theme.accent;
+                        size: 15px;
+                    }
+                    Text {
+                        text: "Collé automatiquement dans votre dernière app à l’arrêt";
+                        font-size: 12.5px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        if root.mode == RecordingMode.meeting: Rectangle {
+            min-height: 170px;
+            vertical-stretch: 1;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Theme.border-soft;
+
+            VerticalLayout {
+                padding-left: 18px;
+                padding-right: 18px;
+                padding-top: 16px;
+                padding-bottom: 16px;
+                spacing: 16px;
+                alignment: start;
+
+                HorizontalLayout {
+                    height: 17px;
+                    vertical-stretch: 0;
+                    alignment: space-between;
+
+                    Text {
+                        text: "TRANSCRIPTION EN DIRECT";
+                        font-family: "Archivo SemiBold";
+                        font-size: 11px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+
+                    HorizontalLayout {
+                        width: audio-label.preferred-width + 14px;
+                        horizontal-stretch: 0;
+                        spacing: 6px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: root.system-audio-active ? Theme.accent : Theme.surface-4;
+                        }
+                        audio-label := Text {
+                            text: root.system-audio-active ? "Audio système demandé" : "Audio système indisponible";
+                            font-size: 11.5px;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                ScrollView {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        alignment: start;
+                        spacing: 3px;
+
+                        if root.live-me-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me): HorizontalLayout {
+                            alignment: start;
+                            spacing: 8px;
+
+                            Text {
+                                text: "Moi";
+                                font-family: "Archivo SemiBold";
+                                font-size: 11.5px;
+                                color: Theme.accent;
+                            }
+                            Text {
+                                text: root.elapsed-label;
+                                font-family: "JetBrains Mono";
+                                font-size: 10.5px;
+                                color: Theme.text-faint;
+                            }
+                        }
+                        if root.live-me-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me): Text {
+                            width: parent.width;
+                            text: root.live-me-text + (root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me ? " " + root.live-tentative : "");
+                            font-size: 15px;
+                            color: Theme.text-secondary;
+                            wrap: word-wrap;
+                        }
+                        if root.live-them-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them): HorizontalLayout {
+                            alignment: start;
+                            spacing: 8px;
+                            Text {
+                                text: "Eux";
+                                font-family: "Archivo SemiBold";
+                                font-size: 11.5px;
+                                color: Theme.accent;
+                            }
+                            Text {
+                                text: root.elapsed-label;
+                                font-family: "JetBrains Mono";
+                                font-size: 10.5px;
+                                color: Theme.text-faint;
+                            }
+                        }
+                        if root.live-them-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them): Text {
+                            width: parent.width;
+                            text: root.live-them-text + (root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them ? " " + root.live-tentative : "");
+                            font-size: 15px;
+                            color: Theme.text-secondary;
+                            wrap: word-wrap;
+                        }
+                        if root.live-me-text == "" && root.live-them-text == "" && root.live-tentative == "": Text {
+                            text: "À l'écoute…";
+                            font-size: 14px;
+                            color: Theme.text-muted;
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.mode == RecordingMode.meeting: Rectangle {
+            height: 132px;
+            vertical-stretch: 0;
+
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 0px;
+
+                Rectangle {
+                    height: 1px;
+                    vertical-stretch: 0;
+                    background: Theme.rule;
+                }
+
+                Rectangle {
+                    height: 15px;
+                    vertical-stretch: 0;
+                }
+
+                HorizontalLayout {
+                    height: 18px;
+                    vertical-stretch: 0;
+                    spacing: 8px;
+                    alignment: start;
+
+                    LucideIcon {
+                        icon: IconSet.PenLine;
+                        icon-color: Theme.accent;
+                        size: 14px;
+                    }
+                    Text {
+                        text: "NOTES";
+                        font-family: "Archivo SemiBold";
+                        font-size: 11px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    height: 10px;
+                    vertical-stretch: 0;
+                }
+
+                notes-input := ThemedTextArea {
+                    width: parent.width;
+                    area-height: 76px;
+                    text <=> root.notes;
+                    placeholder: "Notez décisions, actions, noms…";
+                    control-label: "Notes de la réunion";
+                    edited(value) => { root.notes-changed(value); }
                 }
             }
         }

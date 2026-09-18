@@ -1,5 +1,10 @@
-import { Switch, ComboBox, TextEdit, Button } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedTextArea } from "../themed_text_area.slint";
 
 // Port of DictationPolishSettingsSection.svelte. The active template's
 // prompt is forwarded as a plain property (`active-prompt`) rather than
@@ -10,42 +15,36 @@ export component DictationPolishSection inherits VerticalLayout {
     in property <bool> provider-available;
     in property <[string]> template-labels;
     in property <string> active-template-label;
-    in property <string> active-prompt;
+    in-out property <string> active-prompt;
 
     callback enabled-changed(bool);
     callback template-changed(string);
     callback prompt-changed(string);
     callback open-provider-settings-requested();
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Retouche de dictée";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: white;
-    }
-    Text {
-        text: "Reformule le texte transcrit avec l'IA avant de le coller.";
-        font-size: 11.5px;
-        color: #999;
-        wrap: word-wrap;
-    }
+    SettingsGroup {
+        title: "POLISH DE LA DICTÉE";
 
     SettingsField {
-        label: "Activer la retouche";
+        show-divider: false;
+        label: "Nettoyer la dictée avec l'IA";
+        description: "Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.";
 
-        Switch {
+        ThemedSwitch {
+            control-label: "Nettoyer la dictée avec l'IA";
             checked: root.enabled;
-            toggled => { root.enabled-changed(self.checked); }
+            toggled(new) => { root.enabled-changed(new); }
         }
     }
 
     if root.enabled && !root.provider-available: Rectangle {
         border-width: 1px;
-        border-color: #a06a1a;
+        border-color: Theme.warning;
         border-radius: 6px;
-        background: #3a2c14;
+        background: Theme.surface-2;
 
         HorizontalLayout {
             padding: 10px;
@@ -54,13 +53,13 @@ export component DictationPolishSection inherits VerticalLayout {
 
             Text {
                 text: "Aucun fournisseur IA disponible pour la retouche.";
-                color: #f0c674;
+                color: Theme.warning;
                 font-size: 11.5px;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
-            Button {
-                text: "Réglages IA";
+            ThemedButton {
+                text: "Choisir un fournisseur";
                 clicked => { root.open-provider-settings-requested(); }
             }
         }
@@ -69,7 +68,8 @@ export component DictationPolishSection inherits VerticalLayout {
     if root.enabled && root.template-labels.length > 0: SettingsField {
         label: "Modèle de retouche";
 
-        ComboBox {
+        ThemedComboBox {
+            control-label: "Modèle de retouche";
             model: root.template-labels;
             current-value: root.active-template-label;
             selected(value) => { root.template-changed(value); }
@@ -80,11 +80,13 @@ export component DictationPolishSection inherits VerticalLayout {
         label: "Instruction";
         description: "Prompt envoyé à l'IA pour retoucher le texte transcrit.";
 
-        TextEdit {
-            text: root.active-prompt;
-            height: 90px;
-            wrap: word-wrap;
+        ThemedTextArea {
+            text <=> root.active-prompt;
+            area-height: 160px;
+            placeholder: "Instruction de retouche";
+            control-label: "Instruction de retouche";
             edited(value) => { root.prompt-changed(value); }
         }
+    }
     }
 }

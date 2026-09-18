@@ -1,5 +1,6 @@
-import { Switch } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
 
 // Port of AutostartSettingsSection.svelte.
 export component AutostartSection inherits VerticalLayout {
@@ -7,22 +8,22 @@ export component AutostartSection inherits VerticalLayout {
 
     callback autostart-changed(bool);
 
-    spacing: 10px;
+    spacing: 22px;
+    alignment: start;
 
-    Text {
-        text: "Démarrage";
-        font-size: 13.5px;
-        font-weight: 700;
-        color: white;
-    }
+    SettingsGroup {
+        title: "DÉMARRAGE";
 
-    SettingsField {
-        label: "Lancer à l'ouverture de session";
-        description: "Ouvrir Soufflé automatiquement au démarrage du Mac.";
+        SettingsField {
+            show-divider: false;
+            label: "Lancer à l'ouverture de session";
+            description: "Ouvrir Soufflé automatiquement au démarrage du Mac.";
 
-        Switch {
-            checked <=> root.autostart-enabled;
-            toggled => { root.autostart-changed(root.autostart-enabled); }
+            ThemedSwitch {
+                control-label: "Lancer Soufflé à l'ouverture de session";
+                checked: root.autostart-enabled;
+                toggled(new) => { root.autostart-changed(new); }
+            }
         }
     }
 }

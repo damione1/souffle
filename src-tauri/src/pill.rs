@@ -102,6 +102,8 @@ static HOLD: Mutex<Option<PillHoldKind>> = Mutex::new(None);
 static LAST_RECORDING: AtomicBool = AtomicBool::new(false);
 
 static PILL_HIDDEN: AtomicBool = AtomicBool::new(false);
+static CURRENT_RMS_BITS: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0.0f32.to_bits());
 
 /// Restored / last-known origin, kept in Rust so `restore_from_db` is
 /// testable without AppKit.
@@ -382,7 +384,13 @@ pub fn push_live_text(text: &str) {
 
 /// Push a new RMS level (0.0–1.0) for the waveform animation.
 pub fn push_rms(level: f32) {
+    CURRENT_RMS_BITS.store(level.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     unsafe { pill_panel_push_rms(level) };
+}
+
+/// Latest normalized capture level for the in-process Slint window.
+pub fn current_rms() -> f32 {
+    f32::from_bits(CURRENT_RMS_BITS.load(Ordering::Relaxed))
 }
 
 /// Whether enough time has passed since the last live-text emission.

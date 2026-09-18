@@ -1,4 +1,5 @@
 import { MarkdownBlock } from "markdown_block.slint";
+import { Theme } from "../../theme.slint";
 
 export component MarkdownView inherits VerticalLayout {
     in property <[MarkdownBlock]> blocks;
@@ -13,15 +14,15 @@ export component MarkdownView inherits VerticalLayout {
             text: block.text;
             font-size: 13.5px;
             font-weight: 700;
-            color: white;
+            color: Theme.text-primary;
             wrap: word-wrap;
         }
         if block.kind == "bullet": HorizontalLayout {
             spacing: 6px;
-            Text { text: "•"; color: #999; font-size: 12px; }
+            Text { text: "•"; color: Theme.text-muted; font-size: 12px; }
             Text {
                 text: block.text;
-                color: #ddd;
+                color: Theme.text-secondary;
                 font-size: 12px;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
@@ -29,7 +30,7 @@ export component MarkdownView inherits VerticalLayout {
         }
         if block.kind == "paragraph": Text {
             text: block.text;
-            color: #ddd;
+            color: Theme.text-secondary;
             font-size: 12px;
             wrap: word-wrap;
         }
@@ -37,7 +38,7 @@ export component MarkdownView inherits VerticalLayout {
             clicked => { root.link-clicked(block.url); }
             Text {
                 text: block.text;
-                color: #5b9dfa;
+                color: Theme.accent;
                 font-size: 11.5px;
                 wrap: word-wrap;
             }

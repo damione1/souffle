@@ -5,13 +5,16 @@
 //! or option lists locally (AC3): `SettingsOptions::current()` is the single
 //! source for those once a section needs them.
 
-use crate::{CalendarRow, MainWindow};
+use crate::{
+    AccessState, AppLocale, AppTheme, AudioRetention as SlintAudioRetention, CalendarRow,
+    LogLevel as SlintLogLevel, MainWindow, MeetingLanguage, PasteMethod as SlintPasteMethod,
+};
 use souffle_lib::calendar::CalendarInfo;
 use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::PermState;
 use souffle_lib::settings::{
-    AppSettings, MeetingTranscriptionLanguage, PasteMethod, SettingsOptions, ShortcutSettings,
-    Theme,
+    AppSettings, MeetingAudioRetention, MeetingTranscriptionLanguage, PasteMethod, SettingsOptions,
+    ShortcutSettings, Theme,
 };
 
 /// Pushes `settings` into the Slint properties this shell currently wires.
@@ -21,12 +24,13 @@ use souffle_lib::settings::{
 pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_autostart_enabled(settings.autostart_enabled);
     window.set_settings_debug_transcription(settings.debug_transcription);
-    window.set_settings_log_level(settings.log_level.as_str().into());
+    window.set_settings_log_level(log_level_to_slint(settings.log_level));
 
-    window.set_settings_theme(theme_to_str(&settings.theme).into());
-    window.set_settings_locale(settings.locale.as_str().into());
+    window.set_settings_theme(theme_to_slint(settings.theme));
+    window.set_settings_locale(locale_to_slint(&settings.locale));
     window.set_settings_auto_paste(settings.auto_paste);
-    window.set_settings_paste_method(paste_method_to_str(&settings.paste_method).into());
+    window.set_settings_paste_method(paste_method_to_slint(settings.paste_method));
+    window.set_settings_dictation_learn_from_edit(settings.dictation_learn_from_edit);
     window.set_settings_paste_delay_ms(settings.paste_delay_ms as i32);
     window.set_settings_pill_hidden(settings.pill_hidden);
     window.set_settings_feedback_sounds_enabled(settings.feedback_sounds_enabled);
@@ -40,9 +44,9 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_system_audio_supported(souffle_lib::commands::get_system_audio_support());
     window.set_settings_allow_bluetooth_mic(settings.allow_bluetooth_mic);
     window.set_settings_capture_system_audio(settings.capture_system_audio);
-    window.set_settings_meeting_transcription_language(
-        meeting_transcription_language_to_str(&settings.meeting_transcription_language).into(),
-    );
+    window.set_settings_meeting_transcription_language(meeting_language_to_slint(
+        settings.meeting_transcription_language,
+    ));
     window.set_settings_meeting_autostop_enabled(settings.meeting_autostop_enabled);
     window.set_settings_meeting_autostop_label(
         crate::audio_ui::minute_label(settings.meeting_autostop_minutes).into(),
@@ -71,19 +75,19 @@ fn shared_string_model(values: &[String]) -> slint::ModelRc<slint::SharedString>
     std::rc::Rc::new(slint::VecModel::from(values)).into()
 }
 
-fn meeting_transcription_language_to_str(value: &MeetingTranscriptionLanguage) -> &'static str {
+pub fn meeting_language_to_slint(value: MeetingTranscriptionLanguage) -> MeetingLanguage {
     match value {
-        MeetingTranscriptionLanguage::Auto => "auto",
-        MeetingTranscriptionLanguage::En => "en",
-        MeetingTranscriptionLanguage::Fr => "fr",
+        MeetingTranscriptionLanguage::Auto => MeetingLanguage::Auto,
+        MeetingTranscriptionLanguage::En => MeetingLanguage::En,
+        MeetingTranscriptionLanguage::Fr => MeetingLanguage::Fr,
     }
 }
 
-pub fn meeting_transcription_language_from_str(value: &str) -> MeetingTranscriptionLanguage {
+pub fn meeting_language_from_slint(value: MeetingLanguage) -> MeetingTranscriptionLanguage {
     match value {
-        "en" => MeetingTranscriptionLanguage::En,
-        "fr" => MeetingTranscriptionLanguage::Fr,
-        _ => MeetingTranscriptionLanguage::Auto,
+        MeetingLanguage::Auto => MeetingTranscriptionLanguage::Auto,
+        MeetingLanguage::En => MeetingTranscriptionLanguage::En,
+        MeetingLanguage::Fr => MeetingTranscriptionLanguage::Fr,
     }
 }
 
@@ -98,7 +102,7 @@ pub fn populate_calendars(
     selected_ids: &[String],
     permission: PermState,
 ) {
-    window.set_settings_calendar_permission(perm_state_to_str(permission).into());
+    window.set_settings_calendar_permission(perm_state_to_slint(permission));
 
     let mut sorted: Vec<&CalendarInfo> = calendars.iter().collect();
     sorted.sort_by(|a, b| {
@@ -129,13 +133,13 @@ pub fn populate_calendars(
     window.set_settings_calendars(std::rc::Rc::new(slint::VecModel::from(rows)).into());
 }
 
-fn perm_state_to_str(state: PermState) -> &'static str {
+pub(crate) fn perm_state_to_slint(state: PermState) -> AccessState {
     match state {
-        PermState::Granted => "granted",
-        PermState::Denied => "denied",
-        PermState::Unknown => "unknown",
-        PermState::Unsupported => "unsupported",
-        PermState::NoDevice => "unknown",
+        PermState::Granted => AccessState::Granted,
+        PermState::Denied => AccessState::Denied,
+        PermState::Unknown => AccessState::Unknown,
+        PermState::Unsupported => AccessState::Unsupported,
+        PermState::NoDevice => AccessState::NoDevice,
     }
 }
 
@@ -162,46 +166,105 @@ pub fn populate_shortcuts(
     window.set_settings_native_tap_warning_visible(warning_visible);
 }
 
-/// Inverse of `LogLevel::as_str()` - the combobox in `diagnostics_section.slint`
-/// only ever sends back one of these five values.
-pub fn log_level_from_str(value: &str) -> LogLevel {
+pub fn log_level_to_slint(value: LogLevel) -> SlintLogLevel {
     match value {
-        "error" => LogLevel::Error,
-        "warn" => LogLevel::Warn,
-        "debug" => LogLevel::Debug,
-        "trace" => LogLevel::Trace,
-        _ => LogLevel::Info,
+        LogLevel::Error => SlintLogLevel::Error,
+        LogLevel::Warn => SlintLogLevel::Warn,
+        LogLevel::Info => SlintLogLevel::Info,
+        LogLevel::Debug => SlintLogLevel::Debug,
+        LogLevel::Trace => SlintLogLevel::Trace,
     }
 }
 
-fn theme_to_str(theme: &Theme) -> &'static str {
+pub fn log_level_from_slint(value: SlintLogLevel) -> LogLevel {
+    match value {
+        SlintLogLevel::Error => LogLevel::Error,
+        SlintLogLevel::Warn => LogLevel::Warn,
+        SlintLogLevel::Info => LogLevel::Info,
+        SlintLogLevel::Debug => LogLevel::Debug,
+        SlintLogLevel::Trace => LogLevel::Trace,
+    }
+}
+
+pub fn theme_to_slint(theme: Theme) -> AppTheme {
     match theme {
-        Theme::Dark => "dark",
-        Theme::Light => "light",
-        Theme::System => "system",
+        Theme::Dark => AppTheme::Dark,
+        Theme::Light => AppTheme::Light,
+        Theme::System => AppTheme::System,
     }
 }
 
-pub fn theme_from_str(value: &str) -> Theme {
-    match value {
-        "light" => Theme::Light,
-        "system" => Theme::System,
-        _ => Theme::Dark,
+pub fn theme_from_slint(theme: AppTheme) -> Theme {
+    match theme {
+        AppTheme::Dark => Theme::Dark,
+        AppTheme::Light => Theme::Light,
+        AppTheme::System => Theme::System,
     }
 }
 
-fn paste_method_to_str(method: &PasteMethod) -> &'static str {
+pub fn locale_to_slint(locale: &str) -> AppLocale {
+    match locale {
+        "fr" => AppLocale::Fr,
+        "en" => AppLocale::En,
+        "" => AppLocale::En,
+        other => {
+            eprintln!("unknown locale {other:?}, falling back to en");
+            AppLocale::En
+        }
+    }
+}
+
+pub fn locale_from_slint(locale: AppLocale) -> &'static str {
+    match locale {
+        AppLocale::En => "en",
+        AppLocale::Fr => "fr",
+    }
+}
+
+/// Port of App.svelte's `isLightTheme` (`theme === "light" || (theme ===
+/// "system" && !prefersDark)`), inverted to match `Theme.slint`'s `dark`
+/// flag. `"system"` resolves against the real macOS appearance
+/// (`native::appearance::is_system_dark`) rather than the browser's
+/// `matchMedia` - see that function's doc comment for what "resolves"
+/// means (a one-shot query, not a live OS-appearance subscription).
+pub fn resolve_dark(theme: Theme) -> bool {
+    match theme {
+        Theme::Dark => true,
+        Theme::Light => false,
+        Theme::System => souffle_lib::native::appearance::is_system_dark(),
+    }
+}
+
+pub fn paste_method_to_slint(method: PasteMethod) -> SlintPasteMethod {
     match method {
-        PasteMethod::Clipboard => "clipboard",
-        PasteMethod::Type => "type",
-        PasteMethod::Ax => "ax",
+        PasteMethod::Clipboard => SlintPasteMethod::Clipboard,
+        PasteMethod::Type => SlintPasteMethod::Typing,
+        PasteMethod::Ax => SlintPasteMethod::Ax,
     }
 }
 
-pub fn paste_method_from_str(value: &str) -> PasteMethod {
+pub fn paste_method_from_slint(method: SlintPasteMethod) -> PasteMethod {
+    match method {
+        SlintPasteMethod::Clipboard => PasteMethod::Clipboard,
+        SlintPasteMethod::Typing => PasteMethod::Type,
+        SlintPasteMethod::Ax => PasteMethod::Ax,
+    }
+}
+
+pub fn audio_retention_to_slint(value: MeetingAudioRetention) -> SlintAudioRetention {
     match value {
-        "type" => PasteMethod::Type,
-        "ax" => PasteMethod::Ax,
-        _ => PasteMethod::Clipboard,
+        MeetingAudioRetention::Off => SlintAudioRetention::Off,
+        MeetingAudioRetention::Keep7d => SlintAudioRetention::Keep7d,
+        MeetingAudioRetention::Keep30d => SlintAudioRetention::Keep30d,
+        MeetingAudioRetention::KeepForever => SlintAudioRetention::KeepForever,
+    }
+}
+
+pub fn audio_retention_from_slint(value: SlintAudioRetention) -> MeetingAudioRetention {
+    match value {
+        SlintAudioRetention::Off => MeetingAudioRetention::Off,
+        SlintAudioRetention::Keep7d => MeetingAudioRetention::Keep7d,
+        SlintAudioRetention::Keep30d => MeetingAudioRetention::Keep30d,
+        SlintAudioRetention::KeepForever => MeetingAudioRetention::KeepForever,
     }
 }

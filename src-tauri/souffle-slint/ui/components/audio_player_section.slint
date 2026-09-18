@@ -1,3 +1,4 @@
+import { Theme } from "../theme.slint";
 // Native audio player for MeetingDetail (SOU-187 milestone 7, AC14/AC16).
 // New engineering, not a port: MeetingAudioPlayerSection.svelte is a bare
 // `<input type="range">` next to an HTML `<audio>` element, no waveform at
@@ -18,7 +19,7 @@ export component AudioPlayerSection inherits VerticalLayout {
 
     if !root.has-audio: Text {
         text: "Aucun enregistrement audio pour cette r\u{e9}union.";
-        color: #888888;
+        color: Theme.text-muted;
         font-size: 12px;
     }
 
@@ -29,14 +30,30 @@ export component AudioPlayerSection inherits VerticalLayout {
             width: 36px;
             height: 36px;
             border-radius: 18px;
-            background: play-area.has-hover ? #4a4a4a : #3a3a3a;
+            border-width: play-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: play-area.pressed ? Theme.surface-3 : Theme.surface-4;
 
             accessible-role: button;
             accessible-label: root.is-playing ? "Pause" : "Lecture";
             accessible-action-default => { root.play-pause-requested(); }
 
+            forward-focus: play-focus;
+            play-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.play-pause-requested();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
             play-area := TouchArea {
-                clicked => { root.play-pause-requested(); }
+                clicked => {
+                    play-focus.focus();
+                    root.play-pause-requested();
+                }
             }
 
             Text {
@@ -48,7 +65,7 @@ export component AudioPlayerSection inherits VerticalLayout {
 
         Text {
             text: root.position-label + " / " + root.duration-label;
-            color: #888888;
+            color: Theme.text-muted;
             font-size: 11px;
             font-family: "monospace";
             vertical-alignment: center;
@@ -57,12 +74,34 @@ export component AudioPlayerSection inherits VerticalLayout {
 
     if root.has-audio: waveform-area := Rectangle {
         height: 56px;
+        border-width: waveform-focus.has-focus ? 2px : 0px;
+        border-color: Theme.accent;
 
         accessible-role: slider;
         accessible-label: "Position de lecture";
+        accessible-value: root.position-label;
+        accessible-value-minimum: 0;
+        accessible-value-maximum: 100;
+        accessible-value-step: 5;
+
+        forward-focus: waveform-focus;
+        waveform-focus := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.LeftArrow {
+                    root.seek-requested(max(0, root.progress - 0.05));
+                    return accept;
+                }
+                if event.text == Key.RightArrow {
+                    root.seek-requested(min(1, root.progress + 0.05));
+                    return accept;
+                }
+                return reject;
+            }
+        }
 
         seek-area := TouchArea {
             clicked => {
+                waveform-focus.focus();
                 root.seek-requested(self.mouse-x / self.width);
             }
         }
@@ -80,7 +119,7 @@ export component AudioPlayerSection inherits VerticalLayout {
 
                 Rectangle {
                     height: max(2px, peak * waveform-area.height);
-                    background: (i * 1.0 / root.peaks.length) < root.progress ? #4a9eff : #555555;
+                    background: (i * 1.0 / root.peaks.length) < root.progress ? Theme.accent : Theme.surface-4;
                 }
             }
         }

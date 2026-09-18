@@ -290,28 +290,30 @@ impl AppStateMachine {
         }
     }
 
-    /// Derive the legacy runtime phase from the current FSM state.
-    pub fn runtime_phase(&self) -> crate::engine::TranscriptionRuntimePhase {
-        use crate::engine::TranscriptionRuntimePhase;
+    /// Project the selected profile's runtime phase from the authoritative FSM.
+    /// Disk presence matters before the process has loaded any model, and when
+    /// the selected profile differs from the loaded one. In-flight operations
+    /// remain visible instead of being mistaken for missing model files.
+    pub fn runtime_phase(
+        &self,
+        selected: &TranscriptionProfile,
+        downloaded: bool,
+    ) -> crate::engine::TranscriptionRuntimePhase {
+        use crate::engine::{TranscriptionRuntimePhase, transcription_runtime_phase};
         match self {
-            AppStateMachine::Idle | AppStateMachine::Downloading { .. } => {
-                TranscriptionRuntimePhase::DownloadRequired
+            AppStateMachine::Idle | AppStateMachine::Downloaded { .. } => {
+                transcription_runtime_phase(downloaded, false)
             }
-            AppStateMachine::Downloaded { .. } | AppStateMachine::Loading { .. } => {
-                TranscriptionRuntimePhase::LoadRequired
+            AppStateMachine::Downloading { .. } => TranscriptionRuntimePhase::Downloading,
+            AppStateMachine::Loading { .. } => TranscriptionRuntimePhase::Loading,
+            AppStateMachine::Ready { profile }
+            | AppStateMachine::RecordingDictation { profile, .. }
+            | AppStateMachine::RecordingMeeting { profile, .. }
+            | AppStateMachine::Stopping { profile, .. } => {
+                transcription_runtime_phase(downloaded, profile == selected)
             }
-            AppStateMachine::Ready { .. }
-            | AppStateMachine::RecordingDictation { .. }
-            | AppStateMachine::RecordingMeeting { .. }
-            | AppStateMachine::Stopping { .. }
-            | AppStateMachine::Unloading { .. } => TranscriptionRuntimePhase::Ready,
-            AppStateMachine::Error { recovery, .. } => match recovery {
-                ErrorRecovery::RetryFromIdle => TranscriptionRuntimePhase::DownloadRequired,
-                ErrorRecovery::RetryFromDownloaded { .. } => {
-                    TranscriptionRuntimePhase::LoadRequired
-                }
-                ErrorRecovery::RetryFromReady { .. } => TranscriptionRuntimePhase::Ready,
-            },
+            AppStateMachine::Unloading { .. } => TranscriptionRuntimePhase::Unloading,
+            AppStateMachine::Error { .. } => TranscriptionRuntimePhase::Failed,
         }
     }
 }
@@ -748,22 +750,81 @@ mod tests {
     fn runtime_phase_mapping() {
         use crate::engine::TranscriptionRuntimePhase;
         assert_eq!(
-            AppStateMachine::Idle.runtime_phase(),
+            AppStateMachine::Idle.runtime_phase(&test_profile(), false),
             TranscriptionRuntimePhase::DownloadRequired
         );
         assert_eq!(
             AppStateMachine::Downloaded {
                 profile: test_profile()
             }
-            .runtime_phase(),
+            .runtime_phase(&test_profile(), true),
             TranscriptionRuntimePhase::LoadRequired
         );
         assert_eq!(
             AppStateMachine::Ready {
                 profile: test_profile()
             }
-            .runtime_phase(),
+            .runtime_phase(&test_profile(), true),
             TranscriptionRuntimePhase::Ready
+        );
+    }
+
+    #[test]
+    fn cold_boot_with_downloaded_configured_model_requires_load_not_download() {
+        assert_eq!(
+            AppStateMachine::Idle.runtime_phase(&other_profile(), true),
+            crate::engine::TranscriptionRuntimePhase::LoadRequired
+        );
+    }
+
+    #[test]
+    fn runtime_phase_preserves_transitions_errors_and_selected_profile() {
+        use crate::engine::TranscriptionRuntimePhase as Phase;
+        let profile = test_profile();
+        let cases = [
+            (
+                AppStateMachine::Downloading {
+                    profile: profile.clone(),
+                },
+                Phase::Downloading,
+            ),
+            (
+                AppStateMachine::Loading {
+                    profile: profile.clone(),
+                },
+                Phase::Loading,
+            ),
+            (
+                AppStateMachine::Unloading {
+                    profile: profile.clone(),
+                    next_profile: None,
+                },
+                Phase::Unloading,
+            ),
+            (
+                AppStateMachine::Error {
+                    message: "load failed".into(),
+                    recovery: ErrorRecovery::RetryFromDownloaded {
+                        profile: profile.clone(),
+                    },
+                },
+                Phase::Failed,
+            ),
+        ];
+        for (machine, expected) in cases {
+            assert_eq!(machine.runtime_phase(&profile, true), expected);
+            assert_eq!(machine.runtime_phase(&profile, false), expected);
+        }
+        let loaded_other = AppStateMachine::Ready {
+            profile: other_profile(),
+        };
+        assert_eq!(
+            loaded_other.runtime_phase(&profile, true),
+            Phase::LoadRequired
+        );
+        assert_eq!(
+            loaded_other.runtime_phase(&profile, false),
+            Phase::DownloadRequired
         );
     }
 

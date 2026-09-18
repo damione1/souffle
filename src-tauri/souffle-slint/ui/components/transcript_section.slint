@@ -1,4 +1,5 @@
 import { LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
 
 // Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
 // labels and session-break dividers, click-to-seek on a paragraph's
@@ -102,9 +103,9 @@ export component TranscriptSection inherits VerticalLayout {
             }
 
             Rectangle {
-                background: #2a2a2a;
+                background: Theme.surface-2;
                 border-width: 1px;
-                border-color: #4a9eff;
+                border-color: Theme.accent;
 
                 VerticalLayout {
                     padding: 12px;
@@ -117,7 +118,7 @@ export component TranscriptSection inherits VerticalLayout {
                             text: "Alias de dictionnaire";
                             font-size: 11px;
                             font-weight: 600;
-                            color: #cccccc;
+                            color: Theme.text-secondary;
                             vertical-alignment: center;
                         }
 
@@ -136,7 +137,7 @@ export component TranscriptSection inherits VerticalLayout {
                             Text {
                                 text: "\u{2715}";
                                 font-size: 11px;
-                                color: #888888;
+                                color: Theme.text-muted;
                             }
                         }
                     }
@@ -155,7 +156,7 @@ export component TranscriptSection inherits VerticalLayout {
 
                     save-btn := Rectangle {
                         height: 26px;
-                        background: root.alias-term-draft == "" ? #3a3a3a : (save-area.has-hover ? #3a7bc8 : #4a9eff);
+                        background: root.alias-term-draft == "" ? Theme.surface-4 : (save-area.has-hover ? Theme.accent-hover : Theme.accent);
 
                         accessible-role: button;
                         accessible-label: "Enregistrer l'alias";
@@ -168,7 +169,7 @@ export component TranscriptSection inherits VerticalLayout {
 
                         Text {
                             text: "Enregistrer";
-                            color: white;
+                            color: Theme.text-primary;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -192,30 +193,32 @@ export component TranscriptSection inherits VerticalLayout {
     }
 
     Text {
-        text: "Transcript \u{b7} " + root.segment-count + " segments";
-        font-size: 11px;
-        font-weight: 600;
-        color: #888888;
+        text: "Transcription";
+        font-family: "Archivo SemiBold";
+        font-size: 13px;
+        color: Theme.text-primary;
     }
 
     if root.segment-count == 0: Text {
-        text: "Pas de transcript pour cette r\u{e9}union.";
-        color: #888888;
+        text: "Aucun texte transcrit pour cette r\u{e9}union.";
+        color: Theme.text-muted;
         font-size: 12px;
     }
 
     if root.segment-count > 0: Rectangle {
         height: 260px;
         border-width: 1px;
-        border-color: #3a3a3a;
+        border-color: Theme.surface-4;
         clip: true;
 
         flick := Flickable {
-            width: 100%;
+            width: parent.width - 10px;
             height: 100%;
+            viewport-width: self.width;
             viewport-y <=> root.scroll-top;
 
             VerticalLayout {
+                width: flick.width;
                 padding: 12px;
                 spacing: 12px;
                 alignment: start;
@@ -234,22 +237,41 @@ export component TranscriptSection inherits VerticalLayout {
                                 text: block.speaker-label;
                                 font-size: 11px;
                                 font-weight: 600;
-                                color: #4a9eff;
+                                color: Theme.accent;
                                 vertical-alignment: center;
                             }
 
                             ts-btn := Rectangle {
                                 width: 40px;
+                                height: 22px;
+                                border-radius: 3px;
+                                border-width: ts-focus.has-focus ? 2px : 0px;
+                                border-color: Theme.accent;
+                                background: ts-area.has-hover ? Theme.surface-2 : transparent;
 
                                 accessible-role: button;
                                 accessible-label: "Aller \u{e0} " + block.timestamp;
+                                accessible-enabled: root.has-audio;
                                 accessible-action-default => {
                                     root.paragraph-clicked(block.recording-session-index, block.start-time);
                                 }
 
-                                TouchArea {
+                                forward-focus: ts-focus;
+                                ts-focus := FocusScope {
+                                    enabled: root.has-audio;
+                                    key-pressed(event) => {
+                                        if event.text == Key.Return || event.text == Key.Space {
+                                            root.paragraph-clicked(block.recording-session-index, block.start-time);
+                                            return accept;
+                                        }
+                                        return reject;
+                                    }
+                                }
+
+                                ts-area := TouchArea {
                                     enabled: root.has-audio;
                                     clicked => {
+                                        ts-focus.focus();
                                         root.paragraph-clicked(block.recording-session-index, block.start-time);
                                     }
                                 }
@@ -258,24 +280,18 @@ export component TranscriptSection inherits VerticalLayout {
                                     text: block.timestamp;
                                     font-family: "monospace";
                                     font-size: 10.5px;
-                                    color: #777777;
+                                    color: Theme.text-faint;
                                     vertical-alignment: center;
                                 }
                             }
                         }
 
-                        StyledText {
-                            text: block.markdown-text;
-                            default-color: white;
-                            default-font-size: 13px;
-                            link-color: #4a9eff;
-                            // Not positioned under the exact clicked word:
-                            // `PopupWindow`'s `x`/`y` are relative to this
-                            // component and `StyledText` doesn't expose a
-                            // clicked link's on-screen position - a fixed,
-                            // honest v1 position, not a missing feature
-                            // hidden as a bug.
-                            link-clicked(word) => { root.open-alias-popup(word); }
+                        Text {
+                            width: parent.width;
+                            text: block.text;
+                            color: Theme.text-primary;
+                            font-size: 13px;
+                            wrap: word-wrap;
                         }
                     }
 
@@ -286,17 +302,17 @@ export component TranscriptSection inherits VerticalLayout {
 
                         Rectangle {
                             height: 1px;
-                            background: #3a3a3a;
+                            background: Theme.surface-4;
                             vertical-stretch: 1;
                         }
                         Text {
                             text: block.end-label + " / " + block.start-label;
                             font-size: 10px;
-                            color: #777777;
+                            color: Theme.text-faint;
                         }
                         Rectangle {
                             height: 1px;
-                            background: #3a3a3a;
+                            background: Theme.surface-4;
                             vertical-stretch: 1;
                         }
                     }

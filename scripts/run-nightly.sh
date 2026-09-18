@@ -53,27 +53,16 @@ fi
 # The first build after this fails with `errSecInternalComponent` unless the
 # keychain prompt for the signing key is answered with "Always Allow": the
 # private key's ACL does not list codesign. One click, once per machine.
-export APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: Damien Goehrig (X6H966RSDB)}"
+# (bundle-macos.sh applies the same default and the same fallback-to-unsigned
+# behavior if the identity isn't in the keychain.)
 
-if ! security find-identity -v -p codesigning | grep -qF "$APPLE_SIGNING_IDENTITY"; then
-  echo "WARNING: no codesigning identity matching '$APPLE_SIGNING_IDENTITY' in the keychain."
-  echo "         Building unsigned: every rebuild will be a new TCC subject, so"
-  echo "         all permissions have to be granted again each time."
-  echo "         Set APPLE_SIGNING_IDENTITY to an identity you do have to fix this."
-  unset APPLE_SIGNING_IDENTITY
-fi
-
-npm run tauri -- build --debug --bundles app
+bundle_args=(--debug --nightly)
+[[ "$dmg_mode" -eq 1 ]] && bundle_args+=(--dmg)
+"$root/scripts/bundle-macos.sh" "${bundle_args[@]}"
 
 pkill -f "Soufflé Nightly.app/Contents/MacOS/souffle" 2>/dev/null || true
 
 if [[ "$dmg_mode" -eq 1 ]]; then
-  mkdir -p "$(dirname "$dmg")"
-  stage="$(mktemp -d)"
-  cp -R "$app" "$stage/"
-  ln -s /Applications "$stage/Applications"
-  hdiutil create -volname "Soufflé Nightly" -srcfolder "$stage" -ov -format UDZO "$dmg"
-  rm -rf "$stage"
   open "$dmg"
 else
   open "$app"

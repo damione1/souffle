@@ -1,0 +1,128 @@
+import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Port of app.css `.field-select`. `std-widgets` ComboBox uses the Fluent
+// skin (and stretches in a SettingsField row), so closed-set and catalogue
+// pickers both go through this instead.
+export component ThemedComboBox inherits Rectangle {
+    in property <[string]> model;
+    in property <string> current-value;
+    in property <bool> enabled: true;
+    in property <length> combo-width: Theme.settings-control-width;
+    in property <bool> fill-width: false;
+    in property <string> control-label: "Sélection";
+
+    callback selected(string);
+
+    width: root.combo-width;
+    height: Theme.settings-control-height;
+    horizontal-stretch: root.fill-width ? 1 : 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: key-focus.has-focus ? 2px : 1px;
+    border-color: key-focus.has-focus ? Theme.accent : Theme.ghost-border;
+    background: area.pressed ? Theme.surface-2 : Theme.input;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    accessible-role: combobox;
+    accessible-label: root.control-label;
+    accessible-value: root.current-value;
+    accessible-enabled: root.enabled;
+    accessible-expanded: popup.is-open;
+    accessible-action-default => {
+        if root.enabled {
+            popup.show();
+        }
+    }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow {
+                popup.show();
+                return accept;
+            }
+            if event.text == Key.Escape && popup.is-open {
+                popup.close();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    label := Text {
+        x: 12px;
+        width: parent.width - 36px;
+        height: parent.height;
+        text: root.current-value;
+        font-size: 14px;
+        color: Theme.text-secondary;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    LucideIcon {
+        icon: IconSet.ChevronDown;
+        icon-color: Theme.text-muted;
+        size: 14px;
+        x: parent.width - 26px;
+        y: (parent.height - self.height) / 2;
+    }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            key-focus.focus();
+            popup.show();
+        }
+    }
+
+    popup := PopupWindow {
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        x: 0;
+        y: parent.height + 4px;
+        width: max(parent.width, 160px);
+
+        Rectangle {
+            border-width: 1px;
+            border-color: Theme.ghost-border;
+            border-radius: 4px;
+            background: Theme.surface-1;
+
+            VerticalLayout {
+                padding: 4px;
+                alignment: start;
+                spacing: 0px;
+
+                for item in root.model: Rectangle {
+                    height: 32px;
+                    vertical-stretch: 0;
+                    background: row-area.has-hover ? Theme.surface-2 : transparent;
+                    border-radius: 3px;
+
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: parent.height;
+                        text: item;
+                        font-size: 13px;
+                        color: item == root.current-value ? Theme.text-primary : Theme.text-secondary;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    row-area := TouchArea {
+                        clicked => {
+                            root.selected(item);
+                            popup.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

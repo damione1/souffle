@@ -14,7 +14,18 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-slint = "1.9"
+# `unstable-winit-030`: lets main.rs configure the native NSWindow (hidden
+# title, transparent titlebar, full-size content view) via
+# `slint::BackendSelector::with_winit_window_attributes_hook` before the
+# window is created - the native-window equivalent of Tauri's
+# `titleBarStyle: overlay` + `hiddenTitle: true`, needed so the app draws one
+# custom dark header with inline traffic lights instead of a native title
+# bar stacked on top of it.
+# Default Slint renderer is FemtoVG (OpenGL ES), not Metal. `renderer-skia`
+# selects Skia, which uses Metal on macOS. Without it, tab switches and
+# scrolling feel like a webview. Keep `unstable-winit-030` for the overlay
+# titlebar hook in main.rs.
+slint = { version = "1.9", features = ["unstable-winit-030", "renderer-skia"] }
 souffle_lib = { path = "..", package = "souffle" }
 chrono = "0.4"
 tokio = { version = "1", features = ["sync"] }
@@ -34,4 +45,5 @@ arboard = "3.6"
 uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
+lucide-slint = "1.46.0"
 slint-build = "1.9"

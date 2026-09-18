@@ -1,0 +1,52 @@
+// Color tokens ported from `src/app.css`'s `@theme`/`.light` blocks. `dark`
+// is the single source of truth for which palette every color below
+// resolves to - main.rs sets it once at launch (resolving "system" against
+// the real macOS appearance) and again on every theme toggle/settings
+// change, via the generated `window.global::<Theme>()` accessor. Every
+// other `.slint` file just reads `Theme.canvas` etc. as before; they don't
+// need to know about `dark` at all; the color properties react to it
+// automatically.
+export global Theme {
+    in-out property <bool> dark: true;
+
+    out property <color> canvas: root.dark ? #16110c : #fbf7ed;
+    out property <color> surface-1: root.dark ? #1e1811 : #ffffff;
+    out property <color> surface-2: root.dark ? #261e15 : #f0e9dc;
+    out property <color> surface-3: root.dark ? #33291d : #e2d8c6;
+    out property <color> surface-4: root.dark ? #423525 : #d3c6ad;
+    out property <color> input: root.dark ? #150f09 : #f6f1e4;
+
+    out property <color> accent: root.dark ? #e9ae55 : #95610f;
+    out property <color> accent-hover: root.dark ? #f2be6e : #7a4e09;
+    out property <color> secondary: root.dark ? #d98c6a : #6b2710;
+
+    out property <color> text-primary: root.dark ? #f1e9dd : #17110b;
+    out property <color> text-secondary: root.dark ? #e6dccb : #3a2d1c;
+    out property <color> text-tertiary: root.dark ? #c2b39a : #55432e;
+    out property <color> text-muted: root.dark ? #b3a284 : #6b573c;
+    out property <color> text-faint: root.dark ? #9c8c70 : #7b6547;
+
+    out property <color> success: root.dark ? #e9ae55 : #4f7a52;
+    out property <color> warning: root.dark ? #e0a458 : #a8701a;
+    out property <color> danger: root.dark ? #f2685a : #a8402c;
+    out property <color> danger-soft: root.dark ? #f28a78 : #c07460;
+    out property <color> danger-strong: root.dark ? #8a5148 : #8a3222;
+    out property <color> on-danger: root.dark ? #2a0e09 : #f7efdf;
+
+    out property <color> ghost-border: root.dark ? rgba(235, 210, 170, 0.42) : rgba(23, 17, 11, 0.46);
+    out property <color> border-soft: root.dark ? rgba(235, 210, 170, 0.16) : rgba(23, 17, 11, 0.16);
+    out property <color> rule: root.dark ? rgba(235, 210, 170, 0.22) : rgba(23, 17, 11, 0.28);
+    out property <color> modal-scrim: root.dark ? rgba(0, 0, 0, 0.72) : rgba(0, 0, 0, 0.54);
+
+    // Shared trailing columns on upcoming + timeline rows so times and
+    // play/chevron sit on one vertical grid. JetBrains Mono 11.5px:
+    // duration `0:00`/`0:00:00`, time `00:00` or range `00:00–00:00`.
+    out property <length> row-duration-width: 42px;
+    out property <length> row-time-width: 84px;
+    out property <length> row-action-width: 22px;
+
+    // Trailing control column on settings rows (combo, URL field, spin).
+    out property <length> settings-control-width: 220px;
+    out property <length> settings-control-height: 36px;
+    out property <length> settings-inset: 12px;
+}

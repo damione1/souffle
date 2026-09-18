@@ -1,0 +1,62 @@
+import { Theme } from "../theme.slint";
+
+// Port of the volume slider in FeedbackSoundsSettingsSection. Stock Slider
+// uses a Fluent blue track that ignores Theme.
+export component ThemedSlider inherits Rectangle {
+    in property <int> value;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <bool> enabled: true;
+
+    callback changed(int);
+
+    width: 140px;
+    height: 18px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    property <float> fraction: max(0, min(1, (root.value - root.minimum) / (root.maximum - root.minimum)));
+
+    Rectangle {
+        y: 7px;
+        height: 4px;
+        width: parent.width;
+        border-radius: 2px;
+        background: Theme.surface-3;
+    }
+    Rectangle {
+        y: 7px;
+        height: 4px;
+        width: parent.width * root.fraction;
+        border-radius: 2px;
+        background: Theme.accent;
+    }
+    Rectangle {
+        x: parent.width * root.fraction - 7px;
+        y: 2px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: white;
+        border-width: 1px;
+        border-color: Theme.ghost-border;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        moved => {
+            if (self.pressed) {
+                root.apply(self.mouse-x);
+            }
+        }
+        clicked => { root.apply(self.mouse-x); }
+    }
+
+    function apply(mouse-x: length) {
+        if (root.width <= 0) {
+            return;
+        }
+        root.changed(round(root.minimum + (root.maximum - root.minimum) * max(0, min(1, mouse-x / root.width))));
+    }
+}

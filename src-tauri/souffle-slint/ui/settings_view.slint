@@ -1,4 +1,3 @@
-import { TabWidget, ScrollView, Button, Palette } from "std-widgets.slint";
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
 import { DiagnosticsSection } from "components/settings/diagnostics_section.slint";
@@ -15,6 +14,10 @@ import { SummaryTemplatesSection } from "components/settings/summary_templates_s
 import { ModelSection } from "components/settings/model_section.slint";
 import { DictionarySection, DictionaryRow } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
+import { Theme } from "theme.slint";
+import { LucideIcon, IconSet } from "components/lucide_icon.slint";
+import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
+import { AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, SettingsTab } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -25,15 +28,16 @@ import { SnippetsSection, SnippetRow } from "components/settings/snippets_sectio
 // (`if`/`for`) tabs (a compiler-enforced restriction), so tabs are added
 // directly in this source as each is implemented, not hidden behind a flag.
 export component SettingsView inherits Rectangle {
+    in-out property <SettingsTab> tab: SettingsTab.transcription;
     in property <bool> autostart-enabled;
     in property <bool> debug-transcription;
-    in property <string> log-level;
+    in property <LogLevel> log-level;
     in property <string> log-tail;
     in property <bool> copying-diagnostics: false;
-    in property <string> theme;
-    in property <string> locale;
+    in property <AppTheme> theme;
+    in property <AppLocale> locale;
     in property <bool> auto-paste;
-    in property <string> paste-method;
+    in property <PasteMethod> paste-method;
     in property <int> paste-delay-ms;
     in property <int> paste-delay-min;
     in property <int> paste-delay-max;
@@ -43,10 +47,10 @@ export component SettingsView inherits Rectangle {
     in property <string> toggle-shortcut-label;
     in property <string> ptt-shortcut-label;
     in property <bool> native-tap-warning-visible;
-    in-out property <string> recording-field: "";
+    in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
     in property <bool> calendar-enabled;
-    in property <string> calendar-permission;
+    in property <AccessState> calendar-permission;
     in property <bool> calendar-autostart-enabled;
     in property <int> calendar-reminder-minutes;
     in property <[CalendarRow]> calendars;
@@ -64,7 +68,7 @@ export component SettingsView inherits Rectangle {
     in property <string> clamshell-device-label;
     in property <bool> system-audio-supported;
     in property <bool> capture-system-audio;
-    in property <string> meeting-transcription-language;
+    in property <MeetingLanguage> meeting-transcription-language;
     in property <bool> meeting-autostop-enabled;
     in property <[string]> meeting-autostop-labels;
     in property <string> meeting-autostop-label;
@@ -76,7 +80,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> dictionary-correction;
     in property <string> data-stats-line;
     in property <string> data-recordings-line;
-    in property <string> meeting-audio-retention;
+    in property <AudioRetention> meeting-audio-retention;
     in property <bool> data-exporting;
     in property <string> data-export-status;
     in property <bool> data-export-status-is-error;
@@ -92,7 +96,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> auto-update-check;
     in property <bool> checking-updates;
     in property <string> update-status;
-    in property <string> summary-provider;
+    in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
     in property <string> apple-intelligence-reason;
     in property <string> ollama-url;
@@ -112,14 +116,15 @@ export component SettingsView inherits Rectangle {
     in property <bool> dictation-polish-provider-available;
     in property <[string]> dictation-polish-template-labels;
     in property <string> active-dictation-polish-label;
-    in property <string> active-dictation-polish-prompt;
+    in-out property <string> active-dictation-polish-prompt;
     in property <[string]> summary-template-labels;
     in property <string> default-summary-template-label;
     in property <string> editing-summary-template-label;
     in property <bool> editing-summary-template-is-builtin;
     in property <string> editing-summary-template-name;
-    in property <string> editing-summary-template-prompt;
+    in-out property <string> editing-summary-template-prompt;
     in property <string> model-status-text;
+    in property <bool> model-ready;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
     in property <bool> model-busy;
@@ -147,20 +152,20 @@ export component SettingsView inherits Rectangle {
     callback autostart-changed(bool);
     callback permissions-review-requested();
     callback debug-transcription-changed(bool);
-    callback log-level-changed(string);
+    callback log-level-changed(LogLevel);
     callback copy-diagnostics-requested();
-    callback theme-changed(string);
-    callback locale-changed(string);
+    callback theme-changed(AppTheme);
+    callback locale-changed(AppLocale);
     callback auto-paste-changed(bool);
-    callback paste-method-changed(string);
+    callback paste-method-changed(PasteMethod);
     callback paste-delay-changed(int);
     callback pill-hidden-changed(bool);
     callback feedback-sounds-enabled-changed(bool);
     callback feedback-sounds-volume-changed(int);
-    callback shortcut-record-requested(string);
-    callback shortcut-captured(string, string, bool, bool, bool, bool);
-    callback shortcut-released(string, string, bool, bool, bool, bool);
-    callback shortcut-cleared(string);
+    callback shortcut-record-requested(ShortcutField);
+    callback shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
+    callback shortcut-released(ShortcutField, string, bool, bool, bool, bool);
+    callback shortcut-cleared(ShortcutField);
     callback shortcut-cancelled();
     callback calendar-enabled-changed(bool);
     callback calendar-autostart-enabled-changed(bool);
@@ -177,7 +182,7 @@ export component SettingsView inherits Rectangle {
     callback remove-device-requested(string);
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
-    callback meeting-transcription-language-changed(string);
+    callback meeting-transcription-language-changed(MeetingLanguage);
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
     callback meeting-max-duration-changed(string);
@@ -185,7 +190,7 @@ export component SettingsView inherits Rectangle {
     callback filler-removal-changed(bool);
     callback stutter-collapse-changed(bool);
     callback dictionary-correction-changed(bool);
-    callback meeting-audio-retention-changed(string);
+    callback meeting-audio-retention-changed(AudioRetention);
     callback data-export-requested();
     callback data-reveal-requested();
     callback mcp-copy-desktop-snippet-requested();
@@ -193,7 +198,7 @@ export component SettingsView inherits Rectangle {
     callback mcp-test-requested();
     callback check-updates-requested();
     callback auto-update-check-changed(bool);
-    callback summary-provider-changed(string);
+    callback summary-provider-changed(SummaryProvider);
     callback ollama-url-changed(string);
     callback ollama-model-changed(string);
     callback summary-providers-retry-requested();
@@ -223,110 +228,196 @@ export component SettingsView inherits Rectangle {
     // replacing them (mirrors App.svelte hiding HomeView behind Settings
     // instead of unmounting it), so without a solid background both would
     // paint into the same window at once.
-    background: Palette.background;
+    background: Theme.canvas;
+
+    // The settings tree overlays a kept-alive HomeView. Painting an opaque
+    // Rectangle doesn't consume input, so empty pixels used to click through.
+    TouchArea { }
 
     VerticalLayout {
-        padding: 24px;
+        padding-left: 26px;
+        padding-right: 26px;
+        padding-top: 18px;
+        padding-bottom: 12px;
         spacing: 16px;
 
-        HorizontalLayout {
-            alignment: space-between;
+        done := Rectangle {
+            height: 32px;
+            width: 16px + 6px + done-label.width + 20px;
+            border-radius: 4px;
+            border-width: done-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: done-area.pressed ? Theme.surface-3 : done-area.has-hover ? Theme.surface-2 : transparent;
+            vertical-stretch: 0;
 
-            Text {
-                text: "Paramètres";
-                font-size: 20px;
-                font-weight: 700;
-                color: white;
-                vertical-alignment: center;
+            accessible-role: button;
+            accessible-label: "Fermer les paramètres";
+            accessible-action-default => { root.close-requested(); }
+
+            forward-focus: done-focus;
+
+            done-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space || event.text == Key.Escape {
+                        root.close-requested();
+                        return accept;
+                    }
+                    return reject;
+                }
             }
 
-            Button {
+            LucideIcon {
+                icon: IconSet.ArrowLeft;
+                icon-color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                size: 16px;
+                x: 10px;
+                y: (parent.height - self.height) / 2;
+            }
+            done-label := Text {
+                x: 32px;
+                y: (parent.height - self.height) / 2;
                 text: "Terminé";
-                clicked => { root.close-requested(); }
+                font-size: 13px;
+                color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
+            }
+            done-area := TouchArea {
+                clicked => {
+                    done-focus.focus();
+                    root.close-requested();
+                }
             }
         }
 
-        TabWidget {
-            Tab {
-                title: "Interface";
+        Text {
+            text: "Paramètres";
+            font-size: 20px;
+            font-weight: 700;
+            color: Theme.text-primary;
+            vertical-stretch: 0;
+        }
 
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
-
-                        InterfaceSection {
-                            theme: root.theme;
-                            locale: root.locale;
-                            auto-paste: root.auto-paste;
-                            paste-method: root.paste-method;
-                            paste-delay-ms: root.paste-delay-ms;
-                            paste-delay-min: root.paste-delay-min;
-                            paste-delay-max: root.paste-delay-max;
-                            toggle-shortcut-label: root.toggle-shortcut-label;
-                            ptt-shortcut-label: root.ptt-shortcut-label;
-                            recording-field: root.recording-field;
-                            shortcut-error: root.shortcut-error;
-                            native-tap-warning-visible: root.native-tap-warning-visible;
-                            pill-hidden: root.pill-hidden;
-                            theme-changed(value) => { root.theme-changed(value); }
-                            locale-changed(value) => { root.locale-changed(value); }
-                            auto-paste-changed(value) => { root.auto-paste-changed(value); }
-                            paste-method-changed(value) => { root.paste-method-changed(value); }
-                            paste-delay-changed(value) => { root.paste-delay-changed(value); }
-                            pill-hidden-changed(value) => { root.pill-hidden-changed(value); }
-                            shortcut-record-requested(field) => { root.shortcut-record-requested(field); }
-                            shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.shortcut-captured(field, text, ctrl, shift, alt, meta); }
-                            shortcut-released(field, text, ctrl, shift, alt, meta) => { root.shortcut-released(field, text, ctrl, shift, alt, meta); }
-                            shortcut-cleared(field) => { root.shortcut-cleared(field); }
-                            shortcut-cancelled => { root.shortcut-cancelled(); }
-                            permissions-review-requested => { root.permissions-review-requested(); }
-                        }
-
-                        FeedbackSoundsSection {
-                            enabled: root.feedback-sounds-enabled;
-                            volume: root.feedback-sounds-volume;
-                            enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
-                            volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
-                        }
-                    }
-                }
+        HorizontalLayout {
+            alignment: start;
+            vertical-stretch: 0;
+            SettingsTabBar {
+                current <=> root.tab;
             }
+        }
 
-            Tab {
-                title: "Réunions";
+        Rectangle {
+            vertical-stretch: 1;
 
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+                    trans-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
+                    active: root.tab == SettingsTab.transcription;
 
-                        CalendarSection {
-                            enabled: root.calendar-enabled;
-                            permission: root.calendar-permission;
-                            autostart-enabled: root.calendar-autostart-enabled;
-                            reminder-minutes: root.calendar-reminder-minutes;
-                            calendars: root.calendars;
-                            enabled-changed(value) => { root.calendar-enabled-changed(value); }
-                            autostart-enabled-changed(value) => { root.calendar-autostart-enabled-changed(value); }
-                            reminder-minutes-changed(value) => { root.calendar-reminder-minutes-changed(value); }
-                            calendar-toggled(id) => { root.calendar-toggled(id); }
-                            open-system-settings-requested => { root.calendar-open-system-settings-requested(); }
+                        ModelSection {
+                            status-text: root.model-status-text;
+                            ready: root.model-ready;
+                            model-labels: root.model-labels;
+                            selected-model-label: root.selected-model-label;
+                            busy: root.model-busy;
+                            downloading: root.model-downloading;
+                            download-progress-label: root.model-download-progress-label;
+                            download-progress-fraction: root.model-download-progress-fraction;
+                            unload-timeout-labels: root.unload-timeout-labels;
+                            unload-timeout-label: root.unload-timeout-label;
+                            error-message: root.model-error-message;
+                            model-changed(value) => { root.model-changed(value); }
+                            unload-timeout-changed(value) => { root.unload-timeout-changed(value); }
                         }
-                    }
+
+                        DictionarySection {
+                            learn-from-edit: root.dictation-learn-from-edit;
+                            entries: root.dictionary-entries;
+                            new-term-draft <=> root.new-dictionary-term-draft;
+                            new-pronunciation-draft <=> root.new-dictionary-pronunciation-draft;
+                            new-category-draft <=> root.new-dictionary-category-draft;
+                            add-error: root.dictionary-add-error;
+                            learn-from-edit-changed(value) => { root.dictation-learn-from-edit-changed(value); }
+                            add-requested(term, pronunciation, category) => { root.dictionary-add-requested(term, pronunciation, category); }
+                            delete-requested(id) => { root.dictionary-delete-requested(id); }
+                        }
+
+                        SnippetsSection {
+                            entries: root.snippets;
+                            new-trigger-draft <=> root.new-snippet-trigger-draft;
+                            new-expansion-draft <=> root.new-snippet-expansion-draft;
+                            add-error: root.snippet-add-error;
+                            edit-trigger-draft <=> root.edit-snippet-trigger-draft;
+                            edit-expansion-draft <=> root.edit-snippet-expansion-draft;
+                            update-error: root.snippet-update-error;
+                            add-requested(trigger, expansion) => { root.snippet-add-requested(trigger, expansion); }
+                            delete-requested(id) => { root.snippet-delete-requested(id); }
+                            edit-requested(id) => { root.snippet-edit-requested(id); }
+                            cancel-edit-requested => { root.snippet-cancel-edit-requested(); }
+                            save-edit-requested(id, trigger, expansion) => { root.snippet-save-edit-requested(id, trigger, expansion); }
+                        }
                 }
-            }
 
-            Tab {
-                title: "Audio";
+                    ai-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
+                    active: root.tab == SettingsTab.ai;
 
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+                        IntelligenceSection {
+                            summary-provider: root.summary-provider;
+                            apple-intelligence-available: root.apple-intelligence-available;
+                            apple-intelligence-reason: root.apple-intelligence-reason;
+                            ollama-url: root.ollama-url;
+                            ollama-available: root.ollama-available;
+                            ollama-checking: root.ollama-checking;
+                            summary-model-count: root.summary-model-count;
+                            model-picker-visible: root.summary-model-picker-visible;
+                            model-labels: root.summary-model-labels;
+                            selected-model-label: root.selected-summary-model-label;
+                            show-ollama-setup: root.show-ollama-setup;
+                            ollama-pulling: root.ollama-pulling;
+                            ollama-pull-status: root.ollama-pull-status;
+                            ollama-pull-error: root.ollama-pull-error;
+                            recommended-model: root.recommended-ollama-model;
+                            unusable-message: root.summary-unusable-message;
+                            summary-provider-changed(value) => { root.summary-provider-changed(value); }
+                            ollama-url-changed(value) => { root.ollama-url-changed(value); }
+                            ollama-model-changed(value) => { root.ollama-model-changed(value); }
+                            retry-requested => { root.summary-providers-retry-requested(); }
+                            download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
+                            open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                        }
+
+                        DictationPolishSection {
+                            enabled: root.dictation-polish-enabled;
+                            provider-available: root.dictation-polish-provider-available;
+                            template-labels: root.dictation-polish-template-labels;
+                            active-template-label: root.active-dictation-polish-label;
+                            active-prompt <=> root.active-dictation-polish-prompt;
+                            enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
+                            template-changed(value) => { root.dictation-polish-template-changed(value); }
+                            prompt-changed(value) => { root.dictation-polish-prompt-changed(value); }
+                            open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                        }
+
+                        SummaryTemplatesSection {
+                            template-labels: root.summary-template-labels;
+                            default-template-label: root.default-summary-template-label;
+                            editing-template-label: root.editing-summary-template-label;
+                            editing-is-builtin: root.editing-summary-template-is-builtin;
+                            editing-name: root.editing-summary-template-name;
+                            editing-prompt <=> root.editing-summary-template-prompt;
+                            default-changed(value) => { root.summary-template-default-changed(value); }
+                            edit-target-changed(value) => { root.summary-template-edit-target-changed(value); }
+                            delete-requested => { root.summary-template-delete-requested(); }
+                            name-changed(value) => { root.summary-template-name-changed(value); }
+                            prompt-changed(value) => { root.summary-template-prompt-changed(value); }
+                            add-requested(name) => { root.summary-template-add-requested(name); }
+                        }
+                }
+
+                    audio-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
+                    active: root.tab == SettingsTab.audio;
 
                         MicrophoneSection {
                             device-labels: root.audio-device-labels;
@@ -375,136 +466,72 @@ export component SettingsView inherits Rectangle {
                             stutter-collapse-changed(value) => { root.stutter-collapse-changed(value); }
                             dictionary-correction-changed(value) => { root.dictionary-correction-changed(value); }
                         }
-                    }
                 }
-            }
 
-            Tab {
-                title: "IA";
+                    interface-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
+                    active: root.tab == SettingsTab.interface;
 
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
-
-                        IntelligenceSection {
-                            summary-provider: root.summary-provider;
-                            apple-intelligence-available: root.apple-intelligence-available;
-                            apple-intelligence-reason: root.apple-intelligence-reason;
-                            ollama-url: root.ollama-url;
-                            ollama-available: root.ollama-available;
-                            ollama-checking: root.ollama-checking;
-                            summary-model-count: root.summary-model-count;
-                            model-picker-visible: root.summary-model-picker-visible;
-                            model-labels: root.summary-model-labels;
-                            selected-model-label: root.selected-summary-model-label;
-                            show-ollama-setup: root.show-ollama-setup;
-                            ollama-pulling: root.ollama-pulling;
-                            ollama-pull-status: root.ollama-pull-status;
-                            ollama-pull-error: root.ollama-pull-error;
-                            recommended-model: root.recommended-ollama-model;
-                            unusable-message: root.summary-unusable-message;
-                            summary-provider-changed(value) => { root.summary-provider-changed(value); }
-                            ollama-url-changed(value) => { root.ollama-url-changed(value); }
-                            ollama-model-changed(value) => { root.ollama-model-changed(value); }
-                            retry-requested => { root.summary-providers-retry-requested(); }
-                            download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
-                            open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                        InterfaceSection {
+                            theme: root.theme;
+                            locale: root.locale;
+                            auto-paste: root.auto-paste;
+                            paste-method: root.paste-method;
+                            paste-delay-ms: root.paste-delay-ms;
+                            paste-delay-min: root.paste-delay-min;
+                            paste-delay-max: root.paste-delay-max;
+                            toggle-shortcut-label: root.toggle-shortcut-label;
+                            ptt-shortcut-label: root.ptt-shortcut-label;
+                            recording-field: root.recording-field;
+                            shortcut-error: root.shortcut-error;
+                            native-tap-warning-visible: root.native-tap-warning-visible;
+                            pill-hidden: root.pill-hidden;
+                            theme-changed(value) => { root.theme-changed(value); }
+                            locale-changed(value) => { root.locale-changed(value); }
+                            auto-paste-changed(value) => { root.auto-paste-changed(value); }
+                            paste-method-changed(value) => { root.paste-method-changed(value); }
+                            paste-delay-changed(value) => { root.paste-delay-changed(value); }
+                            pill-hidden-changed(value) => { root.pill-hidden-changed(value); }
+                            shortcut-record-requested(field) => { root.shortcut-record-requested(field); }
+                            shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.shortcut-captured(field, text, ctrl, shift, alt, meta); }
+                            shortcut-released(field, text, ctrl, shift, alt, meta) => { root.shortcut-released(field, text, ctrl, shift, alt, meta); }
+                            shortcut-cleared(field) => { root.shortcut-cleared(field); }
+                            shortcut-cancelled => { root.shortcut-cancelled(); }
+                            permissions-review-requested => { root.permissions-review-requested(); }
                         }
 
-                        DictationPolishSection {
-                            enabled: root.dictation-polish-enabled;
-                            provider-available: root.dictation-polish-provider-available;
-                            template-labels: root.dictation-polish-template-labels;
-                            active-template-label: root.active-dictation-polish-label;
-                            active-prompt: root.active-dictation-polish-prompt;
-                            enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
-                            template-changed(value) => { root.dictation-polish-template-changed(value); }
-                            prompt-changed(value) => { root.dictation-polish-prompt-changed(value); }
-                            open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                        FeedbackSoundsSection {
+                            enabled: root.feedback-sounds-enabled;
+                            volume: root.feedback-sounds-volume;
+                            enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
+                            volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
                         }
-
-                        SummaryTemplatesSection {
-                            template-labels: root.summary-template-labels;
-                            default-template-label: root.default-summary-template-label;
-                            editing-template-label: root.editing-summary-template-label;
-                            editing-is-builtin: root.editing-summary-template-is-builtin;
-                            editing-name: root.editing-summary-template-name;
-                            editing-prompt: root.editing-summary-template-prompt;
-                            default-changed(value) => { root.summary-template-default-changed(value); }
-                            edit-target-changed(value) => { root.summary-template-edit-target-changed(value); }
-                            delete-requested => { root.summary-template-delete-requested(); }
-                            name-changed(value) => { root.summary-template-name-changed(value); }
-                            prompt-changed(value) => { root.summary-template-prompt-changed(value); }
-                            add-requested(name) => { root.summary-template-add-requested(name); }
-                        }
-                    }
                 }
-            }
 
-            Tab {
-                title: "Transcription";
+                    meetings-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
+                    active: root.tab == SettingsTab.meetings;
 
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
-
-                        ModelSection {
-                            status-text: root.model-status-text;
-                            model-labels: root.model-labels;
-                            selected-model-label: root.selected-model-label;
-                            busy: root.model-busy;
-                            downloading: root.model-downloading;
-                            download-progress-label: root.model-download-progress-label;
-                            download-progress-fraction: root.model-download-progress-fraction;
-                            unload-timeout-labels: root.unload-timeout-labels;
-                            unload-timeout-label: root.unload-timeout-label;
-                            error-message: root.model-error-message;
-                            model-changed(value) => { root.model-changed(value); }
-                            unload-timeout-changed(value) => { root.unload-timeout-changed(value); }
+                        CalendarSection {
+                            enabled: root.calendar-enabled;
+                            permission: root.calendar-permission;
+                            autostart-enabled: root.calendar-autostart-enabled;
+                            reminder-minutes: root.calendar-reminder-minutes;
+                            calendars: root.calendars;
+                            enabled-changed(value) => { root.calendar-enabled-changed(value); }
+                            autostart-enabled-changed(value) => { root.calendar-autostart-enabled-changed(value); }
+                            reminder-minutes-changed(value) => { root.calendar-reminder-minutes-changed(value); }
+                            calendar-toggled(id) => { root.calendar-toggled(id); }
+                            open-system-settings-requested => { root.calendar-open-system-settings-requested(); }
                         }
-
-                        DictionarySection {
-                            learn-from-edit: root.dictation-learn-from-edit;
-                            entries: root.dictionary-entries;
-                            new-term-draft <=> root.new-dictionary-term-draft;
-                            new-pronunciation-draft <=> root.new-dictionary-pronunciation-draft;
-                            new-category-draft <=> root.new-dictionary-category-draft;
-                            add-error: root.dictionary-add-error;
-                            learn-from-edit-changed(value) => { root.dictation-learn-from-edit-changed(value); }
-                            add-requested(term, pronunciation, category) => { root.dictionary-add-requested(term, pronunciation, category); }
-                            delete-requested(id) => { root.dictionary-delete-requested(id); }
-                        }
-
-                        SnippetsSection {
-                            entries: root.snippets;
-                            new-trigger-draft <=> root.new-snippet-trigger-draft;
-                            new-expansion-draft <=> root.new-snippet-expansion-draft;
-                            add-error: root.snippet-add-error;
-                            edit-trigger-draft <=> root.edit-snippet-trigger-draft;
-                            edit-expansion-draft <=> root.edit-snippet-expansion-draft;
-                            update-error: root.snippet-update-error;
-                            add-requested(trigger, expansion) => { root.snippet-add-requested(trigger, expansion); }
-                            delete-requested(id) => { root.snippet-delete-requested(id); }
-                            edit-requested(id) => { root.snippet-edit-requested(id); }
-                            cancel-edit-requested => { root.snippet-cancel-edit-requested(); }
-                            save-edit-requested(id, trigger, expansion) => { root.snippet-save-edit-requested(id, trigger, expansion); }
-                        }
-                    }
                 }
-            }
 
-            Tab {
-                title: "Système";
-
-                ScrollView {
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 22px;
-                        alignment: start;
+                    system-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
+                    active: root.tab == SettingsTab.system;
 
                         AutostartSection {
                             autostart-enabled: root.autostart-enabled;
@@ -558,7 +585,5 @@ export component SettingsView inherits Rectangle {
                         }
                     }
                 }
-            }
-        }
     }
 }

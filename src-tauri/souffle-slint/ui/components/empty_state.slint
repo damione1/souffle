@@ -1,3 +1,5 @@
+import { Theme } from "../theme.slint";
+
 // Port of components/ui/EmptyState.svelte (icon slot dropped: no icon set
 // is wired to this UI yet, not a hidden omission - add one when a caller
 // actually needs it).
@@ -12,12 +14,13 @@ export component EmptyState inherits VerticalLayout {
     if root.title != "": Text {
         text: root.title;
         font-weight: 600;
+        color: Theme.text-primary;
         horizontal-alignment: center;
     }
     Text {
         text: root.message;
         horizontal-alignment: center;
-        color: #888888;
+        color: Theme.text-muted;
         wrap: word-wrap;
     }
 }

@@ -1,0 +1,95 @@
+import { PermissionRow, PermissionsStep } from "../onboarding/permissions_step.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { Theme } from "../../theme.slint";
+
+export component SettingsPermissionsDialog inherits Rectangle {
+    in property <[PermissionRow]> rows;
+    in property <string> error-message;
+    in property <bool> repair-busy;
+    in property <bool> repair-success;
+    in property <bool> repair-cooldown;
+
+    callback close-requested();
+    callback grant-requested(string);
+    callback hint-action-requested(string);
+    callback repair-requested();
+
+    background: Theme.modal-scrim;
+    accessible-role: groupbox;
+    accessible-label: "Permissions macOS";
+
+    forward-focus: modal-focus;
+    init => { modal-focus.focus(); }
+
+    modal-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close-requested();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.close-requested(); }
+    }
+
+    panel := Rectangle {
+        width: min(parent.width - 48px, 560px);
+        height: min(parent.height - 40px, 500px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Theme.border-soft;
+        background: Theme.surface-1;
+        TouchArea { }
+
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            Text {
+                text: "Permissions macOS";
+                font-family: "Archivo SemiBold";
+                font-size: 20px;
+                color: Theme.text-primary;
+            }
+            Text {
+                text: "Vérifiez chaque autorisation. La réparation réinitialise uniquement l’entrée Accessibilité avant de redemander l’accès.";
+                font-size: 12px;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+
+                Flickable {
+                    width: parent.width - 10px;
+                    height: parent.height;
+
+                    PermissionsStep {
+                        width: parent.width;
+                        rows: root.rows;
+                        error-message: root.error-message;
+                        repair-busy: root.repair-busy;
+                        repair-success: root.repair-success;
+                        repair-cooldown: root.repair-cooldown;
+                        grant-requested(kind) => { root.grant-requested(kind); }
+                        hint-action-requested(kind) => { root.hint-action-requested(kind); }
+                        repair-requested => { root.repair-requested(); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                ThemedButton {
+                    text: "Terminé";
+                    kind: ThemedButtonKind.primary;
+                    clicked => { root.close-requested(); }
+                }
+            }
+        }
+    }
+}

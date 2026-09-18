@@ -2,26 +2,30 @@
 
 Conventions for agents working in this repo live in [`CLAUDE.md`](./CLAUDE.md).
 
+**Slint UI:** the shipped frontend is native Slint (`src-tauri/souffle-slint/`), not Svelte. The senior checklist (closed-set enums, house widgets, Metal/Skia, tab keep-alive, memory, threads) is [`docs/engineering/slint.md`](./docs/engineering/slint.md). Follow it for any `.slint` or `souffle-slint` change.
+
 **CodeQL:** not a PR check. Run `./scripts/codeql-local.sh` before opening or updating a PR (requires `brew install --cask codeql`). GitHub only runs CodeQL on push to `develop` (see `.github/workflows/codeql.yml`).
 
 ## Engineering rules
 
-Two languages, one app. Rust owns the truth, TypeScript renders it, and the only thing keeping
-them honest is the generated contract. These rules exist so that a mistake becomes a failed
-build instead of a wrong pixel six weeks later.
+Two languages, one app. Rust owns the truth. The shipped UI is Slint; the retired Svelte tree under `src/` still exists until SOU-192 AC8. In both cases a mistake must become a failed build instead of a wrong pixel six weeks later. The Slint half of these rules, plus performance and memory, is spelled out in [`docs/engineering/slint.md`](./docs/engineering/slint.md).
 
 ### 1. One declaration, in the contract
 
-Every value belonging to a **closed set** is declared exactly once, as a Rust enum carrying
-`#[derive(specta::Type)]`, and reaches the frontend through the generated client
+Every value belonging to a **closed set** is declared exactly once.
+
+**Shipped UI (Slint):** `export enum` in `src-tauri/souffle-slint/ui/types.slint`, matching `souffle_lib` enum, converted with an exhaustive `match` both ways (`settings_ui.rs`, `ia_ui.rs`, …). Never a string property or a string callback argument. Type-design rules (enum vs catalogue, no sentinels, no speculative traits) are in [`docs/engineering/slint.md`](./docs/engineering/slint.md), adapted from Microsoft's Framework Design Guidelines.
+
+**Retired TypeScript (`src/`, until SOU-192 AC8):** a Rust enum carrying
+`#[derive(specta::Type)]`, reaching the frontend through the generated client
 (`src/lib/types/generated.ts`). The frontend imports it. It never retypes it.
 
 Closed set means: the set of valid values is decided by the code, not by the user or by data.
 Recording states, permission states, export formats, transport kinds, error reasons, search
 source kinds. If adding a value requires editing Rust, it is a closed set.
 
-- Never write the same string literal on both sides of the IPC. If a conditional compares against
-  a string, that string is an enum variant somewhere, and the comparison must import it.
+- Never write the same string literal on both sides of the Slint/Rust boundary (or the retired
+  IPC). If a conditional compares against a string, that string is an enum variant somewhere.
 - Never hand-write `impl specta::Type` to flatten an enum into `String`. That silently deletes the
   contract for that type and forces the frontend to invent it again.
 - After changing any `#[tauri::command]` signature or any exposed type, run
@@ -30,7 +34,7 @@ source kinds. If adding a value requires editing Rust, it is a closed set.
 **Open sets are different and must not be converted.** Engine, model and backend ids, user-editable
 template ids, device UIDs: their values come from data or from the user, so the backend ships a
 catalogue and the frontend reads it. `TranscriptionCatalog` is the reference implementation of that
-pattern. Copying a list of options into a `.svelte` file is the anti-pattern, whichever kind of set
+pattern. Copying a list of options into a `.slint` or `.svelte` file is the anti-pattern, whichever kind of set
 it is.
 
 ### 2. Exhaustive branching, enforced by the compiler
@@ -52,6 +56,12 @@ even when today's behaviour is correct.
 - Prefer `match` over `matches!` plus `else` when the result depends on which variant it is.
   `matches!` collapses an enum to a boolean and takes the exhaustiveness check with it.
 
+**Slint**
+
+- Branch on the `types.slint` enum, never on a parallel string. Slint has no exhaustiveness
+  check: adding a variant is a review reject until every chip / `if phase ==` site is updated,
+  and the Rust `match` at the boundary must already fail to compile.
+
 **TypeScript**
 
 - Read a contract union with a `switch` that has **no** `default`, or with a
@@ -69,15 +79,26 @@ Read these before inventing a shape:
 
 | Pattern | Where |
 |---|---|
-| Exhaustive `Record` over a generated union | `src/lib/features/meeting/system-audio.ts` |
-| Exhaustive `switch`, no `default` | `src/lib/stores/app.svelte.ts` (`deriveRuntimePhase`) |
-| Typed registry, impossible to mistype | `src/lib/features/settings/anchors.ts` |
+| Closed-set Slint enums + exhaustive Rust `match` | `ui/types.slint`, `settings_ui.rs` |
+| Theme as a reactive global | `ui/theme.slint` |
+| Tab keep-alive (no remount) | `ui/components/settings/settings_tabs.slint` |
+| Metal renderer pin | `souffle-slint/Cargo.toml` (`renderer-skia`), `main.rs` (`renderer_name("skia")`) |
 | Catalogue for an open set | `TranscriptionCatalog`, `src-tauri/src/engine/mod.rs` |
-| Typed events and commands | `src-tauri/src/app_events.rs`, `specta_builder()` in `src-tauri/src/lib.rs` |
+| Exhaustive `Record` over a generated union (retired TS) | `src/lib/features/meeting/system-audio.ts` |
+| Exhaustive `switch`, no `default` (retired TS) | `src/lib/stores/app.svelte.ts` (`deriveRuntimePhase`) |
+| Typed registry, impossible to mistype (retired TS) | `src/lib/features/settings/anchors.ts` |
+| Typed events and commands (retired TS) | `src-tauri/src/app_events.rs`, `specta_builder()` in `src-tauri/src/lib.rs` |
+
+Full Slint checklist: [`docs/engineering/slint.md`](./docs/engineering/slint.md).
 
 ### 4. What a review rejects
 
 - A string literal compared in a conditional that is also declared elsewhere.
 - A `_ =>` or a `default:` added to a domain enum or a contract union.
-- A list of options, bounds or defaults copied from Rust into a `.svelte` or `.ts` file.
+- An enum used for an open set, a reserved/sentinel variant, `_ =>` "for forward compat", or a public `trait` with one implementor and no consumer.
+- A tagged union flattened in `souffle_lib` (`mode` + leftover `Option`s) instead of an ADT. The Slint Window may split payload; the lib type must not.
+- A list of options, bounds or defaults copied from Rust into a `.slint`, `.svelte` or `.ts` file.
 - A generated file edited by hand.
+- A frequent view switch (`if tab ==`) that destroys and recreates the item tree.
+- FemtoVG left as the renderer (missing `renderer-skia` or `renderer_name("skia")`).
+- Palette hex or Fluent `std-widgets` chrome where a house widget + `Theme.*` exists.
