@@ -7595,6 +7595,7 @@ dependencies = [
  "slint",
  "slint-build",
  "souffle",
+ "tempfile",
  "tokio",
  "uuid",
 ]

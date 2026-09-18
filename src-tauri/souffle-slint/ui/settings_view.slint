@@ -49,6 +49,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> native-tap-warning-visible;
     in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
+    in property <string> save-error;
     in property <bool> calendar-enabled;
     in property <AccessState> calendar-permission;
     in property <bool> calendar-autostart-enabled;
@@ -293,6 +294,13 @@ export component SettingsView inherits Rectangle {
             font-size: 20px;
             font-weight: 700;
             color: Theme.text-primary;
+            vertical-stretch: 0;
+        }
+
+        if root.save-error != "": Text {
+            text: @tr("Enregistrement des réglages : {}", root.save-error);
+            color: Theme.danger;
+            wrap: word-wrap;
             vertical-stretch: 0;
         }
 

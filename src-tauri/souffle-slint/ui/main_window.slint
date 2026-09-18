@@ -142,6 +142,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-native-tap-warning-visible;
     in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
+    in property <string> settings-save-error;
     in property <bool> settings-calendar-enabled;
     in property <AccessState> settings-calendar-permission;
     in property <bool> settings-calendar-autostart-enabled;
@@ -564,6 +565,7 @@ export component MainWindow inherits Window {
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
         recording-field <=> root.settings-recording-field;
         shortcut-error <=> root.settings-shortcut-error;
+        save-error: root.settings-save-error;
         calendar-enabled: root.settings-calendar-enabled;
         calendar-permission: root.settings-calendar-permission;
         calendar-autostart-enabled: root.settings-calendar-autostart-enabled;

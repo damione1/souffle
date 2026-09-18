@@ -83,18 +83,21 @@ pub fn populate_intelligence(
     let model_labels: Vec<String> = status.models.iter().map(|m| m.label.clone()).collect();
     window.set_settings_summary_model_picker_visible(ollama_relevant && !status.models.is_empty());
     window.set_settings_summary_model_labels(shared_string_vec(&model_labels));
-    let selected_label = status
-        .models
-        .iter()
-        .find(|m| m.id == settings.ollama_model)
-        .or_else(|| status.models.first())
-        .map(|m| m.label.clone())
-        .unwrap_or_default();
-    window.set_settings_selected_summary_model_label(selected_label.into());
+    window.set_settings_selected_summary_model_label(
+        selected_summary_model_label(&status.models, &settings.ollama_model).into(),
+    );
     window.set_settings_show_ollama_setup(
         ollama_relevant && status.ollama_available && status.models.is_empty(),
     );
     window.set_settings_recommended_ollama_model(status.recommended_ollama_model.as_str().into());
+}
+
+pub fn selected_summary_model_label(models: &[SummaryModelDescriptor], id: &str) -> String {
+    models
+        .iter()
+        .find(|model| model.id == id)
+        .map(|model| model.label.clone())
+        .unwrap_or_else(|| id.to_string())
 }
 
 pub fn resolve_summary_model_id(models: &[SummaryModelDescriptor], label: &str) -> Option<String> {

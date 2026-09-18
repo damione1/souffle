@@ -3,6 +3,38 @@ use std::sync::Arc;
 use crate::settings::{AppSettings, ShortcutSettings};
 use crate::state::AppState;
 
+/// The write result and the observed durable state are independent: a native
+/// effect can fail after the database was written. Never infer rollback from Err.
+#[derive(Debug)]
+pub enum SettingsSaveOutcome {
+    Observed {
+        settings: Box<AppSettings>,
+        result: Result<(), String>,
+    },
+    Unavailable {
+        result: Result<(), String>,
+        read_error: String,
+    },
+}
+
+impl SettingsSaveOutcome {
+    pub fn from_results(result: Result<(), String>, observed: Result<AppSettings, String>) -> Self {
+        match observed {
+            Ok(settings) => Self::Observed {
+                settings: Box::new(settings),
+                result,
+            },
+            Err(read_error) => Self::Unavailable { result, read_error },
+        }
+    }
+}
+
+/// Re-read even on failure: save_settings may already have committed some keys.
+pub fn save_settings_observed(state: Arc<AppState>, settings: AppSettings) -> SettingsSaveOutcome {
+    let result = save_settings(state.clone(), settings);
+    SettingsSaveOutcome::from_results(result, get_settings(state))
+}
+
 /// Get the typed application settings.
 pub fn get_settings(state: Arc<AppState>) -> Result<AppSettings, String> {
     let mut settings = AppSettings::load(&state.db)?;
