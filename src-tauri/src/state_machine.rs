@@ -238,12 +238,18 @@ impl AppStateMachine {
     /// Checks whether the state machine is currently in a recording state (dictation or meeting)
     /// or in the process of stopping a recording.
     pub fn is_recording(&self) -> bool {
-        matches!(
-            self,
+        match self {
             AppStateMachine::RecordingDictation { .. }
-                | AppStateMachine::RecordingMeeting { .. }
-                | AppStateMachine::Stopping { .. }
-        )
+            | AppStateMachine::RecordingMeeting { .. }
+            | AppStateMachine::Stopping { .. } => true,
+            AppStateMachine::Idle
+            | AppStateMachine::Downloading { .. }
+            | AppStateMachine::Downloaded { .. }
+            | AppStateMachine::Loading { .. }
+            | AppStateMachine::Ready { .. }
+            | AppStateMachine::Unloading { .. }
+            | AppStateMachine::Error { .. } => false,
+        }
     }
 
     /// Checks whether a model is currently fully loaded and ready to transcribe.

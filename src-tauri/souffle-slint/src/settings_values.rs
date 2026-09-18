@@ -6,7 +6,9 @@ use std::rc::Rc;
 
 use slint::ComponentHandle;
 use souffle_lib::audio::AudioInputDevice;
-use souffle_lib::commands::SettingsSaveOutcome;
+#[cfg(test)]
+use souffle_lib::commands::SettingsEffectFailure;
+use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
 use souffle_lib::settings::{AppSettings, Theme as SettingsTheme};
 use souffle_lib::summary::SummaryProvidersStatus;
 
@@ -59,12 +61,16 @@ impl SettingsCache {
             return;
         };
         let message = match outcome {
-            SettingsSaveOutcome::Observed { result, .. } => {
-                result.as_ref().err().cloned().unwrap_or_default()
-            }
+            SettingsSaveOutcome::Observed { result, .. } => match result {
+                Ok(()) => String::new(),
+                Err(error) => error.user_message(),
+            },
             SettingsSaveOutcome::Unavailable { result, read_error } => match result {
                 Ok(()) => format!("Stored settings are unknown: {read_error}"),
-                Err(error) => format!("{error}. Stored settings are unknown: {read_error}"),
+                Err(error) => format!(
+                    "{}. Stored settings are unknown: {read_error}",
+                    error.user_message()
+                ),
             },
         };
         window.set_settings_save_error(message.into());
@@ -117,7 +123,9 @@ pub(crate) fn save_field(
             Err(read_error) => {
                 cache.mark_unknown();
                 let outcome = SettingsSaveOutcome::Unavailable {
-                    result: Err("Settings could not be loaded before saving".into()),
+                    result: Err(SettingsSaveError::NotCommitted {
+                        message: "Settings could not be loaded before saving".into(),
+                    }),
                     read_error,
                 };
                 cache.publish_save_status(&outcome);
@@ -131,7 +139,11 @@ pub(crate) fn save_field(
     match &outcome {
         SettingsSaveOutcome::Observed { settings, result } => {
             let mut cached = settings.as_ref().clone();
-            if result.is_err() {
+            let restore_drafts = match result {
+                Ok(()) => false,
+                Err(error) => !error.committed(),
+            };
+            if restore_drafts {
                 // These two fields still host the existing debounced drafts.
                 // Keep them recoverable until SOU-201 separates their lifecycle.
                 cached.dictation_polish_templates = original.dictation_polish_templates;
@@ -359,6 +371,10 @@ mod tests {
         MainWindow::new().unwrap()
     }
 
+    fn committed_result(result: Result<(), String>) -> Result<(), SettingsSaveError> {
+        result.map_err(|message| SettingsSaveError::NotCommitted { message })
+    }
+
     fn device(uid: &str, name: &str) -> AudioInputDevice {
         AudioInputDevice {
             uid: uid.into(),
@@ -457,7 +473,7 @@ mod tests {
                 }),
                 save: Rc::new(move |settings| {
                     save_count.set(save_count.get() + 1);
-                    let result = settings.save(&save_db);
+                    let result = committed_result(settings.save(&save_db));
                     SettingsSaveOutcome::from_results(result, AppSettings::load(&save_db))
                 }),
                 apply_appearance: Rc::new(move |dark| projected_appearance.set(Some(dark))),
@@ -680,19 +696,28 @@ mod tests {
             devices: Rc::new(RefCell::new(Vec::new())),
             summary: Rc::new(RefCell::new(None)),
             load: Rc::new(move || AppSettings::load(&load_db)),
-            save: Rc::new(move |candidate| {
+            save: Rc::new(move |mut candidate| {
                 let current_step = save_step.get();
                 save_step.set(current_step + 1);
                 match current_step {
                     0 => SettingsSaveOutcome::Observed {
                         settings: Box::new(AppSettings::load(&save_db).unwrap()),
-                        result: Err("write rejected".into()),
+                        result: Err(SettingsSaveError::Rejected {
+                            message: "write rejected".into(),
+                        }),
                     },
                     1 => {
+                        candidate.dictation_polish_templates[0].label =
+                            "Committed polish template".into();
+                        candidate.summary_templates[0].name = "Committed summary template".into();
                         candidate.save(&save_db).unwrap();
                         SettingsSaveOutcome::Observed {
                             settings: Box::new(AppSettings::load(&save_db).unwrap()),
-                            result: Err("native effect failed after commit".into()),
+                            result: Err(SettingsSaveError::EffectFailedAfterCommit {
+                                cause: SettingsEffectFailure::Logging {
+                                    message: "native effect failed after commit".into(),
+                                },
+                            }),
                         }
                     }
                     2 => {
@@ -703,7 +728,7 @@ mod tests {
                         }
                     }
                     3 => {
-                        let result = candidate.save(&save_db);
+                        let result = committed_result(candidate.save(&save_db));
                         SettingsSaveOutcome::from_results(result, AppSettings::load(&save_db))
                     }
                     4 => {
@@ -733,9 +758,32 @@ mod tests {
                 .get_settings_save_error()
                 .contains("native effect failed after commit")
         );
+        {
+            let cached = cache.borrow();
+            let cached = cached
+                .as_ref()
+                .expect("cache after committed effect failure");
+            assert_eq!(
+                cached.dictation_polish_templates[0].label,
+                "Committed polish template"
+            );
+            assert_eq!(
+                cached.summary_templates[0].name,
+                "Committed summary template"
+            );
+        }
 
         window.invoke_settings_paste_delay_changed(250);
-        assert_eq!(AppSettings::load(&db).unwrap().paste_delay_ms, 250);
+        let stored_after_later_save = AppSettings::load(&db).unwrap();
+        assert_eq!(stored_after_later_save.paste_delay_ms, 250);
+        assert_eq!(
+            stored_after_later_save.dictation_polish_templates[0].label,
+            "Committed polish template"
+        );
+        assert_eq!(
+            stored_after_later_save.summary_templates[0].name,
+            "Committed summary template"
+        );
         assert_eq!(window.get_settings_paste_delay_ms(), 200);
         assert!(!cache.is_known());
         assert!(
@@ -766,7 +814,7 @@ mod tests {
             &cache,
             move || AppSettings::load(&load_db),
             move |candidate| {
-                let result = candidate.save(&save_db);
+                let result = committed_result(candidate.save(&save_db));
                 SettingsSaveOutcome::from_results(result, AppSettings::load(&save_db))
             },
             |settings| settings.calendar_selected_ids = vec!["calendar-a".into()],
@@ -787,7 +835,9 @@ mod tests {
             || unreachable!("the observed cache must avoid a fallback read"),
             move |_| SettingsSaveOutcome::Observed {
                 settings: Box::new(AppSettings::load(&rejected_save_db).unwrap()),
-                result: Err("legacy write rejected".into()),
+                result: Err(SettingsSaveError::Rejected {
+                    message: "legacy write rejected".into(),
+                }),
             },
             |_| {},
         );
@@ -805,7 +855,7 @@ mod tests {
             &cache,
             || unreachable!("the observed cache must avoid a fallback read"),
             move |candidate| {
-                let result = candidate.save(&clear_save_db);
+                let result = committed_result(candidate.save(&clear_save_db));
                 SettingsSaveOutcome::from_results(result, AppSettings::load(&clear_save_db))
             },
             |_| {},

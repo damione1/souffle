@@ -1,24 +1,81 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use crate::settings::{AppSettings, ShortcutSettings};
+use crate::db::Database;
+use crate::lock_ext::MutexExt;
+use crate::settings::{AppSettings, PreparedSettingsSaveError, ShortcutSettings};
 use crate::state::AppState;
+use crate::state_machine::AppStateMachine;
 
-/// The write result and the observed durable state are independent: a native
-/// effect can fail after the database was written. Never infer rollback from Err.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingsEffectFailure {
+    Autostart { message: String },
+    Logging { message: String },
+}
+
+impl SettingsEffectFailure {
+    fn user_message(&self) -> &str {
+        match self {
+            Self::Autostart { message } | Self::Logging { message } => message,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingsSaveError {
+    Rejected { message: String },
+    NotCommitted { message: String },
+    EffectFailedAfterCommit { cause: SettingsEffectFailure },
+}
+
+impl SettingsSaveError {
+    pub fn user_message(&self) -> String {
+        match self {
+            Self::Rejected { message } => message.clone(),
+            Self::NotCommitted { message } => message.clone(),
+            Self::EffectFailedAfterCommit { cause } => {
+                format!(
+                    "Settings were saved, but a native effect failed: {}",
+                    cause.user_message()
+                )
+            }
+        }
+    }
+
+    pub fn committed(&self) -> bool {
+        match self {
+            Self::Rejected { .. } | Self::NotCommitted { .. } => false,
+            Self::EffectFailedAfterCommit { .. } => true,
+        }
+    }
+}
+
+impl std::fmt::Display for SettingsSaveError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.user_message())
+    }
+}
+
+impl std::error::Error for SettingsSaveError {}
+
+pub type SettingsSaveResult = Result<(), SettingsSaveError>;
+
+/// The typed save result and the observed durable state are independent: a
+/// native effect can fail after the atomic database commit, and the re-read can
+/// fail independently of both.
 #[derive(Debug)]
 pub enum SettingsSaveOutcome {
     Observed {
         settings: Box<AppSettings>,
-        result: Result<(), String>,
+        result: SettingsSaveResult,
     },
     Unavailable {
-        result: Result<(), String>,
+        result: SettingsSaveResult,
         read_error: String,
     },
 }
 
 impl SettingsSaveOutcome {
-    pub fn from_results(result: Result<(), String>, observed: Result<AppSettings, String>) -> Self {
+    pub fn from_results(result: SettingsSaveResult, observed: Result<AppSettings, String>) -> Self {
         match observed {
             Ok(settings) => Self::Observed {
                 settings: Box::new(settings),
@@ -29,7 +86,8 @@ impl SettingsSaveOutcome {
     }
 }
 
-/// Re-read even on failure: save_settings may already have committed some keys.
+/// Re-read even on failure: the atomic snapshot may have committed before a
+/// native effect failed.
 pub fn save_settings_observed(state: Arc<AppState>, settings: AppSettings) -> SettingsSaveOutcome {
     let result = save_settings(state.clone(), settings);
     SettingsSaveOutcome::from_results(result, get_settings(state))
@@ -37,7 +95,7 @@ pub fn save_settings_observed(state: Arc<AppState>, settings: AppSettings) -> Se
 
 /// Get the typed application settings.
 pub fn get_settings(state: Arc<AppState>) -> Result<AppSettings, String> {
-    let mut settings = AppSettings::load(&state.db)?;
+    let mut settings = AppSettings::load_read_only(&state.db)?;
     #[cfg(target_os = "macos")]
     {
         settings.autostart_enabled = crate::autostart::is_enabled();
@@ -46,25 +104,58 @@ pub fn get_settings(state: Arc<AppState>) -> Result<AppSettings, String> {
 }
 
 /// Save the typed application settings.
-pub fn save_settings(state: Arc<AppState>, settings: AppSettings) -> Result<(), String> {
-    let mut settings = settings.sanitize_for_save()?;
-    let stored = AppSettings::load(&state.db)?;
+pub fn save_settings(state: Arc<AppState>, settings: AppSettings) -> SettingsSaveResult {
+    save_settings_with_effects(&state.db, &state.machine, settings, |settings| {
+        apply_settings_effects(&state, settings)
+    })
+}
 
+fn save_settings_with_effects(
+    db: &Database,
+    machine: &Mutex<AppStateMachine>,
+    settings: AppSettings,
+    apply_effects: impl FnOnce(&AppSettings) -> Result<(), SettingsEffectFailure>,
+) -> SettingsSaveResult {
+    let settings = settings
+        .prepare_for_save()
+        .map_err(|message| SettingsSaveError::Rejected { message })?;
+
+    // Keep the canonical machine stable from the decision through the SQLite
+    // commit. Native/window effects run only after this guard is dropped.
+    {
+        let machine = machine
+            .acquire()
+            .map_err(|message| SettingsSaveError::NotCommitted { message })?;
+        settings
+            .save_prepared_with_recording_guard(db, machine.is_recording())
+            .map_err(|error| match error {
+                PreparedSettingsSaveError::ModelChangeRejected => SettingsSaveError::Rejected {
+                    message: "Cannot change the transcription model while recording".into(),
+                },
+                PreparedSettingsSaveError::Persistence { message } => {
+                    SettingsSaveError::NotCommitted { message }
+                }
+            })?;
+    }
+
+    apply_effects(&settings).map_err(|cause| SettingsSaveError::EffectFailedAfterCommit { cause })
+}
+
+fn apply_settings_effects(
+    state: &Arc<AppState>,
+    settings: &AppSettings,
+) -> Result<(), SettingsEffectFailure> {
     #[cfg(target_os = "macos")]
     {
         if settings.autostart_enabled != crate::autostart::is_enabled() {
-            crate::autostart::set_enabled(settings.autostart_enabled)?;
+            crate::autostart::set_enabled(settings.autostart_enabled)
+                .map_err(|message| SettingsEffectFailure::Autostart { message })?;
         }
     }
 
-    let recording = state
-        .current_machine_state()
-        .map(|machine| machine.is_recording())
-        .unwrap_or(false);
-    let pinned = settings.pin_transcription_while_recording(&stored, recording);
-    settings.save(&state.db)?;
     crate::debug::set_transcription_debug(settings.debug_transcription);
-    crate::logging::set_level(settings.log_level)?;
+    crate::logging::set_level(settings.log_level)
+        .map_err(|message| SettingsEffectFailure::Logging { message })?;
     state
         .engine_actor
         .set_unload_timeout(settings.model_unload_timeout_minutes);
@@ -83,11 +174,8 @@ pub fn save_settings(state: Arc<AppState>, settings: AppSettings) -> Result<(), 
     // A locale change must relabel the tray menu immediately. Hide/show of
     // the recording overlay is applied on the same pass.
     if let Ok(machine) = state.current_machine_state() {
-        crate::pill::sync(&state, &machine);
-        crate::tray::sync(&state, &machine);
-    }
-    if pinned {
-        return Err("Cannot change the transcription model while recording".into());
+        crate::pill::sync(state, &machine);
+        crate::tray::sync(state, &machine);
     }
     Ok(())
 }
@@ -158,4 +246,254 @@ pub fn open_apple_intelligence_settings() {
     let _ = std::process::Command::new("open")
         .arg("x-apple.systempreferences:com.apple.Siri-Settings.extension")
         .spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::sync::{Arc, Barrier, Mutex};
+
+    use super::{SettingsEffectFailure, SettingsSaveError, save_settings_with_effects};
+    use crate::audio::InputPriority;
+    use crate::engine::default_transcription_profile;
+    use crate::settings::{AppSettings, MeetingTranscriptionLanguage, Theme};
+    use crate::state_machine::AppStateMachine;
+    use crate::test_helpers::fixtures::test_db;
+
+    fn recording_machine() -> AppStateMachine {
+        AppStateMachine::RecordingDictation {
+            profile: default_transcription_profile(),
+            session_id: 7,
+        }
+    }
+
+    #[test]
+    fn recording_model_refusal_precedes_every_database_and_native_mutation() {
+        let (db, _dir) = test_db();
+        let initial = AppSettings::default();
+        initial.save(&db).expect("save initial settings");
+        let mut before = db.get_all_settings().expect("read initial settings");
+        before.sort();
+
+        let candidate = AppSettings {
+            theme: Theme::Dark,
+            locale: "fr".into(),
+            transcription_model_id: "stt-2.6b-en".into(),
+            ..initial
+        };
+        let effects_applied = Cell::new(false);
+        let result = save_settings_with_effects(
+            &db,
+            &Mutex::new(recording_machine()),
+            candidate.clone(),
+            |_| {
+                effects_applied.set(true);
+                Ok(())
+            },
+        );
+
+        assert!(matches!(result, Err(SettingsSaveError::Rejected { .. })));
+        assert!(!effects_applied.get());
+        let mut after = db.get_all_settings().expect("read rejected settings");
+        after.sort();
+        assert_eq!(after, before, "a machine refusal must change no key");
+
+        let result =
+            save_settings_with_effects(&db, &Mutex::new(AppStateMachine::Idle), candidate, |_| {
+                Ok(())
+            });
+        assert_eq!(result, Ok(()));
+        let stored = AppSettings::load(&db).expect("load idle settings");
+        assert_eq!(stored.transcription_model_id, "stt-2.6b-en");
+        assert_eq!(stored.theme, Theme::Dark);
+        assert_eq!(stored.locale, "fr");
+    }
+
+    #[test]
+    fn recording_allows_theme_locale_language_and_microphone_policy_changes() {
+        let (db, _dir) = test_db();
+        // A model selection is persisted before its asynchronous load starts.
+        // Hot settings must remain writable if recording begins on the still
+        // active previous profile during that transition window.
+        let initial = AppSettings {
+            transcription_model_id: "stt-2.6b-en".into(),
+            ..AppSettings::default()
+        };
+        initial.save(&db).expect("save initial settings");
+        let candidate = AppSettings {
+            theme: Theme::Dark,
+            locale: "fr".into(),
+            meeting_transcription_language: MeetingTranscriptionLanguage::Fr,
+            allow_bluetooth_mic: true,
+            input_priority: InputPriority {
+                priorities: vec!["preferred-mic".into()],
+                ..InputPriority::default()
+            },
+            ..initial
+        };
+
+        let result = save_settings_with_effects(
+            &db,
+            &Mutex::new(recording_machine()),
+            candidate,
+            |_| Ok(()),
+        );
+        assert_eq!(result, Ok(()));
+        let stored = AppSettings::load(&db).expect("load hot settings");
+        assert_eq!(stored.theme, Theme::Dark);
+        assert_eq!(stored.locale, "fr");
+        assert_eq!(
+            stored.meeting_transcription_language,
+            MeetingTranscriptionLanguage::Fr
+        );
+        assert!(stored.allow_bluetooth_mic);
+        assert_eq!(stored.input_priority.priorities, ["preferred-mic"]);
+        assert_eq!(stored.transcription_model_id, "stt-2.6b-en");
+    }
+
+    #[test]
+    fn native_effect_failure_reports_that_the_commit_succeeded() {
+        let (db, _dir) = test_db();
+        let initial = AppSettings::default();
+        initial.save(&db).expect("save initial settings");
+        let candidate = AppSettings {
+            paste_delay_ms: 250,
+            ..initial
+        };
+
+        let result =
+            save_settings_with_effects(&db, &Mutex::new(AppStateMachine::Idle), candidate, |_| {
+                Err(SettingsEffectFailure::Logging {
+                    message: "injected native effect failure".into(),
+                })
+            });
+        let error = result.expect_err("native effect must fail");
+        assert_eq!(
+            error,
+            SettingsSaveError::EffectFailedAfterCommit {
+                cause: SettingsEffectFailure::Logging {
+                    message: "injected native effect failure".into()
+                }
+            }
+        );
+        assert!(error.committed());
+        assert!(error.user_message().contains("Settings were saved"));
+        assert_eq!(
+            AppSettings::load(&db)
+                .expect("load committed settings")
+                .paste_delay_ms,
+            250
+        );
+    }
+
+    #[test]
+    fn sqlite_persistence_failure_is_typed_and_skips_native_effects() {
+        let (db, _dir) = test_db();
+        let initial = AppSettings::default();
+        initial.save(&db).expect("save initial settings");
+        let mut before = db.get_all_settings().expect("read initial settings");
+        before.sort();
+        db.execute_settings_sql_for_test(
+            r#"
+            CREATE TRIGGER fail_calendar_integration_write
+            BEFORE INSERT ON settings
+            WHEN NEW.key = 'calendar_integration_enabled'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected persistence failure');
+            END;
+            "#,
+        )
+        .expect("install failure trigger");
+
+        let effects_applied = Cell::new(false);
+        let candidate = AppSettings {
+            theme: Theme::Dark,
+            calendar_integration_enabled: true,
+            ..initial
+        };
+        let result =
+            save_settings_with_effects(&db, &Mutex::new(AppStateMachine::Idle), candidate, |_| {
+                effects_applied.set(true);
+                Ok(())
+            });
+        let error = result.expect_err("persistence must fail");
+        assert!(matches!(error, SettingsSaveError::NotCommitted { .. }));
+        assert!(!error.committed());
+        assert!(!effects_applied.get());
+        let mut after = db.get_all_settings().expect("read settings after failure");
+        after.sort();
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn queued_recording_transition_is_seen_before_the_model_commit() {
+        let (db, _dir) = test_db();
+        let db = Arc::new(db);
+        let initial = AppSettings::default();
+        initial.save(&db).expect("save initial settings");
+        let mut before = db.get_all_settings().expect("read initial settings");
+        before.sort();
+
+        let machine = Arc::new(Mutex::new(AppStateMachine::Idle));
+        let mut transition = machine.lock().expect("lock machine before save");
+        let started = Arc::new(Barrier::new(2));
+        let worker_db = Arc::clone(&db);
+        let worker_machine = Arc::clone(&machine);
+        let worker_started = Arc::clone(&started);
+        let candidate = AppSettings {
+            theme: Theme::Dark,
+            transcription_model_id: "stt-2.6b-en".into(),
+            ..initial
+        };
+        let worker = std::thread::spawn(move || {
+            worker_started.wait();
+            save_settings_with_effects(&worker_db, &worker_machine, candidate, |_| Ok(()))
+        });
+
+        started.wait();
+        *transition = recording_machine();
+        drop(transition);
+
+        let result = worker.join().expect("join settings save");
+        assert!(matches!(result, Err(SettingsSaveError::Rejected { .. })));
+        let mut after = db.get_all_settings().expect("read settings after refusal");
+        after.sort();
+        assert_eq!(after, before, "the transition must win before commit");
+    }
+
+    #[test]
+    fn poisoned_machine_lock_reports_not_committed_without_mutation() {
+        let (db, _dir) = test_db();
+        let initial = AppSettings::default();
+        initial.save(&db).expect("save initial settings");
+        let mut before = db.get_all_settings().expect("read initial settings");
+        before.sort();
+
+        let machine = Arc::new(Mutex::new(AppStateMachine::Idle));
+        let poison = Arc::clone(&machine);
+        let _ = std::thread::spawn(move || {
+            let _guard = poison.lock().expect("lock machine for poisoning");
+            panic!("inject poisoned machine lock");
+        })
+        .join();
+
+        let effects_applied = Cell::new(false);
+        let candidate = AppSettings {
+            theme: Theme::Dark,
+            ..initial
+        };
+        let result = save_settings_with_effects(&db, &machine, candidate, |_| {
+            effects_applied.set(true);
+            Ok(())
+        });
+        let error = result.expect_err("poisoned machine lock must fail");
+        assert!(matches!(error, SettingsSaveError::NotCommitted { .. }));
+        assert!(!error.committed());
+        assert!(!effects_applied.get());
+        let mut after = db
+            .get_all_settings()
+            .expect("read settings after lock failure");
+        after.sort();
+        assert_eq!(after, before);
+    }
 }

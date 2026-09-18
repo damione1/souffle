@@ -5,6 +5,30 @@ use crate::lock_ext::MutexExt;
 use super::Database;
 
 impl Database {
+    pub(crate) fn with_settings_transaction<E>(
+        &self,
+        operation: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<(), E>,
+    ) -> Result<(), E>
+    where
+        E: From<String>,
+    {
+        let mut conn = self.conn.acquire().map_err(E::from)?;
+        let transaction = conn
+            .transaction()
+            .map_err(|e| E::from(format!("Begin settings transaction: {e}")))?;
+        operation(&transaction)?;
+        transaction
+            .commit()
+            .map_err(|e| E::from(format!("Commit settings transaction: {e}")))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execute_settings_sql_for_test(&self, sql: &str) -> Result<(), String> {
+        let conn = self.conn.acquire()?;
+        conn.execute_batch(sql)
+            .map_err(|e| format!("Execute settings test SQL: {e}"))
+    }
+
     /// Get a setting value by key. Returns None if not found.
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
         let conn = self.conn.acquire()?;
