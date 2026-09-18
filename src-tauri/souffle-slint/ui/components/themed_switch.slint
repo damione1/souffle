@@ -6,6 +6,7 @@ import { Theme } from "../theme.slint";
 export component ThemedSwitch inherits Rectangle {
     in property <bool> checked;
     in property <bool> enabled: true;
+    in property <string> control-label: "Interrupteur";
 
     // Carries the new value directly - no internal state to read back via
     // `self.checked` (this component is purely one-way, same reasoning as
@@ -18,17 +19,39 @@ export component ThemedSwitch inherits Rectangle {
     horizontal-stretch: 0;
     vertical-stretch: 0;
     border-radius: 12px;
-    background: root.checked ? Theme.accent : Theme.surface-3;
+    border-width: key-focus.has-focus ? 2px : (root.checked ? 0px : 1px);
+    border-color: key-focus.has-focus ? Theme.text-primary : Theme.ghost-border;
+    background: root.checked ? (area.pressed ? Theme.accent-hover : Theme.accent) : (area.pressed ? Theme.surface-3 : Theme.surface-4);
     opacity: root.enabled ? 1.0 : 0.5;
 
-    accessible-role: button;
+    accessible-role: switch;
+    accessible-label: root.control-label;
+    accessible-enabled: root.enabled;
     accessible-checkable: true;
     accessible-checked: root.checked;
-    accessible-action-default => { root.toggled(!root.checked); }
+    accessible-action-default => { if root.enabled { root.toggled(!root.checked); } }
 
-    TouchArea {
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.Return || event.text == Key.Space {
+                root.toggled(!root.checked);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    area := TouchArea {
         enabled: root.enabled;
-        clicked => { root.toggled(!root.checked); }
+        clicked => {
+            key-focus.focus();
+            root.toggled(!root.checked);
+        }
     }
 
     knob := Rectangle {

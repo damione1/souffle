@@ -61,11 +61,31 @@ export component PermissionsStep inherits VerticalLayout {
             }
 
             if row.state == "granted": Rectangle {
+                width: granted-label.preferred-width + 30px;
+                height: 28px;
+                horizontal-stretch: 0;
+                vertical-stretch: 0;
                 background: Theme.surface-2;
+                border-width: 1px;
+                border-color: Theme.border-soft;
                 border-radius: 4px;
-                HorizontalLayout {
-                    padding: 4px;
-                    Text { text: "✓ Accordé"; color: Theme.success; font-size: 11px; }
+
+                Rectangle {
+                    x: 9px;
+                    y: (parent.height - self.height) / 2;
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 4px;
+                    background: Theme.success;
+                }
+                granted-label := Text {
+                    x: 22px;
+                    height: parent.height;
+                    text: "Accordé";
+                    color: Theme.text-secondary;
+                    font-family: "Archivo Medium";
+                    font-size: 11px;
+                    vertical-alignment: center;
                 }
             }
             if row.state == "unsupported": Text {

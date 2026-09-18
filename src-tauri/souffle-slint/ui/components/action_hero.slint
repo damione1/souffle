@@ -13,23 +13,39 @@ export component ActionHero inherits HorizontalLayout {
     spacing: 1px;
 
     Rectangle {
-        horizontal-stretch: 1;
-        border-width: 1px;
-        border-color: Theme.border-soft;
-        background: dictate-area.has-hover ? Theme.surface-2 : transparent;
+        width: (root.width - 1px) / 2;
+        horizontal-stretch: 0;
+        border-width: dictate-focus.has-focus ? 2px : 1px;
+        border-color: dictate-focus.has-focus ? Theme.accent : Theme.border-soft;
+        background: dictate-area.pressed ? Theme.surface-3 : dictate-area.has-hover ? Theme.surface-2 : transparent;
         opacity: root.model-ready ? 1.0 : 0.5;
 
         // TouchArea alone has no accessible role (SOU-186's LineEdit-vs-bare-
         // TextInput lesson applies here too): without these, this control is
         // invisible to assistive tech and AppleScript UI scripting alike.
         accessible-role: button;
-        accessible-label: "Dicter";
+        accessible-label: "Démarrer une dictée";
         accessible-enabled: root.model-ready;
-        accessible-action-default => { root.dictate-requested(); }
+        accessible-action-default => { if root.model-ready { root.dictate-requested(); } }
+
+        forward-focus: dictate-focus;
+
+        dictate-focus := FocusScope {
+            key-pressed(event) => {
+                if root.model-ready && (event.text == Key.Return || event.text == Key.Space) {
+                    root.dictate-requested();
+                    return accept;
+                }
+                return reject;
+            }
+        }
 
         dictate-area := TouchArea {
             enabled: root.model-ready;
-            clicked => { root.dictate-requested(); }
+            clicked => {
+                dictate-focus.focus();
+                root.dictate-requested();
+            }
         }
 
         HorizontalLayout {
@@ -96,20 +112,36 @@ export component ActionHero inherits HorizontalLayout {
     }
 
     Rectangle {
-        horizontal-stretch: 1;
-        border-width: 1px;
-        border-color: Theme.border-soft;
-        background: meeting-area.has-hover ? Theme.surface-2 : transparent;
+        width: (root.width - 1px) / 2;
+        horizontal-stretch: 0;
+        border-width: meeting-focus.has-focus ? 2px : 1px;
+        border-color: meeting-focus.has-focus ? Theme.accent : Theme.border-soft;
+        background: meeting-area.pressed ? Theme.surface-3 : meeting-area.has-hover ? Theme.surface-2 : transparent;
         opacity: root.model-ready ? 1.0 : 0.5;
 
         accessible-role: button;
-        accessible-label: "Meeting";
+        accessible-label: "Démarrer une réunion";
         accessible-enabled: root.model-ready;
-        accessible-action-default => { root.meeting-requested(); }
+        accessible-action-default => { if root.model-ready { root.meeting-requested(); } }
+
+        forward-focus: meeting-focus;
+
+        meeting-focus := FocusScope {
+            key-pressed(event) => {
+                if root.model-ready && (event.text == Key.Return || event.text == Key.Space) {
+                    root.meeting-requested();
+                    return accept;
+                }
+                return reject;
+            }
+        }
 
         meeting-area := TouchArea {
             enabled: root.model-ready;
-            clicked => { root.meeting-requested(); }
+            clicked => {
+                meeting-focus.focus();
+                root.meeting-requested();
+            }
         }
 
         HorizontalLayout {
@@ -129,13 +161,13 @@ export component ActionHero inherits HorizontalLayout {
                 alignment: start;
 
                 Text {
-                    text: "Meeting";
+                    text: "Démarrer une réunion";
                     font-family: "Archivo SemiBold";
                     font-size: 15px;
                     color: Theme.text-primary;
                 }
                 Text {
-                    text: "Transcription en direct · capture l’audio système";
+                    text: "Transcrire en direct avec l’audio système";
                     font-size: 12.5px;
                     color: Theme.text-muted;
                     wrap: word-wrap;

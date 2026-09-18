@@ -5,26 +5,59 @@ component SettingsTabChip inherits Rectangle {
     in property <string> title;
     in property <bool> active;
     callback clicked();
+    callback previous-requested();
+    callback next-requested();
 
     height: 28px;
     width: label.width + 24px;
     vertical-stretch: 0;
     horizontal-stretch: 0;
     border-radius: 4px;
-    background: root.active ? Theme.surface-2 : (area.has-hover ? Theme.surface-2.with-alpha(0.7) : transparent);
+    border-width: key-focus.has-focus ? 2px : 0px;
+    border-color: Theme.accent;
+    background: root.active ? Theme.surface-3 : (area.has-hover ? Theme.surface-2 : transparent);
+
+    accessible-role: tab;
+    accessible-label: root.title;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { root.clicked(); }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            if event.text == Key.LeftArrow {
+                root.previous-requested();
+                return accept;
+            }
+            if event.text == Key.RightArrow {
+                root.next-requested();
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     label := Text {
         x: 12px;
         height: parent.height;
         text: root.title;
         font-size: 13px;
-        font-weight: 500;
+        font-weight: root.active ? 600 : 500;
         color: root.active ? Theme.text-primary : (area.has-hover ? Theme.text-secondary : Theme.text-muted);
         vertical-alignment: center;
     }
 
     area := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => {
+            key-focus.focus();
+            root.clicked();
+        }
     }
 }
 
@@ -35,15 +68,41 @@ export component SettingsTabBar inherits Rectangle {
     callback changed(SettingsTab);
 
     height: 36px;
+    width: chips.preferred-width;
+    horizontal-stretch: 0;
     vertical-stretch: 0;
     border-radius: 4px;
     border-width: 1px;
     border-color: Theme.border-soft;
-    background: transparent;
+    background: Theme.surface-1;
 
-    accessible-role: none;
+    accessible-role: tab-list;
+    accessible-label: "Sections des paramètres";
 
-    HorizontalLayout {
+    function previous() {
+        if root.current == SettingsTab.transcription { root.select(SettingsTab.system); }
+        else if root.current == SettingsTab.ai { root.select(SettingsTab.transcription); }
+        else if root.current == SettingsTab.audio { root.select(SettingsTab.ai); }
+        else if root.current == SettingsTab.interface { root.select(SettingsTab.audio); }
+        else if root.current == SettingsTab.meetings { root.select(SettingsTab.interface); }
+        else if root.current == SettingsTab.system { root.select(SettingsTab.meetings); }
+    }
+
+    function next() {
+        if root.current == SettingsTab.transcription { root.select(SettingsTab.ai); }
+        else if root.current == SettingsTab.ai { root.select(SettingsTab.audio); }
+        else if root.current == SettingsTab.audio { root.select(SettingsTab.interface); }
+        else if root.current == SettingsTab.interface { root.select(SettingsTab.meetings); }
+        else if root.current == SettingsTab.meetings { root.select(SettingsTab.system); }
+        else if root.current == SettingsTab.system { root.select(SettingsTab.transcription); }
+    }
+
+    function select(value: SettingsTab) {
+        root.current = value;
+        root.changed(value);
+    }
+
+    chips := HorizontalLayout {
         padding: 4px;
         spacing: 4px;
         alignment: start;
@@ -52,70 +111,83 @@ export component SettingsTabBar inherits Rectangle {
             title: "Transcription";
             active: root.current == SettingsTab.transcription;
             clicked => {
-                root.current = SettingsTab.transcription;
-                root.changed(SettingsTab.transcription);
+                root.select(SettingsTab.transcription);
             }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
         }
         SettingsTabChip {
             title: "IA";
             active: root.current == SettingsTab.ai;
             clicked => {
-                root.current = SettingsTab.ai;
-                root.changed(SettingsTab.ai);
+                root.select(SettingsTab.ai);
             }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
         }
         SettingsTabChip {
             title: "Audio";
             active: root.current == SettingsTab.audio;
             clicked => {
-                root.current = SettingsTab.audio;
-                root.changed(SettingsTab.audio);
+                root.select(SettingsTab.audio);
             }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
         }
         SettingsTabChip {
             title: "Interface";
             active: root.current == SettingsTab.interface;
             clicked => {
-                root.current = SettingsTab.interface;
-                root.changed(SettingsTab.interface);
+                root.select(SettingsTab.interface);
             }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
         }
         SettingsTabChip {
             title: "Réunions";
             active: root.current == SettingsTab.meetings;
             clicked => {
-                root.current = SettingsTab.meetings;
-                root.changed(SettingsTab.meetings);
+                root.select(SettingsTab.meetings);
             }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
         }
         SettingsTabChip {
             title: "Système";
             active: root.current == SettingsTab.system;
             clicked => {
-                root.current = SettingsTab.system;
-                root.changed(SettingsTab.system);
+                root.select(SettingsTab.system);
             }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
         }
     }
 }
 
 // Keeps a tab's item tree alive when inactive. `if tab ==` tears the
 // whole section down and rebuilds it on every click (hundreds of ms with
-// FemtoVG, still a hitch with Skia). `visible: false` still occupies
-// layout space, so height collapses to 0 when inactive.
+// FemtoVG, still a hitch with Skia). Pages are overlaid in a non-layout
+// Rectangle (so `visible: false` cannot insert a gap). Each page owns its
+// Flickable so scroll position is per-tab and starts at the top.
 export component SettingsTabPage inherits Rectangle {
     in property <bool> active;
 
     visible: root.active;
-    height: root.active ? content.preferred-height : 0px;
     clip: true;
-    vertical-stretch: 0;
 
-    content := VerticalLayout {
-        width: parent.width;
-        spacing: 22px;
-        alignment: start;
+    Flickable {
+        width: parent.width - 10px;
+        height: 100%;
+        viewport-width: self.width;
 
-        @children
+        content := VerticalLayout {
+            width: parent.width;
+            spacing: 22px;
+            alignment: start;
+            padding-right: 14px;
+            padding-bottom: 28px;
+
+            @children
+        }
     }
 }

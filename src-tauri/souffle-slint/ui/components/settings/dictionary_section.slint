@@ -42,72 +42,118 @@ export component DictionarySection inherits VerticalLayout {
         description: "Quand le collage auto est actif, retenir les corrections mot à mot faites dans l'app cible pour les dictées suivantes.";
 
         ThemedSwitch {
+            control-label: "Apprendre depuis les corrections après collage";
             checked: root.learn-from-edit;
             toggled(new) => { root.learn-from-edit-changed(new); }
         }
     }
 
-    Text {
-        text: "Termes techniques, noms propres ou acronymes mal reconnus.";
-        font-size: 11.5px;
-        color: Theme.text-muted;
-        wrap: word-wrap;
-    }
+    VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-top: 4px;
+        padding-bottom: 8px;
+        spacing: 8px;
 
-    HorizontalLayout {
-        spacing: 6px;
+        Text {
+            text: "Termes techniques, noms propres ou acronymes mal reconnus.";
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
 
         VerticalLayout {
-            spacing: 8px;
-            horizontal-stretch: 1;
-            Text { text: "TERME"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-            ThemedLineEdit { text <=> root.new-term-draft; placeholder: "ex. Kubernetes"; }
-        }
-        VerticalLayout {
-            spacing: 8px;
-            Text { text: "PRONONCIATION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-            ThemedLineEdit { text <=> root.new-pronunciation-draft; placeholder: "ex. vaysix"; width: 110px; }
-        }
-        VerticalLayout {
-            spacing: 8px;
-            Text { text: "CATÉGORIE"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-            ThemedLineEdit { text <=> root.new-category-draft; placeholder: "ex. tech"; width: 100px; }
-        }
-        VerticalLayout {
-            spacing: 8px;
-            alignment: end;
-            Rectangle { height: 12px; }
-            ThemedButton {
-                text: "+";
-                enabled: root.new-term-draft != "";
-                clicked => {
-                    root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
-                    root.new-term-draft = "";
-                    root.new-pronunciation-draft = "";
-                    root.new-category-draft = "";
+            spacing: 6px;
+
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: "TERME";
+                    font-size: 10.5px;
+                    color: Theme.text-tertiary;
+                    font-family: "Archivo Bold";
+                    letter-spacing: 1px;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: "PRONONCIATION";
+                    font-size: 10.5px;
+                    color: Theme.text-tertiary;
+                    font-family: "Archivo Bold";
+                    letter-spacing: 1px;
+                    width: 110px;
+                }
+                Text {
+                    text: "CATÉGORIE";
+                    font-size: 10.5px;
+                    color: Theme.text-tertiary;
+                    font-family: "Archivo Bold";
+                    letter-spacing: 1px;
+                    width: 100px;
+                }
+                Rectangle {
+                    width: 88px;
+                    height: 1px;
+                    horizontal-stretch: 0;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                ThemedLineEdit {
+                    text <=> root.new-term-draft;
+                    placeholder: "ex. Kubernetes";
+                    control-label: "Terme";
+                    horizontal-stretch: 1;
+                }
+                ThemedLineEdit {
+                    text <=> root.new-pronunciation-draft;
+                    placeholder: "ex. vaysix";
+                    control-label: "Prononciation facultative";
+                    width: 110px;
+                }
+                ThemedLineEdit {
+                    text <=> root.new-category-draft;
+                    placeholder: "ex. tech";
+                    control-label: "Catégorie facultative";
+                    width: 100px;
+                }
+                ThemedButton {
+                    text: "Ajouter";
+                    enabled: root.new-term-draft != "";
+                    clicked => {
+                        root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
+                        root.new-term-draft = "";
+                        root.new-pronunciation-draft = "";
+                        root.new-category-draft = "";
+                    }
                 }
             }
         }
-    }
 
-    if root.add-error != "": Text {
-        text: root.add-error;
-        color: Theme.danger;
-        font-size: 11px;
-    }
+        if root.add-error != "": Text {
+            text: root.add-error;
+            color: Theme.danger;
+            font-size: 11px;
+        }
 
-    if root.entries.length == 0: VerticalLayout {
-        padding-top: 4px;
-        Text {
+        if root.entries.length == 0: Text {
             text: "Aucune entrée.";
-            font-size: 13px;
+            font-size: 12px;
             color: Theme.text-muted;
         }
     }
 
+    VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 8px;
+        spacing: 6px;
+
     for row in root.entries: Rectangle {
         border-width: 1px;
-        border-color: Theme.surface-4;
+        border-color: Theme.border-soft;
+        border-radius: 6px;
 
         HorizontalLayout {
             padding: 8px;
@@ -134,6 +180,7 @@ export component DictionarySection inherits VerticalLayout {
                 clicked => { root.delete-requested(row.id); }
             }
         }
+    }
     }
     }
 }

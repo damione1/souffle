@@ -36,6 +36,7 @@ export component SearchField inherits Rectangle {
         color: Theme.text-secondary;
         vertical-alignment: center;
         single-line: true;
+        accessible-label: "Rechercher les transcriptions et réunions";
         edited => { root.edited(self.text); }
     }
 

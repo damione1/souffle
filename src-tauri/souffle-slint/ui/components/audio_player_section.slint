@@ -30,14 +30,30 @@ export component AudioPlayerSection inherits VerticalLayout {
             width: 36px;
             height: 36px;
             border-radius: 18px;
-            background: play-area.has-hover ? Theme.surface-4 : Theme.surface-4;
+            border-width: play-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: play-area.pressed ? Theme.surface-3 : Theme.surface-4;
 
             accessible-role: button;
             accessible-label: root.is-playing ? "Pause" : "Lecture";
             accessible-action-default => { root.play-pause-requested(); }
 
+            forward-focus: play-focus;
+            play-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.play-pause-requested();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
             play-area := TouchArea {
-                clicked => { root.play-pause-requested(); }
+                clicked => {
+                    play-focus.focus();
+                    root.play-pause-requested();
+                }
             }
 
             Text {
@@ -58,12 +74,34 @@ export component AudioPlayerSection inherits VerticalLayout {
 
     if root.has-audio: waveform-area := Rectangle {
         height: 56px;
+        border-width: waveform-focus.has-focus ? 2px : 0px;
+        border-color: Theme.accent;
 
         accessible-role: slider;
         accessible-label: "Position de lecture";
+        accessible-value: root.position-label;
+        accessible-value-minimum: 0;
+        accessible-value-maximum: 100;
+        accessible-value-step: 5;
+
+        forward-focus: waveform-focus;
+        waveform-focus := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.LeftArrow {
+                    root.seek-requested(max(0, root.progress - 0.05));
+                    return accept;
+                }
+                if event.text == Key.RightArrow {
+                    root.seek-requested(min(1, root.progress + 0.05));
+                    return accept;
+                }
+                return reject;
+            }
+        }
 
         seek-area := TouchArea {
             clicked => {
+                waveform-focus.focus();
                 root.seek-requested(self.mouse-x / self.width);
             }
         }

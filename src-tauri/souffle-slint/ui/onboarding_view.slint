@@ -247,6 +247,7 @@ export component OnboardingView inherits Rectangle {
                         vertical-alignment: center;
                     }
                     ThemedSwitch {
+                        control-label: "Coller automatiquement le texte transcrit";
                         checked: root.auto-paste;
                         toggled(new) => { root.auto-paste-changed(new); }
                     }

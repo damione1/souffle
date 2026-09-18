@@ -229,19 +229,41 @@ export component SettingsView inherits Rectangle {
     // paint into the same window at once.
     background: Theme.canvas;
 
+    // The settings tree overlays a kept-alive HomeView. Painting an opaque
+    // Rectangle doesn't consume input, so empty pixels used to click through.
+    TouchArea { }
+
     VerticalLayout {
         padding-left: 26px;
         padding-right: 26px;
-        padding-top: 26px;
-        padding-bottom: 34px;
-        spacing: 22px;
+        padding-top: 18px;
+        padding-bottom: 12px;
+        spacing: 16px;
 
         done := Rectangle {
             height: 32px;
             width: 16px + 6px + done-label.width + 20px;
             border-radius: 4px;
-            background: done-area.has-hover ? Theme.surface-2 : transparent;
+            border-width: done-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: done-area.pressed ? Theme.surface-3 : done-area.has-hover ? Theme.surface-2 : transparent;
             vertical-stretch: 0;
+
+            accessible-role: button;
+            accessible-label: "Fermer les paramètres";
+            accessible-action-default => { root.close-requested(); }
+
+            forward-focus: done-focus;
+
+            done-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space || event.text == Key.Escape {
+                        root.close-requested();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
 
             LucideIcon {
                 icon: IconSet.ArrowLeft;
@@ -258,7 +280,10 @@ export component SettingsView inherits Rectangle {
                 color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
             }
             done-area := TouchArea {
-                clicked => { root.close-requested(); }
+                clicked => {
+                    done-focus.focus();
+                    root.close-requested();
+                }
             }
         }
 
@@ -270,19 +295,20 @@ export component SettingsView inherits Rectangle {
             vertical-stretch: 0;
         }
 
-        SettingsTabBar {
-            current <=> root.tab;
+        HorizontalLayout {
+            alignment: start;
+            vertical-stretch: 0;
+            SettingsTabBar {
+                current <=> root.tab;
+            }
         }
 
-        Flickable {
+        Rectangle {
             vertical-stretch: 1;
 
-            VerticalLayout {
-                width: parent.width;
-                spacing: 22px;
-                alignment: start;
-
-                SettingsTabPage {
+                    trans-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
                     active: root.tab == SettingsTab.transcription;
 
                         ModelSection {
@@ -328,7 +354,9 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                SettingsTabPage {
+                    ai-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
                     active: root.tab == SettingsTab.ai;
 
                         IntelligenceSection {
@@ -384,7 +412,9 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                SettingsTabPage {
+                    audio-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
                     active: root.tab == SettingsTab.audio;
 
                         MicrophoneSection {
@@ -436,7 +466,9 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                SettingsTabPage {
+                    interface-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
                     active: root.tab == SettingsTab.interface;
 
                         InterfaceSection {
@@ -475,7 +507,9 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                SettingsTabPage {
+                    meetings-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
                     active: root.tab == SettingsTab.meetings;
 
                         CalendarSection {
@@ -492,7 +526,9 @@ export component SettingsView inherits Rectangle {
                         }
                 }
 
-                SettingsTabPage {
+                    system-page := SettingsTabPage {
+                    width: parent.width;
+                    height: parent.height;
                     active: root.tab == SettingsTab.system;
 
                         AutostartSection {
@@ -545,8 +581,7 @@ export component SettingsView inherits Rectangle {
                             check-updates-requested => { root.check-updates-requested(); }
                             auto-update-check-changed(value) => { root.auto-update-check-changed(value); }
                         }
+                    }
                 }
-            }
-        }
     }
 }

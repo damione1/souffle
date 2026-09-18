@@ -1,10 +1,10 @@
-import { TextEdit } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
 import { ThemedButton } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedTextArea } from "../themed_text_area.slint";
 
 // Port of DictationPolishSettingsSection.svelte. The active template's
 // prompt is forwarded as a plain property (`active-prompt`) rather than
@@ -28,25 +28,13 @@ export component DictationPolishSection inherits VerticalLayout {
     SettingsGroup {
         title: "POLISH DE LA DICTÉE";
 
-    VerticalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        padding-top: 15px;
-        padding-bottom: 15px;
-        Text {
-            text: "Nettoie la dictée avec le même fournisseur de résumés (Ollama ou Apple Intelligence) avant le collage.";
-            font-size: 12px;
-            color: Theme.text-muted;
-            wrap: word-wrap;
-        }
-    }
-
     SettingsField {
         show-divider: false;
         label: "Nettoyer la dictée avec l'IA";
-        description: "Passe LLM locale après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.";
+        description: "Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.";
 
         ThemedSwitch {
+            control-label: "Nettoyer la dictée avec l'IA";
             checked: root.enabled;
             toggled(new) => { root.enabled-changed(new); }
         }
@@ -81,7 +69,7 @@ export component DictationPolishSection inherits VerticalLayout {
         label: "Modèle de retouche";
 
         ThemedComboBox {
-            combo-width: 220px;
+            control-label: "Modèle de retouche";
             model: root.template-labels;
             current-value: root.active-template-label;
             selected(value) => { root.template-changed(value); }
@@ -92,10 +80,11 @@ export component DictationPolishSection inherits VerticalLayout {
         label: "Instruction";
         description: "Prompt envoyé à l'IA pour retoucher le texte transcrit.";
 
-        TextEdit {
+        ThemedTextArea {
             text: root.active-prompt;
-            height: 90px;
-            wrap: word-wrap;
+            area-height: 90px;
+            placeholder: "Instruction de retouche";
+            control-label: "Instruction de retouche";
             edited(value) => { root.prompt-changed(value); }
         }
     }

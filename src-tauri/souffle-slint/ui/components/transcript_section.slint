@@ -193,14 +193,14 @@ export component TranscriptSection inherits VerticalLayout {
     }
 
     Text {
-        text: "Transcript \u{b7} " + root.segment-count + " segments";
-        font-size: 11px;
-        font-weight: 600;
-        color: Theme.text-muted;
+        text: "Transcription";
+        font-family: "Archivo SemiBold";
+        font-size: 13px;
+        color: Theme.text-primary;
     }
 
     if root.segment-count == 0: Text {
-        text: "Pas de transcript pour cette r\u{e9}union.";
+        text: "Aucun texte transcrit pour cette r\u{e9}union.";
         color: Theme.text-muted;
         font-size: 12px;
     }
@@ -212,11 +212,13 @@ export component TranscriptSection inherits VerticalLayout {
         clip: true;
 
         flick := Flickable {
-            width: 100%;
+            width: parent.width - 10px;
             height: 100%;
+            viewport-width: self.width;
             viewport-y <=> root.scroll-top;
 
             VerticalLayout {
+                width: flick.width;
                 padding: 12px;
                 spacing: 12px;
                 alignment: start;
@@ -241,16 +243,35 @@ export component TranscriptSection inherits VerticalLayout {
 
                             ts-btn := Rectangle {
                                 width: 40px;
+                                height: 22px;
+                                border-radius: 3px;
+                                border-width: ts-focus.has-focus ? 2px : 0px;
+                                border-color: Theme.accent;
+                                background: ts-area.has-hover ? Theme.surface-2 : transparent;
 
                                 accessible-role: button;
                                 accessible-label: "Aller \u{e0} " + block.timestamp;
+                                accessible-enabled: root.has-audio;
                                 accessible-action-default => {
                                     root.paragraph-clicked(block.recording-session-index, block.start-time);
                                 }
 
-                                TouchArea {
+                                forward-focus: ts-focus;
+                                ts-focus := FocusScope {
+                                    enabled: root.has-audio;
+                                    key-pressed(event) => {
+                                        if event.text == Key.Return || event.text == Key.Space {
+                                            root.paragraph-clicked(block.recording-session-index, block.start-time);
+                                            return accept;
+                                        }
+                                        return reject;
+                                    }
+                                }
+
+                                ts-area := TouchArea {
                                     enabled: root.has-audio;
                                     clicked => {
+                                        ts-focus.focus();
                                         root.paragraph-clicked(block.recording-session-index, block.start-time);
                                     }
                                 }
@@ -265,34 +286,12 @@ export component TranscriptSection inherits VerticalLayout {
                             }
                         }
 
-                        StyledText {
-                            text: block.markdown-text;
-                            default-color: Theme.text-primary;
-                            default-font-size: 13px;
-                            // `TranscriptWordLine.svelte` keeps clickable
-                            // words visually identical to plain text by
-                            // default (`text-inherit`, no underline - only
-                            // a hover highlight) since alias-correction is
-                            // a secondary action, not a "this is a link"
-                            // affordance. `StyledText`'s CommonMark links
-                            // always render underlined with no property to
-                            // turn that off (confirmed against
-                            // `i-slint-compiler-1.17.1/builtins.slint`), so
-                            // the underline itself can't be matched without
-                            // replacing this whole per-word-links technique
-                            // (SOU-195 - tracked as a known gap, not fixed
-                            // here). Matching `link-color` to `default-color`
-                            // at least stops every word reading as an
-                            // obviously-different-colored hyperlink, which
-                            // was the more jarring half of the mismatch.
-                            link-color: Theme.text-primary;
-                            // Not positioned under the exact clicked word:
-                            // `PopupWindow`'s `x`/`y` are relative to this
-                            // component and `StyledText` doesn't expose a
-                            // clicked link's on-screen position - a fixed,
-                            // honest v1 position, not a missing feature
-                            // hidden as a bug.
-                            link-clicked(word) => { root.open-alias-popup(word); }
+                        Text {
+                            width: parent.width;
+                            text: block.text;
+                            color: Theme.text-primary;
+                            font-size: 13px;
+                            wrap: word-wrap;
                         }
                     }
 

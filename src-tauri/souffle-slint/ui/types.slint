@@ -5,6 +5,9 @@
 
 export enum RecordingMode { idle, dictation, meeting }
 
+// Mirrors souffle_lib::engine::Speaker at the compiled UI boundary.
+export enum SpeakerRole { me, them }
+
 // A timeline entry's own kind - always one specific thing, never "all".
 export enum TimelineKind { meeting, dictation }
 

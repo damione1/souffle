@@ -36,6 +36,7 @@ export global Theme {
     out property <color> ghost-border: root.dark ? rgba(235, 210, 170, 0.42) : rgba(23, 17, 11, 0.46);
     out property <color> border-soft: root.dark ? rgba(235, 210, 170, 0.16) : rgba(23, 17, 11, 0.16);
     out property <color> rule: root.dark ? rgba(235, 210, 170, 0.22) : rgba(23, 17, 11, 0.28);
+    out property <color> modal-scrim: root.dark ? rgba(0, 0, 0, 0.72) : rgba(0, 0, 0, 0.54);
 
     // Shared trailing columns on upcoming + timeline rows so times and
     // play/chevron sit on one vertical grid. JetBrains Mono 11.5px:
@@ -43,4 +44,9 @@ export global Theme {
     out property <length> row-duration-width: 42px;
     out property <length> row-time-width: 84px;
     out property <length> row-action-width: 22px;
+
+    // Trailing control column on settings rows (combo, URL field, spin).
+    out property <length> settings-control-width: 220px;
+    out property <length> settings-control-height: 36px;
+    out property <length> settings-inset: 12px;
 }

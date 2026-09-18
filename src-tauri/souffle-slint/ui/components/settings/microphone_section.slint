@@ -2,9 +2,63 @@ import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { ThemedButton } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { LucideIcon, IconSet } from "../lucide_icon.slint";
+
+enum MicIconKind { refresh, up, down, trash }
+
+component MicIconButton inherits Rectangle {
+    in property <MicIconKind> kind;
+    in property <bool> enabled: true;
+    in property <color> glyph-color: Theme.text-primary;
+    in property <string> control-label;
+    callback clicked();
+
+    width: Theme.settings-control-height;
+    height: Theme.settings-control-height;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: key-focus.has-focus ? 2px : 1px;
+    border-color: key-focus.has-focus ? Theme.accent : Theme.ghost-border;
+    background: area.pressed ? Theme.surface-2 : area.has-hover && root.enabled ? Theme.surface-4 : Theme.surface-3;
+    opacity: root.enabled ? 1.0 : 0.4;
+
+    accessible-role: button;
+    accessible-label: root.control-label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+
+    forward-focus: key-focus;
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if root.enabled && (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    LucideIcon {
+        icon: root.kind == MicIconKind.refresh ? IconSet.RefreshCw
+            : (root.kind == MicIconKind.up ? IconSet.ChevronUp
+            : (root.kind == MicIconKind.down ? IconSet.ChevronDown
+            : IconSet.Trash2));
+        icon-color: root.glyph-color;
+        size: 14px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            key-focus.focus();
+            root.clicked();
+        }
+    }
+}
 
 // One row of the priority list. Fully precomputed by Rust
 // (`microphone_list.rs`, a port of `microphone-list.ts`'s pure functions) so
@@ -57,7 +111,7 @@ export component MicrophoneSection inherits VerticalLayout {
     SettingsField {
         show-divider: false;
         label: "Périphérique d'entrée";
-        description: "Choisissez le microphone que Souffle écoute et configurez le traitement audio.";
+        description: "Choisissez le microphone que Soufflé écoute et configurez le traitement audio.";
 
         HorizontalLayout {
             spacing: 6px;
@@ -65,32 +119,18 @@ export component MicrophoneSection inherits VerticalLayout {
             horizontal-stretch: 0;
 
             ThemedComboBox {
-                combo-width: 200px;
+                control-label: "Microphone actif";
                 model: root.device-labels;
                 current-value: root.selected-device-label;
                 selected(value) => { root.device-changed(value); }
             }
-            refresh := Rectangle {
-                width: 24px;
-                height: 24px;
-                border-radius: 4px;
-                border-width: 1px;
-                border-color: Theme.ghost-border;
-                background: refresh-area.has-hover ? Theme.surface-4 : Theme.surface-3;
-                LucideIcon {
-                    icon: IconSet.RefreshCw;
-                    icon-color: Theme.text-primary;
-                    size: 14px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                }
-                refresh-area := TouchArea {
-                    clicked => { root.refresh-requested(); }
-                }
+            MicIconButton {
+                kind: MicIconKind.refresh;
+                control-label: "Actualiser les microphones";
+                clicked => { root.refresh-requested(); }
             }
             if root.has-disconnected: ThemedButton {
                 text: "Réinitialiser la liste";
-                kind: ThemedButtonKind.primary;
                 clicked => { root.reset-devices-requested(); }
             }
         }
@@ -107,11 +147,24 @@ export component MicrophoneSection inherits VerticalLayout {
         label: "Fréquence d'échantillonnage";
         description: "Fréquence native du périphérique sélectionné.";
 
-        Text {
-            text: root.sample-rate-label;
-            color: Theme.text-secondary;
-            font-size: 12.5px;
-            vertical-alignment: center;
+        Rectangle {
+            height: Theme.settings-control-height;
+            width: sample-rate-text.width + 24px;
+            horizontal-stretch: 0;
+            vertical-stretch: 0;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Theme.border-soft;
+            background: Theme.input;
+
+            sample-rate-text := Text {
+                x: 12px;
+                height: parent.height;
+                text: root.sample-rate-label;
+                color: Theme.text-secondary;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
         }
     }
 
@@ -137,108 +190,128 @@ export component MicrophoneSection inherits VerticalLayout {
     }
 
     VerticalLayout {
-        spacing: 6px;
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-top: 15px;
+        padding-bottom: 8px;
+        spacing: 8px;
 
         Text {
             text: "Ordre de préférence";
-            font-size: 13px;
-            font-weight: 600;
-            color: Theme.text-primary;
+            font-size: 13.5px;
+            color: Theme.text-secondary;
         }
         Text {
             text: "Utilisé quand plusieurs micros sont branchés en même temps.";
-            font-size: 11.5px;
+            font-size: 12px;
             color: Theme.text-muted;
         }
 
-        for row in root.microphones: Rectangle {
+        Rectangle {
             border-width: 1px;
-            border-color: Theme.surface-4;
-            opacity: row.connected ? 1.0 : 0.6;
+            border-color: Theme.border-soft;
+            border-radius: 6px;
+            clip: true;
+            background: Theme.surface-1;
+            vertical-stretch: 0;
 
-            HorizontalLayout {
-                padding: 8px;
-                spacing: 8px;
-                alignment: space-between;
+            VerticalLayout {
+                spacing: 0px;
 
-                VerticalLayout {
-                    spacing: 1px;
-                    horizontal-stretch: 1;
+                for row in root.microphones: VerticalLayout {
+                    spacing: 0px;
+                    opacity: row.connected ? 1.0 : 0.7;
 
                     HorizontalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: row.name;
-                            font-size: 12.5px;
-                            color: Theme.text-primary;
-                            overflow: elide;
-                            wrap: no-wrap;
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+                        spacing: 8px;
+
+                        VerticalLayout {
+                            spacing: 1px;
                             horizontal-stretch: 1;
-                        }
-                        Text {
-                            text: "[" + row.transport-label + "]";
-                            font-size: 10.5px;
-                            color: Theme.text-muted;
-                            vertical-alignment: center;
-                        }
-                        if row.is-default: Text {
-                            text: "(par défaut)";
-                            font-size: 10.5px;
-                            color: Theme.text-muted;
-                            vertical-alignment: center;
-                        }
-                    }
-                    if !row.connected && row.last-seen-label != "": Text {
-                        text: row.last-seen-label;
-                        font-size: 10.5px;
-                        color: Theme.text-muted;
-                    }
-                }
+                            alignment: start;
 
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: end;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: row.name;
+                                    font-size: 12.5px;
+                                    color: Theme.text-primary;
+                                    overflow: elide;
+                                    wrap: no-wrap;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: row.transport-label + (row.is-default ? " · par défaut" : "");
+                                    font-size: 11px;
+                                    color: Theme.text-muted;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 0;
+                                }
+                            }
+                            if !row.connected && row.last-seen-label != "": Text {
+                                text: row.last-seen-label;
+                                font-size: 11px;
+                                color: Theme.text-muted;
+                            }
+                        }
 
-                    ThemedButton {
-                        text: "▲";
-                        enabled: !row.is-first;
-                        clicked => { root.move-device-requested(row.uid, -1); }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: center;
+                            horizontal-stretch: 0;
+
+                            MicIconButton {
+                                kind: MicIconKind.up;
+                                control-label: "Monter " + row.name;
+                                enabled: !row.is-first;
+                                clicked => { root.move-device-requested(row.uid, -1); }
+                            }
+                            MicIconButton {
+                                kind: MicIconKind.down;
+                                control-label: "Descendre " + row.name;
+                                enabled: !row.is-last;
+                                clicked => { root.move-device-requested(row.uid, 1); }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: center;
+                                ThemedSwitch {
+                                    control-label: "Masquer " + row.name;
+                                    checked: row.hidden;
+                                    toggled(new) => { root.toggle-hidden-requested(row.uid, new); }
+                                }
+                                Text {
+                                    text: "Masquer";
+                                    font-size: 11px;
+                                    color: Theme.text-muted;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Rectangle {
+                                width: Theme.settings-control-height;
+                                height: Theme.settings-control-height;
+                                horizontal-stretch: 0;
+                                vertical-stretch: 0;
+
+                                if !row.connected: MicIconButton {
+                                    kind: MicIconKind.trash;
+                                    control-label: "Supprimer " + row.name;
+                                    glyph-color: Theme.danger;
+                                    clicked => { root.remove-device-requested(row.uid); }
+                                }
+                            }
+                        }
                     }
-                    ThemedButton {
-                        text: "▼";
-                        enabled: !row.is-last;
-                        clicked => { root.move-device-requested(row.uid, 1); }
-                    }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        ThemedSwitch {
-                            checked: row.hidden;
-                            toggled(new) => { root.toggle-hidden-requested(row.uid, new); }
-                        }
-                        Text {
-                            text: "Masquer";
-                            font-size: 10.5px;
-                            color: Theme.text-muted;
-                            vertical-alignment: center;
-                        }
-                    }
-                    if !row.connected: Rectangle {
-                        width: 24px;
-                        height: 24px;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: Theme.danger.with-alpha(0.3);
-                        background: delete-area.has-hover ? Theme.danger.with-alpha(0.1) : transparent;
-                        LucideIcon {
-                            icon: IconSet.Trash2;
-                            icon-color: Theme.danger;
-                            size: 14px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                        }
-                        delete-area := TouchArea {
-                            clicked => { root.remove-device-requested(row.uid); }
-                        }
+
+                    if !row.is-last: Rectangle {
+                        height: 1px;
+                        background: Theme.border-soft;
+                        vertical-stretch: 0;
                     }
                 }
             }
@@ -250,6 +323,7 @@ export component MicrophoneSection inherits VerticalLayout {
         description: "Sinon, un casque Bluetooth n'est jamais sélectionné automatiquement (évite le mode mono basse qualité).";
 
         ThemedSwitch {
+            control-label: "Autoriser les micros Bluetooth";
             checked: root.allow-bluetooth-mic;
             toggled(new) => { root.allow-bluetooth-mic-changed(new); }
         }

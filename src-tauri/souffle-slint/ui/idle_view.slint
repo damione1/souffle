@@ -38,10 +38,9 @@ export component IdleView inherits Rectangle {
     // No settings button here: `AppHeader` (mounted once in
     // `main_window.slint`, above every view) owns that control now.
     VerticalLayout {
-        width: 100%;
+        width: min(root.width - 52px, 720px);
         height: 100%;
-        padding-left: 26px;
-        padding-right: 26px;
+        x: (root.width - self.width) / 2;
         padding-top: 26px;
         spacing: 26px;
 

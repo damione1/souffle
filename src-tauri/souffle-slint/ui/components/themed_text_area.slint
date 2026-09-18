@@ -1,0 +1,62 @@
+import { Theme } from "../theme.slint";
+
+// Multiline counterpart of ThemedLineEdit. Stock TextEdit uses the Fluent
+// skin and ignores Theme, so snippets / polish / summary prompts go through
+// this instead.
+export component ThemedTextArea inherits Rectangle {
+    in-out property <string> text;
+    in property <length> area-height: 72px;
+    in property <bool> enabled: true;
+    in property <string> placeholder: "";
+    in property <string> control-label: root.placeholder;
+
+    callback edited(string);
+
+    height: root.area-height;
+    vertical-stretch: 0;
+    clip: true;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent.with-alpha(0.45) : Theme.ghost-border;
+    background: Theme.input;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    Flickable {
+        x: 12px;
+        y: 8px;
+        width: parent.width - 24px;
+        height: parent.height - 16px;
+        viewport-width: self.width;
+
+        input := TextInput {
+            width: parent.width;
+            height: max(parent.height, self.preferred-height);
+            text <=> root.text;
+            font-size: 14px;
+            font-family: "Archivo";
+            color: Theme.text-secondary;
+            wrap: word-wrap;
+            single-line: false;
+            enabled: root.enabled;
+            accessible-label: root.control-label;
+            edited => { root.edited(self.text); }
+            cursor-position-changed(position) => {
+                if position.y < parent.viewport-y {
+                    parent.viewport-y = max(0px, position.y - 4px);
+                } else if position.y + self.font-size * 1.5 > parent.viewport-y + parent.height {
+                    parent.viewport-y = max(0px, min(parent.viewport-height - parent.height, position.y + self.font-size * 1.5 - parent.height));
+                }
+            }
+        }
+    }
+
+    if root.text == "" && !input.has-focus: Text {
+        x: 12px;
+        y: 8px;
+        width: parent.width - 24px;
+        text: root.placeholder;
+        font-size: 14px;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+}

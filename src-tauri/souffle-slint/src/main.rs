@@ -25,7 +25,7 @@ use slint::Model;
 use souffle_lib::audio::AudioInputDevice;
 use souffle_lib::calendar::CalendarEvent;
 use souffle_lib::engine::{
-    TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
+    Speaker, TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
 use souffle_lib::native::bridge::NativeAction;
 use souffle_lib::permissions::{PermState, PermissionKind};
@@ -35,7 +35,10 @@ use souffle_lib::state::AppState;
 use souffle_lib::transcript::{MeetingCalendarContext, MeetingParticipant, MeetingTranscript};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 /// `AppHandle` was Tauri's cloneable, 'static, `Send`+`Sync` handle used to
@@ -600,6 +603,11 @@ fn load_transcription_model_state(
             window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
             window.set_settings_model_downloading(false);
             window.set_settings_model_error_message("".into());
+            match status.phase {
+                TranscriptionRuntimePhase::Ready => window.set_model_ready(true),
+                TranscriptionRuntimePhase::LoadRequired
+                | TranscriptionRuntimePhase::DownloadRequired => window.set_model_ready(false),
+            }
         }
         Err(e) => window.set_settings_model_error_message(e.into()),
     }
@@ -734,16 +742,17 @@ fn open_meeting_detail(
 /// triggering a real (multi-GB, network-bound) download from here - that
 /// flow belongs to SOU-190 (onboarding/dialogs), not this ticket.
 async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
-    let selection = TranscriptionProfileSelection::default();
+    let catalog = souffle_lib::commands::get_transcription_catalog(Arc::clone(handle))?;
+    let selection = model_ui::selected_profile(&catalog);
     let state = Arc::clone(handle);
-    let status = souffle_lib::commands::get_model_status(state, selection)?;
+    let status = souffle_lib::commands::get_model_status(state, selection.clone())?;
     match status.phase {
         TranscriptionRuntimePhase::Ready => Ok(()),
         TranscriptionRuntimePhase::LoadRequired => {
             let handle = handle.clone();
             souffle_lib::async_runtime::spawn_blocking(move || {
                 let state = Arc::clone(&handle);
-                souffle_lib::commands::load_model(state, TranscriptionProfileSelection::default())
+                souffle_lib::commands::load_model(state, selection)
             })
             .await
             .map_err(|e| format!("Join load_model task: {e}"))?
@@ -771,7 +780,11 @@ fn live_segment_channel(weak: slint::Weak<MainWindow>) -> ProgressChannel<Transc
                 return;
             };
             if segment.is_final {
-                let mut text = window.get_live_text().to_string();
+                let mut text = match segment.speaker {
+                    Some(Speaker::Me) => window.get_live_me_text().to_string(),
+                    Some(Speaker::Them) => window.get_live_them_text().to_string(),
+                    None => window.get_live_text().to_string(),
+                };
                 let trimmed = segment.text.trim();
                 if !trimmed.is_empty() {
                     if !text.is_empty() {
@@ -779,13 +792,37 @@ fn live_segment_channel(weak: slint::Weak<MainWindow>) -> ProgressChannel<Transc
                     }
                     text.push_str(trimmed);
                 }
-                window.set_live_text(text.into());
+                match segment.speaker {
+                    Some(Speaker::Me) => window.set_live_me_text(text.into()),
+                    Some(Speaker::Them) => window.set_live_them_text(text.into()),
+                    None => window.set_live_text(text.into()),
+                }
                 window.set_live_tentative("".into());
+                window.set_live_tentative_has_speaker(false);
             } else {
                 window.set_live_tentative(segment.text.into());
+                match segment.speaker {
+                    Some(Speaker::Me) => {
+                        window.set_live_tentative_speaker(SpeakerRole::Me);
+                        window.set_live_tentative_has_speaker(true);
+                    }
+                    Some(Speaker::Them) => {
+                        window.set_live_tentative_speaker(SpeakerRole::Them);
+                        window.set_live_tentative_has_speaker(true);
+                    }
+                    None => window.set_live_tentative_has_speaker(false),
+                }
             }
         });
     })
+}
+
+fn clear_live_transcript(window: &MainWindow) {
+    window.set_live_text("".into());
+    window.set_live_tentative("".into());
+    window.set_live_me_text("".into());
+    window.set_live_them_text("".into());
+    window.set_live_tentative_has_speaker(false);
 }
 
 /// Pushes each `OllamaPullProgress` update into the settings window's
@@ -846,12 +883,19 @@ fn start_model_transition(
     match status.phase {
         TranscriptionRuntimePhase::Ready => {
             window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
+            window.set_settings_model_busy(false);
+            window.set_model_ready(true);
         }
         TranscriptionRuntimePhase::LoadRequired => {
             window.set_settings_model_status_text("Chargement\u{2026}".into());
+            window.set_settings_model_busy(true);
+            window.set_model_ready(false);
             load_model_in_background(weak, handle, selection);
         }
         TranscriptionRuntimePhase::DownloadRequired => {
+            window.set_settings_model_status_text("Téléchargement\u{2026}".into());
+            window.set_settings_model_busy(true);
+            window.set_model_ready(false);
             window.set_settings_model_downloading(true);
             window.set_settings_model_download_progress_label("".into());
             window.set_settings_model_download_progress_fraction(0.0);
@@ -859,6 +903,7 @@ fn start_model_transition(
             let channel = model_download_channel(weak.clone(), handle.clone(), selection.clone());
             if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
                 window.set_settings_model_downloading(false);
+                window.set_settings_model_busy(false);
                 window.set_settings_model_error_message(e.into());
             }
         }
@@ -885,8 +930,16 @@ fn load_model_in_background(
         .and_then(|r| r);
         if let Some(window) = weak.upgrade() {
             match result {
-                Ok(()) => window.set_settings_model_status_text("Pr\u{ea}t".into()),
-                Err(e) => window.set_settings_model_error_message(e.into()),
+                Ok(()) => {
+                    window.set_settings_model_status_text("Pr\u{ea}t".into());
+                    window.set_settings_model_busy(false);
+                    window.set_model_ready(true);
+                }
+                Err(e) => {
+                    window.set_settings_model_busy(false);
+                    window.set_model_ready(false);
+                    window.set_settings_model_error_message(e.into());
+                }
             }
         }
     })
@@ -902,10 +955,12 @@ fn model_download_channel(
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
 ) -> ProgressChannel<souffle_lib::models::DownloadProgress> {
+    let load_started = Arc::new(AtomicBool::new(false));
     ProgressChannel::new(move |progress: souffle_lib::models::DownloadProgress| {
         let weak = weak.clone();
         let handle = handle.clone();
         let selection = selection.clone();
+        let load_started = Arc::clone(&load_started);
         let _ = slint::invoke_from_event_loop(move || {
             let Some(window) = weak.upgrade() else {
                 return;
@@ -923,12 +978,25 @@ fn model_download_channel(
                         .set_settings_model_download_progress_label(progress.file.as_str().into());
                 }
                 souffle_lib::models::DownloadStatus::Complete => {
-                    window.set_settings_model_downloading(false);
-                    window.set_settings_model_status_text("Chargement\u{2026}".into());
-                    load_model_in_background(weak.clone(), handle.clone(), selection.clone());
+                    let globally_complete = model_ui::download_is_globally_complete(&progress);
+                    if globally_complete && !load_started.swap(true, Ordering::AcqRel) {
+                        window.set_settings_model_downloading(false);
+                        window.set_settings_model_status_text("Chargement\u{2026}".into());
+                        load_model_in_background(weak.clone(), handle.clone(), selection.clone());
+                    } else {
+                        window.set_settings_model_download_progress_label(
+                            format!(
+                                "{} / {} fichiers",
+                                progress.completed_files, progress.total_files
+                            )
+                            .into(),
+                        );
+                    }
                 }
                 souffle_lib::models::DownloadStatus::Error(e) => {
                     window.set_settings_model_downloading(false);
+                    window.set_settings_model_busy(false);
+                    window.set_model_ready(false);
                     window.set_settings_model_error_message(e.as_str().into());
                 }
             }
@@ -1006,23 +1074,120 @@ fn default_meeting_date() -> String {
 }
 
 async fn stop_dictation(handle: AppHandle) -> Result<(), String> {
+    souffle_lib::commands::stop_transcription(handle).await
+}
+
+async fn stop_meeting(handle: AppHandle) -> Result<String, String> {
+    souffle_lib::commands::stop_meeting_recording(handle).await
+}
+
+async fn wait_for_meeting_finalization(handle: &AppHandle, meeting_id: &str) -> Result<(), String> {
+    use souffle_lib::state_machine::{AppStateMachine, RecordingKind};
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let machine = handle.current_machine_state()?;
+        match machine {
+            AppStateMachine::Stopping {
+                was_recording: RecordingKind::Meeting { meeting_id: active },
+                ..
+            } if active == meeting_id => {}
+            AppStateMachine::Ready { .. } => return Ok(()),
+            AppStateMachine::Error { message, .. } => return Err(message),
+            AppStateMachine::Idle
+            | AppStateMachine::Downloading { .. }
+            | AppStateMachine::Downloaded { .. }
+            | AppStateMachine::Loading { .. }
+            | AppStateMachine::RecordingDictation { .. }
+            | AppStateMachine::RecordingMeeting { .. }
+            | AppStateMachine::Stopping {
+                was_recording: RecordingKind::Dictation,
+                ..
+            }
+            | AppStateMachine::Stopping {
+                was_recording: RecordingKind::Meeting { .. },
+                ..
+            }
+            | AppStateMachine::Unloading { .. } => {
+                return Err(
+                    "La réunion a quitté son état de finalisation de façon inattendue.".into(),
+                );
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err("La finalisation de la réunion a dépassé 30 secondes.".into());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn read_live_dictation_text(weak: slint::Weak<MainWindow>) -> String {
     run_on_main_thread(move || {
-        souffle_lib::async_runtime::block_on(async move {
-            let state = Arc::clone(&handle);
-            souffle_lib::commands::stop_transcription(state).await
-        })
+        weak.upgrade()
+            .map(|window| window.get_live_text().trim().to_string())
+            .unwrap_or_default()
     })
     .await
 }
 
-async fn stop_meeting(handle: AppHandle) -> Result<String, String> {
-    run_on_main_thread(move || {
-        souffle_lib::async_runtime::block_on(async move {
-            let state = Arc::clone(&handle);
-            souffle_lib::commands::stop_meeting_recording(state).await
-        })
-    })
+/// Persist raw text before the optional network polish, then insert the final
+/// text using the exact settings-owned paste contract. A polish failure never
+/// loses the raw dictation; insertion failures remain visible to the caller.
+async fn finalize_dictation(
+    handle: AppHandle,
+    raw_text: String,
+    focused_app: Option<String>,
+) -> Result<(), String> {
+    let raw_text = raw_text.trim().to_string();
+    if raw_text.is_empty() {
+        return Ok(());
+    }
+
+    let entry_id =
+        souffle_lib::commands::add_dictation_entry(Arc::clone(&handle), raw_text.clone())?;
+    let settings = souffle_lib::commands::get_settings(Arc::clone(&handle))?;
+    let polished = match tokio::time::timeout(
+        Duration::from_secs(25),
+        souffle_lib::commands::polish_dictation(Arc::clone(&handle), raw_text.clone(), focused_app),
+    )
     .await
+    {
+        Ok(Ok(result)) => result.text.trim().to_string(),
+        Ok(Err(error)) => {
+            eprintln!("Dictation polish failed; using raw text: {error}");
+            raw_text.clone()
+        }
+        Err(_) => {
+            eprintln!("Dictation polish timed out; using raw text");
+            raw_text.clone()
+        }
+    };
+    let final_text = if polished.is_empty() {
+        raw_text.clone()
+    } else {
+        polished
+    };
+    if final_text != raw_text {
+        souffle_lib::commands::update_dictation_entry(
+            Arc::clone(&handle),
+            entry_id,
+            final_text.clone(),
+        )?;
+    }
+
+    if settings.auto_paste {
+        if let Err(error) = souffle_lib::commands::paste_text(
+            final_text.clone(),
+            settings.paste_delay_ms,
+            settings.paste_method,
+        ) {
+            let _ = souffle_lib::commands::copy_text(final_text);
+            return Err(format!("Collage impossible; texte copié : {error}"));
+        }
+    } else {
+        souffle_lib::commands::copy_text(final_text)?;
+    }
+    Ok(())
 }
 
 /// All mutable state the onboarding wizard needs across its 4 steps, in one
@@ -1228,15 +1393,20 @@ fn start_onboarding_permission_poll(
 /// same commands `wire_callbacks`'s Settings-tab model selector calls
 /// (`get_model_status`/`download_model`/`load_model`); shortcut capture
 /// reuses `shortcut_capture.rs` the same way the Interface tab does.
-fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bool {
+fn wire_onboarding_callbacks(
+    window: &MainWindow,
+    tauri_handle: AppHandle,
+) -> (bool, Rc<RefCell<OnboardingState>>) {
     let ob: Rc<RefCell<OnboardingState>> = Rc::new(RefCell::new(OnboardingState::default()));
     let onboarding_poll_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
     let handle = tauri_handle.clone();
     let state = Arc::clone(&handle);
-    let default_selection = TranscriptionProfileSelection::default();
-    let phase = souffle_lib::commands::get_model_status(state, default_selection)
-        .map(|s| s.phase)
+    let phase = souffle_lib::commands::get_transcription_catalog(Arc::clone(&handle))
+        .and_then(|catalog| {
+            souffle_lib::commands::get_model_status(state, model_ui::selected_profile(&catalog))
+        })
+        .map(|status| status.phase)
         .unwrap_or(TranscriptionRuntimePhase::DownloadRequired);
     let machine_state = handle
         .current_machine_state()
@@ -1620,7 +1790,7 @@ fn wire_onboarding_callbacks(window: &MainWindow, tauri_handle: AppHandle) -> bo
         }
     });
 
-    should_show
+    (should_show, ob)
 }
 
 /// Advances to the next step, stopping/starting the permissions poll timer
@@ -1754,10 +1924,12 @@ fn onboarding_model_download_channel(
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
 ) -> ProgressChannel<souffle_lib::models::DownloadProgress> {
+    let load_started = Arc::new(AtomicBool::new(false));
     ProgressChannel::new(move |progress: souffle_lib::models::DownloadProgress| {
         let weak = weak.clone();
         let handle = handle.clone();
         let selection = selection.clone();
+        let load_started = Arc::clone(&load_started);
         let _ = slint::invoke_from_event_loop(move || {
             let Some(window) = weak.upgrade() else {
                 return;
@@ -1774,12 +1946,23 @@ fn onboarding_model_download_channel(
                     window.set_onboarding_download_progress_label(progress.file.as_str().into());
                 }
                 souffle_lib::models::DownloadStatus::Complete => {
-                    window.set_onboarding_model_phase(ModelPhase::Loading);
-                    start_onboarding_model_transition(
-                        weak.clone(),
-                        handle.clone(),
-                        selection.clone(),
-                    );
+                    let globally_complete = model_ui::download_is_globally_complete(&progress);
+                    if globally_complete && !load_started.swap(true, Ordering::AcqRel) {
+                        window.set_onboarding_model_phase(ModelPhase::Loading);
+                        start_onboarding_model_transition(
+                            weak.clone(),
+                            handle.clone(),
+                            selection.clone(),
+                        );
+                    } else if !globally_complete {
+                        window.set_onboarding_download_progress_label(
+                            format!(
+                                "{} / {} fichiers",
+                                progress.completed_files, progress.total_files
+                            )
+                            .into(),
+                        );
+                    }
                 }
                 souffle_lib::models::DownloadStatus::Error(e) => {
                     window.set_onboarding_busy(false);
@@ -1962,7 +2145,11 @@ fn wire_update_dialogs(window: &MainWindow, tauri_handle: AppHandle, onboarding_
 /// unrelated to the production log file/filter (`SOUFFLE_LOG`, scoped to the
 /// `souffle` lib crate's own targets), which was the wrong tool here and
 /// silently swallowed these lines during milestone 2 verification.
-fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
+fn wire_callbacks(
+    window: &MainWindow,
+    tauri_handle: AppHandle,
+    onboarding_state: Rc<RefCell<OnboardingState>>,
+) {
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
     // and the play-pause/seek callbacks below - one loaded player at a
     // time, for whichever meeting is currently open in MeetingDetail.
@@ -1973,6 +2160,53 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
     let transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     let upcoming_cache: Rc<RefCell<Vec<CalendarEvent>>> = Rc::new(RefCell::new(Vec::new()));
     let upcoming_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    let saved_live_notes: Rc<RefCell<Option<(String, String)>>> = Rc::new(RefCell::new(None));
+    let live_notes_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+
+    let timer = slint::Timer::default();
+    let weak_for_notes = window.as_weak();
+    let handle_for_notes = tauri_handle.clone();
+    let saved_live_notes_for_timer = saved_live_notes.clone();
+    timer.start(slint::TimerMode::Repeated, NOTES_DEBOUNCE, move || {
+        let Some(window) = weak_for_notes.upgrade() else {
+            return;
+        };
+        let meeting_id = match handle_for_notes.current_machine_state() {
+            Ok(souffle_lib::state_machine::AppStateMachine::RecordingMeeting {
+                meeting_id,
+                ..
+            }) => Some(meeting_id),
+            Ok(souffle_lib::state_machine::AppStateMachine::Idle)
+            | Ok(souffle_lib::state_machine::AppStateMachine::Downloading { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Downloaded { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Loading { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Ready { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::RecordingDictation { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Stopping { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Unloading { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Error { .. })
+            | Err(_) => None,
+        };
+        let Some(meeting_id) = meeting_id else {
+            *saved_live_notes_for_timer.borrow_mut() = None;
+            return;
+        };
+        let notes = window.get_live_notes().to_string();
+        if saved_live_notes_for_timer.borrow().as_ref()
+            == Some(&(meeting_id.clone(), notes.clone()))
+        {
+            return;
+        }
+        match souffle_lib::commands::save_meeting_notes(
+            Arc::clone(&handle_for_notes),
+            meeting_id.clone(),
+            Some(notes.clone()),
+        ) {
+            Ok(()) => *saved_live_notes_for_timer.borrow_mut() = Some((meeting_id, notes)),
+            Err(error) => eprintln!("Failed to autosave live meeting notes: {error}"),
+        }
+    });
+    *live_notes_timer.borrow_mut() = Some(timer);
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
@@ -1983,8 +2217,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             let result = start_dictation(handle, weak.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
                 Ok(()) => {
-                    window.set_live_text("".into());
-                    window.set_live_tentative("".into());
+                    clear_live_transcript(&window);
                     window.set_recording_mode(RecordingMode::Dictation);
                 }
                 Err(e) => window.set_transcription_status_message(e.into()),
@@ -2003,8 +2236,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             let result = start_meeting(handle, weak.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
                 Ok(()) => {
-                    window.set_live_text("".into());
-                    window.set_live_tentative("".into());
+                    clear_live_transcript(&window);
+                    window.set_live_notes("".into());
                     window.set_recording_mode(RecordingMode::Meeting);
                 }
                 Err(e) => window.set_meeting_status_message(e.into()),
@@ -2014,19 +2247,43 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         });
     });
 
+    let stop_in_flight = Arc::new(AtomicBool::new(false));
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
+    let stop_in_flight_for_request = Arc::clone(&stop_in_flight);
+    let live_notes_timer_keepalive = live_notes_timer.clone();
     window.on_stop_requested(move || {
+        let _ = &live_notes_timer_keepalive;
+        if stop_in_flight_for_request.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let Some(current) = weak.upgrade() else {
+            stop_in_flight_for_request.store(false, Ordering::Release);
             return;
         };
         let mode = current.get_recording_mode();
+        let live_notes = current.get_live_notes().to_string();
+        let focused_app = souffle_lib::commands::frontmost_app_name().unwrap_or(None);
         let weak = weak.clone();
         let handle = handle.clone();
+        let stop_in_flight = Arc::clone(&stop_in_flight_for_request);
         souffle_lib::async_runtime::spawn(async move {
             let handle_for_refresh = handle.clone();
             if mode == RecordingMode::Meeting {
-                let result = stop_meeting(handle.clone()).await;
+                let result = match stop_meeting(handle.clone()).await {
+                    Ok(meeting_id) => wait_for_meeting_finalization(&handle, &meeting_id)
+                        .await
+                        .map(|()| meeting_id),
+                    Err(error) => Err(error),
+                }
+                .and_then(|meeting_id| {
+                    souffle_lib::commands::save_meeting_notes(
+                        Arc::clone(&handle),
+                        meeting_id.clone(),
+                        Some(live_notes),
+                    )?;
+                    Ok(meeting_id)
+                });
                 // Send-safe on purpose: this closure cannot capture the
                 // Rc<RefCell<AudioPlayer>> player state (Rc isn't Send, and
                 // upgrade_in_event_loop requires it) - re-invoking the
@@ -2034,13 +2291,13 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                 // does capture it, as a plain same-thread closure) reuses
                 // the real open-meeting path instead of duplicating it.
                 if let Err(e) = weak.upgrade_in_event_loop(move |window| {
-                    window.set_live_text("".into());
-                    window.set_live_tentative("".into());
+                    clear_live_transcript(&window);
                     match result {
                         // A stopped meeting recording lands the user back on
                         // that meeting's detail, not the Timeline - they
                         // were just looking at it live.
                         Ok(meeting_id) => {
+                            window.set_live_notes("".into());
                             window.set_recording_mode(RecordingMode::Idle);
                             window.invoke_timeline_item_opened(
                                 TimelineKind::Meeting,
@@ -2050,6 +2307,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                         Err(e) => {
                             eprintln!("Failed to stop meeting: {e}");
                             window.set_recording_mode(RecordingMode::Idle);
+                            window.set_meeting_status_message(e.into());
                             refresh_timeline(&window, &handle_for_refresh);
                         }
                     }
@@ -2057,19 +2315,26 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                     eprintln!("upgrade_in_event_loop failed (stop meeting): {e}");
                 }
             } else {
-                let result = stop_dictation(handle).await;
+                let result = match stop_dictation(handle.clone()).await {
+                    Ok(()) => {
+                        let raw_text = read_live_dictation_text(weak.clone()).await;
+                        finalize_dictation(handle, raw_text, focused_app).await
+                    }
+                    Err(error) => Err(error),
+                };
                 if let Err(e) = weak.upgrade_in_event_loop(move |window| {
                     if let Err(e) = result {
                         eprintln!("Failed to stop dictation: {e}");
+                        window.set_transcription_status_message(e.into());
                     }
                     window.set_recording_mode(RecordingMode::Idle);
-                    window.set_live_text("".into());
-                    window.set_live_tentative("".into());
+                    clear_live_transcript(&window);
                     refresh_timeline(&window, &handle_for_refresh);
                 }) {
                     eprintln!("upgrade_in_event_loop failed (stop dictation): {e}");
                 }
             }
+            stop_in_flight.store(false, Ordering::Release);
         });
     });
 
@@ -2283,8 +2548,8 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
             let result = start_meeting_from_event(handle, weak.clone(), event).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
                 Ok(()) => {
-                    window.set_live_text("".into());
-                    window.set_live_tentative("".into());
+                    clear_live_transcript(&window);
+                    window.set_live_notes("".into());
                     window.set_recording_mode(RecordingMode::Meeting);
                 }
                 Err(e) => window.set_meeting_status_message(e.into()),
@@ -2448,36 +2713,38 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
-    // Mutates `settings_state`'s cached `AppSettings` with `mutate`, saves
-    // the whole object, and reports failure the same honest way every other
-    // command in this file does - `eprintln!`, no popup UI yet. On success
-    // the Slint property is left as the optimistic value the two-way
-    // binding already applied; on failure it stays optimistic too (matches
-    // `notes-changed`'s existing precedent in this file) since none of the
-    // fields wired so far can fail for a reason the user could act on.
+    // Save a cloned candidate, then re-read the sanitized/pinned value the
+    // backend actually persisted. The cache must never retain an optimistic
+    // value rejected by validation or pinned while recording.
     fn save_settings_field(
         handle: &AppHandle,
         settings_state: &Rc<RefCell<Option<AppSettings>>>,
         mutate: impl FnOnce(&mut AppSettings),
     ) {
-        let mut guard = settings_state.borrow_mut();
-        if guard.is_none() {
-            match souffle_lib::commands::get_settings(Arc::clone(handle)) {
-                Ok(loaded) => *guard = Some(loaded),
+        let original = match settings_state.borrow().clone() {
+            Some(settings) => settings,
+            None => match souffle_lib::commands::get_settings(Arc::clone(handle)) {
+                Ok(loaded) => loaded,
                 Err(e) => {
                     eprintln!("Failed to load settings: {e}");
                     return;
                 }
-            }
-        }
-        let Some(settings) = guard.as_mut() else {
-            return;
+            },
         };
-        mutate(settings);
+        let mut candidate = original.clone();
+        mutate(&mut candidate);
         let state = Arc::clone(handle);
-        if let Err(e) = souffle_lib::commands::save_settings(state, settings.clone()) {
+        if let Err(e) = souffle_lib::commands::save_settings(state, candidate) {
             eprintln!("Failed to save settings: {e}");
+            *settings_state.borrow_mut() = Some(original);
+            return;
         }
+        let effective =
+            souffle_lib::commands::get_settings(Arc::clone(handle)).unwrap_or_else(|e| {
+                eprintln!("Failed to re-read saved settings: {e}");
+                original
+            });
+        *settings_state.borrow_mut() = Some(effective);
     }
 
     // Mirrors `applyShortcutValue()` + `saveShortcutSettings()`: writes
@@ -2517,20 +2784,28 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     }
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_autostart = settings_state.clone();
     window.on_settings_autostart_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_autostart, |settings| {
             settings.autostart_enabled = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_autostart_enabled(enabled);
+        }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_debug = settings_state.clone();
     window.on_settings_debug_transcription_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_debug, |settings| {
             settings.debug_transcription = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_debug_transcription(enabled);
+        }
     });
 
     let weak = window.as_weak();
@@ -2595,12 +2870,16 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         });
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_auto_paste = settings_state.clone();
     window.on_settings_auto_paste_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_auto_paste, |settings| {
             settings.auto_paste = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_auto_paste(enabled);
+        }
     });
 
     let handle = tauri_handle.clone();
@@ -2620,20 +2899,28 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         });
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_pill_hidden = settings_state.clone();
     window.on_settings_pill_hidden_changed(move |hidden| {
         save_settings_field(&handle, &settings_state_for_pill_hidden, |settings| {
             settings.pill_hidden = hidden;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_pill_hidden(hidden);
+        }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_feedback_enabled = settings_state.clone();
     window.on_settings_feedback_sounds_enabled_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_feedback_enabled, |settings| {
             settings.feedback_sounds_enabled = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_feedback_sounds_enabled(enabled);
+        }
     });
 
     let handle = tauri_handle.clone();
@@ -2708,6 +2995,7 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         .expect("slint event loop not running");
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_calendar_autostart = settings_state.clone();
     window.on_settings_calendar_autostart_enabled_changed(move |enabled| {
@@ -2718,6 +3006,9 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
                 settings.calendar_autostart_enabled = enabled;
             },
         );
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_calendar_autostart_enabled(enabled);
+        }
     });
 
     let handle = tauri_handle.clone();
@@ -2824,14 +3115,19 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_bt = settings_state.clone();
     window.on_settings_allow_bluetooth_mic_changed(move |allowed| {
         save_settings_field(&handle, &settings_state_for_bt, |settings| {
             settings.allow_bluetooth_mic = allowed;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_allow_bluetooth_mic(allowed);
+        }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_clamshell = settings_state.clone();
     let audio_devices_state_for_clamshell = audio_devices_state.clone();
@@ -2848,8 +3144,12 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         save_settings_field(&handle, &settings_state_for_system_audio, |settings| {
             settings.capture_system_audio = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_capture_system_audio(enabled);
+        }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_meeting_lang = settings_state.clone();
     window.on_settings_meeting_transcription_language_changed(move |value| {
@@ -2865,8 +3165,12 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         save_settings_field(&handle, &settings_state_for_autostop_enabled, |settings| {
             settings.meeting_autostop_enabled = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_meeting_autostop_enabled(enabled);
+        }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_autostop_minutes = settings_state.clone();
     window.on_settings_meeting_autostop_changed(move |label| {
@@ -2895,30 +3199,45 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         save_settings_field(&handle, &settings_state_for_vad, |settings| {
             settings.vad_enabled = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_vad_enabled(enabled);
+        }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_filler = settings_state.clone();
     window.on_settings_filler_removal_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_filler, |settings| {
             settings.filler_removal = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_filler_removal(enabled);
+        }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_stutter = settings_state.clone();
     window.on_settings_stutter_collapse_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_stutter, |settings| {
             settings.stutter_collapse = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_stutter_collapse(enabled);
+        }
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_dictionary = settings_state.clone();
     window.on_settings_dictionary_correction_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_dictionary, |settings| {
             settings.dictionary_correction = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_dictionary_correction(enabled);
+        }
     });
 
     let weak = window.as_weak();
@@ -3159,12 +3478,16 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         window.set_settings_testing_mcp(false);
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_auto_update = settings_state.clone();
     window.on_settings_auto_update_check_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_auto_update, |settings| {
             settings.auto_update_check_enabled = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_auto_update_check(enabled);
+        }
     });
 
     let weak = window.as_weak();
@@ -3596,12 +3919,16 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         });
     });
 
+    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_learn = settings_state.clone();
     window.on_settings_dictation_learn_from_edit_changed(move |enabled| {
         save_settings_field(&handle, &settings_state_for_learn, |settings| {
             settings.dictation_learn_from_edit = enabled;
         });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_dictation_learn_from_edit(enabled);
+        }
     });
 
     let weak = window.as_weak();
@@ -3848,10 +4175,31 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
+    let weak = window.as_weak();
+    let onboarding_state_for_review = onboarding_state.clone();
     window.on_settings_permissions_review_requested(move || {
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security")
-            .spawn();
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_permissions_dialog_open(true);
+        let weak = weak.clone();
+        let onboarding_state = onboarding_state_for_review.clone();
+        slint::spawn_local(async move {
+            match souffle_lib::commands::get_permission_status().await {
+                Ok(status) => {
+                    if let Some(window) = weak.upgrade() {
+                        onboarding_state.borrow_mut().permission_status = status.clone();
+                        onboarding_ui::populate_permission_rows(&window, &status, [false; 3]);
+                    }
+                }
+                Err(e) => {
+                    if let Some(window) = weak.upgrade() {
+                        window.set_onboarding_permissions_error(e.into());
+                    }
+                }
+            }
+        })
+        .expect("slint event loop not running");
     });
 
     let weak = window.as_weak();
@@ -3921,8 +4269,17 @@ fn dispatch_native_action(window: &MainWindow, handle: &AppHandle, action: Nativ
                 window.invoke_stop_requested();
             }
         }
-        NativeAction::Navigate(AppView::Home) => window.set_settings_open(false),
-        NativeAction::Navigate(AppView::Settings) => window.set_settings_open(true),
+        NativeAction::Navigate(AppView::Home) => {
+            if window.get_settings_open() {
+                window.set_settings_open(false);
+                window.invoke_settings_closed();
+            }
+        }
+        NativeAction::Navigate(AppView::Settings) => {
+            if !window.get_settings_open() {
+                window.invoke_settings_requested();
+            }
+        }
         NativeAction::ShowMainWindow => {
             let _ = window.show();
         }
@@ -4074,9 +4431,24 @@ fn main() {
             souffle_lib::calendar::authorization_state(),
         );
     }
-    let onboarding_open = wire_onboarding_callbacks(&window, handle.clone());
+    let (onboarding_open, onboarding_state) = wire_onboarding_callbacks(&window, handle.clone());
     wire_update_dialogs(&window, handle.clone(), onboarding_open);
-    wire_callbacks(&window, handle);
+    wire_callbacks(&window, handle, onboarding_state);
+
+    // Capture publishes its normalized RMS at ~15 Hz. Polling the lock-free
+    // value on Slint's event loop keeps rendering single-threaded while the
+    // native pill and the main window display the exact same signal.
+    let audio_level_timer = slint::Timer::default();
+    let weak = window.as_weak();
+    audio_level_timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(66),
+        move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_audio_level(souffle_lib::pill::current_rms());
+            }
+        },
+    );
 
     window.run().expect("event loop failed");
 }

@@ -9,21 +9,46 @@ export component ThemedSpinBox inherits Rectangle {
     in property <int> maximum: 100;
     in property <int> step: 1;
     in property <bool> enabled: true;
+    in property <string> control-label: "Valeur";
 
     callback edited(int);
 
-    width: 80px;
-    height: 36px;
+    width: 96px;
+    height: Theme.settings-control-height;
     horizontal-stretch: 0;
     vertical-stretch: 0;
     border-radius: 4px;
-    border-width: 1px;
-    border-color: Theme.ghost-border;
+    border-width: key-focus.has-focus ? 2px : 1px;
+    border-color: key-focus.has-focus ? Theme.accent : Theme.ghost-border;
     background: Theme.input;
     opacity: root.enabled ? 1.0 : 0.5;
 
-    accessible-role: none;
+    accessible-role: spinbox;
+    accessible-label: root.control-label;
     accessible-enabled: root.enabled;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.UpArrow {
+                root.edited(min(root.maximum, root.value + root.step));
+                return accept;
+            }
+            if event.text == Key.DownArrow {
+                root.edited(max(root.minimum, root.value - root.step));
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     Text {
         x: 10px;
@@ -42,7 +67,10 @@ export component ThemedSpinBox inherits Rectangle {
         width: 20px;
         height: 17px;
         enabled: root.enabled && root.value < root.maximum;
-        clicked => { root.edited(min(root.maximum, root.value + root.step)); }
+        clicked => {
+            key-focus.focus();
+            root.edited(min(root.maximum, root.value + root.step));
+        }
     }
     LucideIcon {
         icon: IconSet.ChevronUp;
@@ -58,7 +86,10 @@ export component ThemedSpinBox inherits Rectangle {
         width: 20px;
         height: 17px;
         enabled: root.enabled && root.value > root.minimum;
-        clicked => { root.edited(max(root.minimum, root.value - root.step)); }
+        clicked => {
+            key-focus.focus();
+            root.edited(max(root.minimum, root.value - root.step));
+        }
     }
     LucideIcon {
         icon: IconSet.ChevronDown;

@@ -14,28 +14,47 @@ export component ThemedButton inherits Rectangle {
 
     callback clicked();
 
-    height: 34px;
+    height: Theme.settings-control-height;
     horizontal-stretch: 0;
     vertical-stretch: 0;
     border-radius: 4px;
-    border-width: 1px;
-    border-color: root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(0.25)
+    border-width: key-focus.has-focus ? 2px : 1px;
+    border-color: key-focus.has-focus ? Theme.accent
+        : root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(0.25)
         : root.kind == ThemedButtonKind.ghost || root.kind == ThemedButtonKind.active ? transparent
         : Theme.ghost-border;
-    background: root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(area.has-hover ? 0.20 : 0.12)
-        : root.kind == ThemedButtonKind.active ? Theme.text-primary
+    background: root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(area.pressed ? 0.28 : area.has-hover ? 0.20 : 0.12)
+        : root.kind == ThemedButtonKind.active ? (area.pressed || area.has-hover ? Theme.accent-hover : Theme.accent)
         : root.kind == ThemedButtonKind.ghost ? (area.has-hover ? Theme.surface-2 : transparent)
-        : (area.has-hover ? Theme.surface-4 : Theme.surface-3);
+        : (area.pressed ? Theme.surface-2 : area.has-hover ? Theme.surface-4 : Theme.surface-3);
     opacity: root.enabled ? 1.0 : 0.5;
 
     accessible-role: button;
     accessible-label: root.text;
     accessible-enabled: root.enabled;
-    accessible-action-default => { root.clicked(); }
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.Return || event.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     area := TouchArea {
         enabled: root.enabled;
-        clicked => { root.clicked(); }
+        clicked => {
+            key-focus.focus();
+            root.clicked();
+        }
     }
 
     HorizontalLayout {

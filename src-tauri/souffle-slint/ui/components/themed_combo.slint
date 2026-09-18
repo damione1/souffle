@@ -8,23 +8,51 @@ export component ThemedComboBox inherits Rectangle {
     in property <[string]> model;
     in property <string> current-value;
     in property <bool> enabled: true;
-    in property <length> combo-width: 192px;
+    in property <length> combo-width: Theme.settings-control-width;
+    in property <bool> fill-width: false;
+    in property <string> control-label: "Sélection";
 
     callback selected(string);
 
     width: root.combo-width;
-    height: 40px;
-    horizontal-stretch: 0;
+    height: Theme.settings-control-height;
+    horizontal-stretch: root.fill-width ? 1 : 0;
     vertical-stretch: 0;
     border-radius: 4px;
-    border-width: 1px;
-    border-color: Theme.ghost-border;
-    background: Theme.input;
+    border-width: key-focus.has-focus ? 2px : 1px;
+    border-color: key-focus.has-focus ? Theme.accent : Theme.ghost-border;
+    background: area.pressed ? Theme.surface-2 : Theme.input;
     opacity: root.enabled ? 1.0 : 0.5;
 
     accessible-role: combobox;
-    accessible-label: root.current-value;
+    accessible-label: root.control-label;
+    accessible-value: root.current-value;
     accessible-enabled: root.enabled;
+    accessible-expanded: popup.is-open;
+    accessible-action-default => {
+        if root.enabled {
+            popup.show();
+        }
+    }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow {
+                popup.show();
+                return accept;
+            }
+            if event.text == Key.Escape && popup.is-open {
+                popup.close();
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     label := Text {
         x: 12px;
@@ -47,7 +75,10 @@ export component ThemedComboBox inherits Rectangle {
 
     area := TouchArea {
         enabled: root.enabled;
-        clicked => { popup.show(); }
+        clicked => {
+            key-focus.focus();
+            popup.show();
+        }
     }
 
     popup := PopupWindow {

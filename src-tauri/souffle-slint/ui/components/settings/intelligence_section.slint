@@ -57,7 +57,7 @@ export component IntelligenceSection inherits VerticalLayout {
         description: "Le moteur qui rédige les résumés et nettoie la dictée.";
 
         ThemedComboBox {
-            combo-width: 220px;
+            control-label: "Moteur de résumé";
             model: [
                 root.provider-label(SummaryProvider.auto),
                 root.provider-label(SummaryProvider.apple-intelligence),
@@ -100,12 +100,15 @@ export component IntelligenceSection inherits VerticalLayout {
 
         HorizontalLayout {
             spacing: 6px;
+            alignment: center;
+            horizontal-stretch: 0;
+            vertical-stretch: 0;
             Rectangle {
                 width: 8px;
                 height: 8px;
                 border-radius: 4px;
                 background: root.apple-intelligence-available ? Theme.success : Theme.text-faint;
-                y: 4px;
+                vertical-stretch: 0;
             }
             Text {
                 text: root.apple-intelligence-available ? "Disponible" : "Non disponible";
@@ -145,7 +148,9 @@ export component IntelligenceSection inherits VerticalLayout {
         description: "Adresse du serveur Ollama local ou distant.";
 
         ThemedLineEdit {
-            width: 220px;
+            width: Theme.settings-control-width;
+            control-label: "URL Ollama";
+            placeholder: "http://localhost:11434";
             text: root.ollama-url;
             edited(value) => { root.ollama-url-changed(value); }
         }
@@ -153,20 +158,25 @@ export component IntelligenceSection inherits VerticalLayout {
 
     SettingsField {
         label: "État de la connexion";
-        description: root.summary-model-count + " modèle(s) trouvé(s).";
+        description: root.summary-model-count == 0 ? "Aucun modèle trouvé."
+            : root.summary-model-count == 1 ? "1 modèle trouvé."
+            : root.summary-model-count + " modèles trouvés.";
 
         HorizontalLayout {
             spacing: 12px;
-            alignment: end;
+            alignment: center;
+            horizontal-stretch: 0;
             HorizontalLayout {
                 spacing: 6px;
+                alignment: center;
+                horizontal-stretch: 0;
                 vertical-stretch: 0;
                 Rectangle {
                     width: 8px;
                     height: 8px;
                     border-radius: 4px;
                     background: root.ollama-available ? Theme.success : Theme.text-faint;
-                    y: (parent.height - self.height) / 2;
+                    vertical-stretch: 0;
                 }
                 Text {
                     text: root.ollama-available ? "Connecté" : "Non disponible";
@@ -187,7 +197,7 @@ export component IntelligenceSection inherits VerticalLayout {
         label: "Modèle de résumé";
 
         ThemedComboBox {
-            combo-width: 220px;
+            control-label: "Modèle de résumé";
             model: root.model-labels;
             current-value: root.selected-model-label;
             selected(value) => { root.ollama-model-changed(value); }

@@ -21,7 +21,7 @@ export component DiagnosticsSection inherits VerticalLayout {
     pure function log-level-label(value: LogLevel) -> string {
         if value == LogLevel.error { return "Erreur"; }
         if value == LogLevel.warn { return "Avertissement"; }
-        if value == LogLevel.info { return "Info"; }
+        if value == LogLevel.info { return "Information"; }
         if value == LogLevel.debug { return "Débogage"; }
         if value == LogLevel.trace { return "Trace"; }
         return "";
@@ -39,7 +39,7 @@ export component DiagnosticsSection inherits VerticalLayout {
             description: "Quantité de détails que Soufflé écrit dans le fichier journal.";
 
             ThemedComboBox {
-                combo-width: 140px;
+                control-label: "Niveau de journal";
                 model: [
                     root.log-level-label(LogLevel.error),
                     root.log-level-label(LogLevel.warn),
@@ -63,6 +63,7 @@ export component DiagnosticsSection inherits VerticalLayout {
             description: "Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.";
 
             ThemedSwitch {
+                control-label: "Journaux détaillés de transcription";
                 checked: root.debug-transcription;
                 toggled(new) => { root.debug-transcription-changed(new); }
             }
@@ -71,8 +72,8 @@ export component DiagnosticsSection inherits VerticalLayout {
         VerticalLayout {
             padding-top: 15px;
             padding-bottom: 8px;
-            padding-left: 12px;
-            padding-right: 12px;
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
             spacing: 8px;
             alignment: start;
 
@@ -98,9 +99,11 @@ export component DiagnosticsSection inherits VerticalLayout {
                 Flickable {
                     width: 100%;
                     height: 100%;
+                    viewport-width: self.width;
 
-                    Text {
+                    TextInput {
                         width: parent.width - 16px;
+                        height: max(parent.height - 16px, self.preferred-height);
                         x: 8px;
                         y: 8px;
                         text: root.log-tail == "" ? "Aucune entrée de journal pour l'instant." : root.log-tail;
@@ -108,6 +111,10 @@ export component DiagnosticsSection inherits VerticalLayout {
                         font-size: 10.5px;
                         color: Theme.text-secondary;
                         wrap: word-wrap;
+                        single-line: false;
+                        read-only: true;
+                        selection-background-color: Theme.accent.with-alpha(0.28);
+                        accessible-label: "Journal en direct";
                     }
                 }
             }

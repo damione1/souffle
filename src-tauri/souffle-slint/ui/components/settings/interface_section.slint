@@ -25,18 +25,18 @@ export component ShortcutRecorderButton inherits FocusScope {
     callback cleared();
     callback cancelled();
 
-    width: 110px;
-    height: 32px;
+    width: 128px;
+    height: Theme.settings-control-height;
 
     Rectangle {
         border-width: 1px;
         border-color: root.recording ? Theme.accent.with-alpha(0.4) : Theme.ghost-border;
-        border-radius: 8px;
+        border-radius: 4px;
         background: root.recording ? Theme.accent.with-alpha(0.16) : Theme.input;
 
         Text {
-            text: root.recording ? "Appuyez sur les touches..." : (root.shortcut-label == "" ? "Non défini" : root.shortcut-label);
-            color: root.recording ? Theme.accent : Theme.text-tertiary;
+            text: root.recording ? "Appuyez…" : (root.shortcut-label == "" ? "Non défini" : root.shortcut-label);
+            color: root.recording ? Theme.accent : (root.shortcut-label == "" ? Theme.text-muted : Theme.text-secondary);
             font-size: 13px;
             font-family: "JetBrains Mono";
             font-weight: 500;
@@ -112,7 +112,7 @@ export component InterfaceSection inherits VerticalLayout {
 
     pure function locale-label(value: AppLocale) -> string {
         if value == AppLocale.fr { return "Français"; }
-        if value == AppLocale.en { return "English"; }
+        if value == AppLocale.en { return "Anglais"; }
         return "";
     }
     pure function paste-method-label(value: PasteMethod) -> string {
@@ -134,7 +134,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Choisissez la langue de l'interface.";
 
             ThemedComboBox {
-                combo-width: 192px;
+                control-label: "Langue de l'interface";
                 model: [root.locale-label(AppLocale.en), root.locale-label(AppLocale.fr)];
                 current-value: root.locale-label(root.locale);
                 selected(value) => {
@@ -152,7 +152,7 @@ export component InterfaceSection inherits VerticalLayout {
             label: "Thème";
 
             HorizontalLayout {
-                spacing: 4px;
+                spacing: 0px;
                 horizontal-stretch: 0;
                 vertical-stretch: 0;
 
@@ -179,6 +179,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Colle automatiquement la transcription à l'arrêt de l'enregistrement.";
 
             ThemedSwitch {
+                control-label: "Collage automatique après dictée";
                 checked: root.auto-paste;
                 toggled(new) => { root.auto-paste-changed(new); }
             }
@@ -189,7 +190,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).";
 
             ThemedComboBox {
-                combo-width: 224px;
+                control-label: "Méthode de collage";
                 model: [
                     root.paste-method-label(PasteMethod.clipboard),
                     root.paste-method-label(PasteMethod.typing),
@@ -215,6 +216,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.";
 
             ThemedSpinBox {
+                control-label: "Délai de collage en millisecondes";
                 value: root.paste-delay-ms;
                 minimum: root.paste-delay-min;
                 maximum: root.paste-delay-max;
@@ -280,6 +282,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.";
 
             ThemedSwitch {
+                control-label: "Masquer l'overlay d'enregistrement";
                 checked: root.pill-hidden;
                 toggled(new) => { root.pill-hidden-changed(new); }
             }

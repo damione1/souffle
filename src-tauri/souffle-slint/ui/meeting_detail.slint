@@ -1,8 +1,10 @@
-import { LineEdit, TextEdit, ScrollView } from "std-widgets.slint";
+import { LineEdit, ScrollView } from "std-widgets.slint";
 import { NotesSaveState } from "types.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
 import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
+import { LucideIcon, IconSet } from "components/lucide_icon.slint";
+import { ThemedTextArea } from "components/themed_text_area.slint";
 import { Theme } from "theme.slint";
 
 // Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
@@ -19,7 +21,7 @@ import { Theme } from "theme.slint";
 // + dictionary alias popover, summary generation itself (model/template
 // pickers, streaming), export menu and resume-recording (need the native
 // file dialog from SOU-191, not available to this headless bridge yet).
-export component MeetingDetail inherits VerticalLayout {
+export component MeetingDetail inherits Rectangle {
     in property <string> title;
     in property <string> meta-line;
     in property <string> model-label;
@@ -55,170 +57,303 @@ export component MeetingDetail inherits VerticalLayout {
 
     property <bool> editing-title: false;
     property <string> title-draft;
+    property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
 
-    padding: 24px;
-    spacing: 14px;
+    content := VerticalLayout {
+        width: min(root.width - 52px, 720px);
+        height: root.height;
+        x: (root.width - self.width) / 2;
+        padding-top: 26px;
+        padding-bottom: 34px;
+        spacing: 14px;
 
-    back-btn := Rectangle {
-        height: 22px;
+        back-btn := Rectangle {
+            height: 28px;
+            vertical-stretch: 0;
 
-        accessible-role: button;
-        accessible-label: "Retour \u{e0} l'accueil";
-        accessible-action-default => { root.back-requested(); }
+            border-radius: 4px;
+            border-width: back-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: back-area.pressed ? Theme.surface-3 : back-area.has-hover ? Theme.surface-2 : transparent;
 
-        TouchArea {
-            clicked => { root.back-requested(); }
+            accessible-role: button;
+            accessible-label: "Retour \u{e0} l'historique";
+            accessible-action-default => { root.back-requested(); }
+
+            forward-focus: back-focus;
+            back-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.back-requested();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
+            back-area := TouchArea {
+                clicked => {
+                    back-focus.focus();
+                    root.back-requested();
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                LucideIcon {
+                    width: 18px;
+                    height: 18px;
+                    icon: IconSet.ArrowLeft;
+                    icon-color: Theme.text-secondary;
+                }
+                Text {
+                    text: "Historique";
+                    font-size: 13px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
         }
 
-        HorizontalLayout {
-            spacing: 6px;
-            alignment: start;
-            Text { text: "\u{2190} Retour"; vertical-alignment: center; }
-        }
-    }
+        if !root.editing-title: title-btn := Rectangle {
+            width: parent.width;
+            height: 34px;
+            horizontal-stretch: 1;
+            vertical-stretch: 0;
+            border-radius: 4px;
+            border-width: title-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: title-area.has-hover ? Theme.surface-2 : transparent;
 
-    if !root.editing-title: title-btn := Rectangle {
-        height: 28px;
-
-        accessible-role: button;
-        accessible-label: "Renommer la r\u{e9}union";
-        accessible-action-default => {
-            root.title-draft = root.title;
-            root.editing-title = true;
-        }
-
-        TouchArea {
-            clicked => {
+            accessible-role: button;
+            accessible-label: "Renommer la r\u{e9}union";
+            accessible-action-default => {
                 root.title-draft = root.title;
                 root.editing-title = true;
             }
-        }
 
-        Text {
-            text: root.title;
-            font-size: 20px;
-            font-weight: 700;
-            vertical-alignment: center;
-        }
-    }
+            forward-focus: title-focus;
+            title-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.title-draft = root.title;
+                        root.editing-title = true;
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
 
-    if root.editing-title: LineEdit {
-        text <=> root.title-draft;
-        accepted => {
-            root.editing-title = false;
-            if (root.title-draft != "" && root.title-draft != root.title) {
-                root.rename-requested(root.title-draft);
+            title-area := TouchArea {
+                clicked => {
+                    title-focus.focus();
+                    root.title-draft = root.title;
+                    root.editing-title = true;
+                }
+            }
+
+            Text {
+                width: parent.width;
+                text: root.title;
+                font-family: "Archivo SemiBold";
+                font-size: 24px;
+                font-weight: 700;
+                horizontal-alignment: left;
+                vertical-alignment: center;
             }
         }
-    }
 
-    HorizontalLayout {
-        spacing: 9px;
-        alignment: start;
-
-        Text {
-            text: root.meta-line;
-            color: Theme.text-muted;
-            font-size: 12px;
-            vertical-alignment: center;
+        if root.editing-title: LineEdit {
+            text <=> root.title-draft;
+            accessible-label: "Titre de la réunion";
+            accepted => {
+                root.editing-title = false;
+                if (root.title-draft != "" && root.title-draft != root.title) {
+                    root.rename-requested(root.title-draft);
+                }
+            }
         }
 
-        if root.model-label != "": Text {
-            text: "[" + root.model-label + "]";
-            color: Theme.accent;
-            font-family: "monospace";
-            font-size: 11px;
-            vertical-alignment: center;
+        HorizontalLayout {
+            height: 26px;
+            vertical-stretch: 0;
+            spacing: 9px;
+            alignment: start;
+
+            Text {
+                text: root.meta-line;
+                color: Theme.text-muted;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+
+            if root.model-label != "": Rectangle {
+                width: model-chip.preferred-width + 16px;
+                height: 24px;
+                horizontal-stretch: 0;
+                border-width: 1px;
+                border-color: Theme.surface-4;
+
+                model-chip := Text {
+                    text: root.model-label;
+                    color: Theme.accent;
+                    font-family: "JetBrains Mono";
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
         }
-    }
 
-    if root.participant-labels.length > 0: HorizontalLayout {
-        spacing: 8px;
-        alignment: start;
+        if root.participant-labels.length > 0: HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
 
-        for label in root.participant-labels: Text {
-            text: label;
-            color: Theme.text-secondary;
-            font-size: 11px;
+            for label in root.participant-labels: Text {
+                text: label;
+                color: Theme.text-secondary;
+                font-size: 11px;
+            }
         }
-    }
 
-    Rectangle {
-        vertical-stretch: 1;
+        Rectangle {
+            height: 1px;
+            vertical-stretch: 0;
+            background: Theme.surface-4;
+        }
 
-        ScrollView {
-            VerticalLayout {
-                spacing: 14px;
+        Rectangle {
+            vertical-stretch: 1;
 
-                AudioPlayerSection {
-                    has-audio: root.has-audio;
-                    is-playing: root.audio-is-playing;
-                    peaks: root.audio-peaks;
-                    progress: root.audio-progress;
-                    position-label: root.audio-position-label;
-                    duration-label: root.audio-duration-label;
-                    play-pause-requested => { root.audio-play-pause-requested(); }
-                    seek-requested(fraction) => { root.audio-seek-requested(fraction); }
-                }
-
-                TranscriptSection {
-                    blocks: root.transcript-blocks;
-                    segment-count: root.transcript-segment-count;
-                    has-audio: root.has-audio;
-                    spacer-before: root.transcript-spacer-before;
-                    spacer-after: root.transcript-spacer-after;
-                    scroll-top <=> root.transcript-scroll-top;
-                    paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
-                    alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
-                }
-
-                SummarySection {
-                    summary: root.summary;
-                    summary-is-stale: root.summary-is-stale;
-                    summary-model-label: root.summary-model-label;
-                    key-points: root.summary-key-points;
-                    decisions: root.summary-decisions;
-                    action-items: root.summary-action-items;
-                    open-questions: root.summary-open-questions;
-                }
-
-                Rectangle {
-                    height: 220px;
-                    border-width: 1px;
-                    border-color: Theme.surface-4;
+            ScrollView {
+                width: parent.width - 12px;
+                VerticalLayout {
+                    padding-right: 14px;
+                    spacing: 22px;
+                    alignment: start;
 
                     VerticalLayout {
-                        padding: 16px;
-                        spacing: 8px;
+                        spacing: 10px;
 
                         HorizontalLayout {
-                            alignment: space-between;
+                            height: 24px;
+                            vertical-stretch: 0;
+                            spacing: 8px;
+
+                            LucideIcon {
+                                width: 18px;
+                                height: 18px;
+                                icon: IconSet.PenLine;
+                                icon-color: Theme.accent;
+                            }
 
                             Text {
-                                text: "NOTES";
-                                font-size: 11px;
+                                text: "Notes";
+                                font-size: 13px;
+                                font-family: "Archivo SemiBold";
                                 font-weight: 600;
-                                color: Theme.text-muted;
                                 vertical-alignment: center;
                             }
+
+                            Rectangle { horizontal-stretch: 1; }
 
                             if root.notes-save-state == NotesSaveState.saved: Text {
                                 text: "Enregistr\u{e9}";
                                 font-size: 11px;
                                 color: Theme.text-muted;
+                                vertical-alignment: center;
                             }
                             if root.notes-save-state == NotesSaveState.pending: Text {
                                 text: "Enregistrement\u{2026}";
                                 font-size: 11px;
                                 color: Theme.text-muted;
+                                vertical-alignment: center;
                             }
                         }
 
-                        notes-edit := TextEdit {
+                        notes-edit := ThemedTextArea {
                             text <=> root.notes;
-                            vertical-stretch: 1;
+                            area-height: 96px;
+                            placeholder: "Ajoutez les décisions, actions et noms importants…";
+                            control-label: "Notes de la réunion";
                             edited(value) => { root.notes-changed(value); }
                         }
+
+                        Text {
+                            text: "Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.";
+                            color: Theme.text-muted;
+                            font-size: 11px;
+                        }
+                    }
+
+                    Rectangle {
+                        height: 1px;
+                        vertical-stretch: 0;
+                        background: Theme.surface-4;
+                    }
+
+                    if root.is-empty-meeting: Rectangle {
+                        height: 84px;
+                        vertical-stretch: 0;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.border-soft;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 5px;
+                            alignment: center;
+
+                            Text {
+                                text: "Cette réunion ne contient aucun enregistrement.";
+                                font-family: "Archivo SemiBold";
+                                font-size: 13px;
+                                color: Theme.text-secondary;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: "Aucun audio, aucune transcription et aucun résumé.";
+                                font-size: 11.5px;
+                                color: Theme.text-muted;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+
+                    if !root.is-empty-meeting: AudioPlayerSection {
+                        vertical-stretch: 0;
+                        has-audio: root.has-audio;
+                        is-playing: root.audio-is-playing;
+                        peaks: root.audio-peaks;
+                        progress: root.audio-progress;
+                        position-label: root.audio-position-label;
+                        duration-label: root.audio-duration-label;
+                        play-pause-requested => { root.audio-play-pause-requested(); }
+                        seek-requested(fraction) => { root.audio-seek-requested(fraction); }
+                    }
+
+                    if !root.is-empty-meeting: TranscriptSection {
+                        vertical-stretch: 0;
+                        blocks: root.transcript-blocks;
+                        segment-count: root.transcript-segment-count;
+                        has-audio: root.has-audio;
+                        spacer-before: root.transcript-spacer-before;
+                        spacer-after: root.transcript-spacer-after;
+                        scroll-top <=> root.transcript-scroll-top;
+                        paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
+                        alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
+                    }
+
+                    if !root.is-empty-meeting: SummarySection {
+                        vertical-stretch: 0;
+                        summary: root.summary;
+                        summary-is-stale: root.summary-is-stale;
+                        summary-model-label: root.summary-model-label;
+                        key-points: root.summary-key-points;
+                        decisions: root.summary-decisions;
+                        action-items: root.summary-action-items;
+                        open-questions: root.summary-open-questions;
                     }
                 }
             }

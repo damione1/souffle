@@ -5,12 +5,14 @@ export component ThemedLineEdit inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder: "";
     in property <bool> enabled: true;
+    in property <string> control-label: root.placeholder;
 
     callback edited(string);
     callback accepted(string);
 
-    height: 40px;
+    height: Theme.settings-control-height;
     vertical-stretch: 0;
+    min-width: 80px;
     border-radius: 4px;
     border-width: 1px;
     border-color: input.has-focus ? Theme.accent.with-alpha(0.45) : Theme.ghost-border;
@@ -28,6 +30,7 @@ export component ThemedLineEdit inherits Rectangle {
         vertical-alignment: center;
         single-line: true;
         enabled: root.enabled;
+        accessible-label: root.control-label;
         edited => { root.edited(self.text); }
         accepted => { root.accepted(self.text); }
     }

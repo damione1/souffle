@@ -5,6 +5,41 @@ import { ThemedButton } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { AudioRetention } from "../../types.slint";
 
+component CodeBlock inherits Rectangle {
+    in property <string> body;
+
+    border-width: 1px;
+    border-color: Theme.border-soft;
+    border-radius: 6px;
+    background: Theme.input;
+    clip: true;
+    vertical-stretch: 0;
+
+    height: 88px;
+
+    Flickable {
+        x: 10px;
+        y: 10px;
+        width: parent.width - 20px;
+        height: parent.height - 20px;
+        viewport-width: self.width;
+
+        TextInput {
+            width: parent.width;
+            height: max(parent.height, self.preferred-height);
+            text: root.body;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+            single-line: false;
+            read-only: true;
+            selection-background-color: Theme.accent.with-alpha(0.28);
+            accessible-label: "Bloc de code sélectionnable";
+        }
+    }
+}
+
 // Port of DataSettingsSection.svelte. "Export archive" opens a native
 // macOS folder picker (osascript `choose folder`) rather than the
 // `@tauri-apps/plugin-dialog` the Svelte version uses - the ticket's own
@@ -49,15 +84,27 @@ export component DataSection inherits VerticalLayout {
     SettingsGroup {
         title: "DONNÉES";
 
-    if root.stats-line != "": Text {
-        text: root.stats-line;
-        font-size: 11.5px;
-        color: Theme.text-muted;
+    if root.stats-line != "": VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-top: 12px;
+        Text {
+            text: root.stats-line;
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
     }
-    if root.recordings-line != "": Text {
-        text: root.recordings-line;
-        font-size: 11.5px;
-        color: Theme.text-muted;
+    if root.recordings-line != "": VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 4px;
+        Text {
+            text: root.recordings-line;
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
     }
 
     SettingsField {
@@ -66,7 +113,7 @@ export component DataSection inherits VerticalLayout {
         description: "Durée de conservation des enregistrements audio bruts.";
 
         ThemedComboBox {
-            combo-width: 220px;
+            control-label: "Conservation audio des réunions";
             model: [
                 root.retention-label(AudioRetention.off),
                 root.retention-label(AudioRetention.keep-7d),
@@ -103,103 +150,147 @@ export component DataSection inherits VerticalLayout {
         }
     }
 
-    if root.export-status != "": Text {
-        text: root.export-status;
-        color: root.export-status-is-error ? Theme.danger : Theme.text-muted;
-        font-size: 11.5px;
-        wrap: word-wrap;
-    }
-
-    Rectangle {
-        height: 1px;
-        background: Theme.surface-4;
-    }
-
-    VerticalLayout {
-        spacing: 8px;
-
+    if root.export-status != "": VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 12px;
         Text {
-            text: "Serveur MCP";
-            font-size: 13px;
-            font-weight: 600;
-            color: Theme.text-primary;
-        }
-        Text {
-            text: "Donne accès en lecture aux réunions et dictées depuis un client MCP (Claude Desktop, Claude Code).";
+            text: root.export-status;
+            color: root.export-status-is-error ? Theme.danger : Theme.text-muted;
             font-size: 11.5px;
-            color: Theme.text-muted;
             wrap: word-wrap;
         }
+    }
+    }
 
-        Text {
-            text: root.mcp-binary-path;
-            font-family: "monospace";
-            font-size: 10.5px;
-            color: Theme.text-secondary;
-            wrap: word-wrap;
-        }
-        if !root.mcp-exists: Text {
-            text: "Binaire introuvable.";
-            color: Theme.warning;
-            font-size: 11px;
-        }
+    SettingsGroup {
+        title: "SERVEUR MCP";
 
-        HorizontalLayout {
-            alignment: space-between;
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-top: 15px;
+            padding-bottom: 8px;
             Text {
-                text: "Claude Desktop (config JSON)";
+                text: "Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos transcriptions et résumés. Tout reste sur ce Mac.";
                 font-size: 12px;
-                color: Theme.text-secondary;
-                vertical-alignment: center;
+                color: Theme.text-muted;
+                wrap: word-wrap;
             }
-            ThemedButton {
-                text: "Copier";
-                clicked => { root.copy-desktop-snippet-requested(); }
-            }
-        }
-        Text {
-            text: root.mcp-claude-desktop-snippet;
-            font-family: "monospace";
-            font-size: 10px;
-            color: Theme.text-muted;
-            wrap: word-wrap;
         }
 
-        HorizontalLayout {
-            alignment: space-between;
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-top: 8px;
+            padding-bottom: 12px;
+            spacing: 8px;
+
             Text {
-                text: "Claude Code (commande)";
-                font-size: 12px;
+                text: "Binaire sidecar";
+                font-size: 13.5px;
                 color: Theme.text-secondary;
-                vertical-alignment: center;
             }
-            ThemedButton {
-                text: "Copier";
-                clicked => { root.copy-code-command-requested(); }
+            CodeBlock {
+                body: root.mcp-binary-path;
             }
-        }
-        Text {
-            text: root.mcp-claude-code-command;
-            font-family: "monospace";
-            font-size: 10px;
-            color: Theme.text-muted;
-            wrap: word-wrap;
+            if !root.mcp-exists: Text {
+                text: "Binaire introuvable. Compilez souffle-mcp pour le développement local.";
+                color: Theme.warning;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
         }
 
-        HorizontalLayout {
-            alignment: end;
+        Rectangle {
+            height: 1px;
+            background: Theme.border-soft;
+            vertical-stretch: 0;
+        }
+
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-top: 15px;
+            padding-bottom: 12px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Config Claude Desktop";
+                        font-size: 13.5px;
+                        color: Theme.text-secondary;
+                    }
+                    Text {
+                        text: "À coller dans claude_desktop_config.json sous mcpServers.";
+                        font-size: 12px;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
+                }
+                ThemedButton {
+                    text: "Copier";
+                    clicked => { root.copy-desktop-snippet-requested(); }
+                }
+            }
+            CodeBlock {
+                body: root.mcp-claude-desktop-snippet;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.border-soft;
+            vertical-stretch: 0;
+        }
+
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-top: 15px;
+            padding-bottom: 12px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Claude Code";
+                        font-size: 13.5px;
+                        color: Theme.text-secondary;
+                    }
+                    Text {
+                        text: "À exécuter une fois dans un terminal pour enregistrer le serveur.";
+                        font-size: 12px;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
+                }
+                ThemedButton {
+                    text: "Copier";
+                    clicked => { root.copy-code-command-requested(); }
+                }
+            }
+            CodeBlock {
+                body: root.mcp-claude-code-command;
+            }
+        }
+
+        SettingsField {
+            label: "Tester la connexion";
+            description: root.mcp-test-status;
+
             ThemedButton {
                 text: root.testing-mcp ? "Test en cours…" : "Tester la connexion";
                 enabled: root.mcp-exists && !root.testing-mcp;
                 clicked => { root.test-mcp-requested(); }
             }
         }
-        if root.mcp-test-status != "": Text {
-            text: root.mcp-test-status;
-            font-size: 11px;
-            color: Theme.text-muted;
-            wrap: word-wrap;
-        }
-    }
     }
 }

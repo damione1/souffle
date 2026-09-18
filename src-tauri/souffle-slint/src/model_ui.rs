@@ -10,6 +10,7 @@ use souffle_lib::engine::{
     TranscriptionCatalog, TranscriptionModelDescriptor, TranscriptionProfileSelection,
     TranscriptionRuntimeBackendDescriptor, TranscriptionRuntimePhase,
 };
+use souffle_lib::models::{DownloadProgress, DownloadStatus};
 
 pub struct FlatModelOption {
     pub engine_id: String,
@@ -97,6 +98,23 @@ pub fn selected_model_short_label(catalog: &TranscriptionCatalog) -> String {
         &catalog.selected_engine_id,
         &catalog.selected_model_id,
     )
+}
+
+/// The catalogue is the source of truth for the active open-set identifiers.
+/// Recording startup must use this selection rather than the library default:
+/// users can legitimately select a different downloaded model in Settings.
+pub fn selected_profile(catalog: &TranscriptionCatalog) -> TranscriptionProfileSelection {
+    TranscriptionProfileSelection {
+        engine_id: catalog.selected_engine_id.clone(),
+        model_id: catalog.selected_model_id.clone(),
+        backend_id: catalog.selected_backend_id.clone(),
+    }
+}
+
+pub fn download_is_globally_complete(progress: &DownloadProgress) -> bool {
+    matches!(progress.status, DownloadStatus::Complete)
+        && progress.total_files > 0
+        && progress.completed_files >= progress.total_files
 }
 
 pub fn phase_label(phase: TranscriptionRuntimePhase) -> &'static str {
@@ -194,5 +212,21 @@ mod tests {
             phase_label(TranscriptionRuntimePhase::LoadRequired),
             "Chargement requis"
         );
+    }
+
+    #[test]
+    fn download_only_completes_after_every_artifact() {
+        let progress = |completed_files, total_files| DownloadProgress {
+            file: "artifact".into(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+            completed_files,
+            total_files,
+            status: DownloadStatus::Complete,
+        };
+
+        assert!(!download_is_globally_complete(&progress(1, 0)));
+        assert!(!download_is_globally_complete(&progress(1, 2)));
+        assert!(download_is_globally_complete(&progress(2, 2)));
     }
 }

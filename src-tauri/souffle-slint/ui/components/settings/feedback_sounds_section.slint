@@ -24,6 +24,7 @@ export component FeedbackSoundsSection inherits VerticalLayout {
             description: "Jouer un son au démarrage et à l'arrêt de l'enregistrement.";
 
             ThemedSwitch {
+                control-label: "Activer les sons";
                 checked: root.enabled;
                 toggled(new) => { root.enabled-changed(new); }
             }

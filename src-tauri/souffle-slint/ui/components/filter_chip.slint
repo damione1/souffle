@@ -22,14 +22,33 @@ export component FilterChip inherits Rectangle {
 
     height: 26px;
     border-radius: 4px;
-    background: root.selected ? Theme.text-primary : (area.has-hover ? Theme.surface-2 : transparent);
+    border-width: key-focus.has-focus ? 2px : 0px;
+    border-color: Theme.accent;
+    background: root.selected ? Theme.text-primary : (area.pressed ? Theme.surface-3 : area.has-hover ? Theme.surface-2 : transparent);
 
     accessible-role: button;
     accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
     accessible-action-default => { root.clicked(); }
 
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
     area := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => {
+            key-focus.focus();
+            root.clicked();
+        }
     }
 
     HorizontalLayout {

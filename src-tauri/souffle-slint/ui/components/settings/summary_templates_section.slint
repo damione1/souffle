@@ -1,10 +1,10 @@
-import { TextEdit } from "std-widgets.slint";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedButton } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
+import { ThemedTextArea } from "../themed_text_area.slint";
 
 // Port of SummaryTemplatesSettingsSection.svelte. Which template is being
 // edited is tracked in Rust (`summary_templates_state` in main.rs), not as
@@ -34,8 +34,8 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         title: "MODÈLES DE RÉSUMÉ";
 
     VerticalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
         padding-top: 15px;
         padding-bottom: 15px;
         Text {
@@ -51,7 +51,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         label: "Modèle par défaut";
 
         ThemedComboBox {
-            combo-width: 220px;
+            control-label: "Modèle de résumé par défaut";
             model: root.template-labels;
             current-value: root.default-template-label;
             selected(value) => { root.default-changed(value); }
@@ -67,7 +67,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
             horizontal-stretch: 0;
 
             ThemedComboBox {
-                combo-width: 220px;
+                control-label: "Modèle de résumé à modifier";
                 model: root.template-labels;
                 current-value: root.editing-template-label;
                 selected(value) => { root.edit-target-changed(value); }
@@ -83,6 +83,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         label: "Nom";
 
         ThemedLineEdit {
+            control-label: "Nom du modèle de résumé";
             text: root.editing-name;
             edited(value) => { root.name-changed(value); }
         }
@@ -94,20 +95,25 @@ export component SummaryTemplatesSection inherits VerticalLayout {
             ? "Modèle intégré : le prompt peut être personnalisé mais pas supprimé."
             : "Prompt envoyé à l'IA pour générer le résumé.";
 
-        TextEdit {
+        ThemedTextArea {
             text: root.editing-prompt;
-            height: 110px;
-            wrap: word-wrap;
+            area-height: 110px;
+            placeholder: "Instruction de génération du résumé";
+            control-label: "Instruction du modèle de résumé";
             edited(value) => { root.prompt-changed(value); }
         }
     }
 
     HorizontalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 8px;
         spacing: 6px;
 
         ThemedLineEdit {
             text <=> root.new-template-draft;
             placeholder: "Nom du nouveau modèle";
+            control-label: "Nom du nouveau modèle de résumé";
             horizontal-stretch: 1;
         }
         ThemedButton {

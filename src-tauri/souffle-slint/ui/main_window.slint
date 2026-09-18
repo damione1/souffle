@@ -4,6 +4,7 @@ import { MeetingDetail } from "meeting_detail.slint";
 import { SettingsView } from "settings_view.slint";
 import { OnboardingView } from "onboarding_view.slint";
 import { PermissionRow } from "components/onboarding/permissions_step.slint";
+import { SettingsPermissionsDialog } from "components/settings/settings_permissions_dialog.slint";
 import { WhatsNewDialog } from "components/onboarding/whats_new_dialog.slint";
 import { UpdateAvailableDialog } from "components/onboarding/update_available_dialog.slint";
 import { MarkdownBlock } from "components/onboarding/markdown_block.slint";
@@ -14,8 +15,8 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider } from "types.slint";
-export { SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider }
+import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider } from "types.slint";
+export { SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
 // accessor for it (`window.global::<Theme>()`) - main.rs sets `Theme.dark`
@@ -67,6 +68,12 @@ export component MainWindow inherits Window {
     in-out property <RecordingMode> recording-mode: RecordingMode.idle;
     in-out property <string> live-text;
     in-out property <string> live-tentative;
+    in-out property <string> live-me-text;
+    in-out property <string> live-them-text;
+    in-out property <SpeakerRole> live-tentative-speaker: SpeakerRole.me;
+    in-out property <bool> live-tentative-has-speaker: false;
+    in property <float> audio-level: 0.0;
+    in-out property <string> live-notes;
 
     // Non-empty while a completed meeting is open in MeetingDetail. Empty
     // means "show the Timeline instead" - checked together with
@@ -110,6 +117,7 @@ export component MainWindow inherits Window {
     // must first load the real settings from disk (see main.rs) - closing
     // needs no such round trip, so `settings-open` alone is enough there.
     in-out property <bool> settings-open: false;
+    in-out property <bool> settings-permissions-dialog-open: false;
     // The gear opens Transcription; the homepage calendar CTA opens Meetings.
     in-out property <SettingsTab> settings-tab: SettingsTab.transcription;
     in property <bool> settings-autostart-enabled;
@@ -506,6 +514,14 @@ export component MainWindow inherits Window {
         mode: root.recording-mode;
         live-text: root.live-text;
         live-tentative: root.live-tentative;
+        live-me-text: root.live-me-text;
+        live-them-text: root.live-them-text;
+        live-tentative-speaker: root.live-tentative-speaker;
+        live-tentative-has-speaker: root.live-tentative-has-speaker;
+        audio-level: root.audio-level;
+        notes <=> root.live-notes;
+        system-audio-active: root.settings-system-audio-supported && root.settings-capture-system-audio;
+        auto-paste: root.settings-auto-paste;
         stop-requested => { root.stop-requested(); }
     }
 
@@ -759,6 +775,20 @@ export component MainWindow inherits Window {
         review-accessibility-requested => { root.onboarding-review-accessibility-requested(); }
         back-requested => { root.onboarding-back-requested(); }
         continue-requested => { root.onboarding-continue-requested(); }
+    }
+
+    if root.settings-permissions-dialog-open: SettingsPermissionsDialog {
+        width: 100%;
+        height: 100%;
+        rows: root.onboarding-permission-rows;
+        error-message: root.onboarding-permissions-error;
+        repair-busy: root.onboarding-repair-busy;
+        repair-success: root.onboarding-repair-success;
+        repair-cooldown: root.onboarding-repair-cooldown;
+        close-requested => { root.settings-permissions-dialog-open = false; }
+        grant-requested(kind) => { root.onboarding-grant-requested(kind); }
+        hint-action-requested(kind) => { root.onboarding-hint-action-requested(kind); }
+        repair-requested => { root.onboarding-repair-requested(); }
     }
 
     if root.whats-new-open: WhatsNewDialog {

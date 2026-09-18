@@ -1,7 +1,6 @@
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
-import { Theme } from "../../theme.slint";
-import { LucideIcon, IconSet } from "../lucide_icon.slint";
+import { ThemedButton } from "../themed_button.slint";
 
 // Port of PermissionsSettingsSection.svelte.
 export component PermissionsSection inherits VerticalLayout {
@@ -16,35 +15,11 @@ export component PermissionsSection inherits VerticalLayout {
         SettingsField {
             show-divider: false;
             label: "Permissions";
-            description: "Revérifier ou réparer les permissions macOS si le collage ou l'enregistrement cesse de fonctionner après une mise à jour.";
+            description: "Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.";
 
-            review := Rectangle {
-                height: 32px;
-                width: 16px + 6px + btn-label.width + 12px;
-                background: area.has-hover ? Theme.surface-4 : Theme.surface-3;
-                border-radius: 4px;
-                border-width: 1px;
-                border-color: Theme.ghost-border;
-
-                LucideIcon {
-                    icon: IconSet.Shield;
-                    icon-color: Theme.text-primary;
-                    size: 14px;
-                    x: 8px;
-                    y: (parent.height - self.height) / 2;
-                }
-                btn-label := Text {
-                    x: 28px;
-                    height: parent.height;
-                    text: "Vérifier les permissions";
-                    font-size: 13px;
-                    font-weight: 500;
-                    color: Theme.text-primary;
-                    vertical-alignment: center;
-                }
-                area := TouchArea {
-                    clicked => { root.review-requested(); }
-                }
+            ThemedButton {
+                text: "Vérifier les permissions";
+                clicked => { root.review-requested(); }
             }
         }
     }

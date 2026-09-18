@@ -1,7 +1,7 @@
 import { Theme } from "../theme.slint";
 // Port of MeetingSummarySection.svelte + MeetingStructuredSummarySection.svelte
 // - read-only display only (SOU-187 milestone 9, remaining part of AC13).
-// Generation itself (model/template pickers, the "Générer"/"Regénérer"
+// Generation itself (model/template pickers, the "Générer"/"Régénérer"
 // button, streaming progress) is not wired here: it needs the same
 // Channel-based streaming plumbing as milestone 5's live transcript, which
 // is a separate, substantial piece of work. Said here rather than a
@@ -22,11 +22,22 @@ export component SummarySection inherits VerticalLayout {
 
     spacing: 8px;
 
-    if root.summary == "": Text {
-        text: "Aucun r\u{e9}sum\u{e9} g\u{e9}n\u{e9}r\u{e9} pour cette r\u{e9}union (g\u{e9}n\u{e9}ration pas encore branch\u{e9}e ici).";
-        color: Theme.text-muted;
-        font-size: 11px;
-        wrap: word-wrap;
+    if root.summary == "": VerticalLayout {
+        spacing: 4px;
+
+        Text {
+            text: "R\u{e9}sum\u{e9}";
+            font-size: 11px;
+            font-weight: 600;
+            color: Theme.text-muted;
+        }
+
+        Text {
+            text: "Aucun r\u{e9}sum\u{e9} pour cette r\u{e9}union.";
+            color: Theme.text-muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
     }
 
     if root.summary != "": VerticalLayout {

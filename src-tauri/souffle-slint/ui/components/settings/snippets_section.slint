@@ -1,8 +1,8 @@
-import { TextEdit } from "std-widgets.slint";
 import { Theme } from "../../theme.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { ThemedButton } from "../themed_button.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
+import { ThemedTextArea } from "../themed_text_area.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
 // tracked in Rust (`snippets_editing` in main.rs), not local `.slint`
@@ -34,37 +34,40 @@ export component SnippetsSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "SNIPPETS VOCAUX";
+        title: "EXTRAITS VOCAUX";
 
     VerticalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
         padding-top: 15px;
         padding-bottom: 15px;
+        spacing: 8px;
+
         Text {
-            text: "Dites une phrase déclencheur au début d'une dictée pour coller un bloc de texte à la place. La comparaison ignore casse et accents ; aucun polish IA ne tourne quand un snippet correspond.";
+            text: "Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de texte. La comparaison ignore la casse et les accents ; aucune retouche IA n'est appliquée quand un extrait correspond.";
             font-size: 12px;
             color: Theme.text-muted;
             wrap: word-wrap;
         }
-    }
-
-    VerticalLayout {
-        spacing: 4px;
 
         Text { text: "DÉCLENCHEUR"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-        ThemedLineEdit { text <=> root.new-trigger-draft; }
+        ThemedLineEdit {
+            text <=> root.new-trigger-draft;
+            placeholder: "Phrase déclencheur";
+            control-label: "Phrase déclencheur";
+        }
         Text { text: "EXPANSION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-        TextEdit {
+        ThemedTextArea {
             text <=> root.new-expansion-draft;
-            height: 60px;
-            wrap: word-wrap;
+            area-height: 72px;
+            placeholder: "Texte à insérer";
+            control-label: "Texte de l'extrait vocal";
         }
 
         HorizontalLayout {
             alignment: end;
             ThemedButton {
-                text: "Ajouter un snippet";
+                text: "Ajouter un extrait";
                 enabled: root.new-trigger-draft != "" && root.new-expansion-draft != "";
                 clicked => {
                     root.add-requested(root.new-trigger-draft, root.new-expansion-draft);
@@ -73,23 +76,30 @@ export component SnippetsSection inherits VerticalLayout {
                 }
             }
         }
+
+        if root.add-error != "": Text {
+            text: root.add-error;
+            color: Theme.danger;
+            font-size: 11px;
+        }
+
+        if root.entries.length == 0: Text {
+            text: "Aucune formule.";
+            color: Theme.text-muted;
+            font-size: 12px;
+        }
     }
 
-    if root.add-error != "": Text {
-        text: root.add-error;
-        color: Theme.danger;
-        font-size: 11px;
-    }
-
-    if root.entries.length == 0: Text {
-        text: "Aucune formule.";
-        color: Theme.text-muted;
-        font-size: 11.5px;
-    }
+    VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 8px;
+        spacing: 6px;
 
     for row in root.entries: Rectangle {
         border-width: 1px;
-        border-color: Theme.surface-4;
+        border-color: Theme.border-soft;
+        border-radius: 6px;
 
         VerticalLayout {
             padding: 8px;
@@ -130,12 +140,15 @@ export component SnippetsSection inherits VerticalLayout {
                 spacing: 4px;
 
                 Text { text: "DÉCLENCHEUR"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-                ThemedLineEdit { text <=> root.edit-trigger-draft; }
+                ThemedLineEdit {
+                    text <=> root.edit-trigger-draft;
+                    control-label: "Phrase déclencheur";
+                }
                 Text { text: "EXPANSION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-                TextEdit {
+                ThemedTextArea {
                     text <=> root.edit-expansion-draft;
-                    height: 60px;
-                    wrap: word-wrap;
+                    area-height: 72px;
+                    control-label: "Texte de l'extrait vocal";
                 }
                 if root.update-error != "": Text {
                     text: root.update-error;
@@ -157,6 +170,7 @@ export component SnippetsSection inherits VerticalLayout {
                 }
             }
         }
+    }
     }
     }
 }
