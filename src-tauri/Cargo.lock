@@ -9063,6 +9063,7 @@ dependencies = [
 name = "souffle-slint"
 version = "0.0.0"
 dependencies = [
+ "arboard",
  "chrono",
  "cpal",
  "serde_json",
@@ -9071,6 +9072,7 @@ dependencies = [
  "souffle",
  "tauri",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -1,0 +1,206 @@
+import { Switch, ComboBox, LineEdit, Button } from "std-widgets.slint";
+import { SettingsField } from "settings_field.slint";
+
+// Port of IntelligenceSettingsSection.svelte. The exact per-reason-code
+// wording (`KNOWN_REASON_KEYS`) and the fine-grained model-picker
+// visibility state machine (`ollamaModelPickerState`) are simplified to
+// generic messages/conditions here - functional parity (the real
+// check_summary_providers status drives everything), wording polish is a
+// follow-up pass. Model pickers forward their chosen *label* back to Rust
+// for id resolution, same reasoning as the audio device pickers.
+export component IntelligenceSection inherits VerticalLayout {
+    in property <string> summary-provider; // "auto" | "apple_intelligence" | "ollama"
+    in property <bool> apple-intelligence-available;
+    in property <string> apple-intelligence-reason; // "" when available
+    in property <string> ollama-url;
+    in property <bool> ollama-available;
+    in property <bool> ollama-checking;
+    in property <int> summary-model-count;
+    in property <bool> model-picker-visible;
+    in property <[string]> model-labels;
+    in property <string> selected-model-label;
+    in property <bool> show-ollama-setup;
+    in property <bool> ollama-pulling;
+    in property <string> ollama-pull-status;
+    in property <string> ollama-pull-error;
+    in property <string> recommended-model;
+    in property <string> unusable-message; // "" when the chosen provider can run
+
+    callback summary-provider-changed(string);
+    callback ollama-url-changed(string);
+    callback ollama-model-changed(string);
+    callback retry-requested();
+    callback download-recommended-requested();
+    callback open-apple-intelligence-settings-requested();
+
+    pure function provider-label(value: string) -> string {
+        if value == "apple_intelligence" { return "Apple Intelligence"; }
+        if value == "ollama" { return "Ollama"; }
+        return "Automatique";
+    }
+    pure function provider-value(label: string) -> string {
+        if label == "Apple Intelligence" { return "apple_intelligence"; }
+        if label == "Ollama" { return "ollama"; }
+        return "auto";
+    }
+
+    spacing: 10px;
+
+    Text {
+        text: "Intelligence artificielle";
+        font-size: 13.5px;
+        font-weight: 700;
+        color: white;
+    }
+
+    SettingsField {
+        label: "Fournisseur de résumés";
+        description: "Modèle utilisé pour résumer les réunions et retoucher les dictées.";
+
+        ComboBox {
+            model: ["Automatique", "Apple Intelligence", "Ollama"];
+            current-value: root.provider-label(root.summary-provider);
+            selected(value) => { root.summary-provider-changed(root.provider-value(value)); }
+        }
+    }
+
+    if root.unusable-message != "": Rectangle {
+        border-width: 1px;
+        border-color: #a02a2a;
+        border-radius: 6px;
+        background: #3a1414;
+
+        VerticalLayout {
+            padding: 10px;
+            Text {
+                text: root.unusable-message;
+                color: #f08080;
+                font-size: 11.5px;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    SettingsField {
+        label: "Apple Intelligence";
+
+        HorizontalLayout {
+            spacing: 6px;
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: root.apple-intelligence-available ? #4caf50 : #666;
+                y: 4px;
+            }
+            Text {
+                text: root.apple-intelligence-available ? "Disponible" : "Non disponible";
+                font-size: 12px;
+                color: #ccc;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    if root.apple-intelligence-reason != "": Rectangle {
+        border-width: 1px;
+        border-color: #3a3a3a;
+        border-radius: 6px;
+
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 10px;
+            alignment: space-between;
+
+            Text {
+                text: root.apple-intelligence-reason;
+                color: #999;
+                font-size: 11px;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+            if root.apple-intelligence-reason == "apple_intelligence_not_enabled": Button {
+                text: "Réglages Système";
+                clicked => { root.open-apple-intelligence-settings-requested(); }
+            }
+        }
+    }
+
+    SettingsField {
+        label: "URL Ollama";
+        description: "Adresse du serveur Ollama local ou distant.";
+
+        LineEdit {
+            text: root.ollama-url;
+            edited(value) => { root.ollama-url-changed(value); }
+        }
+    }
+
+    SettingsField {
+        label: "État de la connexion";
+        description: root.summary-model-count + " modèle(s) trouvé(s).";
+
+        HorizontalLayout {
+            spacing: 6px;
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: root.ollama-available ? #4caf50 : #666;
+                y: 4px;
+            }
+            Text {
+                text: root.ollama-available ? "Connecté" : "Non disponible";
+                font-size: 12px;
+                color: #ccc;
+                vertical-alignment: center;
+            }
+            Button {
+                text: "Réessayer";
+                enabled: !root.ollama-checking && !root.ollama-pulling;
+                clicked => { root.retry-requested(); }
+            }
+        }
+    }
+
+    if root.model-picker-visible: SettingsField {
+        label: "Modèle de résumé";
+
+        ComboBox {
+            model: root.model-labels;
+            current-value: root.selected-model-label;
+            selected(value) => { root.ollama-model-changed(value); }
+        }
+    }
+
+    if root.show-ollama-setup: VerticalLayout {
+        spacing: 8px;
+
+        Text {
+            text: "Aucun modèle compatible installé.";
+            color: #f0c674;
+            font-size: 11.5px;
+        }
+
+        if root.ollama-pull-error != "": Text {
+            text: "Échec du téléchargement : " + root.ollama-pull-error;
+            color: #f08080;
+            font-size: 11.5px;
+            wrap: word-wrap;
+        }
+
+        if root.ollama-pulling: Text {
+            text: root.ollama-pull-status == "" ? "Téléchargement de " + root.recommended-model + "…" : root.ollama-pull-status;
+            color: #999;
+            font-size: 11.5px;
+        }
+
+        if !root.ollama-pulling: HorizontalLayout {
+            alignment: end;
+            Button {
+                text: "Télécharger " + root.recommended-model;
+                clicked => { root.download-recommended-requested(); }
+            }
+        }
+    }
+}

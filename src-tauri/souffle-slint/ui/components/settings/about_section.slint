@@ -1,0 +1,82 @@
+import { Switch, Button } from "std-widgets.slint";
+import { SettingsField } from "settings_field.slint";
+
+// Port of AboutSettingsSection.svelte. `UpdateAction` (the download-progress
+// + install button shown once an update is found) is not built here - a
+// full updater UI is a standalone feature disproportionate to this tab, and
+// is left for a follow-up ticket. "Check for updates" itself is real
+// (`check_for_updates`), it just reports the result as text rather than
+// offering to install it.
+export component AboutSection inherits VerticalLayout {
+    in property <string> app-version;
+    in property <string> transcription-label;
+    in property <string> summary-label;
+    in property <bool> auto-update-check;
+    in property <bool> checking-updates;
+    in property <string> update-status;
+
+    callback check-updates-requested();
+    callback auto-update-check-changed(bool);
+
+    spacing: 8px;
+
+    Text {
+        text: "À propos";
+        font-size: 13.5px;
+        font-weight: 700;
+        color: white;
+    }
+
+    HorizontalLayout {
+        alignment: space-between;
+        Text { text: "Version"; font-size: 12.5px; color: #999; }
+        Text { text: "v" + root.app-version; font-size: 12.5px; color: #ddd; }
+    }
+    HorizontalLayout {
+        alignment: space-between;
+        Text { text: "Transcription"; font-size: 12.5px; color: #999; }
+        Text { text: root.transcription-label; font-size: 12.5px; color: #ddd; }
+    }
+    HorizontalLayout {
+        alignment: space-between;
+        Text { text: "Résumés"; font-size: 12.5px; color: #999; }
+        Text { text: root.summary-label; font-size: 12.5px; color: #ddd; }
+    }
+    HorizontalLayout {
+        alignment: space-between;
+        Text { text: "Confidentialité"; font-size: 12.5px; color: #999; }
+        Text { text: "100% local"; font-size: 12.5px; color: #ddd; }
+    }
+
+    HorizontalLayout {
+        alignment: space-between;
+        Text {
+            text: "Mises à jour";
+            font-size: 12.5px;
+            color: #999;
+            vertical-alignment: center;
+        }
+        Button {
+            text: root.checking-updates ? "Vérification…" : "Vérifier les mises à jour";
+            enabled: !root.checking-updates;
+            clicked => { root.check-updates-requested(); }
+        }
+    }
+
+    if root.update-status != "": Text {
+        text: root.update-status;
+        font-size: 11.5px;
+        color: #999;
+        wrap: word-wrap;
+    }
+
+    SettingsField {
+        label: "Vérification automatique";
+        description: "Vérifier les mises à jour au démarrage.";
+
+        Switch {
+            checked: root.auto-update-check;
+            toggled => { root.auto-update-check-changed(self.checked); }
+        }
+    }
+}

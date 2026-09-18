@@ -1,4 +1,4 @@
-import { LineEdit } from "std-widgets.slint";
+import { LineEdit, Button } from "std-widgets.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { TimelineSection, TimelineDayGroup } from "components/timeline_section.slint";
@@ -27,9 +27,19 @@ export component IdleView inherits VerticalLayout {
     callback dismiss-meeting-status();
     callback timeline-item-opened(TimelineKind, string);
     callback timeline-item-removed(TimelineKind, string);
+    callback settings-requested();
 
     padding: 24px;
     spacing: 18px;
+
+    HorizontalLayout {
+        alignment: end;
+
+        Button {
+            text: "⚙ Paramètres";
+            clicked => { root.settings-requested(); }
+        }
+    }
 
     if root.transcription-status-message != "": StatusBanner {
         message: root.transcription-status-message;

@@ -6,13 +6,25 @@
 slint::include_modules!();
 
 mod audio_player;
+mod audio_ui;
+mod data_ui;
+mod ia_ui;
+mod lists_ui;
+mod microphone_list;
+mod model_ui;
+mod settings_ui;
+mod shortcut_capture;
 mod summary;
 mod timeline;
 mod transcript;
 
+use slint::Model;
+use souffle_lib::audio::AudioInputDevice;
 use souffle_lib::engine::{
     TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
+use souffle_lib::permissions::{PermState, PermissionKind};
+use souffle_lib::settings::{AppSettings, ShortcutSettings};
 use souffle_lib::state::AppState;
 use souffle_lib::transcript::{MeetingParticipant, MeetingTranscript};
 use std::cell::RefCell;
@@ -36,6 +48,10 @@ const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
 /// scrolling is more time-sensitive than a playback position label.
 const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
 
+/// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
+const SETTINGS_LOG_TAIL_LINES: u32 = 80;
+const SETTINGS_LOG_POLL: Duration = Duration::from_millis(2000);
+
 /// Backing data for the virtualized transcript list: the full block list
 /// plus precomputed cumulative height estimates (see
 /// `transcript::compute_offsets`). `MeetingDetail`'s `transcript-blocks`
@@ -58,6 +74,20 @@ fn format_shortcut_label(shortcut: &str) -> String {
         .replace("Shift", "\u{21e7}")
         .replace("Alt", "\u{2325}")
         .replace('+', " ")
+}
+
+/// Shared by the diagnostics and MCP snippet "Copy" buttons - no webview
+/// clipboard API to fall back on in this headless shell (see the `arboard`
+/// dependency comment in Cargo.toml).
+fn copy_to_clipboard(text: &str) {
+    match arboard::Clipboard::new() {
+        Ok(mut clipboard) => {
+            if let Err(e) = clipboard.set_text(text) {
+                eprintln!("Failed to write to clipboard: {e}");
+            }
+        }
+        Err(e) => eprintln!("Failed to open clipboard: {e}"),
+    }
 }
 
 /// Re-fetches dictations + meetings from the real database and rebuilds the
@@ -339,6 +369,190 @@ fn start_audio_progress_timer(
     timer
 }
 
+/// Re-fetches the log tail and pushes it into the Settings window - mirrors
+/// `DiagnosticsSettingsSection.svelte`'s `refreshTail()`.
+fn refresh_settings_log_tail(window: &MainWindow) {
+    match souffle_lib::commands::get_log_tail(SETTINGS_LOG_TAIL_LINES) {
+        Ok(tail) => window.set_settings_log_tail(tail.into()),
+        Err(e) => eprintln!("Failed to read log tail: {e}"),
+    }
+}
+
+/// Polls the log tail every 2s while Settings is open - mirrors the Svelte
+/// section's `setInterval`. Stopped on `settings-closed` (see
+/// `stop_settings_log_timer`), not left running once the sheet is gone.
+fn start_settings_log_timer(weak: slint::Weak<MainWindow>) -> slint::Timer {
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, SETTINGS_LOG_POLL, move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        refresh_settings_log_tail(&window);
+    });
+    timer
+}
+
+/// Populates the calendar picker without prompting - mirrors
+/// `loadCalendars()`'s own guard (only queries EventKit when the
+/// integration is already on, which implies access was granted before).
+fn load_calendars_if_enabled(
+    window: &MainWindow,
+    settings_state: &Rc<RefCell<Option<AppSettings>>>,
+) {
+    let (enabled, selected_ids) = {
+        let guard = settings_state.borrow();
+        match guard.as_ref() {
+            Some(settings) => (
+                settings.calendar_integration_enabled,
+                settings.calendar_selected_ids.clone(),
+            ),
+            None => return,
+        }
+    };
+    if !enabled {
+        settings_ui::populate_calendars(window, &[], &[], PermState::Unknown);
+        return;
+    }
+    match souffle_lib::calendar::list_calendars() {
+        Ok(calendars) => {
+            settings_ui::populate_calendars(window, &calendars, &selected_ids, PermState::Granted)
+        }
+        Err(_) => settings_ui::populate_calendars(window, &[], &selected_ids, PermState::Denied),
+    }
+}
+
+/// Refreshes the audio device list, both device pickers, and the
+/// microphone priority list, then kicks off an async sample-rate fetch for
+/// whichever device `resolve_sample_rate_device_uid` picks - mirrors
+/// `refreshDevices()` + the `$effect` that calls `refreshInputSampleRate()`
+/// on device/selection change in controller.svelte.ts.
+/// Runs the real `check_summary_providers()` network/availability check and
+/// repopulates the whole IA tab from the result - shared by settings-open
+/// and the "Retry" button, since both need the same round trip. `slint::
+/// spawn_local`, not `tauri::async_runtime::spawn`: this closes over
+/// `Rc<RefCell<..>>` state, which is not `Send`.
+fn refresh_summary_providers(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    settings_state: Rc<RefCell<Option<AppSettings>>>,
+    summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>>,
+    summary_template_editing: Rc<RefCell<String>>,
+) {
+    slint::spawn_local(async move {
+        let state = handle.state::<AppState>();
+        let status = souffle_lib::commands::check_summary_providers(state).await;
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let Ok(status) = status else {
+            return;
+        };
+        let guard = settings_state.borrow();
+        let Some(settings) = guard.as_ref() else {
+            return;
+        };
+        ia_ui::populate_intelligence(&window, settings, &status);
+        let provider_available = window.get_settings_summary_unusable_message().is_empty();
+        ia_ui::populate_dictation_polish(&window, settings, provider_available);
+        let editing_id = summary_template_editing.borrow().clone();
+        ia_ui::populate_summary_templates(&window, settings, &editing_id);
+        drop(guard);
+        *summary_status_state.borrow_mut() = Some(status);
+    })
+    .expect("slint event loop not running");
+}
+
+/// Pushes the model picker's option list + current status - AC2's own
+/// state (download/load) is read via `get_model_status`, never
+/// reimplemented; this only formats what it returns.
+fn load_transcription_model_state(
+    window: &MainWindow,
+    handle: &AppHandle,
+    settings_state: &Rc<RefCell<Option<AppSettings>>>,
+    model_options_state: &Rc<RefCell<Vec<model_ui::FlatModelOption>>>,
+) {
+    let state = handle.state::<AppState>();
+    let catalog = match souffle_lib::commands::get_transcription_catalog(state) {
+        Ok(catalog) => catalog,
+        Err(e) => {
+            eprintln!("Failed to load transcription catalog: {e}");
+            return;
+        }
+    };
+    let unload_timeout_minutes = settings_state
+        .borrow()
+        .as_ref()
+        .map(|s| s.model_unload_timeout_minutes)
+        .unwrap_or(0);
+    let unload_timeout_options =
+        souffle_lib::settings::SettingsOptions::current().model_unload_timeout_minutes;
+    model_ui::populate_options(
+        window,
+        &catalog,
+        unload_timeout_minutes,
+        &unload_timeout_options,
+    );
+    *model_options_state.borrow_mut() = model_ui::list_available_model_options(&catalog);
+
+    let selection = TranscriptionProfileSelection {
+        engine_id: catalog.selected_engine_id.clone(),
+        model_id: catalog.selected_model_id.clone(),
+        backend_id: catalog.selected_backend_id.clone(),
+    };
+    let state = handle.state::<AppState>();
+    match souffle_lib::commands::get_model_status(state, selection) {
+        Ok(status) => {
+            window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
+            window.set_settings_model_downloading(false);
+            window.set_settings_model_error_message("".into());
+        }
+        Err(e) => window.set_settings_model_error_message(e.into()),
+    }
+}
+
+fn load_audio_devices(
+    window: &MainWindow,
+    settings_state: &Rc<RefCell<Option<AppSettings>>>,
+    audio_devices_state: &Rc<RefCell<Vec<AudioInputDevice>>>,
+) {
+    let devices = souffle_lib::commands::list_audio_devices().unwrap_or_else(|e| {
+        eprintln!("Failed to list audio devices: {e}");
+        Vec::new()
+    });
+    let (selected, clamshell, priority) = {
+        let guard = settings_state.borrow();
+        match guard.as_ref() {
+            Some(settings) => (
+                settings.audio_device.clone().unwrap_or_default(),
+                settings.clamshell_audio_device.clone(),
+                settings.input_priority.clone(),
+            ),
+            None => return,
+        }
+    };
+    audio_ui::populate_device_pickers(window, &devices, &selected, clamshell.as_deref());
+    let list = microphone_list::build_microphone_list(&devices, &priority);
+    audio_ui::populate_microphones(window, &list);
+
+    let rate_uid = audio_ui::resolve_sample_rate_device_uid(&selected, &devices).map(String::from);
+    *audio_devices_state.borrow_mut() = devices;
+
+    window.set_settings_sample_rate_label("".into());
+    window.set_settings_sample_rate_high(false);
+    if let Some(uid) = rate_uid {
+        let weak = window.as_weak();
+        slint::spawn_local(async move {
+            if let Ok(hz) = souffle_lib::commands::get_input_sample_rate(uid).await
+                && let Some(window) = weak.upgrade()
+            {
+                window.set_settings_sample_rate_label(audio_ui::format_sample_rate_hz(hz).into());
+                window.set_settings_sample_rate_high(audio_ui::sample_rate_blocks_conferencing(hz));
+            }
+        })
+        .expect("slint event loop not running");
+    }
+}
+
 /// Loads (decodes + opens a paused output stream for) the first recorded
 /// session of `meeting_id`, if any - mirrors `getMeetingAudio` populating
 /// `MeetingAudioPlayerSection`. Multiple recording sessions (a meeting
@@ -483,6 +697,170 @@ fn live_segment_channel(weak: slint::Weak<MainWindow>) -> Channel<TranscriptionS
                 window.set_live_tentative("".into());
             } else {
                 window.set_live_tentative(segment.text.into());
+            }
+        });
+        Ok(())
+    })
+}
+
+/// Pushes each `OllamaPullProgress` update into the settings window's
+/// pull-status properties - same `Channel` + `invoke_from_event_loop`
+/// pattern as `live_segment_channel`, for the real download triggered by
+/// "Download recommended model" in the IA tab.
+fn ollama_pull_channel(
+    weak: slint::Weak<MainWindow>,
+) -> Channel<souffle_lib::summary::OllamaPullProgress> {
+    Channel::new(move |body| {
+        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+            return Ok(());
+        };
+        let Ok(progress) = serde_json::from_str::<souffle_lib::summary::OllamaPullProgress>(&json)
+        else {
+            return Ok(());
+        };
+        let weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let status = if let Some(total) = progress.total_bytes.filter(|t| *t > 0) {
+                format!(
+                    "{} \u{2014} {:.0}%",
+                    progress.status,
+                    (progress.downloaded_bytes as f64 / total as f64) * 100.0
+                )
+            } else {
+                progress.status.clone()
+            };
+            window.set_settings_ollama_pull_status(status.into());
+            if let Some(error) = progress.error {
+                window.set_settings_ollama_pull_error(error.into());
+            }
+        });
+        Ok(())
+    })
+}
+
+/// Drives one model transition (AC2): reads the real `get_model_status`,
+/// then either does nothing (Ready), loads in the background (LoadRequired),
+/// or starts a real tracked download that itself triggers the load once
+/// `DownloadStatus::Complete` arrives (DownloadRequired) - mirrors
+/// `selectModelOption()`'s `refreshRuntimeStatus()` branch, using the same
+/// commands, never a client-side re-derivation of the state machine.
+fn start_model_transition(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    selection: TranscriptionProfileSelection,
+) {
+    let state = handle.state::<AppState>();
+    let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
+        Ok(status) => status,
+        Err(e) => {
+            if let Some(window) = weak.upgrade() {
+                window.set_settings_model_error_message(e.into());
+            }
+            return;
+        }
+    };
+    let Some(window) = weak.upgrade() else {
+        return;
+    };
+    window.set_settings_model_error_message("".into());
+    match status.phase {
+        TranscriptionRuntimePhase::Ready => {
+            window.set_settings_model_status_text(model_ui::phase_label(status.phase).into());
+        }
+        TranscriptionRuntimePhase::LoadRequired => {
+            window.set_settings_model_status_text("Chargement\u{2026}".into());
+            load_model_in_background(weak, handle, selection);
+        }
+        TranscriptionRuntimePhase::DownloadRequired => {
+            window.set_settings_model_downloading(true);
+            window.set_settings_model_download_progress_label("".into());
+            window.set_settings_model_download_progress_fraction(0.0);
+            let state = handle.state::<AppState>();
+            let channel = model_download_channel(weak.clone(), handle.clone(), selection.clone());
+            if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
+                window.set_settings_model_downloading(false);
+                window.set_settings_model_error_message(e.into());
+            }
+        }
+    }
+}
+
+/// Off the Slint event-loop thread (weights loading takes seconds) - same
+/// `spawn_blocking` + await pattern `ensure_model_ready` already uses for
+/// the recording flow's own load step.
+fn load_model_in_background(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    selection: TranscriptionProfileSelection,
+) {
+    slint::spawn_local(async move {
+        let handle_for_load = handle.clone();
+        let selection_for_load = selection.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let state = handle_for_load.state::<AppState>();
+            souffle_lib::commands::load_model(state, selection_for_load)
+        })
+        .await
+        .map_err(|e| format!("Join load_model task: {e}"))
+        .and_then(|r| r);
+        if let Some(window) = weak.upgrade() {
+            match result {
+                Ok(()) => window.set_settings_model_status_text("Pr\u{ea}t".into()),
+                Err(e) => window.set_settings_model_error_message(e.into()),
+            }
+        }
+    })
+    .expect("slint event loop not running");
+}
+
+/// Pushes `DownloadProgress` updates into the model tab's progress
+/// properties, and triggers the load step itself once the download
+/// reports `Complete` - same `Channel` + `invoke_from_event_loop` pattern
+/// as `live_segment_channel`/`ollama_pull_channel`.
+fn model_download_channel(
+    weak: slint::Weak<MainWindow>,
+    handle: AppHandle,
+    selection: TranscriptionProfileSelection,
+) -> Channel<souffle_lib::models::DownloadProgress> {
+    Channel::new(move |body| {
+        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+            return Ok(());
+        };
+        let Ok(progress) = serde_json::from_str::<souffle_lib::models::DownloadProgress>(&json)
+        else {
+            return Ok(());
+        };
+        let weak = weak.clone();
+        let handle = handle.clone();
+        let selection = selection.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            match &progress.status {
+                souffle_lib::models::DownloadStatus::Starting
+                | souffle_lib::models::DownloadStatus::Downloading => {
+                    let fraction = progress
+                        .total_bytes
+                        .filter(|total| *total > 0)
+                        .map(|total| progress.downloaded_bytes as f32 / total as f32)
+                        .unwrap_or(0.0);
+                    window.set_settings_model_download_progress_fraction(fraction);
+                    window
+                        .set_settings_model_download_progress_label(progress.file.as_str().into());
+                }
+                souffle_lib::models::DownloadStatus::Complete => {
+                    window.set_settings_model_downloading(false);
+                    window.set_settings_model_status_text("Chargement\u{2026}".into());
+                    load_model_in_background(weak.clone(), handle.clone(), selection.clone());
+                }
+                souffle_lib::models::DownloadStatus::Error(e) => {
+                    window.set_settings_model_downloading(false);
+                    window.set_settings_model_error_message(e.as_str().into());
+                }
             }
         });
         Ok(())
@@ -871,6 +1249,1503 @@ fn wire_callbacks(window: &MainWindow, tauri_handle: AppHandle) {
         }
     });
 
+    // SOU-188: Settings shell. `settings_state` caches the full `AppSettings`
+    // struct while the sheet is open, since `save_settings` always writes
+    // the whole object back (matching `saveSettings()` in
+    // controller.svelte.ts) - every field-level callback below mutates this
+    // cache and re-saves it, it never redeclares state on the Slint side.
+    let settings_state: Rc<RefCell<Option<AppSettings>>> = Rc::new(RefCell::new(None));
+    let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    // Not part of `AppSettings` (see `get_shortcuts`/`save_shortcuts`), so it
+    // gets its own cache next to `settings_state` rather than folding into it.
+    let shortcuts_state: Rc<RefCell<Option<ShortcutSettings>>> = Rc::new(RefCell::new(None));
+    // The modifier text (e.g. "MetaLeft") of a bare modifier key press still
+    // waiting to see whether it is released alone (-> commit) or followed by
+    // a real key (-> that combo wins instead) - mirrors `modifierDownEvent`
+    // in controller.svelte.ts's `handleKeyDown`/`handleKeyUp`.
+    let pending_modifier: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    // Cached so device-picker/microphone-list callbacks (move/hide/remove,
+    // label->uid resolution) don't each re-query CoreAudio.
+    let audio_devices_state: Rc<RefCell<Vec<AudioInputDevice>>> = Rc::new(RefCell::new(Vec::new()));
+    // Cached so the model picker/download button don't each re-query Ollama.
+    let summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>> =
+        Rc::new(RefCell::new(None));
+    // Which summary template's name/prompt are shown in the edit fields -
+    // mirrors `editingTemplateId` in controller.svelte.ts (local UI state,
+    // not part of `AppSettings`).
+    let summary_template_editing: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+    // Cached so a model switch resolves the clicked label without re-querying
+    // the catalog (a pure static list, but avoids an extra command round trip
+    // on every pick).
+    let model_options_state: Rc<RefCell<Vec<model_ui::FlatModelOption>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    let snippets_list_state: Rc<RefCell<Vec<souffle_lib::db::snippets::SnippetEntry>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    // Which snippet is shown as an inline edit form - mirrors `editingId` in
+    // SnippetsSettingsSection.svelte (local UI state, not persisted).
+    let snippet_editing: Rc<RefCell<Option<i64>>> = Rc::new(RefCell::new(None));
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_open = settings_state.clone();
+    let shortcuts_state_for_open = shortcuts_state.clone();
+    let audio_devices_state_for_open = audio_devices_state.clone();
+    let summary_status_state_for_open = summary_status_state.clone();
+    let summary_template_editing_for_open = summary_template_editing.clone();
+    let model_options_state_for_open = model_options_state.clone();
+    let snippets_list_state_for_open = snippets_list_state.clone();
+    let snippet_editing_for_open = snippet_editing.clone();
+    let settings_log_timer_for_open = settings_log_timer.clone();
+    window.on_settings_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::get_settings(state) {
+            Ok(settings) => {
+                settings_ui::populate(&window, &settings);
+                data_ui::populate(&window, &settings);
+                *settings_state_for_open.borrow_mut() = Some(settings);
+                window.set_settings_open(true);
+                refresh_settings_log_tail(&window);
+                *settings_log_timer_for_open.borrow_mut() =
+                    Some(start_settings_log_timer(weak.clone()));
+            }
+            Err(e) => eprintln!("Failed to load settings: {e}"),
+        }
+        match souffle_lib::commands::get_data_stats(handle.state::<AppState>()) {
+            Ok(stats) => data_ui::populate_stats(&window, &stats),
+            Err(e) => eprintln!("Failed to load data stats: {e}"),
+        }
+        match souffle_lib::commands::get_mcp_setup_info() {
+            Ok(info) => data_ui::populate_mcp(&window, &info),
+            Err(e) => eprintln!("Failed to load MCP setup info: {e}"),
+        }
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::get_shortcuts(state) {
+            Ok(shortcuts) => {
+                let natives = souffle_lib::commands::get_native_shortcuts();
+                let tap_installed =
+                    souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
+                settings_ui::populate_shortcuts(&window, &shortcuts, &natives, tap_installed);
+                *shortcuts_state_for_open.borrow_mut() = Some(shortcuts);
+            }
+            Err(e) => eprintln!("Failed to load shortcuts: {e}"),
+        }
+        load_calendars_if_enabled(&window, &settings_state_for_open);
+        load_audio_devices(
+            &window,
+            &settings_state_for_open,
+            &audio_devices_state_for_open,
+        );
+        refresh_summary_providers(
+            weak.clone(),
+            handle.clone(),
+            settings_state_for_open.clone(),
+            summary_status_state_for_open.clone(),
+            summary_template_editing_for_open.clone(),
+        );
+        load_transcription_model_state(
+            &window,
+            &handle,
+            &settings_state_for_open,
+            &model_options_state_for_open,
+        );
+        match souffle_lib::commands::list_dictionary(handle.state::<AppState>()) {
+            Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+            Err(e) => eprintln!("Failed to load dictionary: {e}"),
+        }
+        *snippet_editing_for_open.borrow_mut() = None;
+        match souffle_lib::commands::list_snippets(handle.state::<AppState>()) {
+            Ok(entries) => {
+                lists_ui::populate_snippets(&window, &entries, None);
+                *snippets_list_state_for_open.borrow_mut() = entries;
+            }
+            Err(e) => eprintln!("Failed to load snippets: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let settings_log_timer_for_close = settings_log_timer.clone();
+    let pending_modifier_for_close = pending_modifier.clone();
+    window.on_settings_closed(move || {
+        *settings_log_timer_for_close.borrow_mut() = None;
+        *pending_modifier_for_close.borrow_mut() = None;
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_recording_field("".into());
+            window.set_settings_shortcut_error("".into());
+        }
+    });
+
+    // Mutates `settings_state`'s cached `AppSettings` with `mutate`, saves
+    // the whole object, and reports failure the same honest way every other
+    // command in this file does - `eprintln!`, no popup UI yet. On success
+    // the Slint property is left as the optimistic value the two-way
+    // binding already applied; on failure it stays optimistic too (matches
+    // `notes-changed`'s existing precedent in this file) since none of the
+    // fields wired so far can fail for a reason the user could act on.
+    fn save_settings_field(
+        handle: &AppHandle,
+        settings_state: &Rc<RefCell<Option<AppSettings>>>,
+        mutate: impl FnOnce(&mut AppSettings),
+    ) {
+        let mut guard = settings_state.borrow_mut();
+        let Some(settings) = guard.as_mut() else {
+            return;
+        };
+        mutate(settings);
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
+        {
+            eprintln!("Failed to save settings: {e}");
+        }
+    }
+
+    // Mirrors `applyShortcutValue()` + `saveShortcutSettings()`: writes
+    // `value` into the cached `ShortcutSettings` under `field` ("toggle" or
+    // "ptt"), saves the whole thing (this also re-registers the global
+    // shortcut and syncs the native modifier tap, see
+    // `commands::settings::save_shortcuts`), and always clears the
+    // recording UI state regardless of outcome - only the error banner
+    // differs between success and failure, matching the Svelte controller.
+    fn apply_shortcut(
+        handle: &AppHandle,
+        shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
+        window: &MainWindow,
+        field: &str,
+        value: String,
+    ) {
+        window.set_settings_recording_field("".into());
+        let mut guard = shortcuts_state.borrow_mut();
+        let Some(shortcuts) = guard.as_mut() else {
+            return;
+        };
+        match field {
+            "toggle" => shortcuts.toggle = value,
+            "ptt" => shortcuts.push_to_talk = value,
+            _ => return,
+        }
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::save_shortcuts(handle.clone(), state, shortcuts.clone()) {
+            Ok(()) => {
+                window.set_settings_shortcut_error("".into());
+                let natives = souffle_lib::commands::get_native_shortcuts();
+                let tap_installed =
+                    souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
+                settings_ui::populate_shortcuts(window, shortcuts, &natives, tap_installed);
+            }
+            Err(e) => window.set_settings_shortcut_error(e.into()),
+        }
+    }
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_autostart = settings_state.clone();
+    window.on_settings_autostart_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_autostart, |settings| {
+            settings.autostart_enabled = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_debug = settings_state.clone();
+    window.on_settings_debug_transcription_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_debug, |settings| {
+            settings.debug_transcription = enabled;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_log_level = settings_state.clone();
+    window.on_settings_log_level_changed(move |value| {
+        let level = settings_ui::log_level_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_log_level, |settings| {
+            settings.log_level = level;
+        });
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_log_level(value);
+        }
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_theme = settings_state.clone();
+    window.on_settings_theme_changed(move |value| {
+        let theme = settings_ui::theme_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_theme, |settings| {
+            settings.theme = theme;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_locale = settings_state.clone();
+    window.on_settings_locale_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_locale, |settings| {
+            settings.locale = value.to_string();
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_auto_paste = settings_state.clone();
+    window.on_settings_auto_paste_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_auto_paste, |settings| {
+            settings.auto_paste = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_paste_method = settings_state.clone();
+    window.on_settings_paste_method_changed(move |value| {
+        let method = settings_ui::paste_method_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_paste_method, |settings| {
+            settings.paste_method = method;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_paste_delay = settings_state.clone();
+    window.on_settings_paste_delay_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_paste_delay, |settings| {
+            settings.paste_delay_ms = value.max(0) as u64;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_pill_hidden = settings_state.clone();
+    window.on_settings_pill_hidden_changed(move |hidden| {
+        save_settings_field(&handle, &settings_state_for_pill_hidden, |settings| {
+            settings.pill_hidden = hidden;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_feedback_enabled = settings_state.clone();
+    window.on_settings_feedback_sounds_enabled_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_feedback_enabled, |settings| {
+            settings.feedback_sounds_enabled = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_feedback_volume = settings_state.clone();
+    window.on_settings_feedback_sounds_volume_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_feedback_volume, |settings| {
+            settings.feedback_sounds_volume = value.clamp(0, 100) as u32;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_calendar_enabled = settings_state.clone();
+    window.on_settings_calendar_enabled_changed(move |enabled| {
+        if !enabled {
+            save_settings_field(&handle, &settings_state_for_calendar_enabled, |settings| {
+                settings.calendar_integration_enabled = false;
+            });
+            if let Some(window) = weak.upgrade() {
+                settings_ui::populate_calendars(&window, &[], &[], PermState::Unknown);
+            }
+            return;
+        }
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let handle = handle.clone();
+        let settings_state = settings_state_for_calendar_enabled.clone();
+        // Not `tauri::async_runtime::spawn`: this closes over an
+        // `Rc<RefCell<..>>`, which is not `Send`. `request_permission`
+        // blocks on the native TCC prompt internally (off its own thread via
+        // `spawn_blocking`), so awaiting it on Slint's single-threaded local
+        // executor is exactly what it's for.
+        slint::spawn_local(async move {
+            let permission = souffle_lib::commands::request_permission(PermissionKind::Calendar)
+                .await
+                .unwrap_or(PermState::Denied);
+            if permission != PermState::Granted {
+                window.set_settings_calendar_enabled(false);
+                settings_ui::populate_calendars(&window, &[], &[], permission);
+                return;
+            }
+            save_settings_field(&handle, &settings_state, |settings| {
+                settings.calendar_integration_enabled = true;
+            });
+            window.set_settings_calendar_enabled(true);
+            let selected_ids = settings_state
+                .borrow()
+                .as_ref()
+                .map(|s| s.calendar_selected_ids.clone())
+                .unwrap_or_default();
+            match souffle_lib::calendar::list_calendars() {
+                Ok(list) => settings_ui::populate_calendars(
+                    &window,
+                    &list,
+                    &selected_ids,
+                    PermState::Granted,
+                ),
+                Err(_) => settings_ui::populate_calendars(&window, &[], &[], PermState::Denied),
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_calendar_autostart = settings_state.clone();
+    window.on_settings_calendar_autostart_enabled_changed(move |enabled| {
+        save_settings_field(
+            &handle,
+            &settings_state_for_calendar_autostart,
+            |settings| {
+                settings.calendar_autostart_enabled = enabled;
+            },
+        );
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_calendar_reminder = settings_state.clone();
+    window.on_settings_calendar_reminder_minutes_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_calendar_reminder, |settings| {
+            settings.calendar_reminder_minutes = value.clamp(1, 30) as u32;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_calendar_toggle = settings_state.clone();
+    window.on_settings_calendar_toggled(move |id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let model = window.get_settings_calendars();
+        let all_ids: Vec<String> = (0..model.row_count())
+            .filter_map(|i| model.row_data(i))
+            .map(|row| row.id.to_string())
+            .collect();
+        let mut guard = settings_state_for_calendar_toggle.borrow_mut();
+        let Some(settings) = guard.as_mut() else {
+            return;
+        };
+        let effective = if settings.calendar_selected_ids.is_empty() {
+            all_ids.clone()
+        } else {
+            settings.calendar_selected_ids.clone()
+        };
+        let id_string = id.to_string();
+        let mut next = effective.clone();
+        if let Some(pos) = next.iter().position(|existing| existing == &id_string) {
+            next.remove(pos);
+        } else {
+            next.push(id_string);
+        }
+        if next.is_empty() {
+            // Mirrors `toggleCalendarSelected()`: the last checked calendar
+            // cannot be unchecked.
+            return;
+        }
+        settings.calendar_selected_ids = if next.len() == all_ids.len() {
+            Vec::new()
+        } else {
+            next
+        };
+        let selected_ids = settings.calendar_selected_ids.clone();
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
+        {
+            eprintln!("Failed to save settings: {e}");
+        }
+        drop(guard);
+        match souffle_lib::calendar::list_calendars() {
+            Ok(calendars) => settings_ui::populate_calendars(
+                &window,
+                &calendars,
+                &selected_ids,
+                PermState::Granted,
+            ),
+            Err(_) => eprintln!("Failed to reload calendars after toggle"),
+        }
+    });
+
+    window.on_settings_calendar_open_system_settings_requested(move || {
+        souffle_lib::commands::open_calendar_settings();
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_device = settings_state.clone();
+    let audio_devices_state_for_device = audio_devices_state.clone();
+    window.on_settings_device_changed(move |label| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_device.borrow(), &label)
+            .unwrap_or_default();
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::select_audio_device(handle.clone(), state, uid.clone())
+        {
+            eprintln!("Failed to select audio device: {e}");
+        }
+        save_settings_field(&handle, &settings_state_for_device, |settings| {
+            settings.audio_device = if uid.is_empty() { None } else { Some(uid) };
+        });
+        load_audio_devices(
+            &window,
+            &settings_state_for_device,
+            &audio_devices_state_for_device,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_refresh = settings_state.clone();
+    let audio_devices_state_for_refresh = audio_devices_state.clone();
+    window.on_settings_refresh_devices_requested(move || {
+        if let Some(window) = weak.upgrade() {
+            load_audio_devices(
+                &window,
+                &settings_state_for_refresh,
+                &audio_devices_state_for_refresh,
+            );
+        }
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_bt = settings_state.clone();
+    window.on_settings_allow_bluetooth_mic_changed(move |allowed| {
+        save_settings_field(&handle, &settings_state_for_bt, |settings| {
+            settings.allow_bluetooth_mic = allowed;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_clamshell = settings_state.clone();
+    let audio_devices_state_for_clamshell = audio_devices_state.clone();
+    window.on_settings_clamshell_device_changed(move |label| {
+        let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_clamshell.borrow(), &label);
+        save_settings_field(&handle, &settings_state_for_clamshell, |settings| {
+            settings.clamshell_audio_device = uid;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_system_audio = settings_state.clone();
+    window.on_settings_capture_system_audio_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_system_audio, |settings| {
+            settings.capture_system_audio = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_meeting_lang = settings_state.clone();
+    window.on_settings_meeting_transcription_language_changed(move |value| {
+        let language = settings_ui::meeting_transcription_language_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_meeting_lang, |settings| {
+            settings.meeting_transcription_language = language;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_autostop_enabled = settings_state.clone();
+    window.on_settings_meeting_autostop_enabled_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_autostop_enabled, |settings| {
+            settings.meeting_autostop_enabled = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_autostop_minutes = settings_state.clone();
+    window.on_settings_meeting_autostop_changed(move |label| {
+        let Some(minutes) = audio_ui::parse_minute_label(&label) else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_autostop_minutes, |settings| {
+            settings.meeting_autostop_minutes = minutes;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_max_duration = settings_state.clone();
+    window.on_settings_meeting_max_duration_changed(move |label| {
+        let Some(minutes) = audio_ui::parse_minute_label(&label) else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_max_duration, |settings| {
+            settings.meeting_max_duration_minutes = minutes;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_vad = settings_state.clone();
+    window.on_settings_vad_enabled_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_vad, |settings| {
+            settings.vad_enabled = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_filler = settings_state.clone();
+    window.on_settings_filler_removal_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_filler, |settings| {
+            settings.filler_removal = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_stutter = settings_state.clone();
+    window.on_settings_stutter_collapse_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_stutter, |settings| {
+            settings.stutter_collapse = enabled;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_dictionary = settings_state.clone();
+    window.on_settings_dictionary_correction_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_dictionary, |settings| {
+            settings.dictionary_correction = enabled;
+        });
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_move = settings_state.clone();
+    let audio_devices_state_for_move = audio_devices_state.clone();
+    let handle = tauri_handle.clone();
+    window.on_settings_move_device_requested(move |uid, direction| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let devices = audio_devices_state_for_move.borrow().clone();
+        let mut guard = settings_state_for_move.borrow_mut();
+        let Some(settings) = guard.as_mut() else {
+            return;
+        };
+        let list = microphone_list::build_microphone_list(&devices, &settings.input_priority);
+        let Some(next) = microphone_list::reorder_microphone_list(&list, &uid, direction) else {
+            return;
+        };
+        settings.input_priority.priorities = next;
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
+        {
+            eprintln!("Failed to save settings: {e}");
+        }
+        drop(guard);
+        load_audio_devices(
+            &window,
+            &settings_state_for_move,
+            &audio_devices_state_for_move,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_hide = settings_state.clone();
+    let audio_devices_state_for_hide = audio_devices_state.clone();
+    let handle = tauri_handle.clone();
+    window.on_settings_toggle_hidden_requested(move |uid, hidden| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_hide, |settings| {
+            let hidden_set = &mut settings.input_priority.hidden;
+            hidden_set.retain(|existing| existing.as_str() != uid.as_str());
+            if hidden {
+                hidden_set.push(uid.to_string());
+            }
+        });
+        load_audio_devices(
+            &window,
+            &settings_state_for_hide,
+            &audio_devices_state_for_hide,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_remove = settings_state.clone();
+    let audio_devices_state_for_remove = audio_devices_state.clone();
+    let handle = tauri_handle.clone();
+    window.on_settings_remove_device_requested(move |uid| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        let mut guard = settings_state_for_remove.borrow_mut();
+        let Some(settings) = guard.as_mut() else {
+            return;
+        };
+        settings.input_priority =
+            microphone_list::remove_known_device(&settings.input_priority, &uid);
+        if settings.audio_device.as_deref() == Some(uid.as_str()) {
+            settings.audio_device = None;
+        }
+        if settings.clamshell_audio_device.as_deref() == Some(uid.as_str()) {
+            settings.clamshell_audio_device = None;
+        }
+        if let Err(e) =
+            souffle_lib::commands::save_settings(handle.clone(), state, settings.clone())
+        {
+            eprintln!("Failed to save settings: {e}");
+        }
+        drop(guard);
+        load_audio_devices(
+            &window,
+            &settings_state_for_remove,
+            &audio_devices_state_for_remove,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_reset_devices = settings_state.clone();
+    let audio_devices_state_for_reset_devices = audio_devices_state.clone();
+    let handle = tauri_handle.clone();
+    window.on_settings_reset_devices_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let connected = souffle_lib::commands::list_audio_devices().unwrap_or_default();
+        let connected_uids: Vec<String> = connected.iter().map(|d| d.uid.clone()).collect();
+        save_settings_field(&handle, &settings_state_for_reset_devices, |settings| {
+            settings
+                .input_priority
+                .priorities
+                .retain(|uid| connected_uids.contains(uid));
+            settings
+                .input_priority
+                .hidden
+                .retain(|uid| connected_uids.contains(uid));
+            settings
+                .input_priority
+                .known
+                .retain(|entry| connected_uids.contains(&entry.uid));
+        });
+        load_audio_devices(
+            &window,
+            &settings_state_for_reset_devices,
+            &audio_devices_state_for_reset_devices,
+        );
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_reset_rate = settings_state.clone();
+    let audio_devices_state_for_reset_rate = audio_devices_state.clone();
+    window.on_settings_reset_sample_rate_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let selected = settings_state_for_reset_rate
+            .borrow()
+            .as_ref()
+            .and_then(|s| s.audio_device.clone())
+            .unwrap_or_default();
+        let devices = audio_devices_state_for_reset_rate.borrow().clone();
+        let Some(uid) =
+            audio_ui::resolve_sample_rate_device_uid(&selected, &devices).map(String::from)
+        else {
+            return;
+        };
+        window.set_settings_resetting_sample_rate(true);
+        let weak = weak.clone();
+        slint::spawn_local(async move {
+            let result = souffle_lib::commands::reset_input_sample_rate(uid).await;
+            if let Some(window) = weak.upgrade() {
+                window.set_settings_resetting_sample_rate(false);
+                match result {
+                    Ok(hz) => {
+                        window.set_settings_sample_rate_label(
+                            audio_ui::format_sample_rate_hz(hz).into(),
+                        );
+                        window.set_settings_sample_rate_high(
+                            audio_ui::sample_rate_blocks_conferencing(hz),
+                        );
+                    }
+                    Err(e) => eprintln!("Failed to reset sample rate: {e}"),
+                }
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_retention = settings_state.clone();
+    window.on_settings_meeting_audio_retention_changed(move |value| {
+        let retention = data_ui::meeting_audio_retention_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_retention, |settings| {
+            settings.meeting_audio_retention = retention;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_settings_data_export_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        // Native macOS folder picker, not the `@tauri-apps/plugin-dialog`
+        // the Svelte version uses - see `data_section.slint`'s doc comment.
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg("POSIX path of (choose folder with prompt \"Choisir un dossier d'export\")")
+            .output();
+        let dir = match output {
+            Ok(out) if out.status.success() => {
+                String::from_utf8_lossy(&out.stdout).trim().to_string()
+            }
+            _ => return, // cancelled or picker failed
+        };
+        window.set_settings_data_exporting(true);
+        window.set_settings_data_export_status("".into());
+        let state = handle.state::<AppState>();
+        let result = souffle_lib::commands::export_archive(handle.clone(), state, dir.clone());
+        window.set_settings_data_exporting(false);
+        match result {
+            Ok(()) => window.set_settings_data_export_status(
+                format!("Export démarré vers {dir}. Il continue en arrière-plan.").into(),
+            ),
+            Err(e) => {
+                window.set_settings_data_export_status(e.into());
+                window.set_settings_data_export_status_is_error(true);
+                return;
+            }
+        }
+        window.set_settings_data_export_status_is_error(false);
+    });
+
+    window.on_settings_data_reveal_requested(move || {
+        if let Err(e) = souffle_lib::commands::reveal_data_dir() {
+            eprintln!("Failed to reveal data directory: {e}");
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_mcp_copy_desktop_snippet_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        copy_to_clipboard(&window.get_settings_mcp_claude_desktop_snippet());
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_mcp_copy_code_command_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        copy_to_clipboard(&window.get_settings_mcp_claude_code_command());
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_mcp_test_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_testing_mcp(true);
+        window.set_settings_mcp_test_status("".into());
+        match souffle_lib::commands::test_mcp_connection() {
+            Ok(tools) => {
+                window.set_settings_mcp_test_status(format!("Connexion réussie ({tools}).").into())
+            }
+            Err(e) => window.set_settings_mcp_test_status(e.into()),
+        }
+        window.set_settings_testing_mcp(false);
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_auto_update = settings_state.clone();
+    window.on_settings_auto_update_check_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_auto_update, |settings| {
+            settings.auto_update_check_enabled = enabled;
+        });
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_check_updates_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_checking_updates(true);
+        window.set_settings_update_status("".into());
+        slint::spawn_local(async move {
+            let result = souffle_lib::commands::check_for_updates().await;
+            window.set_settings_checking_updates(false);
+            match result {
+                Ok(update) => {
+                    let status = if let Some(err) = update.check_error {
+                        err
+                    } else if update.update_available {
+                        format!(
+                            "Mise à jour disponible : v{}",
+                            update.latest_version.unwrap_or_default()
+                        )
+                    } else {
+                        "À jour.".to_string()
+                    };
+                    window.set_settings_update_status(status.into());
+                }
+                Err(e) => window.set_settings_update_status(e.into()),
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_provider = settings_state.clone();
+    let summary_status_state_for_provider = summary_status_state.clone();
+    window.on_settings_summary_provider_changed(move |value| {
+        let provider = ia_ui::summary_provider_from_str(&value);
+        save_settings_field(&handle, &settings_state_for_provider, |settings| {
+            settings.summary_provider = provider;
+        });
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let guard = settings_state_for_provider.borrow();
+        let status_guard = summary_status_state_for_provider.borrow();
+        if let (Some(settings), Some(status)) = (guard.as_ref(), status_guard.as_ref()) {
+            ia_ui::populate_intelligence(&window, settings, status);
+            let provider_available = window.get_settings_summary_unusable_message().is_empty();
+            ia_ui::populate_dictation_polish(&window, settings, provider_available);
+        }
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_ollama_url = settings_state.clone();
+    window.on_settings_ollama_url_changed(move |value| {
+        save_settings_field(&handle, &settings_state_for_ollama_url, |settings| {
+            settings.ollama_url = value.to_string();
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_ollama_model = settings_state.clone();
+    let summary_status_state_for_ollama_model = summary_status_state.clone();
+    window.on_settings_ollama_model_changed(move |label| {
+        let Some(model_id) = summary_status_state_for_ollama_model
+            .borrow()
+            .as_ref()
+            .and_then(|status| ia_ui::resolve_summary_model_id(&status.models, &label))
+        else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_ollama_model, |settings| {
+            settings.ollama_model = model_id;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_retry = settings_state.clone();
+    let summary_status_state_for_retry = summary_status_state.clone();
+    let summary_template_editing_for_retry = summary_template_editing.clone();
+    window.on_settings_summary_providers_retry_requested(move || {
+        refresh_summary_providers(
+            weak.clone(),
+            handle.clone(),
+            settings_state_for_retry.clone(),
+            summary_status_state_for_retry.clone(),
+            summary_template_editing_for_retry.clone(),
+        );
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_pull = settings_state.clone();
+    let summary_status_state_for_pull = summary_status_state.clone();
+    let summary_template_editing_for_pull = summary_template_editing.clone();
+    window.on_settings_download_recommended_ollama_model_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_ollama_pulling(true);
+        window.set_settings_ollama_pull_error("".into());
+        let channel = ollama_pull_channel(weak.clone());
+        let weak = weak.clone();
+        let handle = handle.clone();
+        let settings_state_for_pull = settings_state_for_pull.clone();
+        let summary_status_state_for_pull = summary_status_state_for_pull.clone();
+        let summary_template_editing_for_pull = summary_template_editing_for_pull.clone();
+        slint::spawn_local(async move {
+            let state = handle.state::<AppState>();
+            let result = souffle_lib::commands::pull_recommended_ollama_model(state, channel).await;
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            window.set_settings_ollama_pulling(false);
+            match result {
+                Ok(_) => refresh_summary_providers(
+                    weak,
+                    handle,
+                    settings_state_for_pull,
+                    summary_status_state_for_pull,
+                    summary_template_editing_for_pull,
+                ),
+                Err(e) => window.set_settings_ollama_pull_error(e.into()),
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    window.on_settings_open_apple_intelligence_settings_requested(move || {
+        souffle_lib::commands::open_apple_intelligence_settings();
+    });
+
+    let handle = tauri_handle.clone();
+    let weak = window.as_weak();
+    let settings_state_for_polish_enabled = settings_state.clone();
+    window.on_settings_dictation_polish_enabled_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_polish_enabled, |settings| {
+            settings.dictation_polish_enabled = enabled;
+        });
+        if let Some(window) = weak.upgrade() {
+            let guard = settings_state_for_polish_enabled.borrow();
+            if let Some(settings) = guard.as_ref() {
+                let provider_available = window.get_settings_summary_unusable_message().is_empty();
+                ia_ui::populate_dictation_polish(&window, settings, provider_available);
+            }
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_polish_template = settings_state.clone();
+    window.on_settings_dictation_polish_template_changed(move |label| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let Some(template_id) = settings_state_for_polish_template
+            .borrow()
+            .as_ref()
+            .and_then(|settings| {
+                ia_ui::resolve_dictation_polish_id(&settings.dictation_polish_templates, &label)
+            })
+        else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_polish_template, |settings| {
+            settings.dictation_polish_template_id = template_id;
+        });
+        let guard = settings_state_for_polish_template.borrow();
+        if let Some(settings) = guard.as_ref() {
+            let provider_available = window.get_settings_summary_unusable_message().is_empty();
+            ia_ui::populate_dictation_polish(&window, settings, provider_available);
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_polish_prompt = settings_state.clone();
+    window.on_settings_dictation_polish_prompt_changed(move |text| {
+        save_settings_field(&handle, &settings_state_for_polish_prompt, |settings| {
+            let active_id = settings.dictation_polish_template_id.clone();
+            if let Some(template) = settings
+                .dictation_polish_templates
+                .iter_mut()
+                .find(|t| t.id == active_id)
+            {
+                template.prompt = text.to_string();
+            }
+        });
+        if let Some(window) = weak.upgrade() {
+            let guard = settings_state_for_polish_prompt.borrow();
+            if let Some(settings) = guard.as_ref() {
+                let provider_available = window.get_settings_summary_unusable_message().is_empty();
+                ia_ui::populate_dictation_polish(&window, settings, provider_available);
+            }
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_template_default = settings_state.clone();
+    let summary_template_editing_for_default = summary_template_editing.clone();
+    window.on_settings_summary_template_default_changed(move |label| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let Some(template_id) = settings_state_for_template_default
+            .borrow()
+            .as_ref()
+            .and_then(|settings| {
+                ia_ui::resolve_summary_template_id(&settings.summary_templates, &label)
+            })
+        else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_template_default, |settings| {
+            settings.default_summary_template_id = template_id;
+        });
+        let guard = settings_state_for_template_default.borrow();
+        if let Some(settings) = guard.as_ref() {
+            let editing_id = summary_template_editing_for_default.borrow().clone();
+            ia_ui::populate_summary_templates(&window, settings, &editing_id);
+        }
+    });
+
+    let weak = window.as_weak();
+    let settings_state_for_edit_target = settings_state.clone();
+    let summary_template_editing_for_edit_target = summary_template_editing.clone();
+    window.on_settings_summary_template_edit_target_changed(move |label| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let guard = settings_state_for_edit_target.borrow();
+        let Some(settings) = guard.as_ref() else {
+            return;
+        };
+        let Some(template_id) =
+            ia_ui::resolve_summary_template_id(&settings.summary_templates, &label)
+        else {
+            return;
+        };
+        *summary_template_editing_for_edit_target.borrow_mut() = template_id.clone();
+        ia_ui::populate_summary_templates(&window, settings, &template_id);
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_template_delete = settings_state.clone();
+    let summary_template_editing_for_delete = summary_template_editing.clone();
+    window.on_settings_summary_template_delete_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut editing_id = summary_template_editing_for_delete.borrow().clone();
+        if editing_id.is_empty() {
+            editing_id = settings_state_for_template_delete
+                .borrow()
+                .as_ref()
+                .map(|s| s.default_summary_template_id.clone())
+                .unwrap_or_default();
+        }
+        if editing_id.is_empty() || ia_ui::is_builtin_summary_template(&editing_id) {
+            return;
+        }
+        save_settings_field(&handle, &settings_state_for_template_delete, |settings| {
+            settings.summary_templates.retain(|t| t.id != editing_id);
+            if settings.default_summary_template_id == editing_id {
+                settings.default_summary_template_id = settings
+                    .summary_templates
+                    .first()
+                    .map(|t| t.id.clone())
+                    .unwrap_or_else(|| "default".to_string());
+            }
+        });
+        *summary_template_editing_for_delete.borrow_mut() = String::new();
+        let guard = settings_state_for_template_delete.borrow();
+        if let Some(settings) = guard.as_ref() {
+            ia_ui::populate_summary_templates(&window, settings, "");
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_template_name = settings_state.clone();
+    let summary_template_editing_for_name = summary_template_editing.clone();
+    window.on_settings_summary_template_name_changed(move |text| {
+        let editing_id = summary_template_editing_for_name.borrow().clone();
+        save_settings_field(&handle, &settings_state_for_template_name, |settings| {
+            if let Some(template) = settings
+                .summary_templates
+                .iter_mut()
+                .find(|t| t.id == editing_id)
+            {
+                template.name = text.to_string();
+            }
+        });
+        if let Some(window) = weak.upgrade() {
+            let guard = settings_state_for_template_name.borrow();
+            if let Some(settings) = guard.as_ref() {
+                let editing_id = summary_template_editing_for_name.borrow().clone();
+                ia_ui::populate_summary_templates(&window, settings, &editing_id);
+            }
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_template_prompt = settings_state.clone();
+    let summary_template_editing_for_prompt = summary_template_editing.clone();
+    window.on_settings_summary_template_prompt_changed(move |text| {
+        let editing_id = summary_template_editing_for_prompt.borrow().clone();
+        save_settings_field(&handle, &settings_state_for_template_prompt, |settings| {
+            if let Some(template) = settings
+                .summary_templates
+                .iter_mut()
+                .find(|t| t.id == editing_id)
+            {
+                template.prompt = text.to_string();
+            }
+        });
+        if let Some(window) = weak.upgrade() {
+            let guard = settings_state_for_template_prompt.borrow();
+            if let Some(settings) = guard.as_ref() {
+                let editing_id = summary_template_editing_for_prompt.borrow().clone();
+                ia_ui::populate_summary_templates(&window, settings, &editing_id);
+            }
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_template_add = settings_state.clone();
+    let summary_template_editing_for_add = summary_template_editing.clone();
+    window.on_settings_summary_template_add_requested(move |name| {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let new_id_for_editing = new_id.clone();
+        save_settings_field(&handle, &settings_state_for_template_add, |settings| {
+            let base_prompt = settings
+                .summary_templates
+                .iter()
+                .find(|t| t.id == "default")
+                .map(|t| t.prompt.clone())
+                .unwrap_or_default();
+            settings
+                .summary_templates
+                .push(souffle_lib::settings::SummaryTemplate {
+                    id: new_id.clone(),
+                    name: name.clone(),
+                    prompt: base_prompt,
+                });
+        });
+        *summary_template_editing_for_add.borrow_mut() = new_id_for_editing.clone();
+        if let Some(window) = weak.upgrade() {
+            let guard = settings_state_for_template_add.borrow();
+            if let Some(settings) = guard.as_ref() {
+                ia_ui::populate_summary_templates(&window, settings, &new_id_for_editing);
+            }
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_state_for_model = settings_state.clone();
+    let model_options_state_for_model = model_options_state.clone();
+    window.on_settings_model_changed(move |label| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        if window.get_recording_mode() != RecordingMode::Idle {
+            window.set_settings_model_error_message(
+                "Impossible de changer de modèle pendant un enregistrement.".into(),
+            );
+            // Unlike the Svelte version's `finally { target.value =
+            // selectedKey; }`, the combobox's own displayed value is not
+            // forced back here: Slint's binding only reasserts on a real
+            // value change, and the rejected pick never became the real
+            // selection. Documented known gap - the error message above is
+            // the source of truth, the visible combobox label may lag it
+            // until the next real selection.
+            return;
+        }
+        let Some(option) = model_ui::find_option(&model_options_state_for_model.borrow(), &label)
+            .map(|o| {
+                (
+                    o.engine_id.clone(),
+                    o.model_id.clone(),
+                    o.backend_id.clone(),
+                    o.selection(),
+                )
+            })
+        else {
+            return;
+        };
+        let (engine_id, model_id, backend_id, selection) = option;
+        save_settings_field(&handle, &settings_state_for_model, |settings| {
+            settings.transcription_engine_id = engine_id;
+            settings.transcription_model_id = model_id;
+            settings.transcription_backend_id = backend_id;
+        });
+        window.set_settings_selected_model_label(label);
+        start_model_transition(weak.clone(), handle.clone(), selection);
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_unload_timeout = settings_state.clone();
+    window.on_settings_unload_timeout_changed(move |label| {
+        let Some(minutes) = model_ui::parse_unload_timeout_label(&label) else {
+            return;
+        };
+        save_settings_field(&handle, &settings_state_for_unload_timeout, |settings| {
+            settings.model_unload_timeout_minutes = minutes;
+        });
+    });
+
+    let handle = tauri_handle.clone();
+    let settings_state_for_learn = settings_state.clone();
+    window.on_settings_dictation_learn_from_edit_changed(move |enabled| {
+        save_settings_field(&handle, &settings_state_for_learn, |settings| {
+            settings.dictation_learn_from_edit = enabled;
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_settings_dictionary_add_requested(move |term, pronunciation, category| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
+        let category = (!category.is_empty()).then(|| category.to_string());
+        if let Err(e) = souffle_lib::commands::add_dictionary_entry(
+            state,
+            term.to_string(),
+            pronunciation,
+            category,
+        ) {
+            window.set_settings_dictionary_add_error(e.into());
+            return;
+        }
+        window.set_settings_dictionary_add_error("".into());
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_dictionary(state) {
+            Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+            Err(e) => eprintln!("Failed to reload dictionary: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_settings_dictionary_delete_requested(move |id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) = souffle_lib::commands::delete_dictionary_entry(state, id as i64) {
+            eprintln!("Failed to delete dictionary entry: {e}");
+            return;
+        }
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_dictionary(state) {
+            Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+            Err(e) => eprintln!("Failed to reload dictionary: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let snippets_list_state_for_add = snippets_list_state.clone();
+    window.on_settings_snippet_add_requested(move |trigger, expansion| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) = souffle_lib::commands::add_snippet(state, &trigger, &expansion) {
+            window.set_settings_snippet_add_error(e.into());
+            return;
+        }
+        window.set_settings_snippet_add_error("".into());
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_snippets(state) {
+            Ok(entries) => {
+                lists_ui::populate_snippets(&window, &entries, None);
+                *snippets_list_state_for_add.borrow_mut() = entries;
+            }
+            Err(e) => eprintln!("Failed to reload snippets: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let snippets_list_state_for_delete = snippets_list_state.clone();
+    let snippet_editing_for_delete = snippet_editing.clone();
+    window.on_settings_snippet_delete_requested(move |id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) = souffle_lib::commands::delete_snippet(state, id as i64) {
+            eprintln!("Failed to delete snippet: {e}");
+            return;
+        }
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_snippets(state) {
+            Ok(entries) => {
+                let editing = *snippet_editing_for_delete.borrow();
+                lists_ui::populate_snippets(&window, &entries, editing);
+                *snippets_list_state_for_delete.borrow_mut() = entries;
+            }
+            Err(e) => eprintln!("Failed to reload snippets: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    let snippets_list_state_for_edit = snippets_list_state.clone();
+    let snippet_editing_for_edit = snippet_editing.clone();
+    window.on_settings_snippet_edit_requested(move |id| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let id = id as i64;
+        let entries = snippets_list_state_for_edit.borrow();
+        let Some(entry) = entries.iter().find(|e| e.id == id) else {
+            return;
+        };
+        window.set_settings_edit_snippet_trigger_draft(entry.trigger.as_str().into());
+        window.set_settings_edit_snippet_expansion_draft(entry.expansion.as_str().into());
+        window.set_settings_snippet_update_error("".into());
+        *snippet_editing_for_edit.borrow_mut() = Some(id);
+        lists_ui::populate_snippets(&window, &entries, Some(id));
+    });
+
+    let weak = window.as_weak();
+    let snippets_list_state_for_cancel = snippets_list_state.clone();
+    let snippet_editing_for_cancel = snippet_editing.clone();
+    window.on_settings_snippet_cancel_edit_requested(move || {
+        *snippet_editing_for_cancel.borrow_mut() = None;
+        if let Some(window) = weak.upgrade() {
+            let entries = snippets_list_state_for_cancel.borrow();
+            lists_ui::populate_snippets(&window, &entries, None);
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let snippets_list_state_for_save = snippets_list_state.clone();
+    let snippet_editing_for_save = snippet_editing.clone();
+    window.on_settings_snippet_save_edit_requested(move |id, trigger, expansion| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) =
+            souffle_lib::commands::update_snippet(state, id as i64, &trigger, &expansion)
+        {
+            window.set_settings_snippet_update_error(e.into());
+            return;
+        }
+        window.set_settings_snippet_update_error("".into());
+        *snippet_editing_for_save.borrow_mut() = None;
+        let state = handle.state::<AppState>();
+        match souffle_lib::commands::list_snippets(state) {
+            Ok(entries) => {
+                lists_ui::populate_snippets(&window, &entries, None);
+                *snippets_list_state_for_save.borrow_mut() = entries;
+            }
+            Err(e) => eprintln!("Failed to reload snippets: {e}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_settings_shortcut_record_requested(move |field| {
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_recording_field(field);
+            window.set_settings_shortcut_error("".into());
+        }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let shortcuts_state_for_capture = shortcuts_state.clone();
+    let pending_modifier_for_capture = pending_modifier.clone();
+    window.on_settings_shortcut_captured(move |field, text, ctrl, shift, alt, meta| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let modifiers = shortcut_capture::Modifiers {
+            control: ctrl,
+            shift,
+            alt,
+            meta,
+        };
+        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
+            // Wait for the matching key-released event (see
+            // `on_settings_shortcut_released`) instead of committing now -
+            // a real key pressed while this is still held wins instead.
+            *pending_modifier_for_capture.borrow_mut() = Some(name.to_string());
+            return;
+        }
+        *pending_modifier_for_capture.borrow_mut() = None;
+        if shortcut_capture::missing_modifier(&text, modifiers) {
+            window.set_settings_shortcut_error(
+                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
+            );
+            return;
+        }
+        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+            return;
+        };
+        apply_shortcut(&handle, &shortcuts_state_for_capture, &window, &field, value);
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let shortcuts_state_for_release = shortcuts_state.clone();
+    let pending_modifier_for_release = pending_modifier.clone();
+    window.on_settings_shortcut_released(move |field, text, _ctrl, _shift, _alt, _meta| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+            return;
+        };
+        let mut pending = pending_modifier_for_release.borrow_mut();
+        if pending.as_deref() != Some(name) {
+            return;
+        }
+        *pending = None;
+        drop(pending);
+        apply_shortcut(
+            &handle,
+            &shortcuts_state_for_release,
+            &window,
+            &field,
+            name.to_string(),
+        );
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let shortcuts_state_for_clear = shortcuts_state.clone();
+    let pending_modifier_for_clear = pending_modifier.clone();
+    window.on_settings_shortcut_cleared(move |field| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        *pending_modifier_for_clear.borrow_mut() = None;
+        apply_shortcut(
+            &handle,
+            &shortcuts_state_for_clear,
+            &window,
+            &field,
+            String::new(),
+        );
+    });
+
+    let weak = window.as_weak();
+    let pending_modifier_for_cancel = pending_modifier.clone();
+    window.on_settings_shortcut_cancelled(move || {
+        *pending_modifier_for_cancel.borrow_mut() = None;
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_recording_field("".into());
+            window.set_settings_shortcut_error("".into());
+        }
+    });
+
+    window.on_settings_permissions_review_requested(move || {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security")
+            .spawn();
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_settings_copy_diagnostics_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_copying_diagnostics(true);
+        let state = handle.state::<AppState>();
+        let text = souffle_lib::commands::get_diagnostics_text(state);
+        window.set_settings_copying_diagnostics(false);
+        match text {
+            Ok(text) => copy_to_clipboard(&text),
+            Err(e) => eprintln!("Failed to build diagnostics text: {e}"),
+        }
+    });
+
     let weak = window.as_weak();
     window.on_dismiss_transcription_status(move || {
         if let Some(window) = weak.upgrade() {
@@ -905,6 +2780,7 @@ fn main() {
         }
         Err(e) => eprintln!("Failed to load shortcuts: {e}"),
     }
+    window.set_settings_app_version(souffle_lib::commands::get_app_version().version.into());
 
     refresh_timeline(&window, &tauri_handle);
     wire_callbacks(&window, tauri_handle);

@@ -1,0 +1,127 @@
+import { Switch, LineEdit, Button } from "std-widgets.slint";
+import { SettingsField } from "settings_field.slint";
+
+// Port of DictionarySettingsSection.svelte. Simplified: aliases (comma-
+// separated pronunciations) show as plain text per entry rather than
+// individually removable chips - add/delete/list are the real thing
+// against the dictionary DB, this only drops the one-alias-at-a-time
+// removal affordance (documented gap, not a placeholder).
+export struct DictionaryRow {
+    id: int,
+    term: string,
+    aliases-display: string,
+    category: string,
+}
+
+export component DictionarySection inherits VerticalLayout {
+    in property <bool> learn-from-edit;
+    in property <[DictionaryRow]> entries;
+    in-out property <string> new-term-draft: "";
+    in-out property <string> new-pronunciation-draft: "";
+    in-out property <string> new-category-draft: "";
+    in property <string> add-error;
+
+    callback learn-from-edit-changed(bool);
+    callback add-requested(string, string, string);
+    callback delete-requested(int);
+
+    spacing: 10px;
+
+    Text {
+        text: "Dictionnaire";
+        font-size: 13.5px;
+        font-weight: 700;
+        color: white;
+    }
+
+    SettingsField {
+        label: "Apprentissage depuis les corrections";
+        description: "Ajouter automatiquement une correction faite dans une transcription au dictionnaire.";
+
+        Switch {
+            checked: root.learn-from-edit;
+            toggled => { root.learn-from-edit-changed(self.checked); }
+        }
+    }
+
+    Text {
+        text: "Termes techniques, noms propres ou acronymes mal reconnus.";
+        font-size: 11.5px;
+        color: #999;
+        wrap: word-wrap;
+    }
+
+    HorizontalLayout {
+        spacing: 6px;
+
+        VerticalLayout {
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: "Terme"; font-size: 10.5px; color: #999; }
+            LineEdit { text <=> root.new-term-draft; }
+        }
+        VerticalLayout {
+            spacing: 2px;
+            Text { text: "Prononciation"; font-size: 10.5px; color: #999; }
+            LineEdit { text <=> root.new-pronunciation-draft; width: 110px; }
+        }
+        VerticalLayout {
+            spacing: 2px;
+            Text { text: "Catégorie"; font-size: 10.5px; color: #999; }
+            LineEdit { text <=> root.new-category-draft; width: 100px; }
+        }
+        Button {
+            text: "Ajouter";
+            enabled: root.new-term-draft != "";
+            clicked => {
+                root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
+                root.new-term-draft = "";
+                root.new-pronunciation-draft = "";
+                root.new-category-draft = "";
+            }
+        }
+    }
+
+    if root.add-error != "": Text {
+        text: root.add-error;
+        color: #f08080;
+        font-size: 11px;
+    }
+
+    if root.entries.length == 0: Text {
+        text: "Aucune entrée.";
+        color: #999;
+        font-size: 11.5px;
+    }
+
+    for row in root.entries: Rectangle {
+        border-width: 1px;
+        border-color: #3a3a3a;
+
+        HorizontalLayout {
+            padding: 8px;
+            spacing: 8px;
+            alignment: space-between;
+
+            VerticalLayout {
+                spacing: 1px;
+                horizontal-stretch: 1;
+                Text {
+                    text: row.term + (row.aliases-display == "" ? "" : "  (" + row.aliases-display + ")");
+                    font-size: 12.5px;
+                    color: white;
+                    wrap: word-wrap;
+                }
+                if row.category != "": Text {
+                    text: row.category;
+                    font-size: 10.5px;
+                    color: #999;
+                }
+            }
+            Button {
+                text: "Supprimer";
+                clicked => { root.delete-requested(row.id); }
+            }
+        }
+    }
+}

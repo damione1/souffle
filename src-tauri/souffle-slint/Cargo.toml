@@ -26,6 +26,13 @@ cpal = "0.17"
 # tree"): the recording backend is built on tauri::State/AppHandle, so the
 # headless bridge needs the `Manager` trait here too. Closed by SOU-191.
 tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png", "protocol-asset"] }
+# SOU-188: native clipboard write for "Copy diagnostics" - same crate/version
+# the main `souffle` crate already uses (src/clipboard.rs), no webview
+# clipboard API to fall back on here.
+arboard = "3.6"
+# SOU-188: new custom summary-template/dictionary-entry/snippet ids, same
+# crate/version the main `souffle` crate already uses (src/state.rs).
+uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
 slint-build = "1.9"
