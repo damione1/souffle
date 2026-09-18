@@ -2,6 +2,7 @@ import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
+import { StatusIndicator } from "status_indicator.slint";
 
 // Port of ModelSettingsSection.svelte. The download/switch state machine
 // itself is not reimplemented here (AC2): it stays entirely in Rust
@@ -10,6 +11,7 @@ import { ThemedComboBox } from "../themed_combo.slint";
 // displays whatever state Rust pushes and forwards the chosen label back.
 export component ModelSection inherits VerticalLayout {
     in property <string> status-text;
+    in property <bool> ready;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
     in property <bool> busy;
@@ -34,24 +36,9 @@ export component ModelSection inherits VerticalLayout {
         label: "Modèle de transcription";
         description: "Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne sur ce Mac.";
 
-        HorizontalLayout {
-            spacing: 6px;
-            alignment: center;
-            horizontal-stretch: 0;
-            vertical-stretch: 0;
-            Rectangle {
-                width: 8px;
-                height: 8px;
-                border-radius: 4px;
-                background: root.status-text == "Prêt" ? Theme.accent : Theme.warning;
-                vertical-stretch: 0;
-            }
-            Text {
-                text: root.status-text;
-                font-size: 12px;
-                color: Theme.text-secondary;
-                vertical-alignment: center;
-            }
+        StatusIndicator {
+            text: root.status-text;
+            indicator-color: root.ready ? Theme.accent : Theme.warning;
         }
     }
 

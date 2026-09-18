@@ -5,7 +5,7 @@ import { Theme } from "../theme.slint";
 // this instead.
 export component ThemedTextArea inherits Rectangle {
     in-out property <string> text;
-    in property <length> area-height: 72px;
+    in property <length> area-height: 140px;
     in property <bool> enabled: true;
     in property <string> placeholder: "";
     in property <string> control-label: root.placeholder;
@@ -13,6 +13,7 @@ export component ThemedTextArea inherits Rectangle {
     callback edited(string);
 
     height: root.area-height;
+    min-width: 240px;
     vertical-stretch: 0;
     clip: true;
     border-radius: 4px;
@@ -20,6 +21,7 @@ export component ThemedTextArea inherits Rectangle {
     border-color: input.has-focus ? Theme.accent.with-alpha(0.45) : Theme.ghost-border;
     background: Theme.input;
     opacity: root.enabled ? 1.0 : 0.5;
+    forward-focus: input;
 
     Flickable {
         x: 12px;
@@ -41,10 +43,20 @@ export component ThemedTextArea inherits Rectangle {
             accessible-label: root.control-label;
             edited => { root.edited(self.text); }
             cursor-position-changed(position) => {
-                if position.y < parent.viewport-y {
-                    parent.viewport-y = max(0px, position.y - 4px);
-                } else if position.y + self.font-size * 1.5 > parent.viewport-y + parent.height {
-                    parent.viewport-y = max(0px, min(parent.viewport-height - parent.height, position.y + self.font-size * 1.5 - parent.height));
+                // Slint's viewport-y is the translation applied to the
+                // content: 0px is the top and scrolling down makes it
+                // negative. Convert it to a positive visible offset only for
+                // the caret math, then write the clamped negative translation.
+                if position.y < -parent.viewport-y {
+                    parent.viewport-y = -max(0px, min(
+                        max(0px, parent.viewport-height - parent.height),
+                        position.y - 4px
+                    ));
+                } else if position.y + self.font-size * 1.5 > -parent.viewport-y + parent.height {
+                    parent.viewport-y = -max(0px, min(
+                        max(0px, parent.viewport-height - parent.height),
+                        position.y + self.font-size * 1.5 - parent.height
+                    ));
                 }
             }
         }

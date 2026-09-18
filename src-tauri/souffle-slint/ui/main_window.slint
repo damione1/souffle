@@ -70,6 +70,7 @@ export component MainWindow inherits Window {
     in-out property <string> live-tentative;
     in-out property <string> live-me-text;
     in-out property <string> live-them-text;
+    in-out property <string> dictation-recovery-text;
     in-out property <SpeakerRole> live-tentative-speaker: SpeakerRole.me;
     in-out property <bool> live-tentative-has-speaker: false;
     in property <float> audio-level: 0.0;
@@ -207,13 +208,13 @@ export component MainWindow inherits Window {
     in property <bool> settings-dictation-polish-provider-available;
     in property <[string]> settings-dictation-polish-template-labels;
     in property <string> settings-active-dictation-polish-label;
-    in property <string> settings-active-dictation-polish-prompt;
+    in-out property <string> settings-active-dictation-polish-prompt;
     in property <[string]> settings-summary-template-labels;
     in property <string> settings-default-summary-template-label;
     in property <string> settings-editing-summary-template-label;
     in property <bool> settings-editing-summary-template-is-builtin;
     in property <string> settings-editing-summary-template-name;
-    in property <string> settings-editing-summary-template-prompt;
+    in-out property <string> settings-editing-summary-template-prompt;
     in property <string> settings-model-status-text;
     in property <[string]> settings-model-labels;
     in property <string> settings-selected-model-label;
@@ -323,12 +324,15 @@ export component MainWindow inherits Window {
     callback filter-changed(TimelineFilter);
     callback search-changed(string);
     callback dismiss-transcription-status();
+    callback copy-dictation-recovery();
+    callback discard-dictation-recovery();
     callback dismiss-meeting-status();
     callback timeline-item-opened(TimelineKind, string);
     callback timeline-item-removed(TimelineKind, string);
     callback timeline-item-copy-requested(string);
     callback calendar-event-start-requested(string);
     callback stop-requested();
+    callback cancel-dictation-requested();
     callback meeting-detail-back();
     callback meeting-detail-rename(string);
     callback meeting-detail-notes-changed(string);
@@ -447,6 +451,7 @@ export component MainWindow inherits Window {
         search-query <=> root.search-query;
         kind-filter: root.kind-filter;
         transcription-status-message: root.transcription-status-message;
+        dictation-recovery-text <=> root.dictation-recovery-text;
         meeting-status-message: root.meeting-status-message;
         timeline-groups: root.timeline-groups;
         timeline-is-empty: root.timeline-is-empty;
@@ -461,6 +466,8 @@ export component MainWindow inherits Window {
         filter-changed(kind) => { root.filter-changed(kind); }
         search-changed(query) => { root.search-changed(query); }
         dismiss-transcription-status => { root.dismiss-transcription-status(); }
+        copy-dictation-recovery => { root.copy-dictation-recovery(); }
+        discard-dictation-recovery => { root.discard-dictation-recovery(); }
         dismiss-meeting-status => { root.dismiss-meeting-status(); }
         timeline-item-opened(kind, id) => { root.timeline-item-opened(kind, id); }
         timeline-item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
@@ -618,14 +625,15 @@ export component MainWindow inherits Window {
         dictation-polish-provider-available: root.settings-dictation-polish-provider-available;
         dictation-polish-template-labels: root.settings-dictation-polish-template-labels;
         active-dictation-polish-label: root.settings-active-dictation-polish-label;
-        active-dictation-polish-prompt: root.settings-active-dictation-polish-prompt;
+        active-dictation-polish-prompt <=> root.settings-active-dictation-polish-prompt;
         summary-template-labels: root.settings-summary-template-labels;
         default-summary-template-label: root.settings-default-summary-template-label;
         editing-summary-template-label: root.settings-editing-summary-template-label;
         editing-summary-template-is-builtin: root.settings-editing-summary-template-is-builtin;
         editing-summary-template-name: root.settings-editing-summary-template-name;
-        editing-summary-template-prompt: root.settings-editing-summary-template-prompt;
+        editing-summary-template-prompt <=> root.settings-editing-summary-template-prompt;
         model-status-text: root.settings-model-status-text;
+        model-ready: root.model-ready;
         model-labels: root.settings-model-labels;
         selected-model-label: root.settings-selected-model-label;
         model-busy: root.settings-model-busy;

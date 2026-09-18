@@ -52,7 +52,8 @@ pub(crate) fn is_context_overflow(error: &str) -> bool {
 /// Deterministic failures repeat on an identical retry; everything else
 /// (timeouts, rate limiting, transient model/asset hiccups) gets one retry.
 fn is_retryable(error: &str) -> bool {
-    !(error.contains(GUARDRAIL_MARKER)
+    !(apple_intelligence::is_terminal_helper_error(error)
+        || error.contains(GUARDRAIL_MARKER)
         || error.contains(UNSUPPORTED_LANGUAGE_MARKER)
         || is_context_overflow(error))
 }
@@ -233,6 +234,7 @@ mod tests {
             "guardrail_violation: safety filter",
             "unsupported_language: locale",
             "exceeded_context_window: 4096 tokens",
+            crate::apple_intelligence::HELPER_TIMEOUT_PREFIX,
         ] {
             let attempts = Arc::new(AtomicU32::new(0));
             let counter = attempts.clone();
@@ -258,5 +260,8 @@ mod tests {
         assert!(is_retryable("some opaque transient failure"));
         assert!(!is_retryable("guardrail_violation: refused"));
         assert!(!is_retryable("exceeded_context_window: too big"));
+        assert!(!is_retryable(
+            crate::apple_intelligence::HELPER_TIMEOUT_PREFIX
+        ));
     }
 }

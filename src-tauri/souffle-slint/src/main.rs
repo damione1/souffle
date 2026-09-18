@@ -817,11 +817,44 @@ fn live_segment_channel(weak: slint::Weak<MainWindow>) -> ProgressChannel<Transc
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct DictationTextBuffers {
+    live: String,
+    tentative: String,
+    me: String,
+    them: String,
+    recovery: String,
+}
+
+fn reset_live_buffers(mut buffers: DictationTextBuffers) -> DictationTextBuffers {
+    buffers.live.clear();
+    buffers.tentative.clear();
+    buffers.me.clear();
+    buffers.them.clear();
+    buffers
+}
+
+fn merge_recovery_text(existing: &str, incoming: &str) -> String {
+    match (existing.trim(), incoming.trim()) {
+        ("", incoming) => incoming.to_string(),
+        (existing, "") => existing.to_string(),
+        (existing, incoming) => format!("{existing}\n\n——\n\n{incoming}"),
+    }
+}
+
 fn clear_live_transcript(window: &MainWindow) {
-    window.set_live_text("".into());
-    window.set_live_tentative("".into());
-    window.set_live_me_text("".into());
-    window.set_live_them_text("".into());
+    let buffers = reset_live_buffers(DictationTextBuffers {
+        live: window.get_live_text().to_string(),
+        tentative: window.get_live_tentative().to_string(),
+        me: window.get_live_me_text().to_string(),
+        them: window.get_live_them_text().to_string(),
+        recovery: window.get_dictation_recovery_text().to_string(),
+    });
+    window.set_live_text(buffers.live.into());
+    window.set_live_tentative(buffers.tentative.into());
+    window.set_live_me_text(buffers.me.into());
+    window.set_live_them_text(buffers.them.into());
+    window.set_dictation_recovery_text(buffers.recovery.into());
     window.set_live_tentative_has_speaker(false);
 }
 
@@ -1077,6 +1110,29 @@ async fn stop_dictation(handle: AppHandle) -> Result<(), String> {
     souffle_lib::commands::stop_transcription(handle).await
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DictationEndIntent {
+    Finalize,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DictationTranscriptDisposition {
+    Clear,
+    RetainForRecovery,
+}
+
+fn dictation_transcript_disposition(
+    intent: DictationEndIntent,
+    succeeded: bool,
+) -> DictationTranscriptDisposition {
+    match intent {
+        DictationEndIntent::Finalize if succeeded => DictationTranscriptDisposition::Clear,
+        DictationEndIntent::Finalize => DictationTranscriptDisposition::RetainForRecovery,
+        DictationEndIntent::Cancel => DictationTranscriptDisposition::Clear,
+    }
+}
+
 async fn stop_meeting(handle: AppHandle) -> Result<String, String> {
     souffle_lib::commands::stop_meeting_recording(handle).await
 }
@@ -1130,6 +1186,22 @@ async fn read_live_dictation_text(weak: slint::Weak<MainWindow>) -> String {
     .await
 }
 
+async fn end_dictation(
+    handle: AppHandle,
+    weak: slint::Weak<MainWindow>,
+    focused_app: Option<String>,
+    intent: DictationEndIntent,
+) -> Result<(), String> {
+    stop_dictation(handle.clone()).await?;
+    match intent {
+        DictationEndIntent::Finalize => {
+            let raw_text = read_live_dictation_text(weak).await;
+            finalize_dictation(handle, raw_text, focused_app).await
+        }
+        DictationEndIntent::Cancel => Ok(()),
+    }
+}
+
 /// Persist raw text before the optional network polish, then insert the final
 /// text using the exact settings-owned paste contract. A polish failure never
 /// loses the raw dictation; insertion failures remain visible to the caller.
@@ -1181,8 +1253,14 @@ async fn finalize_dictation(
             settings.paste_delay_ms,
             settings.paste_method,
         ) {
-            let _ = souffle_lib::commands::copy_text(final_text);
-            return Err(format!("Collage impossible; texte copié : {error}"));
+            return match souffle_lib::commands::copy_text(final_text) {
+                Ok(()) => Err(format!(
+                    "Collage impossible. Le texte a été copié dans le presse-papiers : {error}"
+                )),
+                Err(copy_error) => Err(format!(
+                    "Collage et copie impossibles. Récupérez le texte ci-dessous : {error}; {copy_error}"
+                )),
+            };
         }
     } else {
         souffle_lib::commands::copy_text(final_text)?;
@@ -2315,24 +2393,86 @@ fn wire_callbacks(
                     eprintln!("upgrade_in_event_loop failed (stop meeting): {e}");
                 }
             } else {
-                let result = match stop_dictation(handle.clone()).await {
-                    Ok(()) => {
-                        let raw_text = read_live_dictation_text(weak.clone()).await;
-                        finalize_dictation(handle, raw_text, focused_app).await
-                    }
-                    Err(error) => Err(error),
-                };
+                let result = end_dictation(
+                    handle,
+                    weak.clone(),
+                    focused_app,
+                    DictationEndIntent::Finalize,
+                )
+                .await;
                 if let Err(e) = weak.upgrade_in_event_loop(move |window| {
-                    if let Err(e) = result {
-                        eprintln!("Failed to stop dictation: {e}");
-                        window.set_transcription_status_message(e.into());
+                    let disposition = dictation_transcript_disposition(
+                        DictationEndIntent::Finalize,
+                        result.is_ok(),
+                    );
+                    match result {
+                        Ok(()) => {
+                            window.set_transcription_status_message("".into());
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to finalize dictation: {e}");
+                            window.set_transcription_status_message(e.into());
+                            // Keep live-text intact: IdleView exposes it in an
+                            // editable recovery card until copy/discard.
+                        }
+                    }
+                    match disposition {
+                        DictationTranscriptDisposition::Clear => clear_live_transcript(&window),
+                        DictationTranscriptDisposition::RetainForRecovery => {
+                            let recovery = merge_recovery_text(
+                                &window.get_dictation_recovery_text(),
+                                &window.get_live_text(),
+                            );
+                            window.set_dictation_recovery_text(recovery.into());
+                            clear_live_transcript(&window);
+                        }
                     }
                     window.set_recording_mode(RecordingMode::Idle);
-                    clear_live_transcript(&window);
                     refresh_timeline(&window, &handle_for_refresh);
                 }) {
                     eprintln!("upgrade_in_event_loop failed (stop dictation): {e}");
                 }
+            }
+            stop_in_flight.store(false, Ordering::Release);
+        });
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let stop_in_flight_for_cancel = Arc::clone(&stop_in_flight);
+    window.on_cancel_dictation_requested(move || {
+        if stop_in_flight_for_cancel.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let Some(current) = weak.upgrade() else {
+            stop_in_flight_for_cancel.store(false, Ordering::Release);
+            return;
+        };
+        if current.get_recording_mode() != RecordingMode::Dictation {
+            stop_in_flight_for_cancel.store(false, Ordering::Release);
+            return;
+        }
+        let weak = weak.clone();
+        let handle = handle.clone();
+        let stop_in_flight = Arc::clone(&stop_in_flight_for_cancel);
+        souffle_lib::async_runtime::spawn(async move {
+            let result =
+                end_dictation(handle, weak.clone(), None, DictationEndIntent::Cancel).await;
+            if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+                match dictation_transcript_disposition(DictationEndIntent::Cancel, result.is_ok()) {
+                    DictationTranscriptDisposition::Clear => clear_live_transcript(&window),
+                    DictationTranscriptDisposition::RetainForRecovery => {}
+                }
+                window.set_recording_mode(RecordingMode::Idle);
+                match result {
+                    Ok(()) => window.set_transcription_status_message("".into()),
+                    Err(error) => {
+                        eprintln!("Failed to cancel dictation cleanly: {error}");
+                        window.set_transcription_status_message(error.into());
+                    }
+                }
+            }) {
+                eprintln!("upgrade_in_event_loop failed (cancel dictation): {error}");
             }
             stop_in_flight.store(false, Ordering::Release);
         });
@@ -2589,6 +2729,8 @@ fn wire_callbacks(
     // cache and re-saves it, it never redeclares state on the Slint side.
     let settings_state: Rc<RefCell<Option<AppSettings>>> = Rc::new(RefCell::new(None));
     let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    let polish_prompt_save_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    let summary_prompt_save_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     // Not part of `AppSettings` (see `get_shortcuts`/`save_shortcuts`), so it
     // gets its own cache next to `settings_state` rather than folding into it.
     let shortcuts_state: Rc<RefCell<Option<ShortcutSettings>>> = Rc::new(RefCell::new(None));
@@ -2700,11 +2842,21 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let settings_log_timer_for_close = settings_log_timer.clone();
+    let polish_prompt_timer_for_close = polish_prompt_save_timer.clone();
+    let summary_prompt_timer_for_close = summary_prompt_save_timer.clone();
     let pending_modifier_for_close = pending_modifier.clone();
     let upcoming_for_close = upcoming_cache.clone();
     let handle_for_close = tauri_handle.clone();
+    let settings_state_for_close = settings_state.clone();
     window.on_settings_closed(move || {
+        if polish_prompt_timer_for_close.borrow().is_some()
+            || summary_prompt_timer_for_close.borrow().is_some()
+        {
+            save_settings_field(&handle_for_close, &settings_state_for_close, |_| {});
+        }
         *settings_log_timer_for_close.borrow_mut() = None;
+        *polish_prompt_timer_for_close.borrow_mut() = None;
+        *summary_prompt_timer_for_close.borrow_mut() = None;
         *pending_modifier_for_close.borrow_mut() = None;
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field(ShortcutField::None);
@@ -2745,6 +2897,20 @@ fn wire_callbacks(
                 original
             });
         *settings_state.borrow_mut() = Some(effective);
+    }
+
+    fn schedule_settings_save(
+        timer_state: &Rc<RefCell<Option<slint::Timer>>>,
+        handle: AppHandle,
+        settings_state: Rc<RefCell<Option<AppSettings>>>,
+    ) {
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(400),
+            move || save_settings_field(&handle, &settings_state, |_| {}),
+        );
+        *timer_state.borrow_mut() = Some(timer);
     }
 
     // Mirrors `applyShortcutValue()` + `saveShortcutSettings()`: writes
@@ -3671,11 +3837,11 @@ fn wire_callbacks(
         }
     });
 
-    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_polish_prompt = settings_state.clone();
+    let polish_prompt_timer_for_edit = polish_prompt_save_timer.clone();
     window.on_settings_dictation_polish_prompt_changed(move |text| {
-        save_settings_field(&handle, &settings_state_for_polish_prompt, |settings| {
+        if let Some(settings) = settings_state_for_polish_prompt.borrow_mut().as_mut() {
             let active_id = settings.dictation_polish_template_id.clone();
             if let Some(template) = settings
                 .dictation_polish_templates
@@ -3684,14 +3850,12 @@ fn wire_callbacks(
             {
                 template.prompt = text.to_string();
             }
-        });
-        if let Some(window) = weak.upgrade() {
-            let guard = settings_state_for_polish_prompt.borrow();
-            if let Some(settings) = guard.as_ref() {
-                let provider_available = window.get_settings_summary_unusable_message().is_empty();
-                ia_ui::populate_dictation_polish(&window, settings, provider_available);
-            }
         }
+        schedule_settings_save(
+            &polish_prompt_timer_for_edit,
+            handle.clone(),
+            settings_state_for_polish_prompt.clone(),
+        );
     });
 
     let weak = window.as_weak();
@@ -3801,28 +3965,25 @@ fn wire_callbacks(
         }
     });
 
-    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_template_prompt = settings_state.clone();
     let summary_template_editing_for_prompt = summary_template_editing.clone();
+    let summary_prompt_timer_for_edit = summary_prompt_save_timer.clone();
     window.on_settings_summary_template_prompt_changed(move |text| {
         let editing_id = summary_template_editing_for_prompt.borrow().clone();
-        save_settings_field(&handle, &settings_state_for_template_prompt, |settings| {
-            if let Some(template) = settings
+        if let Some(settings) = settings_state_for_template_prompt.borrow_mut().as_mut()
+            && let Some(template) = settings
                 .summary_templates
                 .iter_mut()
                 .find(|t| t.id == editing_id)
-            {
-                template.prompt = text.to_string();
-            }
-        });
-        if let Some(window) = weak.upgrade() {
-            let guard = settings_state_for_template_prompt.borrow();
-            if let Some(settings) = guard.as_ref() {
-                let editing_id = summary_template_editing_for_prompt.borrow().clone();
-                ia_ui::populate_summary_templates(&window, settings, &editing_id);
-            }
+        {
+            template.prompt = text.to_string();
         }
+        schedule_settings_save(
+            &summary_prompt_timer_for_edit,
+            handle.clone(),
+            settings_state_for_template_prompt.clone(),
+        );
     });
 
     let weak = window.as_weak();
@@ -4225,6 +4386,34 @@ fn wire_callbacks(
         }
     });
     let weak = window.as_weak();
+    window.on_copy_dictation_recovery(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let text = window.get_dictation_recovery_text().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
+        match souffle_lib::commands::copy_text(text) {
+            Ok(()) => {
+                window.set_dictation_recovery_text("".into());
+                window.set_transcription_status_message(
+                    "Texte de la dictée copié dans le presse-papiers.".into(),
+                );
+            }
+            Err(error) => window.set_transcription_status_message(
+                format!("Copie impossible; le texte reste disponible : {error}").into(),
+            ),
+        }
+    });
+    let weak = window.as_weak();
+    window.on_discard_dictation_recovery(move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_dictation_recovery_text("".into());
+            window.set_transcription_status_message("".into());
+        }
+    });
+    let weak = window.as_weak();
     window.on_dismiss_meeting_status(move || {
         if let Some(window) = weak.upgrade() {
             window.set_meeting_status_message("".into());
@@ -4234,10 +4423,6 @@ fn wire_callbacks(
 
 /// Handles a [`souffle_lib::native::bridge::NativeAction`] on the Slint main
 /// thread by invoking the same window callbacks a button click would (SOU-191).
-/// Escape-cancel and a normal stop are currently equivalent here: neither
-/// path pastes or polishes the dictation text today (grepped — no
-/// `commands::paste_text`/`commands::polish_dictation` call sites exist yet
-/// in this shell), a pre-existing SOU-187 gap this ticket does not close.
 fn dispatch_native_action(window: &MainWindow, handle: &AppHandle, action: NativeAction) {
     use souffle_lib::native::bridge::AppView;
 
@@ -4254,9 +4439,14 @@ fn dispatch_native_action(window: &MainWindow, handle: &AppHandle, action: Nativ
                 window.invoke_dictate_requested();
             }
         }
-        NativeAction::PttStop | NativeAction::CancelDictation => {
+        NativeAction::PttStop => {
             if window.get_recording_mode() == RecordingMode::Dictation {
                 window.invoke_stop_requested();
+            }
+        }
+        NativeAction::CancelDictation => {
+            if window.get_recording_mode() == RecordingMode::Dictation {
+                window.invoke_cancel_dictation_requested();
             }
         }
         NativeAction::StopMeeting => {
@@ -4451,4 +4641,52 @@ fn main() {
     );
 
     window.run().expect("event loop failed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DictationEndIntent, DictationTextBuffers, DictationTranscriptDisposition,
+        dictation_transcript_disposition, merge_recovery_text, reset_live_buffers,
+    };
+
+    #[test]
+    fn failed_finalization_retains_text_but_cancel_always_discards_it() {
+        assert_eq!(
+            dictation_transcript_disposition(DictationEndIntent::Finalize, true),
+            DictationTranscriptDisposition::Clear
+        );
+        assert_eq!(
+            dictation_transcript_disposition(DictationEndIntent::Finalize, false),
+            DictationTranscriptDisposition::RetainForRecovery
+        );
+        assert_eq!(
+            dictation_transcript_disposition(DictationEndIntent::Cancel, true),
+            DictationTranscriptDisposition::Clear
+        );
+        assert_eq!(
+            dictation_transcript_disposition(DictationEndIntent::Cancel, false),
+            DictationTranscriptDisposition::Clear
+        );
+    }
+
+    #[test]
+    fn every_live_reset_preserves_the_independent_recovery_buffer() {
+        let reset = reset_live_buffers(DictationTextBuffers {
+            live: "new live dictation".into(),
+            tentative: "partial".into(),
+            me: "speaker me".into(),
+            them: "speaker them".into(),
+            recovery: "older recoverable draft".into(),
+        });
+        assert!(reset.live.is_empty());
+        assert!(reset.tentative.is_empty());
+        assert!(reset.me.is_empty());
+        assert!(reset.them.is_empty());
+        assert_eq!(reset.recovery, "older recoverable draft");
+        assert_eq!(
+            merge_recovery_text(&reset.recovery, "second failed dictation"),
+            "older recoverable draft\n\n——\n\nsecond failed dictation"
+        );
+    }
 }

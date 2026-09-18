@@ -6,6 +6,8 @@ import { LucideIcon, IconSet } from "lucide_icon.slint";
 export component ActionHero inherits HorizontalLayout {
     in property <string> dictation-shortcut;
     in property <bool> model-ready: true;
+    in property <bool> actions-enabled: true;
+    property <bool> can-start: root.model-ready && root.actions-enabled;
 
     callback dictate-requested();
     callback meeting-requested();
@@ -18,21 +20,21 @@ export component ActionHero inherits HorizontalLayout {
         border-width: dictate-focus.has-focus ? 2px : 1px;
         border-color: dictate-focus.has-focus ? Theme.accent : Theme.border-soft;
         background: dictate-area.pressed ? Theme.surface-3 : dictate-area.has-hover ? Theme.surface-2 : transparent;
-        opacity: root.model-ready ? 1.0 : 0.5;
+        opacity: root.can-start ? 1.0 : 0.5;
 
         // TouchArea alone has no accessible role (SOU-186's LineEdit-vs-bare-
         // TextInput lesson applies here too): without these, this control is
         // invisible to assistive tech and AppleScript UI scripting alike.
         accessible-role: button;
         accessible-label: "Démarrer une dictée";
-        accessible-enabled: root.model-ready;
-        accessible-action-default => { if root.model-ready { root.dictate-requested(); } }
+        accessible-enabled: root.can-start;
+        accessible-action-default => { if root.can-start { root.dictate-requested(); } }
 
         forward-focus: dictate-focus;
 
         dictate-focus := FocusScope {
             key-pressed(event) => {
-                if root.model-ready && (event.text == Key.Return || event.text == Key.Space) {
+                if root.can-start && (event.text == Key.Return || event.text == Key.Space) {
                     root.dictate-requested();
                     return accept;
                 }
@@ -41,7 +43,7 @@ export component ActionHero inherits HorizontalLayout {
         }
 
         dictate-area := TouchArea {
-            enabled: root.model-ready;
+            enabled: root.can-start;
             clicked => {
                 dictate-focus.focus();
                 root.dictate-requested();
@@ -117,18 +119,18 @@ export component ActionHero inherits HorizontalLayout {
         border-width: meeting-focus.has-focus ? 2px : 1px;
         border-color: meeting-focus.has-focus ? Theme.accent : Theme.border-soft;
         background: meeting-area.pressed ? Theme.surface-3 : meeting-area.has-hover ? Theme.surface-2 : transparent;
-        opacity: root.model-ready ? 1.0 : 0.5;
+        opacity: root.can-start ? 1.0 : 0.5;
 
         accessible-role: button;
         accessible-label: "Démarrer une réunion";
-        accessible-enabled: root.model-ready;
-        accessible-action-default => { if root.model-ready { root.meeting-requested(); } }
+        accessible-enabled: root.can-start;
+        accessible-action-default => { if root.can-start { root.meeting-requested(); } }
 
         forward-focus: meeting-focus;
 
         meeting-focus := FocusScope {
             key-pressed(event) => {
-                if root.model-ready && (event.text == Key.Return || event.text == Key.Space) {
+                if root.can-start && (event.text == Key.Return || event.text == Key.Space) {
                     root.meeting-requested();
                     return accept;
                 }
@@ -137,7 +139,7 @@ export component ActionHero inherits HorizontalLayout {
         }
 
         meeting-area := TouchArea {
-            enabled: root.model-ready;
+            enabled: root.can-start;
             clicked => {
                 meeting-focus.focus();
                 root.meeting-requested();

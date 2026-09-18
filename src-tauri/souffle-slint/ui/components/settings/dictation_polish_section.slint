@@ -15,7 +15,7 @@ export component DictationPolishSection inherits VerticalLayout {
     in property <bool> provider-available;
     in property <[string]> template-labels;
     in property <string> active-template-label;
-    in property <string> active-prompt;
+    in-out property <string> active-prompt;
 
     callback enabled-changed(bool);
     callback template-changed(string);
@@ -81,8 +81,8 @@ export component DictationPolishSection inherits VerticalLayout {
         description: "Prompt envoyé à l'IA pour retoucher le texte transcrit.";
 
         ThemedTextArea {
-            text: root.active-prompt;
-            area-height: 90px;
+            text <=> root.active-prompt;
+            area-height: 160px;
             placeholder: "Instruction de retouche";
             control-label: "Instruction de retouche";
             edited(value) => { root.prompt-changed(value); }

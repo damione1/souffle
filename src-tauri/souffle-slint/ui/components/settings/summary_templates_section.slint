@@ -17,7 +17,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
     in property <string> editing-template-label;
     in property <bool> editing-is-builtin;
     in property <string> editing-name;
-    in property <string> editing-prompt;
+    in-out property <string> editing-prompt;
     in-out property <string> new-template-draft: "";
 
     callback default-changed(string);
@@ -96,8 +96,8 @@ export component SummaryTemplatesSection inherits VerticalLayout {
             : "Prompt envoyé à l'IA pour générer le résumé.";
 
         ThemedTextArea {
-            text: root.editing-prompt;
-            area-height: 110px;
+            text <=> root.editing-prompt;
+            area-height: 220px;
             placeholder: "Instruction de génération du résumé";
             control-label: "Instruction du modèle de résumé";
             edited(value) => { root.prompt-changed(value); }

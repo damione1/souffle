@@ -71,6 +71,9 @@ impl CliArgs {
 /// `None` when the app should launch normally.
 pub fn try_run_headless() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
+    if let Some(code) = crate::apple_intelligence::try_run_helper(&args) {
+        return Some(code);
+    }
     dispatch(args)
 }
 

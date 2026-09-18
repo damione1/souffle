@@ -5,6 +5,7 @@ import { ThemedButton } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
 import { SummaryProvider } from "../../types.slint";
+import { StatusIndicator } from "status_indicator.slint";
 
 // Port of IntelligenceSettingsSection.svelte. The exact per-reason-code
 // wording (`KNOWN_REASON_KEYS`) and the fine-grained model-picker
@@ -98,24 +99,9 @@ export component IntelligenceSection inherits VerticalLayout {
     SettingsField {
         label: "Apple Intelligence";
 
-        HorizontalLayout {
-            spacing: 6px;
-            alignment: center;
-            horizontal-stretch: 0;
-            vertical-stretch: 0;
-            Rectangle {
-                width: 8px;
-                height: 8px;
-                border-radius: 4px;
-                background: root.apple-intelligence-available ? Theme.success : Theme.text-faint;
-                vertical-stretch: 0;
-            }
-            Text {
-                text: root.apple-intelligence-available ? "Disponible" : "Non disponible";
-                font-size: 12px;
-                color: Theme.text-secondary;
-                vertical-alignment: center;
-            }
+        StatusIndicator {
+            text: root.apple-intelligence-available ? "Disponible" : "Non disponible";
+            indicator-color: root.apple-intelligence-available ? Theme.success : Theme.text-faint;
         }
     }
 
@@ -162,30 +148,22 @@ export component IntelligenceSection inherits VerticalLayout {
             : root.summary-model-count == 1 ? "1 modèle trouvé."
             : root.summary-model-count + " modèles trouvés.";
 
-        HorizontalLayout {
-            spacing: 12px;
-            alignment: center;
+        Rectangle {
+            height: Theme.settings-control-height;
+            width: status.width + 12px + retry.width;
             horizontal-stretch: 0;
-            HorizontalLayout {
-                spacing: 6px;
-                alignment: center;
-                horizontal-stretch: 0;
-                vertical-stretch: 0;
-                Rectangle {
-                    width: 8px;
-                    height: 8px;
-                    border-radius: 4px;
-                    background: root.ollama-available ? Theme.success : Theme.text-faint;
-                    vertical-stretch: 0;
-                }
-                Text {
-                    text: root.ollama-available ? "Connecté" : "Non disponible";
-                    font-size: 12px;
-                    color: Theme.text-secondary;
-                    vertical-alignment: center;
-                }
+            vertical-stretch: 0;
+
+            status := StatusIndicator {
+                x: 0px;
+                y: (parent.height - self.height) / 2;
+                text: root.ollama-available ? "Connecté" : "Non disponible";
+                indicator-color: root.ollama-available ? Theme.success : Theme.text-faint;
             }
-            ThemedButton {
+            retry := ThemedButton {
+                x: status.width + 12px;
+                y: 0px;
+                width: 92px;
                 text: "Réessayer";
                 enabled: !root.ollama-checking && !root.ollama-pulling;
                 clicked => { root.retry-requested(); }
