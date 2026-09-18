@@ -139,7 +139,11 @@ pub(crate) fn save_field(
     match &outcome {
         SettingsSaveOutcome::Observed { settings, result } => {
             let mut cached = settings.as_ref().clone();
-            if result.is_err() {
+            let restore_drafts = match result {
+                Ok(()) => false,
+                Err(error) => !error.committed(),
+            };
+            if restore_drafts {
                 // These two fields still host the existing debounced drafts.
                 // Keep them recoverable until SOU-201 separates their lifecycle.
                 cached.dictation_polish_templates = original.dictation_polish_templates;
@@ -692,7 +696,7 @@ mod tests {
             devices: Rc::new(RefCell::new(Vec::new())),
             summary: Rc::new(RefCell::new(None)),
             load: Rc::new(move || AppSettings::load(&load_db)),
-            save: Rc::new(move |candidate| {
+            save: Rc::new(move |mut candidate| {
                 let current_step = save_step.get();
                 save_step.set(current_step + 1);
                 match current_step {
@@ -703,6 +707,9 @@ mod tests {
                         }),
                     },
                     1 => {
+                        candidate.dictation_polish_templates[0].label =
+                            "Committed polish template".into();
+                        candidate.summary_templates[0].name = "Committed summary template".into();
                         candidate.save(&save_db).unwrap();
                         SettingsSaveOutcome::Observed {
                             settings: Box::new(AppSettings::load(&save_db).unwrap()),
@@ -751,9 +758,32 @@ mod tests {
                 .get_settings_save_error()
                 .contains("native effect failed after commit")
         );
+        {
+            let cached = cache.borrow();
+            let cached = cached
+                .as_ref()
+                .expect("cache after committed effect failure");
+            assert_eq!(
+                cached.dictation_polish_templates[0].label,
+                "Committed polish template"
+            );
+            assert_eq!(
+                cached.summary_templates[0].name,
+                "Committed summary template"
+            );
+        }
 
         window.invoke_settings_paste_delay_changed(250);
-        assert_eq!(AppSettings::load(&db).unwrap().paste_delay_ms, 250);
+        let stored_after_later_save = AppSettings::load(&db).unwrap();
+        assert_eq!(stored_after_later_save.paste_delay_ms, 250);
+        assert_eq!(
+            stored_after_later_save.dictation_polish_templates[0].label,
+            "Committed polish template"
+        );
+        assert_eq!(
+            stored_after_later_save.summary_templates[0].name,
+            "Committed summary template"
+        );
         assert_eq!(window.get_settings_paste_delay_ms(), 200);
         assert!(!cache.is_known());
         assert!(
