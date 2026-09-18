@@ -15,6 +15,7 @@ mod microphone_list;
 mod model_ui;
 mod onboarding_flags;
 mod onboarding_ui;
+mod settings_drafts;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
@@ -522,6 +523,7 @@ fn refresh_summary_providers(
     settings_state: SettingsCache,
     summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>>,
     summary_template_editing: Rc<RefCell<String>>,
+    settings_drafts: Rc<settings_drafts::SettingsDraftController>,
 ) {
     slint::spawn_local(async move {
         let handle_for_check = handle.clone();
@@ -551,8 +553,12 @@ fn refresh_summary_providers(
         ia_ui::populate_intelligence(&window, settings, &status);
         let provider_available = window.get_settings_summary_unusable_message().is_empty();
         ia_ui::populate_dictation_polish(&window, settings, provider_available);
-        let editing_id = summary_template_editing.borrow().clone();
+        settings_drafts.reapply_polish_prompt(&window, &settings.dictation_polish_template_id);
+        let current_editing_id = summary_template_editing.borrow().clone();
+        let editing_id = settings_drafts::summary_editing_id(&current_editing_id, settings);
+        *summary_template_editing.borrow_mut() = editing_id.clone();
         ia_ui::populate_summary_templates(&window, settings, &editing_id);
+        settings_drafts.reapply_summary_template(&window, &editing_id);
         drop(guard);
         *summary_status_state.borrow_mut() = Some(status);
     })
@@ -2782,8 +2788,13 @@ fn wire_callbacks(
     // cache and re-saves it, it never redeclares state on the Slint side.
     let settings_state = SettingsCache::new(window);
     let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
-    let polish_prompt_save_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
-    let summary_prompt_save_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    let settings_drafts = settings_drafts::SettingsDraftController::new(
+        window,
+        tauri_handle.clone(),
+        settings_state.clone(),
+    );
+    let settings_drafts_for_quit = settings_drafts.clone();
+    window.on_settings_quit_requested(move || settings_drafts_for_quit.request_quit());
     // Not part of `AppSettings` (see `get_shortcuts`/`save_shortcuts`), so it
     // gets its own cache next to `settings_state` rather than folding into it.
     let shortcuts_state: Rc<RefCell<Option<ShortcutSettings>>> = Rc::new(RefCell::new(None));
@@ -2833,6 +2844,7 @@ fn wire_callbacks(
     let snippets_list_state_for_open = snippets_list_state.clone();
     let snippet_editing_for_open = snippet_editing.clone();
     let settings_log_timer_for_open = settings_log_timer.clone();
+    let settings_drafts_for_open = settings_drafts.clone();
     window.on_settings_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
@@ -2840,10 +2852,13 @@ fn wire_callbacks(
         let state = Arc::clone(&handle);
         match souffle_lib::commands::get_settings(state) {
             Ok(settings) => {
+                let current_editing_id = summary_template_editing_for_open.borrow().clone();
+                let editing_id =
+                    settings_drafts::summary_editing_id(&current_editing_id, &settings);
+                *summary_template_editing_for_open.borrow_mut() = editing_id;
                 settings_ui::populate(&window, &settings);
                 data_ui::populate(&window, &settings);
                 settings_state_for_open.replace_observed(settings);
-                window.set_settings_save_error("".into());
                 window.set_settings_open(true);
                 refresh_settings_log_tail(&window);
                 *settings_log_timer_for_open.borrow_mut() =
@@ -2882,6 +2897,7 @@ fn wire_callbacks(
             settings_state_for_open.clone(),
             summary_status_state_for_open.clone(),
             summary_template_editing_for_open.clone(),
+            settings_drafts_for_open.clone(),
         );
         load_transcription_model_state(
             &window,
@@ -2893,10 +2909,10 @@ fn wire_callbacks(
             Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
             Err(e) => eprintln!("Failed to load dictionary: {e}"),
         }
-        *snippet_editing_for_open.borrow_mut() = None;
         match souffle_lib::commands::list_snippets(Arc::clone(&handle)) {
             Ok(entries) => {
-                lists_ui::populate_snippets(&window, &entries, None);
+                let editing = *snippet_editing_for_open.borrow();
+                lists_ui::populate_snippets(&window, &entries, editing);
                 *snippets_list_state_for_open.borrow_mut() = entries;
             }
             Err(e) => eprintln!("Failed to load snippets: {e}"),
@@ -2905,21 +2921,22 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let settings_log_timer_for_close = settings_log_timer.clone();
-    let polish_prompt_timer_for_close = polish_prompt_save_timer.clone();
-    let summary_prompt_timer_for_close = summary_prompt_save_timer.clone();
+    let settings_drafts_for_close = settings_drafts.clone();
     let pending_modifier_for_close = pending_modifier.clone();
     let upcoming_for_close = upcoming_cache.clone();
     let handle_for_close = tauri_handle.clone();
-    let settings_state_for_close = settings_state.clone();
     window.on_settings_closed(move || {
-        if polish_prompt_timer_for_close.borrow().is_some()
-            || summary_prompt_timer_for_close.borrow().is_some()
-        {
-            save_settings_field(&handle_for_close, &settings_state_for_close, |_| {});
+        match settings_drafts_for_close.flush_explicit() {
+            settings_drafts::DraftFlushResult::RetainedAfterFailure => {
+                if let Some(window) = weak.upgrade() {
+                    window.set_settings_open(true);
+                }
+                return;
+            }
+            settings_drafts::DraftFlushResult::NothingPending
+            | settings_drafts::DraftFlushResult::Committed => {}
         }
         *settings_log_timer_for_close.borrow_mut() = None;
-        *polish_prompt_timer_for_close.borrow_mut() = None;
-        *summary_prompt_timer_for_close.borrow_mut() = None;
         *pending_modifier_for_close.borrow_mut() = None;
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field(ShortcutField::None);
@@ -2950,22 +2967,6 @@ fn wire_callbacks(
             }
         }
         outcome
-    }
-
-    fn schedule_settings_save(
-        timer_state: &Rc<RefCell<Option<slint::Timer>>>,
-        handle: AppHandle,
-        settings_state: SettingsCache,
-    ) {
-        let timer = slint::Timer::default();
-        timer.start(
-            slint::TimerMode::SingleShot,
-            Duration::from_millis(400),
-            move || {
-                save_settings_field(&handle, &settings_state, |_| {});
-            },
-        );
-        *timer_state.borrow_mut() = Some(timer);
     }
 
     // Mirrors `applyShortcutValue()` + `saveShortcutSettings()`: writes
@@ -3616,6 +3617,7 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let settings_state_for_provider = settings_state.clone();
     let summary_status_state_for_provider = summary_status_state.clone();
+    let settings_drafts_for_provider = settings_drafts.clone();
     window.on_settings_summary_provider_changed(move |value| {
         let provider = ia_ui::summary_provider_from_slint(value);
         save_settings_field(&handle, &settings_state_for_provider, |settings| {
@@ -3630,6 +3632,8 @@ fn wire_callbacks(
             ia_ui::populate_intelligence(&window, settings, status);
             let provider_available = window.get_settings_summary_unusable_message().is_empty();
             ia_ui::populate_dictation_polish(&window, settings, provider_available);
+            settings_drafts_for_provider
+                .reapply_polish_prompt(&window, &settings.dictation_polish_template_id);
         }
     });
 
@@ -3646,6 +3650,7 @@ fn wire_callbacks(
     let settings_state_for_retry = settings_state.clone();
     let summary_status_state_for_retry = summary_status_state.clone();
     let summary_template_editing_for_retry = summary_template_editing.clone();
+    let settings_drafts_for_retry = settings_drafts.clone();
     window.on_settings_summary_providers_retry_requested(move || {
         refresh_summary_providers(
             weak.clone(),
@@ -3653,6 +3658,7 @@ fn wire_callbacks(
             settings_state_for_retry.clone(),
             summary_status_state_for_retry.clone(),
             summary_template_editing_for_retry.clone(),
+            settings_drafts_for_retry.clone(),
         );
     });
 
@@ -3661,6 +3667,7 @@ fn wire_callbacks(
     let settings_state_for_pull = settings_state.clone();
     let summary_status_state_for_pull = summary_status_state.clone();
     let summary_template_editing_for_pull = summary_template_editing.clone();
+    let settings_drafts_for_pull = settings_drafts.clone();
     window.on_settings_download_recommended_ollama_model_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
@@ -3673,6 +3680,7 @@ fn wire_callbacks(
         let settings_state_for_pull = settings_state_for_pull.clone();
         let summary_status_state_for_pull = summary_status_state_for_pull.clone();
         let summary_template_editing_for_pull = summary_template_editing_for_pull.clone();
+        let settings_drafts_for_pull = settings_drafts_for_pull.clone();
         slint::spawn_local(async move {
             let state = Arc::clone(&handle);
             // Same reactor requirement as `refresh_summary_providers`/
@@ -3694,6 +3702,7 @@ fn wire_callbacks(
                     settings_state_for_pull,
                     summary_status_state_for_pull,
                     summary_template_editing_for_pull,
+                    settings_drafts_for_pull,
                 ),
                 Err(e) => window.set_settings_ollama_pull_error(e.into()),
             }
@@ -3724,6 +3733,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_polish_template = settings_state.clone();
+    let settings_drafts_for_polish_template = settings_drafts.clone();
     window.on_settings_dictation_polish_template_changed(move |label| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -3744,34 +3754,28 @@ fn wire_callbacks(
         if let Some(settings) = guard.as_ref() {
             let provider_available = window.get_settings_summary_unusable_message().is_empty();
             ia_ui::populate_dictation_polish(&window, settings, provider_available);
+            settings_drafts_for_polish_template
+                .reapply_polish_prompt(&window, &settings.dictation_polish_template_id);
         }
     });
 
-    let handle = tauri_handle.clone();
     let settings_state_for_polish_prompt = settings_state.clone();
-    let polish_prompt_timer_for_edit = polish_prompt_save_timer.clone();
+    let settings_drafts_for_polish_prompt = settings_drafts.clone();
     window.on_settings_dictation_polish_prompt_changed(move |text| {
-        if let Some(settings) = settings_state_for_polish_prompt.borrow_mut().as_mut() {
-            let active_id = settings.dictation_polish_template_id.clone();
-            if let Some(template) = settings
-                .dictation_polish_templates
-                .iter_mut()
-                .find(|t| t.id == active_id)
-            {
-                template.prompt = text.to_string();
-            }
+        let active_id = settings_state_for_polish_prompt
+            .borrow()
+            .as_ref()
+            .map(|settings| settings.dictation_polish_template_id.clone());
+        if let Some(active_id) = active_id {
+            settings_drafts_for_polish_prompt.edit_polish_prompt(active_id, text.to_string());
         }
-        schedule_settings_save(
-            &polish_prompt_timer_for_edit,
-            handle.clone(),
-            settings_state_for_polish_prompt.clone(),
-        );
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_template_default = settings_state.clone();
     let summary_template_editing_for_default = summary_template_editing.clone();
+    let settings_drafts_for_template_default = settings_drafts.clone();
     window.on_settings_summary_template_default_changed(move |label| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -3792,12 +3796,19 @@ fn wire_callbacks(
         if let Some(settings) = guard.as_ref() {
             let editing_id = summary_template_editing_for_default.borrow().clone();
             ia_ui::populate_summary_templates(&window, settings, &editing_id);
+            let editing_id = if editing_id.is_empty() {
+                settings.default_summary_template_id.as_str()
+            } else {
+                editing_id.as_str()
+            };
+            settings_drafts_for_template_default.reapply_summary_template(&window, editing_id);
         }
     });
 
     let weak = window.as_weak();
     let settings_state_for_edit_target = settings_state.clone();
     let summary_template_editing_for_edit_target = summary_template_editing.clone();
+    let settings_drafts_for_edit_target = settings_drafts.clone();
     window.on_settings_summary_template_edit_target_changed(move |label| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -3813,12 +3824,14 @@ fn wire_callbacks(
         };
         *summary_template_editing_for_edit_target.borrow_mut() = template_id.clone();
         ia_ui::populate_summary_templates(&window, settings, &template_id);
+        settings_drafts_for_edit_target.reapply_summary_template(&window, &template_id);
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_template_delete = settings_state.clone();
     let summary_template_editing_for_delete = summary_template_editing.clone();
+    let settings_drafts_for_template_delete = settings_drafts.clone();
     window.on_settings_summary_template_delete_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
@@ -3834,66 +3847,64 @@ fn wire_callbacks(
         if editing_id.is_empty() || ia_ui::is_builtin_summary_template(&editing_id) {
             return;
         }
-        save_settings_field(&handle, &settings_state_for_template_delete, |settings| {
-            settings.summary_templates.retain(|t| t.id != editing_id);
-            if settings.default_summary_template_id == editing_id {
-                settings.default_summary_template_id = settings
-                    .summary_templates
-                    .first()
-                    .map(|t| t.id.clone())
-                    .unwrap_or_else(|| "default".to_string());
+        settings_drafts_for_template_delete.flush_explicit();
+        let outcome =
+            save_settings_field(&handle, &settings_state_for_template_delete, |settings| {
+                settings.summary_templates.retain(|t| t.id != editing_id);
+                if settings.default_summary_template_id == editing_id {
+                    settings.default_summary_template_id = settings
+                        .summary_templates
+                        .first()
+                        .map(|t| t.id.clone())
+                        .unwrap_or_else(|| "default".to_string());
+                }
+            });
+        match settings_drafts::settle_settings_submission(editing_id, &outcome) {
+            settings_drafts::SettingsSubmission::Committed => {
+                let editing_id = summary_template_editing_for_delete.borrow().clone();
+                settings_drafts_for_template_delete.discard_summary_template(&editing_id);
+                *summary_template_editing_for_delete.borrow_mut() = String::new();
+                let guard = settings_state_for_template_delete.borrow();
+                if let Some(settings) = guard.as_ref() {
+                    ia_ui::populate_summary_templates(&window, settings, "");
+                }
             }
-        });
-        *summary_template_editing_for_delete.borrow_mut() = String::new();
-        let guard = settings_state_for_template_delete.borrow();
-        if let Some(settings) = guard.as_ref() {
-            ia_ui::populate_summary_templates(&window, settings, "");
+            settings_drafts::SettingsSubmission::Retained(editing_id) => {
+                *summary_template_editing_for_delete.borrow_mut() = editing_id.clone();
+                settings_drafts_for_template_delete.reapply_summary_template(&window, &editing_id);
+            }
         }
     });
 
     let weak = window.as_weak();
-    let handle = tauri_handle.clone();
     let settings_state_for_template_name = settings_state.clone();
     let summary_template_editing_for_name = summary_template_editing.clone();
+    let settings_drafts_for_template_name = settings_drafts.clone();
     window.on_settings_summary_template_name_changed(move |text| {
         let editing_id = summary_template_editing_for_name.borrow().clone();
-        save_settings_field(&handle, &settings_state_for_template_name, |settings| {
-            if let Some(template) = settings
-                .summary_templates
-                .iter_mut()
-                .find(|t| t.id == editing_id)
-            {
-                template.name = text.to_string();
+        let result = settings_drafts_for_template_name
+            .edit_summary_name(editing_id.clone(), text.to_string());
+        match result {
+            settings_drafts::DraftFlushResult::Committed => {
+                if let Some(window) = weak.upgrade() {
+                    let guard = settings_state_for_template_name.borrow();
+                    if let Some(settings) = guard.as_ref() {
+                        ia_ui::populate_summary_templates(&window, settings, &editing_id);
+                    }
+                }
             }
-        });
-        if let Some(window) = weak.upgrade() {
-            let guard = settings_state_for_template_name.borrow();
-            if let Some(settings) = guard.as_ref() {
-                let editing_id = summary_template_editing_for_name.borrow().clone();
-                ia_ui::populate_summary_templates(&window, settings, &editing_id);
-            }
+            settings_drafts::DraftFlushResult::NothingPending
+            | settings_drafts::DraftFlushResult::RetainedAfterFailure => {}
         }
     });
 
-    let handle = tauri_handle.clone();
-    let settings_state_for_template_prompt = settings_state.clone();
     let summary_template_editing_for_prompt = summary_template_editing.clone();
-    let summary_prompt_timer_for_edit = summary_prompt_save_timer.clone();
+    let settings_drafts_for_template_prompt = settings_drafts.clone();
     window.on_settings_summary_template_prompt_changed(move |text| {
         let editing_id = summary_template_editing_for_prompt.borrow().clone();
-        if let Some(settings) = settings_state_for_template_prompt.borrow_mut().as_mut()
-            && let Some(template) = settings
-                .summary_templates
-                .iter_mut()
-                .find(|t| t.id == editing_id)
-        {
-            template.prompt = text.to_string();
+        if !editing_id.is_empty() {
+            settings_drafts_for_template_prompt.edit_summary_prompt(editing_id, text.to_string());
         }
-        schedule_settings_save(
-            &summary_prompt_timer_for_edit,
-            handle.clone(),
-            settings_state_for_template_prompt.clone(),
-        );
     });
 
     let weak = window.as_weak();
@@ -3901,13 +3912,14 @@ fn wire_callbacks(
     let settings_state_for_template_add = settings_state.clone();
     let summary_template_editing_for_add = summary_template_editing.clone();
     window.on_settings_summary_template_add_requested(move |name| {
-        let name = name.trim().to_string();
-        if name.is_empty() {
+        let draft = name.to_string();
+        let persisted_name = draft.trim().to_string();
+        if persisted_name.is_empty() {
             return;
         }
         let new_id = uuid::Uuid::new_v4().to_string();
         let new_id_for_editing = new_id.clone();
-        save_settings_field(&handle, &settings_state_for_template_add, |settings| {
+        let outcome = save_settings_field(&handle, &settings_state_for_template_add, |settings| {
             let base_prompt = settings
                 .summary_templates
                 .iter()
@@ -3918,15 +3930,25 @@ fn wire_callbacks(
                 .summary_templates
                 .push(souffle_lib::settings::SummaryTemplate {
                     id: new_id.clone(),
-                    name: name.clone(),
+                    name: persisted_name.clone(),
                     prompt: base_prompt,
                 });
         });
-        *summary_template_editing_for_add.borrow_mut() = new_id_for_editing.clone();
-        if let Some(window) = weak.upgrade() {
-            let guard = settings_state_for_template_add.borrow();
-            if let Some(settings) = guard.as_ref() {
-                ia_ui::populate_summary_templates(&window, settings, &new_id_for_editing);
+        match settings_drafts::settle_settings_submission(draft, &outcome) {
+            settings_drafts::SettingsSubmission::Committed => {
+                if let Some(window) = weak.upgrade() {
+                    window.set_settings_new_summary_template_draft("".into());
+                    *summary_template_editing_for_add.borrow_mut() = new_id_for_editing.clone();
+                    let guard = settings_state_for_template_add.borrow();
+                    if let Some(settings) = guard.as_ref() {
+                        ia_ui::populate_summary_templates(&window, settings, &new_id_for_editing);
+                    }
+                }
+            }
+            settings_drafts::SettingsSubmission::Retained(name) => {
+                if let Some(window) = weak.upgrade() {
+                    window.set_settings_new_summary_template_draft(name.into());
+                }
             }
         }
     });
@@ -3998,22 +4020,33 @@ fn wire_callbacks(
             return;
         };
         let state = Arc::clone(&handle);
-        let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
-        let category = (!category.is_empty()).then(|| category.to_string());
-        if let Err(e) = souffle_lib::commands::add_dictionary_entry(
-            state,
-            term.to_string(),
-            pronunciation,
-            category,
-        ) {
-            window.set_settings_dictionary_add_error(e.into());
-            return;
-        }
-        window.set_settings_dictionary_add_error("".into());
-        let state = Arc::clone(&handle);
-        match souffle_lib::commands::list_dictionary(state) {
-            Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
-            Err(e) => eprintln!("Failed to reload dictionary: {e}"),
+        let draft = lists_ui::DictionaryAddDraft {
+            term: term.to_string(),
+            pronunciation: pronunciation.to_string(),
+            category: category.to_string(),
+        };
+        let result =
+            lists_ui::submit_dictionary_add(draft, move |term, pronunciation, category| {
+                souffle_lib::commands::add_dictionary_entry(state, term, pronunciation, category)
+            });
+        match result {
+            lists_ui::ListMutation::Committed(_) => {
+                window.set_settings_dictionary_add_error("".into());
+                window.set_settings_new_dictionary_term_draft("".into());
+                window.set_settings_new_dictionary_pronunciation_draft("".into());
+                window.set_settings_new_dictionary_category_draft("".into());
+                let state = Arc::clone(&handle);
+                match souffle_lib::commands::list_dictionary(state) {
+                    Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+                    Err(e) => eprintln!("Failed to reload dictionary: {e}"),
+                }
+            }
+            lists_ui::ListMutation::Rejected { draft, error } => {
+                window.set_settings_new_dictionary_term_draft(draft.term.into());
+                window.set_settings_new_dictionary_pronunciation_draft(draft.pronunciation.into());
+                window.set_settings_new_dictionary_category_draft(draft.category.into());
+                window.set_settings_dictionary_add_error(error.into());
+            }
         }
     });
 
@@ -4024,14 +4057,22 @@ fn wire_callbacks(
             return;
         };
         let state = Arc::clone(&handle);
-        if let Err(e) = souffle_lib::commands::delete_dictionary_entry(state, id as i64) {
-            eprintln!("Failed to delete dictionary entry: {e}");
-            return;
-        }
-        let state = Arc::clone(&handle);
-        match souffle_lib::commands::list_dictionary(state) {
-            Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
-            Err(e) => eprintln!("Failed to reload dictionary: {e}"),
+        let result = lists_ui::submit_dictionary_delete(id as i64, move |id| {
+            souffle_lib::commands::delete_dictionary_entry(state, id)
+        });
+        match result {
+            lists_ui::ListMutation::Committed(()) => {
+                window.set_settings_dictionary_delete_error("".into());
+                let state = Arc::clone(&handle);
+                match souffle_lib::commands::list_dictionary(state) {
+                    Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+                    Err(e) => eprintln!("Failed to reload dictionary: {e}"),
+                }
+            }
+            lists_ui::ListMutation::Rejected { draft: id, error } => {
+                window.set_settings_dictionary_delete_error_id(id as i32);
+                window.set_settings_dictionary_delete_error(error.into());
+            }
         }
     });
 
@@ -4043,18 +4084,32 @@ fn wire_callbacks(
             return;
         };
         let state = Arc::clone(&handle);
-        if let Err(e) = souffle_lib::commands::add_snippet(state, &trigger, &expansion) {
-            window.set_settings_snippet_add_error(e.into());
-            return;
-        }
-        window.set_settings_snippet_add_error("".into());
-        let state = Arc::clone(&handle);
-        match souffle_lib::commands::list_snippets(state) {
-            Ok(entries) => {
-                lists_ui::populate_snippets(&window, &entries, None);
-                *snippets_list_state_for_add.borrow_mut() = entries;
+        let draft = lists_ui::SnippetDraft {
+            trigger: trigger.to_string(),
+            expansion: expansion.to_string(),
+        };
+        let result = lists_ui::submit_snippet_add(draft, move |trigger, expansion| {
+            souffle_lib::commands::add_snippet(state, trigger, expansion)
+        });
+        match result {
+            lists_ui::ListMutation::Committed(_) => {
+                window.set_settings_snippet_add_error("".into());
+                window.set_settings_new_snippet_trigger_draft("".into());
+                window.set_settings_new_snippet_expansion_draft("".into());
+                let state = Arc::clone(&handle);
+                match souffle_lib::commands::list_snippets(state) {
+                    Ok(entries) => {
+                        lists_ui::populate_snippets(&window, &entries, None);
+                        *snippets_list_state_for_add.borrow_mut() = entries;
+                    }
+                    Err(e) => eprintln!("Failed to reload snippets: {e}"),
+                }
             }
-            Err(e) => eprintln!("Failed to reload snippets: {e}"),
+            lists_ui::ListMutation::Rejected { draft, error } => {
+                window.set_settings_new_snippet_trigger_draft(draft.trigger.into());
+                window.set_settings_new_snippet_expansion_draft(draft.expansion.into());
+                window.set_settings_snippet_add_error(error.into());
+            }
         }
     });
 
@@ -4067,18 +4122,26 @@ fn wire_callbacks(
             return;
         };
         let state = Arc::clone(&handle);
-        if let Err(e) = souffle_lib::commands::delete_snippet(state, id as i64) {
-            eprintln!("Failed to delete snippet: {e}");
-            return;
-        }
-        let state = Arc::clone(&handle);
-        match souffle_lib::commands::list_snippets(state) {
-            Ok(entries) => {
-                let editing = *snippet_editing_for_delete.borrow();
-                lists_ui::populate_snippets(&window, &entries, editing);
-                *snippets_list_state_for_delete.borrow_mut() = entries;
+        let result = lists_ui::submit_snippet_delete(id as i64, move |id| {
+            souffle_lib::commands::delete_snippet(state, id)
+        });
+        match result {
+            lists_ui::ListMutation::Committed(()) => {
+                window.set_settings_snippet_delete_error("".into());
+                let state = Arc::clone(&handle);
+                match souffle_lib::commands::list_snippets(state) {
+                    Ok(entries) => {
+                        let editing = *snippet_editing_for_delete.borrow();
+                        lists_ui::populate_snippets(&window, &entries, editing);
+                        *snippets_list_state_for_delete.borrow_mut() = entries;
+                    }
+                    Err(e) => eprintln!("Failed to reload snippets: {e}"),
+                }
             }
-            Err(e) => eprintln!("Failed to reload snippets: {e}"),
+            lists_ui::ListMutation::Rejected { draft: id, error } => {
+                window.set_settings_snippet_delete_error_id(id as i32);
+                window.set_settings_snippet_delete_error(error.into());
+            }
         }
     });
 
@@ -4121,21 +4184,33 @@ fn wire_callbacks(
             return;
         };
         let state = Arc::clone(&handle);
-        if let Err(e) =
-            souffle_lib::commands::update_snippet(state, id as i64, &trigger, &expansion)
-        {
-            window.set_settings_snippet_update_error(e.into());
-            return;
-        }
-        window.set_settings_snippet_update_error("".into());
-        *snippet_editing_for_save.borrow_mut() = None;
-        let state = Arc::clone(&handle);
-        match souffle_lib::commands::list_snippets(state) {
-            Ok(entries) => {
-                lists_ui::populate_snippets(&window, &entries, None);
-                *snippets_list_state_for_save.borrow_mut() = entries;
+        let draft = lists_ui::SnippetDraft {
+            trigger: trigger.to_string(),
+            expansion: expansion.to_string(),
+        };
+        let result = lists_ui::submit_snippet_update(draft, move |trigger, expansion| {
+            souffle_lib::commands::update_snippet(state, id as i64, trigger, expansion)
+        });
+        match result {
+            lists_ui::ListMutation::Committed(()) => {
+                window.set_settings_snippet_update_error("".into());
+                window.set_settings_edit_snippet_trigger_draft("".into());
+                window.set_settings_edit_snippet_expansion_draft("".into());
+                *snippet_editing_for_save.borrow_mut() = None;
+                let state = Arc::clone(&handle);
+                match souffle_lib::commands::list_snippets(state) {
+                    Ok(entries) => {
+                        lists_ui::populate_snippets(&window, &entries, None);
+                        *snippets_list_state_for_save.borrow_mut() = entries;
+                    }
+                    Err(e) => eprintln!("Failed to reload snippets: {e}"),
+                }
             }
-            Err(e) => eprintln!("Failed to reload snippets: {e}"),
+            lists_ui::ListMutation::Rejected { draft, error } => {
+                window.set_settings_edit_snippet_trigger_draft(draft.trigger.into());
+                window.set_settings_edit_snippet_expansion_draft(draft.expansion.into());
+                window.set_settings_snippet_update_error(error.into());
+            }
         }
     });
 
@@ -4373,6 +4448,7 @@ fn dispatch_native_action(window: &MainWindow, handle: &AppHandle, action: Nativ
         NativeAction::ShowMainWindow => {
             let _ = window.show();
         }
+        NativeAction::Quit => window.invoke_settings_quit_requested(),
         NativeAction::UpdateAvailable {
             latest_version,
             release_notes,

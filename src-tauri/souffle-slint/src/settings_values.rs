@@ -1,7 +1,7 @@
 //! Settings values are controlled by Rust. This module wires the value callbacks
 //! and owns the save/read/publication round trip, without querying catalogues.
 
-use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
 
 use slint::ComponentHandle;
@@ -43,20 +43,33 @@ impl SettingsCache {
         self.snapshot.borrow()
     }
 
-    pub(crate) fn borrow_mut(&self) -> RefMut<'_, Option<AppSettings>> {
-        self.snapshot.borrow_mut()
-    }
-
     pub(crate) fn replace_observed(&self, settings: AppSettings) {
         *self.snapshot.borrow_mut() = Some(settings);
         self.known.set(true);
+    }
+
+    pub(crate) fn known_snapshot(&self) -> Option<AppSettings> {
+        self.known
+            .get()
+            .then(|| self.snapshot.borrow().clone())
+            .flatten()
     }
 
     fn mark_unknown(&self) {
         self.known.set(false);
     }
 
-    fn publish_save_status(&self, outcome: &SettingsSaveOutcome) {
+    pub(crate) fn observe_save_outcome(&self, outcome: &SettingsSaveOutcome) {
+        match outcome {
+            SettingsSaveOutcome::Observed { settings, .. } => {
+                self.replace_observed(settings.as_ref().clone());
+            }
+            SettingsSaveOutcome::Unavailable { .. } => self.mark_unknown(),
+        }
+        self.publish_save_status(outcome);
+    }
+
+    pub(crate) fn publish_save_status(&self, outcome: &SettingsSaveOutcome) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
@@ -79,6 +92,26 @@ impl SettingsCache {
     #[cfg(test)]
     fn is_known(&self) -> bool {
         self.known.get()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsCommitStatus {
+    Committed,
+    NotCommitted,
+}
+
+pub(crate) fn save_outcome_commit_status(outcome: &SettingsSaveOutcome) -> SettingsCommitStatus {
+    let result = match outcome {
+        SettingsSaveOutcome::Observed { result, .. }
+        | SettingsSaveOutcome::Unavailable { result, .. } => result,
+    };
+    match result {
+        Ok(()) => SettingsCommitStatus::Committed,
+        Err(SettingsSaveError::EffectFailedAfterCommit { .. }) => SettingsCommitStatus::Committed,
+        Err(SettingsSaveError::Rejected { .. } | SettingsSaveError::NotCommitted { .. }) => {
+            SettingsCommitStatus::NotCommitted
+        }
     }
 }
 
@@ -110,16 +143,8 @@ pub(crate) fn save_field(
     let cached = cache.borrow().clone();
     let original = match (cache.known.get(), cached) {
         (true, Some(settings)) => settings,
-        (_, cached) => match load() {
-            Ok(mut settings) => {
-                // These are the only intentionally optimistic cache values.
-                // Recover them without reviving stale persisted fields.
-                if let Some(cached) = cached {
-                    settings.dictation_polish_templates = cached.dictation_polish_templates;
-                    settings.summary_templates = cached.summary_templates;
-                }
-                settings
-            }
+        (_, _) => match load() {
+            Ok(settings) => settings,
             Err(read_error) => {
                 cache.mark_unknown();
                 let outcome = SettingsSaveOutcome::Unavailable {
@@ -136,24 +161,7 @@ pub(crate) fn save_field(
     let mut candidate = original.clone();
     mutate(&mut candidate);
     let outcome = save(candidate);
-    match &outcome {
-        SettingsSaveOutcome::Observed { settings, result } => {
-            let mut cached = settings.as_ref().clone();
-            let restore_drafts = match result {
-                Ok(()) => false,
-                Err(error) => !error.committed(),
-            };
-            if restore_drafts {
-                // These two fields still host the existing debounced drafts.
-                // Keep them recoverable until SOU-201 separates their lifecycle.
-                cached.dictation_polish_templates = original.dictation_polish_templates;
-                cached.summary_templates = original.summary_templates;
-            }
-            cache.replace_observed(cached);
-        }
-        SettingsSaveOutcome::Unavailable { .. } => cache.mark_unknown(),
-    }
-    cache.publish_save_status(&outcome);
+    cache.observe_save_outcome(&outcome);
     outcome
 }
 
@@ -347,16 +355,16 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
-    use std::sync::Once;
-
     use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
     use souffle_lib::audio::TransportType;
     use souffle_lib::db::Database;
     use souffle_lib::settings::{MeetingAudioRetention, MeetingTranscriptionLanguage, PasteMethod};
     use souffle_lib::summary::{SummaryModelDescriptor, SummaryProviderKind};
+    use std::cell::Cell;
+    use std::sync::Once;
 
     struct TestPlatform;
+
     impl Platform for TestPlatform {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
             Ok(MinimalSoftwareWindow::new(Default::default()))

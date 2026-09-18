@@ -25,6 +25,8 @@ export component DictionarySection inherits VerticalLayout {
     in-out property <string> new-pronunciation-draft: "";
     in-out property <string> new-category-draft: "";
     in property <string> add-error;
+    in property <int> delete-error-id;
+    in property <string> delete-error;
 
     callback learn-from-edit-changed(bool);
     callback add-requested(string, string, string);
@@ -123,9 +125,6 @@ export component DictionarySection inherits VerticalLayout {
                     enabled: root.new-term-draft != "";
                     clicked => {
                         root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
-                        root.new-term-draft = "";
-                        root.new-pronunciation-draft = "";
-                        root.new-category-draft = "";
                     }
                 }
             }
@@ -155,29 +154,40 @@ export component DictionarySection inherits VerticalLayout {
         border-color: Theme.border-soft;
         border-radius: 6px;
 
-        HorizontalLayout {
+        VerticalLayout {
             padding: 8px;
-            spacing: 8px;
-            alignment: space-between;
+            spacing: 6px;
 
-            VerticalLayout {
-                spacing: 1px;
-                horizontal-stretch: 1;
-                Text {
-                    text: row.term + (row.aliases-display == "" ? "" : "  (" + row.aliases-display + ")");
-                    font-size: 12.5px;
-                    color: Theme.text-primary;
-                    wrap: word-wrap;
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: space-between;
+
+                VerticalLayout {
+                    spacing: 1px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: row.term + (row.aliases-display == "" ? "" : "  (" + row.aliases-display + ")");
+                        font-size: 12.5px;
+                        color: Theme.text-primary;
+                        wrap: word-wrap;
+                    }
+                    if row.category != "": Text {
+                        text: row.category;
+                        font-size: 10.5px;
+                        color: Theme.text-muted;
+                    }
                 }
-                if row.category != "": Text {
-                    text: row.category;
-                    font-size: 10.5px;
-                    color: Theme.text-muted;
+                ThemedButton {
+                    text: "Supprimer";
+                    clicked => { root.delete-requested(row.id); }
                 }
             }
-            ThemedButton {
-                text: "Supprimer";
-                clicked => { root.delete-requested(row.id); }
+
+            if root.delete-error != "" && root.delete-error-id == row.id: Text {
+                text: root.delete-error;
+                color: Theme.danger;
+                font-size: 11px;
+                wrap: word-wrap;
             }
         }
     }

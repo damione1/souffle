@@ -50,6 +50,7 @@ export component SettingsView inherits Rectangle {
     in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
     in property <string> save-error;
+    in property <string> draft-save-error;
     in property <bool> calendar-enabled;
     in property <AccessState> calendar-permission;
     in property <bool> calendar-autostart-enabled;
@@ -122,8 +123,9 @@ export component SettingsView inherits Rectangle {
     in property <string> default-summary-template-label;
     in property <string> editing-summary-template-label;
     in property <bool> editing-summary-template-is-builtin;
-    in property <string> editing-summary-template-name;
+    in-out property <string> editing-summary-template-name;
     in-out property <string> editing-summary-template-prompt;
+    in-out property <string> new-summary-template-draft: "";
     in property <string> model-status-text;
     in property <bool> model-ready;
     in property <[string]> model-labels;
@@ -138,8 +140,12 @@ export component SettingsView inherits Rectangle {
     in property <bool> dictation-learn-from-edit;
     in property <[DictionaryRow]> dictionary-entries;
     in property <string> dictionary-add-error;
+    in property <int> dictionary-delete-error-id;
+    in property <string> dictionary-delete-error;
     in property <[SnippetRow]> snippets;
     in property <string> snippet-add-error;
+    in property <int> snippet-delete-error-id;
+    in property <string> snippet-delete-error;
     in property <string> snippet-update-error;
     in-out property <string> new-dictionary-term-draft: "";
     in-out property <string> new-dictionary-pronunciation-draft: "";
@@ -297,8 +303,15 @@ export component SettingsView inherits Rectangle {
             vertical-stretch: 0;
         }
 
-        if root.save-error != "": Text {
+        if root.save-error != "" && root.draft-save-error == "": Text {
             text: @tr("Enregistrement des réglages : {}", root.save-error);
+            color: Theme.danger;
+            wrap: word-wrap;
+            vertical-stretch: 0;
+        }
+
+        if root.draft-save-error != "": Text {
+            text: @tr("Brouillon conservé : {}", root.draft-save-error);
             color: Theme.danger;
             wrap: word-wrap;
             vertical-stretch: 0;
@@ -343,6 +356,8 @@ export component SettingsView inherits Rectangle {
                             new-pronunciation-draft <=> root.new-dictionary-pronunciation-draft;
                             new-category-draft <=> root.new-dictionary-category-draft;
                             add-error: root.dictionary-add-error;
+                            delete-error-id: root.dictionary-delete-error-id;
+                            delete-error: root.dictionary-delete-error;
                             learn-from-edit-changed(value) => { root.dictation-learn-from-edit-changed(value); }
                             add-requested(term, pronunciation, category) => { root.dictionary-add-requested(term, pronunciation, category); }
                             delete-requested(id) => { root.dictionary-delete-requested(id); }
@@ -353,6 +368,8 @@ export component SettingsView inherits Rectangle {
                             new-trigger-draft <=> root.new-snippet-trigger-draft;
                             new-expansion-draft <=> root.new-snippet-expansion-draft;
                             add-error: root.snippet-add-error;
+                            delete-error-id: root.snippet-delete-error-id;
+                            delete-error: root.snippet-delete-error;
                             edit-trigger-draft <=> root.edit-snippet-trigger-draft;
                             edit-expansion-draft <=> root.edit-snippet-expansion-draft;
                             update-error: root.snippet-update-error;
@@ -411,8 +428,9 @@ export component SettingsView inherits Rectangle {
                             default-template-label: root.default-summary-template-label;
                             editing-template-label: root.editing-summary-template-label;
                             editing-is-builtin: root.editing-summary-template-is-builtin;
-                            editing-name: root.editing-summary-template-name;
+                            editing-name <=> root.editing-summary-template-name;
                             editing-prompt <=> root.editing-summary-template-prompt;
+                            new-template-draft <=> root.new-summary-template-draft;
                             default-changed(value) => { root.summary-template-default-changed(value); }
                             edit-target-changed(value) => { root.summary-template-edit-target-changed(value); }
                             delete-requested => { root.summary-template-delete-requested(); }

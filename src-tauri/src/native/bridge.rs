@@ -45,6 +45,8 @@ pub enum NativeAction {
     CancelDictation,
     Navigate(AppView),
     ShowMainWindow,
+    /// Flush recoverable Settings drafts before terminating the process.
+    Quit,
     /// A newer GitHub release was found by the background scheduler.
     UpdateAvailable {
         latest_version: String,
@@ -72,5 +74,20 @@ pub fn dispatch(action: NativeAction) {
         && let Some(tx) = guard.as_ref()
     {
         let _ = tx.send(action);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quit_action_crosses_the_native_bridge() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        set_sink(tx);
+
+        dispatch(NativeAction::Quit);
+
+        assert_eq!(rx.recv().expect("quit action"), NativeAction::Quit);
     }
 }

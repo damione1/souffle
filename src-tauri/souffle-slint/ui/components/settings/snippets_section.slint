@@ -20,6 +20,8 @@ export component SnippetsSection inherits VerticalLayout {
     in-out property <string> new-trigger-draft: "";
     in-out property <string> new-expansion-draft: "";
     in property <string> add-error;
+    in property <int> delete-error-id;
+    in property <string> delete-error;
     in-out property <string> edit-trigger-draft: "";
     in-out property <string> edit-expansion-draft: "";
     in property <string> update-error;
@@ -71,8 +73,6 @@ export component SnippetsSection inherits VerticalLayout {
                 enabled: root.new-trigger-draft != "" && root.new-expansion-draft != "";
                 clicked => {
                     root.add-requested(root.new-trigger-draft, root.new-expansion-draft);
-                    root.new-trigger-draft = "";
-                    root.new-expansion-draft = "";
                 }
             }
         }
@@ -168,6 +168,13 @@ export component SnippetsSection inherits VerticalLayout {
                         clicked => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
                     }
                 }
+            }
+
+            if root.delete-error != "" && root.delete-error-id == row.id: Text {
+                text: root.delete-error;
+                color: Theme.danger;
+                font-size: 11px;
+                wrap: word-wrap;
             }
         }
     }
