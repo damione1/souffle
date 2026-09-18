@@ -143,6 +143,7 @@ export component MainWindow inherits Window {
     in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
     in property <string> settings-save-error;
+    in property <string> settings-draft-save-error;
     in property <bool> settings-calendar-enabled;
     in property <AccessState> settings-calendar-permission;
     in property <bool> settings-calendar-autostart-enabled;
@@ -215,8 +216,9 @@ export component MainWindow inherits Window {
     in property <string> settings-default-summary-template-label;
     in property <string> settings-editing-summary-template-label;
     in property <bool> settings-editing-summary-template-is-builtin;
-    in property <string> settings-editing-summary-template-name;
+    in-out property <string> settings-editing-summary-template-name;
     in-out property <string> settings-editing-summary-template-prompt;
+    in-out property <string> settings-new-summary-template-draft: "";
     in property <string> settings-model-status-text;
     in property <[string]> settings-model-labels;
     in property <string> settings-selected-model-label;
@@ -239,14 +241,24 @@ export component MainWindow inherits Window {
     in property <bool> settings-dictation-learn-from-edit;
     in property <[DictionaryRow]> settings-dictionary-entries;
     in property <string> settings-dictionary-add-error;
+    in property <int> settings-dictionary-delete-error-id;
+    in property <string> settings-dictionary-delete-error;
+    in-out property <string> settings-new-dictionary-term-draft: "";
+    in-out property <string> settings-new-dictionary-pronunciation-draft: "";
+    in-out property <string> settings-new-dictionary-category-draft: "";
     in property <[SnippetRow]> settings-snippets;
     in property <string> settings-snippet-add-error;
+    in property <int> settings-snippet-delete-error-id;
+    in property <string> settings-snippet-delete-error;
     in property <string> settings-snippet-update-error;
+    in-out property <string> settings-new-snippet-trigger-draft: "";
+    in-out property <string> settings-new-snippet-expansion-draft: "";
     in-out property <string> settings-edit-snippet-trigger-draft: "";
     in-out property <string> settings-edit-snippet-expansion-draft: "";
 
     callback settings-requested();
     callback settings-closed();
+    callback settings-quit-requested();
     callback theme-toggle-requested();
     callback settings-autostart-changed(bool);
     callback settings-permissions-review-requested();
@@ -566,6 +578,7 @@ export component MainWindow inherits Window {
         recording-field <=> root.settings-recording-field;
         shortcut-error <=> root.settings-shortcut-error;
         save-error: root.settings-save-error;
+        draft-save-error: root.settings-draft-save-error;
         calendar-enabled: root.settings-calendar-enabled;
         calendar-permission: root.settings-calendar-permission;
         calendar-autostart-enabled: root.settings-calendar-autostart-enabled;
@@ -638,8 +651,9 @@ export component MainWindow inherits Window {
         default-summary-template-label: root.settings-default-summary-template-label;
         editing-summary-template-label: root.settings-editing-summary-template-label;
         editing-summary-template-is-builtin: root.settings-editing-summary-template-is-builtin;
-        editing-summary-template-name: root.settings-editing-summary-template-name;
+        editing-summary-template-name <=> root.settings-editing-summary-template-name;
         editing-summary-template-prompt <=> root.settings-editing-summary-template-prompt;
+        new-summary-template-draft <=> root.settings-new-summary-template-draft;
         model-status-text: root.settings-model-status-text;
         model-ready: root.model-ready;
         model-labels: root.settings-model-labels;
@@ -654,9 +668,18 @@ export component MainWindow inherits Window {
         dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
         dictionary-entries: root.settings-dictionary-entries;
         dictionary-add-error: root.settings-dictionary-add-error;
+        dictionary-delete-error-id: root.settings-dictionary-delete-error-id;
+        dictionary-delete-error: root.settings-dictionary-delete-error;
+        new-dictionary-term-draft <=> root.settings-new-dictionary-term-draft;
+        new-dictionary-pronunciation-draft <=> root.settings-new-dictionary-pronunciation-draft;
+        new-dictionary-category-draft <=> root.settings-new-dictionary-category-draft;
         snippets: root.settings-snippets;
         snippet-add-error: root.settings-snippet-add-error;
+        snippet-delete-error-id: root.settings-snippet-delete-error-id;
+        snippet-delete-error: root.settings-snippet-delete-error;
         snippet-update-error: root.settings-snippet-update-error;
+        new-snippet-trigger-draft <=> root.settings-new-snippet-trigger-draft;
+        new-snippet-expansion-draft <=> root.settings-new-snippet-expansion-draft;
         edit-snippet-trigger-draft <=> root.settings-edit-snippet-trigger-draft;
         edit-snippet-expansion-draft <=> root.settings-edit-snippet-expansion-draft;
         close-requested => {

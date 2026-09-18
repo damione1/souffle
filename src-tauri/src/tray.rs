@@ -357,7 +357,7 @@ fn handle_menu_event(state: &Arc<AppState>, id: &str) {
         }
         "quit" => {
             info!("Quit requested from tray");
-            std::process::exit(0);
+            bridge::dispatch(NativeAction::Quit);
         }
         _ => {}
     }
