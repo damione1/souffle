@@ -3088,6 +3088,39 @@ fn wire_callbacks(
         let core_models = model_options_state_for_open.clone();
         let core_drafts = settings_drafts_for_open.clone();
         let core_values = settings_values_for_open.clone();
+        let finish_core_io = core_io.clone();
+        let finish_core = Rc::new(move |settings: AppSettings| {
+            if !finish_core_io.accepts_load(token) {
+                return;
+            }
+            let Some(window) = core_weak.upgrade() else {
+                return;
+            };
+            let current_editing_id = core_editing.borrow().clone();
+            let editing_id = settings_drafts::summary_editing_id(&current_editing_id, &settings);
+            *core_editing.borrow_mut() = editing_id;
+            settings_ui::populate(&window, &settings);
+            data_ui::populate(&window, &settings);
+            core_values.observe_loaded(&settings);
+            load_calendars_if_enabled(&window, &core_state, finish_core_io.clone());
+            load_audio_devices(&window, &core_state, &core_devices, finish_core_io.clone());
+            refresh_summary_providers(
+                core_weak.clone(),
+                core_handle.clone(),
+                core_state.clone(),
+                core_summary.clone(),
+                core_editing.clone(),
+                core_drafts.clone(),
+                finish_core_io.clone(),
+            );
+            load_transcription_model_state(
+                &window,
+                &core_handle,
+                &core_state,
+                &core_models,
+                finish_core_io.clone(),
+            );
+        });
         slint::spawn_local(async move {
             let settings = match core_worker.await {
                 Ok(Ok(settings)) => settings,
@@ -3100,36 +3133,11 @@ fn wire_callbacks(
                     return;
                 }
             };
-            if !core_io.seed_if_current(token, revision_at_start, settings.clone()) {
-                return;
+            if core_io.seed_if_current(token, revision_at_start, settings.clone()) {
+                finish_core(settings);
+            } else if core_io.accepts_load(token) {
+                core_io.after_current_snapshot(token, move |settings| finish_core(settings));
             }
-            let Some(window) = core_weak.upgrade() else {
-                return;
-            };
-            let current_editing_id = core_editing.borrow().clone();
-            let editing_id = settings_drafts::summary_editing_id(&current_editing_id, &settings);
-            *core_editing.borrow_mut() = editing_id;
-            settings_ui::populate(&window, &settings);
-            data_ui::populate(&window, &settings);
-            core_values.observe_loaded(&settings);
-            load_calendars_if_enabled(&window, &core_state, core_io.clone());
-            load_audio_devices(&window, &core_state, &core_devices, core_io.clone());
-            refresh_summary_providers(
-                core_weak.clone(),
-                core_handle.clone(),
-                core_state.clone(),
-                core_summary,
-                core_editing,
-                core_drafts,
-                core_io.clone(),
-            );
-            load_transcription_model_state(
-                &window,
-                &core_handle,
-                &core_state,
-                &core_models,
-                core_io,
-            );
         })
         .expect("slint event loop not running");
 

@@ -71,6 +71,7 @@ impl ResponseSequence {
 
 type SettingsMutation = Box<dyn FnOnce(&mut AppSettings) + Send>;
 type SettingsCompletion = Box<dyn FnOnce(SettingsResponseOrder, &SettingsSaveOutcome)>;
+type SettingsSnapshotCompletion = Box<dyn FnOnce(AppSettings)>;
 type LoadSettings = Arc<dyn Fn() -> Result<AppSettings, String> + Send + Sync>;
 type SaveSettings = Arc<dyn Fn(AppSettings) -> SettingsSaveOutcome + Send + Sync>;
 
@@ -330,6 +331,47 @@ impl SettingsIoCoordinator {
         }
         self.arm_response_pump();
         revision
+    }
+
+    /// Run `completion` with the snapshot behind every write currently in the
+    /// actor. If a newer write is submitted while the barrier is in flight,
+    /// queue another barrier instead of publishing an intermediate snapshot.
+    pub(crate) fn after_current_snapshot(
+        self: &Rc<Self>,
+        token: SettingsLoadToken,
+        completion: impl FnOnce(AppSettings) + 'static,
+    ) {
+        let completion = Rc::new(RefCell::new(Some(
+            Box::new(completion) as SettingsSnapshotCompletion
+        )));
+        self.queue_snapshot_barrier(token, completion);
+    }
+
+    fn queue_snapshot_barrier(
+        self: &Rc<Self>,
+        token: SettingsLoadToken,
+        completion: Rc<RefCell<Option<SettingsSnapshotCompletion>>>,
+    ) {
+        let coordinator = Rc::clone(self);
+        self.barrier(move |order, outcome| {
+            if !coordinator.accepts_load(token) {
+                return;
+            }
+            match order {
+                SettingsResponseOrder::LatestVisible => match outcome {
+                    SettingsSaveOutcome::Observed { settings, .. } => {
+                        if let Some(completion) = completion.borrow_mut().take() {
+                            completion(settings.as_ref().clone());
+                        }
+                    }
+                    SettingsSaveOutcome::Unavailable { .. } => {}
+                },
+                SettingsResponseOrder::Intermediate | SettingsResponseOrder::Stale => {
+                    coordinator.queue_snapshot_barrier(token, completion);
+                }
+                SettingsResponseOrder::LatestHidden => {}
+            }
+        });
     }
 
     fn arm_response_pump(self: &Rc<Self>) {
@@ -920,6 +962,55 @@ mod tests {
         assert_eq!(durable.locale, "fr");
         assert!(durable.autostart_enabled);
         assert_eq!(autostart_loads.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn late_core_load_still_starts_dependents_from_the_latest_snapshot() {
+        let window = test_window();
+        let cache = SettingsCache::with_observed(&window, AppSettings::default());
+        let coordinator = SettingsIoCoordinator::with_io(cache, immediate_io());
+        let token = coordinator.begin_open();
+        let revision_before_load = coordinator.current_revision();
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let core_load = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            AppSettings::default()
+        });
+        started_rx.recv().unwrap();
+
+        coordinator.submit(
+            SettingsSaveLane::General,
+            |settings| settings.locale = "fr".into(),
+            |_, _| {},
+        );
+        release_tx.send(()).unwrap();
+        let stale_core = core_load.join().unwrap();
+        assert!(!coordinator.seed_if_current(token, revision_before_load, stale_core));
+
+        let dependent_started = Rc::new(Cell::new(false));
+        let dependent_settings = Rc::new(RefCell::new(None));
+        let started = dependent_started.clone();
+        let observed = dependent_settings.clone();
+        coordinator.after_current_snapshot(token, move |settings| {
+            started.set(true);
+            *observed.borrow_mut() = Some(settings);
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !dependent_started.get() {
+            coordinator.drain_for_test();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            dependent_settings
+                .borrow()
+                .as_ref()
+                .expect("latest settings snapshot")
+                .locale,
+            "fr"
+        );
     }
 
     #[test]
