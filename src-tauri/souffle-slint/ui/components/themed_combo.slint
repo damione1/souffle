@@ -17,6 +17,10 @@ export component ThemedComboBox inherits Rectangle {
 
     callback selected(string);
 
+    // Transient keyboard cursor only. The selected value remains fully
+    // controlled by `current-value` and the parent callback contract.
+    property <int> highlighted-index: 0;
+
     width: root.combo-width;
     height: Theme.settings-control-height;
     horizontal-stretch: root.fill-width ? 1 : 0;
@@ -31,12 +35,12 @@ export component ThemedComboBox inherits Rectangle {
     accessible-label: root.control-label;
     accessible-value: root.current-value;
     accessible-enabled: root.enabled;
+    accessible-expandable: true;
     accessible-expanded: popup.is-open;
     accessible-action-default => {
-        if root.enabled {
-            popup.show();
-        }
+        root.open(0);
     }
+    accessible-action-expand => { root.open(0); }
 
     forward-focus: key-focus;
 
@@ -46,7 +50,11 @@ export component ThemedComboBox inherits Rectangle {
                 return reject;
             }
             if event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow {
-                popup.show();
+                root.open(0);
+                return accept;
+            }
+            if event.text == Key.UpArrow {
+                root.open(root.model.length - 1);
                 return accept;
             }
             if event.text == Key.Escape && popup.is-open {
@@ -80,8 +88,29 @@ export component ThemedComboBox inherits Rectangle {
         enabled: root.enabled;
         clicked => {
             key-focus.focus();
-            popup.show();
+            root.open(0);
         }
+    }
+
+    function open(index: int) {
+        if !root.enabled || root.model.length == 0 {
+            return;
+        }
+        root.highlighted-index = max(0, min(root.model.length - 1, index));
+        popup.show();
+    }
+
+    function choose(index: int) {
+        if !root.enabled || index < 0 || index >= root.model.length {
+            return;
+        }
+        root.selected(root.option-values.length == root.model.length
+            ? root.option-values[index]
+            : root.model[index]);
+    }
+
+    function restore-focus() {
+        key-focus.focus();
     }
 
     popup := PopupWindow {
@@ -89,41 +118,90 @@ export component ThemedComboBox inherits Rectangle {
         x: 0;
         y: parent.height + 4px;
         width: max(parent.width, 160px);
+        forward-focus: popup-focus;
 
-        Rectangle {
-            border-width: 1px;
-            border-color: Theme.ghost-border;
-            border-radius: 4px;
-            background: Theme.surface-1;
+        popup-focus := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.DownArrow {
+                    root.highlighted-index = min(root.model.length - 1, root.highlighted-index + 1);
+                    return accept;
+                }
+                if event.text == Key.UpArrow {
+                    root.highlighted-index = max(0, root.highlighted-index - 1);
+                    return accept;
+                }
+                if event.text == Key.Home {
+                    root.highlighted-index = 0;
+                    return accept;
+                }
+                if event.text == Key.End {
+                    root.highlighted-index = root.model.length - 1;
+                    return accept;
+                }
+                if event.text == Key.Return || event.text == Key.Space {
+                    root.choose(root.highlighted-index);
+                    popup.close();
+                    root.restore-focus();
+                    return accept;
+                }
+                if event.text == Key.Escape {
+                    popup.close();
+                    root.restore-focus();
+                    return accept;
+                }
+                return reject;
+            }
 
-            VerticalLayout {
-                padding: 4px;
-                alignment: start;
-                spacing: 0px;
+            Rectangle {
+                border-width: 1px;
+                border-color: Theme.ghost-border;
+                border-radius: 4px;
+                background: Theme.surface-1;
+                accessible-role: list;
+                accessible-label: root.control-label;
+                accessible-item-count: root.model.length;
 
-                for item[index] in root.model: Rectangle {
-                    height: 32px;
-                    vertical-stretch: 0;
-                    background: row-area.has-hover ? Theme.surface-2 : transparent;
-                    border-radius: 3px;
+                VerticalLayout {
+                    padding: 4px;
+                    alignment: start;
+                    spacing: 0px;
 
-                    Text {
-                        x: 10px;
-                        width: parent.width - 20px;
-                        height: parent.height;
-                        text: item;
-                        font-size: 13px;
-                        color: item == root.current-value ? Theme.text-primary : Theme.text-secondary;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    row-area := TouchArea {
-                        clicked => {
-                            root.selected(root.option-values.length == root.model.length
-                                ? root.option-values[index]
-                                : item);
+                    for item[index] in root.model: Rectangle {
+                        height: 32px;
+                        vertical-stretch: 0;
+                        background: index == root.highlighted-index || row-area.has-hover ? Theme.surface-2 : transparent;
+                        border-radius: 3px;
+                        border-width: index == root.highlighted-index ? 1px : 0px;
+                        border-color: Theme.accent;
+                        accessible-role: list-item;
+                        accessible-label: item;
+                        accessible-enabled: root.enabled;
+                        accessible-item-selectable: true;
+                        accessible-item-selected: item == root.current-value;
+                        accessible-item-index: index;
+                        accessible-action-default => {
+                            root.choose(index);
                             popup.close();
+                            root.restore-focus();
+                        }
+
+                        Text {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            height: parent.height;
+                            text: item;
+                            font-size: 13px;
+                            color: item == root.current-value ? Theme.text-primary : Theme.text-secondary;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        row-area := TouchArea {
+                            clicked => {
+                                root.choose(index);
+                                popup.close();
+                                root.restore-focus();
+                            }
                         }
                     }
                 }
