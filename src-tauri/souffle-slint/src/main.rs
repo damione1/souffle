@@ -2892,6 +2892,7 @@ fn wire_callbacks(
     settings_state: SettingsCache,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
 ) {
+    let lists_models = lists_ui::SettingsListModels::install(window);
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
     // and the play-pause/seek callbacks below - one loaded player at a
     // time, for whichever meeting is currently open in MeetingDetail.
@@ -3456,6 +3457,7 @@ fn wire_callbacks(
     let settings_io_for_open = settings_io.clone();
     let settings_values_for_open = settings_values.clone();
     let permissions_for_open = permissions.clone();
+    let lists_models_for_open = lists_models.clone();
     window.on_settings_requested(move || {
         settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Open);
         let Some(window) = weak.upgrade() else {
@@ -3605,7 +3607,10 @@ fn wire_callbacks(
             souffle_lib::async_runtime::spawn_blocking(move || {
                 souffle_lib::commands::list_dictionary(dictionary_handle)
             }),
-            |window, entries| lists_ui::populate_dictionary(window, &entries),
+            {
+                let lists_models = lists_models_for_open.clone();
+                move |_window, entries| lists_models.populate_dictionary(&entries)
+            },
         );
         let snippets_handle = handle.clone();
         let snippets_state = snippets_list_state_for_open.clone();
@@ -3618,10 +3623,13 @@ fn wire_callbacks(
             souffle_lib::async_runtime::spawn_blocking(move || {
                 souffle_lib::commands::list_snippets(snippets_handle)
             }),
-            move |window, entries| {
-                let editing = *snippet_editing.borrow();
-                lists_ui::populate_snippets(window, &entries, editing);
-                *snippets_state.borrow_mut() = entries;
+            {
+                let lists_models = lists_models_for_open.clone();
+                move |_window, entries| {
+                    let editing = *snippet_editing.borrow();
+                    lists_models.populate_snippets(&entries, editing);
+                    *snippets_state.borrow_mut() = entries;
+                }
             },
         );
     });
@@ -5138,6 +5146,7 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
+    let lists_models_0 = lists_models.clone();
     window.on_settings_dictionary_add_requested(move |term, pronunciation, category| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -5160,7 +5169,7 @@ fn wire_callbacks(
                 window.set_settings_new_dictionary_category_draft("".into());
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_dictionary(state) {
-                    Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+                    Ok(entries) => lists_models_0.populate_dictionary( &entries),
                     Err(e) => eprintln!("Failed to reload dictionary: {e}"),
                 }
             }
@@ -5175,6 +5184,7 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
+    let lists_models_1 = lists_models.clone();
     window.on_settings_dictionary_delete_requested(move |id| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -5188,7 +5198,7 @@ fn wire_callbacks(
                 window.set_settings_dictionary_delete_error("".into());
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_dictionary(state) {
-                    Ok(entries) => lists_ui::populate_dictionary(&window, &entries),
+                    Ok(entries) => lists_models_1.populate_dictionary( &entries),
                     Err(e) => eprintln!("Failed to reload dictionary: {e}"),
                 }
             }
@@ -5202,6 +5212,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let snippets_list_state_for_add = snippets_list_state.clone();
+    let lists_models_2 = lists_models.clone();
     window.on_settings_snippet_add_requested(move |trigger, expansion| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -5222,7 +5233,7 @@ fn wire_callbacks(
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_snippets(state) {
                     Ok(entries) => {
-                        lists_ui::populate_snippets(&window, &entries, None);
+                        lists_models_2.populate_snippets( &entries, None);
                         *snippets_list_state_for_add.borrow_mut() = entries;
                     }
                     Err(e) => eprintln!("Failed to reload snippets: {e}"),
@@ -5240,6 +5251,7 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let snippets_list_state_for_delete = snippets_list_state.clone();
     let snippet_editing_for_delete = snippet_editing.clone();
+    let lists_models_3 = lists_models.clone();
     window.on_settings_snippet_delete_requested(move |id| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -5255,7 +5267,7 @@ fn wire_callbacks(
                 match souffle_lib::commands::list_snippets(state) {
                     Ok(entries) => {
                         let editing = *snippet_editing_for_delete.borrow();
-                        lists_ui::populate_snippets(&window, &entries, editing);
+                        lists_models_3.populate_snippets( &entries, editing);
                         *snippets_list_state_for_delete.borrow_mut() = entries;
                     }
                     Err(e) => eprintln!("Failed to reload snippets: {e}"),
@@ -5271,6 +5283,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let snippets_list_state_for_edit = snippets_list_state.clone();
     let snippet_editing_for_edit = snippet_editing.clone();
+    let lists_models_4 = lists_models.clone();
     window.on_settings_snippet_edit_requested(move |id| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -5284,17 +5297,18 @@ fn wire_callbacks(
         window.set_settings_edit_snippet_expansion_draft(entry.expansion.as_str().into());
         window.set_settings_snippet_update_error("".into());
         *snippet_editing_for_edit.borrow_mut() = Some(id);
-        lists_ui::populate_snippets(&window, &entries, Some(id));
+        lists_models_4.populate_snippets( &entries, Some(id));
     });
 
     let weak = window.as_weak();
     let snippets_list_state_for_cancel = snippets_list_state.clone();
     let snippet_editing_for_cancel = snippet_editing.clone();
+    let lists_models_5 = lists_models.clone();
     window.on_settings_snippet_cancel_edit_requested(move || {
         *snippet_editing_for_cancel.borrow_mut() = None;
         if let Some(window) = weak.upgrade() {
             let entries = snippets_list_state_for_cancel.borrow();
-            lists_ui::populate_snippets(&window, &entries, None);
+            lists_models_5.populate_snippets( &entries, None);
         }
     });
 
@@ -5302,6 +5316,7 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let snippets_list_state_for_save = snippets_list_state.clone();
     let snippet_editing_for_save = snippet_editing.clone();
+    let lists_models_6 = lists_models.clone();
     window.on_settings_snippet_save_edit_requested(move |id, trigger, expansion| {
         let Some(window) = weak.upgrade() else {
             return;
@@ -5323,7 +5338,7 @@ fn wire_callbacks(
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_snippets(state) {
                     Ok(entries) => {
-                        lists_ui::populate_snippets(&window, &entries, None);
+                        lists_models_6.populate_snippets(&entries, None);
                         *snippets_list_state_for_save.borrow_mut() = entries;
                     }
                     Err(e) => eprintln!("Failed to reload snippets: {e}"),
