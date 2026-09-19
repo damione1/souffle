@@ -37,7 +37,7 @@ export component SnippetsSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "EXTRAITS VOCAUX";
+        title: @tr("EXTRAITS VOCAUX");
 
     VerticalLayout {
         padding-left: Theme.settings-inset;
@@ -47,30 +47,30 @@ export component SnippetsSection inherits VerticalLayout {
         spacing: 8px;
 
         Text {
-            text: "Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de texte. La comparaison ignore la casse et les accents ; aucune retouche IA n'est appliquée quand un extrait correspond.";
+            text: @tr("Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de texte. La comparaison ignore la casse et les accents ; aucune retouche IA n'est appliquée quand un extrait correspond.");
             font-size: 12px;
             color: Theme.text-muted;
             wrap: word-wrap;
         }
 
-        Text { text: "DÉCLENCHEUR"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+        Text { text: @tr("DÉCLENCHEUR"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
         ThemedLineEdit {
             text <=> root.new-trigger-draft;
             placeholder: "Phrase déclencheur";
-            control-label: "Phrase déclencheur";
+            control-label: @tr("Phrase déclencheur");
         }
-        Text { text: "EXPANSION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+        Text { text: @tr("EXPANSION"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
         ThemedTextArea {
             text <=> root.new-expansion-draft;
             area-height: 72px;
             placeholder: "Texte à insérer";
-            control-label: "Texte de l'extrait vocal";
+            control-label: @tr("Texte de l'extrait vocal");
         }
 
         HorizontalLayout {
             alignment: end;
             ThemedButton {
-                text: "Ajouter un extrait";
+                text: @tr("Ajouter un extrait");
                 enabled: root.new-trigger-draft != "" && root.new-expansion-draft != "";
                 clicked => {
                     root.add-requested(root.new-trigger-draft, root.new-expansion-draft);
@@ -85,7 +85,7 @@ export component SnippetsSection inherits VerticalLayout {
         }
 
         if root.entries.length == 0: Text {
-            text: "Aucune formule.";
+            text: @tr("Aucune formule.");
             color: Theme.text-muted;
             font-size: 12px;
         }
@@ -125,11 +125,11 @@ export component SnippetsSection inherits VerticalLayout {
                             HorizontalLayout {
                                 spacing: 4px;
                                 ThemedButton {
-                                    text: "Modifier";
+                                    text: @tr("Modifier");
                                     clicked => { root.edit-requested(row.id); }
                                 }
                                 ThemedButton {
-                                    text: "Supprimer";
+                                    text: @tr("Supprimer");
                                     clicked => { root.delete-requested(row.id); }
                                 }
                             }
@@ -147,16 +147,16 @@ export component SnippetsSection inherits VerticalLayout {
                     if row.editing: VerticalLayout {
                         spacing: 4px;
 
-                        Text { text: "DÉCLENCHEUR"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+                        Text { text: @tr("DÉCLENCHEUR"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
                         ThemedLineEdit {
                             text <=> root.edit-trigger-draft;
-                            control-label: "Phrase déclencheur";
+                            control-label: @tr("Phrase déclencheur");
                         }
-                        Text { text: "EXPANSION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+                        Text { text: @tr("EXPANSION"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
                         ThemedTextArea {
                             text <=> root.edit-expansion-draft;
                             area-height: 72px;
-                            control-label: "Texte de l'extrait vocal";
+                            control-label: @tr("Texte de l'extrait vocal");
                         }
                         if root.update-error != "": Text {
                             text: root.update-error;
@@ -168,11 +168,11 @@ export component SnippetsSection inherits VerticalLayout {
                             alignment: end;
                             spacing: 4px;
                             ThemedButton {
-                                text: "Annuler";
+                                text: @tr("Annuler");
                                 clicked => { root.cancel-edit-requested(); }
                             }
                             ThemedButton {
-                                text: "Enregistrer";
+                                text: @tr("Enregistrer");
                                 enabled: root.edit-trigger-draft != "" && root.edit-expansion-draft != "";
                                 clicked => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
                             }

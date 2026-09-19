@@ -31,7 +31,7 @@ export component WhatsNewDialog inherits Rectangle {
             VerticalLayout {
                 spacing: 2px;
                 Text {
-                    text: "Nouveautés";
+                    text: @tr("Nouveautés");
                     font-size: 16px;
                     font-weight: 700;
                     color: Theme.text-primary;
@@ -53,7 +53,7 @@ export component WhatsNewDialog inherits Rectangle {
             HorizontalLayout {
                 alignment: end;
                 Button {
-                    text: "Compris";
+                    text: @tr("Compris");
                     clicked => { root.dismissed(); }
                 }
             }

@@ -18,7 +18,7 @@ export component FeedbackSoundsSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "SONS DE DICTÉE";
+        title: @tr("SONS DE DICTÉE");
 
         SettingsField {
             show-divider: false;
@@ -26,7 +26,7 @@ export component FeedbackSoundsSection inherits VerticalLayout {
             description: "Jouer un son au démarrage et à l'arrêt de l'enregistrement.";
 
             ThemedSwitch {
-                control-label: "Activer les sons";
+                control-label: @tr("Activer les sons");
                 checked: root.enabled;
                 toggled(new) => { root.enabled-changed(new); }
             }
@@ -41,7 +41,7 @@ export component FeedbackSoundsSection inherits VerticalLayout {
                 horizontal-stretch: 0;
 
                 ThemedSlider {
-                    control-label: "Volume des sons de dictée";
+                    control-label: @tr("Volume des sons de dictée");
                     value: root.volume;
                     minimum: root.volume-min;
                     maximum: root.volume-max;

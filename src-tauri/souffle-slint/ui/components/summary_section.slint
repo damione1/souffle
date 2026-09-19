@@ -26,14 +26,14 @@ export component SummarySection inherits VerticalLayout {
         spacing: 4px;
 
         Text {
-            text: "R\u{e9}sum\u{e9}";
+            text: @tr("R\u{e9}sum\u{e9}");
             font-size: 11px;
             font-weight: 600;
             color: Theme.text-muted;
         }
 
         Text {
-            text: "Aucun r\u{e9}sum\u{e9} pour cette r\u{e9}union.";
+            text: @tr("Aucun r\u{e9}sum\u{e9} pour cette r\u{e9}union.");
             color: Theme.text-muted;
             font-size: 12px;
             wrap: word-wrap;
@@ -48,7 +48,7 @@ export component SummarySection inherits VerticalLayout {
             alignment: space-between;
 
             Text {
-                text: "R\u{e9}sum\u{e9}";
+                text: @tr("R\u{e9}sum\u{e9}");
                 font-size: 11px;
                 font-weight: 600;
                 color: Theme.text-muted;
@@ -65,7 +65,7 @@ export component SummarySection inherits VerticalLayout {
         }
 
         if root.summary-is-stale: Text {
-            text: "R\u{e9}sum\u{e9} obsol\u{e8}te (audio ajout\u{e9} depuis)";
+            text: @tr("R\u{e9}sum\u{e9} obsol\u{e8}te (audio ajout\u{e9} depuis)");
             color: Theme.warning;
             font-size: 11px;
         }
@@ -111,7 +111,7 @@ export component SummarySection inherits VerticalLayout {
             spacing: 6px;
 
             Text {
-                text: "D\u{e9}cisions";
+                text: @tr("D\u{e9}cisions");
                 font-size: 11px;
                 font-weight: 600;
                 color: Theme.text-muted;
@@ -128,7 +128,7 @@ export component SummarySection inherits VerticalLayout {
             spacing: 6px;
 
             Text {
-                text: "Actions";
+                text: @tr("Actions");
                 font-size: 11px;
                 font-weight: 600;
                 color: Theme.text-muted;
@@ -152,7 +152,7 @@ export component SummarySection inherits VerticalLayout {
             spacing: 6px;
 
             Text {
-                text: "Questions ouvertes";
+                text: @tr("Questions ouvertes");
                 font-size: 11px;
                 font-weight: 600;
                 color: Theme.text-muted;

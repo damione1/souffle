@@ -126,7 +126,7 @@ export component InterfaceSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "INTERFACE";
+        title: @tr("INTERFACE");
 
         SettingsField {
             show-divider: false;
@@ -134,7 +134,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Choisissez la langue de l'interface.";
 
             ThemedComboBox {
-                control-label: "Langue de l'interface";
+                control-label: @tr("Langue de l'interface");
                 model: [root.locale-label(AppLocale.en), root.locale-label(AppLocale.fr)];
                 current-value: root.locale-label(root.locale);
                 selected(value) => {
@@ -157,17 +157,17 @@ export component InterfaceSection inherits VerticalLayout {
                 vertical-stretch: 0;
 
                 ThemedButton {
-                    text: "Sombre";
+                    text: @tr("Sombre");
                     kind: root.theme == AppTheme.dark ? ThemedButtonKind.active : ThemedButtonKind.default;
                     clicked => { root.theme-changed(AppTheme.dark); }
                 }
                 ThemedButton {
-                    text: "Clair";
+                    text: @tr("Clair");
                     kind: root.theme == AppTheme.light ? ThemedButtonKind.active : ThemedButtonKind.default;
                     clicked => { root.theme-changed(AppTheme.light); }
                 }
                 ThemedButton {
-                    text: "Système";
+                    text: @tr("Système");
                     kind: root.theme == AppTheme.system ? ThemedButtonKind.active : ThemedButtonKind.default;
                     clicked => { root.theme-changed(AppTheme.system); }
                 }
@@ -179,7 +179,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Colle automatiquement la transcription à l'arrêt de l'enregistrement.";
 
             ThemedSwitch {
-                control-label: "Collage automatique après dictée";
+                control-label: @tr("Collage automatique après dictée");
                 checked: root.auto-paste;
                 toggled(new) => { root.auto-paste-changed(new); }
             }
@@ -190,7 +190,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).";
 
             ThemedComboBox {
-                control-label: "Méthode de collage";
+                control-label: @tr("Méthode de collage");
                 model: [
                     root.paste-method-label(PasteMethod.clipboard),
                     root.paste-method-label(PasteMethod.typing),
@@ -216,7 +216,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.";
 
             ThemedSpinBox {
-                control-label: "Délai de collage en millisecondes";
+                control-label: @tr("Délai de collage en millisecondes");
                 value: root.paste-delay-ms;
                 minimum: root.paste-delay-min;
                 maximum: root.paste-delay-max;
@@ -244,7 +244,7 @@ export component InterfaceSection inherits VerticalLayout {
                     cancelled => { root.shortcut-cancelled(); }
                 }
                 if root.toggle-shortcut-label != "": ThemedButton {
-                    text: "Effacer";
+                    text: @tr("Effacer");
                     kind: ThemedButtonKind.ghost;
                     clicked => { root.shortcut-cleared(ShortcutField.toggle); }
                 }
@@ -270,7 +270,7 @@ export component InterfaceSection inherits VerticalLayout {
                     cancelled => { root.shortcut-cancelled(); }
                 }
                 if root.ptt-shortcut-label != "": ThemedButton {
-                    text: "Effacer";
+                    text: @tr("Effacer");
                     kind: ThemedButtonKind.ghost;
                     clicked => { root.shortcut-cleared(ShortcutField.ptt); }
                 }
@@ -282,7 +282,7 @@ export component InterfaceSection inherits VerticalLayout {
             description: "Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.";
 
             ThemedSwitch {
-                control-label: "Masquer l'overlay d'enregistrement";
+                control-label: @tr("Masquer l'overlay d'enregistrement");
                 checked: root.pill-hidden;
                 toggled(new) => { root.pill-hidden-changed(new); }
             }
@@ -297,7 +297,7 @@ export component InterfaceSection inherits VerticalLayout {
                 alignment: space-between;
 
                 Text {
-                    text: "Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.";
+                    text: @tr("Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.");
                     color: Theme.warning;
                     font-size: 12px;
                     wrap: word-wrap;
@@ -306,7 +306,7 @@ export component InterfaceSection inherits VerticalLayout {
                 }
 
                 ThemedButton {
-                    text: "Vérifier les permissions";
+                    text: @tr("Vérifier les permissions");
                     kind: ThemedButtonKind.ghost;
                     clicked => { root.permissions-review-requested(); }
                 }

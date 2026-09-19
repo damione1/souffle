@@ -115,7 +115,7 @@ export component TranscriptSection inherits VerticalLayout {
                         alignment: space-between;
 
                         Text {
-                            text: "Alias de dictionnaire";
+                            text: @tr("Alias de dictionnaire");
                             font-size: 11px;
                             font-weight: 600;
                             color: Theme.text-secondary;
@@ -127,7 +127,7 @@ export component TranscriptSection inherits VerticalLayout {
                             height: 16px;
 
                             accessible-role: button;
-                            accessible-label: "Fermer";
+                            accessible-label: @tr("Fermer");
                             accessible-action-default => { alias-popup.close(); }
 
                             TouchArea {
@@ -135,7 +135,7 @@ export component TranscriptSection inherits VerticalLayout {
                             }
 
                             Text {
-                                text: "\u{2715}";
+                                text: @tr("\u{2715}");
                                 font-size: 11px;
                                 color: Theme.text-muted;
                             }
@@ -143,13 +143,13 @@ export component TranscriptSection inherits VerticalLayout {
                     }
 
                     LineEdit {
-                        placeholder-text: "Terme correct";
+                        placeholder-text: @tr("Terme correct");
                         text <=> root.alias-term-draft;
                         accepted => { root.save-and-close-alias-popup(); }
                     }
 
                     LineEdit {
-                        placeholder-text: "Prononciation entendue";
+                        placeholder-text: @tr("Prononciation entendue");
                         text <=> root.alias-pronunciation-draft;
                         accepted => { root.save-and-close-alias-popup(); }
                     }
@@ -159,7 +159,7 @@ export component TranscriptSection inherits VerticalLayout {
                         background: root.alias-term-draft == "" ? Theme.surface-4 : (save-area.has-hover ? Theme.accent-hover : Theme.accent);
 
                         accessible-role: button;
-                        accessible-label: "Enregistrer l'alias";
+                        accessible-label: @tr("Enregistrer l'alias");
                         accessible-action-default => { root.save-and-close-alias-popup(); }
 
                         save-area := TouchArea {
@@ -168,7 +168,7 @@ export component TranscriptSection inherits VerticalLayout {
                         }
 
                         Text {
-                            text: "Enregistrer";
+                            text: @tr("Enregistrer");
                             color: Theme.text-primary;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -193,14 +193,14 @@ export component TranscriptSection inherits VerticalLayout {
     }
 
     Text {
-        text: "Transcription";
+        text: @tr("Transcription");
         font-family: "Archivo SemiBold";
         font-size: 13px;
         color: Theme.text-primary;
     }
 
     if root.segment-count == 0: Text {
-        text: "Aucun texte transcrit pour cette r\u{e9}union.";
+        text: @tr("Aucun texte transcrit pour cette r\u{e9}union.");
         color: Theme.text-muted;
         font-size: 12px;
     }
@@ -306,7 +306,7 @@ export component TranscriptSection inherits VerticalLayout {
                             vertical-stretch: 1;
                         }
                         Text {
-                            text: block.end-label + " / " + block.start-label;
+                            text: @tr("Fin de l'enregistrement précédent") + " / " + @tr("Nouvelle session d'enregistrement");
                             font-size: 10px;
                             color: Theme.text-faint;
                         }

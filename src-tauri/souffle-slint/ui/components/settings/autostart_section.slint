@@ -12,7 +12,7 @@ export component AutostartSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "DÉMARRAGE";
+        title: @tr("DÉMARRAGE");
 
         SettingsField {
             show-divider: false;
@@ -20,7 +20,7 @@ export component AutostartSection inherits VerticalLayout {
             description: "Ouvrir Soufflé automatiquement au démarrage du Mac.";
 
             ThemedSwitch {
-                control-label: "Lancer Soufflé à l'ouverture de session";
+                control-label: @tr("Lancer Soufflé à l'ouverture de session");
                 checked: root.autostart-enabled;
                 toggled(new) => { root.autostart-changed(new); }
             }

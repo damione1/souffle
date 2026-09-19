@@ -10,7 +10,7 @@ export component PermissionsSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "PERMISSIONS";
+        title: @tr("PERMISSIONS");
 
         SettingsField {
             show-divider: false;
@@ -18,7 +18,7 @@ export component PermissionsSection inherits VerticalLayout {
             description: "Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.";
 
             ThemedButton {
-                text: "Vérifier les permissions";
+                text: @tr("Vérifier les permissions");
                 clicked => { root.review-requested(); }
             }
         }

@@ -27,7 +27,7 @@ export component DictationPolishSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "POLISH DE LA DICTÉE";
+        title: @tr("POLISH DE LA DICTÉE");
 
     SettingsField {
         show-divider: false;
@@ -35,7 +35,7 @@ export component DictationPolishSection inherits VerticalLayout {
         description: "Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.";
 
         ThemedSwitch {
-            control-label: "Nettoyer la dictée avec l'IA";
+            control-label: @tr("Nettoyer la dictée avec l'IA");
             checked: root.enabled;
             toggled(new) => { root.enabled-changed(new); }
         }
@@ -53,14 +53,14 @@ export component DictationPolishSection inherits VerticalLayout {
             alignment: space-between;
 
             Text {
-                text: "Aucun fournisseur IA disponible pour la retouche.";
+                text: @tr("Aucun fournisseur IA disponible pour la retouche.");
                 color: Theme.warning;
                 font-size: 11.5px;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
             ThemedButton {
-                text: "Choisir un fournisseur";
+                text: @tr("Choisir un fournisseur");
                 clicked => { root.open-provider-settings-requested(); }
             }
         }
@@ -70,7 +70,7 @@ export component DictationPolishSection inherits VerticalLayout {
         label: "Modèle de retouche";
 
         ThemedComboBox {
-            control-label: "Modèle de retouche";
+            control-label: @tr("Modèle de retouche");
             model: root.template-labels;
             option-values: root.template-ids;
             current-value: root.active-template-label;
@@ -86,7 +86,7 @@ export component DictationPolishSection inherits VerticalLayout {
             text <=> root.active-prompt;
             area-height: 160px;
             placeholder: "Instruction de retouche";
-            control-label: "Instruction de retouche";
+            control-label: @tr("Instruction de retouche");
             edited(value) => { root.prompt-changed(value); }
         }
     }

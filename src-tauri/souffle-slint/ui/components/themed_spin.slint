@@ -9,7 +9,7 @@ export component ThemedSpinBox inherits Rectangle {
     in property <int> maximum: 100;
     in property <int> step: 1;
     in property <bool> enabled: true;
-    in property <string> control-label: "Valeur";
+    in property <string> control-label: @tr("Valeur");
 
     callback edited(int);
 
