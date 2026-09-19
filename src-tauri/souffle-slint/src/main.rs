@@ -1939,7 +1939,8 @@ fn project_startup_settings(
     let dark = settings_ui::resolve_dark(settings.theme);
     window.global::<Theme>().set_dark(dark);
     window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
-    let safe_locale = settings_ui::locale_from_slint(settings_ui::locale_to_slint(settings.locale.as_str()));
+    let safe_locale =
+        settings_ui::locale_from_slint(settings_ui::locale_to_slint(settings.locale.as_str()));
     window.set_onboarding_locale(safe_locale.into());
     let _ = slint::select_bundled_translation(safe_locale);
     let mut onboarding = onboarding.borrow_mut();
@@ -3399,7 +3400,25 @@ fn wire_callbacks(
     let settings_drafts =
         settings_drafts::SettingsDraftController::new(window, settings_io.clone());
     let settings_drafts_for_quit = settings_drafts.clone();
-    window.on_settings_quit_requested(move || settings_drafts_for_quit.request_quit());
+    let weak_quit = window.as_weak();
+    let io_quit = settings_io.clone();
+    window.on_settings_quit_requested(move || {
+        if let Some(w) = weak_quit.upgrade() {
+            let size = w.window().size();
+            let scale = w.window().scale_factor();
+            let width = (size.width as f32 / scale) as u32;
+            let height = (size.height as f32 / scale) as u32;
+            io_quit.submit(
+                souffle_lib::commands::SettingsSaveLane::General,
+                move |settings| {
+                    settings.window_width = width;
+                    settings.window_height = height;
+                },
+                |_order, _outcome| {},
+            );
+        }
+        settings_drafts_for_quit.request_quit();
+    });
     // Not part of `AppSettings` (see `get_shortcuts`/`save_shortcuts`), so it
     // gets its own cache next to `settings_state` rather than folding into it.
     let shortcuts_state: Rc<RefCell<Option<ShortcutSettings>>> = Rc::new(RefCell::new(None));
@@ -5172,7 +5191,7 @@ fn wire_callbacks(
                 window.set_settings_new_dictionary_category_draft("".into());
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_dictionary(state) {
-                    Ok(entries) => lists_models_0.populate_dictionary( &entries),
+                    Ok(entries) => lists_models_0.populate_dictionary(&entries),
                     Err(e) => eprintln!("Failed to reload dictionary: {e}"),
                 }
             }
@@ -5201,7 +5220,7 @@ fn wire_callbacks(
                 window.set_settings_dictionary_delete_error("".into());
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_dictionary(state) {
-                    Ok(entries) => lists_models_1.populate_dictionary( &entries),
+                    Ok(entries) => lists_models_1.populate_dictionary(&entries),
                     Err(e) => eprintln!("Failed to reload dictionary: {e}"),
                 }
             }
@@ -5236,7 +5255,7 @@ fn wire_callbacks(
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_snippets(state) {
                     Ok(entries) => {
-                        lists_models_2.populate_snippets( &entries, None);
+                        lists_models_2.populate_snippets(&entries, None);
                         *snippets_list_state_for_add.borrow_mut() = entries;
                     }
                     Err(e) => eprintln!("Failed to reload snippets: {e}"),
@@ -5270,7 +5289,7 @@ fn wire_callbacks(
                 match souffle_lib::commands::list_snippets(state) {
                     Ok(entries) => {
                         let editing = *snippet_editing_for_delete.borrow();
-                        lists_models_3.populate_snippets( &entries, editing);
+                        lists_models_3.populate_snippets(&entries, editing);
                         *snippets_list_state_for_delete.borrow_mut() = entries;
                     }
                     Err(e) => eprintln!("Failed to reload snippets: {e}"),
@@ -5300,7 +5319,7 @@ fn wire_callbacks(
         window.set_settings_edit_snippet_expansion_draft(entry.expansion.as_str().into());
         window.set_settings_snippet_update_error("".into());
         *snippet_editing_for_edit.borrow_mut() = Some(id);
-        lists_models_4.populate_snippets( &entries, Some(id));
+        lists_models_4.populate_snippets(&entries, Some(id));
     });
 
     let weak = window.as_weak();
@@ -5311,7 +5330,7 @@ fn wire_callbacks(
         *snippet_editing_for_cancel.borrow_mut() = None;
         if let Some(_window) = weak.upgrade() {
             let entries = snippets_list_state_for_cancel.borrow();
-            lists_models_5.populate_snippets( &entries, None);
+            lists_models_5.populate_snippets(&entries, None);
         }
     });
 
@@ -5739,6 +5758,11 @@ fn main() {
     // every command below takes.
     let handle: AppHandle = souffle_lib::bootstrap::bootstrap();
 
+    let initial_settings =
+        souffle_lib::settings::AppSettings::load_read_only(&handle.db).unwrap_or_default();
+    let initial_width = initial_settings.window_width as f64;
+    let initial_height = initial_settings.window_height as f64;
+
     // Native equivalent of Tauri's `titleBarStyle: "overlay"` + `hiddenTitle:
     // true`: keep the traffic lights but remove the native title bar strip
     // and let AppHeader (main_window.slint) draw one continuous dark header
@@ -5749,9 +5773,13 @@ fn main() {
     slint::BackendSelector::new()
         .renderer_name("skia".into())
         .require_metal()
-        .with_winit_window_attributes_hook(|attrs| {
+        .with_winit_window_attributes_hook(move |attrs| {
             use slint::winit_030::winit::platform::macos::WindowAttributesExtMacOS;
             attrs
+                .with_inner_size(slint::winit_030::winit::dpi::LogicalSize::new(
+                    initial_width,
+                    initial_height,
+                ))
                 .with_titlebar_transparent(true)
                 .with_title_hidden(true)
                 .with_fullsize_content_view(true)
@@ -5767,9 +5795,6 @@ fn main() {
     // alive, so a destroyed main window leaves Soufflé in the Dock and menu
     // bar with no window to bring back (mirrors the pre-191 Tauri
     // `CloseRequested` -> `prevent_close` + `hide` behavior).
-    window
-        .window()
-        .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
 
     let startup_gate = Arc::new(StartupPresentationGate::new());
     spawn_native_action_receiver(window.as_weak(), handle.clone(), Arc::clone(&startup_gate));
@@ -5782,6 +5807,26 @@ fn main() {
     let settings_state = SettingsCache::new(&window);
     let settings_io =
         settings_io::SettingsIoCoordinator::new(handle.clone(), settings_state.clone());
+
+    let weak_close = window.as_weak();
+    let io_close = settings_io.clone();
+    window.window().on_close_requested(move || {
+        if let Some(w) = weak_close.upgrade() {
+            let size = w.window().size();
+            let scale = w.window().scale_factor();
+            let width = (size.width as f32 / scale) as u32;
+            let height = (size.height as f32 / scale) as u32;
+            io_close.submit(
+                souffle_lib::commands::SettingsSaveLane::General,
+                move |settings| {
+                    settings.window_width = width;
+                    settings.window_height = height;
+                },
+                |_order, _outcome| {},
+            );
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
     let permissions = permissions_ui::PermissionController::new(&window);
     permissions.wire_foreground_refresh(&window);
 

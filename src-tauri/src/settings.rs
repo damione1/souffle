@@ -12,6 +12,8 @@ use crate::logging::LogLevel;
 use crate::summary::SummaryProviderChoice;
 
 const THEME_KEY: &str = "theme";
+const WINDOW_WIDTH_KEY: &str = "window_width";
+const WINDOW_HEIGHT_KEY: &str = "window_height";
 const AUTO_PASTE_KEY: &str = "auto_paste";
 const PASTE_DELAY_MS_KEY: &str = "paste_delay_ms";
 const OLLAMA_URL_KEY: &str = "ollama_url";
@@ -147,6 +149,8 @@ pub enum MeetingAudioRetention {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppSettings {
+    pub window_width: u32,
+    pub window_height: u32,
     pub theme: Theme,
     pub locale: String,
     pub auto_paste: bool,
@@ -303,6 +307,8 @@ impl SettingsOptions {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            window_width: 860,
+            window_height: 1040,
             theme: Theme::Light,
             locale: String::new(),
             auto_paste: false,
@@ -378,8 +384,14 @@ impl AppSettings {
     /// Read and normalize the persisted snapshot without running migrations or
     /// writing any key. Save preflight and post-save observation must use this
     /// path so a rejected or failed save cannot mutate the database indirectly.
-    pub(crate) fn load_read_only(db: &Database) -> Result<Self, String> {
+    pub fn load_read_only(db: &Database) -> Result<Self, String> {
         let mut settings = Self::default();
+        if let Some(w) = read_json_setting::<u32>(db, WINDOW_WIDTH_KEY)? {
+            settings.window_width = w;
+        }
+        if let Some(h) = read_json_setting::<u32>(db, WINDOW_HEIGHT_KEY)? {
+            settings.window_height = h;
+        }
 
         if let Some(theme) = read_json_setting::<Theme>(db, THEME_KEY)? {
             settings.theme = theme;
@@ -874,6 +886,16 @@ impl AppSettings {
             }
 
             let normalized = self;
+            write_json_setting_in_transaction(
+                transaction,
+                WINDOW_WIDTH_KEY,
+                &normalized.window_width,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                WINDOW_HEIGHT_KEY,
+                &normalized.window_height,
+            )?;
             write_json_setting_in_transaction(transaction, THEME_KEY, &normalized.theme)?;
             write_json_setting_in_transaction(transaction, LOCALE_KEY, &normalized.locale)?;
             write_json_setting_in_transaction(transaction, AUTO_PASTE_KEY, &normalized.auto_paste)?;
@@ -1348,6 +1370,8 @@ mod tests {
     fn app_settings_round_trip() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
+            window_width: 860,
+            window_height: 1040,
             auto_update_check_enabled: false,
             theme: Theme::Light,
             locale: "fr".into(),
@@ -1492,6 +1516,8 @@ mod tests {
     fn autostart_explicit_value_round_trips() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
+            window_width: 860,
+            window_height: 1040,
             autostart_enabled: true,
             ..AppSettings::default()
         };
@@ -1501,6 +1527,8 @@ mod tests {
         // An explicit `false` is written too, so it stays distinguishable
         // from the never-written key above.
         let settings = AppSettings {
+            window_width: 860,
+            window_height: 1040,
             autostart_enabled: false,
             ..AppSettings::default()
         };
@@ -1516,6 +1544,8 @@ mod tests {
     fn blank_audio_device_is_removed_on_save() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
+            window_width: 860,
+            window_height: 1040,
             audio_device: Some("   ".into()),
             ..AppSettings::default()
         };
@@ -1529,6 +1559,8 @@ mod tests {
     fn blank_clamshell_audio_device_is_removed_on_save() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
+            window_width: 860,
+            window_height: 1040,
             clamshell_audio_device: Some("   ".into()),
             ..AppSettings::default()
         };
@@ -1850,6 +1882,8 @@ mod tests {
     fn dictation_polish_settings_round_trip() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
+            window_width: 860,
+            window_height: 1040,
             dictation_polish_enabled: true,
             dictation_polish_template_id: "bullets".into(),
             dictation_polish_templates: vec![super::DictationPolishTemplate {
@@ -1880,6 +1914,8 @@ mod tests {
     fn summary_template_settings_round_trip_keeps_custom_templates() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
+            window_width: 860,
+            window_height: 1040,
             default_summary_template_id: "custom-1".into(),
             summary_templates: vec![
                 super::SummaryTemplate {
@@ -1927,6 +1963,8 @@ mod tests {
     #[test]
     fn unknown_default_summary_template_falls_back_to_first() {
         let settings = AppSettings {
+            window_width: 860,
+            window_height: 1040,
             default_summary_template_id: "deleted-id".into(),
             ..AppSettings::default()
         };
