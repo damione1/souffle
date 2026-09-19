@@ -45,6 +45,7 @@ impl PollLifecycle {
         }
     }
 
+    #[allow(dead_code)]
     fn timer_count(&self) -> usize {
         usize::from(self.active)
     }
@@ -238,6 +239,7 @@ impl PermissionController {
             controller.state.borrow_mut().busy[index] = false;
             controller.apply_observation(revision, observation);
             if let Err(error) = request {
+                #[allow(clippy::collapsible_if)]
                 if let Some(window) = controller.window.upgrade() {
                     window.set_onboarding_permissions_error(error.into());
                 }
