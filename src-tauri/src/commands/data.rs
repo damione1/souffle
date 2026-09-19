@@ -40,6 +40,15 @@ pub fn export_archive(state: Arc<AppState>, dest_dir: String) -> Result<(), Stri
         return Err(format!("Destination is not a directory: {dest_dir}"));
     }
 
+    // Replace any previous terminal snapshot before spawning so a UI poller
+    // cannot mistake the last export's result for this export's result.
+    record_export_progress(ArchiveExportProgress {
+        done: 0,
+        total: 0,
+        finished: false,
+        error: None,
+    });
+
     let db = Arc::clone(&state.db);
     std::thread::spawn(move || {
         let now = chrono::Utc::now();

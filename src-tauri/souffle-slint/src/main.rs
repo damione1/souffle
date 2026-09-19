@@ -70,6 +70,7 @@ const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
 /// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
 const SETTINGS_LOG_TAIL_LINES: u32 = 80;
 const SETTINGS_LOG_POLL: Duration = Duration::from_millis(2000);
+const ARCHIVE_EXPORT_POLL: Duration = Duration::from_millis(150);
 
 /// Backing data for the virtualized transcript list: the full block list
 /// plus precomputed cumulative height estimates (see
@@ -107,6 +108,68 @@ fn copy_to_clipboard(text: &str) {
         }
         Err(e) => eprintln!("Failed to open clipboard: {e}"),
     }
+}
+
+fn choose_archive_export_folder() -> Result<Option<String>, String> {
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg("POSIX path of (choose folder with prompt \"Choisir un dossier d'export\")")
+        .output()
+        .map_err(|error| format!("Ouvrir le sélecteur de dossier : {error}"))?;
+
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok((!path.is_empty()).then_some(path));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("-128") || stderr.contains("User canceled") {
+        Ok(None)
+    } else {
+        Err(stderr.trim().to_string())
+    }
+}
+
+fn monitor_archive_export(weak: slint::Weak<MainWindow>, destination: String) {
+    let worker = souffle_lib::async_runtime::spawn(async move {
+        loop {
+            if let Some(progress) = souffle_lib::commands::get_archive_export_progress()
+                && progress.finished
+            {
+                return progress;
+            }
+            tokio::time::sleep(ARCHIVE_EXPORT_POLL).await;
+        }
+    });
+
+    slint::spawn_local(async move {
+        let result = worker
+            .await
+            .map_err(|error| format!("Suivi de l'export interrompu : {error}"));
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_settings_data_exporting(false);
+        match result {
+            Ok(progress) => match progress.error {
+                Some(error) => {
+                    window.set_settings_data_export_status(error.into());
+                    window.set_settings_data_export_status_is_error(true);
+                }
+                None => {
+                    window.set_settings_data_export_status(
+                        format!("Export terminé vers {destination}.").into(),
+                    );
+                    window.set_settings_data_export_status_is_error(false);
+                }
+            },
+            Err(error) => {
+                window.set_settings_data_export_status(error.into());
+                window.set_settings_data_export_status_is_error(true);
+            }
+        }
+    })
+    .expect("slint event loop not running");
 }
 
 fn log_settings_save_outcome(context: &str, outcome: &SettingsSaveOutcome) {
@@ -4532,34 +4595,49 @@ fn wire_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
-        // Native macOS folder picker, not the `@tauri-apps/plugin-dialog`
-        // the Svelte version uses - see `data_section.slint`'s doc comment.
-        let output = std::process::Command::new("osascript")
-            .arg("-e")
-            .arg("POSIX path of (choose folder with prompt \"Choisir un dossier d'export\")")
-            .output();
-        let dir = match output {
-            Ok(out) if out.status.success() => {
-                String::from_utf8_lossy(&out.stdout).trim().to_string()
-            }
-            _ => return, // cancelled or picker failed
-        };
         window.set_settings_data_exporting(true);
         window.set_settings_data_export_status("".into());
-        let state = Arc::clone(&handle);
-        let result = souffle_lib::commands::export_archive(state, dir.clone());
-        window.set_settings_data_exporting(false);
-        match result {
-            Ok(()) => window.set_settings_data_export_status(
-                format!("Export démarré vers {dir}. Il continue en arrière-plan.").into(),
-            ),
-            Err(e) => {
-                window.set_settings_data_export_status(e.into());
-                window.set_settings_data_export_status_is_error(true);
-                return;
-            }
-        }
         window.set_settings_data_export_status_is_error(false);
+        let weak = weak.clone();
+        let state = Arc::clone(&handle);
+        let picker = souffle_lib::async_runtime::spawn_blocking(choose_archive_export_folder);
+        slint::spawn_local(async move {
+            let selection = picker
+                .await
+                .map_err(|error| format!("Sélecteur de dossier interrompu : {error}"))
+                .and_then(|result| result);
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let directory = match selection {
+                Ok(Some(directory)) => directory,
+                Ok(None) => {
+                    window.set_settings_data_exporting(false);
+                    return;
+                }
+                Err(error) => {
+                    window.set_settings_data_exporting(false);
+                    window.set_settings_data_export_status(error.into());
+                    window.set_settings_data_export_status_is_error(true);
+                    return;
+                }
+            };
+
+            match souffle_lib::commands::export_archive(state, directory.clone()) {
+                Ok(()) => {
+                    window.set_settings_data_export_status(
+                        format!("Export en cours vers {directory}…").into(),
+                    );
+                    monitor_archive_export(weak, directory);
+                }
+                Err(error) => {
+                    window.set_settings_data_exporting(false);
+                    window.set_settings_data_export_status(error.into());
+                    window.set_settings_data_export_status_is_error(true);
+                }
+            }
+        })
+        .expect("slint event loop not running");
     });
 
     window.on_settings_data_reveal_requested(move || {
@@ -4591,13 +4669,25 @@ fn wire_callbacks(
         };
         window.set_settings_testing_mcp(true);
         window.set_settings_mcp_test_status("".into());
-        match souffle_lib::commands::test_mcp_connection() {
-            Ok(tools) => {
-                window.set_settings_mcp_test_status(format!("Connexion réussie ({tools}).").into())
+        let weak = weak.clone();
+        let worker =
+            souffle_lib::async_runtime::spawn_blocking(souffle_lib::commands::test_mcp_connection);
+        slint::spawn_local(async move {
+            let result = worker
+                .await
+                .map_err(|error| format!("Test MCP interrompu : {error}"))
+                .and_then(|result| result);
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            match result {
+                Ok(tools) => window
+                    .set_settings_mcp_test_status(format!("Connexion réussie ({tools}).").into()),
+                Err(error) => window.set_settings_mcp_test_status(error.into()),
             }
-            Err(e) => window.set_settings_mcp_test_status(e.into()),
-        }
-        window.set_settings_testing_mcp(false);
+            window.set_settings_testing_mcp(false);
+        })
+        .expect("slint event loop not running");
     });
 
     let weak = window.as_weak();
@@ -5509,12 +5599,25 @@ fn wire_callbacks(
         };
         window.set_settings_copying_diagnostics(true);
         let state = Arc::clone(&handle);
-        let text = souffle_lib::commands::get_diagnostics_text(state);
-        window.set_settings_copying_diagnostics(false);
-        match text {
-            Ok(text) => copy_to_clipboard(&text),
-            Err(e) => eprintln!("Failed to build diagnostics text: {e}"),
-        }
+        let weak = weak.clone();
+        let worker = souffle_lib::async_runtime::spawn_blocking(move || {
+            souffle_lib::commands::get_diagnostics_text(state)
+        });
+        slint::spawn_local(async move {
+            let text = worker
+                .await
+                .map_err(|error| format!("Join diagnostics worker: {error}"))
+                .and_then(|result| result);
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            window.set_settings_copying_diagnostics(false);
+            match text {
+                Ok(text) => copy_to_clipboard(&text),
+                Err(error) => eprintln!("Failed to build diagnostics text: {error}"),
+            }
+        })
+        .expect("slint event loop not running");
     });
 
     let weak = window.as_weak();
