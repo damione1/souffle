@@ -1,11 +1,10 @@
 //! IA tab (SOU-188 milestone 5): Intelligence, DictationPolish, and
-//! SummaryTemplates sections. Model/template pickers forward their chosen
-//! *label* back to Rust for id resolution rather than doing array lookups
-//! in `.slint` - same reasoning as the audio device pickers.
+//! SummaryTemplates sections. Summary-model options keep their open-set ids
+//! alongside their labels so duplicate labels never erase identity.
 
 use crate::MainWindow;
 use souffle_lib::settings::{AppSettings, DictationPolishTemplate, SummaryTemplate};
-use souffle_lib::summary::{SummaryModelDescriptor, SummaryProvidersStatus};
+use souffle_lib::summary::{SummaryModelDescriptor, SummaryProviderKind, SummaryProvidersStatus};
 
 fn shared_string_vec(values: &[String]) -> slint::ModelRc<slint::SharedString> {
     let values: Vec<slint::SharedString> = values.iter().map(|v| v.as_str().into()).collect();
@@ -46,6 +45,7 @@ pub fn populate_intelligence(
     settings: &AppSettings,
     status: &SummaryProvidersStatus,
 ) {
+    let ollama_models = compatible_ollama_models(&status.models);
     window.set_settings_summary_provider(summary_provider_to_slint(settings.summary_provider));
     window.set_settings_apple_intelligence_available(status.apple_intelligence_available);
     window.set_settings_apple_intelligence_reason(
@@ -57,7 +57,7 @@ pub fn populate_intelligence(
     );
     window.set_settings_ollama_url(status.ollama_url.as_str().into());
     window.set_settings_ollama_available(status.ollama_available);
-    window.set_settings_summary_model_count(status.models.len() as i32);
+    window.set_settings_summary_model_count(ollama_models.len() as i32);
 
     let effective_is_apple = match settings.summary_provider {
         souffle_lib::summary::SummaryProviderChoice::AppleIntelligence => true,
@@ -66,7 +66,7 @@ pub fn populate_intelligence(
     };
     let unusable = if effective_is_apple && !status.apple_intelligence_available {
         "Apple Intelligence n'est pas disponible sur cet appareil."
-    } else if !effective_is_apple && status.models.is_empty() {
+    } else if !effective_is_apple && ollama_models.is_empty() {
         "Aucun modèle Ollama compatible n'est installé."
     } else {
         ""
@@ -80,31 +80,50 @@ pub fn populate_intelligence(
         settings.summary_provider,
         souffle_lib::summary::SummaryProviderChoice::Auto
     ) && !status.apple_intelligence_available);
-    let model_labels: Vec<String> = status.models.iter().map(|m| m.label.clone()).collect();
-    window.set_settings_summary_model_picker_visible(ollama_relevant && !status.models.is_empty());
+    let model_ids: Vec<String> = ollama_models.iter().map(|model| model.id.clone()).collect();
+    let model_labels: Vec<String> = ollama_models
+        .iter()
+        .map(|model| model.label.clone())
+        .collect();
+    window.set_settings_summary_model_picker_visible(ollama_relevant && !ollama_models.is_empty());
+    window.set_settings_summary_model_ids(shared_string_vec(&model_ids));
     window.set_settings_summary_model_labels(shared_string_vec(&model_labels));
     window.set_settings_selected_summary_model_label(
         selected_summary_model_label(&status.models, &settings.ollama_model).into(),
     );
     window.set_settings_show_ollama_setup(
-        ollama_relevant && status.ollama_available && status.models.is_empty(),
+        ollama_relevant && status.ollama_available && ollama_models.is_empty(),
     );
     window.set_settings_recommended_ollama_model(status.recommended_ollama_model.as_str().into());
+}
+
+fn is_compatible_ollama_model(model: &SummaryModelDescriptor) -> bool {
+    match model.provider {
+        SummaryProviderKind::AppleIntelligence => false,
+        SummaryProviderKind::Ollama => model.can_summarize,
+    }
+}
+
+fn compatible_ollama_models(models: &[SummaryModelDescriptor]) -> Vec<&SummaryModelDescriptor> {
+    models
+        .iter()
+        .filter(|model| is_compatible_ollama_model(model))
+        .collect()
 }
 
 pub fn selected_summary_model_label(models: &[SummaryModelDescriptor], id: &str) -> String {
     models
         .iter()
+        .filter(|model| is_compatible_ollama_model(model))
         .find(|model| model.id == id)
         .map(|model| model.label.clone())
         .unwrap_or_else(|| id.to_string())
 }
 
-pub fn resolve_summary_model_id(models: &[SummaryModelDescriptor], label: &str) -> Option<String> {
+pub fn contains_summary_model_id(models: &[SummaryModelDescriptor], id: &str) -> bool {
     models
         .iter()
-        .find(|m| m.label == label)
-        .map(|m| m.id.clone())
+        .any(|model| is_compatible_ollama_model(model) && model.id == id)
 }
 
 fn summary_provider_to_slint(
@@ -227,4 +246,61 @@ pub fn resolve_summary_template_id(templates: &[SummaryTemplate], label: &str) -
         .iter()
         .find(|t| summary_template_label(t) == label)
         .map(|t| t.id.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compatible_ollama_models, contains_summary_model_id};
+    use souffle_lib::summary::{SummaryModelDescriptor, SummaryProviderKind};
+
+    fn model(
+        id: &str,
+        label: &str,
+        provider: SummaryProviderKind,
+        can_summarize: bool,
+    ) -> SummaryModelDescriptor {
+        SummaryModelDescriptor {
+            id: id.into(),
+            label: label.into(),
+            provider,
+            can_summarize,
+        }
+    }
+
+    #[test]
+    fn ollama_catalogue_excludes_apple_and_incompatible_models() {
+        let models = vec![
+            model(
+                "apple-intelligence",
+                "Apple Intelligence",
+                SummaryProviderKind::AppleIntelligence,
+                true,
+            ),
+            model(
+                "embedding-only",
+                "Embedding",
+                SummaryProviderKind::Ollama,
+                false,
+            ),
+            model("summary-model", "Résumé", SummaryProviderKind::Ollama, true),
+        ];
+
+        let projected = compatible_ollama_models(&models);
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].id, "summary-model");
+        assert!(contains_summary_model_id(&models, "summary-model"));
+        assert!(!contains_summary_model_id(&models, "apple-intelligence"));
+        assert!(!contains_summary_model_id(&models, "embedding-only"));
+    }
+
+    #[test]
+    fn duplicate_labels_keep_distinct_open_set_ids() {
+        let models = vec![
+            model("model-a", "Même nom", SummaryProviderKind::Ollama, true),
+            model("model-b", "Même nom", SummaryProviderKind::Ollama, true),
+        ];
+
+        assert!(contains_summary_model_id(&models, "model-a"));
+        assert!(contains_summary_model_id(&models, "model-b"));
+    }
 }

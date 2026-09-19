@@ -12,8 +12,8 @@ import { StatusIndicator } from "status_indicator.slint";
 // visibility state machine (`ollamaModelPickerState`) are simplified to
 // generic messages/conditions here - functional parity (the real
 // check_summary_providers status drives everything), wording polish is a
-// follow-up pass. Model pickers forward their chosen *label* back to Rust
-// for id resolution, same reasoning as the audio device pickers.
+// follow-up pass. Summary models keep their open-set ids paired with labels
+// through the picker so duplicate labels remain distinct.
 export component IntelligenceSection inherits VerticalLayout {
     in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
@@ -23,6 +23,7 @@ export component IntelligenceSection inherits VerticalLayout {
     in property <bool> ollama-checking;
     in property <int> summary-model-count;
     in property <bool> model-picker-visible;
+    in property <[string]> model-ids;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
     in property <bool> show-ollama-setup;
@@ -177,8 +178,9 @@ export component IntelligenceSection inherits VerticalLayout {
         ThemedComboBox {
             control-label: "Modèle de résumé";
             model: root.model-labels;
+            option-values: root.model-ids;
             current-value: root.selected-model-label;
-            selected(value) => { root.ollama-model-changed(value); }
+            selected(id) => { root.ollama-model-changed(id); }
         }
     }
 

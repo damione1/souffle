@@ -199,6 +199,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-ollama-checking;
     in property <int> settings-summary-model-count;
     in property <bool> settings-summary-model-picker-visible;
+    in property <[string]> settings-summary-model-ids;
     in property <[string]> settings-summary-model-labels;
     in property <string> settings-selected-summary-model-label;
     in property <bool> settings-show-ollama-setup;
@@ -641,6 +642,7 @@ export component MainWindow inherits Window {
         ollama-checking: root.settings-ollama-checking;
         summary-model-count: root.settings-summary-model-count;
         summary-model-picker-visible: root.settings-summary-model-picker-visible;
+        summary-model-ids: root.settings-summary-model-ids;
         summary-model-labels: root.settings-summary-model-labels;
         selected-summary-model-label: root.settings-selected-summary-model-label;
         show-ollama-setup: root.settings-show-ollama-setup;

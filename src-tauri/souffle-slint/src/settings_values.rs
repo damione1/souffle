@@ -423,13 +423,14 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
         });
     });
     let c = controller.clone();
-    window.on_settings_ollama_model_changed(move |label| {
-        let id = c
+    window.on_settings_ollama_model_changed(move |id| {
+        let id = id.to_string();
+        let is_known_ollama_model = c
             .summary
             .borrow()
             .as_ref()
-            .and_then(|status| ia_ui::resolve_summary_model_id(&status.models, &label));
-        if let Some(id) = id {
+            .is_some_and(|status| ia_ui::contains_summary_model_id(&status.models, &id));
+        if is_known_ollama_model {
             c.apply(SettingsSaveLane::General, move |s| {
                 s.ollama_model = id.clone()
             });
@@ -972,7 +973,7 @@ mod tests {
         window.invoke_settings_meeting_autostop_changed("5 min".into());
         window.invoke_settings_meeting_max_duration_changed("2 h".into());
         window.invoke_settings_meeting_audio_retention_changed(crate::AudioRetention::Keep7d);
-        window.invoke_settings_ollama_model_changed("Model B".into());
+        window.invoke_settings_ollama_model_changed("model-b".into());
         window.invoke_settings_unload_timeout_changed("5 min".into());
         harness.wait_for_saves(14);
 
@@ -1074,6 +1075,33 @@ mod tests {
         assert_eq!(harness.saves.load(Ordering::SeqCst), 16);
 
         assert_failure_projection_contract();
+    }
+
+    #[test]
+    fn ollama_model_callback_persists_the_selected_id_when_labels_match() {
+        let initial = AppSettings {
+            ollama_model: "model-a".into(),
+            ..AppSettings::default()
+        };
+        let harness = DatabaseHarness::new(initial);
+        harness.summary.borrow_mut().as_mut().unwrap().models[1].label = "Model A".into();
+
+        harness
+            .window
+            .invoke_settings_ollama_model_changed("model-b".into());
+        harness.wait_for_saves(1);
+
+        assert_eq!(
+            AppSettings::load(&harness.db).unwrap().ollama_model,
+            "model-b"
+        );
+        assert_eq!(
+            harness
+                .window
+                .get_settings_selected_summary_model_label()
+                .as_str(),
+            "Model A"
+        );
     }
 
     fn assert_failure_projection_contract() {

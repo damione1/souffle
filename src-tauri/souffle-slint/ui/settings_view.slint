@@ -106,6 +106,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> ollama-checking;
     in property <int> summary-model-count;
     in property <bool> summary-model-picker-visible;
+    in property <[string]> summary-model-ids;
     in property <[string]> summary-model-labels;
     in property <string> selected-summary-model-label;
     in property <bool> show-ollama-setup;
@@ -395,6 +396,7 @@ export component SettingsView inherits Rectangle {
                             ollama-checking: root.ollama-checking;
                             summary-model-count: root.summary-model-count;
                             model-picker-visible: root.summary-model-picker-visible;
+                            model-ids: root.summary-model-ids;
                             model-labels: root.summary-model-labels;
                             selected-model-label: root.selected-summary-model-label;
                             show-ollama-setup: root.show-ollama-setup;
