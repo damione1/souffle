@@ -5169,7 +5169,7 @@ fn wire_callbacks(
                 window.set_settings_new_dictionary_category_draft("".into());
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_dictionary(state) {
-                    Ok(entries) => lists_models_0.populate_dictionary( &entries),
+                    Ok(entries) => lists_models_0.populate_dictionary(&entries),
                     Err(e) => eprintln!("Failed to reload dictionary: {e}"),
                 }
             }
@@ -5198,7 +5198,7 @@ fn wire_callbacks(
                 window.set_settings_dictionary_delete_error("".into());
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_dictionary(state) {
-                    Ok(entries) => lists_models_1.populate_dictionary( &entries),
+                    Ok(entries) => lists_models_1.populate_dictionary(&entries),
                     Err(e) => eprintln!("Failed to reload dictionary: {e}"),
                 }
             }
@@ -5233,7 +5233,7 @@ fn wire_callbacks(
                 let state = Arc::clone(&handle);
                 match souffle_lib::commands::list_snippets(state) {
                     Ok(entries) => {
-                        lists_models_2.populate_snippets( &entries, None);
+                        lists_models_2.populate_snippets(&entries, None);
                         *snippets_list_state_for_add.borrow_mut() = entries;
                     }
                     Err(e) => eprintln!("Failed to reload snippets: {e}"),
@@ -5267,7 +5267,7 @@ fn wire_callbacks(
                 match souffle_lib::commands::list_snippets(state) {
                     Ok(entries) => {
                         let editing = *snippet_editing_for_delete.borrow();
-                        lists_models_3.populate_snippets( &entries, editing);
+                        lists_models_3.populate_snippets(&entries, editing);
                         *snippets_list_state_for_delete.borrow_mut() = entries;
                     }
                     Err(e) => eprintln!("Failed to reload snippets: {e}"),
@@ -5297,7 +5297,7 @@ fn wire_callbacks(
         window.set_settings_edit_snippet_expansion_draft(entry.expansion.as_str().into());
         window.set_settings_snippet_update_error("".into());
         *snippet_editing_for_edit.borrow_mut() = Some(id);
-        lists_models_4.populate_snippets( &entries, Some(id));
+        lists_models_4.populate_snippets(&entries, Some(id));
     });
 
     let weak = window.as_weak();
@@ -5306,9 +5306,9 @@ fn wire_callbacks(
     let lists_models_5 = lists_models.clone();
     window.on_settings_snippet_cancel_edit_requested(move || {
         *snippet_editing_for_cancel.borrow_mut() = None;
-        if let Some(window) = weak.upgrade() {
+        if let Some(_window) = weak.upgrade() {
             let entries = snippets_list_state_for_cancel.borrow();
-            lists_models_5.populate_snippets( &entries, None);
+            lists_models_5.populate_snippets(&entries, None);
         }
     });
 

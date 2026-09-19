@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn fold_trigger_matches_fixtures() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../src/lib/features/transcription/snippet-fold-test-cases.json");
+            .join("fixtures/snippet-fold-test-cases.json");
         let file = std::fs::File::open(fixture_path).expect("failed to open fixture");
         let test_cases: Vec<FoldTestCase> =
             serde_json::from_reader(file).expect("failed to parse fixture");

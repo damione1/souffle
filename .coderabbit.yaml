@@ -31,9 +31,6 @@ reviews:
 
   # Generated and vendored code is not reviewable material.
   path_filters:
-    - "!src/lib/types/generated.ts"
-    - "!src/lib/api/generated.ts"
-    - "!src-tauri/gen/**"
     - "!src-tauri/fixtures/**"
     - "!src-tauri/target/**"
     - "!dist/**"
@@ -59,12 +56,10 @@ reviews:
 
     - path: "src-tauri/src/commands/**"
       instructions: |
-        Tauri IPC boundary. Flag every new or modified `Result<_, String>`: the frontend cannot
-        discriminate a cause from a string, and a typed error already exists.
+        IPC boundary. Flag every new or modified `Result<_, String>`: the frontend cannot
+discriminate a cause from a string, and a typed error already exists.
         Flag session orchestration logic added here rather than in the layer below.
-        A changed #[tauri::command] signature requires `npm run generate:types`; if the
-        generated files are not in the diff, say so.
-
+        
     - path: "src-tauri/src/**"
       instructions: |
         Flag any window operation (show, hide, resize, move, focus, emit to a window) performed

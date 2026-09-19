@@ -1030,7 +1030,7 @@
             "p": "Demande un Mac Apple Silicon, <a href=\"https://rustup.rs/\">Rust</a>, <a href=\"https://nodejs.org/\">Node.js</a> 18+ et cmake (<code>brew install cmake</code>)."
           },
           {
-            "code": "git clone https://github.com/damione1/souffle.git\ncd souffle\nnpm install\nnpm run tauri dev"
+            "code": "git clone https://github.com/damione1/souffle.git\ncd souffle\nnpm install\nmake nightly"
           }
         ]
       },
