@@ -962,8 +962,29 @@ enum AudioDeviceSaveSettlement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AudioDeviceProjectionState {
-    Canonical,
-    PendingUnknown { uid: String },
+    Canonical { generation: u64 },
+    PendingUnknown { generation: u64, uid: String },
+}
+
+impl AudioDeviceProjectionState {
+    fn generation(&self) -> u64 {
+        match self {
+            Self::Canonical { generation } | Self::PendingUnknown { generation, .. } => *generation,
+        }
+    }
+
+    fn begin_pending(&mut self, uid: String) {
+        *self = Self::PendingUnknown {
+            generation: self.generation().wrapping_add(1),
+            uid,
+        };
+    }
+
+    fn observe_canonical(&mut self) {
+        *self = Self::Canonical {
+            generation: self.generation().wrapping_add(1),
+        };
+    }
 }
 
 impl AudioDeviceSaveSettlement {
@@ -973,17 +994,15 @@ impl AudioDeviceSaveSettlement {
         }
     }
 
-    fn projection_state(&self) -> AudioDeviceProjectionState {
+    fn keeps_pending_projection(&self) -> bool {
         match self {
+            Self::Committed {
+                canonical: None, ..
+            } => true,
             Self::Committed {
                 canonical: Some(_), ..
             }
-            | Self::Rejected { canonical: Some(_) }
-            | Self::Rejected { canonical: None } => AudioDeviceProjectionState::Canonical,
-            Self::Committed {
-                uid,
-                canonical: None,
-            } => AudioDeviceProjectionState::PendingUnknown { uid: uid.clone() },
+            | Self::Rejected { .. } => false,
         }
     }
 }
@@ -1029,22 +1048,24 @@ fn settle_audio_device_save(
 fn audio_device_load_configuration(
     settings_state: &SettingsCache,
     projection_state: &Rc<RefCell<AudioDeviceProjectionState>>,
-) -> Option<(String, Option<String>, souffle_lib::audio::InputPriority)> {
+) -> Option<(
+    u64,
+    String,
+    Option<String>,
+    souffle_lib::audio::InputPriority,
+)> {
     let known = settings_state.known_snapshot();
     let last_observed = settings_state.borrow().clone();
     let settings = known.as_ref().or(last_observed.as_ref())?;
-    let selected = if known.is_some() {
-        *projection_state.borrow_mut() = AudioDeviceProjectionState::Canonical;
-        settings.audio_device.clone().unwrap_or_default()
-    } else {
-        match &*projection_state.borrow() {
-            AudioDeviceProjectionState::Canonical => {
-                settings.audio_device.clone().unwrap_or_default()
-            }
-            AudioDeviceProjectionState::PendingUnknown { uid } => uid.clone(),
+    let projection = projection_state.borrow();
+    let selected = match &*projection {
+        AudioDeviceProjectionState::Canonical { .. } => {
+            settings.audio_device.clone().unwrap_or_default()
         }
+        AudioDeviceProjectionState::PendingUnknown { uid, .. } => uid.clone(),
     };
     Some((
+        projection.generation(),
         selected,
         settings.clamshell_audio_device.clone(),
         settings.input_priority.clone(),
@@ -1061,13 +1082,10 @@ fn load_audio_devices(
     let Some(token) = settings_io.current_load_token() else {
         return;
     };
-    let Some((selected, clamshell, priority)) =
-        audio_device_load_configuration(settings_state, projection_state)
-    else {
-        return;
-    };
     let weak = window.as_weak();
     let devices_state = audio_devices_state.clone();
+    let settings_state = settings_state.clone();
+    let projection_state = projection_state.clone();
     let worker =
         souffle_lib::async_runtime::spawn_blocking(souffle_lib::commands::list_audio_devices);
     slint::spawn_local(async move {
@@ -1085,6 +1103,14 @@ fn load_audio_devices(
         if !settings_io.accepts_load(token) {
             return;
         }
+        // Resolve the selected UID only after the CoreAudio wait. A device
+        // save may have settled while the worker was blocked; capturing this
+        // before `await` would let the old UID overwrite the newer picker.
+        let Some((generation, selected, clamshell, priority)) =
+            audio_device_load_configuration(&settings_state, &projection_state)
+        else {
+            return;
+        };
         let Some(window) = weak.upgrade() else {
             return;
         };
@@ -1100,6 +1126,9 @@ fn load_audio_devices(
         if let Some(uid) = rate_uid {
             let rate = souffle_lib::commands::get_input_sample_rate(uid).await;
             if !settings_io.accepts_load(token) {
+                return;
+            }
+            if projection_state.borrow().generation() != generation {
                 return;
             }
             if let Ok(hz) = rate
@@ -3378,7 +3407,9 @@ fn wire_callbacks(
     // label->uid resolution) don't each re-query CoreAudio.
     let audio_devices_state: Rc<RefCell<Vec<AudioInputDevice>>> = Rc::new(RefCell::new(Vec::new()));
     let audio_device_projection_state =
-        Rc::new(RefCell::new(AudioDeviceProjectionState::Canonical));
+        Rc::new(RefCell::new(AudioDeviceProjectionState::Canonical {
+            generation: 0,
+        }));
     // Cached so the model picker/download button don't each re-query Ollama.
     let summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>> =
         Rc::new(RefCell::new(None));
@@ -3471,6 +3502,7 @@ fn wire_callbacks(
             settings_ui::populate(&window, &settings);
             data_ui::populate(&window, &settings);
             core_values.observe_loaded(&settings);
+            core_device_projection.borrow_mut().observe_canonical();
             load_calendars_if_enabled(&window, &core_state, finish_core_io.clone());
             load_audio_devices(
                 &window,
@@ -3951,6 +3983,9 @@ fn wire_callbacks(
         let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_device.borrow(), &label)
             .unwrap_or_default();
         let revision = device_selection_revision.fetch_add(1, Ordering::AcqRel) + 1;
+        audio_device_projection_for_device
+            .borrow_mut()
+            .begin_pending(uid.clone());
         let uid_for_save = uid.clone();
         let weak = weak.clone();
         let settings_state = settings_state_for_device.clone();
@@ -3982,7 +4017,9 @@ fn wire_callbacks(
                 // native effect; the user's submitted label remains visible
                 // until a later serialized refresh observes persistence.
                 let reload_after_effect = settlement.has_observed_canonical();
-                *projection_state.borrow_mut() = settlement.projection_state();
+                if !settlement.keeps_pending_projection() {
+                    projection_state.borrow_mut().observe_canonical();
+                }
                 let (target_uid, canonical) = match settlement {
                     AudioDeviceSaveSettlement::Committed { uid, canonical } => {
                         (Some(uid), canonical)
@@ -4353,7 +4390,7 @@ fn wire_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some((selected, _, _)) = audio_device_load_configuration(
+        let Some((generation, selected, _, _)) = audio_device_load_configuration(
             &settings_state_for_reset_rate,
             &audio_device_projection_for_reset_rate,
         ) else {
@@ -4367,8 +4404,15 @@ fn wire_callbacks(
         };
         window.set_settings_resetting_sample_rate(true);
         let weak = weak.clone();
+        let projection_state = audio_device_projection_for_reset_rate.clone();
         slint::spawn_local(async move {
             let result = souffle_lib::commands::reset_input_sample_rate(uid).await;
+            if projection_state.borrow().generation() != generation {
+                if let Some(window) = weak.upgrade() {
+                    window.set_settings_resetting_sample_rate(false);
+                }
+                return;
+            }
             if let Some(window) = weak.upgrade() {
                 window.set_settings_resetting_sample_rate(false);
                 match result {
@@ -5763,9 +5807,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioDeviceSaveSettlement, DictationEndIntent, DictationTextBuffers,
-        DictationTranscriptDisposition, MainWindow, OnboardingState, SettingsCache,
-        StartupPresentationGate, Theme, audio_device_load_configuration,
+        AudioDeviceProjectionState, AudioDeviceSaveSettlement, DictationEndIntent,
+        DictationTextBuffers, DictationTranscriptDisposition, MainWindow, OnboardingState,
+        SettingsCache, StartupPresentationGate, Theme, audio_device_load_configuration,
         clear_committed_summary_add_draft, dictation_transcript_disposition,
         finish_startup_presentation, merge_recovery_text, prime_summary_template_editor,
         project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
@@ -6085,7 +6129,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_unavailable_device_keeps_the_submitted_picker_after_effect() {
+    fn blocked_device_load_cannot_publish_stale_uid_after_unavailable_commit() {
         let window = test_window();
         window.set_settings_selected_device_label("Microphone B".into());
         let fallback = AppSettings {
@@ -6097,12 +6141,27 @@ mod tests {
             read_error: "controlled reread failure".into(),
         };
         let cache = SettingsCache::with_observed(&window, fallback.clone());
+        let projection = Rc::new(RefCell::new(AudioDeviceProjectionState::Canonical {
+            generation: 0,
+        }));
+        let (load_started_tx, load_started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_load_tx, release_load_rx) = std::sync::mpsc::sync_channel(1);
+        let blocked_load = std::thread::spawn(move || {
+            load_started_tx.send(()).unwrap();
+            release_load_rx.recv().unwrap();
+        });
+        load_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("controlled device load started with cached mic-a");
+
+        // While CoreAudio is blocked, B commits but the actor cannot reread
+        // persistence. This is the ordering that previously let captured A
+        // overwrite the picker when the old load completed.
+        projection.borrow_mut().begin_pending("mic-b".into());
         cache.observe_save_outcome_silent(&outcome);
-
         let settlement = settle_audio_device_save(&outcome, &Some(fallback), "mic-b");
-
         assert!(!settlement.has_observed_canonical());
-        let projection = Rc::new(RefCell::new(settlement.projection_state()));
+        assert!(settlement.keeps_pending_projection());
         match settlement {
             AudioDeviceSaveSettlement::Committed { uid, canonical } => {
                 assert_eq!(uid, "mic-b");
@@ -6112,7 +6171,9 @@ mod tests {
                 panic!("committed device save was classified as rejected")
             }
         }
-        let (selected, _, _) = audio_device_load_configuration(&cache, &projection)
+        release_load_tx.send(()).unwrap();
+        blocked_load.join().unwrap();
+        let (_, selected, _, _) = audio_device_load_configuration(&cache, &projection)
             .expect("unknown cache still has a pending selection");
 
         // Both the post-effect path and a manual Refresh use the pending
