@@ -1,0 +1,1229 @@
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"POT-Creation-Date: 2026-09-19 14:21+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: ui/meeting_detail.slint:80
+msgctxt "MeetingDetail"
+msgid "Retour à l'historique"
+msgstr "[EN] Retour à l'historique"
+
+#: ui/meeting_detail.slint:111
+msgctxt "MeetingDetail"
+msgid "Historique"
+msgstr "[EN] Historique"
+
+#: ui/meeting_detail.slint:130
+msgctxt "MeetingDetail"
+msgid "Renommer la réunion"
+msgstr "[EN] Renommer la réunion"
+
+#: ui/meeting_detail.slint:169
+msgctxt "MeetingDetail"
+msgid "Titre de la réunion"
+msgstr "[EN] Titre de la réunion"
+
+#: ui/meeting_detail.slint:252
+msgctxt "MeetingDetail"
+msgid "Notes"
+msgstr "[EN] Notes"
+
+#: ui/meeting_detail.slint:262
+msgctxt "MeetingDetail"
+msgid "Enregistré"
+msgstr "[EN] Enregistré"
+
+#: ui/meeting_detail.slint:268
+msgctxt "MeetingDetail"
+msgid "Enregistrement…"
+msgstr "[EN] Enregistrement…"
+
+#: ui/meeting_detail.slint:279
+msgctxt "MeetingDetail"
+msgid "Notes de la réunion"
+msgstr "[EN] Notes de la réunion"
+
+#: ui/meeting_detail.slint:284
+msgctxt "MeetingDetail"
+msgid "Les notes sont enregistrées avec la réunion et améliorent le résumé."
+msgstr "[EN] Les notes sont enregistrées avec la réunion et améliorent le résumé."
+
+#: ui/meeting_detail.slint:309
+msgctxt "MeetingDetail"
+msgid "Cette réunion ne contient aucun enregistrement."
+msgstr "[EN] Cette réunion ne contient aucun enregistrement."
+
+#: ui/meeting_detail.slint:316
+msgctxt "MeetingDetail"
+msgid "Aucun audio, aucune transcription et aucun résumé."
+msgstr "[EN] Aucun audio, aucune transcription et aucun résumé."
+
+#: ui/settings_view.slint:270
+msgctxt "SettingsView"
+msgid "Fermer les paramètres"
+msgstr "[EN] Fermer les paramètres"
+
+#: ui/settings_view.slint:295
+msgctxt "SettingsView"
+msgid "Terminé"
+msgstr "[EN] Terminé"
+
+#: ui/settings_view.slint:308
+msgctxt "SettingsView"
+msgid "Paramètres"
+msgstr "[EN] Paramètres"
+
+#: ui/settings_view.slint:316
+msgctxt "SettingsView"
+msgid "Enregistrement des réglages : {}"
+msgstr "[EN] Enregistrement des réglages : {}"
+
+#: ui/settings_view.slint:323
+msgctxt "SettingsView"
+msgid "Brouillon conservé : {}"
+msgstr "[EN] Brouillon conservé : {}"
+
+#: ui/recording_view.slint:136
+msgctxt "RecordingView"
+msgid "Arrêter l'enregistrement"
+msgstr "[EN] Arrêter l'enregistrement"
+
+#: ui/recording_view.slint:182
+msgctxt "RecordingView"
+msgid "Arrêter"
+msgstr "[EN] Arrêter"
+
+#: ui/recording_view.slint:202
+msgctxt "RecordingView"
+msgid ""
+"Attention. Seul votre microphone est enregistré. L'audio des autres "
+"participants est indisponible."
+msgstr ""
+
+#: ui/recording_view.slint:218
+msgctxt "RecordingView"
+msgid ""
+"Seul votre microphone est enregistré. L’audio des autres participants est "
+"indisponible."
+msgstr ""
+
+#: ui/recording_view.slint:270
+msgctxt "RecordingView"
+msgid "Collé automatiquement dans votre dernière app à l’arrêt"
+msgstr "[EN] Collé automatiquement dans votre dernière app à l’arrêt"
+
+#: ui/recording_view.slint:300
+msgctxt "RecordingView"
+msgid "TRANSCRIPTION EN DIRECT"
+msgstr "[EN] TRANSCRIPTION EN DIRECT"
+
+#: ui/recording_view.slint:341
+msgctxt "RecordingView"
+msgid "Moi"
+msgstr "[EN] Moi"
+
+#: ui/recording_view.slint:364
+msgctxt "RecordingView"
+msgid "Eux"
+msgstr "[EN] Eux"
+
+#: ui/recording_view.slint:384
+msgctxt "RecordingView"
+msgid "À l'écoute…"
+msgstr "[EN] À l'écoute…"
+
+#: ui/recording_view.slint:425
+msgctxt "RecordingView"
+msgid "NOTES"
+msgstr "[EN] NOTES"
+
+#: ui/recording_view.slint:443
+msgctxt "RecordingView"
+msgid "Notes de la réunion"
+msgstr "[EN] Notes de la réunion"
+
+#: ui/components/settings/audio_section.slint:51
+msgctxt "AudioSection"
+msgid "AUDIO"
+msgstr "[EN] AUDIO"
+
+#: ui/components/settings/audio_section.slint:59
+msgctxt "AudioSection"
+msgid "Microphone quand le capot est fermé"
+msgstr "[EN] Microphone quand le capot est fermé"
+
+#: ui/components/settings/audio_section.slint:72
+msgctxt "AudioSection"
+msgid "Capturer l'audio système"
+msgstr "[EN] Capturer l'audio système"
+
+#: ui/components/settings/audio_section.slint:84
+msgctxt "AudioSection"
+msgid "Langue de transcription des réunions"
+msgstr "[EN] Langue de transcription des réunions"
+
+#: ui/components/settings/audio_section.slint:110
+msgctxt "AudioSection"
+msgid "Arrêt automatique des réunions"
+msgstr "[EN] Arrêt automatique des réunions"
+
+#: ui/components/settings/audio_section.slint:120
+msgctxt "AudioSection"
+msgid "Délai avant arrêt automatique"
+msgstr "[EN] Délai avant arrêt automatique"
+
+#: ui/components/settings/audio_section.slint:131
+msgctxt "AudioSection"
+msgid "Durée maximale d'une réunion"
+msgstr "[EN] Durée maximale d'une réunion"
+
+#: ui/components/settings/audio_section.slint:143
+msgctxt "AudioSection"
+msgid "Détection de voix"
+msgstr "[EN] Détection de voix"
+
+#: ui/components/settings/audio_section.slint:154
+msgctxt "AudioSection"
+msgid "Suppression des hésitations"
+msgstr "[EN] Suppression des hésitations"
+
+#: ui/components/settings/audio_section.slint:165
+msgctxt "AudioSection"
+msgid "Réduction des bégaiements"
+msgstr "[EN] Réduction des bégaiements"
+
+#: ui/components/settings/audio_section.slint:176
+msgctxt "AudioSection"
+msgid "Correction par dictionnaire"
+msgstr "[EN] Correction par dictionnaire"
+
+#: ui/components/settings/summary_templates_section.slint:35
+msgctxt "SummaryTemplatesSection"
+msgid "MODÈLES DE RÉSUMÉ"
+msgstr "[EN] MODÈLES DE RÉSUMÉ"
+
+#: ui/components/settings/summary_templates_section.slint:43
+msgctxt "SummaryTemplatesSection"
+msgid ""
+"Le modèle par défaut est utilisé pour résumer automatiquement une réunion "
+"terminée."
+msgstr ""
+
+#: ui/components/settings/summary_templates_section.slint:55
+msgctxt "SummaryTemplatesSection"
+msgid "Modèle de résumé par défaut"
+msgstr "[EN] Modèle de résumé par défaut"
+
+#: ui/components/settings/summary_templates_section.slint:72
+msgctxt "SummaryTemplatesSection"
+msgid "Modèle de résumé à modifier"
+msgstr "[EN] Modèle de résumé à modifier"
+
+#: ui/components/settings/summary_templates_section.slint:79
+msgctxt "SummaryTemplatesSection"
+msgid "Supprimer"
+msgstr "[EN] Supprimer"
+
+#: ui/components/settings/summary_templates_section.slint:89
+msgctxt "SummaryTemplatesSection"
+msgid "Nom du modèle de résumé"
+msgstr "[EN] Nom du modèle de résumé"
+
+#: ui/components/settings/summary_templates_section.slint:105
+msgctxt "SummaryTemplatesSection"
+msgid "Instruction du modèle de résumé"
+msgstr "[EN] Instruction du modèle de résumé"
+
+#: ui/components/settings/summary_templates_section.slint:119
+msgctxt "SummaryTemplatesSection"
+msgid "Nom du nouveau modèle de résumé"
+msgstr "[EN] Nom du nouveau modèle de résumé"
+
+#: ui/components/settings/summary_templates_section.slint:123
+msgctxt "SummaryTemplatesSection"
+msgid "Ajouter"
+msgstr "[EN] Ajouter"
+
+#: ui/components/settings/settings_permissions_dialog.slint:20
+msgctxt "SettingsPermissionsDialog"
+msgid "Permissions macOS"
+msgstr "[EN] Permissions macOS"
+
+#: ui/components/settings/settings_permissions_dialog.slint:60
+msgctxt "SettingsPermissionsDialog"
+msgid ""
+"Vérifiez chaque autorisation. La réparation réinitialise uniquement l’entrée "
+"Accessibilité avant de redemander l’accès."
+msgstr ""
+
+#: ui/components/settings/settings_permissions_dialog.slint:89
+msgctxt "SettingsPermissionsDialog"
+msgid "Terminé"
+msgstr "[EN] Terminé"
+
+#: ui/components/settings/settings_tabs.slint:80
+msgctxt "SettingsTabBar"
+msgid "Sections des paramètres"
+msgstr "[EN] Sections des paramètres"
+
+#: ui/components/settings/settings_tabs.slint:111
+msgctxt "SettingsTabBar"
+msgid "Transcription"
+msgstr "[EN] Transcription"
+
+#: ui/components/settings/settings_tabs.slint:120
+msgctxt "SettingsTabBar"
+msgid "IA"
+msgstr "[EN] IA"
+
+#: ui/components/settings/settings_tabs.slint:129
+msgctxt "SettingsTabBar"
+msgid "Audio"
+msgstr "[EN] Audio"
+
+#: ui/components/settings/settings_tabs.slint:138
+msgctxt "SettingsTabBar"
+msgid "Interface"
+msgstr "[EN] Interface"
+
+#: ui/components/settings/settings_tabs.slint:147
+msgctxt "SettingsTabBar"
+msgid "Réunions"
+msgstr "[EN] Réunions"
+
+#: ui/components/settings/settings_tabs.slint:156
+msgctxt "SettingsTabBar"
+msgid "Système"
+msgstr "[EN] Système"
+
+#: ui/components/settings/interface_section.slint:129
+msgctxt "InterfaceSection"
+msgid "INTERFACE"
+msgstr "[EN] INTERFACE"
+
+#: ui/components/settings/interface_section.slint:137
+msgctxt "InterfaceSection"
+msgid "Langue de l'interface"
+msgstr "[EN] Langue de l'interface"
+
+#: ui/components/settings/interface_section.slint:160
+msgctxt "InterfaceSection"
+msgid "Sombre"
+msgstr "[EN] Sombre"
+
+#: ui/components/settings/interface_section.slint:165
+msgctxt "InterfaceSection"
+msgid "Clair"
+msgstr "[EN] Clair"
+
+#: ui/components/settings/interface_section.slint:170
+msgctxt "InterfaceSection"
+msgid "Système"
+msgstr "[EN] Système"
+
+#: ui/components/settings/interface_section.slint:182
+msgctxt "InterfaceSection"
+msgid "Collage automatique après dictée"
+msgstr "[EN] Collage automatique après dictée"
+
+#: ui/components/settings/interface_section.slint:193
+msgctxt "InterfaceSection"
+msgid "Méthode de collage"
+msgstr "[EN] Méthode de collage"
+
+#: ui/components/settings/interface_section.slint:219
+msgctxt "InterfaceSection"
+msgid "Délai de collage en millisecondes"
+msgstr "[EN] Délai de collage en millisecondes"
+
+#: ui/components/settings/interface_section.slint:247
+msgctxt "InterfaceSection"
+msgid "Effacer"
+msgstr "[EN] Effacer"
+
+#: ui/components/settings/interface_section.slint:285
+msgctxt "InterfaceSection"
+msgid "Masquer l'overlay d'enregistrement"
+msgstr "[EN] Masquer l'overlay d'enregistrement"
+
+#: ui/components/settings/interface_section.slint:300
+msgctxt "InterfaceSection"
+msgid ""
+"Votre raccourci sur une seule touche ne fonctionnera pas tant que "
+"l'Accessibilité n'est pas accordée."
+msgstr ""
+
+#: ui/components/settings/interface_section.slint:309
+msgctxt "InterfaceSection"
+msgid "Vérifier les permissions"
+msgstr "[EN] Vérifier les permissions"
+
+#: ui/components/settings/dictation_polish_section.slint:30
+msgctxt "DictationPolishSection"
+msgid "POLISH DE LA DICTÉE"
+msgstr "[EN] POLISH DE LA DICTÉE"
+
+#: ui/components/settings/dictation_polish_section.slint:38
+msgctxt "DictationPolishSection"
+msgid "Nettoyer la dictée avec l'IA"
+msgstr "[EN] Nettoyer la dictée avec l'IA"
+
+#: ui/components/settings/dictation_polish_section.slint:56
+msgctxt "DictationPolishSection"
+msgid "Aucun fournisseur IA disponible pour la retouche."
+msgstr "[EN] Aucun fournisseur IA disponible pour la retouche."
+
+#: ui/components/settings/dictation_polish_section.slint:63
+msgctxt "DictationPolishSection"
+msgid "Choisir un fournisseur"
+msgstr "[EN] Choisir un fournisseur"
+
+#: ui/components/settings/dictation_polish_section.slint:73
+msgctxt "DictationPolishSection"
+msgid "Modèle de retouche"
+msgstr "[EN] Modèle de retouche"
+
+#: ui/components/settings/dictation_polish_section.slint:89
+msgctxt "DictationPolishSection"
+msgid "Instruction de retouche"
+msgstr "[EN] Instruction de retouche"
+
+#: ui/components/settings/feedback_sounds_section.slint:21
+msgctxt "FeedbackSoundsSection"
+msgid "SONS DE DICTÉE"
+msgstr "[EN] SONS DE DICTÉE"
+
+#: ui/components/settings/feedback_sounds_section.slint:29
+msgctxt "FeedbackSoundsSection"
+msgid "Activer les sons"
+msgstr "[EN] Activer les sons"
+
+#: ui/components/settings/feedback_sounds_section.slint:44
+msgctxt "FeedbackSoundsSection"
+msgid "Volume des sons de dictée"
+msgstr "[EN] Volume des sons de dictée"
+
+#: ui/components/settings/snippets_section.slint:40
+msgctxt "SnippetsSection"
+msgid "EXTRAITS VOCAUX"
+msgstr "[EN] EXTRAITS VOCAUX"
+
+#: ui/components/settings/snippets_section.slint:50
+msgctxt "SnippetsSection"
+msgid ""
+"Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de "
+"texte. La comparaison ignore la casse et les accents ; aucune retouche IA "
+"n'est appliquée quand un extrait correspond."
+msgstr ""
+
+#: ui/components/settings/snippets_section.slint:56
+msgctxt "SnippetsSection"
+msgid "DÉCLENCHEUR"
+msgstr "[EN] DÉCLENCHEUR"
+
+#: ui/components/settings/snippets_section.slint:60
+msgctxt "SnippetsSection"
+msgid "Phrase déclencheur"
+msgstr "[EN] Phrase déclencheur"
+
+#: ui/components/settings/snippets_section.slint:62
+msgctxt "SnippetsSection"
+msgid "EXPANSION"
+msgstr "[EN] EXPANSION"
+
+#: ui/components/settings/snippets_section.slint:67
+msgctxt "SnippetsSection"
+msgid "Texte de l'extrait vocal"
+msgstr "[EN] Texte de l'extrait vocal"
+
+#: ui/components/settings/snippets_section.slint:73
+msgctxt "SnippetsSection"
+msgid "Ajouter un extrait"
+msgstr "[EN] Ajouter un extrait"
+
+#: ui/components/settings/snippets_section.slint:88
+msgctxt "SnippetsSection"
+msgid "Aucune formule."
+msgstr "[EN] Aucune formule."
+
+#: ui/components/settings/snippets_section.slint:128
+msgctxt "SnippetsSection"
+msgid "Modifier"
+msgstr "[EN] Modifier"
+
+#: ui/components/settings/snippets_section.slint:132
+msgctxt "SnippetsSection"
+msgid "Supprimer"
+msgstr "[EN] Supprimer"
+
+#: ui/components/settings/snippets_section.slint:171
+msgctxt "SnippetsSection"
+msgid "Annuler"
+msgstr "[EN] Annuler"
+
+#: ui/components/settings/snippets_section.slint:175
+msgctxt "SnippetsSection"
+msgid "Enregistrer"
+msgstr "[EN] Enregistrer"
+
+#: ui/components/settings/autostart_section.slint:15
+msgctxt "AutostartSection"
+msgid "DÉMARRAGE"
+msgstr "[EN] DÉMARRAGE"
+
+#: ui/components/settings/autostart_section.slint:23
+msgctxt "AutostartSection"
+msgid "Lancer Soufflé à l'ouverture de session"
+msgstr "[EN] Lancer Soufflé à l'ouverture de session"
+
+#: ui/components/settings/microphone_section.slint:109
+msgctxt "MicrophoneSection"
+msgid "MICROPHONE"
+msgstr "[EN] MICROPHONE"
+
+#: ui/components/settings/microphone_section.slint:122
+msgctxt "MicrophoneSection"
+msgid "Microphone actif"
+msgstr "[EN] Microphone actif"
+
+#: ui/components/settings/microphone_section.slint:129
+msgctxt "MicrophoneSection"
+msgid "Actualiser les microphones"
+msgstr "[EN] Actualiser les microphones"
+
+#: ui/components/settings/microphone_section.slint:133
+msgctxt "MicrophoneSection"
+msgid "Réinitialiser la liste"
+msgstr "[EN] Réinitialiser la liste"
+
+#: ui/components/settings/microphone_section.slint:140
+msgctxt "MicrophoneSection"
+msgid ""
+"Le périphérique choisi n'est plus disponible ; un autre est utilisé en "
+"attendant."
+msgstr ""
+
+#: ui/components/settings/microphone_section.slint:175
+msgctxt "MicrophoneSection"
+msgid ""
+"Cette fréquence élevée peut perturber les appels en visioconférence pendant "
+"l'enregistrement."
+msgstr ""
+
+#: ui/components/settings/microphone_section.slint:200
+msgctxt "MicrophoneSection"
+msgid "Ordre de préférence"
+msgstr "[EN] Ordre de préférence"
+
+#: ui/components/settings/microphone_section.slint:205
+msgctxt "MicrophoneSection"
+msgid "Utilisé quand plusieurs micros sont branchés en même temps."
+msgstr "[EN] Utilisé quand plusieurs micros sont branchés en même temps."
+
+#: ui/components/settings/microphone_section.slint:289
+msgctxt "MicrophoneSection"
+msgid "Masquer"
+msgstr "[EN] Masquer"
+
+#: ui/components/settings/microphone_section.slint:326
+msgctxt "MicrophoneSection"
+msgid "Autoriser les micros Bluetooth"
+msgstr "[EN] Autoriser les micros Bluetooth"
+
+#: ui/components/settings/calendar_section.slint:38
+msgctxt "CalendarSection"
+msgid "CALENDRIER"
+msgstr "[EN] CALENDRIER"
+
+#: ui/components/settings/calendar_section.slint:46
+msgctxt "CalendarSection"
+msgid "Intégration du calendrier"
+msgstr "[EN] Intégration du calendrier"
+
+#: ui/components/settings/calendar_section.slint:61
+msgctxt "CalendarSection"
+msgid "L'accès au calendrier a été refusé."
+msgstr "[EN] L'accès au calendrier a été refusé."
+
+#: ui/components/settings/calendar_section.slint:70
+msgctxt "CalendarSection"
+msgid "Ouvrir les Réglages Système"
+msgstr "[EN] Ouvrir les Réglages Système"
+
+#: ui/components/settings/calendar_section.slint:82
+msgctxt "CalendarSection"
+msgid "Proposer au début de la réunion"
+msgstr "[EN] Proposer au début de la réunion"
+
+#: ui/components/settings/calendar_section.slint:93
+msgctxt "CalendarSection"
+msgid "Délai du rappel en minutes"
+msgstr "[EN] Délai du rappel en minutes"
+
+#: ui/components/settings/calendar_section.slint:111
+msgctxt "CalendarSection"
+msgid "Calendriers"
+msgstr "[EN] Calendriers"
+
+#: ui/components/settings/calendar_section.slint:116
+msgctxt "CalendarSection"
+msgid "Tous les calendriers sont inclus ; décochez ceux à masquer."
+msgstr "[EN] Tous les calendriers sont inclus ; décochez ceux à masquer."
+
+#: ui/components/settings/dictionary_section.slint:40
+msgctxt "DictionarySection"
+msgid "DICTIONNAIRE PERSONNALISÉ"
+msgstr "[EN] DICTIONNAIRE PERSONNALISÉ"
+
+#: ui/components/settings/dictionary_section.slint:48
+msgctxt "DictionarySection"
+msgid "Apprendre depuis les corrections après collage"
+msgstr "[EN] Apprendre depuis les corrections après collage"
+
+#: ui/components/settings/dictionary_section.slint:62
+msgctxt "DictionarySection"
+msgid "Termes techniques, noms propres ou acronymes mal reconnus."
+msgstr "[EN] Termes techniques, noms propres ou acronymes mal reconnus."
+
+#: ui/components/settings/dictionary_section.slint:74
+msgctxt "DictionarySection"
+msgid "TERME"
+msgstr "[EN] TERME"
+
+#: ui/components/settings/dictionary_section.slint:82
+msgctxt "DictionarySection"
+msgid "PRONONCIATION"
+msgstr "[EN] PRONONCIATION"
+
+#: ui/components/settings/dictionary_section.slint:90
+msgctxt "DictionarySection"
+msgid "CATÉGORIE"
+msgstr "[EN] CATÉGORIE"
+
+#: ui/components/settings/dictionary_section.slint:109
+msgctxt "DictionarySection"
+msgid "Terme"
+msgstr "[EN] Terme"
+
+#: ui/components/settings/dictionary_section.slint:115
+msgctxt "DictionarySection"
+msgid "Prononciation facultative"
+msgstr "[EN] Prononciation facultative"
+
+#: ui/components/settings/dictionary_section.slint:121
+msgctxt "DictionarySection"
+msgid "Catégorie facultative"
+msgstr "[EN] Catégorie facultative"
+
+#: ui/components/settings/dictionary_section.slint:125
+msgctxt "DictionarySection"
+msgid "Ajouter"
+msgstr "[EN] Ajouter"
+
+#: ui/components/settings/dictionary_section.slint:141
+msgctxt "DictionarySection"
+msgid "Aucune entrée."
+msgstr "[EN] Aucune entrée."
+
+#: ui/components/settings/dictionary_section.slint:187
+msgctxt "DictionarySection"
+msgid "Supprimer"
+msgstr "[EN] Supprimer"
+
+#: ui/components/settings/about_section.slint:28
+msgctxt "AboutSection"
+msgid "À PROPOS"
+msgstr "[EN] À PROPOS"
+
+#: ui/components/settings/about_section.slint:77
+msgctxt "AboutSection"
+msgid "100% local"
+msgstr "[EN] 100% local"
+
+#: ui/components/settings/about_section.slint:102
+msgctxt "AboutSection"
+msgid "Vérification automatique des mises à jour"
+msgstr "[EN] Vérification automatique des mises à jour"
+
+#: ui/components/settings/diagnostics_section.slint:34
+msgctxt "DiagnosticsSection"
+msgid "DIAGNOSTICS"
+msgstr "[EN] DIAGNOSTICS"
+
+#: ui/components/settings/diagnostics_section.slint:42
+msgctxt "DiagnosticsSection"
+msgid "Niveau de journal"
+msgstr "[EN] Niveau de journal"
+
+#: ui/components/settings/diagnostics_section.slint:66
+msgctxt "DiagnosticsSection"
+msgid "Journaux détaillés de transcription"
+msgstr "[EN] Journaux détaillés de transcription"
+
+#: ui/components/settings/diagnostics_section.slint:81
+msgctxt "DiagnosticsSection"
+msgid "Journal en direct"
+msgstr "[EN] Journal en direct"
+
+#: ui/components/settings/diagnostics_section.slint:86
+msgctxt "DiagnosticsSection"
+msgid "Fin du fichier journal actuel, actualisé toutes les quelques secondes."
+msgstr "[EN] Fin du fichier journal actuel, actualisé toutes les quelques secondes."
+
+#: ui/components/settings/intelligence_section.slint:52
+msgctxt "IntelligenceSection"
+msgid "Ce Mac ne prend pas en charge Apple Intelligence."
+msgstr "[EN] Ce Mac ne prend pas en charge Apple Intelligence."
+
+#: ui/components/settings/intelligence_section.slint:53
+msgctxt "IntelligenceSection"
+msgid ""
+"Activez Apple Intelligence dans les Réglages Système, puis rouvrez Soufflé."
+msgstr ""
+
+#: ui/components/settings/intelligence_section.slint:54
+msgctxt "IntelligenceSection"
+msgid "macOS télécharge encore le modèle on-device ; réessayez plus tard."
+msgstr "[EN] macOS télécharge encore le modèle on-device ; réessayez plus tard."
+
+#: ui/components/settings/intelligence_section.slint:55
+msgctxt "IntelligenceSection"
+msgid "Apple Intelligence nécessite macOS 26 ou plus récent."
+msgstr "[EN] Apple Intelligence nécessite macOS 26 ou plus récent."
+
+#: ui/components/settings/intelligence_section.slint:56
+msgctxt "IntelligenceSection"
+msgid "Cette version ne comprend pas le support d'Apple Intelligence."
+msgstr "[EN] Cette version ne comprend pas le support d'Apple Intelligence."
+
+#: ui/components/settings/intelligence_section.slint:57
+msgctxt "IntelligenceSection"
+msgid "Apple Intelligence nécessite une puce Apple Silicon."
+msgstr "[EN] Apple Intelligence nécessite une puce Apple Silicon."
+
+#: ui/components/settings/intelligence_section.slint:58
+msgctxt "IntelligenceSection"
+msgid "Apple Intelligence n'est pas disponible."
+msgstr "[EN] Apple Intelligence n'est pas disponible."
+
+#: ui/components/settings/intelligence_section.slint:66
+msgctxt "IntelligenceSection"
+msgid "RÉSUMÉS"
+msgstr "[EN] RÉSUMÉS"
+
+#: ui/components/settings/intelligence_section.slint:74
+msgctxt "IntelligenceSection"
+msgid "Moteur de résumé"
+msgstr "[EN] Moteur de résumé"
+
+#: ui/components/settings/intelligence_section.slint:156
+msgctxt "IntelligenceSection"
+msgid "Réglages Système"
+msgstr "[EN] Réglages Système"
+
+#: ui/components/settings/intelligence_section.slint:168
+msgctxt "IntelligenceSection"
+msgid "URL Ollama"
+msgstr "[EN] URL Ollama"
+
+#: ui/components/settings/intelligence_section.slint:197
+msgctxt "IntelligenceSection"
+msgid "Réessayer"
+msgstr "[EN] Réessayer"
+
+#: ui/components/settings/intelligence_section.slint:208
+msgctxt "IntelligenceSection"
+msgid "Modèle de résumé"
+msgstr "[EN] Modèle de résumé"
+
+#: ui/components/settings/intelligence_section.slint:220
+msgctxt "IntelligenceSection"
+msgid "Aucun modèle compatible installé."
+msgstr "[EN] Aucun modèle compatible installé."
+
+#: ui/components/settings/data_section.slint:38
+msgctxt "CodeBlock"
+msgid "Bloc de code sélectionnable"
+msgstr "[EN] Bloc de code sélectionnable"
+
+#: ui/components/settings/data_section.slint:85
+msgctxt "DataSection"
+msgid "DONNÉES"
+msgstr "[EN] DONNÉES"
+
+#: ui/components/settings/data_section.slint:116
+msgctxt "DataSection"
+msgid "Conservation audio des réunions"
+msgstr "[EN] Conservation audio des réunions"
+
+#: ui/components/settings/data_section.slint:148
+msgctxt "DataSection"
+msgid "Afficher dans le Finder"
+msgstr "[EN] Afficher dans le Finder"
+
+#: ui/components/settings/data_section.slint:167
+msgctxt "DataSection"
+msgid "SERVEUR MCP"
+msgstr "[EN] SERVEUR MCP"
+
+#: ui/components/settings/data_section.slint:175
+msgctxt "DataSection"
+msgid ""
+"Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos "
+"transcriptions et résumés. Tout reste sur ce Mac."
+msgstr ""
+
+#: ui/components/settings/data_section.slint:190
+msgctxt "DataSection"
+msgid "Binaire sidecar"
+msgstr "[EN] Binaire sidecar"
+
+#: ui/components/settings/data_section.slint:198
+msgctxt "DataSection"
+msgid "Binaire introuvable. Compilez souffle-mcp pour le développement local."
+msgstr "[EN] Binaire introuvable. Compilez souffle-mcp pour le développement local."
+
+#: ui/components/settings/data_section.slint:224
+msgctxt "DataSection"
+msgid "Config Claude Desktop"
+msgstr "[EN] Config Claude Desktop"
+
+#: ui/components/settings/data_section.slint:229
+msgctxt "DataSection"
+msgid "À coller dans claude_desktop_config.json sous mcpServers."
+msgstr "[EN] À coller dans claude_desktop_config.json sous mcpServers."
+
+#: ui/components/settings/data_section.slint:236
+msgctxt "DataSection"
+msgid "Copier"
+msgstr "[EN] Copier"
+
+#: ui/components/settings/data_section.slint:264
+msgctxt "DataSection"
+msgid "Claude Code"
+msgstr "[EN] Claude Code"
+
+#: ui/components/settings/data_section.slint:269
+msgctxt "DataSection"
+msgid "À exécuter une fois dans un terminal pour enregistrer le serveur."
+msgstr "[EN] À exécuter une fois dans un terminal pour enregistrer le serveur."
+
+#: ui/components/settings/model_section.slint:32
+msgctxt "ModelSection"
+msgid "MODÈLE DE TRANSCRIPTION"
+msgstr "[EN] MODÈLE DE TRANSCRIPTION"
+
+#: ui/components/settings/model_section.slint:54
+msgctxt "ModelSection"
+msgid "Modèle de transcription"
+msgstr "[EN] Modèle de transcription"
+
+#: ui/components/settings/model_section.slint:97
+msgctxt "ModelSection"
+msgid "Délai avant déchargement"
+msgstr "[EN] Délai avant déchargement"
+
+#: ui/components/settings/permissions_section.slint:13
+msgctxt "PermissionsSection"
+msgid "PERMISSIONS"
+msgstr "[EN] PERMISSIONS"
+
+#: ui/components/settings/permissions_section.slint:21
+msgctxt "PermissionsSection"
+msgid "Vérifier les permissions"
+msgstr "[EN] Vérifier les permissions"
+
+#: ui/components/themed_spin.slint:12
+msgctxt "ThemedSpinBox"
+msgid "Valeur"
+msgstr "[EN] Valeur"
+
+#: ui/components/themed_slider.slint:11
+msgctxt "ThemedSlider"
+msgid "Valeur"
+msgstr "[EN] Valeur"
+
+#: ui/components/themed_combo.slint:16
+msgctxt "ThemedComboBox"
+msgid "Sélection"
+msgstr "[EN] Sélection"
+
+#: ui/components/timeline_item.slint:240
+msgctxt "TimelineItemRow"
+msgid "Confirmer"
+msgstr "[EN] Confirmer"
+
+#: ui/components/search_field.slint:39
+msgctxt "SearchField"
+msgid "Rechercher les transcriptions et réunions"
+msgstr "[EN] Rechercher les transcriptions et réunions"
+
+#: ui/components/audio_player_section.slint:21
+msgctxt "AudioPlayerSection"
+msgid "Aucun enregistrement audio pour cette réunion."
+msgstr "[EN] Aucun enregistrement audio pour cette réunion."
+
+#: ui/components/audio_player_section.slint:81
+msgctxt "AudioPlayerSection"
+msgid "Position de lecture"
+msgstr "[EN] Position de lecture"
+
+#: ui/components/timeline_section.slint:63
+msgctxt "TimelineSection"
+msgid "À VENIR AUJOURD'HUI"
+msgstr "[EN] À VENIR AUJOURD'HUI"
+
+#: ui/components/timeline_section.slint:114
+msgctxt "TimelineSection"
+msgid "EN COURS"
+msgstr "[EN] EN COURS"
+
+#: ui/components/timeline_section.slint:132
+msgctxt "TimelineSection"
+msgid "SUIVANT"
+msgstr "[EN] SUIVANT"
+
+#: ui/components/timeline_section.slint:184
+msgctxt "TimelineSection"
+msgid "Démarrer la transcription"
+msgstr "[EN] Démarrer la transcription"
+
+#: ui/components/timeline_section.slint:211
+msgctxt "TimelineSection"
+msgid "Configurer le calendrier"
+msgstr "[EN] Configurer le calendrier"
+
+#: ui/components/timeline_section.slint:241
+msgctxt "TimelineSection"
+msgid "Affichez vos réunions du jour ici"
+msgstr "[EN] Affichez vos réunions du jour ici"
+
+#: ui/components/timeline_section.slint:247
+msgctxt "TimelineSection"
+msgid ""
+"Connectez le calendrier macOS pour des rappels et un démarrage en un clic."
+msgstr ""
+
+#: ui/components/timeline_section.slint:255
+msgctxt "TimelineSection"
+msgid "Configurer"
+msgstr "[EN] Configurer"
+
+#: ui/components/timeline_section.slint:267
+msgctxt "TimelineSection"
+msgid "Rien ici pour l'instant"
+msgstr "[EN] Rien ici pour l'instant"
+
+#: ui/components/timeline_section.slint:271
+msgctxt "TimelineSection"
+msgid "Aucun résultat"
+msgstr "[EN] Aucun résultat"
+
+#: ui/components/themed_switch.slint:9
+msgctxt "ThemedSwitch"
+msgid "Interrupteur"
+msgstr "[EN] Interrupteur"
+
+#: ui/components/app_header.slint:35
+msgctxt "AppHeader"
+msgid "Enregistrement"
+msgstr "[EN] Enregistrement"
+
+#: ui/components/app_header.slint:83
+msgctxt "AppHeader"
+msgid "Soufflé"
+msgstr "[EN] Soufflé"
+
+#: ui/components/app_header.slint:148
+msgctxt "AppHeader"
+msgid "Basculer clair / sombre"
+msgstr "[EN] Basculer clair / sombre"
+
+#: ui/components/app_header.slint:172
+msgctxt "AppHeader"
+msgid "Réglages"
+msgstr "[EN] Réglages"
+
+#: ui/components/summary_section.slint:29
+msgctxt "SummarySection"
+msgid "Résumé"
+msgstr "[EN] Résumé"
+
+#: ui/components/summary_section.slint:36
+msgctxt "SummarySection"
+msgid "Aucun résumé pour cette réunion."
+msgstr "[EN] Aucun résumé pour cette réunion."
+
+#: ui/components/summary_section.slint:68
+msgctxt "SummarySection"
+msgid "Résumé obsolète (audio ajouté depuis)"
+msgstr "[EN] Résumé obsolète (audio ajouté depuis)"
+
+#: ui/components/summary_section.slint:114
+msgctxt "SummarySection"
+msgid "Décisions"
+msgstr "[EN] Décisions"
+
+#: ui/components/summary_section.slint:131
+msgctxt "SummarySection"
+msgid "Actions"
+msgstr "[EN] Actions"
+
+#: ui/components/summary_section.slint:155
+msgctxt "SummarySection"
+msgid "Questions ouvertes"
+msgstr "[EN] Questions ouvertes"
+
+#: ui/components/dictation_recovery.slint:28
+msgctxt "DictationRecovery"
+msgid "Dictée à récupérer"
+msgstr "[EN] Dictée à récupérer"
+
+#: ui/components/dictation_recovery.slint:34
+msgctxt "DictationRecovery"
+msgid "Le texte reste ici tant que vous ne l’avez pas copié ou supprimé."
+msgstr "[EN] Le texte reste ici tant que vous ne l’avez pas copié ou supprimé."
+
+#: ui/components/dictation_recovery.slint:42
+msgctxt "DictationRecovery"
+msgid "Texte de dictée à récupérer"
+msgstr "[EN] Texte de dictée à récupérer"
+
+#: ui/components/dictation_recovery.slint:48
+msgctxt "DictationRecovery"
+msgid "Supprimer"
+msgstr "[EN] Supprimer"
+
+#: ui/components/dictation_recovery.slint:53
+msgctxt "DictationRecovery"
+msgid "Copier le texte"
+msgstr "[EN] Copier le texte"
+
+#: ui/components/action_hero.slint:29
+msgctxt "ActionHero"
+msgid "Démarrer une dictée"
+msgstr "[EN] Démarrer une dictée"
+
+#: ui/components/action_hero.slint:70
+msgctxt "ActionHero"
+msgid "Dicter"
+msgstr "[EN] Dicter"
+
+#: ui/components/action_hero.slint:77
+msgctxt "ActionHero"
+msgid "Définissez un raccourci"
+msgstr "[EN] Définissez un raccourci"
+
+#: ui/components/action_hero.slint:86
+msgctxt "ActionHero"
+msgid "Appuyez sur"
+msgstr "[EN] Appuyez sur"
+
+#: ui/components/action_hero.slint:125 ui/components/action_hero.slint:166
+msgctxt "ActionHero"
+msgid "Démarrer une réunion"
+msgstr "[EN] Démarrer une réunion"
+
+#: ui/components/action_hero.slint:172
+msgctxt "ActionHero"
+msgid "Transcrire en direct avec l’audio système"
+msgstr "[EN] Transcrire en direct avec l’audio système"
+
+#: ui/components/transcript_section.slint:118
+msgctxt "TranscriptSection"
+msgid "Alias de dictionnaire"
+msgstr "[EN] Alias de dictionnaire"
+
+#: ui/components/transcript_section.slint:130
+msgctxt "TranscriptSection"
+msgid "Fermer"
+msgstr "[EN] Fermer"
+
+#: ui/components/transcript_section.slint:138
+msgctxt "TranscriptSection"
+msgid "✕"
+msgstr "[EN] ✕"
+
+#: ui/components/transcript_section.slint:146
+msgctxt "TranscriptSection"
+msgid "Terme correct"
+msgstr "[EN] Terme correct"
+
+#: ui/components/transcript_section.slint:152
+msgctxt "TranscriptSection"
+msgid "Prononciation entendue"
+msgstr "[EN] Prononciation entendue"
+
+#: ui/components/transcript_section.slint:162
+msgctxt "TranscriptSection"
+msgid "Enregistrer l'alias"
+msgstr "[EN] Enregistrer l'alias"
+
+#: ui/components/transcript_section.slint:171
+msgctxt "TranscriptSection"
+msgid "Enregistrer"
+msgstr "[EN] Enregistrer"
+
+#: ui/components/transcript_section.slint:196
+msgctxt "TranscriptSection"
+msgid "Transcription"
+msgstr "[EN] Transcription"
+
+#: ui/components/transcript_section.slint:203
+msgctxt "TranscriptSection"
+msgid "Aucun texte transcrit pour cette réunion."
+msgstr "[EN] Aucun texte transcrit pour cette réunion."
+
+#: ui/components/transcript_section.slint:309
+msgctxt "TranscriptSection"
+msgid "Fin de l'enregistrement précédent"
+msgstr "[EN] Fin de l'enregistrement précédent"
+
+#: ui/components/transcript_section.slint:309
+msgctxt "TranscriptSection"
+msgid "Nouvelle session d'enregistrement"
+msgstr "[EN] Nouvelle session d'enregistrement"
+
+#: ui/components/status_banner.slint:37
+msgctxt "StatusBanner"
+msgid "×"
+msgstr "[EN] ×"
+
+#: ui/components/onboarding/whats_new_dialog.slint:34
+msgctxt "WhatsNewDialog"
+msgid "Nouveautés"
+msgstr "[EN] Nouveautés"
+
+#: ui/components/onboarding/whats_new_dialog.slint:56
+msgctxt "WhatsNewDialog"
+msgid "Compris"
+msgstr "[EN] Compris"
+
+#: ui/components/onboarding/permissions_step.slint:85
+msgctxt "PermissionsStep"
+msgid "Accordé"
+msgstr "[EN] Accordé"
+
+#: ui/components/onboarding/permissions_step.slint:93
+msgctxt "PermissionsStep"
+msgid "Non pris en charge"
+msgstr "[EN] Non pris en charge"
+
+#: ui/components/onboarding/update_available_dialog.slint:46
+msgctxt "UpdateAvailableDialog"
+msgid "Mise à jour disponible"
+msgstr "[EN] Mise à jour disponible"
+
+#: ui/components/onboarding/update_available_dialog.slint:84
+msgctxt "UpdateAvailableDialog"
+msgid "Voir sur GitHub"
+msgstr "[EN] Voir sur GitHub"
+
+#: ui/components/onboarding/update_available_dialog.slint:91
+msgctxt "UpdateAvailableDialog"
+msgid "Plus tard"
+msgstr "[EN] Plus tard"
+
+#: ui/components/onboarding/update_available_dialog.slint:95
+msgctxt "UpdateAvailableDialog"
+msgid "Installer et redémarrer"
+msgstr "[EN] Installer et redémarrer"
+
+#: ui/onboarding_view.slint:81
+msgctxt "OnboardingView"
+msgid "Soufflé"
+msgstr "[EN] Soufflé"
+
+#: ui/onboarding_view.slint:88
+msgctxt "OnboardingView"
+msgid "Dictée et transcription de réunion, 100% locale."
+msgstr "[EN] Dictée et transcription de réunion, 100% locale."
+
+#: ui/onboarding_view.slint:98
+msgctxt "OnboardingView"
+msgid "English"
+msgstr "[EN] English"
+
+#: ui/onboarding_view.slint:103
+msgctxt "OnboardingView"
+msgid "Français"
+msgstr "[EN] Français"
+
+#: ui/onboarding_view.slint:173
+msgctxt "OnboardingView"
+msgid "Actualiser"
+msgstr "[EN] Actualiser"
+
+#: ui/onboarding_view.slint:178
+msgctxt "OnboardingView"
+msgid "Le microphone peut être changé plus tard dans les Réglages."
+msgstr "[EN] Le microphone peut être changé plus tard dans les Réglages."
+
+#: ui/onboarding_view.slint:190
+msgctxt "OnboardingView"
+msgid "Téléchargement du modèle…"
+msgstr "[EN] Téléchargement du modèle…"
+
+#: ui/onboarding_view.slint:206
+msgctxt "OnboardingView"
+msgid "Chargement du modèle…"
+msgstr "[EN] Chargement du modèle…"
+
+#: ui/onboarding_view.slint:211
+msgctxt "OnboardingView"
+msgid "Modèle prêt."
+msgstr "[EN] Modèle prêt."
+
+#: ui/onboarding_view.slint:244 ui/onboarding_view.slint:250
+msgctxt "OnboardingView"
+msgid "Coller automatiquement le texte transcrit"
+msgstr "[EN] Coller automatiquement le texte transcrit"
+
+#: ui/onboarding_view.slint:260
+msgctxt "OnboardingView"
+msgid "Le collage automatique nécessite la permission Accessibilité."
+msgstr "[EN] Le collage automatique nécessite la permission Accessibilité."
+
+#: ui/onboarding_view.slint:267
+msgctxt "OnboardingView"
+msgid "Vérifier"
+msgstr "[EN] Vérifier"
+
+#: ui/onboarding_view.slint:277
+msgctxt "OnboardingView"
+msgid "Retour"
+msgstr "[EN] Retour"
+
+#: ui/onboarding_view.slint:283
+msgctxt "OnboardingView"
+msgid "Les permissions peuvent être accordées plus tard."
+msgstr "[EN] Les permissions peuvent être accordées plus tard."
+
+#: ui/main_window.slint:42
+msgctxt "MainWindow"
+msgid "Soufflé"
+msgstr "[EN] Soufflé"
+
+#: ui/idle_view.slint:91
+msgctxt "IdleView"
+msgid "Tout"
+msgstr "[EN] Tout"
+
+#: ui/idle_view.slint:96
+msgctxt "IdleView"
+msgid "Réunions"
+msgstr "[EN] Réunions"
+
+#: ui/idle_view.slint:101
+msgctxt "IdleView"
+msgid "Dictées"
+msgstr "[EN] Dictées"

@@ -6,7 +6,7 @@ import { Theme } from "../theme.slint";
 export component ThemedSwitch inherits Rectangle {
     in property <bool> checked;
     in property <bool> enabled: true;
-    in property <string> control-label: "Interrupteur";
+    in property <string> control-label: @tr("Interrupteur");
 
     // Carries the new value directly - no internal state to read back via
     // `self.checked` (this component is purely one-way, same reasoning as

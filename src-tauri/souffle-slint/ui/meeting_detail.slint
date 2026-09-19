@@ -77,7 +77,7 @@ export component MeetingDetail inherits Rectangle {
             background: back-area.pressed ? Theme.surface-3 : back-area.has-hover ? Theme.surface-2 : transparent;
 
             accessible-role: button;
-            accessible-label: "Retour \u{e0} l'historique";
+            accessible-label: @tr("Retour \u{e0} l'historique");
             accessible-action-default => { root.back-requested(); }
 
             forward-focus: back-focus;
@@ -108,7 +108,7 @@ export component MeetingDetail inherits Rectangle {
                     icon-color: Theme.text-secondary;
                 }
                 Text {
-                    text: "Historique";
+                    text: @tr("Historique");
                     font-size: 13px;
                     color: Theme.text-secondary;
                     vertical-alignment: center;
@@ -127,7 +127,7 @@ export component MeetingDetail inherits Rectangle {
             background: title-area.has-hover ? Theme.surface-2 : transparent;
 
             accessible-role: button;
-            accessible-label: "Renommer la r\u{e9}union";
+            accessible-label: @tr("Renommer la r\u{e9}union");
             accessible-action-default => {
                 root.title-draft = root.title;
                 root.editing-title = true;
@@ -166,7 +166,7 @@ export component MeetingDetail inherits Rectangle {
 
         if root.editing-title: LineEdit {
             text <=> root.title-draft;
-            accessible-label: "Titre de la réunion";
+            accessible-label: @tr("Titre de la réunion");
             accepted => {
                 root.editing-title = false;
                 if (root.title-draft != "" && root.title-draft != root.title) {
@@ -249,7 +249,7 @@ export component MeetingDetail inherits Rectangle {
                             }
 
                             Text {
-                                text: "Notes";
+                                text: @tr("Notes");
                                 font-size: 13px;
                                 font-family: "Archivo SemiBold";
                                 font-weight: 600;
@@ -259,13 +259,13 @@ export component MeetingDetail inherits Rectangle {
                             Rectangle { horizontal-stretch: 1; }
 
                             if root.notes-save-state == NotesSaveState.saved: Text {
-                                text: "Enregistr\u{e9}";
+                                text: @tr("Enregistr\u{e9}");
                                 font-size: 11px;
                                 color: Theme.text-muted;
                                 vertical-alignment: center;
                             }
                             if root.notes-save-state == NotesSaveState.pending: Text {
-                                text: "Enregistrement\u{2026}";
+                                text: @tr("Enregistrement\u{2026}");
                                 font-size: 11px;
                                 color: Theme.text-muted;
                                 vertical-alignment: center;
@@ -276,12 +276,12 @@ export component MeetingDetail inherits Rectangle {
                             text <=> root.notes;
                             area-height: 96px;
                             placeholder: "Ajoutez les décisions, actions et noms importants…";
-                            control-label: "Notes de la réunion";
+                            control-label: @tr("Notes de la réunion");
                             edited(value) => { root.notes-changed(value); }
                         }
 
                         Text {
-                            text: "Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.";
+                            text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
                             color: Theme.text-muted;
                             font-size: 11px;
                         }
@@ -306,14 +306,14 @@ export component MeetingDetail inherits Rectangle {
                             alignment: center;
 
                             Text {
-                                text: "Cette réunion ne contient aucun enregistrement.";
+                                text: @tr("Cette réunion ne contient aucun enregistrement.");
                                 font-family: "Archivo SemiBold";
                                 font-size: 13px;
                                 color: Theme.text-secondary;
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: "Aucun audio, aucune transcription et aucun résumé.";
+                                text: @tr("Aucun audio, aucune transcription et aucun résumé.");
                                 font-size: 11.5px;
                                 color: Theme.text-muted;
                                 horizontal-alignment: center;

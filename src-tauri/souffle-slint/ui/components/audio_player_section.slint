@@ -18,7 +18,7 @@ export component AudioPlayerSection inherits VerticalLayout {
     spacing: 8px;
 
     if !root.has-audio: Text {
-        text: "Aucun enregistrement audio pour cette r\u{e9}union.";
+        text: @tr("Aucun enregistrement audio pour cette r\u{e9}union.");
         color: Theme.text-muted;
         font-size: 12px;
     }
@@ -78,7 +78,7 @@ export component AudioPlayerSection inherits VerticalLayout {
         border-color: Theme.accent;
 
         accessible-role: slider;
-        accessible-label: "Position de lecture";
+        accessible-label: @tr("Position de lecture");
         accessible-value: root.position-label;
         accessible-value-minimum: 0;
         accessible-value-maximum: 100;

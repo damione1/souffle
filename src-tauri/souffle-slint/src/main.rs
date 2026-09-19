@@ -1939,7 +1939,9 @@ fn project_startup_settings(
     let dark = settings_ui::resolve_dark(settings.theme);
     window.global::<Theme>().set_dark(dark);
     window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
-    window.set_onboarding_locale(settings.locale.as_str().into());
+    let safe_locale = settings_ui::locale_from_slint(settings_ui::locale_to_slint(settings.locale.as_str()));
+    window.set_onboarding_locale(safe_locale.into());
+    let _ = slint::select_bundled_translation(safe_locale);
     let mut onboarding = onboarding.borrow_mut();
     onboarding.selected_device = settings.audio_device.clone().unwrap_or_default();
     onboarding.auto_paste = settings.auto_paste;
@@ -2156,7 +2158,8 @@ fn wire_onboarding_callbacks(
             |_, outcome| log_settings_save_outcome("onboarding locale", outcome),
         );
         if let Some(window) = weak.upgrade() {
-            window.set_onboarding_locale(locale);
+            window.set_onboarding_locale(locale.clone());
+            let _ = slint::select_bundled_translation(locale.as_str());
         }
     });
 
@@ -5306,7 +5309,7 @@ fn wire_callbacks(
     let lists_models_5 = lists_models.clone();
     window.on_settings_snippet_cancel_edit_requested(move || {
         *snippet_editing_for_cancel.borrow_mut() = None;
-        if let Some(window) = weak.upgrade() {
+        if let Some(_window) = weak.upgrade() {
             let entries = snippets_list_state_for_cancel.borrow();
             lists_models_5.populate_snippets( &entries, None);
         }

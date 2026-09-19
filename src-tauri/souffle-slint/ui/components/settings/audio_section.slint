@@ -48,7 +48,7 @@ export component AudioSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "AUDIO";
+        title: @tr("AUDIO");
 
         if root.is-laptop: SettingsField {
             show-divider: false;
@@ -56,7 +56,7 @@ export component AudioSection inherits VerticalLayout {
             description: "Utiliser ce microphone à la place quand le capot est fermé avec un écran externe connecté.";
 
             ThemedComboBox {
-                control-label: "Microphone quand le capot est fermé";
+                control-label: @tr("Microphone quand le capot est fermé");
                 model: root.clamshell-device-labels;
                 current-value: root.clamshell-device-label;
                 selected(value) => { root.clamshell-device-changed(value); }
@@ -69,7 +69,7 @@ export component AudioSection inherits VerticalLayout {
             description: "Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions.";
 
             ThemedSwitch {
-                control-label: "Capturer l'audio système";
+                control-label: @tr("Capturer l'audio système");
                 checked: root.capture-system-audio;
                 toggled(new) => { root.capture-system-audio-changed(new); }
             }
@@ -81,7 +81,7 @@ export component AudioSection inherits VerticalLayout {
             description: "Indice pour la détection de langue, jamais forcé sur le moteur.";
 
             ThemedComboBox {
-                control-label: "Langue de transcription des réunions";
+                control-label: @tr("Langue de transcription des réunions");
                 model: [
                     root.meeting-language-label(MeetingLanguage.auto),
                     root.meeting-language-label(MeetingLanguage.en),
@@ -107,7 +107,7 @@ export component AudioSection inherits VerticalLayout {
             description: "Arrêter l'enregistrement quand plus personne ne parle depuis longtemps.";
 
             ThemedSwitch {
-                control-label: "Arrêt automatique des réunions";
+                control-label: @tr("Arrêt automatique des réunions");
                 checked: root.meeting-autostop-enabled;
                 toggled(new) => { root.meeting-autostop-enabled-changed(new); }
             }
@@ -117,7 +117,7 @@ export component AudioSection inherits VerticalLayout {
             label: "Délai avant arrêt";
 
             ThemedComboBox {
-                control-label: "Délai avant arrêt automatique";
+                control-label: @tr("Délai avant arrêt automatique");
                 model: root.meeting-autostop-labels;
                 current-value: root.meeting-autostop-label;
                 selected(value) => { root.meeting-autostop-changed(value); }
@@ -128,7 +128,7 @@ export component AudioSection inherits VerticalLayout {
             label: "Durée maximale d'une réunion";
 
             ThemedComboBox {
-                control-label: "Durée maximale d'une réunion";
+                control-label: @tr("Durée maximale d'une réunion");
                 model: root.meeting-max-duration-labels;
                 current-value: root.meeting-max-duration-label;
                 selected(value) => { root.meeting-max-duration-changed(value); }
@@ -140,7 +140,7 @@ export component AudioSection inherits VerticalLayout {
             description: "Ignorer les silences pour une transcription plus rapide et plus propre.";
 
             ThemedSwitch {
-                control-label: "Détection de voix";
+                control-label: @tr("Détection de voix");
                 checked: root.vad-enabled;
                 toggled(new) => { root.vad-enabled-changed(new); }
             }
@@ -151,7 +151,7 @@ export component AudioSection inherits VerticalLayout {
             description: "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation.";
 
             ThemedSwitch {
-                control-label: "Suppression des hésitations";
+                control-label: @tr("Suppression des hésitations");
                 checked: root.filler-removal;
                 toggled(new) => { root.filler-removal-changed(new); }
             }
@@ -162,7 +162,7 @@ export component AudioSection inherits VerticalLayout {
             description: "Fusionner les répétitions et faux départs.";
 
             ThemedSwitch {
-                control-label: "Réduction des bégaiements";
+                control-label: @tr("Réduction des bégaiements");
                 checked: root.stutter-collapse;
                 toggled(new) => { root.stutter-collapse-changed(new); }
             }
@@ -173,7 +173,7 @@ export component AudioSection inherits VerticalLayout {
             description: "Appliquer automatiquement les corrections du dictionnaire personnel.";
 
             ThemedSwitch {
-                control-label: "Correction par dictionnaire";
+                control-label: @tr("Correction par dictionnaire");
                 checked: root.dictionary-correction;
                 toggled(new) => { root.dictionary-correction-changed(new); }
             }

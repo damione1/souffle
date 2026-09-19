@@ -29,7 +29,7 @@ export component ModelSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "MODÈLE DE TRANSCRIPTION";
+        title: @tr("MODÈLE DE TRANSCRIPTION");
 
     SettingsField {
         show-divider: false;
@@ -51,7 +51,7 @@ export component ModelSection inherits VerticalLayout {
             vertical-stretch: 0;
             clip: true;
             ThemedComboBox {
-                control-label: "Modèle de transcription";
+                control-label: @tr("Modèle de transcription");
                 width: parent.width;
                 combo-width: parent.width;
                 model: root.model-labels;
@@ -94,7 +94,7 @@ export component ModelSection inherits VerticalLayout {
         description: "Décharger le modèle de la mémoire après une période d'inactivité.";
 
         ThemedComboBox {
-            control-label: "Délai avant déchargement";
+            control-label: @tr("Délai avant déchargement");
             model: root.unload-timeout-labels;
             current-value: root.unload-timeout-label;
             selected(value) => { root.unload-timeout-changed(value); }

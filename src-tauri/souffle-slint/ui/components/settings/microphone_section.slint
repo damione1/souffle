@@ -106,7 +106,7 @@ export component MicrophoneSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "MICROPHONE";
+        title: @tr("MICROPHONE");
 
     SettingsField {
         show-divider: false;
@@ -119,25 +119,25 @@ export component MicrophoneSection inherits VerticalLayout {
             horizontal-stretch: 0;
 
             ThemedComboBox {
-                control-label: "Microphone actif";
+                control-label: @tr("Microphone actif");
                 model: root.device-labels;
                 current-value: root.selected-device-label;
                 selected(value) => { root.device-changed(value); }
             }
             MicIconButton {
                 kind: MicIconKind.refresh;
-                control-label: "Actualiser les microphones";
+                control-label: @tr("Actualiser les microphones");
                 clicked => { root.refresh-requested(); }
             }
             if root.has-disconnected: ThemedButton {
-                text: "Réinitialiser la liste";
+                text: @tr("Réinitialiser la liste");
                 clicked => { root.reset-devices-requested(); }
             }
         }
     }
 
     if root.pin-unavailable: Text {
-        text: "Le périphérique choisi n'est plus disponible ; un autre est utilisé en attendant.";
+        text: @tr("Le périphérique choisi n'est plus disponible ; un autre est utilisé en attendant.");
         color: Theme.warning;
         font-size: 11.5px;
         wrap: word-wrap;
@@ -172,7 +172,7 @@ export component MicrophoneSection inherits VerticalLayout {
         spacing: 6px;
 
         Text {
-            text: "Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.";
+            text: @tr("Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.");
             color: Theme.warning;
             font-size: 11.5px;
             wrap: word-wrap;
@@ -197,12 +197,12 @@ export component MicrophoneSection inherits VerticalLayout {
         spacing: 8px;
 
         Text {
-            text: "Ordre de préférence";
+            text: @tr("Ordre de préférence");
             font-size: 13.5px;
             color: Theme.text-secondary;
         }
         Text {
-            text: "Utilisé quand plusieurs micros sont branchés en même temps.";
+            text: @tr("Utilisé quand plusieurs micros sont branchés en même temps.");
             font-size: 12px;
             color: Theme.text-muted;
         }
@@ -286,7 +286,7 @@ export component MicrophoneSection inherits VerticalLayout {
                                     toggled(new) => { root.toggle-hidden-requested(row.uid, new); }
                                 }
                                 Text {
-                                    text: "Masquer";
+                                    text: @tr("Masquer");
                                     font-size: 11px;
                                     color: Theme.text-muted;
                                     vertical-alignment: center;
@@ -323,7 +323,7 @@ export component MicrophoneSection inherits VerticalLayout {
         description: "Sinon, un casque Bluetooth n'est jamais sélectionné automatiquement (évite le mode mono basse qualité).";
 
         ThemedSwitch {
-            control-label: "Autoriser les micros Bluetooth";
+            control-label: @tr("Autoriser les micros Bluetooth");
             checked: root.allow-bluetooth-mic;
             toggled(new) => { root.allow-bluetooth-mic-changed(new); }
         }

@@ -133,7 +133,7 @@ export component RecordingView inherits Rectangle {
                 height: 38px;
                 horizontal-stretch: 0;
                 accessible-role: button;
-                accessible-label: "Arrêter l'enregistrement";
+                accessible-label: @tr("Arrêter l'enregistrement");
                 accessible-enabled: true;
                 accessible-action-default => { root.stop-requested(); }
 
@@ -179,7 +179,7 @@ export component RecordingView inherits Rectangle {
                             }
                         }
                         Text {
-                            text: "Arrêter";
+                            text: @tr("Arrêter");
                             font-family: "Archivo SemiBold";
                             font-size: 13.5px;
                             color: Theme.on-danger;
@@ -199,7 +199,7 @@ export component RecordingView inherits Rectangle {
             background: Theme.warning.with-alpha(0.10);
 
             accessible-role: text;
-            accessible-label: "Attention. Seul votre microphone est enregistré. L'audio des autres participants est indisponible.";
+            accessible-label: @tr("Attention. Seul votre microphone est enregistré. L'audio des autres participants est indisponible.");
 
             HorizontalLayout {
                 padding-left: 14px;
@@ -215,7 +215,7 @@ export component RecordingView inherits Rectangle {
                 }
 
                 Text {
-                    text: "Seul votre microphone est enregistré. L’audio des autres participants est indisponible.";
+                    text: @tr("Seul votre microphone est enregistré. L’audio des autres participants est indisponible.");
                     font-size: 12.5px;
                     font-family: "Archivo SemiBold";
                     color: Theme.text-secondary;
@@ -267,7 +267,7 @@ export component RecordingView inherits Rectangle {
                         size: 15px;
                     }
                     Text {
-                        text: "Collé automatiquement dans votre dernière app à l’arrêt";
+                        text: @tr("Collé automatiquement dans votre dernière app à l’arrêt");
                         font-size: 12.5px;
                         color: Theme.text-muted;
                         vertical-alignment: center;
@@ -297,7 +297,7 @@ export component RecordingView inherits Rectangle {
                     alignment: space-between;
 
                     Text {
-                        text: "TRANSCRIPTION EN DIRECT";
+                        text: @tr("TRANSCRIPTION EN DIRECT");
                         font-family: "Archivo SemiBold";
                         font-size: 11px;
                         color: Theme.text-muted;
@@ -338,7 +338,7 @@ export component RecordingView inherits Rectangle {
                             spacing: 8px;
 
                             Text {
-                                text: "Moi";
+                                text: @tr("Moi");
                                 font-family: "Archivo SemiBold";
                                 font-size: 11.5px;
                                 color: Theme.accent;
@@ -361,7 +361,7 @@ export component RecordingView inherits Rectangle {
                             alignment: start;
                             spacing: 8px;
                             Text {
-                                text: "Eux";
+                                text: @tr("Eux");
                                 font-family: "Archivo SemiBold";
                                 font-size: 11.5px;
                                 color: Theme.accent;
@@ -381,7 +381,7 @@ export component RecordingView inherits Rectangle {
                             wrap: word-wrap;
                         }
                         if root.live-me-text == "" && root.live-them-text == "" && root.live-tentative == "": Text {
-                            text: "À l'écoute…";
+                            text: @tr("À l'écoute…");
                             font-size: 14px;
                             color: Theme.text-muted;
                         }
@@ -422,7 +422,7 @@ export component RecordingView inherits Rectangle {
                         size: 14px;
                     }
                     Text {
-                        text: "NOTES";
+                        text: @tr("NOTES");
                         font-family: "Archivo SemiBold";
                         font-size: 11px;
                         color: Theme.text-muted;
@@ -440,7 +440,7 @@ export component RecordingView inherits Rectangle {
                     area-height: 76px;
                     text <=> root.notes;
                     placeholder: "Notez décisions, actions, noms…";
-                    control-label: "Notes de la réunion";
+                    control-label: @tr("Notes de la réunion");
                     edited(value) => { root.notes-changed(value); }
                 }
             }
