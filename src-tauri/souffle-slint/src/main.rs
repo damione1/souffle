@@ -17,8 +17,8 @@ mod onboarding_flags;
 mod onboarding_ui;
 mod permissions_ui;
 mod settings_drafts;
-mod settings_io;
 mod settings_instrumentation;
+mod settings_io;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
@@ -3694,7 +3694,9 @@ fn wire_callbacks(
     let weak = window.as_weak();
     window.on_settings_tab_changed(move || {
         settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Tab);
-        settings_instrumentation::snapshot_without_persistence(settings_instrumentation::SettingsScenario::Tab);
+        settings_instrumentation::snapshot_without_persistence(
+            settings_instrumentation::SettingsScenario::Tab,
+        );
         if let Some(window) = weak.upgrade() {
             window.window().request_redraw();
         }

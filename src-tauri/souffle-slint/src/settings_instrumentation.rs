@@ -93,7 +93,10 @@ impl SettingsTrace {
     }
 
     fn mark(&self, milestone: SettingsMilestone, detail: Option<&str>) {
-        let mut inner = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         inner.sequence += 1;
         emit(json!({
             "kind": "milestone",
@@ -106,10 +109,21 @@ impl SettingsTrace {
         }));
     }
 
-    pub(crate) fn os_db_start(&self) { self.mark(SettingsMilestone::OsDbStart, None); }
-    pub(crate) fn os_db_end(&self) { self.mark(SettingsMilestone::OsDbEnd, None); }
+    pub(crate) fn os_db_start(&self) {
+        self.mark(SettingsMilestone::OsDbStart, None);
+    }
+    pub(crate) fn os_db_end(&self) {
+        self.mark(SettingsMilestone::OsDbEnd, None);
+    }
     pub(crate) fn commit(&self, committed: bool) {
-        self.mark(SettingsMilestone::Commit, Some(if committed { "committed" } else { "not_committed" }));
+        self.mark(
+            SettingsMilestone::Commit,
+            Some(if committed {
+                "committed"
+            } else {
+                "not_committed"
+            }),
+        );
     }
 }
 
@@ -137,15 +151,23 @@ fn emit(value: serde_json::Value) {
 }
 
 pub(crate) fn input(interaction: SettingsInteraction) {
-    if !enabled() { return; }
+    if !enabled() {
+        return;
+    }
     let scenario = SettingsScenario::from(interaction);
     let trace = SettingsTrace::new(scenario);
     trace.mark(SettingsMilestone::Input, None);
-    state().lock().unwrap_or_else(|p| p.into_inner()).input.insert(scenario, trace);
+    state()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .input
+        .insert(scenario, trace);
 }
 
 pub(crate) fn handler(scenario: SettingsScenario) {
-    if !enabled() { return; }
+    if !enabled() {
+        return;
+    }
     let mut state = state().lock().unwrap_or_else(|p| p.into_inner());
     if let Some(trace) = state.input.remove(&scenario) {
         trace.mark(SettingsMilestone::Handler, None);
@@ -154,12 +176,20 @@ pub(crate) fn handler(scenario: SettingsScenario) {
 }
 
 pub(crate) fn take_persistence_trace() -> Option<Arc<SettingsTrace>> {
-    state().lock().unwrap_or_else(|p| p.into_inner()).persistence.pop_front()
+    state()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .persistence
+        .pop_front()
 }
 
 pub(crate) fn snapshot(trace: Arc<SettingsTrace>) {
     trace.mark(SettingsMilestone::Snapshot, None);
-    state().lock().unwrap_or_else(|p| p.into_inner()).after_render.push(trace);
+    state()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .after_render
+        .push(trace);
 }
 
 pub(crate) fn snapshot_without_persistence(scenario: SettingsScenario) {
@@ -180,7 +210,9 @@ fn after_render() {
 }
 
 pub(crate) fn install(window: &MainWindow) {
-    if !enabled() { return; }
+    if !enabled() {
+        return;
+    }
     #[cfg(target_os = "macos")]
     let (surface, surface_evidence) = (
         "metal",
@@ -211,11 +243,16 @@ pub(crate) fn install(window: &MainWindow) {
             "apple_api": "not_run"
         }
     }));
-    if let Err(error) = window.window().set_rendering_notifier(|state, _graphics_api| {
-        if matches!(state, RenderingState::AfterRendering) {
-            after_render();
-        }
-    }) {
-        emit(json!({"kind": "capability", "after_render": "unavailable", "reason": error.to_string()}));
+    if let Err(error) = window
+        .window()
+        .set_rendering_notifier(|state, _graphics_api| {
+            if matches!(state, RenderingState::AfterRendering) {
+                after_render();
+            }
+        })
+    {
+        emit(
+            json!({"kind": "capability", "after_render": "unavailable", "reason": error.to_string()}),
+        );
     }
 }

@@ -10,7 +10,10 @@ fn main() {
         .map(|sha| sha.trim().to_owned())
         .unwrap_or_else(|| "unavailable".to_owned());
     println!("cargo:rustc-env=SOUFFLE_BUILD_GIT_SHA={sha}");
-    println!("cargo:rustc-env=SOUFFLE_BUILD_PROFILE={}", std::env::var("PROFILE").unwrap_or_else(|_| "unavailable".into()));
+    println!(
+        "cargo:rustc-env=SOUFFLE_BUILD_PROFILE={}",
+        std::env::var("PROFILE").unwrap_or_else(|_| "unavailable".into())
+    );
     println!("cargo:rerun-if-env-changed=PROFILE");
 
     // souffle_lib's linker arguments do not propagate to this binary crate.
