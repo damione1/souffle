@@ -29,8 +29,7 @@ fn unload_loaded_model(
     Ok(())
 }
 
-fn selected_profile(state: &AppState) -> Result<TranscriptionProfile, String> {
-    let settings = AppSettings::load(&state.db)?;
+fn selected_profile_from_settings(settings: &AppSettings) -> Result<TranscriptionProfile, String> {
     resolve_transcription_profile(
         Some(&settings.transcription_engine_id),
         Some(&settings.transcription_model_id),
@@ -38,15 +37,25 @@ fn selected_profile(state: &AppState) -> Result<TranscriptionProfile, String> {
     )
 }
 
-/// Catalog of supported transcription engines and models.
-pub fn get_transcription_catalog(state: Arc<AppState>) -> Result<TranscriptionCatalog, String> {
-    let profile = selected_profile(&state)?;
+/// Build the transcription catalogue from an already-observed Settings
+/// snapshot. UI clients that obtained Settings through their worker actor can
+/// use this without performing a second database read on the event thread.
+pub fn transcription_catalog_from_settings(
+    settings: &AppSettings,
+) -> Result<TranscriptionCatalog, String> {
+    let profile = selected_profile_from_settings(settings)?;
     Ok(TranscriptionCatalog {
         engines: transcription_engine_catalog(),
         selected_engine_id: profile.engine_id,
         selected_model_id: profile.model_id,
         selected_backend_id: profile.backend_id,
     })
+}
+
+/// Catalog of supported transcription engines and models.
+pub fn get_transcription_catalog(state: Arc<AppState>) -> Result<TranscriptionCatalog, String> {
+    let settings = AppSettings::load(&state.db)?;
+    transcription_catalog_from_settings(&settings)
 }
 
 /// Check whether the selected transcription model is downloaded and loaded.
@@ -370,6 +379,20 @@ mod tests {
 
     fn profile() -> TranscriptionProfile {
         TranscriptionProfile::default()
+    }
+
+    #[test]
+    fn catalogue_uses_the_already_observed_settings_selection() {
+        let settings = AppSettings::default();
+
+        let catalog = transcription_catalog_from_settings(&settings).expect("valid defaults");
+
+        assert_eq!(catalog.selected_engine_id, settings.transcription_engine_id);
+        assert_eq!(catalog.selected_model_id, settings.transcription_model_id);
+        assert_eq!(
+            catalog.selected_backend_id,
+            settings.transcription_backend_id
+        );
     }
 
     #[test]
