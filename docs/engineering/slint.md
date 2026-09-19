@@ -276,6 +276,80 @@ SLINT_SLOW_ANIMATIONS=4 make nightly
 
 A tab click that takes 400 ms with `refresh_lazy` showing a single spike is tree construction, not fill rate. A tab click that is smooth in `refresh_full_speed` overlay but hitchy in real use is still tree construction.
 
+### SOU-211 perception contract — PROPOSED, NOT APPROVED
+
+> This section is a decision proposal. It is not normative until SOU-211 is
+> approved. No runtime implementation or performance claim may cite these
+> thresholds as an accepted product contract before that decision.
+
+The proposed product requirement is **Metal end to end** for the shipped macOS
+app. Selecting Skia is not enough: a run is admissible only when it proves that
+the window surface presented by the compositor is Metal. A missing proof is a
+failure, not permission to assume Metal.
+
+#### Proposed input-to-present budgets
+
+Each cell is `p95 / per-sample maximum`. A scenario passes only when both
+limits pass; averages and `AfterRendering` timestamps cannot substitute for
+them.
+
+| SOU-210 scenario | Start -> presented result | Cold budget | Warm budget |
+|---|---|---:|---:|
+| `open` | Settings command input -> first complete Settings frame | 180 ms / 250 ms | 100 ms / 150 ms |
+| `tab` | tab activation -> destination tab frame | 100 ms / 150 ms | 50 ms / 100 ms |
+| `theme` | theme activation -> frame where app content and native chrome use the new resolved theme | 100 ms / 150 ms | 50 ms / 100 ms |
+| `menu` | menu option activation -> frame showing the committed selection | 75 ms / 125 ms | 50 ms / 100 ms |
+| `number` | keyboard/stepper input -> frame showing the new numeric draft | 50 ms / 75 ms | 33 ms / 50 ms |
+
+The end timestamp is the OS compositor presentation time for the first frame
+that contains the requested visual state. Slint `AfterRendering` is explicitly
+not that timestamp. Persistence completion remains a separate diagnostic: it
+must not delay the optimistic `menu` or `number` presentation, and it does not
+move the end of either budget.
+
+Proposed measurement conditions are deliberately reproducible:
+
+- a production-signed `release` bundle, launched outside a debugger from
+  `/Applications`, with instrumentation enabled but no compiler or profiler
+  running;
+- the oldest supported Apple Silicon performance tier: MacBook Air M1, 8 GB,
+  internal display at 60 Hz, native resolution, Low Power Mode off, on the
+  oldest supported macOS release;
+- the isolated synthetic fixture `settings-perf-v1`: defaults plus 8 audio
+  devices, 12 AI catalogue rows across 3 provider identities, 250 dictionary
+  rows, 250 snippets and 50 calendar rows; provider/network responses are
+  deterministic and no personal profile, production database, TCC state or
+  credentials are read or changed;
+- a cold sample is the first occurrence after a fresh process launch. Collect
+  30 cold samples, each from a new process;
+- a warm sample follows one discarded priming interaction in the same process.
+  Collect 100 warm samples across 10 process launches, restoring the same
+  visible state before every sample;
+- the run metadata records commit SHA, signature identity, release profile,
+  fixture version, machine/OS/display, Skia renderer and independently observed
+  Metal surface. Missing metadata or presentation timing invalidates the run.
+
+These numbers are proposed guardrails, not measured baselines. SOU-210's
+current `AfterRendering` marker may diagnose pipeline stages, but cannot by
+itself approve this contract.
+
+#### Proposed non-Metal policy
+
+The signed macOS release fails closed before showing the application window
+when the surface is non-Metal or cannot be proven Metal. It must never continue
+silently on FemtoVG, OpenGL or software rendering. The failure is explicit and
+visible through a native macOS alert that does not depend on the Slint surface;
+it names the detected renderer/surface, offers a diagnostic-copy action, then
+terminates with a non-zero status after dismissal. There is no degraded product
+mode under this proposal.
+
+The failure path must be injectable at the private startup boundary. Tests pass
+a synthetic `non-Metal` or `unverified` probe result before window creation and
+assert the same visible failure contract used in release. Injection is confined
+to the test/dev launch harness: it must not write a preference, production
+database, TCC state or user data, and a production launch must not accept an
+environment variable that can silently enable a non-Metal surface.
+
 ## 5. Memory and threads
 
 Slint is retained-mode. The item tree, font cache, image cache, and GPU textures **are** the working set. Dropping a Window does not reliably unload font and image caches (upstream limitation). Do not open extra Windows to "save memory".
