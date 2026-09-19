@@ -74,3 +74,4 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
         timeout-minutes: 15
       - run: git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts
+      - run: ./scripts/check_slint_translations.sh

@@ -23,6 +23,7 @@ Mirror `.github/workflows/contracts.yml`, then CodeQL (not on PR CI):
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --workspace
+./scripts/check_slint_translations.sh
 ./scripts/codeql-local.sh
 ```
 
