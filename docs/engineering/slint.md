@@ -276,11 +276,7 @@ SLINT_SLOW_ANIMATIONS=4 make nightly
 
 A tab click that takes 400 ms with `refresh_lazy` showing a single spike is tree construction, not fill rate. A tab click that is smooth in `refresh_full_speed` overlay but hitchy in real use is still tree construction.
 
-### SOU-211 perception contract — PROPOSED, NOT APPROVED
-
-> This section is a decision proposal. It is not normative until SOU-211 is
-> approved. No runtime implementation or performance claim may cite these
-> thresholds as an accepted product contract before that decision.
+### SOU-211 perception contract
 
 The proposed product requirement is **Metal end to end** for the shipped macOS
 app. Selecting Skia is not enough: a run is admissible only when it proves that
