@@ -150,6 +150,7 @@ enum WorkerRequest {
     Refresh {
         revision: u64,
         lane: SettingsSaveLane,
+        trace: Option<Arc<crate::settings_instrumentation::SettingsTrace>>,
     },
     Barrier {
         revision: u64,
@@ -158,6 +159,7 @@ enum WorkerRequest {
         revision: u64,
         lane: SettingsSaveLane,
         mutation: SettingsMutation,
+        trace: Option<Arc<crate::settings_instrumentation::SettingsTrace>>,
     },
 }
 
@@ -221,6 +223,8 @@ pub(crate) struct SettingsIoCoordinator {
     response_wake_pending: Arc<AtomicBool>,
     sequence: RefCell<ResponseSequence>,
     callbacks: RefCell<HashMap<u64, SettingsCompletion>>,
+    instrumentation_traces:
+        RefCell<HashMap<u64, Arc<crate::settings_instrumentation::SettingsTrace>>>,
     save_projection: RefCell<Option<SettingsSaveProjection>>,
     cache: SettingsCache,
     session: Cell<SettingsSessionState>,
@@ -282,6 +286,7 @@ impl SettingsIoCoordinator {
             response_wake_pending,
             sequence: RefCell::new(ResponseSequence::default()),
             callbacks: RefCell::new(HashMap::new()),
+            instrumentation_traces: RefCell::new(HashMap::new()),
             save_projection: RefCell::new(None),
             cache,
             session: Cell::new(SettingsSessionState::Closed { generation: 0 }),
@@ -388,6 +393,12 @@ impl SettingsIoCoordinator {
         completion: impl FnOnce(SettingsResponseOrder, &SettingsSaveOutcome) + 'static,
     ) -> u64 {
         let revision = self.sequence.borrow_mut().submit();
+        let trace = crate::settings_instrumentation::take_persistence_trace();
+        if let Some(trace) = trace.as_ref() {
+            self.instrumentation_traces
+                .borrow_mut()
+                .insert(revision, Arc::clone(trace));
+        }
         self.callbacks
             .borrow_mut()
             .insert(revision, Box::new(completion));
@@ -397,6 +408,7 @@ impl SettingsIoCoordinator {
                 revision,
                 lane,
                 mutation: Box::new(mutation),
+                trace,
             })
             .is_err()
         {
@@ -505,6 +517,12 @@ impl SettingsIoCoordinator {
         completion: Rc<RefCell<Option<SettingsSnapshotCompletion>>>,
     ) {
         let revision = self.sequence.borrow_mut().submit();
+        let trace = crate::settings_instrumentation::take_persistence_trace();
+        if let Some(trace) = trace.as_ref() {
+            self.instrumentation_traces
+                .borrow_mut()
+                .insert(revision, Arc::clone(trace));
+        }
         let coordinator = Rc::clone(self);
         let completion_for_response = completion.clone();
         self.callbacks.borrow_mut().insert(
@@ -533,7 +551,11 @@ impl SettingsIoCoordinator {
         );
         if self
             .requests
-            .send(WorkerRequest::Refresh { revision, lane })
+            .send(WorkerRequest::Refresh {
+                revision,
+                lane,
+                trace,
+            })
             .is_err()
         {
             self.settle(WorkerResponse {
@@ -619,6 +641,13 @@ impl SettingsIoCoordinator {
         if let Some(callback) = callback {
             callback(order, &response.outcome);
         }
+        if let Some(trace) = self
+            .instrumentation_traces
+            .borrow_mut()
+            .remove(&response.revision)
+        {
+            crate::settings_instrumentation::snapshot(trace);
+        }
     }
 
     #[cfg(test)]
@@ -665,11 +694,24 @@ async fn run_worker(
         match request {
             #[cfg(test)]
             WorkerRequest::Seed(settings) => snapshot = Some(*settings),
-            WorkerRequest::Refresh { revision, lane } => {
+            WorkerRequest::Refresh {
+                revision,
+                lane,
+                trace,
+            } => {
                 let current = snapshot.take();
                 let io = Arc::clone(&io);
-                let result =
-                    souffle_lib::async_runtime::spawn_blocking(move || io.load(lane)).await;
+                let result = souffle_lib::async_runtime::spawn_blocking(move || {
+                    if let Some(trace) = trace.as_ref() {
+                        trace.os_db_start();
+                    }
+                    let result = io.load(lane);
+                    if let Some(trace) = trace.as_ref() {
+                        trace.os_db_end();
+                    }
+                    result
+                })
+                .await;
                 let outcome = match result {
                     Ok(Ok(settings)) => {
                         snapshot = Some(settings.clone());
@@ -771,10 +813,14 @@ async fn run_worker(
                 revision,
                 lane,
                 mutation,
+                trace,
             } => {
                 let current = snapshot.take();
                 let io = Arc::clone(&io);
                 let result = souffle_lib::async_runtime::spawn_blocking(move || {
+                    if let Some(trace) = trace.as_ref() {
+                        trace.os_db_start();
+                    }
                     let fallback = current.clone();
                     let loaded = match lane {
                         SettingsSaveLane::General => match current {
@@ -796,11 +842,22 @@ async fn run_worker(
                                 }),
                                 read_error,
                             };
+                            if let Some(trace) = trace.as_ref() {
+                                trace.os_db_end();
+                                trace.commit(false);
+                            }
                             return (fallback, outcome);
                         }
                     };
                     mutation(&mut candidate);
                     let outcome = io.save(lane, candidate);
+                    if let Some(trace) = trace.as_ref() {
+                        trace.os_db_end();
+                        trace.commit(matches!(
+                            &outcome,
+                            SettingsSaveOutcome::Observed { result: Ok(()), .. }
+                        ));
+                    }
                     let next = match &outcome {
                         SettingsSaveOutcome::Observed { settings, .. } => {
                             Some(settings.as_ref().clone())

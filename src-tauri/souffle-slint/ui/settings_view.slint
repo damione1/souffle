@@ -165,6 +165,7 @@ export component SettingsView inherits Rectangle {
 
     callback close-requested();
     callback autostart-changed(bool);
+    callback tab-changed();
     callback permissions-review-requested();
     callback debug-transcription-changed(bool);
     callback log-level-changed(LogLevel);
@@ -330,6 +331,7 @@ export component SettingsView inherits Rectangle {
             vertical-stretch: 0;
             SettingsTabBar {
                 current <=> root.tab;
+                changed(value) => { root.tab-changed(); }
             }
         }
 
