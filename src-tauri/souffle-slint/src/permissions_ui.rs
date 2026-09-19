@@ -45,6 +45,7 @@ impl PollLifecycle {
         }
     }
 
+    #[cfg(test)]
     fn timer_count(&self) -> usize {
         usize::from(self.active)
     }
