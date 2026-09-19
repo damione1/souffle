@@ -4,6 +4,7 @@ import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
 import { ThemedButton } from "../themed_button.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
+import { ListView } from "std-widgets.slint";
 
 
 // Port of DictionarySettingsSection.svelte. Simplified: aliases (comma-
@@ -143,54 +144,60 @@ export component DictionarySection inherits VerticalLayout {
         }
     }
 
-    VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-bottom: 8px;
-        spacing: 6px;
+    dictionary-list := ListView {
+        height: min(root.entries.length * 64px, 360px);
+        visible: root.entries.length > 0;
 
-    for row in root.entries: Rectangle {
-        border-width: 1px;
-        border-color: Theme.border-soft;
-        border-radius: 6px;
+        for row in root.entries: Rectangle {
+            height: root.delete-error != "" && root.delete-error-id == row.id ? 88px : 64px;
 
-        VerticalLayout {
-            padding: 8px;
-            spacing: 6px;
-
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: space-between;
+            Rectangle {
+                x: Theme.settings-inset;
+                width: parent.width - 2 * Theme.settings-inset;
+                height: parent.height - 6px;
+                border-width: 1px;
+                border-color: Theme.border-soft;
+                border-radius: 6px;
 
                 VerticalLayout {
-                    spacing: 1px;
-                    horizontal-stretch: 1;
-                    Text {
-                        text: row.term + (row.aliases-display == "" ? "" : "  (" + row.aliases-display + ")");
-                        font-size: 12.5px;
-                        color: Theme.text-primary;
-                        wrap: word-wrap;
-                    }
-                    if row.category != "": Text {
-                        text: row.category;
-                        font-size: 10.5px;
-                        color: Theme.text-muted;
-                    }
-                }
-                ThemedButton {
-                    text: "Supprimer";
-                    clicked => { root.delete-requested(row.id); }
-                }
-            }
+                    padding: 8px;
+                    spacing: 6px;
 
-            if root.delete-error != "" && root.delete-error-id == row.id: Text {
-                text: root.delete-error;
-                color: Theme.danger;
-                font-size: 11px;
-                wrap: word-wrap;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: space-between;
+
+                        VerticalLayout {
+                            spacing: 1px;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: row.term + (row.aliases-display == "" ? "" : "  (" + row.aliases-display + ")");
+                                font-size: 12.5px;
+                                color: Theme.text-primary;
+                                overflow: elide;
+                            }
+                            if row.category != "": Text {
+                                text: row.category;
+                                font-size: 10.5px;
+                                color: Theme.text-muted;
+                                overflow: elide;
+                            }
+                        }
+                        ThemedButton {
+                            text: "Supprimer";
+                            clicked => { root.delete-requested(row.id); }
+                        }
+                    }
+
+                    if root.delete-error != "" && root.delete-error-id == row.id: Text {
+                        text: root.delete-error;
+                        color: Theme.danger;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+                }
             }
         }
-    }
     }
     }
 }

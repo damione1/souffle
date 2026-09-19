@@ -3,6 +3,7 @@ import { SettingsGroup } from "settings_group.slint";
 import { ThemedButton } from "../themed_button.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
 import { ThemedTextArea } from "../themed_text_area.slint";
+import { ListView } from "std-widgets.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
 // tracked in Rust (`snippets_editing` in main.rs), not local `.slint`
@@ -90,94 +91,103 @@ export component SnippetsSection inherits VerticalLayout {
         }
     }
 
-    VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-bottom: 8px;
-        spacing: 6px;
+    snippets-list := ListView {
+        height: min(root.entries.length * 96px, 420px);
+        visible: root.entries.length > 0;
 
-    for row in root.entries: Rectangle {
-        border-width: 1px;
-        border-color: Theme.border-soft;
-        border-radius: 6px;
+        for row in root.entries: Rectangle {
+            height: row.editing ? 236px : (root.delete-error != "" && root.delete-error-id == row.id ? 116px : 96px);
 
-        VerticalLayout {
-            padding: 8px;
-            spacing: 6px;
+            Rectangle {
+                x: Theme.settings-inset;
+                width: parent.width - 2 * Theme.settings-inset;
+                height: parent.height - 6px;
+                border-width: 1px;
+                border-color: Theme.border-soft;
+                border-radius: 6px;
 
-            if !row.editing: VerticalLayout {
-                spacing: 4px;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 6px;
 
-                HorizontalLayout {
-                    alignment: space-between;
-                    Text {
-                        text: row.trigger;
-                        font-size: 12.5px;
-                        font-weight: 600;
-                        color: Theme.text-primary;
-                    }
-                    HorizontalLayout {
+                    if !row.editing: VerticalLayout {
                         spacing: 4px;
-                        ThemedButton {
-                            text: "Modifier";
-                            clicked => { root.edit-requested(row.id); }
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: row.trigger;
+                                font-size: 12.5px;
+                                font-weight: 600;
+                                color: Theme.text-primary;
+                                overflow: elide;
+                            }
+                            HorizontalLayout {
+                                spacing: 4px;
+                                ThemedButton {
+                                    text: "Modifier";
+                                    clicked => { root.edit-requested(row.id); }
+                                }
+                                ThemedButton {
+                                    text: "Supprimer";
+                                    clicked => { root.delete-requested(row.id); }
+                                }
+                            }
                         }
-                        ThemedButton {
-                            text: "Supprimer";
-                            clicked => { root.delete-requested(row.id); }
+                        Text {
+                            text: row.expansion;
+                            font-size: 11px;
+                            color: Theme.text-muted;
+                            max-height: 38px;
+                            wrap: word-wrap;
+                            overflow: elide;
                         }
                     }
-                }
-                Text {
-                    text: row.expansion;
-                    font-size: 11px;
-                    color: Theme.text-muted;
-                    wrap: word-wrap;
-                }
-            }
 
-            if row.editing: VerticalLayout {
-                spacing: 4px;
+                    if row.editing: VerticalLayout {
+                        spacing: 4px;
 
-                Text { text: "DÉCLENCHEUR"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-                ThemedLineEdit {
-                    text <=> root.edit-trigger-draft;
-                    control-label: "Phrase déclencheur";
-                }
-                Text { text: "EXPANSION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
-                ThemedTextArea {
-                    text <=> root.edit-expansion-draft;
-                    area-height: 72px;
-                    control-label: "Texte de l'extrait vocal";
-                }
-                if root.update-error != "": Text {
-                    text: root.update-error;
-                    color: Theme.danger;
-                    font-size: 11px;
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    spacing: 4px;
-                    ThemedButton {
-                        text: "Annuler";
-                        clicked => { root.cancel-edit-requested(); }
+                        Text { text: "DÉCLENCHEUR"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+                        ThemedLineEdit {
+                            text <=> root.edit-trigger-draft;
+                            control-label: "Phrase déclencheur";
+                        }
+                        Text { text: "EXPANSION"; font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+                        ThemedTextArea {
+                            text <=> root.edit-expansion-draft;
+                            area-height: 72px;
+                            control-label: "Texte de l'extrait vocal";
+                        }
+                        if root.update-error != "": Text {
+                            text: root.update-error;
+                            color: Theme.danger;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+                        HorizontalLayout {
+                            alignment: end;
+                            spacing: 4px;
+                            ThemedButton {
+                                text: "Annuler";
+                                clicked => { root.cancel-edit-requested(); }
+                            }
+                            ThemedButton {
+                                text: "Enregistrer";
+                                enabled: root.edit-trigger-draft != "" && root.edit-expansion-draft != "";
+                                clicked => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
+                            }
+                        }
                     }
-                    ThemedButton {
-                        text: "Enregistrer";
-                        enabled: root.edit-trigger-draft != "" && root.edit-expansion-draft != "";
-                        clicked => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
+
+                    if root.delete-error != "" && root.delete-error-id == row.id: Text {
+                        text: root.delete-error;
+                        color: Theme.danger;
+                        font-size: 11px;
+                        overflow: elide;
                     }
                 }
-            }
-
-            if root.delete-error != "" && root.delete-error-id == row.id: Text {
-                text: root.delete-error;
-                color: Theme.danger;
-                font-size: 11px;
-                wrap: word-wrap;
             }
         }
-    }
     }
     }
 }
