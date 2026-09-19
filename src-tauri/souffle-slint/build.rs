@@ -1,6 +1,18 @@
 use std::{collections::HashMap, path::PathBuf};
 
 fn main() {
+    let sha = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|sha| sha.trim().to_owned())
+        .unwrap_or_else(|| "unavailable".to_owned());
+    println!("cargo:rustc-env=SOUFFLE_BUILD_GIT_SHA={sha}");
+    println!("cargo:rustc-env=SOUFFLE_BUILD_PROFILE={}", std::env::var("PROFILE").unwrap_or_else(|_| "unavailable".into()));
+    println!("cargo:rerun-if-env-changed=PROFILE");
+
     // souffle_lib's linker arguments do not propagate to this binary crate.
     // The Swift bridge weak-links @rpath/libswift_Concurrency.dylib; without
     // this runtime search path, TaskPriority metadata is null and its first

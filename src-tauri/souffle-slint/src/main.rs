@@ -18,6 +18,7 @@ mod onboarding_ui;
 mod permissions_ui;
 mod settings_drafts;
 mod settings_io;
+mod settings_instrumentation;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
@@ -3474,6 +3475,7 @@ fn wire_callbacks(
     let settings_values_for_open = settings_values.clone();
     let permissions_for_open = permissions.clone();
     window.on_settings_requested(move || {
+        settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Open);
         let Some(window) = weak.upgrade() else {
             return;
         };
@@ -3688,6 +3690,16 @@ fn wire_callbacks(
         });
     });
 
+    window.on_settings_instrument_input(settings_instrumentation::input);
+    let weak = window.as_weak();
+    window.on_settings_tab_changed(move || {
+        settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Tab);
+        settings_instrumentation::snapshot_without_persistence(settings_instrumentation::SettingsScenario::Tab);
+        if let Some(window) = weak.upgrade() {
+            window.window().request_redraw();
+        }
+    });
+
     fn save_settings_field(
         io: &Rc<settings_io::SettingsIoCoordinator>,
         lane: souffle_lib::commands::SettingsSaveLane,
@@ -3783,6 +3795,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_io_for_log_level = settings_io.clone();
     window.on_settings_log_level_changed(move |value| {
+        settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Menu);
         let level = settings_ui::log_level_from_slint(value);
         save_settings_field(
             &settings_io_for_log_level,
@@ -5747,6 +5760,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     slint::BackendSelector::new()
         .renderer_name("skia".into())
+        .require_metal()
         .with_winit_window_attributes_hook(|attrs| {
             use slint::winit_030::winit::platform::macos::WindowAttributesExtMacOS;
             attrs
@@ -5759,6 +5773,7 @@ fn main() {
         .expect("failed to select winit backend");
 
     let window = MainWindow::new().expect("failed to create Slint window");
+    settings_instrumentation::install(&window);
 
     // Close hides; it must not destroy. The pill + tray keep the process
     // alive, so a destroyed main window leaves Soufflé in the Dock and menu

@@ -340,6 +340,7 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
     });
     let c = controller.clone();
     window.on_settings_theme_changed(move |value| {
+        crate::settings_instrumentation::handler(crate::settings_instrumentation::SettingsScenario::Theme);
         c.apply(SettingsSaveLane::General, move |s| {
             s.theme = settings_ui::theme_from_slint(value)
         });
@@ -371,6 +372,7 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
     });
     let c = controller.clone();
     window.on_settings_paste_delay_changed(move |value| {
+        crate::settings_instrumentation::handler(crate::settings_instrumentation::SettingsScenario::Number);
         c.apply(SettingsSaveLane::General, move |s| {
             s.paste_delay_ms = value.max(0) as u64
         });
