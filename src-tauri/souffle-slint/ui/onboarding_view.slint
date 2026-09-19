@@ -1,7 +1,7 @@
 import { ComboBox } from "std-widgets.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
 import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
-import { ModelPhase } from "types.slint";
+import { ModelPhase, PermissionKind } from "types.slint";
 import { Theme } from "theme.slint";
 import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
 import { ThemedSwitch } from "components/themed_switch.slint";
@@ -47,8 +47,8 @@ export component OnboardingView inherits Rectangle {
     in property <string> continue-label;
 
     callback locale-changed(string);
-    callback grant-requested(string);
-    callback hint-action-requested(string);
+    callback grant-requested(PermissionKind);
+    callback hint-action-requested(PermissionKind);
     callback repair-requested();
     callback device-changed(string);
     callback refresh-devices-requested();

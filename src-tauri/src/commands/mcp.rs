@@ -5,7 +5,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 const MCP_BINARY_NAME: &str = "souffle-mcp";
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const STDERR_LIMIT: usize = 16 * 1024;
 
 /// Shell-escape a path for pasting into zsh/bash (e.g. `claude mcp add souffle …`).
 /// Bundled installs live under `Soufflé.app` — unquoted paths break copy-paste.
@@ -103,23 +104,20 @@ pub fn test_mcp_connection() -> Result<String, String> {
         ));
     }
 
-    let mut child = Command::new(&path)
+    let child = Command::new(&path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Spawn sidecar: {e}"))?;
 
-    let result = run_handshake(&mut child);
-    let _ = child.kill();
-    let _ = child.wait();
-    result
+    run_handshake(child, HANDSHAKE_TIMEOUT)
 }
 
-fn run_handshake(child: &mut Child) -> Result<String, String> {
+fn run_handshake(mut child: Child, timeout: Duration) -> Result<String, String> {
     let mut stdin = child.stdin.take().ok_or("Sidecar has no stdin handle")?;
     let stdout = child.stdout.take().ok_or("Sidecar has no stdout handle")?;
-    let mut stderr = child.stderr.take();
+    let stderr = child.stderr.take().ok_or("Sidecar has no stderr handle")?;
 
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::spawn(move || {
@@ -137,8 +135,37 @@ fn run_handshake(child: &mut Child) -> Result<String, String> {
         }
     });
 
+    // Drain stderr concurrently so a noisy sidecar cannot fill its pipe and
+    // deadlock before replying. Keep only a bounded prefix for the UI while
+    // continuing to drain the rest.
+    let stderr_output = Arc::new(Mutex::new(Vec::new()));
+    let stderr_for_reader = Arc::clone(&stderr_output);
+    std::thread::spawn(move || drain_stderr(stderr, &stderr_for_reader));
+
+    let result = perform_handshake(&mut stdin, &rx, timeout);
+    drop(stdin);
+
+    // `kill` is harmless when the sidecar already exited. Always `wait` so
+    // every success, timeout and malformed-response path reaps the child.
+    let _ = child.kill();
+    let wait_result = child.wait();
+
+    match result {
+        Ok(tools) => {
+            wait_result.map_err(|e| format!("Reap sidecar: {e}"))?;
+            Ok(tools)
+        }
+        Err(error) => Err(with_stderr(error, &stderr_output)),
+    }
+}
+
+fn perform_handshake(
+    stdin: &mut impl Write,
+    rx: &mpsc::Receiver<String>,
+    timeout: Duration,
+) -> Result<String, String> {
     send_line(
-        &mut stdin,
+        stdin,
         &serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -150,18 +177,18 @@ fn run_handshake(child: &mut Child) -> Result<String, String> {
             },
         }),
     )?;
-    recv_response(&rx, &mut stderr)?;
+    recv_response(rx, timeout)?;
 
     send_line(
-        &mut stdin,
+        stdin,
         &serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
     )?;
 
     send_line(
-        &mut stdin,
+        stdin,
         &serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
     )?;
-    let response = recv_response(&rx, &mut stderr)?;
+    let response = recv_response(rx, timeout)?;
 
     let names: Vec<String> = response["result"]["tools"]
         .as_array()
@@ -186,26 +213,50 @@ fn send_line(stdin: &mut impl Write, value: &serde_json::Value) -> Result<(), St
 
 fn recv_response(
     rx: &mpsc::Receiver<String>,
-    stderr: &mut Option<impl Read>,
+    timeout: Duration,
 ) -> Result<serde_json::Value, String> {
-    let line = rx.recv_timeout(HANDSHAKE_TIMEOUT).map_err(|_| {
-        let mut output = String::new();
-        if let Some(err) = stderr.as_mut() {
-            let _ = err.read_to_string(&mut output);
-        }
-        if output.trim().is_empty() {
+    let line = rx.recv_timeout(timeout).map_err(|error| match error {
+        mpsc::RecvTimeoutError::Timeout => {
             "Timed out waiting for the sidecar to respond".to_string()
-        } else {
-            output.trim().to_string()
+        }
+        mpsc::RecvTimeoutError::Disconnected => {
+            "Sidecar closed stdout before responding".to_string()
         }
     })?;
 
     serde_json::from_str(&line).map_err(|e| format!("Parse sidecar response: {e}"))
 }
 
+fn drain_stderr(mut stderr: impl Read, output: &Mutex<Vec<u8>>) {
+    let mut chunk = [0_u8; 4096];
+    while let Ok(read) = stderr.read(&mut chunk) {
+        if read == 0 {
+            break;
+        }
+        if let Ok(mut output) = output.lock() {
+            let remaining = STDERR_LIMIT.saturating_sub(output.len());
+            output.extend_from_slice(&chunk[..read.min(remaining)]);
+        }
+    }
+}
+
+fn with_stderr(error: String, stderr: &Mutex<Vec<u8>>) -> String {
+    let output = stderr
+        .lock()
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output).trim().to_string())
+        .unwrap_or_default();
+    if output.is_empty() {
+        error
+    } else {
+        format!("{error}: {output}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn setup_info_snippet_embeds_resolved_path() {
@@ -258,5 +309,48 @@ mod tests {
         if let Err(e) = result {
             assert!(!e.is_empty());
         }
+    }
+
+    #[test]
+    fn handshake_timeout_drains_and_bounds_stderr_before_reaping_child() {
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("yes x | head -c 32768 >&2; printf partial; sleep 30")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+
+        let error = run_handshake(child, Duration::from_millis(100)).unwrap_err();
+
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(error.starts_with("Timed out waiting for the sidecar to respond"));
+        assert!(error.contains('x'));
+        assert!(error.len() <= STDERR_LIMIT + 128);
+    }
+
+    #[test]
+    fn handshake_accepts_initialize_and_tools_list_responses() {
+        let script = concat!(
+            "read _request; ",
+            "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}'; ",
+            "read _notification; read _request; ",
+            "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"search\"},{\"name\":\"export\"}]}}'"
+        );
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        assert_eq!(
+            run_handshake(child, Duration::from_secs(1)).unwrap(),
+            "search, export"
+        );
     }
 }

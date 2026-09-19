@@ -11,11 +11,12 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use slint::ComponentHandle;
-use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
+use souffle_lib::commands::{SettingsSaveLane, SettingsSaveOutcome};
 use souffle_lib::settings::AppSettings;
 
-use crate::settings_values::{SettingsCache, SettingsCommitStatus, save_outcome_commit_status};
-use crate::{AppHandle, MainWindow};
+use crate::MainWindow;
+use crate::settings_io::{SettingsIoCoordinator, SettingsResponseOrder};
+use crate::settings_values::{SettingsCommitStatus, save_outcome_commit_status};
 
 const SETTINGS_DRAFT_DEBOUNCE: Duration = Duration::from_millis(400);
 
@@ -253,6 +254,15 @@ fn begin_quit_request(state: &RefCell<DraftState>) -> QuitFlushDecision {
     }
 }
 
+fn finish_barrier_quit(state: &DraftState, status: SettingsCommitStatus) -> QuitCompletion {
+    match (status, state.batch().is_empty()) {
+        (SettingsCommitStatus::Committed, true) => QuitCompletion::Exit,
+        (SettingsCommitStatus::Committed, false)
+        | (SettingsCommitStatus::NotCommitted, true)
+        | (SettingsCommitStatus::NotCommitted, false) => QuitCompletion::RetainAndShow,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DraftFlushResult {
     NothingPending,
@@ -290,18 +300,16 @@ pub(crate) fn summary_editing_id(current: &str, settings: &AppSettings) -> Strin
 
 pub(crate) struct SettingsDraftController {
     window: slint::Weak<MainWindow>,
-    handle: AppHandle,
-    cache: SettingsCache,
+    io: Rc<SettingsIoCoordinator>,
     state: RefCell<DraftState>,
     quit: Rc<dyn Fn()>,
 }
 
 impl SettingsDraftController {
-    pub(crate) fn new(window: &MainWindow, handle: AppHandle, cache: SettingsCache) -> Rc<Self> {
+    pub(crate) fn new(window: &MainWindow, io: Rc<SettingsIoCoordinator>) -> Rc<Self> {
         Rc::new(Self {
             window: window.as_weak(),
-            handle,
-            cache,
+            io,
             state: RefCell::new(DraftState::default()),
             quit: Rc::new(|| std::process::exit(0)),
         })
@@ -317,9 +325,14 @@ impl SettingsDraftController {
         self.restart_timer();
     }
 
-    pub(crate) fn edit_summary_name(&self, id: String, text: String) -> DraftFlushResult {
+    pub(crate) fn edit_summary_name(
+        self: &Rc<Self>,
+        id: String,
+        text: String,
+        completion: impl FnOnce(DraftFlushResult) + 'static,
+    ) {
         self.state.borrow_mut().edit_summary_name(id, text);
-        self.flush_explicit()
+        self.flush_explicit(completion);
     }
 
     fn restart_timer(self: &Rc<Self>) {
@@ -338,32 +351,67 @@ impl SettingsDraftController {
         self.state.borrow_mut().timer = Some(timer);
     }
 
-    fn flush_timer(&self) -> DraftFlushResult {
+    fn flush_timer(self: &Rc<Self>) {
         let batch = self.state.borrow_mut().begin_timer_flush();
-        self.save_batch(batch)
-    }
-
-    pub(crate) fn flush_explicit(&self) -> DraftFlushResult {
-        let batch = self.state.borrow_mut().begin_explicit_flush();
-        let result = self.save_batch(batch);
-        self.state.borrow_mut().timer = None;
-        result
-    }
-
-    fn save_batch(&self, batch: Option<DraftBatch>) -> DraftFlushResult {
-        let Some(batch) = batch else {
-            return DraftFlushResult::NothingPending;
-        };
-        let outcome = save_field(&self.handle, &self.cache, |settings| {
-            batch.apply_to(settings)
-        });
-        self.publish_draft_status(&outcome);
-        let status = save_outcome_commit_status(&outcome);
-        self.state.borrow_mut().finish(&batch, status);
-        match status {
-            SettingsCommitStatus::Committed => DraftFlushResult::Committed,
-            SettingsCommitStatus::NotCommitted => DraftFlushResult::RetainedAfterFailure,
+        if let Some(batch) = batch {
+            self.save_batch(batch, |_| {});
         }
+    }
+
+    pub(crate) fn flush_explicit(
+        self: &Rc<Self>,
+        completion: impl FnOnce(DraftFlushResult) + 'static,
+    ) {
+        let batch = self.state.borrow_mut().begin_explicit_flush();
+        self.state.borrow_mut().timer = None;
+        match batch {
+            Some(batch) => self.save_batch(batch, completion),
+            None => {
+                let controller = Rc::clone(self);
+                self.io.barrier(move |_order, outcome| {
+                    let retained = !controller.state.borrow().batch().is_empty();
+                    let result = match (save_outcome_commit_status(outcome), retained) {
+                        (SettingsCommitStatus::Committed, false) => {
+                            DraftFlushResult::NothingPending
+                        }
+                        (SettingsCommitStatus::Committed, true)
+                        | (SettingsCommitStatus::NotCommitted, false)
+                        | (SettingsCommitStatus::NotCommitted, true) => {
+                            DraftFlushResult::RetainedAfterFailure
+                        }
+                    };
+                    completion(result);
+                });
+            }
+        }
+    }
+
+    fn save_batch(
+        self: &Rc<Self>,
+        batch: DraftBatch,
+        completion: impl FnOnce(DraftFlushResult) + 'static,
+    ) {
+        let worker_batch = batch.clone();
+        let controller = Rc::clone(self);
+        self.io.submit(
+            SettingsSaveLane::General,
+            move |settings| worker_batch.apply_to(settings),
+            move |order, outcome| {
+                match order {
+                    SettingsResponseOrder::LatestVisible
+                    | SettingsResponseOrder::LatestHidden
+                    | SettingsResponseOrder::Intermediate
+                    | SettingsResponseOrder::Stale => {}
+                }
+                controller.publish_draft_status(outcome);
+                let status = save_outcome_commit_status(outcome);
+                controller.state.borrow_mut().finish(&batch, status);
+                completion(match status {
+                    SettingsCommitStatus::Committed => DraftFlushResult::Committed,
+                    SettingsCommitStatus::NotCommitted => DraftFlushResult::RetainedAfterFailure,
+                });
+            },
+        );
     }
 
     pub(crate) fn reapply_polish_prompt(&self, window: &MainWindow, id: &str) {
@@ -435,54 +483,23 @@ impl SettingsDraftController {
     /// recoverable draft and visible error remain available.
     pub(crate) fn request_quit(self: &Rc<Self>) {
         let batch = match begin_quit_request(&self.state) {
-            QuitFlushDecision::NothingPending => {
-                (self.quit)();
-                return;
-            }
-            QuitFlushDecision::Start(batch) => batch,
+            QuitFlushDecision::NothingPending => None,
+            QuitFlushDecision::Start(batch) => Some(batch),
             QuitFlushDecision::AlreadySaving => return,
         };
         if let Some(window) = self.window.upgrade() {
             let _ = window.hide();
         }
 
-        let handle = self.handle.clone();
-        let cached = self.cache.known_snapshot();
-        let worker_batch = batch.clone();
-        let worker = souffle_lib::async_runtime::spawn_blocking(move || {
-            let mut settings = match cached {
-                Some(settings) => settings,
-                None => match souffle_lib::commands::get_settings(handle.clone()) {
-                    Ok(settings) => settings,
-                    Err(read_error) => {
-                        return SettingsSaveOutcome::Unavailable {
-                            result: Err(SettingsSaveError::NotCommitted {
-                                message: "Settings could not be loaded before quitting".into(),
-                            }),
-                            read_error,
-                        };
-                    }
-                },
-            };
-            worker_batch.apply_to(&mut settings);
-            souffle_lib::commands::save_settings_observed(handle, settings)
-        });
-
+        let completion_batch = batch.clone();
         let controller = Rc::clone(self);
-        slint::spawn_local(async move {
-            let outcome = match worker.await {
-                Ok(outcome) => outcome,
-                Err(error) => SettingsSaveOutcome::Unavailable {
-                    result: Err(SettingsSaveError::NotCommitted {
-                        message: format!("Settings save worker failed before quitting: {error}"),
-                    }),
-                    read_error: "The final durable settings snapshot is unavailable".into(),
-                },
+        let completion = move |_order: SettingsResponseOrder, outcome: &SettingsSaveOutcome| {
+            let status = save_outcome_commit_status(outcome);
+            controller.publish_draft_status(outcome);
+            let completion = match completion_batch.as_ref() {
+                Some(batch) => controller.state.borrow_mut().finish_quit(batch, status),
+                None => finish_barrier_quit(&controller.state.borrow(), status),
             };
-            let status = save_outcome_commit_status(&outcome);
-            controller.cache.observe_save_outcome(&outcome);
-            controller.publish_draft_status(&outcome);
-            let completion = controller.state.borrow_mut().finish_quit(&batch, status);
             match completion {
                 QuitCompletion::Exit => {
                     (controller.quit)();
@@ -495,29 +512,115 @@ impl SettingsDraftController {
                     }
                 }
             }
-        })
-        .expect("slint event loop not running");
+        };
+        match batch {
+            Some(ref batch) => {
+                let worker_batch = batch.clone();
+                self.io.submit(
+                    SettingsSaveLane::General,
+                    move |settings| worker_batch.apply_to(settings),
+                    completion,
+                );
+            }
+            None => {
+                self.io.barrier(completion);
+            }
+        }
     }
-}
-
-fn save_field(
-    handle: &AppHandle,
-    cache: &SettingsCache,
-    mutate: impl FnOnce(&mut AppSettings),
-) -> SettingsSaveOutcome {
-    crate::settings_values::save_field(
-        cache,
-        || souffle_lib::commands::get_settings(handle.clone()),
-        |candidate| souffle_lib::commands::save_settings_observed(handle.clone(), candidate),
-        mutate,
-    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use souffle_lib::commands::SettingsEffectFailure;
+    use crate::settings_io::SettingsIoCoordinator;
+    use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
+    use souffle_lib::commands::{SettingsEffectFailure, SettingsSaveError};
     use std::cell::Cell;
+    use std::sync::{Arc, Mutex};
+
+    struct TestPlatform;
+
+    impl Platform for TestPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(MinimalSoftwareWindow::new(Default::default()))
+        }
+    }
+
+    fn test_window() -> MainWindow {
+        let _ = slint::platform::set_platform(Box::new(TestPlatform));
+        MainWindow::new().unwrap()
+    }
+
+    type ControlledController = (
+        MainWindow,
+        Rc<SettingsDraftController>,
+        Rc<SettingsIoCoordinator>,
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::SyncSender<()>,
+        Rc<Cell<bool>>,
+    );
+
+    fn controlled_controller(commit: bool) -> ControlledController {
+        let window = test_window();
+        let cache =
+            crate::settings_values::SettingsCache::with_observed(&window, AppSettings::default());
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let io = SettingsIoCoordinator::with_functions(
+            cache,
+            || Ok(AppSettings::default()),
+            || Ok(AppSettings::default()),
+            move |settings| {
+                started_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv().unwrap();
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result: if commit {
+                        Ok(())
+                    } else {
+                        Err(SettingsSaveError::NotCommitted {
+                            message: "injected draft failure".into(),
+                        })
+                    },
+                }
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        io.begin_open();
+        let quit_called = Rc::new(Cell::new(false));
+        let quit_for_controller = Rc::clone(&quit_called);
+        let controller = Rc::new(SettingsDraftController {
+            window: window.as_weak(),
+            io: io.clone(),
+            state: RefCell::new(DraftState::default()),
+            quit: Rc::new(move || quit_for_controller.set(true)),
+        });
+        controller
+            .state
+            .borrow_mut()
+            .edit_summary_prompt("summary-default".into(), "latest draft".into());
+        controller.flush_timer();
+        (window, controller, io, started_rx, release_tx, quit_called)
+    }
+
+    fn drain_until_idle(io: &SettingsIoCoordinator) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            io.drain_for_test();
+            if io.is_idle_for_test() {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "settings I/O did not settle"
+            );
+            std::thread::yield_now();
+        }
+    }
 
     fn edit_every_family(state: &mut DraftState) {
         state.edit_polish_prompt("polish-default".into(), "polish draft".into());
@@ -555,6 +658,101 @@ mod tests {
             .expect("close must flush scheduled work");
 
         assert_eq!(batch.summary_prompts["summary-default"].text, "latest text");
+    }
+
+    #[test]
+    fn quit_barrier_never_exits_after_an_in_flight_draft_save_fails() {
+        let mut state = DraftState::default();
+        state.edit_summary_prompt("summary-default".into(), "recover me".into());
+        let in_flight = state.begin_timer_flush().expect("timer batch");
+        assert!(matches!(
+            state.begin_quit_flush(),
+            QuitFlushDecision::NothingPending
+        ));
+
+        state.finish(&in_flight, SettingsCommitStatus::NotCommitted);
+
+        assert_eq!(
+            finish_barrier_quit(&state, SettingsCommitStatus::Committed),
+            QuitCompletion::RetainAndShow
+        );
+        assert_eq!(state.summary_prompts["summary-default"].text, "recover me");
+    }
+
+    #[test]
+    fn quit_barrier_exits_only_after_the_in_flight_draft_is_committed() {
+        let mut state = DraftState::default();
+        state.edit_summary_prompt("summary-default".into(), "persist me".into());
+        let in_flight = state.begin_timer_flush().expect("timer batch");
+        assert!(matches!(
+            state.begin_quit_flush(),
+            QuitFlushDecision::NothingPending
+        ));
+
+        state.finish(&in_flight, SettingsCommitStatus::Committed);
+
+        assert_eq!(
+            finish_barrier_quit(&state, SettingsCommitStatus::Committed),
+            QuitCompletion::Exit
+        );
+        assert!(state.batch().is_empty());
+    }
+
+    #[test]
+    fn controller_quit_waits_for_blocked_timer_save_and_retains_failures() {
+        for commit in [false, true] {
+            let (window, controller, io, started, release, quit_called) =
+                controlled_controller(commit);
+            started
+                .recv_timeout(Duration::from_secs(1))
+                .expect("timer save started");
+
+            controller.request_quit();
+            assert!(!quit_called.get(), "quit must wait behind the blocked save");
+            release.send(()).unwrap();
+            drain_until_idle(&io);
+
+            if commit {
+                assert!(
+                    quit_called.get(),
+                    "committed timer save permits quit after barrier"
+                );
+                assert!(controller.state.borrow().batch().is_empty());
+            } else {
+                assert!(!quit_called.get(), "failed timer save must abort quit");
+                assert_eq!(
+                    controller.state.borrow().summary_prompts["summary-default"].text,
+                    "latest draft"
+                );
+                assert!(window.get_settings_open());
+            }
+        }
+    }
+
+    #[test]
+    fn controller_close_waits_for_blocked_timer_save_and_reports_its_result() {
+        for (commit, expected) in [
+            (false, DraftFlushResult::RetainedAfterFailure),
+            (true, DraftFlushResult::NothingPending),
+        ] {
+            let (_window, controller, io, started, release, _quit_called) =
+                controlled_controller(commit);
+            started
+                .recv_timeout(Duration::from_secs(1))
+                .expect("timer save started");
+            let result = Rc::new(RefCell::new(None));
+            let published = Rc::clone(&result);
+            controller.flush_explicit(move |value| *published.borrow_mut() = Some(value));
+            assert!(
+                result.borrow().is_none(),
+                "close waits behind the blocked save"
+            );
+
+            release.send(()).unwrap();
+            drain_until_idle(&io);
+
+            assert_eq!(*result.borrow(), Some(expected));
+        }
     }
 
     #[test]

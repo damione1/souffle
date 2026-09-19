@@ -15,8 +15,8 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider } from "types.slint";
-export { SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, SpeakerRole }
+import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason } from "types.slint";
+export { SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
 // accessor for it (`window.global::<Theme>()`) - main.rs sets `Theme.dark`
@@ -137,6 +137,8 @@ export component MainWindow inherits Window {
     in property <bool> settings-pill-hidden;
     in property <bool> settings-feedback-sounds-enabled;
     in property <int> settings-feedback-sounds-volume;
+    in property <int> settings-feedback-sounds-volume-min;
+    in property <int> settings-feedback-sounds-volume-max;
     in property <string> settings-toggle-shortcut-label;
     in property <string> settings-ptt-shortcut-label;
     in property <bool> settings-native-tap-warning-visible;
@@ -148,6 +150,8 @@ export component MainWindow inherits Window {
     in property <AccessState> settings-calendar-permission;
     in property <bool> settings-calendar-autostart-enabled;
     in property <int> settings-calendar-reminder-minutes;
+    in property <int> settings-calendar-reminder-minutes-min;
+    in property <int> settings-calendar-reminder-minutes-max;
     in property <[CalendarRow]> settings-calendars;
     in property <[string]> settings-audio-device-labels;
     in property <string> settings-selected-device-label;
@@ -193,12 +197,13 @@ export component MainWindow inherits Window {
     in property <string> settings-update-status;
     in property <SummaryProvider> settings-summary-provider;
     in property <bool> settings-apple-intelligence-available;
-    in property <string> settings-apple-intelligence-reason;
+    in property <AppleIntelligenceUnavailableReason> settings-apple-intelligence-reason: AppleIntelligenceUnavailableReason.unknown;
     in property <string> settings-ollama-url;
     in property <bool> settings-ollama-available;
     in property <bool> settings-ollama-checking;
     in property <int> settings-summary-model-count;
     in property <bool> settings-summary-model-picker-visible;
+    in property <[string]> settings-summary-model-ids;
     in property <[string]> settings-summary-model-labels;
     in property <string> settings-selected-summary-model-label;
     in property <bool> settings-show-ollama-setup;
@@ -206,12 +211,15 @@ export component MainWindow inherits Window {
     in property <string> settings-ollama-pull-status;
     in property <string> settings-ollama-pull-error;
     in property <string> settings-recommended-ollama-model;
+    in property <string> settings-summary-refresh-error;
     in property <string> settings-summary-unusable-message;
     in property <bool> settings-dictation-polish-enabled;
     in property <bool> settings-dictation-polish-provider-available;
+    in property <[string]> settings-dictation-polish-template-ids;
     in property <[string]> settings-dictation-polish-template-labels;
     in property <string> settings-active-dictation-polish-label;
     in-out property <string> settings-active-dictation-polish-prompt;
+    in property <[string]> settings-summary-template-ids;
     in property <[string]> settings-summary-template-labels;
     in property <string> settings-default-summary-template-label;
     in property <string> settings-editing-summary-template-label;
@@ -399,8 +407,8 @@ export component MainWindow inherits Window {
     in property <string> onboarding-continue-label;
 
     callback onboarding-locale-changed(string);
-    callback onboarding-grant-requested(string);
-    callback onboarding-hint-action-requested(string);
+    callback onboarding-grant-requested(PermissionKind);
+    callback onboarding-hint-action-requested(PermissionKind);
     callback onboarding-repair-requested();
     callback onboarding-device-changed(string);
     callback onboarding-refresh-devices-requested();
@@ -553,6 +561,13 @@ export component MainWindow inherits Window {
 
     // Drawn last so it overlays whatever is behind it, mirroring App.svelte
     // hiding HomeView under the Settings overlay rather than replacing it.
+    // SOU-202: retain conditional mounting. With OS/DB excluded and a forced
+    // same-data software-render pass (30 repetitions), cold/warm medians were
+    // 65.761/65.872 ms debug and 2.815/2.784 ms release. Both scenarios are
+    // remounts; the measured release reopen is below one frame, Settings is a
+    // rare overlay, and its internal tabs already stay alive, so a permanent
+    // overlay tree is not worth its memory. Software rendering only forces
+    // item-tree/layout work; this is not a shipped Skia/Metal frame claim.
     if root.settings-open: SettingsView {
         width: 100%;
         height: 100%;
@@ -572,6 +587,8 @@ export component MainWindow inherits Window {
         pill-hidden: root.settings-pill-hidden;
         feedback-sounds-enabled: root.settings-feedback-sounds-enabled;
         feedback-sounds-volume: root.settings-feedback-sounds-volume;
+        feedback-sounds-volume-min: root.settings-feedback-sounds-volume-min;
+        feedback-sounds-volume-max: root.settings-feedback-sounds-volume-max;
         toggle-shortcut-label: root.settings-toggle-shortcut-label;
         ptt-shortcut-label: root.settings-ptt-shortcut-label;
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
@@ -583,6 +600,8 @@ export component MainWindow inherits Window {
         calendar-permission: root.settings-calendar-permission;
         calendar-autostart-enabled: root.settings-calendar-autostart-enabled;
         calendar-reminder-minutes: root.settings-calendar-reminder-minutes;
+        calendar-reminder-minutes-min: root.settings-calendar-reminder-minutes-min;
+        calendar-reminder-minutes-max: root.settings-calendar-reminder-minutes-max;
         calendars: root.settings-calendars;
         audio-device-labels: root.settings-audio-device-labels;
         selected-device-label: root.settings-selected-device-label;
@@ -634,6 +653,7 @@ export component MainWindow inherits Window {
         ollama-checking: root.settings-ollama-checking;
         summary-model-count: root.settings-summary-model-count;
         summary-model-picker-visible: root.settings-summary-model-picker-visible;
+        summary-model-ids: root.settings-summary-model-ids;
         summary-model-labels: root.settings-summary-model-labels;
         selected-summary-model-label: root.settings-selected-summary-model-label;
         show-ollama-setup: root.settings-show-ollama-setup;
@@ -641,12 +661,15 @@ export component MainWindow inherits Window {
         ollama-pull-status: root.settings-ollama-pull-status;
         ollama-pull-error: root.settings-ollama-pull-error;
         recommended-ollama-model: root.settings-recommended-ollama-model;
+        summary-refresh-error: root.settings-summary-refresh-error;
         summary-unusable-message: root.settings-summary-unusable-message;
         dictation-polish-enabled: root.settings-dictation-polish-enabled;
         dictation-polish-provider-available: root.settings-dictation-polish-provider-available;
+        dictation-polish-template-ids: root.settings-dictation-polish-template-ids;
         dictation-polish-template-labels: root.settings-dictation-polish-template-labels;
         active-dictation-polish-label: root.settings-active-dictation-polish-label;
         active-dictation-polish-prompt <=> root.settings-active-dictation-polish-prompt;
+        summary-template-ids: root.settings-summary-template-ids;
         summary-template-labels: root.settings-summary-template-labels;
         default-summary-template-label: root.settings-default-summary-template-label;
         editing-summary-template-label: root.settings-editing-summary-template-label;

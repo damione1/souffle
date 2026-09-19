@@ -6,6 +6,9 @@ import { LucideIcon, IconSet } from "lucide_icon.slint";
 // pickers both go through this instead.
 export component ThemedComboBox inherits Rectangle {
     in property <[string]> model;
+    // Optional stable open-set values matching `model` by index. Catalogue
+    // pickers use ids here; closed-set and label-only pickers leave it empty.
+    in property <[string]> option-values;
     in property <string> current-value;
     in property <bool> enabled: true;
     in property <length> combo-width: Theme.settings-control-width;
@@ -98,7 +101,7 @@ export component ThemedComboBox inherits Rectangle {
                 alignment: start;
                 spacing: 0px;
 
-                for item in root.model: Rectangle {
+                for item[index] in root.model: Rectangle {
                     height: 32px;
                     vertical-stretch: 0;
                     background: row-area.has-hover ? Theme.surface-2 : transparent;
@@ -117,7 +120,9 @@ export component ThemedComboBox inherits Rectangle {
 
                     row-area := TouchArea {
                         clicked => {
-                            root.selected(item);
+                            root.selected(root.option-values.length == root.model.length
+                                ? root.option-values[index]
+                                : item);
                             popup.close();
                         }
                     }

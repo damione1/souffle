@@ -8,6 +8,8 @@ import { ThemedSlider } from "../themed_slider.slint";
 export component FeedbackSoundsSection inherits VerticalLayout {
     in property <bool> enabled;
     in property <int> volume;
+    in property <int> volume-min;
+    in property <int> volume-max;
 
     callback enabled-changed(bool);
     callback volume-changed(int);
@@ -40,8 +42,8 @@ export component FeedbackSoundsSection inherits VerticalLayout {
 
                 ThemedSlider {
                     value: root.volume;
-                    minimum: 0;
-                    maximum: 100;
+                    minimum: root.volume-min;
+                    maximum: root.volume-max;
                     changed(value) => { root.volume-changed(value); }
                 }
 

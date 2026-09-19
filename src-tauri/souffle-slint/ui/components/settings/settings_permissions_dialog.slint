@@ -1,6 +1,7 @@
 import { PermissionRow, PermissionsStep } from "../onboarding/permissions_step.slint";
 import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 import { Theme } from "../../theme.slint";
+import { PermissionKind } from "../../types.slint";
 
 export component SettingsPermissionsDialog inherits Rectangle {
     in property <[PermissionRow]> rows;
@@ -10,8 +11,8 @@ export component SettingsPermissionsDialog inherits Rectangle {
     in property <bool> repair-cooldown;
 
     callback close-requested();
-    callback grant-requested(string);
-    callback hint-action-requested(string);
+    callback grant-requested(PermissionKind);
+    callback hint-action-requested(PermissionKind);
     callback repair-requested();
 
     background: Theme.modal-scrim;

@@ -1,4 +1,5 @@
 use std::ffi::{CStr, CString};
+use std::fmt;
 use std::io::{Read, Write};
 use std::os::raw::{c_char, c_int};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -6,6 +7,62 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, sync_channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
+
+/// Stable reasons emitted by the FoundationModels bridge when Apple
+/// Intelligence cannot run. The Swift bridge is an external boundary: a
+/// future OS can add a raw reason, but that value is normalized here instead
+/// of leaking strings into the application and Slint contracts.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AppleIntelligenceUnavailableReason {
+    DeviceNotEligible,
+    AppleIntelligenceNotEnabled,
+    ModelNotReady,
+    MacosTooOld,
+    Stub,
+    UnsupportedPlatform,
+    Unknown,
+}
+
+impl AppleIntelligenceUnavailableReason {
+    fn from_external(raw: &str) -> Self {
+        match raw {
+            "device_not_eligible" => Self::DeviceNotEligible,
+            "apple_intelligence_not_enabled" => Self::AppleIntelligenceNotEnabled,
+            "model_not_ready" => Self::ModelNotReady,
+            "macos_too_old" => Self::MacosTooOld,
+            "stub" => Self::Stub,
+            "unsupported_platform" => Self::UnsupportedPlatform,
+            other => {
+                tracing::warn!(
+                    reason = other,
+                    "Unknown Apple Intelligence availability reason"
+                );
+                Self::Unknown
+            }
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DeviceNotEligible => "device_not_eligible",
+            Self::AppleIntelligenceNotEnabled => "apple_intelligence_not_enabled",
+            Self::ModelNotReady => "model_not_ready",
+            Self::MacosTooOld => "macos_too_old",
+            Self::Stub => "stub",
+            Self::UnsupportedPlatform => "unsupported_platform",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl fmt::Display for AppleIntelligenceUnavailableReason {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[repr(C)]
 pub struct AppleLLMResponse {
@@ -109,8 +166,9 @@ pub fn check_apple_intelligence_availability() -> bool {
 
 /// Reason Apple Intelligence is unavailable on this device, or `None` when available.
 ///
-/// On non-macOS/non-Apple-Silicon builds this always reports `"unsupported_platform"`.
-pub fn unavailable_reason() -> Option<String> {
+/// On non-macOS/non-Apple-Silicon builds this always reports
+/// [`AppleIntelligenceUnavailableReason::UnsupportedPlatform`].
+pub fn unavailable_reason() -> Option<AppleIntelligenceUnavailableReason> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         let reason_ptr = unsafe { apple_intelligence_unavailable_reason() };
@@ -121,11 +179,11 @@ pub fn unavailable_reason() -> Option<String> {
             .to_string_lossy()
             .into_owned();
         unsafe { libc::free(reason_ptr.cast()) };
-        Some(reason)
+        Some(AppleIntelligenceUnavailableReason::from_external(&reason))
     }
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
-        Some("unsupported_platform".to_string())
+        Some(AppleIntelligenceUnavailableReason::UnsupportedPlatform)
     }
 }
 
@@ -543,8 +601,9 @@ pub(crate) fn try_run_helper(args: &[String]) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        check_apple_intelligence_availability, decode_helper_response, encode_helper_response,
-        is_stub_linked, read_bounded, run_helper_process, unavailable_reason,
+        AppleIntelligenceUnavailableReason, check_apple_intelligence_availability,
+        decode_helper_response, encode_helper_response, is_stub_linked, read_bounded,
+        run_helper_process, unavailable_reason,
     };
     use std::io::Cursor;
     use std::process::Command;
@@ -568,7 +627,29 @@ mod tests {
         let reason = unavailable_reason();
         assert_eq!(available, reason.is_none());
         if is_stub_linked() {
-            assert_eq!(reason.as_deref(), Some("stub"));
+            assert_eq!(reason, Some(AppleIntelligenceUnavailableReason::Stub));
+        }
+    }
+
+    #[test]
+    fn external_unavailable_reasons_are_normalized_at_the_ffi_boundary() {
+        use AppleIntelligenceUnavailableReason as Reason;
+
+        let cases = [
+            ("device_not_eligible", Reason::DeviceNotEligible),
+            (
+                "apple_intelligence_not_enabled",
+                Reason::AppleIntelligenceNotEnabled,
+            ),
+            ("model_not_ready", Reason::ModelNotReady),
+            ("macos_too_old", Reason::MacosTooOld),
+            ("stub", Reason::Stub),
+            ("unsupported_platform", Reason::UnsupportedPlatform),
+            ("unknown:futureReason", Reason::Unknown),
+        ];
+
+        for (raw, expected) in cases {
+            assert_eq!(Reason::from_external(raw), expected);
         }
     }
 

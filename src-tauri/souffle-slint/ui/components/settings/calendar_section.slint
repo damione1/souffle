@@ -21,6 +21,8 @@ export component CalendarSection inherits VerticalLayout {
     in property <AccessState> permission;
     in property <bool> autostart-enabled;
     in property <int> reminder-minutes;
+    in property <int> reminder-minutes-min;
+    in property <int> reminder-minutes-max;
     in property <[CalendarRow]> calendars;
 
     callback enabled-changed(bool);
@@ -85,13 +87,13 @@ export component CalendarSection inherits VerticalLayout {
 
         if root.enabled && root.permission == AccessState.granted: SettingsField {
             label: "Délai du rappel";
-            description: "Minutes avant un événement pour proposer de démarrer une transcription (1-30).";
+            description: "Minutes avant un événement pour proposer de démarrer une transcription.";
 
             ThemedSpinBox {
                 control-label: "Délai du rappel en minutes";
                 value: root.reminder-minutes;
-                minimum: 1;
-                maximum: 30;
+                minimum: root.reminder-minutes-min;
+                maximum: root.reminder-minutes-max;
                 step: 1;
                 edited(value) => { root.reminder-minutes-changed(value); }
             }

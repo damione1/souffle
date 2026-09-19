@@ -48,6 +48,21 @@ export enum AudioRetention { off, keep-7d, keep-30d, keep-forever }
 
 export enum AccessState { granted, denied, unknown, unsupported, no-device }
 
+// Mirrors souffle_lib::permissions::PermissionKind at the UI boundary.
+export enum PermissionKind { microphone, system-audio, accessibility, calendar }
+
 export enum ShortcutField { none, toggle, ptt }
 
 export enum SummaryProvider { auto, apple-intelligence, ollama }
+
+// Normalized at the FoundationModels FFI boundary. `unknown` is the real
+// observation produced for a future OS reason, not a catch-all branch.
+export enum AppleIntelligenceUnavailableReason {
+    device-not-eligible,
+    apple-intelligence-not-enabled,
+    model-not-ready,
+    macos-too-old,
+    stub,
+    unsupported-platform,
+    unknown,
+}

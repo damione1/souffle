@@ -180,7 +180,8 @@ pub struct SummaryProvidersStatus {
     /// True when this build linked the Apple Intelligence stub (no FoundationModels).
     pub apple_intelligence_is_stub: bool,
     /// Machine-readable reason Apple Intelligence is unavailable, `None` when available.
-    pub apple_intelligence_unavailable_reason: Option<String>,
+    pub apple_intelligence_unavailable_reason:
+        Option<apple_intelligence::AppleIntelligenceUnavailableReason>,
     /// Ollama model recommended by the backend for one-click installation.
     pub recommended_ollama_model: String,
     pub models: Vec<SummaryModelDescriptor>,

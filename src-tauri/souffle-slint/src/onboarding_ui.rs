@@ -12,11 +12,11 @@
 //! attempts. The repair action itself is real; only that one UX nicety
 //! is dropped.
 
-use crate::{MainWindow, PermissionRow};
-use souffle_lib::permissions::{PermState, PermissionStatus};
+use crate::{MainWindow, PermissionRow, settings_ui};
+use souffle_lib::permissions::{PermState, PermissionKind, PermissionStatus};
 
 struct RowSpec {
-    kind: &'static str,
+    kind: PermissionKind,
     label: &'static str,
     description: &'static str,
     action_label: &'static str,
@@ -24,56 +24,61 @@ struct RowSpec {
 
 const ROWS: [RowSpec; 3] = [
     RowSpec {
-        kind: "microphone",
+        kind: PermissionKind::Microphone,
         label: "Microphone",
         description: "Nécessaire pour la dictée et les réunions.",
         action_label: "Autoriser",
     },
     RowSpec {
-        kind: "system_audio",
+        kind: PermissionKind::SystemAudio,
         label: "Audio système",
         description: "Capture l'autre côté d'un appel dans les réunions.",
         action_label: "Autoriser",
     },
     RowSpec {
-        kind: "accessibility",
+        kind: PermissionKind::Accessibility,
         label: "Accessibilité",
         description: "Nécessaire pour le collage automatique et certains raccourcis.",
         action_label: "Ouvrir les Réglages",
     },
 ];
 
-fn perm_state_str(state: PermState) -> &'static str {
-    match state {
-        PermState::Granted => "granted",
-        PermState::Denied => "denied",
-        PermState::Unknown => "unknown",
-        PermState::Unsupported => "unsupported",
-        PermState::NoDevice => "no_device",
-    }
-}
-
-fn state_of(status: &PermissionStatus, kind: &str) -> PermState {
+fn state_of(status: &PermissionStatus, kind: PermissionKind) -> PermState {
     match kind {
-        "microphone" => status.microphone,
-        "system_audio" => status.system_audio,
-        "accessibility" => status.accessibility,
-        _ => PermState::Unknown,
+        PermissionKind::Microphone => status.microphone,
+        PermissionKind::SystemAudio => status.system_audio,
+        PermissionKind::Accessibility => status.accessibility,
+        PermissionKind::Calendar => status.calendar,
     }
 }
 
-fn hint_for(kind: &str, state: PermState) -> (&'static str, &'static str) {
+fn hint_for(kind: PermissionKind, state: PermState) -> (&'static str, &'static str) {
     match (kind, state) {
-        ("accessibility", PermState::Denied) => (
+        (PermissionKind::Accessibility, PermState::Denied) => (
             "Refusé. Ouvrez Réglages Système > Confidentialité et sécurité > Accessibilité.",
             "Réglages Système",
         ),
-        ("microphone", PermState::Denied) => (
+        (PermissionKind::Microphone, PermState::Denied) => (
             "Refusé. Ouvrez Réglages Système pour l'autoriser.",
             "Réglages Système",
         ),
-        ("microphone", PermState::NoDevice) => ("Aucun microphone détecté.", ""),
-        _ => ("", ""),
+        (PermissionKind::Microphone, PermState::NoDevice) => ("Aucun microphone détecté.", ""),
+        (
+            PermissionKind::Microphone,
+            PermState::Granted | PermState::Unknown | PermState::Unsupported,
+        )
+        | (
+            PermissionKind::SystemAudio | PermissionKind::Calendar,
+            PermState::Granted
+            | PermState::Denied
+            | PermState::Unknown
+            | PermState::Unsupported
+            | PermState::NoDevice,
+        )
+        | (
+            PermissionKind::Accessibility,
+            PermState::Granted | PermState::Unknown | PermState::Unsupported | PermState::NoDevice,
+        ) => ("", ""),
     }
 }
 
@@ -87,10 +92,10 @@ pub fn populate_permission_rows(window: &MainWindow, status: &PermissionStatus, 
             let state = state_of(status, spec.kind);
             let (hint, hint_action_label) = hint_for(spec.kind, state);
             PermissionRow {
-                kind: spec.kind.into(),
+                kind: settings_ui::permission_kind_to_slint(spec.kind),
                 label: spec.label.into(),
                 description: spec.description.into(),
-                state: perm_state_str(state).into(),
+                state: settings_ui::perm_state_to_slint(state),
                 busy: busy[i],
                 action_label: spec.action_label.into(),
                 hint: hint.into(),
@@ -101,7 +106,7 @@ pub fn populate_permission_rows(window: &MainWindow, status: &PermissionStatus, 
     window.set_onboarding_permission_rows(std::rc::Rc::new(slint::VecModel::from(rows)).into());
 }
 
-pub fn row_index(kind: &str) -> Option<usize> {
+pub fn row_index(kind: PermissionKind) -> Option<usize> {
     ROWS.iter().position(|r| r.kind == kind)
 }
 

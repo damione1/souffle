@@ -74,6 +74,15 @@ pub enum SettingsSaveOutcome {
     },
 }
 
+/// ServiceManagement is not a generic settings side effect. Most saves stay
+/// entirely in the database/worker lane; only the autostart control opts into
+/// the native login-item transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsSaveLane {
+    General,
+    Autostart,
+}
+
 impl SettingsSaveOutcome {
     pub fn from_results(result: SettingsSaveResult, observed: Result<AppSettings, String>) -> Self {
         match observed {
@@ -86,16 +95,28 @@ impl SettingsSaveOutcome {
     }
 }
 
-/// Re-read even on failure: the atomic snapshot may have committed before a
-/// native effect failed.
-pub fn save_settings_observed(state: Arc<AppState>, settings: AppSettings) -> SettingsSaveOutcome {
-    let result = save_settings(state.clone(), settings);
-    SettingsSaveOutcome::from_results(result, get_settings(state))
+/// Save a settings snapshot on one explicit effect lane. `General` never
+/// consults ServiceManagement; only the autostart control selects `Autostart`.
+pub fn save_settings_observed_in_lane(
+    state: Arc<AppState>,
+    settings: AppSettings,
+    lane: SettingsSaveLane,
+) -> SettingsSaveOutcome {
+    match lane {
+        SettingsSaveLane::General => {
+            let result = save_settings_in_lane(state.clone(), settings, lane);
+            SettingsSaveOutcome::from_results(result, get_stored_settings(state))
+        }
+        SettingsSaveLane::Autostart => {
+            let result = save_settings_in_lane(state.clone(), settings, lane);
+            SettingsSaveOutcome::from_results(result, get_settings(state))
+        }
+    }
 }
 
 /// Get the typed application settings.
 pub fn get_settings(state: Arc<AppState>) -> Result<AppSettings, String> {
-    let mut settings = AppSettings::load_read_only(&state.db)?;
+    let mut settings = get_stored_settings(state)?;
     #[cfg(target_os = "macos")]
     {
         settings.autostart_enabled = crate::autostart::is_enabled();
@@ -103,10 +124,20 @@ pub fn get_settings(state: Arc<AppState>) -> Result<AppSettings, String> {
     Ok(settings)
 }
 
-/// Save the typed application settings.
-pub fn save_settings(state: Arc<AppState>, settings: AppSettings) -> SettingsSaveResult {
+/// Read the durable snapshot without consulting any native service. Worker
+/// queues use this after a generic save so unrelated controls never pay the
+/// ServiceManagement cost.
+pub fn get_stored_settings(state: Arc<AppState>) -> Result<AppSettings, String> {
+    AppSettings::load_read_only(&state.db)
+}
+
+fn save_settings_in_lane(
+    state: Arc<AppState>,
+    settings: AppSettings,
+    lane: SettingsSaveLane,
+) -> SettingsSaveResult {
     save_settings_with_effects(&state.db, &state.machine, settings, |settings| {
-        apply_settings_effects(&state, settings)
+        apply_settings_effects(&state, settings, lane)
     })
 }
 
@@ -144,14 +175,14 @@ fn save_settings_with_effects(
 fn apply_settings_effects(
     state: &Arc<AppState>,
     settings: &AppSettings,
+    lane: SettingsSaveLane,
 ) -> Result<(), SettingsEffectFailure> {
     #[cfg(target_os = "macos")]
-    {
-        if settings.autostart_enabled != crate::autostart::is_enabled() {
-            crate::autostart::set_enabled(settings.autostart_enabled)
-                .map_err(|message| SettingsEffectFailure::Autostart { message })?;
-        }
-    }
+    apply_autostart_effect(lane, settings.autostart_enabled, |enabled| {
+        crate::autostart::set_enabled(enabled)
+    })?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = lane;
 
     crate::debug::set_transcription_debug(settings.debug_transcription);
     crate::logging::set_level(settings.log_level)
@@ -178,6 +209,19 @@ fn apply_settings_effects(
         crate::tray::sync(state, &machine);
     }
     Ok(())
+}
+
+fn apply_autostart_effect(
+    lane: SettingsSaveLane,
+    enabled: bool,
+    apply: impl FnOnce(bool) -> Result<(), String>,
+) -> Result<(), SettingsEffectFailure> {
+    match lane {
+        SettingsSaveLane::General => Ok(()),
+        SettingsSaveLane::Autostart => {
+            apply(enabled).map_err(|message| SettingsEffectFailure::Autostart { message })
+        }
+    }
 }
 
 /// Register global shortcuts for toggle and push-to-talk dictation.
@@ -253,7 +297,10 @@ mod tests {
     use std::cell::Cell;
     use std::sync::{Arc, Barrier, Mutex};
 
-    use super::{SettingsEffectFailure, SettingsSaveError, save_settings_with_effects};
+    use super::{
+        SettingsEffectFailure, SettingsSaveError, SettingsSaveLane, apply_autostart_effect,
+        save_settings_with_effects,
+    };
     use crate::audio::InputPriority;
     use crate::engine::default_transcription_profile;
     use crate::settings::{AppSettings, MeetingTranscriptionLanguage, Theme};
@@ -265,6 +312,37 @@ mod tests {
             profile: default_transcription_profile(),
             session_id: 7,
         }
+    }
+
+    #[test]
+    fn generic_effect_lane_never_consults_service_management() {
+        let calls = Cell::new(0);
+
+        let result = apply_autostart_effect(SettingsSaveLane::General, true, |_| {
+            calls.set(calls.get() + 1);
+            Ok(())
+        });
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn autostart_effect_lane_calls_service_management_once_and_maps_errors() {
+        let calls = Cell::new(0);
+        let result = apply_autostart_effect(SettingsSaveLane::Autostart, true, |enabled| {
+            assert!(enabled);
+            calls.set(calls.get() + 1);
+            Err("injected ServiceManagement failure".into())
+        });
+
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            result,
+            Err(SettingsEffectFailure::Autostart {
+                message: "injected ServiceManagement failure".into()
+            })
+        );
     }
 
     #[test]
