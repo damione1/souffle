@@ -14,7 +14,7 @@ use souffle_lib::settings::{AppSettings, Theme as SettingsTheme};
 use souffle_lib::summary::SummaryProvidersStatus;
 
 use crate::settings_io::{SettingsIoCoordinator, SettingsResponseOrder};
-use crate::{MainWindow, Theme, audio_ui, ia_ui, model_ui, settings_ui};
+use crate::{MainWindow, Theme, audio_ui, data_ui, ia_ui, model_ui, settings_ui};
 
 #[derive(Clone)]
 pub(crate) struct SettingsCache {
@@ -32,6 +32,7 @@ impl SettingsCache {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_observed(window: &MainWindow, settings: AppSettings) -> Self {
         Self {
             snapshot: Rc::new(RefCell::new(Some(settings))),
@@ -238,60 +239,35 @@ impl SettingsValueController {
         }
 
         let worker_mutation = Arc::clone(&mutation);
-        let controller = Rc::clone(self);
-        self.io.submit(
-            lane,
-            move |settings| worker_mutation(settings),
-            move |order, outcome| match order {
-                SettingsResponseOrder::LatestVisible => {
-                    let settings = match outcome {
-                        SettingsSaveOutcome::Observed { settings, .. } => {
-                            Some(settings.as_ref().clone())
-                        }
-                        SettingsSaveOutcome::Unavailable { .. } => {
-                            controller.cache.observed_snapshot()
-                        }
-                    };
-                    if let Some(settings) = settings {
-                        let previous_theme = controller
-                            .preview
-                            .borrow()
-                            .as_ref()
-                            .map(|preview| preview.theme);
-                        *controller.preview.borrow_mut() = Some(settings.clone());
-                        if let Some(window) = controller.window.upgrade() {
-                            controller.project_snapshot(&window, &settings, previous_theme);
-                        }
+        self.io
+            .submit(lane, move |settings| worker_mutation(settings), |_, _| {});
+    }
+
+    fn publish_save_outcome(&self, order: SettingsResponseOrder, outcome: &SettingsSaveOutcome) {
+        match order {
+            SettingsResponseOrder::LatestVisible | SettingsResponseOrder::LatestHidden => {
+                let settings = match outcome {
+                    SettingsSaveOutcome::Observed { settings, .. } => {
+                        Some(settings.as_ref().clone())
+                    }
+                    SettingsSaveOutcome::Unavailable { .. } => self.cache.observed_snapshot(),
+                };
+                if let Some(settings) = settings {
+                    let previous_theme =
+                        self.preview.borrow().as_ref().map(|preview| preview.theme);
+                    *self.preview.borrow_mut() = Some(settings.clone());
+                    if let Some(window) = self.window.upgrade() {
+                        // These helpers project scalar/dropdown values only;
+                        // prompt/template/list drafts remain owned by the
+                        // draft controller and are never overwritten here.
+                        settings_ui::populate(&window, &settings);
+                        data_ui::populate(&window, &settings);
+                        self.project_snapshot(&window, &settings, previous_theme);
                     }
                 }
-                SettingsResponseOrder::LatestHidden => {
-                    let settings = match outcome {
-                        SettingsSaveOutcome::Observed { settings, .. } => {
-                            Some(settings.as_ref().clone())
-                        }
-                        SettingsSaveOutcome::Unavailable { .. } => {
-                            controller.cache.observed_snapshot()
-                        }
-                    };
-                    if let Some(settings) = settings {
-                        let previous_theme = controller
-                            .preview
-                            .borrow()
-                            .as_ref()
-                            .map(|preview| preview.theme);
-                        *controller.preview.borrow_mut() = Some(settings.clone());
-                        if let Some(window) = controller.window.upgrade() {
-                            // The Settings sheet is hidden, but the header
-                            // theme toggle and global NSAppearance are not.
-                            // Canonicalize the in-memory projection without
-                            // mounting the sheet or starting any I/O.
-                            controller.project_snapshot(&window, &settings, previous_theme);
-                        }
-                    }
-                }
-                SettingsResponseOrder::Intermediate | SettingsResponseOrder::Stale => {}
-            },
-        );
+            }
+            SettingsResponseOrder::Intermediate | SettingsResponseOrder::Stale => {}
+        }
     }
 
     fn project_snapshot(
@@ -356,6 +332,12 @@ impl SettingsValueController {
 }
 
 pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>) {
+    let weak_controller = Rc::downgrade(&controller);
+    controller.io.set_save_projection(move |order, outcome| {
+        if let Some(controller) = weak_controller.upgrade() {
+            controller.publish_save_outcome(order, outcome);
+        }
+    });
     let c = controller.clone();
     window.on_settings_theme_changed(move |value| {
         c.apply(SettingsSaveLane::General, move |s| {
@@ -801,6 +783,141 @@ mod tests {
         assert_eq!(window.get_settings_theme(), crate::AppTheme::Light);
         assert_eq!(appearance.get(), Some(false));
         assert!(window.get_settings_save_error().contains("theme rejected"));
+    }
+
+    #[test]
+    fn later_generic_save_projects_the_canonical_theme_after_an_intermediate_rejection() {
+        let window = test_window();
+        let initial = AppSettings {
+            theme: SettingsTheme::Light,
+            auto_paste: true,
+            ..AppSettings::default()
+        };
+        settings_ui::populate(&window, &initial);
+        window.global::<Theme>().set_dark(false);
+        let cache = SettingsCache::with_observed(&window, initial.clone());
+        let saves = Arc::new(AtomicUsize::new(0));
+        let save_count = Arc::clone(&saves);
+        let rejected = initial.clone();
+        let io = SettingsIoCoordinator::with_functions(
+            cache.clone(),
+            {
+                let initial = initial.clone();
+                move || Ok(initial.clone())
+            },
+            {
+                let initial = initial.clone();
+                move || Ok(initial.clone())
+            },
+            move |candidate| match save_count.fetch_add(1, Ordering::SeqCst) {
+                0 => SettingsSaveOutcome::Observed {
+                    settings: Box::new(rejected.clone()),
+                    result: Err(SettingsSaveError::Rejected {
+                        message: "theme rejected".into(),
+                    }),
+                },
+                1 => SettingsSaveOutcome::Observed {
+                    settings: Box::new(candidate),
+                    result: Ok(()),
+                },
+                _ => unreachable!(),
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        io.begin_open();
+        let appearance = Rc::new(Cell::new(None));
+        let projected_appearance = appearance.clone();
+        let controller = Rc::new(SettingsValueController {
+            window: window.as_weak(),
+            cache,
+            io: io.clone(),
+            preview: RefCell::new(Some(initial)),
+            devices: Rc::new(RefCell::new(Vec::new())),
+            summary: Rc::new(RefCell::new(None)),
+            apply_appearance: Rc::new(move |dark| projected_appearance.set(Some(dark))),
+        });
+        wire(&window, controller);
+
+        window.invoke_theme_toggle_requested();
+        assert!(window.global::<Theme>().get_dark());
+        io.submit(
+            SettingsSaveLane::General,
+            |settings| settings.auto_paste = false,
+            |_, _| {},
+        );
+        drain_until(&io, &saves, 2);
+
+        assert!(!window.global::<Theme>().get_dark());
+        assert_eq!(window.get_settings_theme(), crate::AppTheme::Light);
+        assert!(!window.get_settings_auto_paste());
+        assert_eq!(appearance.get(), Some(false));
+    }
+
+    #[test]
+    fn rejected_legacy_autostart_save_rolls_back_the_optimistic_control() {
+        let window = test_window();
+        let initial = AppSettings {
+            autostart_enabled: false,
+            ..AppSettings::default()
+        };
+        settings_ui::populate(&window, &initial);
+        let cache = SettingsCache::with_observed(&window, initial.clone());
+        let saves = Arc::new(AtomicUsize::new(0));
+        let save_count = Arc::clone(&saves);
+        let rejected = initial.clone();
+        let io = SettingsIoCoordinator::with_functions(
+            cache.clone(),
+            {
+                let initial = initial.clone();
+                move || Ok(initial.clone())
+            },
+            {
+                let initial = initial.clone();
+                move || Ok(initial.clone())
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+            move |_| {
+                save_count.fetch_add(1, Ordering::SeqCst);
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(rejected.clone()),
+                    result: Err(SettingsSaveError::Rejected {
+                        message: "autostart rejected".into(),
+                    }),
+                }
+            },
+        );
+        io.begin_open();
+        let controller = Rc::new(SettingsValueController {
+            window: window.as_weak(),
+            cache,
+            io: io.clone(),
+            preview: RefCell::new(Some(initial)),
+            devices: Rc::new(RefCell::new(Vec::new())),
+            summary: Rc::new(RefCell::new(None)),
+            apply_appearance: Rc::new(|_| {}),
+        });
+        wire(&window, controller);
+
+        window.set_settings_autostart_enabled(true);
+        io.submit(
+            SettingsSaveLane::Autostart,
+            |settings| settings.autostart_enabled = true,
+            |_, _| {},
+        );
+        drain_until(&io, &saves, 1);
+
+        assert!(!window.get_settings_autostart_enabled());
+        assert!(
+            window
+                .get_settings_save_error()
+                .contains("autostart rejected")
+        );
     }
 
     #[test]

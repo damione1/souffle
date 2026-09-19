@@ -10,6 +10,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(test)]
 use std::time::Duration;
 
 use souffle_lib::commands::{SettingsSaveError, SettingsSaveLane, SettingsSaveOutcome};
@@ -18,7 +20,12 @@ use souffle_lib::settings::AppSettings;
 use crate::AppHandle;
 use crate::settings_values::SettingsCache;
 
-const RESPONSE_POLL_INTERVAL: Duration = Duration::from_millis(8);
+static NEXT_RESPONSE_TARGET: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    static RESPONSE_TARGETS: RefCell<HashMap<u64, std::rc::Weak<SettingsIoCoordinator>>> =
+        RefCell::new(HashMap::new());
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SettingsResponseOrder {
@@ -71,7 +78,8 @@ impl ResponseSequence {
 
 type SettingsMutation = Box<dyn FnOnce(&mut AppSettings) + Send>;
 type SettingsCompletion = Box<dyn FnOnce(SettingsResponseOrder, &SettingsSaveOutcome)>;
-type SettingsSnapshotCompletion = Box<dyn FnOnce(AppSettings)>;
+type SettingsSnapshotCompletion = Box<dyn FnOnce(SettingsSnapshotResult)>;
+type SettingsSaveProjection = Rc<dyn Fn(SettingsResponseOrder, &SettingsSaveOutcome)>;
 type LoadSettings = Arc<dyn Fn() -> Result<AppSettings, String> + Send + Sync>;
 type SaveSettings = Arc<dyn Fn(AppSettings) -> SettingsSaveOutcome + Send + Sync>;
 
@@ -102,6 +110,17 @@ pub(crate) struct SettingsLoadToken(u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SettingsCloseToken(u64);
 
+pub(crate) enum SettingsSnapshotResult {
+    Observed(Box<AppSettings>),
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsSnapshotAudience {
+    Startup,
+    Open(SettingsLoadToken),
+}
+
 struct SettingsWorkerIo {
     load_general: LoadSettings,
     load_autostart: LoadSettings,
@@ -126,7 +145,12 @@ impl SettingsWorkerIo {
 }
 
 enum WorkerRequest {
+    #[cfg(test)]
     Seed(Box<AppSettings>),
+    Refresh {
+        revision: u64,
+        lane: SettingsSaveLane,
+    },
     Barrier {
         revision: u64,
     },
@@ -143,18 +167,61 @@ struct WorkerResponse {
     outcome: SettingsSaveOutcome,
 }
 
+struct ResponsePublisher {
+    sender: crossbeam_channel::Sender<WorkerResponse>,
+    wake_pending: Arc<AtomicBool>,
+    target_id: u64,
+}
+
+fn reserve_response_wake(wake_pending: &AtomicBool) -> bool {
+    !wake_pending.swap(true, Ordering::AcqRel)
+}
+
+impl ResponsePublisher {
+    fn send(&self, response: WorkerResponse) -> bool {
+        if self.sender.send(response).is_err() {
+            return false;
+        }
+        if !reserve_response_wake(&self.wake_pending) {
+            return true;
+        }
+        let wake_pending = Arc::clone(&self.wake_pending);
+        let target_id = self.target_id;
+        if slint::invoke_from_event_loop(move || {
+            wake_pending.store(false, Ordering::Release);
+            RESPONSE_TARGETS.with(|targets| {
+                let controller = targets
+                    .borrow()
+                    .get(&target_id)
+                    .and_then(std::rc::Weak::upgrade);
+                if let Some(controller) = controller {
+                    controller.drain_responses();
+                }
+            });
+        })
+        .is_err()
+        {
+            self.wake_pending.store(false, Ordering::Release);
+        }
+        true
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkerResponseOrigin {
     Save,
+    Refresh,
     Barrier,
 }
 
 pub(crate) struct SettingsIoCoordinator {
     requests: tokio::sync::mpsc::UnboundedSender<WorkerRequest>,
     responses: crossbeam_channel::Receiver<WorkerResponse>,
-    response_timer: slint::Timer,
+    response_target_id: u64,
+    response_wake_pending: Arc<AtomicBool>,
     sequence: RefCell<ResponseSequence>,
     callbacks: RefCell<HashMap<u64, SettingsCompletion>>,
+    save_projection: RefCell<Option<SettingsSaveProjection>>,
     cache: SettingsCache,
     session: Cell<SettingsSessionState>,
 }
@@ -194,17 +261,37 @@ impl SettingsIoCoordinator {
     fn with_io(cache: SettingsCache, io: SettingsWorkerIo) -> Rc<Self> {
         let (requests, receiver) = tokio::sync::mpsc::unbounded_channel();
         let (response_sender, responses) = crossbeam_channel::unbounded();
-        souffle_lib::async_runtime::spawn(run_worker(receiver, response_sender, io));
+        let response_target_id = NEXT_RESPONSE_TARGET.fetch_add(1, Ordering::Relaxed);
+        let response_wake_pending = Arc::new(AtomicBool::new(false));
+        let initial_snapshot = cache.known_snapshot();
+        souffle_lib::async_runtime::spawn(run_worker(
+            receiver,
+            ResponsePublisher {
+                sender: response_sender,
+                wake_pending: Arc::clone(&response_wake_pending),
+                target_id: response_target_id,
+            },
+            io,
+            initial_snapshot,
+        ));
 
-        Rc::new(Self {
+        let controller = Rc::new(Self {
             requests,
             responses,
-            response_timer: slint::Timer::default(),
+            response_target_id,
+            response_wake_pending,
             sequence: RefCell::new(ResponseSequence::default()),
             callbacks: RefCell::new(HashMap::new()),
+            save_projection: RefCell::new(None),
             cache,
             session: Cell::new(SettingsSessionState::Closed { generation: 0 }),
-        })
+        });
+        RESPONSE_TARGETS.with(|targets| {
+            targets
+                .borrow_mut()
+                .insert(response_target_id, Rc::downgrade(&controller));
+        });
+        controller
     }
 
     #[cfg(test)]
@@ -226,8 +313,16 @@ impl SettingsIoCoordinator {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn current_revision(&self) -> u64 {
         self.sequence.borrow().latest_submitted
+    }
+
+    pub(crate) fn set_save_projection(
+        &self,
+        projection: impl Fn(SettingsResponseOrder, &SettingsSaveOutcome) + 'static,
+    ) {
+        *self.save_projection.borrow_mut() = Some(Rc::new(projection));
     }
 
     pub(crate) fn begin_open(&self) -> SettingsLoadToken {
@@ -266,13 +361,18 @@ impl SettingsIoCoordinator {
 
     /// Seed the worker only if no write was submitted while the load was in
     /// flight. A late open response must never replace a newer candidate.
+    #[cfg(test)]
     pub(crate) fn seed_if_current(
         &self,
         token: SettingsLoadToken,
         revision_at_start: u64,
         settings: AppSettings,
     ) -> bool {
-        if self.current_revision() != revision_at_start || !self.accepts_load(token) {
+        let sequence = self.sequence.borrow();
+        let fully_settled = sequence.latest_submitted == revision_at_start
+            && sequence.latest_observed == revision_at_start;
+        drop(sequence);
+        if !fully_settled || !self.accepts_load(token) {
             return false;
         }
         self.cache.replace_observed(settings.clone());
@@ -306,7 +406,6 @@ impl SettingsIoCoordinator {
                 outcome: worker_failure("Settings worker is unavailable"),
             });
         }
-        self.arm_response_pump();
         revision
     }
 
@@ -329,67 +428,149 @@ impl SettingsIoCoordinator {
                 outcome: worker_failure("Settings worker is unavailable"),
             });
         }
-        self.arm_response_pump();
         revision
     }
 
-    /// Run `completion` with the snapshot behind every write currently in the
-    /// actor. If a newer write is submitted while the barrier is in flight,
-    /// queue another barrier instead of publishing an intermediate snapshot.
-    pub(crate) fn after_current_snapshot(
+    /// Serialize the Settings-open effective refresh behind any writes that
+    /// were already queued before the sheet opened. This is the only refresh
+    /// that consults ServiceManagement, through the explicit Autostart lane.
+    pub(crate) fn load_effective_snapshot(
         self: &Rc<Self>,
         token: SettingsLoadToken,
         completion: impl FnOnce(AppSettings) + 'static,
     ) {
+        let completion = Rc::new(RefCell::new(Some(Box::new(move |result| {
+            if let SettingsSnapshotResult::Observed(settings) = result {
+                completion(*settings);
+            }
+        }) as SettingsSnapshotCompletion)));
+        self.queue_snapshot_refresh(
+            SettingsSaveLane::Autostart,
+            SettingsSnapshotAudience::Open(token),
+            completion,
+        );
+    }
+
+    /// Load the initial durable snapshot on the serialized worker. This is
+    /// queued before Slint starts processing user input, so startup theme and
+    /// onboarding state never perform database I/O on the UI thread.
+    pub(crate) fn load_startup_snapshot(
+        self: &Rc<Self>,
+        completion: impl FnOnce(SettingsSnapshotResult) + 'static,
+    ) {
         let completion = Rc::new(RefCell::new(Some(
             Box::new(completion) as SettingsSnapshotCompletion
         )));
-        self.queue_snapshot_barrier(token, completion);
+        self.queue_snapshot_refresh(
+            SettingsSaveLane::General,
+            SettingsSnapshotAudience::Startup,
+            completion,
+        );
+    }
+
+    fn accepts_snapshot_audience(&self, audience: SettingsSnapshotAudience) -> bool {
+        match audience {
+            SettingsSnapshotAudience::Startup => true,
+            SettingsSnapshotAudience::Open(token) => self.accepts_load(token),
+        }
+    }
+
+    fn order_publishes_snapshot(
+        audience: SettingsSnapshotAudience,
+        order: SettingsResponseOrder,
+    ) -> bool {
+        match (audience, order) {
+            (
+                SettingsSnapshotAudience::Startup,
+                SettingsResponseOrder::LatestVisible | SettingsResponseOrder::LatestHidden,
+            )
+            | (SettingsSnapshotAudience::Open(_), SettingsResponseOrder::LatestVisible) => true,
+            (
+                SettingsSnapshotAudience::Startup,
+                SettingsResponseOrder::Intermediate | SettingsResponseOrder::Stale,
+            )
+            | (
+                SettingsSnapshotAudience::Open(_),
+                SettingsResponseOrder::LatestHidden
+                | SettingsResponseOrder::Intermediate
+                | SettingsResponseOrder::Stale,
+            ) => false,
+        }
+    }
+
+    fn queue_snapshot_refresh(
+        self: &Rc<Self>,
+        lane: SettingsSaveLane,
+        audience: SettingsSnapshotAudience,
+        completion: Rc<RefCell<Option<SettingsSnapshotCompletion>>>,
+    ) {
+        let revision = self.sequence.borrow_mut().submit();
+        let coordinator = Rc::clone(self);
+        let completion_for_response = completion.clone();
+        self.callbacks.borrow_mut().insert(
+            revision,
+            Box::new(move |order, outcome| {
+                if !coordinator.accepts_snapshot_audience(audience) {
+                    return;
+                }
+                if Self::order_publishes_snapshot(audience, order) {
+                    match outcome {
+                        SettingsSaveOutcome::Observed { settings, .. } => {
+                            if let Some(completion) = completion_for_response.borrow_mut().take() {
+                                completion(SettingsSnapshotResult::Observed(settings.clone()));
+                            }
+                        }
+                        SettingsSaveOutcome::Unavailable { .. } => {
+                            if let Some(completion) = completion_for_response.borrow_mut().take() {
+                                completion(SettingsSnapshotResult::Unavailable);
+                            }
+                        }
+                    }
+                } else {
+                    coordinator.queue_snapshot_barrier(audience, completion_for_response);
+                }
+            }),
+        );
+        if self
+            .requests
+            .send(WorkerRequest::Refresh { revision, lane })
+            .is_err()
+        {
+            self.settle(WorkerResponse {
+                revision,
+                origin: WorkerResponseOrigin::Refresh,
+                outcome: worker_failure("Settings worker is unavailable"),
+            });
+        }
     }
 
     fn queue_snapshot_barrier(
         self: &Rc<Self>,
-        token: SettingsLoadToken,
+        audience: SettingsSnapshotAudience,
         completion: Rc<RefCell<Option<SettingsSnapshotCompletion>>>,
     ) {
         let coordinator = Rc::clone(self);
         self.barrier(move |order, outcome| {
-            if !coordinator.accepts_load(token) {
+            if !coordinator.accepts_snapshot_audience(audience) {
                 return;
             }
-            match order {
-                SettingsResponseOrder::LatestVisible => match outcome {
+            if Self::order_publishes_snapshot(audience, order) {
+                match outcome {
                     SettingsSaveOutcome::Observed { settings, .. } => {
                         if let Some(completion) = completion.borrow_mut().take() {
-                            completion(settings.as_ref().clone());
+                            completion(SettingsSnapshotResult::Observed(settings.clone()));
                         }
                     }
-                    SettingsSaveOutcome::Unavailable { .. } => {}
-                },
-                SettingsResponseOrder::Intermediate | SettingsResponseOrder::Stale => {
-                    coordinator.queue_snapshot_barrier(token, completion);
+                    SettingsSaveOutcome::Unavailable { .. } => {
+                        if let Some(completion) = completion.borrow_mut().take() {
+                            completion(SettingsSnapshotResult::Unavailable);
+                        }
+                    }
                 }
-                SettingsResponseOrder::LatestHidden => {}
+            } else {
+                coordinator.queue_snapshot_barrier(audience, completion);
             }
         });
-    }
-
-    fn arm_response_pump(self: &Rc<Self>) {
-        if self.callbacks.borrow().is_empty() || self.response_timer.running() {
-            return;
-        }
-        let weak = Rc::downgrade(self);
-        self.response_timer.start(
-            slint::TimerMode::SingleShot,
-            RESPONSE_POLL_INTERVAL,
-            move || {
-                let Some(controller) = weak.upgrade() else {
-                    return;
-                };
-                controller.drain_responses();
-                controller.arm_response_pump();
-            },
-        );
     }
 
     fn drain_responses(&self) {
@@ -412,21 +593,28 @@ impl SettingsIoCoordinator {
         match sequence_order {
             SequenceOrder::Latest | SequenceOrder::Intermediate => match response.origin {
                 WorkerResponseOrigin::Save => self.cache.observe_save_outcome(&response.outcome),
-                WorkerResponseOrigin::Barrier => match &response.outcome {
-                    SettingsSaveOutcome::Observed { result: Ok(()), .. }
-                    | SettingsSaveOutcome::Unavailable { result: Ok(()), .. } => {
-                        // A barrier proves ordering, not a new successful
-                        // write. Refresh the snapshot without erasing the
-                        // preceding save error.
-                        self.cache.observe_save_outcome_silent(&response.outcome);
+                WorkerResponseOrigin::Refresh | WorkerResponseOrigin::Barrier => {
+                    match &response.outcome {
+                        SettingsSaveOutcome::Observed { result: Ok(()), .. }
+                        | SettingsSaveOutcome::Unavailable { result: Ok(()), .. } => {
+                            // A barrier proves ordering, not a new successful
+                            // write. Refresh the snapshot without erasing the
+                            // preceding save error.
+                            self.cache.observe_save_outcome_silent(&response.outcome);
+                        }
+                        SettingsSaveOutcome::Observed { result: Err(_), .. }
+                        | SettingsSaveOutcome::Unavailable { result: Err(_), .. } => {
+                            self.cache.observe_save_outcome(&response.outcome);
+                        }
                     }
-                    SettingsSaveOutcome::Observed { result: Err(_), .. }
-                    | SettingsSaveOutcome::Unavailable { result: Err(_), .. } => {
-                        self.cache.observe_save_outcome(&response.outcome);
-                    }
-                },
+                }
             },
             SequenceOrder::Stale => {}
+        }
+        if response.origin == WorkerResponseOrigin::Save
+            && let Some(projection) = self.save_projection.borrow().as_ref()
+        {
+            projection(order, &response.outcome);
         }
         if let Some(callback) = callback {
             callback(order, &response.outcome);
@@ -467,14 +655,69 @@ impl SettingsIoCoordinator {
 
 async fn run_worker(
     mut requests: tokio::sync::mpsc::UnboundedReceiver<WorkerRequest>,
-    responses: crossbeam_channel::Sender<WorkerResponse>,
+    responses: ResponsePublisher,
     io: SettingsWorkerIo,
+    initial_snapshot: Option<AppSettings>,
 ) {
     let io = Arc::new(io);
-    let mut snapshot: Option<AppSettings> = None;
+    let mut snapshot = initial_snapshot;
     while let Some(request) = requests.recv().await {
         match request {
+            #[cfg(test)]
             WorkerRequest::Seed(settings) => snapshot = Some(*settings),
+            WorkerRequest::Refresh { revision, lane } => {
+                let current = snapshot.take();
+                let io = Arc::clone(&io);
+                let result =
+                    souffle_lib::async_runtime::spawn_blocking(move || io.load(lane)).await;
+                let outcome = match result {
+                    Ok(Ok(settings)) => {
+                        snapshot = Some(settings.clone());
+                        SettingsSaveOutcome::Observed {
+                            settings: Box::new(settings),
+                            result: Ok(()),
+                        }
+                    }
+                    Ok(Err(read_error)) => {
+                        snapshot = current.clone();
+                        match current {
+                            Some(settings) => SettingsSaveOutcome::Observed {
+                                settings: Box::new(settings),
+                                result: Err(SettingsSaveError::NotCommitted {
+                                    message: format!(
+                                        "Effective Settings refresh failed: {read_error}"
+                                    ),
+                                }),
+                            },
+                            None => SettingsSaveOutcome::Unavailable {
+                                result: Err(SettingsSaveError::NotCommitted {
+                                    message: "Settings could not be refreshed".into(),
+                                }),
+                                read_error,
+                            },
+                        }
+                    }
+                    Err(error) => {
+                        snapshot = current.clone();
+                        match current {
+                            Some(settings) => SettingsSaveOutcome::Observed {
+                                settings: Box::new(settings),
+                                result: Err(SettingsSaveError::NotCommitted {
+                                    message: format!("Settings refresh failed: {error}"),
+                                }),
+                            },
+                            None => worker_failure(&format!("Settings refresh failed: {error}")),
+                        }
+                    }
+                };
+                if !responses.send(WorkerResponse {
+                    revision,
+                    origin: WorkerResponseOrigin::Refresh,
+                    outcome,
+                }) {
+                    break;
+                }
+            }
             WorkerRequest::Barrier { revision } => {
                 let current = snapshot.take();
                 let io = Arc::clone(&io);
@@ -516,14 +759,11 @@ async fn run_worker(
                         worker_failure(&format!("Settings barrier failed: {error}"))
                     }
                 };
-                if responses
-                    .send(WorkerResponse {
-                        revision,
-                        origin: WorkerResponseOrigin::Barrier,
-                        outcome,
-                    })
-                    .is_err()
-                {
+                if !responses.send(WorkerResponse {
+                    revision,
+                    origin: WorkerResponseOrigin::Barrier,
+                    outcome,
+                }) {
                     break;
                 }
             }
@@ -581,18 +821,24 @@ async fn run_worker(
                         worker_failure(&format!("Settings worker failed: {error}"))
                     }
                 };
-                if responses
-                    .send(WorkerResponse {
-                        revision,
-                        origin: WorkerResponseOrigin::Save,
-                        outcome,
-                    })
-                    .is_err()
-                {
+                if !responses.send(WorkerResponse {
+                    revision,
+                    origin: WorkerResponseOrigin::Save,
+                    outcome,
+                }) {
                     break;
                 }
             }
         }
+    }
+}
+
+impl Drop for SettingsIoCoordinator {
+    fn drop(&mut self) {
+        RESPONSE_TARGETS.with(|targets| {
+            targets.borrow_mut().remove(&self.response_target_id);
+        });
+        self.response_wake_pending.store(false, Ordering::Release);
     }
 }
 
@@ -740,6 +986,126 @@ mod tests {
         assert_eq!(window.get_settings_tab(), SettingsTab::Audio);
 
         release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn response_wake_reservation_coalesces_until_dispatch_and_drop_is_safe() {
+        let pending = AtomicBool::new(false);
+        assert!(reserve_response_wake(&pending));
+        assert!(!reserve_response_wake(&pending));
+        pending.store(false, Ordering::Release);
+        assert!(reserve_response_wake(&pending));
+
+        let window = test_window();
+        let cache = SettingsCache::with_observed(&window, AppSettings::default());
+        let completed = Arc::new(AtomicUsize::new(0));
+        let completed_for_save = Arc::clone(&completed);
+        let coordinator = SettingsIoCoordinator::with_functions(
+            cache,
+            || Ok(AppSettings::default()),
+            || Ok(AppSettings::default()),
+            move |settings| {
+                completed_for_save.fetch_add(1, Ordering::SeqCst);
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result: Ok(()),
+                }
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        let target_id = coordinator.response_target_id;
+        coordinator.submit(SettingsSaveLane::General, |_| {}, |_, _| {});
+        coordinator.submit(SettingsSaveLane::General, |_| {}, |_, _| {});
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while completed.load(Ordering::SeqCst) < 2 {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(RESPONSE_TARGETS.with(|targets| targets.borrow().contains_key(&target_id)));
+
+        drop(coordinator);
+        assert!(!RESPONSE_TARGETS.with(|targets| targets.borrow().contains_key(&target_id)));
+    }
+
+    #[test]
+    fn startup_refresh_populates_cache_and_reports_failure_without_blocking() {
+        let window = test_window();
+        let expected = AppSettings {
+            locale: "fr".into(),
+            ..AppSettings::default()
+        };
+        let cache = SettingsCache::new(&window);
+        let coordinator = SettingsIoCoordinator::with_functions(
+            cache.clone(),
+            {
+                let expected = expected.clone();
+                move || Ok(expected.clone())
+            },
+            || unreachable!("startup refresh must not consult ServiceManagement"),
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        let observed = Rc::new(RefCell::new(None));
+        let observed_for_callback = observed.clone();
+        coordinator.load_startup_snapshot(move |result| {
+            *observed_for_callback.borrow_mut() = Some(result);
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while observed.borrow().is_none() {
+            coordinator.drain_for_test();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let SettingsSnapshotResult::Observed(settings) =
+            observed.borrow_mut().take().expect("startup result")
+        else {
+            panic!("startup snapshot should be observed")
+        };
+        assert_eq!(settings.locale, "fr");
+        assert_eq!(cache.known_snapshot().unwrap().locale, "fr");
+
+        let failed_cache = SettingsCache::new(&window);
+        let failed = SettingsIoCoordinator::with_functions(
+            failed_cache.clone(),
+            || Err("injected startup read failure".into()),
+            || unreachable!("startup refresh must not consult ServiceManagement"),
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        let unavailable = Rc::new(Cell::new(false));
+        let unavailable_for_callback = unavailable.clone();
+        failed.load_startup_snapshot(move |result| match result {
+            SettingsSnapshotResult::Observed(_) => panic!("unexpected startup snapshot"),
+            SettingsSnapshotResult::Unavailable => unavailable_for_callback.set(true),
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !unavailable.get() {
+            failed.drain_for_test();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(failed_cache.known_snapshot().is_none());
+        assert!(
+            window
+                .get_settings_save_error()
+                .contains("injected startup read failure")
+        );
     }
 
     #[test]
@@ -965,38 +1331,64 @@ mod tests {
     }
 
     #[test]
-    fn late_core_load_still_starts_dependents_from_the_latest_snapshot() {
+    fn open_refresh_waits_for_a_preexisting_save_and_preserves_it_next_time() {
         let window = test_window();
-        let cache = SettingsCache::with_observed(&window, AppSettings::default());
-        let coordinator = SettingsIoCoordinator::with_io(cache, immediate_io());
-        let token = coordinator.begin_open();
-        let revision_before_load = coordinator.current_revision();
+        let durable = Arc::new(Mutex::new(AppSettings::default()));
+        let cache = SettingsCache::with_observed(&window, durable.lock().unwrap().clone());
         let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
         let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
-        let core_load = std::thread::spawn(move || {
-            started_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-            AppSettings::default()
-        });
-        started_rx.recv().unwrap();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let general_load_state = Arc::clone(&durable);
+        let effective_load_state = Arc::clone(&durable);
+        let general_save_state = Arc::clone(&durable);
+        let autostart_save_state = Arc::clone(&durable);
+        let save_count = Arc::new(AtomicUsize::new(0));
+        let general_save_count = Arc::clone(&save_count);
+        let coordinator = SettingsIoCoordinator::with_io(
+            cache,
+            SettingsWorkerIo {
+                load_general: Arc::new(move || Ok(general_load_state.lock().unwrap().clone())),
+                load_autostart: Arc::new(move || Ok(effective_load_state.lock().unwrap().clone())),
+                save_general: Arc::new(move |settings| {
+                    if general_save_count.fetch_add(1, Ordering::SeqCst) == 0 {
+                        started_tx.send(()).unwrap();
+                        release_rx.lock().unwrap().recv().unwrap();
+                    }
+                    *general_save_state.lock().unwrap() = settings.clone();
+                    SettingsSaveOutcome::Observed {
+                        settings: Box::new(settings),
+                        result: Ok(()),
+                    }
+                }),
+                save_autostart: Arc::new(move |settings| {
+                    *autostart_save_state.lock().unwrap() = settings.clone();
+                    SettingsSaveOutcome::Observed {
+                        settings: Box::new(settings),
+                        result: Ok(()),
+                    }
+                }),
+            },
+        );
 
         coordinator.submit(
             SettingsSaveLane::General,
             |settings| settings.locale = "fr".into(),
             |_, _| {},
         );
-        release_tx.send(()).unwrap();
-        let stale_core = core_load.join().unwrap();
-        assert!(!coordinator.seed_if_current(token, revision_before_load, stale_core));
+        started_rx.recv().unwrap();
+        let token = coordinator.begin_open();
 
         let dependent_started = Rc::new(Cell::new(false));
         let dependent_settings = Rc::new(RefCell::new(None));
         let started = dependent_started.clone();
         let observed = dependent_settings.clone();
-        coordinator.after_current_snapshot(token, move |settings| {
+        coordinator.load_effective_snapshot(token, move |settings| {
             started.set(true);
             *observed.borrow_mut() = Some(settings);
         });
+        coordinator.drain_for_test();
+        assert!(!dependent_started.get());
+        release_tx.send(()).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
         while !dependent_started.get() {
             coordinator.drain_for_test();
@@ -1010,6 +1402,63 @@ mod tests {
                 .expect("latest settings snapshot")
                 .locale,
             "fr"
+        );
+
+        coordinator.submit(
+            SettingsSaveLane::General,
+            |settings| settings.paste_delay_ms = 225,
+            |_, _| {},
+        );
+        while !coordinator.is_idle_for_test() {
+            coordinator.drain_for_test();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let durable = durable.lock().unwrap();
+        assert_eq!(durable.locale, "fr");
+        assert_eq!(durable.paste_delay_ms, 225);
+    }
+
+    #[test]
+    fn failed_effective_refresh_keeps_the_post_save_snapshot_and_opens() {
+        let window = test_window();
+        let initial = AppSettings::default();
+        let cache = SettingsCache::with_observed(&window, initial.clone());
+        let coordinator = SettingsIoCoordinator::with_functions(
+            cache,
+            move || Ok(initial.clone()),
+            || Err("injected ServiceManagement read failure".into()),
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        coordinator.submit(
+            SettingsSaveLane::General,
+            |settings| settings.locale = "fr".into(),
+            |_, _| {},
+        );
+        let token = coordinator.begin_open();
+        let opened = Rc::new(RefCell::new(None));
+        let published = opened.clone();
+        coordinator.load_effective_snapshot(token, move |settings| {
+            *published.borrow_mut() = Some(settings);
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while opened.borrow().is_none() {
+            coordinator.drain_for_test();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(opened.borrow().as_ref().unwrap().locale, "fr");
+        assert!(
+            window
+                .get_settings_save_error()
+                .contains("injected ServiceManagement read failure")
         );
     }
 

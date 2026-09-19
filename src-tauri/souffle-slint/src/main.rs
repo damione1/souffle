@@ -38,7 +38,7 @@ use souffle_lib::progress::ProgressChannel;
 use souffle_lib::settings::{AppSettings, ShortcutSettings};
 use souffle_lib::state::AppState;
 use souffle_lib::transcript::{MeetingCalendarContext, MeetingParticipant, MeetingTranscript};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
     Arc,
@@ -144,6 +144,87 @@ fn settle_onboarding_completion(
             retained(settings_save_failure_message(outcome))
         }
     }
+}
+
+fn should_clear_committed_summary_add_draft(
+    submitted_revision: u64,
+    latest_revision: u64,
+    submitted: &str,
+    current: &str,
+) -> bool {
+    submitted_revision == latest_revision && submitted == current
+}
+
+fn clear_committed_summary_add_draft(
+    window: &MainWindow,
+    submitted_revision: u64,
+    latest_revision: u64,
+    submitted: &str,
+) {
+    if should_clear_committed_summary_add_draft(
+        submitted_revision,
+        latest_revision,
+        submitted,
+        window.get_settings_new_summary_template_draft().as_str(),
+    ) {
+        window.set_settings_new_summary_template_draft("".into());
+    }
+}
+
+fn prime_summary_template_editor(
+    window: &MainWindow,
+    settings: &AppSettings,
+    editing: &Rc<RefCell<String>>,
+    drafts: &Rc<settings_drafts::SettingsDraftController>,
+) {
+    let current = editing.borrow().clone();
+    let editing_id = settings_drafts::summary_editing_id(&current, settings);
+    *editing.borrow_mut() = editing_id.clone();
+    ia_ui::populate_summary_templates(window, settings, &editing_id);
+    drafts.reapply_summary_template(window, &editing_id);
+}
+
+fn wire_summary_template_edit_callbacks(
+    window: &MainWindow,
+    settings_state: SettingsCache,
+    editing: Rc<RefCell<String>>,
+    drafts: Rc<settings_drafts::SettingsDraftController>,
+) {
+    let weak = window.as_weak();
+    let settings_state_for_name = settings_state;
+    let editing_for_name = editing.clone();
+    let drafts_for_name = drafts.clone();
+    window.on_settings_summary_template_name_changed(move |text| {
+        let editing_id = editing_for_name.borrow().clone();
+        if editing_id.is_empty() {
+            return;
+        }
+        let weak = weak.clone();
+        let settings_state = settings_state_for_name.clone();
+        drafts_for_name.edit_summary_name(editing_id.clone(), text.to_string(), move |result| {
+            match result {
+                settings_drafts::DraftFlushResult::Committed => {
+                    if let Some(window) = weak.upgrade() {
+                        let guard = settings_state.borrow();
+                        if let Some(settings) = guard.as_ref() {
+                            ia_ui::populate_summary_templates(&window, settings, &editing_id);
+                        }
+                    }
+                }
+                settings_drafts::DraftFlushResult::NothingPending
+                | settings_drafts::DraftFlushResult::RetainedAfterFailure => {}
+            }
+        });
+    });
+
+    let editing_for_prompt = editing;
+    let drafts_for_prompt = drafts;
+    window.on_settings_summary_template_prompt_changed(move |text| {
+        let editing_id = editing_for_prompt.borrow().clone();
+        if !editing_id.is_empty() {
+            drafts_for_prompt.edit_summary_prompt(editing_id, text.to_string());
+        }
+    });
 }
 
 /// Re-fetches dictations + meetings from the real database and rebuilds the
@@ -1521,6 +1602,21 @@ impl Default for OnboardingState {
     }
 }
 
+fn project_startup_settings(
+    window: &MainWindow,
+    settings: &AppSettings,
+    onboarding: &Rc<RefCell<OnboardingState>>,
+) -> bool {
+    let dark = settings_ui::resolve_dark(settings.theme);
+    window.global::<Theme>().set_dark(dark);
+    window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
+    window.set_onboarding_locale(settings.locale.as_str().into());
+    let mut onboarding = onboarding.borrow_mut();
+    onboarding.selected_device = settings.audio_device.clone().unwrap_or_default();
+    onboarding.auto_paste = settings.auto_paste;
+    dark
+}
+
 fn device_option_label(device: &AudioInputDevice) -> String {
     if device.is_default {
         format!("{} (par défaut)", device.name)
@@ -2321,8 +2417,6 @@ fn onboarding_model_download_channel(
 fn wire_update_dialogs(
     window: &MainWindow,
     tauri_handle: AppHandle,
-    onboarding_open: bool,
-    startup_settings: Option<AppSettings>,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
 ) {
     let settings_io_for_dismiss = settings_io.clone();
@@ -2414,16 +2508,21 @@ fn wire_update_dialogs(
             let _ = souffle_lib::commands::open_release_page(url.to_string());
         }
     });
+}
 
+fn apply_startup_update_dialogs(
+    window: &MainWindow,
+    tauri_handle: AppHandle,
+    onboarding_open: bool,
+    settings: AppSettings,
+    settings_io: Rc<settings_io::SettingsIoCoordinator>,
+) {
     if onboarding_open {
         return;
     }
 
     let handle = tauri_handle;
     let weak = window.as_weak();
-    let Some(settings) = startup_settings else {
-        return;
-    };
     let app_version = souffle_lib::commands::get_app_version();
     let current_version = app_version.version.clone();
     let setup_done = onboarding_flags::read_setup_flags().setup_done;
@@ -3030,6 +3129,7 @@ fn wire_callbacks(
     // mirrors `editingTemplateId` in controller.svelte.ts (local UI state,
     // not part of `AppSettings`).
     let summary_template_editing: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+    let summary_template_add_revision = Rc::new(Cell::new(0_u64));
     // Cached so a model switch resolves the clicked label without re-querying
     // the catalog (a pure static list, but avoids an extra command round trip
     // on every pick).
@@ -3060,11 +3160,16 @@ fn wire_callbacks(
             return;
         };
         let token = settings_io_for_open.begin_open();
-        let revision_at_start = settings_io_for_open.current_revision();
         if let Some(settings) = settings_state_for_open.known_snapshot() {
             settings_ui::populate(&window, &settings);
             data_ui::populate(&window, &settings);
             settings_values_for_open.observe_loaded(&settings);
+            prime_summary_template_editor(
+                &window,
+                &settings,
+                &summary_template_editing_for_open,
+                &settings_drafts_for_open,
+            );
         }
         window.set_settings_open(true);
         refresh_settings_log_tail(&window, settings_io_for_open.clone());
@@ -3074,10 +3179,6 @@ fn wire_callbacks(
         ));
         drop(window);
 
-        let core_handle = handle.clone();
-        let core_worker = souffle_lib::async_runtime::spawn_blocking(move || {
-            souffle_lib::commands::get_settings(core_handle)
-        });
         let core_weak = weak.clone();
         let core_handle = handle.clone();
         let core_io = settings_io_for_open.clone();
@@ -3121,25 +3222,7 @@ fn wire_callbacks(
                 finish_core_io.clone(),
             );
         });
-        slint::spawn_local(async move {
-            let settings = match core_worker.await {
-                Ok(Ok(settings)) => settings,
-                Ok(Err(error)) => {
-                    eprintln!("Failed to load Settings core: {error}");
-                    return;
-                }
-                Err(error) => {
-                    eprintln!("Failed to join Settings core worker: {error}");
-                    return;
-                }
-            };
-            if core_io.seed_if_current(token, revision_at_start, settings.clone()) {
-                finish_core(settings);
-            } else if core_io.accepts_load(token) {
-                core_io.after_current_snapshot(token, move |settings| finish_core(settings));
-            }
-        })
-        .expect("slint event loop not running");
+        core_io.load_effective_snapshot(token, move |settings| finish_core(settings));
 
         let stats_handle = handle.clone();
         spawn_settings_load_stage(
@@ -4389,45 +4472,18 @@ fn wire_callbacks(
         });
     });
 
-    let weak = window.as_weak();
-    let settings_state_for_template_name = settings_state.clone();
-    let summary_template_editing_for_name = summary_template_editing.clone();
-    let settings_drafts_for_template_name = settings_drafts.clone();
-    window.on_settings_summary_template_name_changed(move |text| {
-        let editing_id = summary_template_editing_for_name.borrow().clone();
-        let weak = weak.clone();
-        let settings_state = settings_state_for_template_name.clone();
-        settings_drafts_for_template_name.edit_summary_name(
-            editing_id.clone(),
-            text.to_string(),
-            move |result| match result {
-                settings_drafts::DraftFlushResult::Committed => {
-                    if let Some(window) = weak.upgrade() {
-                        let guard = settings_state.borrow();
-                        if let Some(settings) = guard.as_ref() {
-                            ia_ui::populate_summary_templates(&window, settings, &editing_id);
-                        }
-                    }
-                }
-                settings_drafts::DraftFlushResult::NothingPending
-                | settings_drafts::DraftFlushResult::RetainedAfterFailure => {}
-            },
-        );
-    });
-
-    let summary_template_editing_for_prompt = summary_template_editing.clone();
-    let settings_drafts_for_template_prompt = settings_drafts.clone();
-    window.on_settings_summary_template_prompt_changed(move |text| {
-        let editing_id = summary_template_editing_for_prompt.borrow().clone();
-        if !editing_id.is_empty() {
-            settings_drafts_for_template_prompt.edit_summary_prompt(editing_id, text.to_string());
-        }
-    });
+    wire_summary_template_edit_callbacks(
+        window,
+        settings_state.clone(),
+        summary_template_editing.clone(),
+        settings_drafts.clone(),
+    );
 
     let weak = window.as_weak();
     let settings_io_for_template_add = settings_io.clone();
     let settings_state_for_template_add = settings_state.clone();
     let summary_template_editing_for_add = summary_template_editing.clone();
+    let summary_template_add_revision_for_add = summary_template_add_revision.clone();
     window.on_settings_summary_template_add_requested(move |name| {
         let draft = name.to_string();
         let persisted_name = draft.trim().to_string();
@@ -4439,6 +4495,10 @@ fn wire_callbacks(
         let weak = weak.clone();
         let state = settings_state_for_template_add.clone();
         let editing = summary_template_editing_for_add.clone();
+        let submitted_revision = summary_template_add_revision_for_add.get().wrapping_add(1);
+        summary_template_add_revision_for_add.set(submitted_revision);
+        let latest_revision = summary_template_add_revision_for_add.clone();
+        let submitted_draft = draft.clone();
         save_settings_field_then(
             &settings_io_for_template_add,
             souffle_lib::commands::SettingsSaveLane::General,
@@ -4461,10 +4521,16 @@ fn wire_callbacks(
             {
                 settings_drafts::SettingsSubmission::Committed => {
                     *editing.borrow_mut() = new_id_for_editing.clone();
-                    if order.publishes_to_open_window()
-                        && let Some(window) = weak.upgrade()
-                    {
-                        window.set_settings_new_summary_template_draft("".into());
+                    if let Some(window) = weak.upgrade() {
+                        clear_committed_summary_add_draft(
+                            &window,
+                            submitted_revision,
+                            latest_revision.get(),
+                            &submitted_draft,
+                        );
+                        if !order.publishes_to_open_window() {
+                            return;
+                        }
                         let guard = state.borrow();
                         if let Some(settings) = guard.as_ref() {
                             ia_ui::populate_summary_templates(
@@ -5098,27 +5164,12 @@ fn main() {
     }
     window.set_settings_app_version(souffle_lib::commands::get_app_version().version.into());
 
-    // Resolve the persisted theme (dark/light/system) against the real
-    // palette at launch - `Theme.dark` (theme.slint) defaults to `true`
-    // otherwise, which would always render dark regardless of what's saved.
-    // `System` resolves against the actual macOS appearance
-    // (`native::appearance::is_system_dark`), not a browser media query.
-    // Startup needs only the durable snapshot for theme/header/cache seeding.
-    // Do not consult ServiceManagement on Slint's main thread; the typed
-    // Autostart lane and the async Settings-open refresh observe its effective
-    // state on the serialized worker.
-    let startup_settings = souffle_lib::commands::get_stored_settings(handle.clone()).ok();
-    let settings_state = match startup_settings.clone() {
-        Some(settings) => SettingsCache::with_observed(&window, settings),
-        None => SettingsCache::new(&window),
-    };
+    // Startup Settings are loaded through the same serialized worker as every
+    // later save. Creating the Slint item tree never performs a database or
+    // ServiceManagement read on the UI thread.
+    let settings_state = SettingsCache::new(&window);
     let settings_io =
         settings_io::SettingsIoCoordinator::new(handle.clone(), settings_state.clone());
-    if let Some(settings) = startup_settings.as_ref() {
-        let dark = settings_ui::resolve_dark(settings.theme);
-        window.global::<Theme>().set_dark(dark);
-        souffle_lib::native::appearance::apply_resolved(dark);
-    }
 
     // AppHeader's status pill shows the model label ("STT 1B FR/EN") next
     // to "Prêt", matching StatusChip.svelte - needs `settings-selected-
@@ -5137,36 +5188,47 @@ fn main() {
     }
 
     refresh_timeline(&window, &handle);
-    if let Some(settings) = startup_settings.as_ref() {
-        window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
-        settings_ui::populate_calendars(
-            &window,
-            &[],
-            &[],
-            souffle_lib::calendar::authorization_state(),
-        );
-    }
-    let (onboarding_open, onboarding_state) = wire_onboarding_callbacks(
-        &window,
-        handle.clone(),
-        startup_settings.as_ref(),
-        settings_io.clone(),
-    );
-    wire_update_dialogs(
-        &window,
-        handle.clone(),
-        onboarding_open,
-        startup_settings,
-        settings_io.clone(),
-    );
+    let (onboarding_open, onboarding_state) =
+        wire_onboarding_callbacks(&window, handle.clone(), None, settings_io.clone());
+    wire_update_dialogs(&window, handle.clone(), settings_io.clone());
     wire_callbacks(
         &window,
         handle.clone(),
-        onboarding_state,
+        onboarding_state.clone(),
         settings_state,
-        settings_io,
+        settings_io.clone(),
     );
+    let startup_app_handle = handle.clone();
     initialize_model_at_startup(&window, handle, onboarding_open);
+
+    let weak = window.as_weak();
+    let startup_io = settings_io.clone();
+    settings_io.load_startup_snapshot(move |snapshot| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        match snapshot {
+            settings_io::SettingsSnapshotResult::Observed(settings) => {
+                let dark = project_startup_settings(&window, &settings, &onboarding_state);
+                souffle_lib::native::appearance::apply_resolved(dark);
+                let onboarding_step = window.get_onboarding_step();
+                if onboarding_step == "microphone" || onboarding_step == "shortcut" {
+                    show_onboarding_step(&window, &startup_app_handle, &onboarding_state);
+                }
+                apply_startup_update_dialogs(
+                    &window,
+                    startup_app_handle.clone(),
+                    onboarding_open,
+                    *settings,
+                    startup_io.clone(),
+                );
+            }
+            settings_io::SettingsSnapshotResult::Unavailable => {
+                eprintln!("Startup Settings snapshot is unavailable; using UI defaults")
+            }
+        }
+        window.show().expect("failed to show Slint window");
+    });
 
     // Capture publishes its normalized RMS at ~15 Hz. Polling the lock-free
     // value on Slint's event loop keeps rendering single-threaded while the
@@ -5183,20 +5245,44 @@ fn main() {
         },
     );
 
-    window.run().expect("event loop failed");
+    // The first window is deliberately shown only after the async startup
+    // snapshot is projected, and closing it hides rather than destroys it.
+    // Keep the native tray/shortcut process alive across both intervals.
+    slint::run_event_loop_until_quit().expect("event loop failed");
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        DictationEndIntent, DictationTextBuffers, DictationTranscriptDisposition,
-        dictation_transcript_disposition, merge_recovery_text, reset_live_buffers,
-        settle_onboarding_completion,
+        DictationEndIntent, DictationTextBuffers, DictationTranscriptDisposition, MainWindow,
+        OnboardingState, SettingsCache, Theme, clear_committed_summary_add_draft,
+        dictation_transcript_disposition, merge_recovery_text, prime_summary_template_editor,
+        project_startup_settings, reset_live_buffers, settle_onboarding_completion,
+        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
     };
+    use crate::settings_drafts::SettingsDraftController;
+    use crate::settings_io::SettingsIoCoordinator;
+    use slint::ComponentHandle;
+    use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
     use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
     use souffle_lib::settings::AppSettings;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    struct TestPlatform;
+
+    impl Platform for TestPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(MinimalSoftwareWindow::new(Default::default()))
+        }
+    }
+
+    fn test_window() -> MainWindow {
+        let _ = slint::platform::set_platform(Box::new(TestPlatform));
+        MainWindow::new().unwrap()
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -5292,5 +5378,194 @@ mod tests {
         );
         assert!(committed.get());
         assert!(!retained.get());
+    }
+
+    #[test]
+    fn committed_summary_add_clears_only_the_matching_latest_draft() {
+        assert!(should_clear_committed_summary_add_draft(
+            7, 7, "Team", "Team"
+        ));
+        assert!(!should_clear_committed_summary_add_draft(
+            7, 8, "Team", "Team"
+        ));
+        assert!(!should_clear_committed_summary_add_draft(
+            7,
+            7,
+            "Team",
+            "Newer draft"
+        ));
+    }
+
+    #[test]
+    fn startup_projection_uses_the_observed_snapshot_before_first_show() {
+        let window = test_window();
+        window.global::<Theme>().set_dark(true);
+        let onboarding = Rc::new(RefCell::new(OnboardingState::default()));
+        let settings = AppSettings {
+            theme: souffle_lib::settings::Theme::Light,
+            locale: "fr".into(),
+            audio_device: Some("mic-1".into()),
+            auto_paste: true,
+            calendar_integration_enabled: true,
+            ..AppSettings::default()
+        };
+
+        let dark = project_startup_settings(&window, &settings, &onboarding);
+
+        assert!(!dark);
+        assert!(!window.global::<Theme>().get_dark());
+        assert!(window.get_settings_calendar_enabled());
+        assert_eq!(window.get_onboarding_locale().as_str(), "fr");
+        let onboarding = onboarding.borrow();
+        assert_eq!(onboarding.selected_device, "mic-1");
+        assert!(onboarding.auto_paste);
+    }
+
+    #[test]
+    fn summary_editor_callbacks_accept_drafts_while_core_refresh_is_blocked() {
+        let window = test_window();
+        let initial = AppSettings::default();
+        let template_id = initial.default_summary_template_id.clone();
+        let durable = Arc::new(Mutex::new(initial.clone()));
+        let cache = SettingsCache::with_observed(&window, initial.clone());
+        let (refresh_started_tx, refresh_started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_refresh_tx, release_refresh_rx) = std::sync::mpsc::sync_channel(1);
+        let release_refresh_rx = Arc::new(Mutex::new(release_refresh_rx));
+        let load_general_state = Arc::clone(&durable);
+        let load_effective_state = Arc::clone(&durable);
+        let save_state = Arc::clone(&durable);
+        let io = SettingsIoCoordinator::with_functions(
+            cache.clone(),
+            move || Ok(load_general_state.lock().unwrap().clone()),
+            move || {
+                refresh_started_tx.send(()).unwrap();
+                release_refresh_rx.lock().unwrap().recv().unwrap();
+                Ok(load_effective_state.lock().unwrap().clone())
+            },
+            move |settings| {
+                *save_state.lock().unwrap() = settings.clone();
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result: Ok(()),
+                }
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        let drafts = SettingsDraftController::new(&window, io.clone());
+        let editing = Rc::new(RefCell::new(String::new()));
+        prime_summary_template_editor(&window, &initial, &editing, &drafts);
+        wire_summary_template_edit_callbacks(&window, cache, editing.clone(), drafts);
+
+        let token = io.begin_open();
+        io.load_effective_snapshot(token, |_| {});
+        refresh_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("controlled core refresh started");
+        assert_eq!(editing.borrow().as_str(), template_id);
+
+        window.invoke_settings_summary_template_prompt_changed("Prompt before core".into());
+        window.invoke_settings_summary_template_name_changed("Name before core".into());
+        release_refresh_tx.send(()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !io.is_idle_for_test() {
+            io.drain_for_test();
+            assert!(Instant::now() < deadline, "draft save did not settle");
+            std::thread::yield_now();
+        }
+        let durable = durable.lock().unwrap();
+        let template = durable
+            .summary_templates
+            .iter()
+            .find(|template| template.id == template_id)
+            .expect("edited template remains durable");
+        assert_eq!(template.name, "Name before core");
+        assert_eq!(template.prompt, "Prompt before core");
+    }
+
+    fn assert_add_draft_settlement_after_close(newer_draft: Option<&str>) {
+        let window = test_window();
+        let initial = AppSettings::default();
+        let cache = SettingsCache::with_observed(&window, initial.clone());
+        let (save_started_tx, save_started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_save_tx, release_save_rx) = std::sync::mpsc::sync_channel(1);
+        let release_save_rx = Arc::new(Mutex::new(release_save_rx));
+        let io = SettingsIoCoordinator::with_functions(
+            cache,
+            {
+                let initial = initial.clone();
+                move || Ok(initial.clone())
+            },
+            {
+                let initial = initial.clone();
+                move || Ok(initial.clone())
+            },
+            move |settings| {
+                save_started_tx.send(()).unwrap();
+                release_save_rx.lock().unwrap().recv().unwrap();
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result: Ok(()),
+                }
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        io.begin_open();
+        window.set_settings_new_summary_template_draft("Team".into());
+        let latest_revision = Rc::new(Cell::new(1_u64));
+        let weak = window.as_weak();
+        let latest_for_completion = latest_revision.clone();
+        io.submit(
+            souffle_lib::commands::SettingsSaveLane::General,
+            |_| {},
+            move |_order, outcome| {
+                if super::settings_values::save_outcome_commit_status(outcome)
+                    == super::settings_values::SettingsCommitStatus::Committed
+                    && let Some(window) = weak.upgrade()
+                {
+                    clear_committed_summary_add_draft(
+                        &window,
+                        1,
+                        latest_for_completion.get(),
+                        "Team",
+                    );
+                }
+            },
+        );
+        save_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("controlled template add started");
+        let close_token = io.close();
+        io.barrier(|_, _| {});
+        if let Some(newer) = newer_draft {
+            latest_revision.set(2);
+            window.set_settings_new_summary_template_draft(newer.into());
+        }
+        release_save_tx.send(()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !io.is_idle_for_test() {
+            io.drain_for_test();
+            assert!(Instant::now() < deadline, "close barrier did not settle");
+            std::thread::yield_now();
+        }
+        assert!(io.accepts_close(close_token));
+        io.begin_open();
+        assert_eq!(
+            window.get_settings_new_summary_template_draft().as_str(),
+            newer_draft.unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn committed_add_clears_after_close_but_preserves_a_newer_draft() {
+        assert_add_draft_settlement_after_close(None);
+        assert_add_draft_settlement_after_close(Some("Newer draft"));
     }
 }
