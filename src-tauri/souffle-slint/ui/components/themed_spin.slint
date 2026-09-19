@@ -30,6 +30,14 @@ export component ThemedSpinBox inherits Rectangle {
     accessible-value-minimum: root.minimum;
     accessible-value-maximum: root.maximum;
     accessible-value-step: root.step;
+    accessible-read-only: !root.enabled;
+    accessible-action-set-value(v) => {
+        if root.enabled && v.is-float() {
+            root.publish(round(v.to-float()));
+        }
+    }
+    accessible-action-increment => { root.increment(); }
+    accessible-action-decrement => { root.decrement(); }
 
     forward-focus: key-focus;
 
@@ -39,11 +47,19 @@ export component ThemedSpinBox inherits Rectangle {
                 return reject;
             }
             if event.text == Key.UpArrow {
-                root.edited(min(root.maximum, root.value + root.step));
+                root.increment();
                 return accept;
             }
             if event.text == Key.DownArrow {
-                root.edited(max(root.minimum, root.value - root.step));
+                root.decrement();
+                return accept;
+            }
+            if event.text == Key.Home {
+                root.publish(root.minimum);
+                return accept;
+            }
+            if event.text == Key.End {
+                root.publish(root.maximum);
                 return accept;
             }
             return reject;
@@ -69,7 +85,7 @@ export component ThemedSpinBox inherits Rectangle {
         enabled: root.enabled && root.value < root.maximum;
         clicked => {
             key-focus.focus();
-            root.edited(min(root.maximum, root.value + root.step));
+            root.increment();
         }
     }
     LucideIcon {
@@ -88,7 +104,7 @@ export component ThemedSpinBox inherits Rectangle {
         enabled: root.enabled && root.value > root.minimum;
         clicked => {
             key-focus.focus();
-            root.edited(max(root.minimum, root.value - root.step));
+            root.decrement();
         }
     }
     LucideIcon {
@@ -97,5 +113,23 @@ export component ThemedSpinBox inherits Rectangle {
         size: 12px;
         x: parent.width - 18px;
         y: 20px;
+    }
+
+    function publish(candidate: int) {
+        if !root.enabled {
+            return;
+        }
+        let bounded = max(root.minimum, min(root.maximum, candidate));
+        if bounded != root.value {
+            root.edited(bounded);
+        }
+    }
+
+    function increment() {
+        root.publish(root.value + root.step);
+    }
+
+    function decrement() {
+        root.publish(root.value - root.step);
     }
 }
