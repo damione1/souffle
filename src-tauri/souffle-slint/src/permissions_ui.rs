@@ -45,6 +45,7 @@ impl PollLifecycle {
         }
     }
 
+    #[cfg(test)]
     fn timer_count(&self) -> usize {
         usize::from(self.active)
     }
@@ -237,10 +238,8 @@ impl PermissionController {
             };
             controller.state.borrow_mut().busy[index] = false;
             controller.apply_observation(revision, observation);
-            if let Err(error) = request {
-                if let Some(window) = controller.window.upgrade() {
-                    window.set_onboarding_permissions_error(error.into());
-                }
+            if let (Err(error), Some(window)) = (request, controller.window.upgrade()) {
+                window.set_onboarding_permissions_error(error.into());
             }
         })
         .expect("slint event loop not running");

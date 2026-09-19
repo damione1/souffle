@@ -1916,6 +1916,7 @@ async fn finalize_dictation(
 /// `wire_callbacks`'s per-field caches, this state is only ever touched
 /// while the wizard is open, so bundling it doesn't create the same
 /// cross-feature borrow-conflict risk.
+#[derive(Default)]
 struct OnboardingState {
     steps: Vec<&'static str>,
     step_index: usize,
@@ -1927,23 +1928,6 @@ struct OnboardingState {
     toggle_shortcut: String,
     pending_modifier: Option<String>,
     auto_paste: bool,
-}
-
-impl Default for OnboardingState {
-    fn default() -> Self {
-        Self {
-            steps: Vec::new(),
-            step_index: 0,
-            recovery_only: false,
-            devices: Vec::new(),
-            selected_device: String::new(),
-            model_options: Vec::new(),
-            selected_model_index: None,
-            toggle_shortcut: String::new(),
-            pending_modifier: None,
-            auto_paste: false,
-        }
-    }
 }
 
 fn project_startup_settings(
