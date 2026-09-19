@@ -273,9 +273,10 @@ pub fn contains_summary_template_id(templates: &[SummaryTemplate], id: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        compatible_ollama_models, contains_dictation_polish_id, contains_summary_model_id,
-        contains_summary_template_id,
+        SlintAppleReason, apple_unavailable_reason_to_slint, compatible_ollama_models,
+        contains_dictation_polish_id, contains_summary_model_id, contains_summary_template_id,
     };
+    use souffle_lib::apple_intelligence::AppleIntelligenceUnavailableReason;
     use souffle_lib::settings::{DictationPolishTemplate, SummaryTemplate};
     use souffle_lib::summary::{SummaryModelDescriptor, SummaryProviderKind};
 
@@ -362,11 +363,6 @@ mod tests {
         assert!(contains_summary_template_id(&summaries, "summary-a"));
         assert!(contains_summary_template_id(&summaries, "summary-b"));
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn apple_reason_conversion_covers_every_variant() {
