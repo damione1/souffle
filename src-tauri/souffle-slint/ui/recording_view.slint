@@ -45,7 +45,6 @@ export component RecordingView inherits Rectangle {
         padding-top: 26px;
         padding-bottom: 34px;
         spacing: 18px;
-        alignment: start;
 
         HorizontalLayout {
             height: 38px;
@@ -352,7 +351,7 @@ export component RecordingView inherits Rectangle {
                         }
                         if root.live-me-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me): Text {
                             width: parent.width;
-                            text: root.live-me-text + (root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me ? " " + root.live-tentative : "");
+                            text: root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me ? (root.live-me-text != "" ? root.live-me-text + " " + root.live-tentative : root.live-tentative) : root.live-me-text;
                             font-size: 15px;
                             color: Theme.text-secondary;
                             wrap: word-wrap;
@@ -375,7 +374,7 @@ export component RecordingView inherits Rectangle {
                         }
                         if root.live-them-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them): Text {
                             width: parent.width;
-                            text: root.live-them-text + (root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them ? " " + root.live-tentative : "");
+                            text: root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them ? (root.live-them-text != "" ? root.live-them-text + " " + root.live-tentative : root.live-tentative) : root.live-them-text;
                             font-size: 15px;
                             color: Theme.text-secondary;
                             wrap: word-wrap;
