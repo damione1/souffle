@@ -252,6 +252,8 @@ const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
 
 const MEETING_AUTOSTOP_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 3..=60;
 const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 60..=720;
+const CALENDAR_REMINDER_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 1..=30;
+const FEEDBACK_SOUNDS_VOLUME_RANGE: std::ops::RangeInclusive<u32> = 0..=100;
 
 /// The discrete steps the settings UI offers inside the two ranges above.
 /// They live here, next to the bounds that validate them, so that narrowing a
@@ -273,6 +275,10 @@ pub struct SettingsOptions {
     pub meeting_max_duration_minutes: Vec<u32>,
     pub paste_delay_ms_min: u64,
     pub paste_delay_ms_max: u64,
+    pub calendar_reminder_minutes_min: u32,
+    pub calendar_reminder_minutes_max: u32,
+    pub feedback_sounds_volume_min: u32,
+    pub feedback_sounds_volume_max: u32,
     pub default_shortcuts: ShortcutSettings,
 }
 
@@ -285,6 +291,10 @@ impl SettingsOptions {
             meeting_max_duration_minutes: MEETING_MAX_DURATION_MINUTES_OPTIONS.to_vec(),
             paste_delay_ms_min: MIN_PASTE_DELAY_MS,
             paste_delay_ms_max: MAX_PASTE_DELAY_MS,
+            calendar_reminder_minutes_min: *CALENDAR_REMINDER_MINUTES_RANGE.start(),
+            calendar_reminder_minutes_max: *CALENDAR_REMINDER_MINUTES_RANGE.end(),
+            feedback_sounds_volume_min: *FEEDBACK_SOUNDS_VOLUME_RANGE.start(),
+            feedback_sounds_volume_max: *FEEDBACK_SOUNDS_VOLUME_RANGE.end(),
             default_shortcuts: ShortcutSettings::default(),
         }
     }
@@ -716,10 +726,10 @@ impl AppSettings {
             ids.dedup();
             ids
         };
-        if !(1..=30).contains(&normalized.calendar_reminder_minutes) {
+        if !CALENDAR_REMINDER_MINUTES_RANGE.contains(&normalized.calendar_reminder_minutes) {
             normalized.calendar_reminder_minutes = Self::default().calendar_reminder_minutes;
         }
-        if normalized.feedback_sounds_volume > 100 {
+        if !FEEDBACK_SOUNDS_VOLUME_RANGE.contains(&normalized.feedback_sounds_volume) {
             normalized.feedback_sounds_volume = Self::default().feedback_sounds_volume;
         }
 
@@ -2030,6 +2040,27 @@ mod tests {
         assert_eq!(
             settings_max.sanitized().paste_delay_ms,
             opts.paste_delay_ms_max
+        );
+    }
+
+    #[test]
+    fn volume_and_reminder_bounds_match_settings_options() {
+        let options = SettingsOptions::current();
+        assert_eq!(
+            options.calendar_reminder_minutes_min,
+            *super::CALENDAR_REMINDER_MINUTES_RANGE.start()
+        );
+        assert_eq!(
+            options.calendar_reminder_minutes_max,
+            *super::CALENDAR_REMINDER_MINUTES_RANGE.end()
+        );
+        assert_eq!(
+            options.feedback_sounds_volume_min,
+            *super::FEEDBACK_SOUNDS_VOLUME_RANGE.start()
+        );
+        assert_eq!(
+            options.feedback_sounds_volume_max,
+            *super::FEEDBACK_SOUNDS_VOLUME_RANGE.end()
         );
     }
 }

@@ -10,7 +10,7 @@ use souffle_lib::audio::AudioInputDevice;
 #[cfg(test)]
 use souffle_lib::commands::SettingsEffectFailure;
 use souffle_lib::commands::{SettingsSaveError, SettingsSaveLane, SettingsSaveOutcome};
-use souffle_lib::settings::{AppSettings, Theme as SettingsTheme};
+use souffle_lib::settings::{AppSettings, SettingsOptions, Theme as SettingsTheme};
 use souffle_lib::summary::SummaryProvidersStatus;
 
 use crate::settings_io::{SettingsIoCoordinator, SettingsResponseOrder};
@@ -376,15 +376,20 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
         });
     });
     let c = controller.clone();
+    let options = SettingsOptions::current();
+    let volume_min = options.feedback_sounds_volume_min as i32;
+    let volume_max = options.feedback_sounds_volume_max as i32;
     window.on_settings_feedback_sounds_volume_changed(move |value| {
         c.apply(SettingsSaveLane::General, move |s| {
-            s.feedback_sounds_volume = value.clamp(0, 100) as u32
+            s.feedback_sounds_volume = value.clamp(volume_min, volume_max) as u32
         });
     });
     let c = controller.clone();
+    let reminder_min = options.calendar_reminder_minutes_min as i32;
+    let reminder_max = options.calendar_reminder_minutes_max as i32;
     window.on_settings_calendar_reminder_minutes_changed(move |value| {
         c.apply(SettingsSaveLane::General, move |s| {
-            s.calendar_reminder_minutes = value.clamp(1, 30) as u32
+            s.calendar_reminder_minutes = value.clamp(reminder_min, reminder_max) as u32
         });
     });
     let c = controller.clone();
@@ -506,7 +511,9 @@ mod tests {
             ollama_available: true,
             apple_intelligence_available: false,
             apple_intelligence_is_stub: false,
-            apple_intelligence_unavailable_reason: Some("test fixture".into()),
+            apple_intelligence_unavailable_reason: Some(
+                souffle_lib::apple_intelligence::AppleIntelligenceUnavailableReason::Unknown,
+            ),
             recommended_ollama_model: "model-b".into(),
             models: vec![
                 SummaryModelDescriptor {
@@ -659,6 +666,46 @@ mod tests {
         );
         assert!(dark);
         assert_eq!(resolutions.get(), 1);
+    }
+
+    #[test]
+    fn volume_and_reminder_callbacks_clamp_to_backend_options() {
+        let harness = DatabaseHarness::new(AppSettings::default());
+        let options = SettingsOptions::current();
+
+        harness
+            .window
+            .invoke_settings_feedback_sounds_volume_changed(-1);
+        harness
+            .window
+            .invoke_settings_calendar_reminder_minutes_changed(0);
+        harness.wait_for_saves(2);
+        let lower = AppSettings::load(&harness.db).unwrap();
+        assert_eq!(
+            lower.feedback_sounds_volume,
+            options.feedback_sounds_volume_min
+        );
+        assert_eq!(
+            lower.calendar_reminder_minutes,
+            options.calendar_reminder_minutes_min
+        );
+
+        harness
+            .window
+            .invoke_settings_feedback_sounds_volume_changed(i32::MAX);
+        harness
+            .window
+            .invoke_settings_calendar_reminder_minutes_changed(i32::MAX);
+        harness.wait_for_saves(4);
+        let upper = AppSettings::load(&harness.db).unwrap();
+        assert_eq!(
+            upper.feedback_sounds_volume,
+            options.feedback_sounds_volume_max
+        );
+        assert_eq!(
+            upper.calendar_reminder_minutes,
+            options.calendar_reminder_minutes_max
+        );
     }
 
     fn assert_two_rapid_saves_use_last_observed_snapshot(first_commits: bool, expected_delay: i32) {

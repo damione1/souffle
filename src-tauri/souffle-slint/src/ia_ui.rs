@@ -2,7 +2,8 @@
 //! SummaryTemplates sections. Summary-model options keep their open-set ids
 //! alongside their labels so duplicate labels never erase identity.
 
-use crate::MainWindow;
+use crate::{AppleIntelligenceUnavailableReason as SlintAppleReason, MainWindow};
+use souffle_lib::apple_intelligence::AppleIntelligenceUnavailableReason;
 use souffle_lib::settings::{AppSettings, DictationPolishTemplate, SummaryTemplate};
 use souffle_lib::summary::{SummaryModelDescriptor, SummaryProviderKind, SummaryProvidersStatus};
 
@@ -51,9 +52,8 @@ pub fn populate_intelligence(
     window.set_settings_apple_intelligence_reason(
         status
             .apple_intelligence_unavailable_reason
-            .clone()
-            .unwrap_or_default()
-            .into(),
+            .map(apple_unavailable_reason_to_slint)
+            .unwrap_or(SlintAppleReason::Unknown),
     );
     window.set_settings_ollama_available(status.ollama_available);
     window.set_settings_summary_model_count(ollama_models.len() as i32);
@@ -108,6 +108,26 @@ fn compatible_ollama_models(models: &[SummaryModelDescriptor]) -> Vec<&SummaryMo
         .iter()
         .filter(|model| is_compatible_ollama_model(model))
         .collect()
+}
+
+pub fn apple_unavailable_reason_to_slint(
+    reason: AppleIntelligenceUnavailableReason,
+) -> SlintAppleReason {
+    match reason {
+        AppleIntelligenceUnavailableReason::DeviceNotEligible => {
+            SlintAppleReason::DeviceNotEligible
+        }
+        AppleIntelligenceUnavailableReason::AppleIntelligenceNotEnabled => {
+            SlintAppleReason::AppleIntelligenceNotEnabled
+        }
+        AppleIntelligenceUnavailableReason::ModelNotReady => SlintAppleReason::ModelNotReady,
+        AppleIntelligenceUnavailableReason::MacosTooOld => SlintAppleReason::MacosTooOld,
+        AppleIntelligenceUnavailableReason::Stub => SlintAppleReason::Stub,
+        AppleIntelligenceUnavailableReason::UnsupportedPlatform => {
+            SlintAppleReason::UnsupportedPlatform
+        }
+        AppleIntelligenceUnavailableReason::Unknown => SlintAppleReason::Unknown,
+    }
 }
 
 pub fn selected_summary_model_label(models: &[SummaryModelDescriptor], id: &str) -> String {
@@ -341,5 +361,38 @@ mod tests {
         assert!(contains_dictation_polish_id(&polish, "polish-b"));
         assert!(contains_summary_template_id(&summaries, "summary-a"));
         assert!(contains_summary_template_id(&summaries, "summary-b"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apple_reason_conversion_covers_every_variant() {
+        use AppleIntelligenceUnavailableReason as Reason;
+
+        let cases = [
+            (
+                Reason::DeviceNotEligible,
+                SlintAppleReason::DeviceNotEligible,
+            ),
+            (
+                Reason::AppleIntelligenceNotEnabled,
+                SlintAppleReason::AppleIntelligenceNotEnabled,
+            ),
+            (Reason::ModelNotReady, SlintAppleReason::ModelNotReady),
+            (Reason::MacosTooOld, SlintAppleReason::MacosTooOld),
+            (Reason::Stub, SlintAppleReason::Stub),
+            (
+                Reason::UnsupportedPlatform,
+                SlintAppleReason::UnsupportedPlatform,
+            ),
+            (Reason::Unknown, SlintAppleReason::Unknown),
+        ];
+
+        for (domain, slint) in cases {
+            assert_eq!(apple_unavailable_reason_to_slint(domain), slint);
+        }
     }
 }

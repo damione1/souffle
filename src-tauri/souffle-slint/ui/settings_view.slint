@@ -17,7 +17,7 @@ import { SnippetsSection, SnippetRow } from "components/settings/snippets_sectio
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, SettingsTab } from "types.slint";
+import { AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -44,6 +44,8 @@ export component SettingsView inherits Rectangle {
     in property <bool> pill-hidden;
     in property <bool> feedback-sounds-enabled;
     in property <int> feedback-sounds-volume;
+    in property <int> feedback-sounds-volume-min;
+    in property <int> feedback-sounds-volume-max;
     in property <string> toggle-shortcut-label;
     in property <string> ptt-shortcut-label;
     in property <bool> native-tap-warning-visible;
@@ -55,6 +57,8 @@ export component SettingsView inherits Rectangle {
     in property <AccessState> calendar-permission;
     in property <bool> calendar-autostart-enabled;
     in property <int> calendar-reminder-minutes;
+    in property <int> calendar-reminder-minutes-min;
+    in property <int> calendar-reminder-minutes-max;
     in property <[CalendarRow]> calendars;
     in property <[string]> audio-device-labels;
     in property <string> selected-device-label;
@@ -100,7 +104,7 @@ export component SettingsView inherits Rectangle {
     in property <string> update-status;
     in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
-    in property <string> apple-intelligence-reason;
+    in property <AppleIntelligenceUnavailableReason> apple-intelligence-reason;
     in property <string> ollama-url;
     in property <bool> ollama-available;
     in property <bool> ollama-checking;
@@ -538,6 +542,8 @@ export component SettingsView inherits Rectangle {
                         FeedbackSoundsSection {
                             enabled: root.feedback-sounds-enabled;
                             volume: root.feedback-sounds-volume;
+                            volume-min: root.feedback-sounds-volume-min;
+                            volume-max: root.feedback-sounds-volume-max;
                             enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
                             volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
                         }
@@ -553,6 +559,8 @@ export component SettingsView inherits Rectangle {
                             permission: root.calendar-permission;
                             autostart-enabled: root.calendar-autostart-enabled;
                             reminder-minutes: root.calendar-reminder-minutes;
+                            reminder-minutes-min: root.calendar-reminder-minutes-min;
+                            reminder-minutes-max: root.calendar-reminder-minutes-max;
                             calendars: root.calendars;
                             enabled-changed(value) => { root.calendar-enabled-changed(value); }
                             autostart-enabled-changed(value) => { root.calendar-autostart-enabled-changed(value); }

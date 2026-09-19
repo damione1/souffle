@@ -8,10 +8,11 @@
 use crate::{
     AccessState, AppLocale, AppTheme, AudioRetention as SlintAudioRetention, CalendarRow,
     LogLevel as SlintLogLevel, MainWindow, MeetingLanguage, PasteMethod as SlintPasteMethod,
+    PermissionKind as SlintPermissionKind,
 };
 use souffle_lib::calendar::CalendarInfo;
 use souffle_lib::logging::LogLevel;
-use souffle_lib::permissions::PermState;
+use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::settings::{
     AppSettings, MeetingAudioRetention, MeetingTranscriptionLanguage, PasteMethod, SettingsOptions,
     ShortcutSettings, Theme,
@@ -60,6 +61,10 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     let bounds = SettingsOptions::current();
     window.set_settings_paste_delay_min(bounds.paste_delay_ms_min as i32);
     window.set_settings_paste_delay_max(bounds.paste_delay_ms_max as i32);
+    window.set_settings_feedback_sounds_volume_min(bounds.feedback_sounds_volume_min as i32);
+    window.set_settings_feedback_sounds_volume_max(bounds.feedback_sounds_volume_max as i32);
+    window.set_settings_calendar_reminder_minutes_min(bounds.calendar_reminder_minutes_min as i32);
+    window.set_settings_calendar_reminder_minutes_max(bounds.calendar_reminder_minutes_max as i32);
     window.set_settings_meeting_autostop_labels(shared_string_model(
         &crate::audio_ui::minute_labels(&bounds.meeting_autostop_minutes),
     ));
@@ -147,6 +152,24 @@ pub(crate) fn perm_state_to_slint(state: PermState) -> AccessState {
         PermState::Unknown => AccessState::Unknown,
         PermState::Unsupported => AccessState::Unsupported,
         PermState::NoDevice => AccessState::NoDevice,
+    }
+}
+
+pub fn permission_kind_to_slint(kind: PermissionKind) -> SlintPermissionKind {
+    match kind {
+        PermissionKind::Microphone => SlintPermissionKind::Microphone,
+        PermissionKind::SystemAudio => SlintPermissionKind::SystemAudio,
+        PermissionKind::Accessibility => SlintPermissionKind::Accessibility,
+        PermissionKind::Calendar => SlintPermissionKind::Calendar,
+    }
+}
+
+pub fn permission_kind_from_slint(kind: SlintPermissionKind) -> PermissionKind {
+    match kind {
+        SlintPermissionKind::Microphone => PermissionKind::Microphone,
+        SlintPermissionKind::SystemAudio => PermissionKind::SystemAudio,
+        SlintPermissionKind::Accessibility => PermissionKind::Accessibility,
+        SlintPermissionKind::Calendar => PermissionKind::Calendar,
     }
 }
 
@@ -273,5 +296,27 @@ pub fn audio_retention_from_slint(value: SlintAudioRetention) -> MeetingAudioRet
         SlintAudioRetention::Keep7d => MeetingAudioRetention::Keep7d,
         SlintAudioRetention::Keep30d => MeetingAudioRetention::Keep30d,
         SlintAudioRetention::KeepForever => MeetingAudioRetention::KeepForever,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permission_kind_conversions_cover_every_variant() {
+        let variants = [
+            PermissionKind::Microphone,
+            PermissionKind::SystemAudio,
+            PermissionKind::Accessibility,
+            PermissionKind::Calendar,
+        ];
+
+        for variant in variants {
+            assert_eq!(
+                permission_kind_from_slint(permission_kind_to_slint(variant)),
+                variant
+            );
+        }
     }
 }

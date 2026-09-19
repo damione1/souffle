@@ -1,15 +1,16 @@
 import { Theme } from "../../theme.slint";
 import { ThemedButton } from "../themed_button.slint";
+import { AccessState, PermissionKind } from "../../types.slint";
 
 // Port of PermissionsStep.svelte. Each row's status comes from a real,
 // repeatedly-polled `get_permission_status()` snapshot (main.rs polls every
 // 600ms while this is visible) - never a value fixed once at launch (AC7,
 // added after PR #248 shipped exactly that fake pattern).
 export struct PermissionRow {
-    kind: string, // "microphone" | "system_audio" | "accessibility"
+    kind: PermissionKind,
     label: string,
     description: string,
-    state: string, // "granted" | "denied" | "unsupported" | "no_device" | "unknown"
+    state: AccessState,
     busy: bool,
     action-label: string,
     hint: string,
@@ -23,8 +24,8 @@ export component PermissionsStep inherits VerticalLayout {
     in property <bool> repair-success;
     in property <bool> repair-cooldown;
 
-    callback grant-requested(string);
-    callback hint-action-requested(string);
+    callback grant-requested(PermissionKind);
+    callback hint-action-requested(PermissionKind);
     callback repair-requested();
 
     spacing: 4px;
@@ -60,7 +61,7 @@ export component PermissionsStep inherits VerticalLayout {
                 }
             }
 
-            if row.state == "granted": Rectangle {
+            if row.state == AccessState.granted: Rectangle {
                 width: granted-label.preferred-width + 30px;
                 height: 28px;
                 horizontal-stretch: 0;
@@ -88,13 +89,13 @@ export component PermissionsStep inherits VerticalLayout {
                     vertical-alignment: center;
                 }
             }
-            if row.state == "unsupported": Text {
+            if row.state == AccessState.unsupported: Text {
                 text: "Non pris en charge";
                 color: Theme.text-faint;
                 font-size: 11px;
                 vertical-alignment: center;
             }
-            if row.state != "granted" && row.state != "unsupported": ThemedButton {
+            if row.state != AccessState.granted && row.state != AccessState.unsupported: ThemedButton {
                 text: row.busy ? "Vérification…" : row.action-label;
                 enabled: !row.busy;
                 clicked => { root.grant-requested(row.kind); }

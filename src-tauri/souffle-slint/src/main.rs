@@ -33,7 +33,7 @@ use souffle_lib::engine::{
     Speaker, TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
 use souffle_lib::native::bridge::{AppView, NativeAction};
-use souffle_lib::permissions::{PermState, PermissionKind};
+use souffle_lib::permissions::{PermState, PermissionKind as DomainPermissionKind};
 use souffle_lib::progress::ProgressChannel;
 use souffle_lib::settings::{AppSettings, ShortcutSettings};
 use souffle_lib::state::AppState;
@@ -2237,18 +2237,13 @@ fn wire_onboarding_callbacks(
 
     let weak = window.as_weak();
     let ob_for_grant = ob.clone();
-    window.on_onboarding_grant_requested(move |kind_str| {
+    window.on_onboarding_grant_requested(move |slint_kind| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some(index) = onboarding_ui::row_index(&kind_str) else {
+        let kind = settings_ui::permission_kind_from_slint(slint_kind);
+        let Some(index) = onboarding_ui::row_index(kind) else {
             return;
-        };
-        let kind = match kind_str.as_str() {
-            "microphone" => PermissionKind::Microphone,
-            "system_audio" => PermissionKind::SystemAudio,
-            "accessibility" => PermissionKind::Accessibility,
-            _ => return,
         };
         ob_for_grant.borrow_mut().permission_busy[index] = true;
         {
@@ -2269,10 +2264,14 @@ fn wire_onboarding_callbacks(
             guard.permission_busy[index] = false;
             if let Ok(state) = result {
                 match kind {
-                    PermissionKind::Microphone => guard.permission_status.microphone = state,
-                    PermissionKind::SystemAudio => guard.permission_status.system_audio = state,
-                    PermissionKind::Accessibility => guard.permission_status.accessibility = state,
-                    PermissionKind::Calendar => {}
+                    DomainPermissionKind::Microphone => guard.permission_status.microphone = state,
+                    DomainPermissionKind::SystemAudio => {
+                        guard.permission_status.system_audio = state
+                    }
+                    DomainPermissionKind::Accessibility => {
+                        guard.permission_status.accessibility = state
+                    }
+                    DomainPermissionKind::Calendar => {}
                 }
             }
             let (status, busy) = (guard.permission_status.clone(), guard.permission_busy);
@@ -4007,9 +4006,10 @@ fn wire_callbacks(
         // `spawn_blocking`), so awaiting it on Slint's single-threaded local
         // executor is exactly what it's for.
         slint::spawn_local(async move {
-            let permission = souffle_lib::commands::request_permission(PermissionKind::Calendar)
-                .await
-                .unwrap_or(PermState::Denied);
+            let permission =
+                souffle_lib::commands::request_permission(DomainPermissionKind::Calendar)
+                    .await
+                    .unwrap_or(PermState::Denied);
             let Some(window) = weak.upgrade() else {
                 return;
             };

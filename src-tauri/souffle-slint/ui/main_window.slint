@@ -15,8 +15,8 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider } from "types.slint";
-export { SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, SpeakerRole }
+import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason } from "types.slint";
+export { SettingsTab, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
 // accessor for it (`window.global::<Theme>()`) - main.rs sets `Theme.dark`
@@ -137,6 +137,8 @@ export component MainWindow inherits Window {
     in property <bool> settings-pill-hidden;
     in property <bool> settings-feedback-sounds-enabled;
     in property <int> settings-feedback-sounds-volume;
+    in property <int> settings-feedback-sounds-volume-min;
+    in property <int> settings-feedback-sounds-volume-max;
     in property <string> settings-toggle-shortcut-label;
     in property <string> settings-ptt-shortcut-label;
     in property <bool> settings-native-tap-warning-visible;
@@ -148,6 +150,8 @@ export component MainWindow inherits Window {
     in property <AccessState> settings-calendar-permission;
     in property <bool> settings-calendar-autostart-enabled;
     in property <int> settings-calendar-reminder-minutes;
+    in property <int> settings-calendar-reminder-minutes-min;
+    in property <int> settings-calendar-reminder-minutes-max;
     in property <[CalendarRow]> settings-calendars;
     in property <[string]> settings-audio-device-labels;
     in property <string> settings-selected-device-label;
@@ -193,7 +197,7 @@ export component MainWindow inherits Window {
     in property <string> settings-update-status;
     in property <SummaryProvider> settings-summary-provider;
     in property <bool> settings-apple-intelligence-available;
-    in property <string> settings-apple-intelligence-reason;
+    in property <AppleIntelligenceUnavailableReason> settings-apple-intelligence-reason: AppleIntelligenceUnavailableReason.unknown;
     in property <string> settings-ollama-url;
     in property <bool> settings-ollama-available;
     in property <bool> settings-ollama-checking;
@@ -403,8 +407,8 @@ export component MainWindow inherits Window {
     in property <string> onboarding-continue-label;
 
     callback onboarding-locale-changed(string);
-    callback onboarding-grant-requested(string);
-    callback onboarding-hint-action-requested(string);
+    callback onboarding-grant-requested(PermissionKind);
+    callback onboarding-hint-action-requested(PermissionKind);
     callback onboarding-repair-requested();
     callback onboarding-device-changed(string);
     callback onboarding-refresh-devices-requested();
@@ -583,6 +587,8 @@ export component MainWindow inherits Window {
         pill-hidden: root.settings-pill-hidden;
         feedback-sounds-enabled: root.settings-feedback-sounds-enabled;
         feedback-sounds-volume: root.settings-feedback-sounds-volume;
+        feedback-sounds-volume-min: root.settings-feedback-sounds-volume-min;
+        feedback-sounds-volume-max: root.settings-feedback-sounds-volume-max;
         toggle-shortcut-label: root.settings-toggle-shortcut-label;
         ptt-shortcut-label: root.settings-ptt-shortcut-label;
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
@@ -594,6 +600,8 @@ export component MainWindow inherits Window {
         calendar-permission: root.settings-calendar-permission;
         calendar-autostart-enabled: root.settings-calendar-autostart-enabled;
         calendar-reminder-minutes: root.settings-calendar-reminder-minutes;
+        calendar-reminder-minutes-min: root.settings-calendar-reminder-minutes-min;
+        calendar-reminder-minutes-max: root.settings-calendar-reminder-minutes-max;
         calendars: root.settings-calendars;
         audio-device-labels: root.settings-audio-device-labels;
         selected-device-label: root.settings-selected-device-label;
