@@ -963,21 +963,34 @@ enum AudioDeviceSaveSettlement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AudioDeviceProjectionState {
     Canonical { generation: u64 },
-    PendingUnknown { generation: u64, uid: String },
+    PendingSave { generation: u64, uid: String },
+    CommittedUnknown { generation: u64, uid: String },
 }
 
 impl AudioDeviceProjectionState {
     fn generation(&self) -> u64 {
         match self {
-            Self::Canonical { generation } | Self::PendingUnknown { generation, .. } => *generation,
+            Self::Canonical { generation }
+            | Self::PendingSave { generation, .. }
+            | Self::CommittedUnknown { generation, .. } => *generation,
         }
     }
 
     fn begin_pending(&mut self, uid: String) {
-        *self = Self::PendingUnknown {
+        *self = Self::PendingSave {
             generation: self.generation().wrapping_add(1),
             uid,
         };
+    }
+
+    fn commit_unknown(&mut self, uid: String) {
+        let generation = match self {
+            Self::PendingSave { generation, .. } => *generation,
+            Self::Canonical { .. } | Self::CommittedUnknown { .. } => {
+                self.generation().wrapping_add(1)
+            }
+        };
+        *self = Self::CommittedUnknown { generation, uid };
     }
 
     fn observe_canonical(&mut self) {
@@ -993,17 +1006,21 @@ impl AudioDeviceSaveSettlement {
             Self::Committed { canonical, .. } | Self::Rejected { canonical } => canonical.is_some(),
         }
     }
+}
 
-    fn keeps_pending_projection(&self) -> bool {
-        match self {
-            Self::Committed {
-                canonical: None, ..
-            } => true,
-            Self::Committed {
-                canonical: Some(_), ..
-            }
-            | Self::Rejected { .. } => false,
+fn apply_audio_device_projection_settlement(
+    settlement: &AudioDeviceSaveSettlement,
+    projection: &mut AudioDeviceProjectionState,
+) {
+    match settlement {
+        AudioDeviceSaveSettlement::Committed {
+            uid,
+            canonical: None,
+        } => projection.commit_unknown(uid.clone()),
+        AudioDeviceSaveSettlement::Committed {
+            canonical: Some(_), ..
         }
+        | AudioDeviceSaveSettlement::Rejected { .. } => projection.observe_canonical(),
     }
 }
 
@@ -1057,12 +1074,20 @@ fn audio_device_load_configuration(
     let known = settings_state.known_snapshot();
     let last_observed = settings_state.borrow().clone();
     let settings = known.as_ref().or(last_observed.as_ref())?;
-    let projection = projection_state.borrow();
-    let selected = match &*projection {
+    let mut projection = projection_state.borrow_mut();
+    let selected = match projection.clone() {
         AudioDeviceProjectionState::Canonical { .. } => {
             settings.audio_device.clone().unwrap_or_default()
         }
-        AudioDeviceProjectionState::PendingUnknown { uid, .. } => uid.clone(),
+        AudioDeviceProjectionState::PendingSave { uid, .. } => uid,
+        AudioDeviceProjectionState::CommittedUnknown { uid, .. } => {
+            if known.is_some() {
+                projection.observe_canonical();
+                settings.audio_device.clone().unwrap_or_default()
+            } else {
+                uid
+            }
+        }
     };
     Some((
         projection.generation(),
@@ -4017,9 +4042,10 @@ fn wire_callbacks(
                 // native effect; the user's submitted label remains visible
                 // until a later serialized refresh observes persistence.
                 let reload_after_effect = settlement.has_observed_canonical();
-                if !settlement.keeps_pending_projection() {
-                    projection_state.borrow_mut().observe_canonical();
-                }
+                apply_audio_device_projection_settlement(
+                    &settlement,
+                    &mut projection_state.borrow_mut(),
+                );
                 let (target_uid, canonical) = match settlement {
                     AudioDeviceSaveSettlement::Committed { uid, canonical } => {
                         (Some(uid), canonical)
@@ -5809,12 +5835,13 @@ mod tests {
     use super::{
         AudioDeviceProjectionState, AudioDeviceSaveSettlement, DictationEndIntent,
         DictationTextBuffers, DictationTranscriptDisposition, MainWindow, OnboardingState,
-        SettingsCache, StartupPresentationGate, Theme, audio_device_load_configuration,
-        clear_committed_summary_add_draft, dictation_transcript_disposition,
-        finish_startup_presentation, merge_recovery_text, prime_summary_template_editor,
-        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
-        settle_audio_device_save, settle_model_selection_save, settle_onboarding_completion,
-        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
+        SettingsCache, StartupPresentationGate, Theme, apply_audio_device_projection_settlement,
+        audio_device_load_configuration, clear_committed_summary_add_draft,
+        dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
+        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
+        reset_live_buffers, settle_audio_device_save, settle_model_selection_save,
+        settle_onboarding_completion, should_clear_committed_summary_add_draft,
+        wire_summary_template_edit_callbacks,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -6161,8 +6188,8 @@ mod tests {
         cache.observe_save_outcome_silent(&outcome);
         let settlement = settle_audio_device_save(&outcome, &Some(fallback), "mic-b");
         assert!(!settlement.has_observed_canonical());
-        assert!(settlement.keeps_pending_projection());
-        match settlement {
+        apply_audio_device_projection_settlement(&settlement, &mut projection.borrow_mut());
+        match &settlement {
             AudioDeviceSaveSettlement::Committed { uid, canonical } => {
                 assert_eq!(uid, "mic-b");
                 assert!(canonical.is_none());
@@ -6183,6 +6210,48 @@ mod tests {
             window.get_settings_selected_device_label().as_str(),
             "Microphone B"
         );
+    }
+
+    #[test]
+    fn later_observed_device_mutation_supersedes_committed_unknown_selection() {
+        let window = test_window();
+        let initial = AppSettings {
+            audio_device: Some("mic-a".into()),
+            ..AppSettings::default()
+        };
+        let cache = SettingsCache::with_observed(&window, initial.clone());
+        let projection = Rc::new(RefCell::new(AudioDeviceProjectionState::Canonical {
+            generation: 0,
+        }));
+
+        projection.borrow_mut().begin_pending("mic-b".into());
+        let unavailable = SettingsSaveOutcome::Unavailable {
+            result: Ok(()),
+            read_error: "controlled reread failure".into(),
+        };
+        cache.observe_save_outcome_silent(&unavailable);
+        let settlement = settle_audio_device_save(&unavailable, &Some(initial), "mic-b");
+        apply_audio_device_projection_settlement(&settlement, &mut projection.borrow_mut());
+        let (_, selected, _, _) = audio_device_load_configuration(&cache, &projection)
+            .expect("unknown cache preserves the committed selection");
+        assert_eq!(selected, "mic-b");
+
+        let later = AppSettings {
+            audio_device: None,
+            ..AppSettings::default()
+        };
+        cache.observe_save_outcome_silent(&SettingsSaveOutcome::Observed {
+            settings: Box::new(later),
+            result: Ok(()),
+        });
+        let (_, selected, _, _) = audio_device_load_configuration(&cache, &projection)
+            .expect("later observed settings remain available");
+
+        assert!(selected.is_empty());
+        assert!(matches!(
+            *projection.borrow(),
+            AudioDeviceProjectionState::Canonical { .. }
+        ));
     }
 
     #[test]
