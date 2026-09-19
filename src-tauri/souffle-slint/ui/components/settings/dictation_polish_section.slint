@@ -13,6 +13,7 @@ import { ThemedTextArea } from "../themed_text_area.slint";
 export component DictationPolishSection inherits VerticalLayout {
     in property <bool> enabled;
     in property <bool> provider-available;
+    in property <[string]> template-ids;
     in property <[string]> template-labels;
     in property <string> active-template-label;
     in-out property <string> active-prompt;
@@ -71,8 +72,9 @@ export component DictationPolishSection inherits VerticalLayout {
         ThemedComboBox {
             control-label: "Modèle de retouche";
             model: root.template-labels;
+            option-values: root.template-ids;
             current-value: root.active-template-label;
-            selected(value) => { root.template-changed(value); }
+            selected(id) => { root.template-changed(id); }
         }
     }
 

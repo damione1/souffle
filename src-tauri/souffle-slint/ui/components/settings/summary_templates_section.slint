@@ -10,8 +10,9 @@ import { ThemedTextArea } from "../themed_text_area.slint";
 // edited is tracked in Rust (`summary_templates_state` in main.rs), not as
 // local `.slint` state, because switching the edit target needs Rust to
 // resolve the corresponding name/prompt/is-builtin fields anyway - same
-// picker-forwards-a-label pattern as the rest of this port.
+// picker-forwards-an-id pattern as the other open-set catalogues.
 export component SummaryTemplatesSection inherits VerticalLayout {
+    in property <[string]> template-ids;
     in property <[string]> template-labels;
     in property <string> default-template-label;
     in property <string> editing-template-label;
@@ -53,8 +54,9 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         ThemedComboBox {
             control-label: "Modèle de résumé par défaut";
             model: root.template-labels;
+            option-values: root.template-ids;
             current-value: root.default-template-label;
-            selected(value) => { root.default-changed(value); }
+            selected(id) => { root.default-changed(id); }
         }
     }
 
@@ -69,8 +71,9 @@ export component SummaryTemplatesSection inherits VerticalLayout {
             ThemedComboBox {
                 control-label: "Modèle de résumé à modifier";
                 model: root.template-labels;
+                option-values: root.template-ids;
                 current-value: root.editing-template-label;
-                selected(value) => { root.edit-target-changed(value); }
+                selected(id) => { root.edit-target-changed(id); }
             }
             if !root.editing-is-builtin: ThemedButton {
                 text: "Supprimer";

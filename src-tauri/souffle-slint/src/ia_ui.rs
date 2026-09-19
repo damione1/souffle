@@ -55,7 +55,6 @@ pub fn populate_intelligence(
             .unwrap_or_default()
             .into(),
     );
-    window.set_settings_ollama_url(status.ollama_url.as_str().into());
     window.set_settings_ollama_available(status.ollama_available);
     window.set_settings_summary_model_count(ollama_models.len() as i32);
 
@@ -163,6 +162,12 @@ pub fn populate_dictation_polish(
         .iter()
         .map(dictation_polish_label)
         .collect();
+    let ids: Vec<String> = settings
+        .dictation_polish_templates
+        .iter()
+        .map(|template| template.id.clone())
+        .collect();
+    window.set_settings_dictation_polish_template_ids(shared_string_vec(&ids));
     window.set_settings_dictation_polish_template_labels(shared_string_vec(&labels));
 
     let active = settings
@@ -181,14 +186,8 @@ pub fn populate_dictation_polish(
     );
 }
 
-pub fn resolve_dictation_polish_id(
-    templates: &[DictationPolishTemplate],
-    label: &str,
-) -> Option<String> {
-    templates
-        .iter()
-        .find(|t| dictation_polish_label(t) == label)
-        .map(|t| t.id.clone())
+pub fn contains_dictation_polish_id(templates: &[DictationPolishTemplate], id: &str) -> bool {
+    templates.iter().any(|template| template.id == id)
 }
 
 /// Pushes the summary-template pickers. `editing_id` is which template's
@@ -201,6 +200,12 @@ pub fn populate_summary_templates(window: &MainWindow, settings: &AppSettings, e
         .iter()
         .map(summary_template_label)
         .collect();
+    let ids: Vec<String> = settings
+        .summary_templates
+        .iter()
+        .map(|template| template.id.clone())
+        .collect();
+    window.set_settings_summary_template_ids(shared_string_vec(&ids));
     window.set_settings_summary_template_labels(shared_string_vec(&labels));
 
     let default_label = settings
@@ -241,16 +246,17 @@ pub fn populate_summary_templates(window: &MainWindow, settings: &AppSettings, e
     );
 }
 
-pub fn resolve_summary_template_id(templates: &[SummaryTemplate], label: &str) -> Option<String> {
-    templates
-        .iter()
-        .find(|t| summary_template_label(t) == label)
-        .map(|t| t.id.clone())
+pub fn contains_summary_template_id(templates: &[SummaryTemplate], id: &str) -> bool {
+    templates.iter().any(|template| template.id == id)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{compatible_ollama_models, contains_summary_model_id};
+    use super::{
+        compatible_ollama_models, contains_dictation_polish_id, contains_summary_model_id,
+        contains_summary_template_id,
+    };
+    use souffle_lib::settings::{DictationPolishTemplate, SummaryTemplate};
     use souffle_lib::summary::{SummaryModelDescriptor, SummaryProviderKind};
 
     fn model(
@@ -302,5 +308,38 @@ mod tests {
 
         assert!(contains_summary_model_id(&models, "model-a"));
         assert!(contains_summary_model_id(&models, "model-b"));
+    }
+
+    #[test]
+    fn duplicate_template_labels_keep_distinct_open_set_ids() {
+        let polish = vec![
+            DictationPolishTemplate {
+                id: "polish-a".into(),
+                label: "Même nom".into(),
+                prompt: "A".into(),
+            },
+            DictationPolishTemplate {
+                id: "polish-b".into(),
+                label: "Même nom".into(),
+                prompt: "B".into(),
+            },
+        ];
+        let summaries = vec![
+            SummaryTemplate {
+                id: "summary-a".into(),
+                name: "Même nom".into(),
+                prompt: "A".into(),
+            },
+            SummaryTemplate {
+                id: "summary-b".into(),
+                name: "Même nom".into(),
+                prompt: "B".into(),
+            },
+        ];
+
+        assert!(contains_dictation_polish_id(&polish, "polish-a"));
+        assert!(contains_dictation_polish_id(&polish, "polish-b"));
+        assert!(contains_summary_template_id(&summaries, "summary-a"));
+        assert!(contains_summary_template_id(&summaries, "summary-b"));
     }
 }

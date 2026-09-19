@@ -711,11 +711,66 @@ async fn start_meeting_from_event(
 /// and the "Retry" button, since both need the same round trip. `slint::
 /// spawn_local`, not `souffle_lib::async_runtime::spawn`: this closes over
 /// `Rc<RefCell<..>>` state, which is not `Send`.
+struct SummaryRefreshState {
+    generation: Cell<u64>,
+    url_edited: Cell<bool>,
+    status: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>>,
+}
+
+impl SummaryRefreshState {
+    fn new(status: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>>) -> Self {
+        Self {
+            generation: Cell::new(0),
+            url_edited: Cell::new(false),
+            status,
+        }
+    }
+
+    fn begin_session(&self) {
+        let _ = self.invalidate();
+        self.url_edited.set(false);
+    }
+
+    fn mark_url_edited(&self) -> u64 {
+        self.url_edited.set(true);
+        self.invalidate()
+    }
+
+    fn project_url_if_pristine(&self, window: &MainWindow, url: &str) {
+        if !self.url_edited.get() {
+            window.set_settings_ollama_url(url.into());
+        }
+    }
+
+    fn begin(&self) -> u64 {
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.set(generation);
+        generation
+    }
+
+    fn invalidate(&self) -> u64 {
+        self.begin()
+    }
+
+    fn accepts(&self, generation: u64) -> bool {
+        self.generation.get() == generation
+    }
+}
+
+fn summary_refresh_after_settings_response(order: settings_io::SettingsResponseOrder) -> bool {
+    match order {
+        settings_io::SettingsResponseOrder::LatestVisible
+        | settings_io::SettingsResponseOrder::Intermediate => true,
+        settings_io::SettingsResponseOrder::LatestHidden
+        | settings_io::SettingsResponseOrder::Stale => false,
+    }
+}
+
 fn refresh_summary_providers(
     weak: slint::Weak<MainWindow>,
     handle: AppHandle,
     settings_state: SettingsCache,
-    summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>>,
+    refresh_state: Rc<SummaryRefreshState>,
     summary_template_editing: Rc<RefCell<String>>,
     settings_drafts: Rc<settings_drafts::SettingsDraftController>,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
@@ -723,6 +778,11 @@ fn refresh_summary_providers(
     let Some(token) = settings_io.current_load_token() else {
         return;
     };
+    let generation = refresh_state.begin();
+    if let Some(window) = weak.upgrade() {
+        window.set_settings_ollama_checking(true);
+        window.set_settings_summary_refresh_error("".into());
+    }
     slint::spawn_local(async move {
         let handle_for_check = handle.clone();
         // `check_summary_providers` awaits a reqwest call, which needs an
@@ -738,14 +798,19 @@ fn refresh_summary_providers(
         .await
         .map_err(|e| format!("Join check_summary_providers task: {e}"))
         .and_then(|r| r);
-        if !settings_io.accepts_load(token) {
+        if !settings_io.accepts_load(token) || !refresh_state.accepts(generation) {
             return;
         }
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Ok(status) = status else {
-            return;
+        window.set_settings_ollama_checking(false);
+        let status = match status {
+            Ok(status) => status,
+            Err(error) => {
+                window.set_settings_summary_refresh_error(error.into());
+                return;
+            }
         };
         let guard = settings_state.borrow();
         let Some(settings) = guard.as_ref() else {
@@ -761,7 +826,7 @@ fn refresh_summary_providers(
         ia_ui::populate_summary_templates(&window, settings, &editing_id);
         settings_drafts.reapply_summary_template(&window, &editing_id);
         drop(guard);
-        *summary_status_state.borrow_mut() = Some(status);
+        *refresh_state.status.borrow_mut() = Some(status);
     })
     .expect("slint event loop not running");
 }
@@ -3438,6 +3503,7 @@ fn wire_callbacks(
     // Cached so the model picker/download button don't each re-query Ollama.
     let summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>> =
         Rc::new(RefCell::new(None));
+    let summary_refresh_state = Rc::new(SummaryRefreshState::new(summary_status_state.clone()));
     let settings_values = settings_values::SettingsValueController::new(
         window,
         settings_state.clone(),
@@ -3469,7 +3535,7 @@ fn wire_callbacks(
     let shortcuts_state_for_open = shortcuts_state.clone();
     let audio_devices_state_for_open = audio_devices_state.clone();
     let audio_device_projection_for_open = audio_device_projection_state.clone();
-    let summary_status_state_for_open = summary_status_state.clone();
+    let summary_refresh_state_for_open = summary_refresh_state.clone();
     let summary_template_editing_for_open = summary_template_editing.clone();
     let model_options_state_for_open = model_options_state.clone();
     let snippets_list_state_for_open = snippets_list_state.clone();
@@ -3482,8 +3548,10 @@ fn wire_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
+        summary_refresh_state_for_open.begin_session();
         let token = settings_io_for_open.begin_open();
         if let Some(settings) = settings_state_for_open.known_snapshot() {
+            summary_refresh_state_for_open.project_url_if_pristine(&window, &settings.ollama_url);
             settings_ui::populate(&window, &settings);
             data_ui::populate(&window, &settings);
             settings_values_for_open.observe_loaded(&settings);
@@ -3508,7 +3576,7 @@ fn wire_callbacks(
         let core_state = settings_state_for_open.clone();
         let core_devices = audio_devices_state_for_open.clone();
         let core_device_projection = audio_device_projection_for_open.clone();
-        let core_summary = summary_status_state_for_open.clone();
+        let core_summary_refresh = summary_refresh_state_for_open.clone();
         let core_editing = summary_template_editing_for_open.clone();
         let core_models = model_options_state_for_open.clone();
         let core_drafts = settings_drafts_for_open.clone();
@@ -3521,6 +3589,7 @@ fn wire_callbacks(
             let Some(window) = core_weak.upgrade() else {
                 return;
             };
+            core_summary_refresh.project_url_if_pristine(&window, &settings.ollama_url);
             let current_editing_id = core_editing.borrow().clone();
             let editing_id = settings_drafts::summary_editing_id(&current_editing_id, &settings);
             *core_editing.borrow_mut() = editing_id;
@@ -3540,7 +3609,7 @@ fn wire_callbacks(
                 core_weak.clone(),
                 core_handle.clone(),
                 core_state.clone(),
-                core_summary.clone(),
+                core_summary_refresh.clone(),
                 core_editing.clone(),
                 core_drafts.clone(),
                 finish_core_io.clone(),
@@ -4575,54 +4644,73 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
+    let handle = tauri_handle.clone();
     let settings_io_for_provider = settings_io.clone();
     let settings_state_for_provider = settings_state.clone();
-    let summary_status_state_for_provider = summary_status_state.clone();
+    let summary_refresh_state_for_provider = summary_refresh_state.clone();
+    let summary_template_editing_for_provider = summary_template_editing.clone();
     let settings_drafts_for_provider = settings_drafts.clone();
     window.on_settings_summary_provider_changed(move |value| {
+        let submitted_generation = summary_refresh_state_for_provider.invalidate();
         let provider = ia_ui::summary_provider_from_slint(value);
         let weak = weak.clone();
+        let handle = handle.clone();
         let state = settings_state_for_provider.clone();
-        let summary = summary_status_state_for_provider.clone();
+        let refresh = summary_refresh_state_for_provider.clone();
+        let editing = summary_template_editing_for_provider.clone();
         let drafts = settings_drafts_for_provider.clone();
+        let io = settings_io_for_provider.clone();
         save_settings_field_then(
             &settings_io_for_provider,
             souffle_lib::commands::SettingsSaveLane::General,
             move |settings| settings.summary_provider = provider,
             move |order, _outcome| {
-                if !order.publishes_to_open_window() {
+                if !summary_refresh_after_settings_response(order)
+                    || !refresh.accepts(submitted_generation)
+                {
                     return;
                 }
-                let Some(window) = weak.upgrade() else {
-                    return;
-                };
-                let guard = state.borrow();
-                let status_guard = summary.borrow();
-                if let (Some(settings), Some(status)) = (guard.as_ref(), status_guard.as_ref()) {
-                    ia_ui::populate_intelligence(&window, settings, status);
-                    let provider_available =
-                        window.get_settings_summary_unusable_message().is_empty();
-                    ia_ui::populate_dictation_polish(&window, settings, provider_available);
-                    drafts.reapply_polish_prompt(&window, &settings.dictation_polish_template_id);
-                }
+                refresh_summary_providers(weak, handle, state, refresh, editing, drafts, io);
             },
         );
     });
 
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
     let settings_io_for_ollama_url = settings_io.clone();
+    let settings_state_for_ollama_url = settings_state.clone();
+    let summary_refresh_state_for_ollama_url = summary_refresh_state.clone();
+    let summary_template_editing_for_ollama_url = summary_template_editing.clone();
+    let settings_drafts_for_ollama_url = settings_drafts.clone();
     window.on_settings_ollama_url_changed(move |value| {
+        let submitted_generation = summary_refresh_state_for_ollama_url.mark_url_edited();
         let value = value.to_string();
-        save_settings_field(
+        let weak = weak.clone();
+        let handle = handle.clone();
+        let state = settings_state_for_ollama_url.clone();
+        let refresh = summary_refresh_state_for_ollama_url.clone();
+        let editing = summary_template_editing_for_ollama_url.clone();
+        let drafts = settings_drafts_for_ollama_url.clone();
+        let io = settings_io_for_ollama_url.clone();
+        save_settings_field_then(
             &settings_io_for_ollama_url,
             souffle_lib::commands::SettingsSaveLane::General,
             move |settings| settings.ollama_url = value,
+            move |order, _outcome| {
+                if !summary_refresh_after_settings_response(order)
+                    || !refresh.accepts(submitted_generation)
+                {
+                    return;
+                }
+                refresh_summary_providers(weak, handle, state, refresh, editing, drafts, io);
+            },
         );
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_retry = settings_state.clone();
-    let summary_status_state_for_retry = summary_status_state.clone();
+    let summary_refresh_state_for_retry = summary_refresh_state.clone();
     let summary_template_editing_for_retry = summary_template_editing.clone();
     let settings_drafts_for_retry = settings_drafts.clone();
     let settings_io_for_retry = settings_io.clone();
@@ -4631,7 +4719,7 @@ fn wire_callbacks(
             weak.clone(),
             handle.clone(),
             settings_state_for_retry.clone(),
-            summary_status_state_for_retry.clone(),
+            summary_refresh_state_for_retry.clone(),
             summary_template_editing_for_retry.clone(),
             settings_drafts_for_retry.clone(),
             settings_io_for_retry.clone(),
@@ -4641,7 +4729,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_pull = settings_state.clone();
-    let summary_status_state_for_pull = summary_status_state.clone();
+    let summary_refresh_state_for_pull = summary_refresh_state.clone();
     let summary_template_editing_for_pull = summary_template_editing.clone();
     let settings_drafts_for_pull = settings_drafts.clone();
     let settings_io_for_pull = settings_io.clone();
@@ -4655,7 +4743,7 @@ fn wire_callbacks(
         let weak = weak.clone();
         let handle = handle.clone();
         let settings_state_for_pull = settings_state_for_pull.clone();
-        let summary_status_state_for_pull = summary_status_state_for_pull.clone();
+        let summary_refresh_state_for_pull = summary_refresh_state_for_pull.clone();
         let summary_template_editing_for_pull = summary_template_editing_for_pull.clone();
         let settings_drafts_for_pull = settings_drafts_for_pull.clone();
         let settings_io_for_pull = settings_io_for_pull.clone();
@@ -4678,7 +4766,7 @@ fn wire_callbacks(
                     weak,
                     handle,
                     settings_state_for_pull,
-                    summary_status_state_for_pull,
+                    summary_refresh_state_for_pull,
                     summary_template_editing_for_pull,
                     settings_drafts_for_pull,
                     settings_io_for_pull,
@@ -4723,16 +4811,20 @@ fn wire_callbacks(
     let settings_io_for_polish_template = settings_io.clone();
     let settings_state_for_polish_template = settings_state.clone();
     let settings_drafts_for_polish_template = settings_drafts.clone();
-    window.on_settings_dictation_polish_template_changed(move |label| {
-        let Some(template_id) = settings_state_for_polish_template
+    window.on_settings_dictation_polish_template_changed(move |template_id| {
+        let template_id = template_id.to_string();
+        let valid = settings_state_for_polish_template
             .borrow()
             .as_ref()
-            .and_then(|settings| {
-                ia_ui::resolve_dictation_polish_id(&settings.dictation_polish_templates, &label)
-            })
-        else {
+            .is_some_and(|settings| {
+                ia_ui::contains_dictation_polish_id(
+                    &settings.dictation_polish_templates,
+                    &template_id,
+                )
+            });
+        if !valid {
             return;
-        };
+        }
         let weak = weak.clone();
         let state = settings_state_for_polish_template.clone();
         let drafts = settings_drafts_for_polish_template.clone();
@@ -4775,16 +4867,17 @@ fn wire_callbacks(
     let settings_state_for_template_default = settings_state.clone();
     let summary_template_editing_for_default = summary_template_editing.clone();
     let settings_drafts_for_template_default = settings_drafts.clone();
-    window.on_settings_summary_template_default_changed(move |label| {
-        let Some(template_id) = settings_state_for_template_default
+    window.on_settings_summary_template_default_changed(move |template_id| {
+        let template_id = template_id.to_string();
+        let valid = settings_state_for_template_default
             .borrow()
             .as_ref()
-            .and_then(|settings| {
-                ia_ui::resolve_summary_template_id(&settings.summary_templates, &label)
-            })
-        else {
+            .is_some_and(|settings| {
+                ia_ui::contains_summary_template_id(&settings.summary_templates, &template_id)
+            });
+        if !valid {
             return;
-        };
+        }
         let weak = weak.clone();
         let state = settings_state_for_template_default.clone();
         let editing = summary_template_editing_for_default.clone();
@@ -4819,19 +4912,18 @@ fn wire_callbacks(
     let settings_state_for_edit_target = settings_state.clone();
     let summary_template_editing_for_edit_target = summary_template_editing.clone();
     let settings_drafts_for_edit_target = settings_drafts.clone();
-    window.on_settings_summary_template_edit_target_changed(move |label| {
+    window.on_settings_summary_template_edit_target_changed(move |template_id| {
         let Some(window) = weak.upgrade() else {
             return;
         };
+        let template_id = template_id.to_string();
         let guard = settings_state_for_edit_target.borrow();
         let Some(settings) = guard.as_ref() else {
             return;
         };
-        let Some(template_id) =
-            ia_ui::resolve_summary_template_id(&settings.summary_templates, &label)
-        else {
+        if !ia_ui::contains_summary_template_id(&settings.summary_templates, &template_id) {
             return;
-        };
+        }
         *summary_template_editing_for_edit_target.borrow_mut() = template_id.clone();
         ia_ui::populate_summary_templates(&window, settings, &template_id);
         settings_drafts_for_edit_target.reapply_summary_template(&window, &template_id);
@@ -5835,13 +5927,13 @@ mod tests {
     use super::{
         AudioDeviceProjectionState, AudioDeviceSaveSettlement, DictationEndIntent,
         DictationTextBuffers, DictationTranscriptDisposition, MainWindow, OnboardingState,
-        SettingsCache, StartupPresentationGate, Theme, apply_audio_device_projection_settlement,
-        audio_device_load_configuration, clear_committed_summary_add_draft,
-        dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
-        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
-        reset_live_buffers, settle_audio_device_save, settle_model_selection_save,
-        settle_onboarding_completion, should_clear_committed_summary_add_draft,
-        wire_summary_template_edit_callbacks,
+        SettingsCache, StartupPresentationGate, SummaryRefreshState, Theme,
+        apply_audio_device_projection_settlement, audio_device_load_configuration,
+        clear_committed_summary_add_draft, dictation_transcript_disposition,
+        finish_startup_presentation, merge_recovery_text, prime_summary_template_editor,
+        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
+        settle_audio_device_save, settle_model_selection_save, settle_onboarding_completion,
+        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -5866,6 +5958,19 @@ mod tests {
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    #[test]
+    fn summary_refresh_accepts_only_the_latest_generation() {
+        let state = SummaryRefreshState::new(Rc::new(RefCell::new(None)));
+        let url_a = state.begin();
+        let url_b = state.begin();
+
+        assert!(!state.accepts(url_a));
+        assert!(state.accepts(url_b));
+
+        let _ = state.invalidate();
+        assert!(!state.accepts(url_b));
     }
 
     #[cfg(target_os = "macos")]

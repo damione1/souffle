@@ -31,6 +31,7 @@ export component IntelligenceSection inherits VerticalLayout {
     in property <string> ollama-pull-status;
     in property <string> ollama-pull-error;
     in property <string> recommended-model;
+    in property <string> refresh-error;
     in property <string> unusable-message; // "" when the chosen provider can run
 
     callback summary-provider-changed(SummaryProvider);
@@ -90,6 +91,23 @@ export component IntelligenceSection inherits VerticalLayout {
             padding: 10px;
             Text {
                 text: root.unusable-message;
+                color: Theme.danger;
+                font-size: 11.5px;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    if root.refresh-error != "": Rectangle {
+        border-width: 1px;
+        border-color: Theme.danger;
+        border-radius: 6px;
+        background: Theme.surface-2;
+
+        VerticalLayout {
+            padding: 10px;
+            Text {
+                text: root.refresh-error;
                 color: Theme.danger;
                 font-size: 11.5px;
                 wrap: word-wrap;

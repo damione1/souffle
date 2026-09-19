@@ -114,12 +114,15 @@ export component SettingsView inherits Rectangle {
     in property <string> ollama-pull-status;
     in property <string> ollama-pull-error;
     in property <string> recommended-ollama-model;
+    in property <string> summary-refresh-error;
     in property <string> summary-unusable-message;
     in property <bool> dictation-polish-enabled;
     in property <bool> dictation-polish-provider-available;
+    in property <[string]> dictation-polish-template-ids;
     in property <[string]> dictation-polish-template-labels;
     in property <string> active-dictation-polish-label;
     in-out property <string> active-dictation-polish-prompt;
+    in property <[string]> summary-template-ids;
     in property <[string]> summary-template-labels;
     in property <string> default-summary-template-label;
     in property <string> editing-summary-template-label;
@@ -404,6 +407,7 @@ export component SettingsView inherits Rectangle {
                             ollama-pull-status: root.ollama-pull-status;
                             ollama-pull-error: root.ollama-pull-error;
                             recommended-model: root.recommended-ollama-model;
+                            refresh-error: root.summary-refresh-error;
                             unusable-message: root.summary-unusable-message;
                             summary-provider-changed(value) => { root.summary-provider-changed(value); }
                             ollama-url-changed(value) => { root.ollama-url-changed(value); }
@@ -416,6 +420,7 @@ export component SettingsView inherits Rectangle {
                         DictationPolishSection {
                             enabled: root.dictation-polish-enabled;
                             provider-available: root.dictation-polish-provider-available;
+                            template-ids: root.dictation-polish-template-ids;
                             template-labels: root.dictation-polish-template-labels;
                             active-template-label: root.active-dictation-polish-label;
                             active-prompt <=> root.active-dictation-polish-prompt;
@@ -426,6 +431,7 @@ export component SettingsView inherits Rectangle {
                         }
 
                         SummaryTemplatesSection {
+                            template-ids: root.summary-template-ids;
                             template-labels: root.summary-template-labels;
                             default-template-label: root.default-summary-template-label;
                             editing-template-label: root.editing-summary-template-label;
