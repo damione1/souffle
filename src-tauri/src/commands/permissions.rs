@@ -25,6 +25,10 @@ pub async fn request_permission(kind: PermissionKind) -> Result<PermState, Strin
         .map_err(|e| format!("Permission request failed: {e}"))
 }
 
+pub fn open_permission_settings(kind: PermissionKind) {
+    permissions::open_settings(kind);
+}
+
 /// Clear a stale Accessibility TCC entry and re-prompt. Updating the app by
 /// overwriting the .app bundle in place can leave System Settings showing
 /// Souffle as granted while `AXIsProcessTrusted` still returns false, because

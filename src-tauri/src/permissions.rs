@@ -254,6 +254,22 @@ fn open_privacy_pane(pane: &str) {
         .spawn();
 }
 
+fn settings_pane(kind: PermissionKind) -> &'static str {
+    match kind {
+        PermissionKind::Microphone => "Privacy_Microphone",
+        PermissionKind::SystemAudio => "Privacy_ScreenCapture",
+        PermissionKind::Accessibility => "Privacy_Accessibility",
+        PermissionKind::Calendar => "Privacy_Calendars",
+    }
+}
+
+/// Open the System Settings destination for one permission without raising a
+/// new prompt. This is the help-link path; explicit Grant actions still use
+/// [`request`].
+pub fn open_settings(kind: PermissionKind) {
+    open_privacy_pane(settings_pane(kind));
+}
+
 /// Prompt (and any Launch Services registration) first, let TCC commit the
 /// row, then open the pane. Opening in the same turn shows a stale list.
 fn prompt_then_open_settings(prompt: impl FnOnce(), wait: impl FnOnce(), open: impl FnOnce()) {
@@ -783,6 +799,23 @@ mod tests {
     fn perm_state_denied_serializes_snake_case() {
         let json = serde_json::to_string(&PermState::Denied).unwrap();
         assert_eq!(json, "\"denied\"");
+    }
+
+    #[test]
+    fn each_permission_kind_has_its_own_settings_destination() {
+        assert_eq!(
+            settings_pane(PermissionKind::Microphone),
+            "Privacy_Microphone"
+        );
+        assert_eq!(
+            settings_pane(PermissionKind::SystemAudio),
+            "Privacy_ScreenCapture"
+        );
+        assert_eq!(
+            settings_pane(PermissionKind::Accessibility),
+            "Privacy_Accessibility"
+        );
+        assert_eq!(settings_pane(PermissionKind::Calendar), "Privacy_Calendars");
     }
 
     #[test]

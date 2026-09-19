@@ -15,6 +15,7 @@ mod microphone_list;
 mod model_ui;
 mod onboarding_flags;
 mod onboarding_ui;
+mod permissions_ui;
 mod settings_drafts;
 mod settings_io;
 mod settings_ui;
@@ -1919,8 +1920,6 @@ struct OnboardingState {
     steps: Vec<&'static str>,
     step_index: usize,
     recovery_only: bool,
-    permission_status: souffle_lib::permissions::PermissionStatus,
-    permission_busy: [bool; 3],
     devices: Vec<AudioInputDevice>,
     selected_device: String,
     model_options: Vec<model_ui::FlatModelOption>,
@@ -1936,13 +1935,6 @@ impl Default for OnboardingState {
             steps: Vec::new(),
             step_index: 0,
             recovery_only: false,
-            permission_status: souffle_lib::permissions::PermissionStatus {
-                microphone: PermState::Unknown,
-                system_audio: PermState::Unknown,
-                accessibility: PermState::Unknown,
-                calendar: PermState::Unknown,
-            },
-            permission_busy: [false; 3],
             devices: Vec::new(),
             selected_device: String::new(),
             model_options: Vec::new(),
@@ -2012,7 +2004,7 @@ fn initialize_onboarding(
     startup: &StartupRuntimeSnapshot,
     handle: &AppHandle,
     ob: &Rc<RefCell<OnboardingState>>,
-    poll_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    permissions: &Rc<permissions_ui::PermissionController>,
 ) -> bool {
     let should_show =
         onboarding_flags::decide_show_setup_wizard(startup.model_phase, startup.setup_flags);
@@ -2035,13 +2027,8 @@ fn initialize_onboarding(
     drop(guard);
 
     window.set_onboarding_open(true);
-    show_onboarding_step(window, handle, ob);
-    if ob.borrow().steps.first() == Some(&"permissions") {
-        *poll_timer.borrow_mut() = Some(start_onboarding_permission_poll(
-            window.as_weak(),
-            ob.clone(),
-        ));
-    }
+    show_onboarding_step(window, handle, ob, permissions);
+    permissions.sync_activity();
     true
 }
 
@@ -2059,6 +2046,7 @@ fn show_onboarding_step(
     window: &MainWindow,
     handle: &AppHandle,
     ob: &Rc<RefCell<OnboardingState>>,
+    permissions: &Rc<permissions_ui::PermissionController>,
 ) {
     let (step, step_index, step_count) = {
         let guard = ob.borrow();
@@ -2082,11 +2070,7 @@ fn show_onboarding_step(
 
     match step {
         "permissions" => {
-            let (status, busy) = {
-                let guard = ob.borrow();
-                (guard.permission_status.clone(), guard.permission_busy)
-            };
-            onboarding_ui::populate_permission_rows(window, &status, busy);
+            permissions.project();
         }
         "microphone" => {
             let guard = ob.borrow();
@@ -2155,53 +2139,12 @@ fn show_onboarding_step(
             );
             window.set_onboarding_auto_paste(guard.auto_paste);
             window.set_onboarding_accessibility_granted(
-                guard.permission_status.accessibility == PermState::Granted,
+                permissions.status().accessibility == PermState::Granted,
             );
             window.set_onboarding_continue_label("Terminer".into());
         }
         _ => {}
     }
-}
-
-/// Async permission refresh for the permissions step - `get_permission_status`
-/// is a real TCC query, never a value fixed at wizard-open (AC7).
-fn refresh_onboarding_permissions(weak: slint::Weak<MainWindow>, ob: Rc<RefCell<OnboardingState>>) {
-    slint::spawn_local(async move {
-        let status = souffle_lib::commands::get_permission_status().await;
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        if window.get_onboarding_step() != "permissions" {
-            return;
-        }
-        if let Ok(status) = status {
-            let busy = {
-                let mut guard = ob.borrow_mut();
-                guard.permission_status = status.clone();
-                guard.permission_busy
-            };
-            onboarding_ui::populate_permission_rows(&window, &status, busy);
-        }
-    })
-    .expect("slint event loop not running");
-}
-
-fn start_onboarding_permission_poll(
-    weak: slint::Weak<MainWindow>,
-    ob: Rc<RefCell<OnboardingState>>,
-) -> slint::Timer {
-    let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::Repeated,
-        Duration::from_millis(600),
-        move || {
-            if ob.borrow().permission_busy.iter().any(|b| *b) {
-                return;
-            }
-            refresh_onboarding_permissions(weak.clone(), ob.clone());
-        },
-    );
-    timer
 }
 
 /// Sets up the whole onboarding overlay: decides whether to show it at
@@ -2214,12 +2157,9 @@ fn wire_onboarding_callbacks(
     window: &MainWindow,
     tauri_handle: AppHandle,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
-) -> (
-    Rc<RefCell<OnboardingState>>,
-    Rc<RefCell<Option<slint::Timer>>>,
-) {
+    permissions: Rc<permissions_ui::PermissionController>,
+) -> Rc<RefCell<OnboardingState>> {
     let ob: Rc<RefCell<OnboardingState>> = Rc::new(RefCell::new(OnboardingState::default()));
-    let onboarding_poll_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
     let weak = window.as_weak();
     let settings_io_for_locale = settings_io.clone();
@@ -2235,92 +2175,20 @@ fn wire_onboarding_callbacks(
         }
     });
 
-    let weak = window.as_weak();
-    let ob_for_grant = ob.clone();
+    let permissions_for_grant = permissions.clone();
     window.on_onboarding_grant_requested(move |slint_kind| {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
         let kind = settings_ui::permission_kind_from_slint(slint_kind);
-        let Some(index) = onboarding_ui::row_index(kind) else {
-            return;
-        };
-        ob_for_grant.borrow_mut().permission_busy[index] = true;
-        {
-            let (status, busy) = {
-                let guard = ob_for_grant.borrow();
-                (guard.permission_status.clone(), guard.permission_busy)
-            };
-            onboarding_ui::populate_permission_rows(&window, &status, busy);
-        }
-        let weak = weak.clone();
-        let ob = ob_for_grant.clone();
-        slint::spawn_local(async move {
-            let result = souffle_lib::commands::request_permission(kind).await;
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            let mut guard = ob.borrow_mut();
-            guard.permission_busy[index] = false;
-            if let Ok(state) = result {
-                match kind {
-                    DomainPermissionKind::Microphone => guard.permission_status.microphone = state,
-                    DomainPermissionKind::SystemAudio => {
-                        guard.permission_status.system_audio = state
-                    }
-                    DomainPermissionKind::Accessibility => {
-                        guard.permission_status.accessibility = state
-                    }
-                    DomainPermissionKind::Calendar => {}
-                }
-            }
-            let (status, busy) = (guard.permission_status.clone(), guard.permission_busy);
-            drop(guard);
-            onboarding_ui::populate_permission_rows(&window, &status, busy);
-        })
-        .expect("slint event loop not running");
+        permissions_for_grant.request(kind);
     });
 
-    window.on_onboarding_hint_action_requested(move |_kind| {
-        souffle_lib::commands::open_apple_intelligence_settings();
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security")
-            .spawn();
+    let permissions_for_hint = permissions.clone();
+    window.on_onboarding_hint_action_requested(move |slint_kind| {
+        permissions_for_hint.open_settings(settings_ui::permission_kind_from_slint(slint_kind));
     });
 
-    let weak = window.as_weak();
+    let permissions_for_repair = permissions.clone();
     window.on_onboarding_repair_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_onboarding_repair_busy(true);
-        let weak = weak.clone();
-        slint::spawn_local(async move {
-            let result = souffle_lib::commands::repair_accessibility_permission().await;
-            if let Some(window) = weak.upgrade() {
-                window.set_onboarding_repair_busy(false);
-                match result {
-                    Ok(_) => {
-                        window.set_onboarding_repair_success(true);
-                        window.set_onboarding_repair_cooldown(true);
-                        let weak_for_cooldown = weak.clone();
-                        let timer = slint::Timer::default();
-                        timer.start(
-                            slint::TimerMode::SingleShot,
-                            Duration::from_millis(2500),
-                            move || {
-                                if let Some(window) = weak_for_cooldown.upgrade() {
-                                    window.set_onboarding_repair_cooldown(false);
-                                }
-                            },
-                        );
-                        std::mem::forget(timer);
-                    }
-                    Err(e) => eprintln!("Accessibility repair failed: {e}"),
-                }
-            }
-        })
-        .expect("slint event loop not running");
+        permissions_for_repair.repair_accessibility();
     });
 
     let ob_for_device = ob.clone();
@@ -2341,13 +2209,19 @@ fn wire_onboarding_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_refresh = ob.clone();
+    let permissions_for_device_refresh = permissions.clone();
     window.on_onboarding_refresh_devices_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
         ob_for_refresh.borrow_mut().devices =
             souffle_lib::commands::list_audio_devices().unwrap_or_default();
-        show_onboarding_step(&window, &handle, &ob_for_refresh);
+        show_onboarding_step(
+            &window,
+            &handle,
+            &ob_for_refresh,
+            &permissions_for_device_refresh,
+        );
     });
 
     let ob_for_model_pick = ob.clone();
@@ -2444,15 +2318,15 @@ fn wire_onboarding_callbacks(
         }
     });
 
+    let permissions_for_accessibility_review = permissions.clone();
     window.on_onboarding_review_accessibility_requested(move || {
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security")
-            .spawn();
+        permissions_for_accessibility_review.open_settings(DomainPermissionKind::Accessibility);
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_back = ob.clone();
+    let permissions_for_back = permissions.clone();
     window.on_onboarding_back_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
@@ -2462,13 +2336,14 @@ fn wire_onboarding_callbacks(
             guard.step_index -= 1;
         }
         drop(guard);
-        show_onboarding_step(&window, &handle, &ob_for_back);
+        show_onboarding_step(&window, &handle, &ob_for_back, &permissions_for_back);
+        permissions_for_back.sync_activity();
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_continue = ob.clone();
-    let onboarding_poll_timer_for_continue = onboarding_poll_timer.clone();
+    let permissions_for_continue = permissions.clone();
     let settings_io_for_continue = settings_io.clone();
     window.on_onboarding_continue_requested(move || {
         let Some(window) = weak.upgrade() else {
@@ -2482,7 +2357,7 @@ fn wire_onboarding_callbacks(
                     &window,
                     &handle,
                     &ob_for_continue,
-                    &onboarding_poll_timer_for_continue,
+                    &permissions_for_continue,
                 );
             }
             "microphone" => {
@@ -2494,7 +2369,7 @@ fn wire_onboarding_callbacks(
                 let retained_weak = weak.clone();
                 let completion_handle = handle.clone();
                 let completion_ob = ob_for_continue.clone();
-                let completion_timer = onboarding_poll_timer_for_continue.clone();
+                let completion_permissions = permissions_for_continue.clone();
                 settings_io_for_continue.submit(
                     souffle_lib::commands::SettingsSaveLane::General,
                     move |settings| {
@@ -2520,7 +2395,7 @@ fn wire_onboarding_callbacks(
                                         &window,
                                         &completion_handle,
                                         &completion_ob,
-                                        &completion_timer,
+                                        &completion_permissions,
                                     ),
                                     Err(error) => {
                                         window.set_onboarding_busy(false);
@@ -2547,7 +2422,7 @@ fn wire_onboarding_callbacks(
                         &window,
                         &handle,
                         &ob_for_continue,
-                        &onboarding_poll_timer_for_continue,
+                        &permissions_for_continue,
                     );
                     return;
                 }
@@ -2610,7 +2485,7 @@ fn wire_onboarding_callbacks(
                 window.set_onboarding_busy(true);
                 window.set_onboarding_continue_enabled(false);
                 let completion_weak = weak.clone();
-                let completion_timer = onboarding_poll_timer_for_continue.clone();
+                let completion_permissions = permissions_for_continue.clone();
                 settings_io_for_continue.submit(
                     souffle_lib::commands::SettingsSaveLane::Autostart,
                     move |settings| {
@@ -2627,11 +2502,11 @@ fn wire_onboarding_callbacks(
                             outcome,
                             move || {
                                 onboarding_flags::mark_setup_complete();
-                                *completion_timer.borrow_mut() = None;
                                 if let Some(window) = completion_weak.upgrade() {
                                     window.set_onboarding_busy(false);
                                     window.set_onboarding_open(false);
                                 }
+                                completion_permissions.sync_activity();
                             },
                             move |message| {
                                 if let Some(window) = retained_weak.upgrade() {
@@ -2648,7 +2523,7 @@ fn wire_onboarding_callbacks(
         }
     });
 
-    (ob, onboarding_poll_timer)
+    ob
 }
 
 /// Advances to the next step, stopping/starting the permissions poll timer
@@ -2657,7 +2532,7 @@ fn advance_onboarding_step(
     window: &MainWindow,
     handle: &AppHandle,
     ob: &Rc<RefCell<OnboardingState>>,
-    poll_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    permissions: &Rc<permissions_ui::PermissionController>,
 ) {
     {
         let mut guard = ob.borrow_mut();
@@ -2665,19 +2540,8 @@ fn advance_onboarding_step(
             guard.step_index += 1;
         }
     }
-    show_onboarding_step(window, handle, ob);
-    let now_on_permissions = {
-        let guard = ob.borrow();
-        guard.steps.get(guard.step_index) == Some(&"permissions")
-    };
-    if now_on_permissions {
-        *poll_timer.borrow_mut() = Some(start_onboarding_permission_poll(
-            window.as_weak(),
-            ob.clone(),
-        ));
-    } else {
-        *poll_timer.borrow_mut() = None;
-    }
+    show_onboarding_step(window, handle, ob, permissions);
+    permissions.sync_activity();
 }
 
 fn apply_onboarding_shortcut(
@@ -3039,7 +2903,7 @@ fn apply_startup_update_dialogs(
 fn wire_callbacks(
     window: &MainWindow,
     tauri_handle: AppHandle,
-    onboarding_state: Rc<RefCell<OnboardingState>>,
+    permissions: Rc<permissions_ui::PermissionController>,
     settings_state: SettingsCache,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
 ) {
@@ -3606,6 +3470,7 @@ fn wire_callbacks(
     let settings_drafts_for_open = settings_drafts.clone();
     let settings_io_for_open = settings_io.clone();
     let settings_values_for_open = settings_values.clone();
+    let permissions_for_open = permissions.clone();
     window.on_settings_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
@@ -3625,6 +3490,7 @@ fn wire_callbacks(
             );
         }
         window.set_settings_open(true);
+        permissions_for_open.sync_activity();
         refresh_settings_log_tail(&window, settings_io_for_open.clone());
         *settings_log_timer_for_open.borrow_mut() = Some(start_settings_log_timer(
             weak.clone(),
@@ -3781,7 +3647,9 @@ fn wire_callbacks(
     let upcoming_for_close = upcoming_cache.clone();
     let handle_for_close = tauri_handle.clone();
     let settings_io_for_close = settings_io.clone();
+    let permissions_for_close = permissions.clone();
     window.on_settings_closed(move || {
+        permissions_for_close.sync_activity();
         let close_token = settings_io_for_close.close();
         let weak = weak.clone();
         let settings_log_timer = settings_log_timer_for_close.clone();
@@ -3789,6 +3657,7 @@ fn wire_callbacks(
         let upcoming = upcoming_for_close.clone();
         let handle = handle_for_close.clone();
         let io = settings_io_for_close.clone();
+        let permissions = permissions_for_close.clone();
         settings_drafts_for_close.flush_explicit(move |result| {
             if !io.accepts_close(close_token) {
                 return;
@@ -3799,6 +3668,7 @@ fn wire_callbacks(
                     if let Some(window) = weak.upgrade() {
                         window.set_settings_open(true);
                     }
+                    permissions.sync_activity();
                 }
                 settings_drafts::DraftFlushResult::NothingPending
                 | settings_drafts::DraftFlushResult::Committed => {
@@ -5565,30 +5435,13 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let onboarding_state_for_review = onboarding_state.clone();
+    let permissions_for_review = permissions.clone();
     window.on_settings_permissions_review_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
         window.set_settings_permissions_dialog_open(true);
-        let weak = weak.clone();
-        let onboarding_state = onboarding_state_for_review.clone();
-        slint::spawn_local(async move {
-            match souffle_lib::commands::get_permission_status().await {
-                Ok(status) => {
-                    if let Some(window) = weak.upgrade() {
-                        onboarding_state.borrow_mut().permission_status = status.clone();
-                        onboarding_ui::populate_permission_rows(&window, &status, [false; 3]);
-                    }
-                }
-                Err(e) => {
-                    if let Some(window) = weak.upgrade() {
-                        window.set_onboarding_permissions_error(e.into());
-                    }
-                }
-            }
-        })
-        .expect("slint event loop not running");
+        permissions_for_review.refresh();
     });
 
     let weak = window.as_weak();
@@ -5910,15 +5763,21 @@ fn main() {
     let settings_state = SettingsCache::new(&window);
     let settings_io =
         settings_io::SettingsIoCoordinator::new(handle.clone(), settings_state.clone());
+    let permissions = permissions_ui::PermissionController::new(&window);
+    permissions.wire_foreground_refresh(&window);
 
     refresh_timeline(&window, &handle);
-    let (onboarding_state, onboarding_poll_timer) =
-        wire_onboarding_callbacks(&window, handle.clone(), settings_io.clone());
+    let onboarding_state = wire_onboarding_callbacks(
+        &window,
+        handle.clone(),
+        settings_io.clone(),
+        permissions.clone(),
+    );
     wire_update_dialogs(&window, handle.clone(), settings_io.clone());
     wire_callbacks(
         &window,
         handle.clone(),
-        onboarding_state.clone(),
+        permissions.clone(),
         settings_state,
         settings_io.clone(),
     );
@@ -5936,7 +5795,7 @@ fn main() {
             let weak = weak.clone();
             let startup_app_handle = startup_app_handle.clone();
             let onboarding_state = onboarding_state.clone();
-            let onboarding_poll_timer = onboarding_poll_timer.clone();
+            let permissions = permissions.clone();
             let startup_io = startup_io.clone();
             let startup_gate = Arc::clone(&startup_gate_for_completion);
             slint::spawn_local(async move {
@@ -5969,7 +5828,7 @@ fn main() {
                             &startup,
                             &startup_app_handle,
                             &onboarding_state,
-                            &onboarding_poll_timer,
+                            &permissions,
                         );
                         initialize_model_at_startup(
                             &window,
