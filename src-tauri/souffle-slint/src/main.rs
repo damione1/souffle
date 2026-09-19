@@ -960,10 +960,30 @@ enum AudioDeviceSaveSettlement {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AudioDeviceProjectionState {
+    Canonical,
+    PendingUnknown { uid: String },
+}
+
 impl AudioDeviceSaveSettlement {
     fn has_observed_canonical(&self) -> bool {
         match self {
             Self::Committed { canonical, .. } | Self::Rejected { canonical } => canonical.is_some(),
+        }
+    }
+
+    fn projection_state(&self) -> AudioDeviceProjectionState {
+        match self {
+            Self::Committed {
+                canonical: Some(_), ..
+            }
+            | Self::Rejected { canonical: Some(_) }
+            | Self::Rejected { canonical: None } => AudioDeviceProjectionState::Canonical,
+            Self::Committed {
+                uid,
+                canonical: None,
+            } => AudioDeviceProjectionState::PendingUnknown { uid: uid.clone() },
         }
     }
 }
@@ -1006,25 +1026,45 @@ fn settle_audio_device_save(
     }
 }
 
+fn audio_device_load_configuration(
+    settings_state: &SettingsCache,
+    projection_state: &Rc<RefCell<AudioDeviceProjectionState>>,
+) -> Option<(String, Option<String>, souffle_lib::audio::InputPriority)> {
+    let known = settings_state.known_snapshot();
+    let last_observed = settings_state.borrow().clone();
+    let settings = known.as_ref().or(last_observed.as_ref())?;
+    let selected = if known.is_some() {
+        *projection_state.borrow_mut() = AudioDeviceProjectionState::Canonical;
+        settings.audio_device.clone().unwrap_or_default()
+    } else {
+        match &*projection_state.borrow() {
+            AudioDeviceProjectionState::Canonical => {
+                settings.audio_device.clone().unwrap_or_default()
+            }
+            AudioDeviceProjectionState::PendingUnknown { uid } => uid.clone(),
+        }
+    };
+    Some((
+        selected,
+        settings.clamshell_audio_device.clone(),
+        settings.input_priority.clone(),
+    ))
+}
+
 fn load_audio_devices(
     window: &MainWindow,
     settings_state: &SettingsCache,
     audio_devices_state: &Rc<RefCell<Vec<AudioInputDevice>>>,
+    projection_state: &Rc<RefCell<AudioDeviceProjectionState>>,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
 ) {
     let Some(token) = settings_io.current_load_token() else {
         return;
     };
-    let (selected, clamshell, priority) = {
-        let guard = settings_state.borrow();
-        match guard.as_ref() {
-            Some(settings) => (
-                settings.audio_device.clone().unwrap_or_default(),
-                settings.clamshell_audio_device.clone(),
-                settings.input_priority.clone(),
-            ),
-            None => return,
-        }
+    let Some((selected, clamshell, priority)) =
+        audio_device_load_configuration(settings_state, projection_state)
+    else {
+        return;
     };
     let weak = window.as_weak();
     let devices_state = audio_devices_state.clone();
@@ -3337,6 +3377,8 @@ fn wire_callbacks(
     // Cached so device-picker/microphone-list callbacks (move/hide/remove,
     // label->uid resolution) don't each re-query CoreAudio.
     let audio_devices_state: Rc<RefCell<Vec<AudioInputDevice>>> = Rc::new(RefCell::new(Vec::new()));
+    let audio_device_projection_state =
+        Rc::new(RefCell::new(AudioDeviceProjectionState::Canonical));
     // Cached so the model picker/download button don't each re-query Ollama.
     let summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>> =
         Rc::new(RefCell::new(None));
@@ -3370,6 +3412,7 @@ fn wire_callbacks(
     let settings_state_for_open = settings_state.clone();
     let shortcuts_state_for_open = shortcuts_state.clone();
     let audio_devices_state_for_open = audio_devices_state.clone();
+    let audio_device_projection_for_open = audio_device_projection_state.clone();
     let summary_status_state_for_open = summary_status_state.clone();
     let summary_template_editing_for_open = summary_template_editing.clone();
     let model_options_state_for_open = model_options_state.clone();
@@ -3408,6 +3451,7 @@ fn wire_callbacks(
         let core_io = settings_io_for_open.clone();
         let core_state = settings_state_for_open.clone();
         let core_devices = audio_devices_state_for_open.clone();
+        let core_device_projection = audio_device_projection_for_open.clone();
         let core_summary = summary_status_state_for_open.clone();
         let core_editing = summary_template_editing_for_open.clone();
         let core_models = model_options_state_for_open.clone();
@@ -3428,7 +3472,13 @@ fn wire_callbacks(
             data_ui::populate(&window, &settings);
             core_values.observe_loaded(&settings);
             load_calendars_if_enabled(&window, &core_state, finish_core_io.clone());
-            load_audio_devices(&window, &core_state, &core_devices, finish_core_io.clone());
+            load_audio_devices(
+                &window,
+                &core_state,
+                &core_devices,
+                &core_device_projection,
+                finish_core_io.clone(),
+            );
             refresh_summary_providers(
                 core_weak.clone(),
                 core_handle.clone(),
@@ -3894,6 +3944,7 @@ fn wire_callbacks(
     let settings_state_for_device = settings_state.clone();
     let settings_io_for_device = settings_io.clone();
     let audio_devices_state_for_device = audio_devices_state.clone();
+    let audio_device_projection_for_device = audio_device_projection_state.clone();
     let device_selection_revision = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let device_effect_lock = Arc::new(Mutex::new(()));
     window.on_settings_device_changed(move |label| {
@@ -3906,6 +3957,7 @@ fn wire_callbacks(
         let devices = audio_devices_state_for_device.clone();
         let publication_io = settings_io_for_device.clone();
         let selection_handle = handle.clone();
+        let projection_state = audio_device_projection_for_device.clone();
         let latest_revision = Arc::clone(&device_selection_revision);
         let effect_lock = Arc::clone(&device_effect_lock);
         save_settings_field_then(
@@ -3930,6 +3982,7 @@ fn wire_callbacks(
                 // native effect; the user's submitted label remains visible
                 // until a later serialized refresh observes persistence.
                 let reload_after_effect = settlement.has_observed_canonical();
+                *projection_state.borrow_mut() = settlement.projection_state();
                 let (target_uid, canonical) = match settlement {
                     AudioDeviceSaveSettlement::Committed { uid, canonical } => {
                         (Some(uid), canonical)
@@ -3978,7 +4031,13 @@ fn wire_callbacks(
                         && let Some(window) = weak.upgrade()
                         && window.get_settings_open()
                     {
-                        load_audio_devices(&window, &settings_state, &devices, publication_io);
+                        load_audio_devices(
+                            &window,
+                            &settings_state,
+                            &devices,
+                            &projection_state,
+                            publication_io,
+                        );
                     }
                 })
                 .expect("slint event loop not running");
@@ -3989,6 +4048,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_state_for_refresh = settings_state.clone();
     let audio_devices_state_for_refresh = audio_devices_state.clone();
+    let audio_device_projection_for_refresh = audio_device_projection_state.clone();
     let settings_io_for_refresh = settings_io.clone();
     window.on_settings_refresh_devices_requested(move || {
         if let Some(window) = weak.upgrade() {
@@ -3996,6 +4056,7 @@ fn wire_callbacks(
                 &window,
                 &settings_state_for_refresh,
                 &audio_devices_state_for_refresh,
+                &audio_device_projection_for_refresh,
                 settings_io_for_refresh.clone(),
             );
         }
@@ -4095,6 +4156,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_state_for_move = settings_state.clone();
     let audio_devices_state_for_move = audio_devices_state.clone();
+    let audio_device_projection_for_move = audio_device_projection_state.clone();
     let settings_io_for_move = settings_io.clone();
     window.on_settings_move_device_requested(move |uid, direction| {
         let devices = audio_devices_state_for_move.borrow().clone();
@@ -4102,6 +4164,7 @@ fn wire_callbacks(
         let weak = weak.clone();
         let state = settings_state_for_move.clone();
         let device_state = audio_devices_state_for_move.clone();
+        let projection_state = audio_device_projection_for_move.clone();
         let publication_io = settings_io_for_move.clone();
         save_settings_field_then(
             &settings_io_for_move,
@@ -4119,7 +4182,13 @@ fn wire_callbacks(
                     return;
                 }
                 if let Some(window) = weak.upgrade() {
-                    load_audio_devices(&window, &state, &device_state, publication_io);
+                    load_audio_devices(
+                        &window,
+                        &state,
+                        &device_state,
+                        &projection_state,
+                        publication_io,
+                    );
                 }
             },
         );
@@ -4128,12 +4197,14 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_state_for_hide = settings_state.clone();
     let audio_devices_state_for_hide = audio_devices_state.clone();
+    let audio_device_projection_for_hide = audio_device_projection_state.clone();
     let settings_io_for_hide = settings_io.clone();
     window.on_settings_toggle_hidden_requested(move |uid, hidden| {
         let uid = uid.to_string();
         let weak = weak.clone();
         let state = settings_state_for_hide.clone();
         let devices = audio_devices_state_for_hide.clone();
+        let projection_state = audio_device_projection_for_hide.clone();
         let publication_io = settings_io_for_hide.clone();
         save_settings_field_then(
             &settings_io_for_hide,
@@ -4150,7 +4221,13 @@ fn wire_callbacks(
                     return;
                 }
                 if let Some(window) = weak.upgrade() {
-                    load_audio_devices(&window, &state, &devices, publication_io);
+                    load_audio_devices(
+                        &window,
+                        &state,
+                        &devices,
+                        &projection_state,
+                        publication_io,
+                    );
                 }
             },
         );
@@ -4159,12 +4236,14 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_state_for_remove = settings_state.clone();
     let audio_devices_state_for_remove = audio_devices_state.clone();
+    let audio_device_projection_for_remove = audio_device_projection_state.clone();
     let settings_io_for_remove = settings_io.clone();
     window.on_settings_remove_device_requested(move |uid| {
         let uid = uid.to_string();
         let weak = weak.clone();
         let state = settings_state_for_remove.clone();
         let devices = audio_devices_state_for_remove.clone();
+        let projection_state = audio_device_projection_for_remove.clone();
         let publication_io = settings_io_for_remove.clone();
         save_settings_field_then(
             &settings_io_for_remove,
@@ -4184,7 +4263,13 @@ fn wire_callbacks(
                     return;
                 }
                 if let Some(window) = weak.upgrade() {
-                    load_audio_devices(&window, &state, &devices, publication_io);
+                    load_audio_devices(
+                        &window,
+                        &state,
+                        &devices,
+                        &projection_state,
+                        publication_io,
+                    );
                 }
             },
         );
@@ -4193,11 +4278,13 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_state_for_reset_devices = settings_state.clone();
     let audio_devices_state_for_reset_devices = audio_devices_state.clone();
+    let audio_device_projection_for_reset_devices = audio_device_projection_state.clone();
     let settings_io_for_reset_devices = settings_io.clone();
     window.on_settings_reset_devices_requested(move || {
         let weak = weak.clone();
         let state = settings_state_for_reset_devices.clone();
         let devices = audio_devices_state_for_reset_devices.clone();
+        let projection_state = audio_device_projection_for_reset_devices.clone();
         let io = settings_io_for_reset_devices.clone();
         let Some(token) = io.current_load_token() else {
             return;
@@ -4244,7 +4331,13 @@ fn wire_callbacks(
                         return;
                     }
                     if let Some(window) = weak.upgrade() {
-                        load_audio_devices(&window, &state, &devices, publication_io);
+                        load_audio_devices(
+                            &window,
+                            &state,
+                            &devices,
+                            &projection_state,
+                            publication_io,
+                        );
                     }
                 },
             );
@@ -4255,15 +4348,17 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_state_for_reset_rate = settings_state.clone();
     let audio_devices_state_for_reset_rate = audio_devices_state.clone();
+    let audio_device_projection_for_reset_rate = audio_device_projection_state;
     window.on_settings_reset_sample_rate_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let selected = settings_state_for_reset_rate
-            .borrow()
-            .as_ref()
-            .and_then(|s| s.audio_device.clone())
-            .unwrap_or_default();
+        let Some((selected, _, _)) = audio_device_load_configuration(
+            &settings_state_for_reset_rate,
+            &audio_device_projection_for_reset_rate,
+        ) else {
+            return;
+        };
         let devices = audio_devices_state_for_reset_rate.borrow().clone();
         let Some(uid) =
             audio_ui::resolve_sample_rate_device_uid(&selected, &devices).map(String::from)
@@ -5670,12 +5765,12 @@ mod tests {
     use super::{
         AudioDeviceSaveSettlement, DictationEndIntent, DictationTextBuffers,
         DictationTranscriptDisposition, MainWindow, OnboardingState, SettingsCache,
-        StartupPresentationGate, Theme, clear_committed_summary_add_draft,
-        dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
-        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
-        reset_live_buffers, settle_audio_device_save, settle_model_selection_save,
-        settle_onboarding_completion, should_clear_committed_summary_add_draft,
-        wire_summary_template_edit_callbacks,
+        StartupPresentationGate, Theme, audio_device_load_configuration,
+        clear_committed_summary_add_draft, dictation_transcript_disposition,
+        finish_startup_presentation, merge_recovery_text, prime_summary_template_editor,
+        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
+        settle_audio_device_save, settle_model_selection_save, settle_onboarding_completion,
+        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -6001,10 +6096,13 @@ mod tests {
             result: Ok(()),
             read_error: "controlled reread failure".into(),
         };
+        let cache = SettingsCache::with_observed(&window, fallback.clone());
+        cache.observe_save_outcome_silent(&outcome);
 
         let settlement = settle_audio_device_save(&outcome, &Some(fallback), "mic-b");
 
         assert!(!settlement.has_observed_canonical());
+        let projection = Rc::new(RefCell::new(settlement.projection_state()));
         match settlement {
             AudioDeviceSaveSettlement::Committed { uid, canonical } => {
                 assert_eq!(uid, "mic-b");
@@ -6014,8 +6112,12 @@ mod tests {
                 panic!("committed device save was classified as rejected")
             }
         }
-        // The post-effect path only reloads from a canonical observation.
-        // With no observation, it must leave the submitted label untouched.
+        let (selected, _, _) = audio_device_load_configuration(&cache, &projection)
+            .expect("unknown cache still has a pending selection");
+
+        // Both the post-effect path and a manual Refresh use the pending
+        // unknown selection instead of the stale preserved cache snapshot.
+        assert_eq!(selected, "mic-b");
         assert_eq!(
             window.get_settings_selected_device_label().as_str(),
             "Microphone B"
