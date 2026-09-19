@@ -913,16 +913,6 @@ fn project_model_selection_snapshot(
     Ok(model_ui::selected_profile(&catalog))
 }
 
-fn settings_snapshot_after_save<'a>(
-    outcome: &'a SettingsSaveOutcome,
-    fallback: &'a Option<AppSettings>,
-) -> Option<&'a AppSettings> {
-    match outcome {
-        SettingsSaveOutcome::Observed { settings, .. } => Some(settings),
-        SettingsSaveOutcome::Unavailable { .. } => fallback.as_ref(),
-    }
-}
-
 fn settle_model_selection_save(
     outcome: &SettingsSaveOutcome,
     fallback: &Option<AppSettings>,
@@ -930,16 +920,82 @@ fn settle_model_selection_save(
     project_canonical: impl FnOnce(&AppSettings) -> Result<TranscriptionProfileSelection, String>,
     committed: impl FnOnce(TranscriptionProfileSelection),
 ) -> Result<(), String> {
-    let canonical = settings_snapshot_after_save(outcome, fallback)
-        .map(project_canonical)
-        .transpose()?;
-    match settings_values::save_outcome_commit_status(outcome) {
-        settings_values::SettingsCommitStatus::Committed => {
-            committed(canonical.unwrap_or(requested));
+    match (
+        outcome,
+        settings_values::save_outcome_commit_status(outcome),
+    ) {
+        (
+            SettingsSaveOutcome::Observed { settings, .. },
+            settings_values::SettingsCommitStatus::Committed,
+        ) => committed(project_canonical(settings)?),
+        (
+            SettingsSaveOutcome::Observed { settings, .. },
+            settings_values::SettingsCommitStatus::NotCommitted,
+        ) => {
+            project_canonical(settings)?;
         }
-        settings_values::SettingsCommitStatus::NotCommitted => {}
+        (
+            SettingsSaveOutcome::Unavailable { .. },
+            settings_values::SettingsCommitStatus::Committed,
+        ) => committed(requested),
+        (
+            SettingsSaveOutcome::Unavailable { .. },
+            settings_values::SettingsCommitStatus::NotCommitted,
+        ) => {
+            if let Some(settings) = fallback {
+                project_canonical(settings)?;
+            }
+        }
     }
     Ok(())
+}
+
+enum AudioDeviceSaveSettlement {
+    Committed {
+        uid: String,
+        canonical: Option<Box<AppSettings>>,
+    },
+    Rejected {
+        canonical: Option<Box<AppSettings>>,
+    },
+}
+
+fn settle_audio_device_save(
+    outcome: &SettingsSaveOutcome,
+    fallback: &Option<AppSettings>,
+    submitted_uid: &str,
+) -> AudioDeviceSaveSettlement {
+    match (
+        outcome,
+        settings_values::save_outcome_commit_status(outcome),
+    ) {
+        (
+            SettingsSaveOutcome::Observed { settings, .. },
+            settings_values::SettingsCommitStatus::Committed,
+        ) => AudioDeviceSaveSettlement::Committed {
+            uid: settings.audio_device.clone().unwrap_or_default(),
+            canonical: Some(settings.clone()),
+        },
+        (
+            SettingsSaveOutcome::Unavailable { .. },
+            settings_values::SettingsCommitStatus::Committed,
+        ) => AudioDeviceSaveSettlement::Committed {
+            uid: submitted_uid.to_string(),
+            canonical: None,
+        },
+        (
+            SettingsSaveOutcome::Observed { settings, .. },
+            settings_values::SettingsCommitStatus::NotCommitted,
+        ) => AudioDeviceSaveSettlement::Rejected {
+            canonical: Some(settings.clone()),
+        },
+        (
+            SettingsSaveOutcome::Unavailable { .. },
+            settings_values::SettingsCommitStatus::NotCommitted,
+        ) => AudioDeviceSaveSettlement::Rejected {
+            canonical: fallback.clone().map(Box::new),
+        },
+    }
 }
 
 fn load_audio_devices(
@@ -3830,30 +3886,70 @@ fn wire_callbacks(
     let settings_state_for_device = settings_state.clone();
     let settings_io_for_device = settings_io.clone();
     let audio_devices_state_for_device = audio_devices_state.clone();
+    let device_selection_revision = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let device_effect_lock = Arc::new(Mutex::new(()));
     window.on_settings_device_changed(move |label| {
         let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_device.borrow(), &label)
             .unwrap_or_default();
+        let revision = device_selection_revision.fetch_add(1, Ordering::AcqRel) + 1;
+        let uid_for_save = uid.clone();
         let weak = weak.clone();
         let settings_state = settings_state_for_device.clone();
         let devices = audio_devices_state_for_device.clone();
         let publication_io = settings_io_for_device.clone();
         let selection_handle = handle.clone();
+        let latest_revision = Arc::clone(&device_selection_revision);
+        let effect_lock = Arc::clone(&device_effect_lock);
         save_settings_field_then(
             &settings_io_for_device,
             souffle_lib::commands::SettingsSaveLane::General,
             move |settings| {
-                settings.audio_device = if uid.is_empty() { None } else { Some(uid) };
+                settings.audio_device = if uid_for_save.is_empty() {
+                    None
+                } else {
+                    Some(uid_for_save)
+                };
             },
-            move |order, outcome| {
-                if !order.publishes_to_open_window() {
+            move |_order, outcome| {
+                if revision != latest_revision.load(Ordering::Acquire) {
                     return;
                 }
-                let SettingsSaveOutcome::Observed { settings, .. } = outcome else {
+                let fallback = settings_state.borrow().clone();
+                let settlement = settle_audio_device_save(outcome, &fallback, &uid);
+                let (target_uid, canonical) = match settlement {
+                    AudioDeviceSaveSettlement::Committed { uid, canonical } => {
+                        (Some(uid), canonical)
+                    }
+                    AudioDeviceSaveSettlement::Rejected { canonical } => {
+                        let uid = canonical
+                            .as_ref()
+                            .map(|settings| settings.audio_device.clone().unwrap_or_default());
+                        (uid, canonical)
+                    }
+                };
+                if let Some(window) = weak.upgrade()
+                    && window.get_settings_open()
+                    && let Some(settings) = canonical.as_deref()
+                {
+                    audio_ui::populate_device_pickers(
+                        &window,
+                        &devices.borrow(),
+                        settings.audio_device.as_deref().unwrap_or_default(),
+                        settings.clamshell_audio_device.as_deref(),
+                    );
+                }
+                let Some(target_uid) = target_uid else {
                     return;
                 };
-                let uid = settings.audio_device.clone().unwrap_or_default();
+                let worker_revision = Arc::clone(&latest_revision);
                 let worker = souffle_lib::async_runtime::spawn_blocking(move || {
-                    souffle_lib::commands::select_audio_device(selection_handle, uid)
+                    let _guard = effect_lock
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    if revision != worker_revision.load(Ordering::Acquire) {
+                        return Ok(());
+                    }
+                    souffle_lib::commands::select_audio_device(selection_handle, target_uid)
                 });
                 slint::spawn_local(async move {
                     match worker.await {
@@ -3863,7 +3959,10 @@ fn wire_callbacks(
                             eprintln!("Failed to join audio device selection worker: {error}")
                         }
                     }
-                    if let Some(window) = weak.upgrade() {
+                    if revision == latest_revision.load(Ordering::Acquire)
+                        && let Some(window) = weak.upgrade()
+                        && window.get_settings_open()
+                    {
                         load_audio_devices(&window, &settings_state, &devices, publication_io);
                     }
                 })
@@ -5554,13 +5653,14 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        DictationEndIntent, DictationTextBuffers, DictationTranscriptDisposition, MainWindow,
-        OnboardingState, SettingsCache, StartupPresentationGate, Theme,
-        clear_committed_summary_add_draft, dictation_transcript_disposition,
-        finish_startup_presentation, merge_recovery_text, prime_summary_template_editor,
-        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
-        settle_model_selection_save, settle_onboarding_completion,
-        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
+        AudioDeviceSaveSettlement, DictationEndIntent, DictationTextBuffers,
+        DictationTranscriptDisposition, MainWindow, OnboardingState, SettingsCache,
+        StartupPresentationGate, Theme, clear_committed_summary_add_draft,
+        dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
+        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
+        reset_live_buffers, settle_audio_device_save, settle_model_selection_save,
+        settle_onboarding_completion, should_clear_committed_summary_add_draft,
+        wire_summary_template_edit_callbacks,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -5792,6 +5892,86 @@ mod tests {
             window.get_settings_selected_model_label().as_str(),
             expected_picker
         );
+    }
+
+    #[test]
+    fn committed_unavailable_model_save_starts_the_submitted_not_cached_selection() {
+        let old = AppSettings::default();
+        let requested = souffle_lib::engine::TranscriptionProfileSelection {
+            engine_id: "engine-b".into(),
+            model_id: "model-b".into(),
+            backend_id: "backend-b".into(),
+        };
+        let started = Rc::new(RefCell::new(None));
+        let started_for_callback = started.clone();
+        let projected = Rc::new(Cell::new(false));
+        let projected_for_callback = projected.clone();
+        let outcome = SettingsSaveOutcome::Unavailable {
+            result: Ok(()),
+            read_error: "controlled reread failure".into(),
+        };
+
+        settle_model_selection_save(
+            &outcome,
+            &Some(old),
+            requested.clone(),
+            move |_| {
+                projected_for_callback.set(true);
+                Ok(souffle_lib::engine::TranscriptionProfileSelection::default())
+            },
+            move |selection| *started_for_callback.borrow_mut() = Some(selection),
+        )
+        .unwrap();
+
+        assert!(!projected.get());
+        assert_eq!(started.borrow().as_ref(), Some(&requested));
+    }
+
+    #[test]
+    fn device_effect_settlement_ignores_global_visibility_order_and_rolls_back_rejections() {
+        let committed = AppSettings {
+            audio_device: Some("mic-b".into()),
+            ..AppSettings::default()
+        };
+        let committed_outcome = SettingsSaveOutcome::Observed {
+            settings: Box::new(committed),
+            result: Ok(()),
+        };
+        for order in [
+            crate::settings_io::SettingsResponseOrder::Intermediate,
+            crate::settings_io::SettingsResponseOrder::LatestHidden,
+        ] {
+            assert!(!order.publishes_to_open_window());
+            match settle_audio_device_save(&committed_outcome, &None, "mic-b") {
+                AudioDeviceSaveSettlement::Committed { uid, .. } => assert_eq!(uid, "mic-b"),
+                AudioDeviceSaveSettlement::Rejected { .. } => {
+                    panic!("committed device save was classified as rejected")
+                }
+            }
+        }
+
+        let previous = AppSettings {
+            audio_device: Some("mic-a".into()),
+            ..AppSettings::default()
+        };
+        let rejected = SettingsSaveOutcome::Observed {
+            settings: Box::new(previous),
+            result: Err(SettingsSaveError::Rejected {
+                message: "device rejected".into(),
+            }),
+        };
+        match settle_audio_device_save(&rejected, &None, "mic-b") {
+            AudioDeviceSaveSettlement::Rejected { canonical } => assert_eq!(
+                canonical
+                    .expect("observed rejection has canonical settings")
+                    .audio_device
+                    .as_deref(),
+                Some("mic-a")
+            ),
+            AudioDeviceSaveSettlement::Committed { .. } => {
+                panic!("rejected device save was classified as committed")
+            }
+        }
     }
 
     #[test]
