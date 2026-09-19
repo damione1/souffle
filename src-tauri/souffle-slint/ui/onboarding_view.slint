@@ -91,7 +91,7 @@ export component OnboardingView inherits Rectangle {
                     horizontal-alignment: center;
                 }
 
-                HorizontalLayout {
+                if root.step-index == 0: HorizontalLayout {
                     alignment: center;
                     spacing: 4px;
                     ThemedButton {

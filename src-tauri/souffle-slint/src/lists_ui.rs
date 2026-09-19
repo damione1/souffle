@@ -60,6 +60,7 @@ impl SettingsListModels {
         sync_rows_by_id(&self.snippets, rows, |row| row.id);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_snippet_editing(&self, editing_id: Option<i64>) {
         for index in 0..self.snippets.row_count() {
             let Some(mut row) = self.snippets.row_data(index) else {

@@ -5309,7 +5309,7 @@ fn wire_callbacks(
     let lists_models_5 = lists_models.clone();
     window.on_settings_snippet_cancel_edit_requested(move || {
         *snippet_editing_for_cancel.borrow_mut() = None;
-        if let Some(window) = weak.upgrade() {
+        if let Some(_window) = weak.upgrade() {
             let entries = snippets_list_state_for_cancel.borrow();
             lists_models_5.populate_snippets( &entries, None);
         }
