@@ -226,12 +226,10 @@ export component MeetingDetail inherits Rectangle {
         Rectangle {
             vertical-stretch: 1;
 
-            ScrollView {
+            VerticalLayout {
                 width: parent.width - 12px;
-                VerticalLayout {
-                    padding-right: 14px;
-                    spacing: 22px;
-                    alignment: start;
+                padding-right: 14px;
+                spacing: 22px;
 
                     VerticalLayout {
                         spacing: 10px;
@@ -334,7 +332,7 @@ export component MeetingDetail inherits Rectangle {
                     }
 
                     if !root.is-empty-meeting: TranscriptSection {
-                        vertical-stretch: 0;
+                        vertical-stretch: 1;
                         blocks: root.transcript-blocks;
                         segment-count: root.transcript-segment-count;
                         has-audio: root.has-audio;
@@ -358,5 +356,4 @@ export component MeetingDetail inherits Rectangle {
                 }
             }
         }
-    }
 }
