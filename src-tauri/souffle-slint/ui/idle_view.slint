@@ -88,17 +88,17 @@ export component IdleView inherits Rectangle {
             alignment: start;
 
             FilterChip {
-                text: "Tout";
+                text: @tr("Tout");
                 selected: root.kind-filter == TimelineFilter.all;
                 clicked => { root.filter-changed(TimelineFilter.all); }
             }
             FilterChip {
-                text: "Réunions";
+                text: @tr("Réunions");
                 selected: root.kind-filter == TimelineFilter.meeting;
                 clicked => { root.filter-changed(TimelineFilter.meeting); }
             }
             FilterChip {
-                text: "Dictées";
+                text: @tr("Dictées");
                 selected: root.kind-filter == TimelineFilter.dictation;
                 clicked => { root.filter-changed(TimelineFilter.dictation); }
             }

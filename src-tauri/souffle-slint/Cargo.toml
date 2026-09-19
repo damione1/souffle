@@ -43,6 +43,7 @@ arboard = "3.6"
 # SOU-188: new custom summary-template/dictionary-entry/snippet ids, same
 # crate/version the main `souffle` crate already uses (src/state.rs).
 uuid = { version = "1", features = ["v4"] }
+slint-build = "1.9"
 
 [build-dependencies]
 lucide-slint = "1.46.0"

@@ -267,7 +267,7 @@ export component SettingsView inherits Rectangle {
             vertical-stretch: 0;
 
             accessible-role: button;
-            accessible-label: "Fermer les paramètres";
+            accessible-label: @tr("Fermer les paramètres");
             accessible-action-default => { root.close-requested(); }
 
             forward-focus: done-focus;
@@ -292,7 +292,7 @@ export component SettingsView inherits Rectangle {
             done-label := Text {
                 x: 32px;
                 y: (parent.height - self.height) / 2;
-                text: "Terminé";
+                text: @tr("Terminé");
                 font-size: 13px;
                 color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
             }
@@ -305,7 +305,7 @@ export component SettingsView inherits Rectangle {
         }
 
         Text {
-            text: "Paramètres";
+            text: @tr("Paramètres");
             font-size: 20px;
             font-weight: 700;
             color: Theme.text-primary;

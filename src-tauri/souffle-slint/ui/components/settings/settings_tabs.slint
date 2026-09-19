@@ -77,7 +77,7 @@ export component SettingsTabBar inherits Rectangle {
     background: Theme.surface-1;
 
     accessible-role: tab-list;
-    accessible-label: "Sections des paramètres";
+    accessible-label: @tr("Sections des paramètres");
 
     function previous() {
         if root.current == SettingsTab.transcription { root.select(SettingsTab.system); }
@@ -108,7 +108,7 @@ export component SettingsTabBar inherits Rectangle {
         alignment: start;
 
         SettingsTabChip {
-            title: "Transcription";
+            title: @tr("Transcription");
             active: root.current == SettingsTab.transcription;
             clicked => {
                 root.select(SettingsTab.transcription);
@@ -117,7 +117,7 @@ export component SettingsTabBar inherits Rectangle {
             next-requested => { root.next(); }
         }
         SettingsTabChip {
-            title: "IA";
+            title: @tr("IA");
             active: root.current == SettingsTab.ai;
             clicked => {
                 root.select(SettingsTab.ai);
@@ -126,7 +126,7 @@ export component SettingsTabBar inherits Rectangle {
             next-requested => { root.next(); }
         }
         SettingsTabChip {
-            title: "Audio";
+            title: @tr("Audio");
             active: root.current == SettingsTab.audio;
             clicked => {
                 root.select(SettingsTab.audio);
@@ -135,7 +135,7 @@ export component SettingsTabBar inherits Rectangle {
             next-requested => { root.next(); }
         }
         SettingsTabChip {
-            title: "Interface";
+            title: @tr("Interface");
             active: root.current == SettingsTab.interface;
             clicked => {
                 root.select(SettingsTab.interface);
@@ -144,7 +144,7 @@ export component SettingsTabBar inherits Rectangle {
             next-requested => { root.next(); }
         }
         SettingsTabChip {
-            title: "Réunions";
+            title: @tr("Réunions");
             active: root.current == SettingsTab.meetings;
             clicked => {
                 root.select(SettingsTab.meetings);
@@ -153,7 +153,7 @@ export component SettingsTabBar inherits Rectangle {
             next-requested => { root.next(); }
         }
         SettingsTabChip {
-            title: "Système";
+            title: @tr("Système");
             active: root.current == SettingsTab.system;
             clicked => {
                 root.select(SettingsTab.system);

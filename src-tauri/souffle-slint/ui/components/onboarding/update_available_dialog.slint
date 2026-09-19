@@ -43,7 +43,7 @@ export component UpdateAvailableDialog inherits Rectangle {
             VerticalLayout {
                 spacing: 2px;
                 Text {
-                    text: "Mise à jour disponible";
+                    text: @tr("Mise à jour disponible");
                     font-size: 16px;
                     font-weight: 700;
                     color: Theme.text-primary;
@@ -81,18 +81,18 @@ export component UpdateAvailableDialog inherits Rectangle {
                 spacing: 8px;
 
                 Button {
-                    text: "Voir sur GitHub";
+                    text: @tr("Voir sur GitHub");
                     clicked => { root.open-release-requested(); }
                 }
 
                 HorizontalLayout {
                     spacing: 8px;
                     Button {
-                        text: "Plus tard";
+                        text: @tr("Plus tard");
                         clicked => { root.dismiss-requested(); }
                     }
                     if root.phase == "ready": Button {
-                        text: "Installer et redémarrer";
+                        text: @tr("Installer et redémarrer");
                         enabled: root.install-blocked-reason == "";
                         clicked => { root.install-requested(); }
                     }

@@ -25,13 +25,13 @@ export component DictationRecovery inherits Rectangle {
         alignment: start;
 
         Text {
-            text: "Dictée à récupérer";
+            text: @tr("Dictée à récupérer");
             color: Theme.text-primary;
             font-size: 14px;
             font-weight: 600;
         }
         Text {
-            text: "Le texte reste ici tant que vous ne l’avez pas copié ou supprimé.";
+            text: @tr("Le texte reste ici tant que vous ne l’avez pas copié ou supprimé.");
             color: Theme.text-muted;
             font-size: 12px;
             wrap: word-wrap;
@@ -39,18 +39,18 @@ export component DictationRecovery inherits Rectangle {
         ThemedTextArea {
             text <=> root.text;
             area-height: 108px;
-            control-label: "Texte de dictée à récupérer";
+            control-label: @tr("Texte de dictée à récupérer");
         }
         HorizontalLayout {
             spacing: 8px;
             alignment: end;
             ThemedButton {
-                text: "Supprimer";
+                text: @tr("Supprimer");
                 kind: ThemedButtonKind.ghost;
                 clicked => { root.discard-requested(); }
             }
             ThemedButton {
-                text: "Copier le texte";
+                text: @tr("Copier le texte");
                 kind: ThemedButtonKind.primary;
                 clicked => { root.copy-requested(); }
             }

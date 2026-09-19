@@ -63,7 +63,7 @@ export component IntelligenceSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "RÉSUMÉS";
+        title: @tr("RÉSUMÉS");
 
     SettingsField {
         show-divider: false;
@@ -71,7 +71,7 @@ export component IntelligenceSection inherits VerticalLayout {
         description: "Le moteur qui rédige les résumés et nettoie la dictée.";
 
         ThemedComboBox {
-            control-label: "Moteur de résumé";
+            control-label: @tr("Moteur de résumé");
             model: [
                 root.provider-label(SummaryProvider.auto),
                 root.provider-label(SummaryProvider.apple-intelligence),
@@ -153,7 +153,7 @@ export component IntelligenceSection inherits VerticalLayout {
                 horizontal-stretch: 1;
             }
             if root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: ThemedButton {
-                text: "Réglages Système";
+                text: @tr("Réglages Système");
                 clicked => { root.open-apple-intelligence-settings-requested(); }
             }
         }
@@ -165,7 +165,7 @@ export component IntelligenceSection inherits VerticalLayout {
 
         ThemedLineEdit {
             width: Theme.settings-control-width;
-            control-label: "URL Ollama";
+            control-label: @tr("URL Ollama");
             placeholder: "http://localhost:11434";
             text: root.ollama-url;
             edited(value) => { root.ollama-url-changed(value); }
@@ -194,7 +194,7 @@ export component IntelligenceSection inherits VerticalLayout {
                 x: status.width + 12px;
                 y: 0px;
                 width: 92px;
-                text: "Réessayer";
+                text: @tr("Réessayer");
                 enabled: !root.ollama-checking && !root.ollama-pulling;
                 clicked => { root.retry-requested(); }
             }
@@ -205,7 +205,7 @@ export component IntelligenceSection inherits VerticalLayout {
         label: "Modèle de résumé";
 
         ThemedComboBox {
-            control-label: "Modèle de résumé";
+            control-label: @tr("Modèle de résumé");
             model: root.model-labels;
             option-values: root.model-ids;
             current-value: root.selected-model-label;
@@ -217,7 +217,7 @@ export component IntelligenceSection inherits VerticalLayout {
         spacing: 8px;
 
         Text {
-            text: "Aucun modèle compatible installé.";
+            text: @tr("Aucun modèle compatible installé.");
             color: Theme.warning;
             font-size: 11.5px;
         }

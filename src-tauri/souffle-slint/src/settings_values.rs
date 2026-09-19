@@ -362,6 +362,7 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
     });
     let c = controller.clone();
     window.on_settings_locale_changed(move |value| {
+        let _ = slint::select_bundled_translation(settings_ui::locale_from_slint(value));
         c.apply(SettingsSaveLane::General, move |s| {
             s.locale = settings_ui::locale_from_slint(value).into()
         });

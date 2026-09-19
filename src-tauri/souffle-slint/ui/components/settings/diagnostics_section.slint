@@ -31,7 +31,7 @@ export component DiagnosticsSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "DIAGNOSTICS";
+        title: @tr("DIAGNOSTICS");
 
         SettingsField {
             show-divider: false;
@@ -39,7 +39,7 @@ export component DiagnosticsSection inherits VerticalLayout {
             description: "Quantité de détails que Soufflé écrit dans le fichier journal.";
 
             ThemedComboBox {
-                control-label: "Niveau de journal";
+                control-label: @tr("Niveau de journal");
                 model: [
                     root.log-level-label(LogLevel.error),
                     root.log-level-label(LogLevel.warn),
@@ -63,7 +63,7 @@ export component DiagnosticsSection inherits VerticalLayout {
             description: "Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.";
 
             ThemedSwitch {
-                control-label: "Journaux détaillés de transcription";
+                control-label: @tr("Journaux détaillés de transcription");
                 checked: root.debug-transcription;
                 toggled(new) => { root.debug-transcription-changed(new); }
             }
@@ -78,12 +78,12 @@ export component DiagnosticsSection inherits VerticalLayout {
             alignment: start;
 
             Text {
-                text: "Journal en direct";
+                text: @tr("Journal en direct");
                 font-size: 13.5px;
                 color: Theme.text-secondary;
             }
             Text {
-                text: "Fin du fichier journal actuel, actualisé toutes les quelques secondes.";
+                text: @tr("Fin du fichier journal actuel, actualisé toutes les quelques secondes.");
                 font-size: 12px;
                 color: Theme.text-muted;
                 wrap: word-wrap;
@@ -114,7 +114,7 @@ export component DiagnosticsSection inherits VerticalLayout {
                         single-line: false;
                         read-only: true;
                         selection-background-color: Theme.accent.with-alpha(0.28);
-                        accessible-label: "Journal en direct";
+                        accessible-label: @tr("Journal en direct");
                     }
                 }
             }

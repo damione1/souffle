@@ -25,7 +25,7 @@ export component AboutSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "À PROPOS";
+        title: @tr("À PROPOS");
 
         SettingsField {
             show-divider: false;
@@ -74,7 +74,7 @@ export component AboutSection inherits VerticalLayout {
             label: "Confidentialité";
 
             Text {
-                text: "100% local";
+                text: @tr("100% local");
                 font-size: 13px;
                 color: Theme.text-secondary;
                 horizontal-alignment: right;
@@ -99,7 +99,7 @@ export component AboutSection inherits VerticalLayout {
             description: "Vérifier les mises à jour au démarrage.";
 
             ThemedSwitch {
-                control-label: "Vérification automatique des mises à jour";
+                control-label: @tr("Vérification automatique des mises à jour");
                 checked: root.auto-update-check;
                 toggled(new) => { root.auto-update-check-changed(new); }
             }

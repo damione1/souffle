@@ -13,7 +13,7 @@ export component ThemedComboBox inherits Rectangle {
     in property <bool> enabled: true;
     in property <length> combo-width: Theme.settings-control-width;
     in property <bool> fill-width: false;
-    in property <string> control-label: "Sélection";
+    in property <string> control-label: @tr("Sélection");
 
     callback selected(string);
 

@@ -80,7 +80,7 @@ export component AppHeader inherits Rectangle {
         }
 
         Text {
-            text: "Soufflé";
+            text: @tr("Soufflé");
             height: 100%;
             font-family: "Archivo SemiBold";
             font-size: 14.5px;
@@ -145,7 +145,7 @@ export component AppHeader inherits Rectangle {
         theme-area := TouchArea {
             width: 32px;
             accessible-role: button;
-            accessible-label: "Basculer clair / sombre";
+            accessible-label: @tr("Basculer clair / sombre");
             accessible-action-default => { root.theme-toggle-requested(); }
             clicked => { root.theme-toggle-requested(); }
 
@@ -169,7 +169,7 @@ export component AppHeader inherits Rectangle {
         settings-area := TouchArea {
             width: 32px;
             accessible-role: button;
-            accessible-label: "Réglages";
+            accessible-label: @tr("Réglages");
             accessible-action-default => { root.settings-toggled(); }
             clicked => { root.settings-toggled(); }
 

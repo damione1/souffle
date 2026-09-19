@@ -35,7 +35,7 @@ export component CalendarSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "CALENDRIER";
+        title: @tr("CALENDRIER");
 
         SettingsField {
             show-divider: false;
@@ -43,7 +43,7 @@ export component CalendarSection inherits VerticalLayout {
             description: "Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.";
 
             ThemedSwitch {
-                control-label: "Intégration du calendrier";
+                control-label: @tr("Intégration du calendrier");
                 checked: root.enabled;
                 toggled(new) => { root.enabled-changed(new); }
             }
@@ -58,7 +58,7 @@ export component CalendarSection inherits VerticalLayout {
                 alignment: space-between;
 
                 Text {
-                    text: "L'accès au calendrier a été refusé.";
+                    text: @tr("L'accès au calendrier a été refusé.");
                     color: Theme.text-primary;
                     font-size: 13.5px;
                     wrap: word-wrap;
@@ -67,7 +67,7 @@ export component CalendarSection inherits VerticalLayout {
                 }
 
                 ThemedButton {
-                    text: "Ouvrir les Réglages Système";
+                    text: @tr("Ouvrir les Réglages Système");
                     kind: ThemedButtonKind.primary;
                     clicked => { root.open-system-settings-requested(); }
                 }
@@ -79,7 +79,7 @@ export component CalendarSection inherits VerticalLayout {
             description: "Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement.";
 
             ThemedSwitch {
-                control-label: "Proposer au début de la réunion";
+                control-label: @tr("Proposer au début de la réunion");
                 checked: root.autostart-enabled;
                 toggled(new) => { root.autostart-enabled-changed(new); }
             }
@@ -90,7 +90,7 @@ export component CalendarSection inherits VerticalLayout {
             description: "Minutes avant un événement pour proposer de démarrer une transcription.";
 
             ThemedSpinBox {
-                control-label: "Délai du rappel en minutes";
+                control-label: @tr("Délai du rappel en minutes");
                 value: root.reminder-minutes;
                 minimum: root.reminder-minutes-min;
                 maximum: root.reminder-minutes-max;
@@ -108,12 +108,12 @@ export component CalendarSection inherits VerticalLayout {
             alignment: start;
 
             Text {
-                text: "Calendriers";
+                text: @tr("Calendriers");
                 font-size: 13.5px;
                 color: Theme.text-secondary;
             }
             Text {
-                text: "Tous les calendriers sont inclus ; décochez ceux à masquer.";
+                text: @tr("Tous les calendriers sont inclus ; décochez ceux à masquer.");
                 font-size: 12px;
                 color: Theme.text-muted;
                 wrap: word-wrap;

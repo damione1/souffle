@@ -32,7 +32,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: "MODÈLES DE RÉSUMÉ";
+        title: @tr("MODÈLES DE RÉSUMÉ");
 
     VerticalLayout {
         padding-left: Theme.settings-inset;
@@ -40,7 +40,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         padding-top: 15px;
         padding-bottom: 15px;
         Text {
-            text: "Le modèle par défaut est utilisé pour résumer automatiquement une réunion terminée.";
+            text: @tr("Le modèle par défaut est utilisé pour résumer automatiquement une réunion terminée.");
             font-size: 12px;
             color: Theme.text-muted;
             wrap: word-wrap;
@@ -52,7 +52,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         label: "Modèle par défaut";
 
         ThemedComboBox {
-            control-label: "Modèle de résumé par défaut";
+            control-label: @tr("Modèle de résumé par défaut");
             model: root.template-labels;
             option-values: root.template-ids;
             current-value: root.default-template-label;
@@ -69,14 +69,14 @@ export component SummaryTemplatesSection inherits VerticalLayout {
             horizontal-stretch: 0;
 
             ThemedComboBox {
-                control-label: "Modèle de résumé à modifier";
+                control-label: @tr("Modèle de résumé à modifier");
                 model: root.template-labels;
                 option-values: root.template-ids;
                 current-value: root.editing-template-label;
                 selected(id) => { root.edit-target-changed(id); }
             }
             if !root.editing-is-builtin: ThemedButton {
-                text: "Supprimer";
+                text: @tr("Supprimer");
                 clicked => { root.delete-requested(); }
             }
         }
@@ -86,7 +86,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         label: "Nom";
 
         ThemedLineEdit {
-            control-label: "Nom du modèle de résumé";
+            control-label: @tr("Nom du modèle de résumé");
             text <=> root.editing-name;
             edited(value) => { root.name-changed(value); }
         }
@@ -102,7 +102,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
             text <=> root.editing-prompt;
             area-height: 220px;
             placeholder: "Instruction de génération du résumé";
-            control-label: "Instruction du modèle de résumé";
+            control-label: @tr("Instruction du modèle de résumé");
             edited(value) => { root.prompt-changed(value); }
         }
     }
@@ -116,11 +116,11 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         ThemedLineEdit {
             text <=> root.new-template-draft;
             placeholder: "Nom du nouveau modèle";
-            control-label: "Nom du nouveau modèle de résumé";
+            control-label: @tr("Nom du nouveau modèle de résumé");
             horizontal-stretch: 1;
         }
         ThemedButton {
-            text: "Ajouter";
+            text: @tr("Ajouter");
             enabled: root.new-template-draft != "";
             clicked => {
                 root.add-requested(root.new-template-draft);

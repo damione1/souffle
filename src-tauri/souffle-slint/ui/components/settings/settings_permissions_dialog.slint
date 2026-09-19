@@ -17,7 +17,7 @@ export component SettingsPermissionsDialog inherits Rectangle {
 
     background: Theme.modal-scrim;
     accessible-role: groupbox;
-    accessible-label: "Permissions macOS";
+    accessible-label: @tr("Permissions macOS");
 
     forward-focus: modal-focus;
     init => { modal-focus.focus(); }
@@ -51,13 +51,13 @@ export component SettingsPermissionsDialog inherits Rectangle {
             padding: 22px;
             spacing: 12px;
             Text {
-                text: "Permissions macOS";
+                text: @tr("Permissions macOS");
                 font-family: "Archivo SemiBold";
                 font-size: 20px;
                 color: Theme.text-primary;
             }
             Text {
-                text: "Vérifiez chaque autorisation. La réparation réinitialise uniquement l’entrée Accessibilité avant de redemander l’accès.";
+                text: @tr("Vérifiez chaque autorisation. La réparation réinitialise uniquement l’entrée Accessibilité avant de redemander l’accès.");
                 font-size: 12px;
                 color: Theme.text-muted;
                 wrap: word-wrap;
@@ -86,7 +86,7 @@ export component SettingsPermissionsDialog inherits Rectangle {
             HorizontalLayout {
                 alignment: end;
                 ThemedButton {
-                    text: "Terminé";
+                    text: @tr("Terminé");
                     kind: ThemedButtonKind.primary;
                     clicked => { root.close-requested(); }
                 }

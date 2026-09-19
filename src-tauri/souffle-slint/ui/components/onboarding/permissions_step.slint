@@ -82,7 +82,7 @@ export component PermissionsStep inherits VerticalLayout {
                 granted-label := Text {
                     x: 22px;
                     height: parent.height;
-                    text: "Accordé";
+                    text: @tr("Accordé");
                     color: Theme.text-secondary;
                     font-family: "Archivo Medium";
                     font-size: 11px;
@@ -90,7 +90,7 @@ export component PermissionsStep inherits VerticalLayout {
                 }
             }
             if row.state == AccessState.unsupported: Text {
-                text: "Non pris en charge";
+                text: @tr("Non pris en charge");
                 color: Theme.text-faint;
                 font-size: 11px;
                 vertical-alignment: center;
