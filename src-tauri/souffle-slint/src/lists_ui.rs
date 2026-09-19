@@ -59,19 +59,6 @@ impl SettingsListModels {
             .collect();
         sync_rows_by_id(&self.snippets, rows, |row| row.id);
     }
-
-    pub(crate) fn set_snippet_editing(&self, editing_id: Option<i64>) {
-        for index in 0..self.snippets.row_count() {
-            let Some(mut row) = self.snippets.row_data(index) else {
-                continue;
-            };
-            let editing = Some(row.id as i64) == editing_id;
-            if row.editing != editing {
-                row.editing = editing;
-                self.snippets.set_row_data(index, row);
-            }
-        }
-    }
 }
 
 fn dictionary_row(entry: &DictionaryEntry) -> DictionaryRow {
