@@ -960,6 +960,14 @@ enum AudioDeviceSaveSettlement {
     },
 }
 
+impl AudioDeviceSaveSettlement {
+    fn has_observed_canonical(&self) -> bool {
+        match self {
+            Self::Committed { canonical, .. } | Self::Rejected { canonical } => canonical.is_some(),
+        }
+    }
+}
+
 fn settle_audio_device_save(
     outcome: &SettingsSaveOutcome,
     fallback: &Option<AppSettings>,
@@ -3916,6 +3924,12 @@ fn wire_callbacks(
                 }
                 let fallback = settings_state.borrow().clone();
                 let settlement = settle_audio_device_save(outcome, &fallback, &uid);
+                // An unavailable reread deliberately leaves the actor cache
+                // marked unknown while preserving its last observed value.
+                // Never reload the picker from that stale snapshot after the
+                // native effect; the user's submitted label remains visible
+                // until a later serialized refresh observes persistence.
+                let reload_after_effect = settlement.has_observed_canonical();
                 let (target_uid, canonical) = match settlement {
                     AudioDeviceSaveSettlement::Committed { uid, canonical } => {
                         (Some(uid), canonical)
@@ -3959,7 +3973,8 @@ fn wire_callbacks(
                             eprintln!("Failed to join audio device selection worker: {error}")
                         }
                     }
-                    if revision == latest_revision.load(Ordering::Acquire)
+                    if reload_after_effect
+                        && revision == latest_revision.load(Ordering::Acquire)
                         && let Some(window) = weak.upgrade()
                         && window.get_settings_open()
                     {
@@ -5972,6 +5987,39 @@ mod tests {
                 panic!("rejected device save was classified as committed")
             }
         }
+    }
+
+    #[test]
+    fn committed_unavailable_device_keeps_the_submitted_picker_after_effect() {
+        let window = test_window();
+        window.set_settings_selected_device_label("Microphone B".into());
+        let fallback = AppSettings {
+            audio_device: Some("mic-a".into()),
+            ..AppSettings::default()
+        };
+        let outcome = SettingsSaveOutcome::Unavailable {
+            result: Ok(()),
+            read_error: "controlled reread failure".into(),
+        };
+
+        let settlement = settle_audio_device_save(&outcome, &Some(fallback), "mic-b");
+
+        assert!(!settlement.has_observed_canonical());
+        match settlement {
+            AudioDeviceSaveSettlement::Committed { uid, canonical } => {
+                assert_eq!(uid, "mic-b");
+                assert!(canonical.is_none());
+            }
+            AudioDeviceSaveSettlement::Rejected { .. } => {
+                panic!("committed device save was classified as rejected")
+            }
+        }
+        // The post-effect path only reloads from a canonical observation.
+        // With no observation, it must leave the submitted label untouched.
+        assert_eq!(
+            window.get_settings_selected_device_label().as_str(),
+            "Microphone B"
+        );
     }
 
     #[test]
