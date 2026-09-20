@@ -1767,7 +1767,7 @@ msgstr "Résumé"
 #: ui/components/summary_section.slint:50
 msgctxt "SummarySection"
 msgid "Générer le résumé"
-msgstr "Moteur de résumé"
+msgstr "Générer le résumé"
 
 #: ui/components/summary_section.slint:94
 msgctxt "SummarySection"

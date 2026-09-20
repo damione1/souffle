@@ -280,6 +280,7 @@ impl SettingsValueController {
         let dark = canonical_dark_after_save(settings.theme, previous_theme, applied_dark, || {
             settings_ui::resolve_dark(SettingsTheme::System)
         });
+        crate::select_app_locale(settings_ui::locale_to_slint(&settings.locale));
         self.project(window, settings);
         // NSAppearance is AppKit-owned and stays on Slint's UI thread. The
         // worker runs only database/ServiceManagement/engine effects.

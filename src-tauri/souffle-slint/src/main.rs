@@ -1953,10 +1953,9 @@ fn project_startup_settings(
     let dark = settings_ui::resolve_dark(settings.theme);
     window.global::<Theme>().set_dark(dark);
     window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
-    let safe_locale =
-        settings_ui::locale_from_slint(settings_ui::locale_to_slint(settings.locale.as_str()));
-
-    let _ = slint::select_bundled_translation(safe_locale);
+    let locale = settings_ui::locale_to_slint(settings.locale.as_str());
+    window.set_settings_locale(locale);
+    select_app_locale(locale);
     let mut onboarding = onboarding.borrow_mut();
     onboarding.selected_device = settings.audio_device.clone().unwrap_or_default();
     onboarding.auto_paste = settings.auto_paste;
@@ -2154,15 +2153,19 @@ fn wire_onboarding_callbacks(
 ) -> Rc<RefCell<OnboardingState>> {
     let ob: Rc<RefCell<OnboardingState>> = Rc::new(RefCell::new(OnboardingState::default()));
 
+    let weak = window.as_weak();
     let settings_io_for_locale = settings_io.clone();
     window.on_onboarding_locale_changed(move |locale| {
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_locale(locale);
+        }
+        select_app_locale(locale);
         let locale_value = settings_ui::locale_from_slint(locale).to_string();
         settings_io_for_locale.submit(
             souffle_lib::commands::SettingsSaveLane::General,
             move |settings| settings.locale = locale_value,
             |_, outcome| log_settings_save_outcome("onboarding locale", outcome),
         );
-        let _ = slint::select_bundled_translation(settings_ui::locale_from_slint(locale));
     });
 
     let permissions_for_grant = permissions.clone();
