@@ -1,4 +1,5 @@
 import { SettingsField } from "settings_field.slint";
+import { SettingsFieldVertical } from "settings_field_vertical.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
@@ -78,7 +79,7 @@ export component DictationPolishSection inherits VerticalLayout {
         }
     }
 
-    if root.enabled && root.template-labels.length > 0: SettingsField {
+    if root.enabled && root.template-labels.length > 0: SettingsFieldVertical {
         label: "Instruction";
         description: "Prompt envoyé à l'IA pour retoucher le texte transcrit.";
 
