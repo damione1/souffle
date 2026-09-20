@@ -3213,27 +3213,28 @@ fn wire_callbacks(
     });
 
     let weak_resume = window.as_weak();
-    let app_handle_resume = app_handle.clone();
+    let handle_resume = handle.clone();
     window.on_meeting_detail_resume(move || {
         if let Some(window) = weak_resume.upgrade() {
             let id = window.get_active_meeting_id().to_string();
-            let state = app_handle_resume.state::<Arc<AppState>>().inner().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = souffle_lib::commands::transcription::resume_meeting_recording(state, id).await {
-                    tracing::error!("Failed to resume meeting: {:?}", e);
+            let state = handle_resume.clone();
+            let channel = live_segment_channel(weak_resume.clone());
+            souffle_lib::async_runtime::spawn(async move {
+                if let Err(e) = souffle_lib::commands::resume_meeting_recording(state, id, channel).await {
+                    eprintln!("Failed to resume meeting: {:?}", e);
                 }
             });
         }
     });
 
     let weak_sum = window.as_weak();
-    let app_handle_sum = app_handle.clone();
+    let handle_sum = handle.clone();
     window.on_meeting_detail_summarize(move || {
         let Some(window) = weak_sum.upgrade() else { return; };
         window.set_meeting_detail_summary_is_generating(true);
         window.set_meeting_detail_summary_generation_progress("Démarrage...".into());
         let id = window.get_active_meeting_id().to_string();
-        let state = app_handle_sum.state::<Arc<AppState>>().inner().clone();
+        let state = handle_sum.clone();
         
         let weak_for_progress = weak_sum.clone();
         let channel = ProgressChannel::new(move |progress: souffle_lib::summary::SummarizeProgress| {
@@ -3248,9 +3249,9 @@ fn wire_callbacks(
 
         let weak_for_done = weak_sum.clone();
         let state_for_done = state.clone();
-        tauri::async_runtime::spawn(async move {
+        souffle_lib::async_runtime::spawn(async move {
             let model = "auto".to_string(); 
-            let result = souffle_lib::commands::meetings::summarize_meeting(state.clone(), id.clone(), model, None, channel).await;
+            let result = souffle_lib::commands::summarize_meeting(state.clone(), id.clone(), model, None, channel).await;
             
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = weak_for_done.upgrade() {
