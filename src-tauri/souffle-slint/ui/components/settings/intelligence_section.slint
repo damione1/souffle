@@ -42,9 +42,9 @@ export component IntelligenceSection inherits VerticalLayout {
     callback open-apple-intelligence-settings-requested();
 
     pure function provider-label(value: SummaryProvider) -> string {
-        if value == SummaryProvider.apple-intelligence { return "Apple Intelligence"; }
-        if value == SummaryProvider.ollama { return "Ollama"; }
-        if value == SummaryProvider.auto { return "Automatique"; }
+        if value == SummaryProvider.apple-intelligence { return @tr("Apple Intelligence"); }
+        if value == SummaryProvider.ollama { return @tr("Ollama"); }
+        if value == SummaryProvider.auto { return @tr("Automatique"); }
         return "";
     }
 
@@ -67,8 +67,8 @@ export component IntelligenceSection inherits VerticalLayout {
 
     SettingsField {
         show-divider: false;
-        label: "Moteur";
-        description: "Le moteur qui rédige les résumés et nettoie la dictée.";
+        label: @tr("Moteur");
+        description: @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
 
         ThemedComboBox {
             control-label: @tr("Moteur de résumé");
@@ -127,10 +127,10 @@ export component IntelligenceSection inherits VerticalLayout {
     }
 
     SettingsField {
-        label: "Apple Intelligence";
+        label: @tr("Apple Intelligence");
 
         StatusIndicator {
-            text: root.apple-intelligence-available ? "Disponible" : "Non disponible";
+            text: root.apple-intelligence-available ? @tr("Disponible") : @tr("Non disponible");
             indicator-color: root.apple-intelligence-available ? Theme.success : Theme.text-faint;
         }
     }
@@ -160,23 +160,23 @@ export component IntelligenceSection inherits VerticalLayout {
     }
 
     SettingsField {
-        label: "URL Ollama";
-        description: "Adresse du serveur Ollama local ou distant.";
+        label: @tr("URL Ollama");
+        description: @tr("Adresse du serveur Ollama local ou distant.");
 
         ThemedLineEdit {
             width: Theme.settings-control-width;
             control-label: @tr("URL Ollama");
-            placeholder: "http://localhost:11434";
+            placeholder: @tr("http://localhost:11434");
             text: root.ollama-url;
             edited(value) => { root.ollama-url-changed(value); }
         }
     }
 
     SettingsField {
-        label: "État de la connexion";
-        description: root.summary-model-count == 0 ? "Aucun modèle trouvé."
-            : root.summary-model-count == 1 ? "1 modèle trouvé."
-            : root.summary-model-count + " modèles trouvés.";
+        label: @tr("État de la connexion");
+        description: root.summary-model-count == 0 ? @tr("Aucun modèle trouvé.")
+            : root.summary-model-count == 1 ? @tr("1 modèle trouvé.")
+            : @tr("{} modèles trouvés.", root.summary-model-count);
 
         Rectangle {
             height: Theme.settings-control-height;
@@ -187,7 +187,7 @@ export component IntelligenceSection inherits VerticalLayout {
             status := StatusIndicator {
                 x: 0px;
                 y: (parent.height - self.height) / 2;
-                text: root.ollama-available ? "Connecté" : "Non disponible";
+                text: root.ollama-available ? @tr("Connecté") : @tr("Non disponible");
                 indicator-color: root.ollama-available ? Theme.success : Theme.text-faint;
             }
             retry := ThemedButton {
@@ -202,7 +202,7 @@ export component IntelligenceSection inherits VerticalLayout {
     }
 
     if root.model-picker-visible: SettingsField {
-        label: "Modèle de résumé";
+        label: @tr("Modèle de résumé");
 
         ThemedComboBox {
             control-label: @tr("Modèle de résumé");
@@ -223,14 +223,14 @@ export component IntelligenceSection inherits VerticalLayout {
         }
 
         if root.ollama-pull-error != "": Text {
-            text: "Échec du téléchargement : " + root.ollama-pull-error;
+            text: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
             color: Theme.danger;
             font-size: 11.5px;
             wrap: word-wrap;
         }
 
         if root.ollama-pulling: Text {
-            text: root.ollama-pull-status == "" ? "Téléchargement de " + root.recommended-model + "…" : root.ollama-pull-status;
+            text: root.ollama-pull-status == "" ? @tr("Téléchargement de {}…", root.recommended-model) : root.ollama-pull-status;
             color: Theme.text-muted;
             font-size: 11.5px;
         }
@@ -238,7 +238,7 @@ export component IntelligenceSection inherits VerticalLayout {
         if !root.ollama-pulling: HorizontalLayout {
             alignment: end;
             ThemedButton {
-                text: "Télécharger " + root.recommended-model;
+                text: @tr("Télécharger {}", root.recommended-model);
                 clicked => { root.download-recommended-requested(); }
             }
         }

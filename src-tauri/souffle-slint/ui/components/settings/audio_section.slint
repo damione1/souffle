@@ -38,9 +38,9 @@ export component AudioSection inherits VerticalLayout {
     callback dictionary-correction-changed(bool);
 
     pure function meeting-language-label(value: MeetingLanguage) -> string {
-        if value == MeetingLanguage.en { return "Anglais"; }
-        if value == MeetingLanguage.fr { return "Français"; }
-        if value == MeetingLanguage.auto { return "Automatique"; }
+        if value == MeetingLanguage.en { return @tr("Anglais"); }
+        if value == MeetingLanguage.fr { return @tr("Français"); }
+        if value == MeetingLanguage.auto { return @tr("Automatique"); }
         return "";
     }
 
@@ -52,8 +52,8 @@ export component AudioSection inherits VerticalLayout {
 
         if root.is-laptop: SettingsField {
             show-divider: false;
-            label: "Microphone quand le capot est fermé";
-            description: "Utiliser ce microphone à la place quand le capot est fermé avec un écran externe connecté.";
+            label: @tr("Microphone quand le capot est fermé");
+            description: @tr("Utiliser ce microphone à la place quand le capot est fermé avec un écran externe connecté.");
 
             ThemedComboBox {
                 control-label: @tr("Microphone quand le capot est fermé");
@@ -65,8 +65,8 @@ export component AudioSection inherits VerticalLayout {
 
         if root.system-audio-supported: SettingsField {
             show-divider: !root.is-laptop;
-            label: "Capturer l'audio système";
-            description: "Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions.";
+            label: @tr("Capturer l'audio système");
+            description: @tr("Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions.");
 
             ThemedSwitch {
                 control-label: @tr("Capturer l'audio système");
@@ -77,8 +77,8 @@ export component AudioSection inherits VerticalLayout {
 
         SettingsField {
             show-divider: root.is-laptop || root.system-audio-supported;
-            label: "Langue de transcription (réunions)";
-            description: "Indice pour la détection de langue, jamais forcé sur le moteur.";
+            label: @tr("Langue de transcription (réunions)");
+            description: @tr("Indice pour la détection de langue, jamais forcé sur le moteur.");
 
             ThemedComboBox {
                 control-label: @tr("Langue de transcription des réunions");
@@ -103,8 +103,8 @@ export component AudioSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Arrêt automatique des réunions";
-            description: "Arrêter l'enregistrement quand plus personne ne parle depuis longtemps.";
+            label: @tr("Arrêt automatique des réunions");
+            description: @tr("Arrêter l'enregistrement quand plus personne ne parle depuis longtemps.");
 
             ThemedSwitch {
                 control-label: @tr("Arrêt automatique des réunions");
@@ -114,7 +114,7 @@ export component AudioSection inherits VerticalLayout {
         }
 
         if root.meeting-autostop-enabled: SettingsField {
-            label: "Délai avant arrêt";
+            label: @tr("Délai avant arrêt");
 
             ThemedComboBox {
                 control-label: @tr("Délai avant arrêt automatique");
@@ -125,7 +125,7 @@ export component AudioSection inherits VerticalLayout {
         }
 
         if root.meeting-autostop-enabled: SettingsField {
-            label: "Durée maximale d'une réunion";
+            label: @tr("Durée maximale d'une réunion");
 
             ThemedComboBox {
                 control-label: @tr("Durée maximale d'une réunion");
@@ -136,8 +136,8 @@ export component AudioSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Détection de voix (VAD)";
-            description: "Ignorer les silences pour une transcription plus rapide et plus propre.";
+            label: @tr("Détection de voix (VAD)");
+            description: @tr("Ignorer les silences pour une transcription plus rapide et plus propre.");
 
             ThemedSwitch {
                 control-label: @tr("Détection de voix");
@@ -147,8 +147,8 @@ export component AudioSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Suppression des hésitations";
-            description: "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation.";
+            label: @tr("Suppression des hésitations");
+            description: @tr("Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation.");
 
             ThemedSwitch {
                 control-label: @tr("Suppression des hésitations");
@@ -158,8 +158,8 @@ export component AudioSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Réduction des bégaiements";
-            description: "Fusionner les répétitions et faux départs.";
+            label: @tr("Réduction des bégaiements");
+            description: @tr("Fusionner les répétitions et faux départs.");
 
             ThemedSwitch {
                 control-label: @tr("Réduction des bégaiements");
@@ -169,8 +169,8 @@ export component AudioSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Correction par dictionnaire";
-            description: "Appliquer automatiquement les corrections du dictionnaire personnel.";
+            label: @tr("Correction par dictionnaire");
+            description: @tr("Appliquer automatiquement les corrections du dictionnaire personnel.");
 
             ThemedSwitch {
                 control-label: @tr("Correction par dictionnaire");

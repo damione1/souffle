@@ -385,12 +385,9 @@ export component MainWindow inherits Window {
     // SOU-190: first-run wizard, drawn above everything else while visible -
     // same overlay-not-replace pattern as `settings-open`.
     in-out property <bool> onboarding-open: false;
-    in property <string> onboarding-locale;
     in property <int> onboarding-step-index;
     in property <int> onboarding-step-count;
     in property <string> onboarding-step;
-    in property <string> onboarding-title;
-    in property <string> onboarding-subtitle;
     in property <string> onboarding-status-message;
     in property <[PermissionRow]> onboarding-permission-rows;
     in property <string> onboarding-permissions-error;
@@ -411,9 +408,8 @@ export component MainWindow inherits Window {
     in property <bool> onboarding-accessibility-granted;
     in property <bool> onboarding-busy;
     in property <bool> onboarding-continue-enabled: true;
-    in property <string> onboarding-continue-label;
 
-    callback onboarding-locale-changed(string);
+    callback onboarding-locale-changed(AppLocale);
     callback onboarding-grant-requested(PermissionKind);
     callback onboarding-hint-action-requested(PermissionKind);
     callback onboarding-repair-requested();
@@ -812,12 +808,10 @@ export component MainWindow inherits Window {
     if root.onboarding-open: OnboardingView {
         width: 100%;
         height: 100%;
-        locale: root.onboarding-locale;
+        locale: root.settings-locale;
         step-index: root.onboarding-step-index;
         step-count: root.onboarding-step-count;
         step: root.onboarding-step;
-        title: root.onboarding-title;
-        subtitle: root.onboarding-subtitle;
         status-message: root.onboarding-status-message;
         permission-rows: root.onboarding-permission-rows;
         permissions-error: root.onboarding-permissions-error;
@@ -838,7 +832,6 @@ export component MainWindow inherits Window {
         accessibility-granted: root.onboarding-accessibility-granted;
         busy: root.onboarding-busy;
         continue-enabled: root.onboarding-continue-enabled;
-        continue-label: root.onboarding-continue-label;
         locale-changed(value) => { root.onboarding-locale-changed(value); }
         grant-requested(kind) => { root.onboarding-grant-requested(kind); }
         hint-action-requested(kind) => { root.onboarding-hint-action-requested(kind); }

@@ -32,8 +32,8 @@ export component DictationPolishSection inherits VerticalLayout {
 
     SettingsField {
         show-divider: false;
-        label: "Nettoyer la dictée avec l'IA";
-        description: "Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.";
+        label: @tr("Nettoyer la dictée avec l'IA");
+        description: @tr("Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.");
 
         ThemedSwitch {
             control-label: @tr("Nettoyer la dictée avec l'IA");
@@ -68,7 +68,7 @@ export component DictationPolishSection inherits VerticalLayout {
     }
 
     if root.enabled && root.template-labels.length > 0: SettingsField {
-        label: "Modèle de retouche";
+        label: @tr("Modèle de retouche");
 
         ThemedComboBox {
             control-label: @tr("Modèle de retouche");
@@ -80,13 +80,13 @@ export component DictationPolishSection inherits VerticalLayout {
     }
 
     if root.enabled && root.template-labels.length > 0: SettingsFieldVertical {
-        label: "Instruction";
-        description: "Prompt envoyé à l'IA pour retoucher le texte transcrit.";
+        label: @tr("Instruction");
+        description: @tr("Prompt envoyé à l'IA pour retoucher le texte transcrit.");
 
         ThemedTextArea {
             text <=> root.active-prompt;
             area-height: 160px;
-            placeholder: "Instruction de retouche";
+            placeholder: @tr("Instruction de retouche");
             control-label: @tr("Instruction de retouche");
             edited(value) => { root.prompt-changed(value); }
         }

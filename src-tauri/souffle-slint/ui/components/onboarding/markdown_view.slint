@@ -19,7 +19,7 @@ export component MarkdownView inherits VerticalLayout {
         }
         if block.kind == "bullet": HorizontalLayout {
             spacing: 6px;
-            Text { text: "•"; color: Theme.text-muted; font-size: 12px; }
+            Text { text: @tr("•"); color: Theme.text-muted; font-size: 12px; }
             Text {
                 text: block.text;
                 color: Theme.text-secondary;

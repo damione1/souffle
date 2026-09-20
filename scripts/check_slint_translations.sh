@@ -1,25 +1,22 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-cd "$(dirname "$0")/../src-tauri/souffle-slint"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root/src-tauri/souffle-slint"
 
-slint-tr-extractor -o lang/messages.pot $(find ui -name "*.slint")
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
-MISSING=0
+find ui -name '*.slint' -print0 | xargs -0 slint-tr-extractor -o "$tmp/messages.pot"
+
 for lang in en fr; do
-    po_file="lang/$lang/LC_MESSAGES/souffle-slint.po"
-    msgmerge -U "$po_file" lang/messages.pot --quiet --backup=none
-    
-    # Check for empty msgstr, except for the header (which has empty msgid "")
-    empty_count=$(awk 'BEGIN{RS=""; FS="\n"} $0 ~ /^msgid "[^"]+"/ && $0 ~ /msgstr ""/ {print}' "$po_file" | wc -l)
-    if [ "$empty_count" -gt 0 ]; then
-        echo "Error: $empty_count untranslated strings in $po_file"
-        MISSING=1
-    fi
+    po="lang/$lang/LC_MESSAGES/souffle-slint.po"
+    merged="$tmp/$lang.po"
+    # A check must not rewrite catalogues or accept fuzzy guesses when a
+    # source string changes.
+    msgmerge --quiet --no-fuzzy-matching -o "$merged" "$po" "$tmp/messages.pot"
+    msgfmt --check-format -o /dev/null "$merged"
+    python3 "$root/scripts/check_slint_translations.py" "$lang" "$merged"
 done
 
-if [ "$MISSING" -eq 1 ]; then
-    echo "Translations check failed!"
-    exit 1
-fi
-echo "Translations check passed."
+echo 'Translations check passed.'

@@ -33,8 +33,8 @@ export component ModelSection inherits VerticalLayout {
 
     SettingsField {
         show-divider: false;
-        label: "Modèle de transcription";
-        description: "Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne sur ce Mac.";
+        label: @tr("Modèle de transcription");
+        description: @tr("Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne sur ce Mac.");
 
         StatusIndicator {
             text: root.status-text;
@@ -90,8 +90,8 @@ export component ModelSection inherits VerticalLayout {
     }
 
     SettingsField {
-        label: "Délai avant déchargement";
-        description: "Décharger le modèle de la mémoire après une période d'inactivité.";
+        label: @tr("Délai avant déchargement");
+        description: @tr("Décharger le modèle de la mémoire après une période d'inactivité.");
 
         ThemedComboBox {
             control-label: @tr("Délai avant déchargement");

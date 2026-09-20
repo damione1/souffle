@@ -57,14 +57,14 @@ export component SnippetsSection inherits VerticalLayout {
         Text { text: @tr("DÉCLENCHEUR"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
         ThemedLineEdit {
             text <=> root.new-trigger-draft;
-            placeholder: "Phrase déclencheur";
+            placeholder: @tr("Phrase déclencheur");
             control-label: @tr("Phrase déclencheur");
         }
         Text { text: @tr("EXPANSION"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
         ThemedTextArea {
             text <=> root.new-expansion-draft;
             area-height: 72px;
-            placeholder: "Texte à insérer";
+            placeholder: @tr("Texte à insérer");
             control-label: @tr("Texte de l'extrait vocal");
         }
 

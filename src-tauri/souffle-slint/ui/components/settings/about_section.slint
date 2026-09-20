@@ -29,10 +29,10 @@ export component AboutSection inherits VerticalLayout {
 
         SettingsField {
             show-divider: false;
-            label: "Version";
+            label: @tr("Version");
 
             Text {
-                text: root.app-version == "local build" ? "Build local" : "v" + root.app-version;
+                text: root.app-version == "local build" ? "Build local" : @tr("v{}", root.app-version);
                 font-size: 13px;
                 color: Theme.text-secondary;
                 horizontal-alignment: right;
@@ -43,7 +43,7 @@ export component AboutSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Transcription";
+            label: @tr("Transcription");
 
             Text {
                 text: root.transcription-label;
@@ -57,7 +57,7 @@ export component AboutSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Résumés";
+            label: @tr("Résumés");
 
             Text {
                 text: root.summary-label;
@@ -71,7 +71,7 @@ export component AboutSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Confidentialité";
+            label: @tr("Confidentialité");
 
             Text {
                 text: @tr("100% local");
@@ -84,19 +84,19 @@ export component AboutSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Mises à jour";
+            label: @tr("Mises à jour");
             description: root.update-status;
 
             ThemedButton {
-                text: root.checking-updates ? "Vérification…" : "Vérifier les mises à jour";
+                text: root.checking-updates ? @tr("Vérification…") : @tr("Vérifier les mises à jour");
                 enabled: !root.checking-updates;
                 clicked => { root.check-updates-requested(); }
             }
         }
 
         SettingsField {
-            label: "Vérification automatique";
-            description: "Vérifier les mises à jour au démarrage.";
+            label: @tr("Vérification automatique");
+            description: @tr("Vérifier les mises à jour au démarrage.");
 
             ThemedSwitch {
                 control-label: @tr("Vérification automatique des mises à jour");

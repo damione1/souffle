@@ -49,7 +49,7 @@ export component UpdateAvailableDialog inherits Rectangle {
                     color: Theme.text-primary;
                 }
                 Text {
-                    text: "Version " + root.latest-version;
+                    text: @tr("Version {}", root.latest-version);
                     font-size: 11.5px;
                     color: Theme.text-muted;
                 }
@@ -70,7 +70,7 @@ export component UpdateAvailableDialog inherits Rectangle {
             }
 
             if root.install-blocked-reason != "": Text {
-                text: "Installation impossible pour l'instant : " + root.install-blocked-reason;
+                text: @tr("Installation impossible pour l'instant : {}", root.install-blocked-reason);
                 color: Theme.warning;
                 font-size: 11px;
                 wrap: word-wrap;
@@ -97,7 +97,7 @@ export component UpdateAvailableDialog inherits Rectangle {
                         clicked => { root.install-requested(); }
                     }
                     if root.phase != "ready": Button {
-                        text: root.phase == "downloading" ? "Téléchargement…" : "Télécharger";
+                        text: root.phase == "downloading" ? @tr("Téléchargement…") : @tr("Télécharger");
                         enabled: root.phase != "downloading";
                         clicked => { root.download-requested(); }
                     }

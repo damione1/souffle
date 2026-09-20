@@ -50,7 +50,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
 
     SettingsField {
         show-divider: false;
-        label: "Modèle par défaut";
+        label: @tr("Modèle par défaut");
 
         ThemedComboBox {
             control-label: @tr("Modèle de résumé par défaut");
@@ -62,7 +62,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
     }
 
     SettingsField {
-        label: "Modifier";
+        label: @tr("Modifier");
 
         HorizontalLayout {
             spacing: 6px;
@@ -84,7 +84,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
     }
 
     if !root.editing-is-builtin: SettingsField {
-        label: "Nom";
+        label: @tr("Nom");
 
         ThemedLineEdit {
             control-label: @tr("Nom du modèle de résumé");
@@ -94,15 +94,15 @@ export component SummaryTemplatesSection inherits VerticalLayout {
     }
 
     SettingsFieldVertical {
-        label: "Instruction";
+        label: @tr("Instruction");
         description: root.editing-is-builtin
-            ? "Modèle intégré : le prompt peut être personnalisé mais pas supprimé."
-            : "Prompt envoyé à l'IA pour générer le résumé.";
+            ? @tr("Modèle intégré : le prompt peut être personnalisé mais pas supprimé.")
+            : @tr("Prompt envoyé à l'IA pour générer le résumé.");
 
         ThemedTextArea {
             text <=> root.editing-prompt;
             area-height: 220px;
-            placeholder: "Instruction de génération du résumé";
+            placeholder: @tr("Instruction de génération du résumé");
             control-label: @tr("Instruction du modèle de résumé");
             edited(value) => { root.prompt-changed(value); }
         }
@@ -116,7 +116,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
 
         ThemedLineEdit {
             text <=> root.new-template-draft;
-            placeholder: "Nom du nouveau modèle";
+            placeholder: @tr("Nom du nouveau modèle");
             control-label: @tr("Nom du nouveau modèle de résumé");
             horizontal-stretch: 1;
         }

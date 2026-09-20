@@ -250,7 +250,7 @@ export component TranscriptSection inherits VerticalLayout {
                                 background: ts-area.has-hover ? Theme.surface-2 : transparent;
 
                                 accessible-role: button;
-                                accessible-label: "Aller \u{e0} " + block.timestamp;
+                                accessible-label: @tr("Aller \u{e0} {}", block.timestamp);
                                 accessible-enabled: root.has-audio;
                                 accessible-action-default => {
                                     root.paragraph-clicked(block.recording-session-index, block.start-time);

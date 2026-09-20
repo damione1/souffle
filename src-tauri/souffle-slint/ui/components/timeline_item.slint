@@ -109,7 +109,7 @@ export component TimelineItemRow inherits Rectangle {
                         width: root.is-dictation ? 88px : 0px;
                         height: 28px;
                         accessible-role: button;
-                        accessible-label: root.copied ? "Copié !" : "Copier";
+                        accessible-label: root.copied ? @tr("Copié !") : @tr("Copier");
                         accessible-action-default => {
                             root.copy-requested();
                             root.copied = true;
@@ -131,7 +131,7 @@ export component TimelineItemRow inherits Rectangle {
                                 y: (parent.height - self.height) / 2;
                             }
                             Text {
-                                text: root.copied ? "Copié !" : "Copier";
+                                text: root.copied ? @tr("Copié !") : @tr("Copier");
                                 font-size: 12.5px;
                                 color: copy-area.has-hover ? Theme.text-primary : Theme.text-muted;
                                 x: 28px;
@@ -147,7 +147,7 @@ export component TimelineItemRow inherits Rectangle {
                         width: root.is-live ? 0px : (root.confirming-delete ? 72px : 28px);
                         height: 28px;
                         accessible-role: button;
-                        accessible-label: root.confirming-delete ? "Confirmer la suppression" : "Supprimer";
+                        accessible-label: root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
                         accessible-action-default => {
                             if root.confirming-delete {
                                 root.confirming-delete = false;

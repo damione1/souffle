@@ -71,10 +71,10 @@ export component DataSection inherits VerticalLayout {
     callback test-mcp-requested();
 
     pure function retention-label(value: AudioRetention) -> string {
-        if value == AudioRetention.keep-7d { return "Conserver 7 jours"; }
-        if value == AudioRetention.keep-30d { return "Conserver 30 jours"; }
-        if value == AudioRetention.keep-forever { return "Conserver indéfiniment"; }
-        if value == AudioRetention.off { return "Ne pas conserver"; }
+        if value == AudioRetention.keep-7d { return @tr("Conserver 7 jours"); }
+        if value == AudioRetention.keep-30d { return @tr("Conserver 30 jours"); }
+        if value == AudioRetention.keep-forever { return @tr("Conserver indéfiniment"); }
+        if value == AudioRetention.off { return @tr("Ne pas conserver"); }
         return "";
     }
 
@@ -109,8 +109,8 @@ export component DataSection inherits VerticalLayout {
 
     SettingsField {
         show-divider: root.stats-line != "" || root.recordings-line != "";
-        label: "Conservation audio des réunions";
-        description: "Durée de conservation des enregistrements audio bruts.";
+        label: @tr("Conservation audio des réunions");
+        description: @tr("Durée de conservation des enregistrements audio bruts.");
 
         ThemedComboBox {
             control-label: @tr("Conservation audio des réunions");
@@ -131,18 +131,18 @@ export component DataSection inherits VerticalLayout {
     }
 
     SettingsField {
-        label: "Exporter les données";
-        description: "Exporter réunions, dictées et journal dans un dossier.";
+        label: @tr("Exporter les données");
+        description: @tr("Exporter réunions, dictées et journal dans un dossier.");
 
         ThemedButton {
-            text: root.exporting ? "Export en cours…" : "Exporter…";
+            text: root.exporting ? @tr("Export en cours…") : @tr("Exporter…");
             enabled: !root.exporting;
             clicked => { root.export-requested(); }
         }
     }
 
     SettingsField {
-        label: "Afficher le dossier de données";
+        label: @tr("Afficher le dossier de données");
 
         ThemedButton {
             text: @tr("Afficher dans le Finder");
@@ -283,11 +283,11 @@ export component DataSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Tester la connexion";
+            label: @tr("Tester la connexion");
             description: root.mcp-test-status;
 
             ThemedButton {
-                text: root.testing-mcp ? "Test en cours…" : "Tester la connexion";
+                text: root.testing-mcp ? @tr("Test en cours…") : @tr("Tester la connexion");
                 enabled: root.mcp-exists && !root.testing-mcp;
                 clicked => { root.test-mcp-requested(); }
             }

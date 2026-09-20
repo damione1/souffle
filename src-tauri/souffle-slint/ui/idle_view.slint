@@ -76,7 +76,7 @@ export component IdleView inherits Rectangle {
         SearchField {
             vertical-stretch: 0;
             text <=> root.search-query;
-            placeholder: "Rechercher transcriptions et réunions";
+            placeholder: @tr("Rechercher transcriptions et réunions");
             edited(text) => { root.search-changed(text); }
         }
 

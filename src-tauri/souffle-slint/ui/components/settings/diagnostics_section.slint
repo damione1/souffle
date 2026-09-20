@@ -19,11 +19,11 @@ export component DiagnosticsSection inherits VerticalLayout {
     callback copy-diagnostics-requested();
 
     pure function log-level-label(value: LogLevel) -> string {
-        if value == LogLevel.error { return "Erreur"; }
-        if value == LogLevel.warn { return "Avertissement"; }
-        if value == LogLevel.info { return "Information"; }
-        if value == LogLevel.debug { return "Débogage"; }
-        if value == LogLevel.trace { return "Trace"; }
+        if value == LogLevel.error { return @tr("Erreur"); }
+        if value == LogLevel.warn { return @tr("Avertissement"); }
+        if value == LogLevel.info { return @tr("Information"); }
+        if value == LogLevel.debug { return @tr("Débogage"); }
+        if value == LogLevel.trace { return @tr("Trace"); }
         return "";
     }
 
@@ -35,8 +35,8 @@ export component DiagnosticsSection inherits VerticalLayout {
 
         SettingsField {
             show-divider: false;
-            label: "Niveau de journal";
-            description: "Quantité de détails que Soufflé écrit dans le fichier journal.";
+            label: @tr("Niveau de journal");
+            description: @tr("Quantité de détails que Soufflé écrit dans le fichier journal.");
 
             ThemedComboBox {
                 control-label: @tr("Niveau de journal");
@@ -59,8 +59,8 @@ export component DiagnosticsSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Journaux détaillés de transcription";
-            description: "Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.";
+            label: @tr("Journaux détaillés de transcription");
+            description: @tr("Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.");
 
             ThemedSwitch {
                 control-label: @tr("Journaux détaillés de transcription");
@@ -106,7 +106,7 @@ export component DiagnosticsSection inherits VerticalLayout {
                         height: max(parent.height - 16px, self.preferred-height);
                         x: 8px;
                         y: 8px;
-                        text: root.log-tail == "" ? "Aucune entrée de journal pour l'instant." : root.log-tail;
+                        text: root.log-tail == "" ? @tr("Aucune entrée de journal pour l'instant.") : root.log-tail;
                         font-family: "JetBrains Mono";
                         font-size: 10.5px;
                         color: Theme.text-secondary;
@@ -122,7 +122,7 @@ export component DiagnosticsSection inherits VerticalLayout {
             HorizontalLayout {
                 alignment: end;
                 ThemedButton {
-                    text: root.copying-diagnostics ? "Copie…" : "Copier les diagnostics";
+                    text: root.copying-diagnostics ? @tr("Copie…") : @tr("Copier les diagnostics");
                     enabled: !root.copying-diagnostics;
                     clicked => { root.copy-diagnostics-requested(); }
                 }

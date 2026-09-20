@@ -133,22 +133,6 @@ pub fn parse_minute_label(label: &str) -> Option<u32> {
     }
 }
 
-/// Relative "last seen" wording - not a byte-for-byte port of
-/// `lastSeenAge()`'s pluralization/i18n, but the same information.
-fn last_seen_label(last_seen_unix: i64) -> String {
-    let now = chrono::Utc::now().timestamp();
-    let diff = (now - last_seen_unix).max(0);
-    if diff < 60 {
-        "à l'instant".to_string()
-    } else if diff < 3600 {
-        format!("il y a {} min", diff / 60)
-    } else if diff < 86_400 {
-        format!("il y a {} h", diff / 3600)
-    } else {
-        format!("il y a {} j", diff / 86_400)
-    }
-}
-
 pub fn populate_microphones(window: &MainWindow, list: &[MicrophoneListEntry]) {
     let has_disconnected = list.iter().any(|e| !e.connected);
     let count = list.len();
@@ -162,11 +146,10 @@ pub fn populate_microphones(window: &MainWindow, list: &[MicrophoneListEntry]) {
             is_default: entry.is_default,
             connected: entry.connected,
             hidden: entry.hidden,
-            last_seen_label: entry
+            last_seen_age_seconds: entry
                 .last_seen
-                .map(last_seen_label)
-                .unwrap_or_default()
-                .into(),
+                .map(|ts| (chrono::Utc::now().timestamp() - ts).max(0) as i32)
+                .unwrap_or(-1),
             is_first: index == 0,
             is_last: index + 1 == count,
         })
