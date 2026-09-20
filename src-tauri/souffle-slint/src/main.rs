@@ -3213,7 +3213,7 @@ fn wire_callbacks(
     });
 
     let weak_resume = window.as_weak();
-    let handle_resume = handle.clone();
+    let handle_resume = tauri_handle.clone();
     window.on_meeting_detail_resume(move || {
         if let Some(window) = weak_resume.upgrade() {
             let id = window.get_active_meeting_id().to_string();
@@ -3228,7 +3228,7 @@ fn wire_callbacks(
     });
 
     let weak_sum = window.as_weak();
-    let handle_sum = handle.clone();
+    let handle_sum = tauri_handle.clone();
     window.on_meeting_detail_summarize(move || {
         let Some(window) = weak_sum.upgrade() else { return; };
         window.set_meeting_detail_summary_is_generating(true);
